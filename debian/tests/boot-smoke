@@ -39,6 +39,11 @@ else
         [ -n "$running" ] || break
         TIMEOUT=$((TIMEOUT - 1))
     done
+    # temporary debugging for LP: #1571673
+    if [ -n "$running" ]; then
+        echo "running jobs after remaining timeout $TIMEOUT: $running"
+        journalctl -b
+    fi
     assert_eq "$running" ""
 fi
 
