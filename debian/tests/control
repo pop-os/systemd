@@ -85,11 +85,12 @@ Depends: systemd-sysv,
   network-manager,
   policykit-1,
   lightdm,
+  xserver-xorg-video-dummy,
   tree,
   libudev-dev,
   perl,
   xz-utils,
-Restrictions: needs-recommends, needs-root, isolation-machine, allow-stderr
+Restrictions: needs-recommends, needs-root, isolation-machine, allow-stderr, breaks-testbed
 
 # NOUPSTREAM: Do not run these tests for upstream builds
 

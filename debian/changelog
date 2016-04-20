@@ -28,6 +28,8 @@ systemd (229-5) UNRELEASED; urgency=medium
   * debian/tests/boot-smoke: Add some extra debugging if there are pending
     jobs after 10s, to figure out why lightdm is sometimes "restarting".
     (for LP #1571673)
+  * debian/tests/boot-smoke: Configure dummy X.org driver (like in the
+    boot-and-services test), to avoid lightdm randomly fail. (LP: #1571673)
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
 

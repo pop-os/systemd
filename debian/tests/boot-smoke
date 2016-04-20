@@ -10,6 +10,16 @@ set -e
 if [ -z "$ADT_REBOOT_MARK" ]; then
     # enable persistent journal
     mkdir -p /var/log/journal
+    # allow X to start even on headless machines
+    mkdir -p /etc/X11/xorg.conf.d/
+    cat << EOF > /etc/X11/xorg.conf.d/dummy.conf
+Section "Device"
+    Identifier "test"
+    Driver "dummy"
+EndSection
+EOF
+
+
     ADT_REBOOT_MARK=0
     if [ -d /tmp/systemd-replace/ ]; then
         for f in /tmp/systemd-replace/*; do
