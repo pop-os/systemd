@@ -30,6 +30,10 @@ systemd (229-5) UNRELEASED; urgency=medium
     (for LP #1571673)
   * debian/tests/boot-smoke: Configure dummy X.org driver (like in the
     boot-and-services test), to avoid lightdm randomly fail. (LP: #1571673)
+  * Move Debian specific patches into debian/patches/debian (which translates
+    to "Gbp-Pq: Topic debian" with pq). This keeps upstream vs. Debian
+    patches separated without the comments in debian/patches/series (which
+    always get removed by "pq export").
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
 
