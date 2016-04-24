@@ -34,6 +34,8 @@ systemd (229-5) UNRELEASED; urgency=medium
     to "Gbp-Pq: Topic debian" with pq). This keeps upstream vs. Debian
     patches separated without the comments in debian/patches/series (which
     always get removed by "pq export").
+  * Don't ship an empty /etc/X11/xinit/xinitrc.d/ directory, this isn't
+    supported in Debian. (Closes: #822198)
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
 

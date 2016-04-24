@@ -177,6 +177,7 @@ override_dh_install:
 	rm -rf debian/install/*/etc/kernel/
 	rm -f debian/install/*/usr/lib/sysctl.d/50-default.conf
 	rm -f debian/install/*/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
+	rmdir -p --ignore-fail-on-non-empty debian/install/*/etc/X11/xinit/xinitrc.d/
 	rm -f debian/install/*/lib/systemd/system/halt-local.service
 	find debian/install/ -name '*.la' -delete
 	# remove files related to factory-reset feature
