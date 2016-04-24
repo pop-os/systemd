@@ -30,6 +30,7 @@ man-fix-cgroup-attributes-for-device-throttling.patch
 rules-set-SYSTEMD_READY-0-on-DM_UDEV_DISABLE_OTHER_RULES_.patch
 Install-correctly-report-symlink-creations.patch
 Mark-nbd-as-inactive-until-connected-2422.patch
+tmp.mount.hm4-After-swap.target-3087.patch
 debian/Add-back-support-for-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

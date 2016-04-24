@@ -37,6 +37,7 @@ systemd (229-5) UNRELEASED; urgency=medium
   * Don't ship an empty /etc/X11/xinit/xinitrc.d/ directory, this isn't
     supported in Debian. (Closes: #822198)
   * udev: Mark nbd as inactive until connected. (Closes: #812485)
+  * On shutdown, unmount /tmp before disabling swap. (Closes: #788303)
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
 
