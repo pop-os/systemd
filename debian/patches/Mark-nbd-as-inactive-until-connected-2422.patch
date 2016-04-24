@@ -1,0 +1,40 @@
+From: Wouter Verhelst <w@uter.be>
+Date: Mon, 18 Apr 2016 16:29:10 +0200
+Subject: Mark nbd as inactive until connected (#2422)
+
+Currently, 99-systemd.rules.in contains a line for network block
+devices, which mark them as inactive until the first change event, and
+as active from then on forward. This is not correct. A network block
+device can be connected or disconnected; this state is signalled by the
+presence or absense of a "pid" file, which contains the PID of the
+nbd client userspace process that started the connection.
+
+Update the rules file so that it checks for the presence of that file to
+decide what to set SYSTEMD_READY to.
+
+Note that current kernels do issue a change event upon connecting the
+device, but not yet upon disconnecting. While it's possible to wait
+until that's been fixed, the behaviour of the rule with TEST!="pid" in
+the absence of a proper uevent is exactly the same as the behaviour of
+the old rule; so it should be safe to apply now.
+
+Signed-off-by: Wouter Verhelst <w@uter.be>
+---
+ rules/99-systemd.rules.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/rules/99-systemd.rules.in b/rules/99-systemd.rules.in
+index 0ac4f6a..fb45176 100644
+--- a/rules/99-systemd.rules.in
++++ b/rules/99-systemd.rules.in
+@@ -24,8 +24,8 @@ SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="md*", ATTR{md/array_state}=="
+ # Ignore loop devices that don't have any file attached
+ SUBSYSTEM=="block", KERNEL=="loop[0-9]*", ENV{DEVTYPE}=="disk", TEST!="loop/backing_file", ENV{SYSTEMD_READY}="0"
+ 
+-# Ignore nbd devices in the "add" event, with "change" the nbd is ready
+-ACTION=="add", SUBSYSTEM=="block", KERNEL=="nbd*", ENV{SYSTEMD_READY}="0"
++# Ignore nbd devices until the PID file exists (which signals a connected device)
++SUBSYSTEM=="block", KERNEL=="nbd*", ENV{DEVTYPE}=="disk", TEST!="pid", ENV{SYSTEMD_READY}="0"
+ 
+ # We need a hardware independent way to identify network devices. We
+ # use the /sys/subsystem/ path for this. Kernel "bus" and "class" names
