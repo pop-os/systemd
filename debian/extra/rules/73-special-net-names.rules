@@ -7,3 +7,8 @@ ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", ATTRS{idVendor}=="413c", ATT
 # "/devices/vio/30000002/net/eth1"); we ignore the bus number, as
 # there should only ever be one bus, and then remove leading zeros
 ACTION=="add", SUBSYSTEM=="net", NAME=="", DRIVERS=="ibmveth", PROGRAM="/bin/sh -ec 'D=${DEVPATH#*/vio/}; D=${D%%%%/*}; D=${D#????}; D=${D#0}; D=${D#0}; D=${D#0}; D=${D#0}; echo ${D:-0}'", NAME="ibmveth$result"
+
+# Use MAC based names for network interfaces which are directly or indirectly
+# on USB and have an universally administered (stable) MAC address (second bit
+# is 0).
+ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", NAME=="", ATTR{address}=="?[014589cd]:*", IMPORT{builtin}="net_id", NAME="$env{ID_NET_NAME_MAC}"

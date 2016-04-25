@@ -41,6 +41,12 @@ systemd (229-5) UNRELEASED; urgency=medium
   * debian/systemd-coredump.postinst: Do daemon-reload before starting
     systemd-coredump, as the unit file may have changed on upgrades.
     (Closes: #820325)
+  * Set MAC based name for USB network interfaces only for universally
+    administered (i. e. stable) MACs, not for locally administered (i. e.
+    randomly generated) ones. Drop /lib/systemd/network/90-mac-for-usb.link
+    (as link files don't currently support globs for MACAddress=) and replace
+    with an udev rule in /lib/udev/rules.d/73-special-net-names.rules.
+    (Closes: #812575, LP: #1574483)
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
 
