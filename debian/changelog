@@ -38,6 +38,9 @@ systemd (229-5) UNRELEASED; urgency=medium
     supported in Debian. (Closes: #822198)
   * udev: Mark nbd as inactive until connected. (Closes: #812485)
   * On shutdown, unmount /tmp before disabling swap. (Closes: #788303)
+  * debian/systemd-coredump.postinst: Do daemon-reload before starting
+    systemd-coredump, as the unit file may have changed on upgrades.
+    (Closes: #820325)
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
 
