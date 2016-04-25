@@ -1,4 +1,4 @@
-systemd (229-5) UNRELEASED; urgency=medium
+systemd (229-5) unstable; urgency=medium
 
   * debian/tests/unit-config: Call "daemon-reload" to clean up generated units
     in between tests.
@@ -48,7 +48,7 @@ systemd (229-5) UNRELEASED; urgency=medium
     with an udev rule in /lib/udev/rules.d/73-special-net-names.rules.
     (Closes: #812575, LP: #1574483)
 
- -- Martin Pitt <mpitt@debian.org>  Thu, 07 Apr 2016 21:39:45 +0200
+ -- Martin Pitt <mpitt@debian.org>  Mon, 25 Apr 2016 11:08:11 +0200
 
 systemd (229-4) unstable; urgency=medium
 
