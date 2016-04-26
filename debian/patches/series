@@ -41,7 +41,6 @@ debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Revert-udev-network-device-renaming-immediately-give.patch
 debian/Use-different-default-paths-for-various-binaries.patch
 debian/insserv.conf-generator.patch
-debian/Add-targets-for-compatibility-with-Debian-insserv-sy.patch
 debian/Adjust-systemd-user-pam-config-file-for-Debian.patch
 debian/Add-run-initctl-support-to-SysV-compat-tools.patch
 debian/Add-support-for-TuxOnIce-hibernation.patch

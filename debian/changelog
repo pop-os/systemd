@@ -4,6 +4,10 @@ systemd (229-6) UNRELEASED; urgency=medium
     "btrfs-tools". (Closes: #822629)
   * systemd-container: Recommend libnss-mymachines. (Closes: #822615)
   * Drop systemd-dbg, in favor of debhelpers' automatic -dbgsym packages.
+  * Drop Add-targets-for-compatibility-with-Debian-insserv-sy.patch; we don't
+    need $x-display-manager any more as most/all DMs ship native services, and
+    $mail-transport-agent is not widely used (not even by our default MTA
+    exim4).
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 

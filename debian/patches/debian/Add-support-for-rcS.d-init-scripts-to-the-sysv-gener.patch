@@ -41,7 +41,7 @@ index 665579c..71cffe1 100644
                  "named",                SPECIAL_NSS_LOOKUP_TARGET,
                  "portmap",              SPECIAL_RPCBIND_TARGET,
 diff --git a/src/sysv-generator/sysv-generator.c b/src/sysv-generator/sysv-generator.c
-index 8bff51f..c7af4a4 100644
+index 5a6818a..8a715bb 100644
 --- a/src/sysv-generator/sysv-generator.c
 +++ b/src/sysv-generator/sysv-generator.c
 @@ -43,6 +43,7 @@
@@ -93,7 +93,7 @@ index 8bff51f..c7af4a4 100644
                  yes_no(!s->pid_file));
  
          if (s->pid_file)
-@@ -274,16 +282,22 @@ static int sysv_translate_facility(const char *name, const char *filename, char
+@@ -274,13 +282,19 @@ static int sysv_translate_facility(const char *name, const char *filename, char
  
          static const char * const table[] = {
                  /* LSB defined facilities */
@@ -106,9 +106,6 @@ index 8bff51f..c7af4a4 100644
 -                "syslog",               NULL,
 +                "syslog",               "systemd-journald-dev-log.socket",
                  "time",                 SPECIAL_TIME_SYNC_TARGET,
-                 /* Debian defined facilities */
-                 "x-display-manager",    "display-manager.service",
-                 "mail-transport-agent", "mail-transport-agent.target",
 +                /* special rcS init scripts */
 +                "cryptdisks",           "cryptsetup.target",
 +                "mountall",             SPECIAL_LOCAL_FS_TARGET,
@@ -118,7 +115,7 @@ index 8bff51f..c7af4a4 100644
          };
  
          char *filename_no_sh, *e, *m;
-@@ -714,6 +728,11 @@ static int fix_order(SysvStub *s, Hashmap *all_services) {
+@@ -711,6 +725,11 @@ static int fix_order(SysvStub *s, Hashmap *all_services) {
                  if (s->has_lsb && other->has_lsb)
                          continue;
  
@@ -130,7 +127,7 @@ index 8bff51f..c7af4a4 100644
                  if (other->sysv_start_priority < s->sysv_start_priority) {
                          r = strv_extend(&s->after, other->name);
                          if (r < 0)
-@@ -873,8 +892,12 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
+@@ -870,8 +889,12 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
                                  }
  
                                  if (de->d_name[0] == 'S')  {
