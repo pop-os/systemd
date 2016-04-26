@@ -8,6 +8,7 @@ systemd (229-6) UNRELEASED; urgency=medium
     need $x-display-manager any more as most/all DMs ship native services, and
     $mail-transport-agent is not widely used (not even by our default MTA
     exim4).
+  * Unify our two patches for Debian specific configuration files.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
