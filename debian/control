@@ -129,7 +129,8 @@ Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd
-Recommends: btrfs-progs | btrfs-tools
+Recommends: btrfs-progs | btrfs-tools,
+            libnss-mymachines,
 Breaks: systemd (<< 224-2)
 Replaces: systemd (<< 224-2)
 Description: systemd container/nspawn tools
