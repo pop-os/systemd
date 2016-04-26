@@ -364,16 +364,3 @@ Description: libudev shared library
  This library provides access to udev device information.
  .
  This is a minimal version, only for use in the installation system.
-
-Package: systemd-dbg
-Architecture: linux-any
-Section: debug
-Priority: extra
-Depends: ${misc:Depends},
-         systemd (= ${binary:Version}),
-         udev (= ${binary:Version}),
-         libsystemd0 (= ${binary:Version}),
-         libudev1 (= ${binary:Version})
-Description: system and service manager (debug symbols)
- This package contains the debugging symbols for systemd, udev and
- related libraries.

@@ -3,6 +3,7 @@ systemd (229-6) UNRELEASED; urgency=medium
   * systemd-container: Prefer renamed "btrfs-progs" package name over
     "btrfs-tools". (Closes: #822629)
   * systemd-container: Recommend libnss-mymachines. (Closes: #822615)
+  * Drop systemd-dbg, in favor of debhelpers' automatic -dbgsym packages.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
