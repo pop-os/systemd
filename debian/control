@@ -72,6 +72,7 @@ Breaks: lvm2 (<< 2.02.104-1),
         systemd-shim (<< 8-2),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
+        laptop-mode-tools (<< 1.68~)
 Replaces: udev (<< 228-5),
 Conflicts: klogd
 Description: system and service manager

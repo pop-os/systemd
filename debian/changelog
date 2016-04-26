@@ -9,6 +9,9 @@ systemd (229-6) UNRELEASED; urgency=medium
     $mail-transport-agent is not widely used (not even by our default MTA
     exim4).
   * Unify our two patches for Debian specific configuration files.
+  * Drop udev-re-enable-mount-propagation-for-udevd.patch, i. e. run udevd in
+    its own slave mount name space again. laptop-mode-tools 1.68 fixed the
+    original bug (#762018), thus add a Breaks: to earlier versions.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 

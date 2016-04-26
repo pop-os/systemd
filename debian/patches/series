@@ -48,7 +48,6 @@ debian/Adjust-systemd-user-pam-config-file-for-Debian.patch
 debian/Add-support-for-TuxOnIce-hibernation.patch
 debian/Stop-syslog.socket-when-entering-emergency-mode.patch
 debian/Include-additional-directories-in-ProtectSystem.patch
-debian/udev-re-enable-mount-propagation-for-udevd.patch
 debian/Re-enable-journal-forwarding-to-syslog.patch
 debian/Don-t-enable-audit-by-default.patch
 debian/util-Add-hidden-suffixes-for-ucf.patch
