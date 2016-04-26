@@ -12,6 +12,8 @@ systemd (229-6) UNRELEASED; urgency=medium
   * Drop udev-re-enable-mount-propagation-for-udevd.patch, i. e. run udevd in
     its own slave mount name space again. laptop-mode-tools 1.68 fixed the
     original bug (#762018), thus add a Breaks: to earlier versions.
+  * Ship fbdev-blacklist.conf in /lib/modprobe.d/ instead of /etc/modprobe.d/;
+    remove the conffile on upgrades.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
