@@ -16,6 +16,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     remove the conffile on upgrades.
   * Replace util-Add-hidden-suffixes-for-ucf.patch with patch that got
     committed upstream.
+  * Replace Stop-syslog.socket-when-entering-emergency-mode.patch with patch
+    that got committed upstream.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
