@@ -14,6 +14,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     original bug (#762018), thus add a Breaks: to earlier versions.
   * Ship fbdev-blacklist.conf in /lib/modprobe.d/ instead of /etc/modprobe.d/;
     remove the conffile on upgrades.
+  * Replace util-Add-hidden-suffixes-for-ucf.patch with patch that got
+    committed upstream.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 

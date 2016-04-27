@@ -1,8 +1,13 @@
 From: Martin Pitt <martin.pitt@ubuntu.com>
-Date: Wed, 21 Jan 2015 15:37:40 +0100
-Subject: util: Add hidden suffixes for ucf
+Date: Wed, 27 Apr 2016 09:58:42 +0200
+Subject: path-util: Add hidden suffixes for ucf (#3131)
 
-Bug-Debian: https://bugs.debian.org/775903
+ucf is a standard Debian helper for managing configuration file upgrades which
+need more interaction or elaborate merging than conffiles managed by dpkg.
+Ignore its temporary and backup files similarly to the *.dpkg-* ones to avoid
+creating units for them in generators.
+
+https://bugs.debian.org/775903
 ---
  src/basic/path-util.c | 3 +++
  1 file changed, 3 insertions(+)
