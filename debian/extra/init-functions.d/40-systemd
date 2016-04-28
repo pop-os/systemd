@@ -63,7 +63,7 @@ systemctl_redirect () {
     fi
 
     [ "$command" = status ] || log_daemon_msg "$s" "$service"
-    /bin/systemctl $sctl_args $command "$service"
+    /bin/systemctl --no-pager $sctl_args $command "$service"
     rc=$?
     [ "$command" = status ] || log_end_msg $rc
 
