@@ -11,7 +11,7 @@ generates names based on these properties. This provides "location oriented"
 names for PCI cards such as "enp0s1" for ethernet, or wlp1s0" for a WIFI card
 so that replacing a broken network card does not change the name. As location
 based naming does not work well for USB devices, these use a MAC based naming
-schema (see /lib/systemd/network/01-mac-for-usb.link).
+schema (see /lib/udev/rules.d/73-special-net-names.rules).
 
 This has been enabled by default since udev 220-7, which affects new
 installations/hardware. Existing installations/hardware which already got

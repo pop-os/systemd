@@ -18,6 +18,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     committed upstream.
   * Replace Stop-syslog.socket-when-entering-emergency-mode.patch with patch
     that got committed upstream.
+  * debian/udev.README.Debian: Adjust documentation of MAC based naming for
+    USB network cards to the udev rule, where this was moved to in 229-5.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
