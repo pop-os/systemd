@@ -23,6 +23,10 @@ systemd (229-6) UNRELEASED; urgency=medium
   * debian/extra/init-functions.d/40-systemd: Invoke status command with
     --no-pager, to avoid blocking scripts that call an init.d script with
     "status" with an unexpected pager process. (Closes: #765175, LP: #1576409)
+  * Add debian/extra/rules/70-debian-uaccess.rules: Make FIDO U2F dongles
+    accessible to the user session. This avoids having to install libu2f-host0
+    (which isn't discoverable at all) to make those devices work.
+    (LP: #1387908)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
