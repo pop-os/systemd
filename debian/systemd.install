@@ -54,3 +54,4 @@ usr/share/locale/
 ../../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
 ../../extra/systemd-sysv-install lib/systemd/
 ../../extra/units/* lib/systemd/system/
+../../extra/dhclient-exit-hooks.d/ etc/dhcp/

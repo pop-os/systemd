@@ -29,6 +29,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     (LP: #1387908)
   * libnss-resolve: Enable systemd-resolved.service on package installation,
     as this package makes little sense without resolved.
+  * Add a DHCP exit hook for pushing received NTP servers into timesyncd.
+    (LP: #1578663)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
