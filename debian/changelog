@@ -27,10 +27,6 @@ systemd (229-6) UNRELEASED; urgency=medium
     accessible to the user session. This avoids having to install libu2f-host0
     (which isn't discoverable at all) to make those devices work.
     (LP: #1387908)
-  * debian/libnss-resolve.postinst: Replace "dns" entry with "resolve", as
-    libnss-resolve already falls back to dns if resolved is not available.
-    This avoids querying failing DNS twice. Conversely, replace "resolv" with
-    "dns" in postrm.
   * libnss-resolve: Enable systemd-resolved.service on package installation,
     as this package makes little sense without resolved.
 
