@@ -18,7 +18,11 @@ remove_nss_entry() {
     perl -i -pe '
         sub remove {
             my $s=shift;
-            $s=~s/\s+\Qresolve\E//g;
+            if ($s =~ /\bdns\b/) {
+                $s=~s/\s+\bresolve\b//g;
+            } else {
+                $s=~s/\bresolve\b/dns/g;
+            }
             return $s;
         }
         s/^(hosts:)(.*)/$1.remove($2)/e;

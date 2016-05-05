@@ -23,9 +23,10 @@ insert_nss_entry() {
             if (grep { $_ eq "resolve"} @bits) {
                 return $line;
             }
-            # add resolve before dns
+            # replace dns with resolve (that will fall back to dns if resolved
+            # is not running)
             return join " ", map {
-	        $_ eq "dns" ? ("resolve", "$_") : $_
+	        $_ eq "dns" ? "resolve" : $_
             } @bits;
         }
         s/^(hosts:\s+)(.*)/$1.insert($2)/e;
