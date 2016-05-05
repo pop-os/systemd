@@ -31,6 +31,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     libnss-resolve already falls back to dns if resolved is not available.
     This avoids querying failing DNS twice. Conversely, replace "resolv" with
     "dns" in postrm.
+  * libnss-resolve: Enable systemd-resolved.service on package installation,
+    as this package makes little sense without resolved.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 

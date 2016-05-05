@@ -38,6 +38,11 @@ if [ "$1" = configure ] && [ -z "$2" ]; then
     # first install: setup the recommended configuration (unless
     # nsswitch.conf already contains resolve entries)
     insert_nss_entry
+    # ... and enable resolved
+    systemctl enable systemd-resolved.service
+    if [ -d /run/systemd/system ]; then
+        deb-systemd-invoke start systemd-resolved.service || true
+    fi
 fi
 
 #DEBHELPER#
