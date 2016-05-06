@@ -31,6 +31,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     as this package makes little sense without resolved.
   * Add a DHCP exit hook for pushing received NTP servers into timesyncd.
     (LP: #1578663)
+  * debian/udev.postinst: Fix migration check from the old persistent-net
+    generator to not apply to chroots. (Closes: #813141)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 

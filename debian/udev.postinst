@@ -56,7 +56,7 @@ upgrade_fixes() {
   if dpkg --compare-versions "$2" lt-nl "220-7~" &&
      [ ! -e /etc/udev/rules.d/70-persistent-net.rules ] &&
      [ ! -e /etc/udev/rules.d/80-net-setup-link.rules ] &&
-     ! grep -q net.ifnames /proc/cmdline ; then
+     ! grep -q net.ifnames /proc/cmdline && ! chrooted; then
     mkdir -p /etc/udev/rules.d
     cat <<EOF > /etc/udev/rules.d/80-net-setup-link.rules
 # This machine is most likely a virtualized guest, where the old persistent
