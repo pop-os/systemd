@@ -1,0 +1,99 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Mon, 9 May 2016 21:24:38 +0200
+Subject: Revert "core: enable TasksMax= for all services by default,
+ and set it to 512"
+
+This reverts commit 9ded9cd14cc03c67291b10a5c42ce5094ba0912f.
+
+Introducing a default limit on number of threads broke a lot of software which
+regularly needs more, such as MySQL and RabbitMQ, or services that spawn off an
+indefinite number of subtasks that are not in a scope, like LXC or cron.
+
+512 is way too much for most "simple" services, and it's way too little for
+others such as the ones mentioned above. There is also no particular rationale
+about "512", so even if we'd bump it to 1024 we'd just make the limit even less
+useful while still breaking software.
+
+It is both much safer and also much more effective in terms of guarding against
+berserk programs/bugs/unintended fork bombs etc. to set limits in units
+individually. Once someone looks at one, this is then a great time to also flip
+on the other resource and privilege limitations that systemd offers.
+
+Bug: https://github.com/systemd/systemd/issues/3211
+Bug-Debian: https://bugs.debian.org/823530
+Bug-Ubuntu: https://launchpad.net/bugs/1578080
+---
+ man/systemd-system.conf.xml | 6 ++----
+ src/core/main.c             | 4 ++--
+ src/core/manager.c          | 3 +--
+ src/core/system.conf        | 4 ++--
+ 4 files changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/man/systemd-system.conf.xml b/man/systemd-system.conf.xml
+index edc6df9..0227347 100644
+--- a/man/systemd-system.conf.xml
++++ b/man/systemd-system.conf.xml
+@@ -317,9 +317,7 @@
+         <varname>MemoryAccounting=</varname> and
+         <varname>TasksAccounting=</varname>. See
+         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+-        for details on the per-unit
+-        settings. <varname>DefaulTasksAccounting=</varname> defaults
+-        to on, the other three settings to off.</para></listitem>
++        for details on the per-unit settings.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+@@ -330,7 +328,7 @@
+         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+         for details. This setting applies to all unit types that
+         support resource control settings, with the exception of slice
+-        units. Defaults to 512.</para></listitem>
++        units.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+diff --git a/src/core/main.c b/src/core/main.c
+index 77f9239..1da388b 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -123,8 +123,8 @@ static FILE* arg_serialization = NULL;
+ static bool arg_default_cpu_accounting = false;
+ static bool arg_default_blockio_accounting = false;
+ static bool arg_default_memory_accounting = false;
+-static bool arg_default_tasks_accounting = true;
+-static uint64_t arg_default_tasks_max = UINT64_C(512);
++static bool arg_default_tasks_accounting = false;
++static uint64_t arg_default_tasks_max = (uint64_t) -1;
+ static sd_id128_t arg_machine_id = {};
+ 
+ static void pager_open_if_enabled(void) {
+diff --git a/src/core/manager.c b/src/core/manager.c
+index f36cf5e..4240dac 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -578,8 +578,7 @@ int manager_new(ManagerRunningAs running_as, bool test_run, Manager **_m) {
+         m->running_as = running_as;
+         m->exit_code = _MANAGER_EXIT_CODE_INVALID;
+         m->default_timer_accuracy_usec = USEC_PER_MINUTE;
+-        m->default_tasks_accounting = true;
+-        m->default_tasks_max = UINT64_C(512);
++        m->default_tasks_max = (uint64_t) -1;
+ 
+         /* Prepare log fields we can use for structured logging */
+         m->unit_log_field = unit_log_fields[running_as];
+diff --git a/src/core/system.conf b/src/core/system.conf
+index e2ded27..63bff08 100644
+--- a/src/core/system.conf
++++ b/src/core/system.conf
+@@ -40,8 +40,8 @@
+ #DefaultCPUAccounting=no
+ #DefaultBlockIOAccounting=no
+ #DefaultMemoryAccounting=no
+-#DefaultTasksAccounting=yes
+-#DefaultTasksMax=512
++#DefaultTasksAccounting=no
++#DefaultTasksMax=
+ #DefaultLimitCPU=
+ #DefaultLimitFSIZE=
+ #DefaultLimitDATA=

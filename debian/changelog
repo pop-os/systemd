@@ -33,6 +33,14 @@ systemd (229-6) UNRELEASED; urgency=medium
     (LP: #1578663)
   * debian/udev.postinst: Fix migration check from the old persistent-net
     generator to not apply to chroots. (Closes: #813141)
+  * Revert "enable TasksMax= for all services by default, and set it to 512".
+    Introducing a default limit on number of threads broke a lot of software
+    which regularly needs more, such as MySQL and RabbitMQ, or services that
+    spawn off an indefinite number of subtasks that are not in a scope, like
+    LXC or cron. 512 is way too much for most "simple" services, and it's way
+    too little for the ones mentioned above. Effective (and much stricter)
+    limits should instead be put into units individually.
+    (Closes: #823530, LP: #1578080)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
