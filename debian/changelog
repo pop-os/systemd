@@ -45,6 +45,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     73-usb-net-by-mac.rules, so that it's easier to disable. (Closes: #824025)
   * 73-usb-net-by-mac.rules: Disable when net.ifnames=0 is specified on the
     kernel command line, to be consistent with disabling the *.link files.
+  * 73-special-net-names.rule: Name the IBM integrated management module
+    virtual USB network card "ibmimm". Thanks Marco d'Itri!
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
