@@ -43,6 +43,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     (Closes: #823530, LP: #1578080)
   * Split out udev rule to name USB network interfaces by MAC address into
     73-usb-net-by-mac.rules, so that it's easier to disable. (Closes: #824025)
+  * 73-usb-net-by-mac.rules: Disable when net.ifnames=0 is specified on the
+    kernel command line, to be consistent with disabling the *.link files.
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 
