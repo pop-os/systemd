@@ -41,6 +41,8 @@ systemd (229-6) UNRELEASED; urgency=medium
     too little for the ones mentioned above. Effective (and much stricter)
     limits should instead be put into units individually.
     (Closes: #823530, LP: #1578080)
+  * Split out udev rule to name USB network interfaces by MAC address into
+    73-usb-net-by-mac.rules, so that it's easier to disable. (Closes: #824025)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 26 Apr 2016 22:20:43 +0200
 

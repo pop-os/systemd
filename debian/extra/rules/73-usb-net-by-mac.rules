@@ -1,0 +1,4 @@
+# Use MAC based names for network interfaces which are directly or indirectly
+# on USB and have an universally administered (stable) MAC address (second bit
+# is 0).
+ACTION=="add", SUBSYSTEM=="net", SUBSYSTEMS=="usb", NAME=="", ATTR{address}=="?[014589cd]:*", IMPORT{builtin}="net_id", NAME="$env{ID_NET_NAME_MAC}"
