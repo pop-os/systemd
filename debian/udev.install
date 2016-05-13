@@ -21,4 +21,3 @@ usr/share/pkgconfig/udev.pc
 ../../extra/rules/*.rules lib/udev/rules.d/
 #../../extra/*.hwdb lib/udev/hwdb.d/
 ../../extra/fbdev-blacklist.conf lib/modprobe.d/
-../../extra/udev-helpers/* lib/udev/

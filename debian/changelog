@@ -3,6 +3,8 @@ systemd (229-7) UNRELEASED; urgency=medium
   * Drop cmdline-upstart-boot autopkgtest. It was still needed up to Ubuntu
     16.04 LTS, but upstart-sysv is not supported any more in Debian and Ubuntu
     now.
+  * udev: Drop hotplug.functions, now that the last remaining user of this got
+    fixed. Add appropriate versioned Breaks:.
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 12 May 2016 21:16:49 +0200
 
