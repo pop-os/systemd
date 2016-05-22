@@ -28,6 +28,7 @@
 #include "alloc-util.h"
 #include "conf-parser.h"
 #include "def.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "log.h"
@@ -37,7 +38,7 @@
 #include "string-util.h"
 #include "strv.h"
 
-#define USE(x, y) do{ (x) = (y); (y) = NULL; } while(0)
+#define USE(x, y) do { (x) = (y); (y) = NULL; } while (0)
 
 int parse_sleep_config(const char *verb, char ***_modes, char ***_states) {
 
@@ -230,6 +231,9 @@ static bool enough_memory_for_hibernation(void) {
         unsigned long long act = 0;
         size_t size = 0, used = 0;
         int r;
+
+        if (getenv_bool("SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK") > 0)
+                return true;
 
         r = hibernation_partition_size(&size, &used);
         if (r < 0)

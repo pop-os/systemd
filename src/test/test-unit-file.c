@@ -35,10 +35,12 @@
 #include "install.h"
 #include "load-fragment.h"
 #include "macro.h"
+#include "rm-rf.h"
 #include "specifier.h"
 #include "string-util.h"
 #include "strv.h"
 #include "test-helper.h"
+#include "tests.h"
 #include "user-util.h"
 #include "util.h"
 
@@ -51,7 +53,7 @@ static int test_unit_file_get_set(void) {
         h = hashmap_new(&string_hash_ops);
         assert_se(h);
 
-        r = unit_file_get_list(UNIT_FILE_SYSTEM, NULL, h);
+        r = unit_file_get_list(UNIT_FILE_SYSTEM, NULL, h, NULL, NULL);
 
         if (r == -EPERM || r == -EACCES) {
                 printf("Skipping test: unit_file_get_list: %s", strerror(-r));
@@ -113,7 +115,7 @@ static void test_config_parse_exec(void) {
         Manager *m = NULL;
         Unit *u = NULL;
 
-        r = manager_new(MANAGER_USER, true, &m);
+        r = manager_new(UNIT_FILE_USER, true, &m);
         if (MANAGER_SKIP_TEST(r)) {
                 printf("Skipping test: manager_new: %s\n", strerror(-r));
                 return;
@@ -606,7 +608,7 @@ static void test_install_printf(void) {
                 } else assert_se(t == NULL);                            \
                 strcpy(i.name, d1);                                     \
                 strcpy(i.path, d2);                                     \
-        } while(false)
+        } while (false)
 
         expect(i, "%n", "name.service");
         expect(i, "%N", "name");
@@ -840,10 +842,13 @@ static void test_config_parse_pass_environ(void) {
 }
 
 int main(int argc, char *argv[]) {
+        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
         int r;
 
         log_parse_environment();
         log_open();
+
+        assert_se(runtime_dir = setup_fake_runtime_dir());
 
         r = test_unit_file_get_set();
         test_config_parse_exec();

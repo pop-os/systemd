@@ -23,13 +23,22 @@ use strict;
 my $udev_bin            = "./test-udev";
 my $valgrind            = 0;
 my $gdb                 = 0;
+my $strace              = 0;
 my $udev_bin_valgrind   = "valgrind --tool=memcheck --leak-check=yes --track-origins=yes --quiet $udev_bin";
 my $udev_bin_gdb        = "gdb --args $udev_bin";
-my $udev_dev            = "test/dev";
+my $udev_bin_strace     = "strace -efile $udev_bin";
 my $udev_run            = "test/run";
+my $udev_tmpfs          = "test/tmpfs";
+my $udev_sys            = "${udev_tmpfs}/sys";
+my $udev_dev            = "${udev_tmpfs}/dev";
 my $udev_rules_dir      = "$udev_run/udev/rules.d";
 my $udev_rules          = "$udev_rules_dir/udev-test.rules";
 my $EXIT_TEST_SKIP      = 77;
+
+my $rules_10k_tags      = "";
+for (my $i = 1; $i <= 10000; ++$i) {
+    $rules_10k_tags .= 'KERNEL=="sda", TAG+="test' . $i . "\"\n";
+}
 
 my @tests = (
         {
@@ -700,7 +709,7 @@ EOF
                 desc            => "big major number test",
                 devpath         => "/devices/virtual/misc/misc-fake1",
                 exp_name        => "node",
-                exp_majorminor  => "511:1",
+                exp_majorminor  => "4095:1",
                 rules                => <<EOF
 KERNEL=="misc-fake1", SYMLINK+="node"
 EOF
@@ -709,7 +718,7 @@ EOF
                 desc            => "big major and big minor number test",
                 devpath         => "/devices/virtual/misc/misc-fake89999",
                 exp_name        => "node",
-                exp_majorminor  => "511:89999",
+                exp_majorminor  => "4095:89999",
                 rules           => <<EOF
 KERNEL=="misc-fake89999", SYMLINK+="node"
 EOF
@@ -1315,6 +1324,25 @@ KERNEL=="sda", IMPORT{builtin}="path_id"
 KERNEL=="sda", ENV{ID_PATH}=="?*", SYMLINK+="disk/by-path/\$env{ID_PATH}"
 EOF
         },
+        {
+                desc            => "add and match tag",
+                devpath         => "/devices/pci0000:00/0000:00:1f.2/host0/target0:0:0/0:0:0:0/block/sda",
+                exp_name        => "found",
+                not_exp_name    => "bad" ,
+                rules           => <<EOF
+SUBSYSTEMS=="scsi", ATTRS{vendor}=="ATA", TAG+="green"
+TAGS=="green", SYMLINK+="found"
+TAGS=="blue", SYMLINK+="bad"
+EOF
+        },
+        {
+                desc            => "don't crash with lots of tags",
+                devpath         => "/devices/pci0000:00/0000:00:1f.2/host0/target0:0:0/0:0:0:0/block/sda",
+                exp_name        => "found",
+                rules           => $rules_10k_tags . <<EOF
+TAGS=="test1", TAGS=="test500", TAGS=="test1234", TAGS=="test9999", TAGS=="test10000", SYMLINK+="found"
+EOF
+        },
 );
 
 sub udev {
@@ -1327,11 +1355,13 @@ sub udev {
         close CONF;
 
         if ($valgrind > 0) {
-                system("$udev_bin_valgrind $action $devpath");
+                return system("$udev_bin_valgrind $action $devpath");
         } elsif ($gdb > 0) {
-                system("$udev_bin_gdb $action $devpath");
+                return system("$udev_bin_gdb $action $devpath");
+        } elsif ($strace > 0) {
+                return system("$udev_bin_strace $action $devpath");
         } else {
-                system("$udev_bin", "$action", "$devpath");
+                return system("$udev_bin", "$action", "$devpath");
         }
 }
 
@@ -1401,23 +1431,34 @@ sub major_minor_test {
 }
 
 sub udev_setup {
-        system("rm", "-rf", "$udev_dev");
+        system("umount", $udev_tmpfs);
+        rmdir($udev_tmpfs);
+        mkdir($udev_tmpfs) || die "unable to create udev_tmpfs: $udev_tmpfs\n";
+        system("mount", "-o", "rw,mode=755,nosuid,noexec,nodev", "-t", "tmpfs", "tmpfs", $udev_tmpfs) && die "unable to mount tmpfs";
+
         mkdir($udev_dev) || die "unable to create udev_dev: $udev_dev\n";
         # setting group and mode of udev_dev ensures the tests work
         # even if the parent directory has setgid bit enabled.
         chown (0, 0, $udev_dev) || die "unable to chown $udev_dev\n";
         chmod (0755, $udev_dev) || die "unable to chmod $udev_dev\n";
 
+        system("cp", "-r", "test/sys/", $udev_sys) && die "unable to copy test/sys";
+
         system("rm", "-rf", "$udev_run");
 }
 
 sub run_test {
         my ($rules, $number) = @_;
+        my $rc;
 
         print "TEST $number: $rules->{desc}\n";
         print "device \'$rules->{devpath}\' expecting node/link \'$rules->{exp_name}\'\n";
 
-        udev("add", $rules->{devpath}, \$rules->{rules});
+        $rc = udev("add", $rules->{devpath}, \$rules->{rules});
+        if ($rc != 0) {
+                print "$udev_bin add failed with code $rc\n";
+                $error++;
+        }
         if (defined($rules->{not_exp_name})) {
                 if ((-e "$udev_dev/$rules->{not_exp_name}") ||
                     (-l "$udev_dev/$rules->{not_exp_name}")) {
@@ -1458,7 +1499,11 @@ sub run_test {
                 return;
         }
 
-        udev("remove", $rules->{devpath}, \$rules->{rules});
+        $rc = udev("remove", $rules->{devpath}, \$rules->{rules});
+        if ($rc != 0) {
+                print "$udev_bin remove failed with code $rc\n";
+                $error++;
+        }
         if ((-e "$udev_dev/$rules->{exp_name}") ||
             (-l "$udev_dev/$rules->{exp_name}")) {
                 print "remove:      error";
@@ -1509,6 +1554,9 @@ foreach my $arg (@ARGV) {
         } elsif ($arg =~ m/--gdb/) {
                 $gdb = 1;
                 printf("using gdb\n");
+        } elsif ($arg =~ m/--strace/) {
+                $strace = 1;
+                printf("using strace\n");
         } else {
                 push(@list, $arg);
         }
@@ -1536,8 +1584,9 @@ if ($list[0]) {
 print "$error errors occurred\n\n";
 
 # cleanup
-system("rm", "-rf", "$udev_dev");
 system("rm", "-rf", "$udev_run");
+system("umount", "$udev_tmpfs");
+rmdir($udev_tmpfs);
 
 if ($error > 0) {
     exit(1);

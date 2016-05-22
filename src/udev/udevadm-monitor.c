@@ -40,7 +40,7 @@ static void sig_handler(int signum) {
 static void print_device(struct udev_device *device, const char *source, int prop) {
         struct timespec ts;
 
-        clock_gettime(CLOCK_MONOTONIC, &ts);
+        assert_se(clock_gettime(CLOCK_MONOTONIC, &ts) == 0);
         printf("%-6s[%"PRI_TIME".%06ld] %-8s %s (%s)\n",
                source,
                ts.tv_sec, ts.tv_nsec/1000,
@@ -100,7 +100,7 @@ static int adm_monitor(struct udev *udev, int argc, char *argv[]) {
         udev_list_init(udev, &subsystem_match_list, true);
         udev_list_init(udev, &tag_match_list, true);
 
-        while((c = getopt_long(argc, argv, "pekus:t:h", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "pekus:t:h", options, NULL)) >= 0)
                 switch (c) {
                 case 'p':
                 case 'e':

@@ -265,6 +265,42 @@ static int property_get_docked(
         return sd_bus_message_append(reply, "b", manager_is_docked_or_external_displays(m));
 }
 
+static int property_get_current_sessions(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Manager *m = userdata;
+
+        assert(bus);
+        assert(reply);
+        assert(m);
+
+        return sd_bus_message_append(reply, "t", (uint64_t) hashmap_size(m->sessions));
+}
+
+static int property_get_current_inhibitors(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Manager *m = userdata;
+
+        assert(bus);
+        assert(reply);
+        assert(m);
+
+        return sd_bus_message_append(reply, "t", (uint64_t) hashmap_size(m->inhibitors));
+}
+
 static int method_get_session(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_free_ char *p = NULL;
         Manager *m = userdata;
@@ -725,6 +761,9 @@ static int method_create_session(sd_bus_message *message, void *userdata, sd_bus
             m->seat0->positions[vtnr]->class != SESSION_GREETER)
                 return sd_bus_error_setf(error, BUS_ERROR_SESSION_BUSY, "Already occupied by a session");
 
+        if (hashmap_size(m->sessions) >= m->sessions_max)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_LIMITS_EXCEEDED, "Maximum number of sessions (%" PRIu64 ") reached, refusing further sessions.", m->sessions_max);
+
         audit_session_from_pid(leader, &audit_id);
         if (audit_id > 0) {
                 /* Keep our session IDs and the audit session IDs in sync */
@@ -1077,11 +1116,11 @@ static int method_terminate_seat(sd_bus_message *message, void *userdata, sd_bus
 static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_free_ char *cc = NULL;
         Manager *m = userdata;
-        int b, r;
+        int r, b, interactive;
         struct passwd *pw;
         const char *path;
         uint32_t uid;
-        int interactive;
+        bool self = false;
 
         assert(message);
         assert(m);
@@ -1102,6 +1141,8 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
                 if (r < 0)
                         return r;
 
+                self = true;
+
         } else if (!uid_is_valid(uid))
                 return -EINVAL;
 
@@ -1113,7 +1154,7 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
         r = bus_verify_polkit_async(
                         message,
                         CAP_SYS_ADMIN,
-                        "org.freedesktop.login1.set-user-linger",
+                        self ? "org.freedesktop.login1.set-self-linger" : "org.freedesktop.login1.set-user-linger",
                         NULL,
                         interactive,
                         UID_INVALID,
@@ -2440,6 +2481,9 @@ static int method_inhibit(sd_bus_message *message, void *userdata, sd_bus_error 
         if (r < 0)
                 return r;
 
+        if (hashmap_size(m->inhibitors) >= m->inhibitors_max)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_LIMITS_EXCEEDED, "Maximum number of inhibitors (%" PRIu64 ") reached, refusing further inhibitors.", m->inhibitors_max);
+
         do {
                 id = mfree(id);
 
@@ -2510,6 +2554,13 @@ const sd_bus_vtable manager_vtable[] = {
         SD_BUS_PROPERTY("PreparingForSleep", "b", property_get_preparing, 0, 0),
         SD_BUS_PROPERTY("ScheduledShutdown", "(st)", property_get_scheduled_shutdown, 0, 0),
         SD_BUS_PROPERTY("Docked", "b", property_get_docked, 0, 0),
+        SD_BUS_PROPERTY("RemoveIPC", "b", bus_property_get_bool, offsetof(Manager, remove_ipc), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("RuntimeDirectorySize", "t", bus_property_get_size, offsetof(Manager, runtime_dir_size), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("InhibitorsMax", "t", NULL, offsetof(Manager, inhibitors_max), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("NCurrentInhibitors", "t", property_get_current_inhibitors, 0, 0),
+        SD_BUS_PROPERTY("SessionsMax", "t", NULL, offsetof(Manager, sessions_max), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("NCurrentSessions", "t", property_get_current_sessions, 0, 0),
+        SD_BUS_PROPERTY("UserTasksMax", "t", NULL, offsetof(Manager, user_tasks_max), SD_BUS_VTABLE_PROPERTY_CONST),
 
         SD_BUS_METHOD("GetSession", "s", "o", method_get_session, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetSessionByPID", "u", "o", method_get_session_by_pid, SD_BUS_VTABLE_UNPRIVILEGED),

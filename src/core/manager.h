@@ -132,6 +132,9 @@ struct Manager {
         int notify_fd;
         sd_event_source *notify_event_source;
 
+        int cgroups_agent_fd;
+        sd_event_source *cgroups_agent_event_source;
+
         int signal_fd;
         sd_event_source *signal_event_source;
 
@@ -140,6 +143,7 @@ struct Manager {
 
         sd_event_source *jobs_in_progress_event_source;
 
+        UnitFileScope unit_file_scope;
         LookupPaths lookup_paths;
         Set *unit_path_cache;
 
@@ -161,10 +165,6 @@ struct Manager {
         dual_timestamp generators_finish_timestamp;
         dual_timestamp units_load_start_timestamp;
         dual_timestamp units_load_finish_timestamp;
-
-        char *generator_unit_path;
-        char *generator_unit_path_early;
-        char *generator_unit_path_late;
 
         struct udev* udev;
 
@@ -228,7 +228,6 @@ struct Manager {
         unsigned n_in_gc_queue;
 
         /* Flags */
-        ManagerRunningAs running_as;
         ManagerExitCode exit_code:5;
 
         bool dispatching_load_queue:1;
@@ -256,6 +255,7 @@ struct Manager {
 
         bool default_cpu_accounting;
         bool default_memory_accounting;
+        bool default_io_accounting;
         bool default_blockio_accounting;
         bool default_tasks_accounting;
 
@@ -304,10 +304,15 @@ struct Manager {
         const char *unit_log_field;
         const char *unit_log_format_string;
 
-        int first_boot;
+        int first_boot; /* tri-state */
 };
 
-int manager_new(ManagerRunningAs running_as, bool test_run, Manager **m);
+#define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == UNIT_FILE_SYSTEM)
+#define MANAGER_IS_USER(m) ((m)->unit_file_scope != UNIT_FILE_SYSTEM)
+
+#define MANAGER_IS_RELOADING(m) ((m)->n_reloading > 0)
+
+int manager_new(UnitFileScope scope, bool test_run, Manager **m);
 Manager* manager_free(Manager *m);
 
 void manager_enumerate(Manager *m);
@@ -344,8 +349,6 @@ int manager_serialize(Manager *m, FILE *f, FDSet *fds, bool switching_root);
 int manager_deserialize(Manager *m, FILE *f, FDSet *fds);
 
 int manager_reload(Manager *m);
-
-bool manager_is_reloading_or_reexecuting(Manager *m) _pure_;
 
 void manager_reset_failed(Manager *m);
 

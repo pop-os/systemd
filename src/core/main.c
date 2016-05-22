@@ -81,6 +81,7 @@
 #include "strv.h"
 #include "switch-root.h"
 #include "terminal-util.h"
+#include "umask-util.h"
 #include "user-util.h"
 #include "virt.h"
 #include "watchdog.h"
@@ -94,7 +95,7 @@ static enum {
         ACTION_DONE
 } arg_action = ACTION_RUN;
 static char *arg_default_unit = NULL;
-static ManagerRunningAs arg_running_as = _MANAGER_RUNNING_AS_INVALID;
+static bool arg_system = false;
 static bool arg_dump_core = true;
 static int arg_crash_chvt = -1;
 static bool arg_crash_shell = false;
@@ -102,7 +103,7 @@ static bool arg_crash_reboot = false;
 static bool arg_confirm_spawn = false;
 static ShowStatus arg_show_status = _SHOW_STATUS_UNSET;
 static bool arg_switched_root = false;
-static int arg_no_pager = -1;
+static bool arg_no_pager = false;
 static char ***arg_join_controllers = NULL;
 static ExecOutput arg_default_std_output = EXEC_OUTPUT_JOURNAL;
 static ExecOutput arg_default_std_error = EXEC_OUTPUT_INHERIT;
@@ -121,19 +122,12 @@ static usec_t arg_default_timer_accuracy_usec = 1 * USEC_PER_MINUTE;
 static Set* arg_syscall_archs = NULL;
 static FILE* arg_serialization = NULL;
 static bool arg_default_cpu_accounting = false;
+static bool arg_default_io_accounting = false;
 static bool arg_default_blockio_accounting = false;
 static bool arg_default_memory_accounting = false;
 static bool arg_default_tasks_accounting = true;
 static uint64_t arg_default_tasks_max = UINT64_C(512);
 static sd_id128_t arg_machine_id = {};
-
-static void pager_open_if_enabled(void) {
-
-        if (arg_no_pager <= 0)
-                return;
-
-        pager_open(false);
-}
 
 noreturn static void freeze_or_reboot(void) {
 
@@ -296,6 +290,7 @@ static int parse_crash_chvt(const char *value) {
 }
 
 static int set_machine_id(const char *m) {
+        assert(m);
 
         if (sd_id128_from_string(m, &arg_machine_id) < 0)
                 return -EINVAL;
@@ -420,6 +415,15 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
                 target = runlevel_to_target(key);
                 if (target)
                         return free_and_strdup(&arg_default_unit, target);
+
+        } else if (streq(key, "systemd.default_timeout_start_sec") && value) {
+
+                r = parse_sec(value, &arg_default_timeout_start_usec);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to parse default start timeout: %s, ignoring.", value);
+
+                if (arg_default_timeout_start_usec <= 0)
+                        arg_default_timeout_start_usec = USEC_INFINITY;
         }
 
         return 0;
@@ -667,7 +671,8 @@ static int parse_config_file(void) {
                 { "Manager", "DefaultTimeoutStartSec",    config_parse_sec,              0, &arg_default_timeout_start_usec        },
                 { "Manager", "DefaultTimeoutStopSec",     config_parse_sec,              0, &arg_default_timeout_stop_usec         },
                 { "Manager", "DefaultRestartSec",         config_parse_sec,              0, &arg_default_restart_usec              },
-                { "Manager", "DefaultStartLimitInterval", config_parse_sec,              0, &arg_default_start_limit_interval      },
+                { "Manager", "DefaultStartLimitInterval", config_parse_sec,              0, &arg_default_start_limit_interval      }, /* obsolete alias */
+                { "Manager", "DefaultStartLimitIntervalSec",config_parse_sec,            0, &arg_default_start_limit_interval      },
                 { "Manager", "DefaultStartLimitBurst",    config_parse_unsigned,         0, &arg_default_start_limit_burst         },
                 { "Manager", "DefaultEnvironment",        config_parse_environ,          0, &arg_default_environment               },
                 { "Manager", "DefaultLimitCPU",           config_parse_limit,            RLIMIT_CPU, arg_default_rlimit            },
@@ -687,6 +692,7 @@ static int parse_config_file(void) {
                 { "Manager", "DefaultLimitRTPRIO",        config_parse_limit,            RLIMIT_RTPRIO, arg_default_rlimit         },
                 { "Manager", "DefaultLimitRTTIME",        config_parse_limit,            RLIMIT_RTTIME, arg_default_rlimit         },
                 { "Manager", "DefaultCPUAccounting",      config_parse_bool,             0, &arg_default_cpu_accounting            },
+                { "Manager", "DefaultIOAccounting",       config_parse_bool,             0, &arg_default_io_accounting             },
                 { "Manager", "DefaultBlockIOAccounting",  config_parse_bool,             0, &arg_default_blockio_accounting        },
                 { "Manager", "DefaultMemoryAccounting",   config_parse_bool,             0, &arg_default_memory_accounting         },
                 { "Manager", "DefaultTasksAccounting",    config_parse_bool,             0, &arg_default_tasks_accounting          },
@@ -696,11 +702,11 @@ static int parse_config_file(void) {
 
         const char *fn, *conf_dirs_nulstr;
 
-        fn = arg_running_as == MANAGER_SYSTEM ?
+        fn = arg_system ?
                 PKGSYSCONFDIR "/system.conf" :
                 PKGSYSCONFDIR "/user.conf";
 
-        conf_dirs_nulstr = arg_running_as == MANAGER_SYSTEM ?
+        conf_dirs_nulstr = arg_system ?
                 CONF_PATHS_NULSTR("systemd/system.conf.d") :
                 CONF_PATHS_NULSTR("systemd/user.conf.d");
 
@@ -729,6 +735,7 @@ static void manager_set_defaults(Manager *m) {
         m->default_start_limit_interval = arg_default_start_limit_interval;
         m->default_start_limit_burst = arg_default_start_limit_burst;
         m->default_cpu_accounting = arg_default_cpu_accounting;
+        m->default_io_accounting = arg_default_io_accounting;
         m->default_blockio_accounting = arg_default_blockio_accounting;
         m->default_memory_accounting = arg_default_memory_accounting;
         m->default_tasks_accounting = arg_default_tasks_accounting;
@@ -874,17 +881,15 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_SYSTEM:
-                        arg_running_as = MANAGER_SYSTEM;
+                        arg_system = true;
                         break;
 
                 case ARG_USER:
-                        arg_running_as = MANAGER_USER;
+                        arg_system = false;
                         break;
 
                 case ARG_TEST:
                         arg_action = ACTION_TEST;
-                        if (arg_no_pager < 0)
-                                arg_no_pager = true;
                         break;
 
                 case ARG_NO_PAGER:
@@ -994,8 +999,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case 'h':
                         arg_action = ACTION_HELP;
-                        if (arg_no_pager < 0)
-                                arg_no_pager = true;
                         break;
 
                 case 'D':
@@ -1073,7 +1076,7 @@ static int prepare_reexecute(Manager *m, FILE **_f, FDSet **_fds, bool switching
                 return log_error_errno(r, "Failed to create serialization file: %m");
 
         /* Make sure nothing is really destructed when we shut down */
-        m->n_reloading ++;
+        m->n_reloading++;
         bus_manager_send_reloading(m, true);
 
         fds = fdset_new();
@@ -1230,10 +1233,15 @@ static int status_welcome(void) {
         if (r < 0 && r != -ENOENT)
                 log_warning_errno(r, "Failed to read os-release file: %m");
 
-        return status_printf(NULL, false, false,
-                             "\nWelcome to \x1B[%sm%s\x1B[0m!\n",
-                             isempty(ansi_color) ? "1" : ansi_color,
-                             isempty(pretty_name) ? "Linux" : pretty_name);
+        if (log_get_show_color())
+                return status_printf(NULL, false, false,
+                                     "\nWelcome to \x1B[%sm%s\x1B[0m!\n",
+                                     isempty(ansi_color) ? "1" : ansi_color,
+                                     isempty(pretty_name) ? "Linux" : pretty_name);
+        else
+                return status_printf(NULL, false, false,
+                                     "\nWelcome to %s!\n",
+                                     isempty(pretty_name) ? "Linux" : pretty_name);
 }
 
 static int write_container_id(void) {
@@ -1244,7 +1252,8 @@ static int write_container_id(void) {
         if (isempty(c))
                 return 0;
 
-        r = write_string_file("/run/systemd/container", c, WRITE_STRING_FILE_CREATE);
+        RUN_WITH_UMASK(0022)
+                r = write_string_file("/run/systemd/container", c, WRITE_STRING_FILE_CREATE);
         if (r < 0)
                 return log_warning_errno(r, "Failed to write /run/systemd/container, ignoring: %m");
 
@@ -1313,7 +1322,6 @@ int main(int argc, char *argv[]) {
                 /* This is compatibility support for SysV, where
                  * calling init as a user is identical to telinit. */
 
-                errno = -ENOENT;
                 execv(SYSTEMCTL_BINARY_PATH, argv);
                 log_error_errno(errno, "Failed to exec " SYSTEMCTL_BINARY_PATH ": %m");
                 return 1;
@@ -1344,7 +1352,7 @@ int main(int argc, char *argv[]) {
         saved_argv = argv;
         saved_argc = argc;
 
-        log_show_color(isatty(STDERR_FILENO) > 0);
+        log_show_color(colors_enabled());
         log_set_upgrade_syslog_to_journal(true);
 
         /* Disable the umask logic */
@@ -1354,7 +1362,7 @@ int main(int argc, char *argv[]) {
         if (getpid() == 1 && detect_container() <= 0) {
 
                 /* Running outside of a container as PID 1 */
-                arg_running_as = MANAGER_SYSTEM;
+                arg_system = true;
                 make_null_stdio();
                 log_set_target(LOG_TARGET_KMSG);
                 log_open();
@@ -1382,13 +1390,13 @@ int main(int argc, char *argv[]) {
                         dual_timestamp_get(&security_finish_timestamp);
                 }
 
-                if (mac_selinux_init(NULL) < 0) {
+                if (mac_selinux_init() < 0) {
                         error_message = "Failed to initialize SELinux policy";
                         goto finish;
                 }
 
                 if (!skip_setup) {
-                        if (clock_is_localtime() > 0) {
+                        if (clock_is_localtime(NULL) > 0) {
                                 int min;
 
                                 /*
@@ -1438,7 +1446,7 @@ int main(int argc, char *argv[]) {
 
         } else if (getpid() == 1) {
                 /* Running inside a container, as PID 1 */
-                arg_running_as = MANAGER_SYSTEM;
+                arg_system = true;
                 log_set_target(LOG_TARGET_CONSOLE);
                 log_close_console(); /* force reopen of /dev/console */
                 log_open();
@@ -1448,12 +1456,10 @@ int main(int argc, char *argv[]) {
 
                 /* clear the kernel timestamp,
                  * because we are in a container */
-                kernel_timestamp.monotonic = 0ULL;
-                kernel_timestamp.realtime = 0ULL;
-
+                kernel_timestamp = DUAL_TIMESTAMP_NULL;
         } else {
                 /* Running as user instance */
-                arg_running_as = MANAGER_USER;
+                arg_system = false;
                 log_set_target(LOG_TARGET_AUTO);
                 log_open();
 
@@ -1511,7 +1517,7 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        if (arg_running_as == MANAGER_SYSTEM) {
+        if (arg_system) {
                 r = parse_proc_cmdline(parse_proc_cmdline_item);
                 if (r < 0)
                         log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
@@ -1532,14 +1538,14 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        if (arg_running_as == MANAGER_USER &&
+        if (!arg_system &&
             arg_action == ACTION_RUN &&
             sd_booted() <= 0) {
                 log_error("Trying to run as user instance, but the system has not been booted with systemd.");
                 goto finish;
         }
 
-        if (arg_running_as == MANAGER_SYSTEM &&
+        if (arg_system &&
             arg_action == ACTION_RUN &&
             running_in_chroot() > 0) {
                 log_error("Cannot be run in a chroot() environment.");
@@ -1549,7 +1555,8 @@ int main(int argc, char *argv[]) {
         if (arg_action == ACTION_TEST)
                 skip_setup = true;
 
-        pager_open_if_enabled();
+        if (arg_action == ACTION_TEST || arg_action == ACTION_HELP)
+                pager_open(arg_no_pager, false);
 
         if (arg_action == ACTION_HELP) {
                 retval = help();
@@ -1566,7 +1573,7 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        if (arg_running_as == MANAGER_USER &&
+        if (!arg_system &&
             !getenv("XDG_RUNTIME_DIR")) {
                 log_error("Trying to run as user instance, but $XDG_RUNTIME_DIR is not set.");
                 goto finish;
@@ -1589,7 +1596,7 @@ int main(int argc, char *argv[]) {
         if (arg_serialization)
                 assert_se(fdset_remove(fds, fileno(arg_serialization)) >= 0);
 
-        if (arg_running_as == MANAGER_SYSTEM)
+        if (arg_system)
                 /* Become a session leader if we aren't one yet. */
                 setsid();
 
@@ -1598,7 +1605,7 @@ int main(int argc, char *argv[]) {
 
         /* Reset the console, but only if this is really init and we
          * are freshly booted */
-        if (arg_running_as == MANAGER_SYSTEM && arg_action == ACTION_RUN) {
+        if (arg_system && arg_action == ACTION_RUN) {
 
                 /* If we are init, we connect stdin/stdout/stderr to
                  * /dev/null and make sure we don't have a controlling
@@ -1625,7 +1632,7 @@ int main(int argc, char *argv[]) {
                         goto finish;
         }
 
-        if (arg_running_as == MANAGER_SYSTEM) {
+        if (arg_system) {
                 int v;
 
                 log_info(PACKAGE_STRING " running in %ssystem mode. (" SYSTEMD_FEATURES ")",
@@ -1661,7 +1668,7 @@ int main(int argc, char *argv[]) {
                           arg_action == ACTION_TEST ? " test" : "", getuid(), t);
         }
 
-        if (arg_running_as == MANAGER_SYSTEM && !skip_setup) {
+        if (arg_system && !skip_setup) {
                 if (arg_show_status > 0)
                         status_welcome();
 
@@ -1673,7 +1680,7 @@ int main(int argc, char *argv[]) {
                 test_usr();
         }
 
-        if (arg_running_as == MANAGER_SYSTEM && arg_runtime_watchdog > 0)
+        if (arg_system && arg_runtime_watchdog > 0 && arg_runtime_watchdog != USEC_INFINITY)
                 watchdog_set_timeout(&arg_runtime_watchdog);
 
         if (arg_timer_slack_nsec != NSEC_INFINITY)
@@ -1703,12 +1710,12 @@ int main(int argc, char *argv[]) {
                 }
         }
 
-        if (arg_running_as == MANAGER_USER)
+        if (!arg_system)
                 /* Become reaper of our children */
                 if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0)
                         log_warning_errno(errno, "Failed to make us a subreaper: %m");
 
-        if (arg_running_as == MANAGER_SYSTEM) {
+        if (arg_system) {
                 bump_rlimit_nofile(&saved_rlimit_nofile);
 
                 if (empty_etc) {
@@ -1720,7 +1727,7 @@ int main(int argc, char *argv[]) {
                 }
         }
 
-        r = manager_new(arg_running_as, arg_action == ACTION_TEST, &m);
+        r = manager_new(arg_system ? UNIT_FILE_SYSTEM : UNIT_FILE_USER, arg_action == ACTION_TEST, &m);
         if (r < 0) {
                 log_emergency_errno(r, "Failed to allocate manager object: %m");
                 error_message = "Failed to allocate manager object";
@@ -1883,7 +1890,7 @@ int main(int argc, char *argv[]) {
                 case MANAGER_EXIT:
                         retval = m->return_value;
 
-                        if (m->running_as == MANAGER_USER) {
+                        if (MANAGER_IS_USER(m)) {
                                 log_debug("Exit.");
                                 goto finish;
                         }
@@ -1979,7 +1986,7 @@ finish:
                         args[i++] = SYSTEMD_BINARY_PATH;
                         if (switch_root_dir)
                                 args[i++] = "--switched-root";
-                        args[i++] = arg_running_as == MANAGER_SYSTEM ? "--system" : "--user";
+                        args[i++] = arg_system ? "--system" : "--user";
                         args[i++] = "--deserialize";
                         args[i++] = sfd;
                         args[i++] = NULL;
@@ -2104,7 +2111,7 @@ finish:
 
                 assert(pos < ELEMENTSOF(command_line));
 
-                if (arm_reboot_watchdog && arg_shutdown_watchdog > 0) {
+                if (arm_reboot_watchdog && arg_shutdown_watchdog > 0 && arg_shutdown_watchdog != USEC_INFINITY) {
                         char *e;
 
                         /* If we reboot let's set the shutdown

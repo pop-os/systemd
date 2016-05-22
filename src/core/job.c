@@ -137,7 +137,7 @@ void job_uninstall(Job *j) {
         /* Detach from next 'bigger' objects */
 
         /* daemon-reload should be transparent to job observers */
-        if (j->manager->n_reloading <= 0)
+        if (!MANAGER_IS_RELOADING(j->manager))
                 bus_job_send_removed_signal(j);
 
         *pj = NULL;
@@ -191,7 +191,7 @@ Job* job_install(Job *j) {
 
         if (uj) {
                 if (job_type_is_conflicting(uj->type, j->type))
-                        job_finish_and_invalidate(uj, JOB_CANCELED, false);
+                        job_finish_and_invalidate(uj, JOB_CANCELED, false, false);
                 else {
                         /* not conflicting, i.e. mergeable */
 
@@ -222,7 +222,7 @@ Job* job_install(Job *j) {
         *pj = j;
         j->installed = true;
 
-        j->manager->n_installed_jobs ++;
+        j->manager->n_installed_jobs++;
         log_unit_debug(j->unit,
                        "Installed new job %s/%s as %u",
                        j->unit->id, job_type_to_string(j->type), (unsigned) j->id);
@@ -614,19 +614,19 @@ int job_run_and_invalidate(Job *j) {
 
         if (j) {
                 if (r == -EALREADY)
-                        r = job_finish_and_invalidate(j, JOB_DONE, true);
+                        r = job_finish_and_invalidate(j, JOB_DONE, true, true);
                 else if (r == -EBADR)
-                        r = job_finish_and_invalidate(j, JOB_SKIPPED, true);
+                        r = job_finish_and_invalidate(j, JOB_SKIPPED, true, false);
                 else if (r == -ENOEXEC)
-                        r = job_finish_and_invalidate(j, JOB_INVALID, true);
+                        r = job_finish_and_invalidate(j, JOB_INVALID, true, false);
                 else if (r == -EPROTO)
-                        r = job_finish_and_invalidate(j, JOB_ASSERT, true);
+                        r = job_finish_and_invalidate(j, JOB_ASSERT, true, false);
                 else if (r == -EOPNOTSUPP)
-                        r = job_finish_and_invalidate(j, JOB_UNSUPPORTED, true);
+                        r = job_finish_and_invalidate(j, JOB_UNSUPPORTED, true, false);
                 else if (r == -EAGAIN)
                         job_set_state(j, JOB_WAITING);
                 else if (r < 0)
-                        r = job_finish_and_invalidate(j, JOB_FAILED, true);
+                        r = job_finish_and_invalidate(j, JOB_FAILED, true, false);
         }
 
         return r;
@@ -645,7 +645,7 @@ _pure_ static const char *job_get_status_message_format(Unit *u, JobType t, JobR
         static const char *const generic_finished_stop_job[_JOB_RESULT_MAX] = {
                 [JOB_DONE]        = "Stopped %s.",
                 [JOB_FAILED]      = "Stopped (with error) %s.",
-                [JOB_TIMEOUT]     = "Timed out stoppping %s.",
+                [JOB_TIMEOUT]     = "Timed out stopping %s.",
         };
         static const char *const generic_finished_reload_job[_JOB_RESULT_MAX] = {
                 [JOB_DONE]        = "Reloaded %s.",
@@ -690,17 +690,20 @@ _pure_ static const char *job_get_status_message_format(Unit *u, JobType t, JobR
 }
 
 static void job_print_status_message(Unit *u, JobType t, JobResult result) {
-        static const char* const job_result_status_table[_JOB_RESULT_MAX] = {
-                [JOB_DONE]        = ANSI_GREEN            "  OK  " ANSI_NORMAL,
-                [JOB_TIMEOUT]     = ANSI_HIGHLIGHT_RED    " TIME " ANSI_NORMAL,
-                [JOB_FAILED]      = ANSI_HIGHLIGHT_RED    "FAILED" ANSI_NORMAL,
-                [JOB_DEPENDENCY]  = ANSI_HIGHLIGHT_YELLOW "DEPEND" ANSI_NORMAL,
-                [JOB_SKIPPED]     = ANSI_HIGHLIGHT        " INFO " ANSI_NORMAL,
-                [JOB_ASSERT]      = ANSI_HIGHLIGHT_YELLOW "ASSERT" ANSI_NORMAL,
-                [JOB_UNSUPPORTED] = ANSI_HIGHLIGHT_YELLOW "UNSUPP" ANSI_NORMAL,
+        static struct {
+                const char *color, *word;
+        } const statuses[_JOB_RESULT_MAX] = {
+                [JOB_DONE]        = {ANSI_GREEN,            "  OK  "},
+                [JOB_TIMEOUT]     = {ANSI_HIGHLIGHT_RED,    " TIME "},
+                [JOB_FAILED]      = {ANSI_HIGHLIGHT_RED,    "FAILED"},
+                [JOB_DEPENDENCY]  = {ANSI_HIGHLIGHT_YELLOW, "DEPEND"},
+                [JOB_SKIPPED]     = {ANSI_HIGHLIGHT,        " INFO "},
+                [JOB_ASSERT]      = {ANSI_HIGHLIGHT_YELLOW, "ASSERT"},
+                [JOB_UNSUPPORTED] = {ANSI_HIGHLIGHT_YELLOW, "UNSUPP"},
         };
 
         const char *format;
+        const char *status;
 
         assert(u);
         assert(t >= 0);
@@ -714,11 +717,16 @@ static void job_print_status_message(Unit *u, JobType t, JobResult result) {
         if (!format)
                 return;
 
+        if (log_get_show_color())
+                status = strjoina(statuses[result].color, statuses[result].word, ANSI_NORMAL);
+        else
+                status = statuses[result].word;
+
         if (result != JOB_DONE)
                 manager_flip_auto_status(u->manager, true);
 
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        unit_status_printf(u, job_result_status_table[result], format);
+        unit_status_printf(u, status, format);
         REENABLE_WARNING;
 
         if (t == JOB_START && result == JOB_FAILED) {
@@ -819,11 +827,11 @@ static void job_fail_dependencies(Unit *u, UnitDependency d) {
                 if (!IN_SET(j->type, JOB_START, JOB_VERIFY_ACTIVE))
                         continue;
 
-                job_finish_and_invalidate(j, JOB_DEPENDENCY, true);
+                job_finish_and_invalidate(j, JOB_DEPENDENCY, true, false);
         }
 }
 
-int job_finish_and_invalidate(Job *j, JobResult result, bool recursive) {
+int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool already) {
         Unit *u;
         Unit *other;
         JobType t;
@@ -840,7 +848,9 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive) {
 
         log_unit_debug(u, "Job %s/%s finished, result=%s", u->id, job_type_to_string(t), job_result_to_string(result));
 
-        job_emit_status_message(u, t, result);
+        /* If this job did nothing to respective unit we don't log the status message */
+        if (!already)
+                job_emit_status_message(u, t, result);
 
         job_add_to_dbus_queue(j);
 
@@ -856,7 +866,7 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive) {
         }
 
         if (result == JOB_FAILED || result == JOB_INVALID)
-                j->manager->n_failed_jobs ++;
+                j->manager->n_failed_jobs++;
 
         job_uninstall(j);
         job_free(j);
@@ -915,7 +925,7 @@ static int job_dispatch_timer(sd_event_source *s, uint64_t monotonic, void *user
         log_unit_warning(j->unit, "Job %s/%s timed out.", j->unit->id, job_type_to_string(j->type));
 
         u = j->unit;
-        job_finish_and_invalidate(j, JOB_TIMEOUT, true);
+        job_finish_and_invalidate(j, JOB_TIMEOUT, true, false);
 
         failure_action(u->manager, u->job_timeout_action, u->job_timeout_reboot_arg);
 
@@ -1148,7 +1158,7 @@ void job_shutdown_magic(Job *j) {
         if (j->type != JOB_START)
                 return;
 
-        if (j->unit->manager->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(j->unit->manager))
                 return;
 
         if (!unit_has_name(j->unit, SPECIAL_SHUTDOWN_TARGET))

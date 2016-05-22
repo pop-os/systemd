@@ -30,6 +30,7 @@
 #include "string-util.h"
 #include "strv.h"
 #include "test-helper.h"
+#include "tests.h"
 #include "unit.h"
 #include "util.h"
 
@@ -44,7 +45,7 @@ static int setup_test(Manager **m) {
 
         assert_se(m);
 
-        r = manager_new(MANAGER_USER, true, &tmp);
+        r = manager_new(UNIT_FILE_USER, true, &tmp);
         if (MANAGER_SKIP_TEST(r)) {
                 printf("Skipping test: manager_new: %s\n", strerror(-r));
                 return -EXIT_TEST_SKIP;
@@ -93,7 +94,7 @@ static void check_stop_unlink(Manager *m, Unit *unit, const char *test_path, con
 
         ts = now(CLOCK_MONOTONIC);
         /* We process events until the service related to the path has been successfully started */
-        while(service->result != SERVICE_SUCCESS || service->state != SERVICE_START) {
+        while (service->result != SERVICE_SUCCESS || service->state != SERVICE_START) {
                 usec_t n;
                 int r;
 
@@ -243,7 +244,7 @@ static void test_path_makedirectory_directorymode(Manager *m) {
 }
 
 int main(int argc, char *argv[]) {
-        test_function_t tests[] = {
+        static const test_function_t tests[] = {
                 test_path_exists,
                 test_path_existsglob,
                 test_path_changed,
@@ -253,12 +254,15 @@ int main(int argc, char *argv[]) {
                 test_path_makedirectory_directorymode,
                 NULL,
         };
-        test_function_t *test = NULL;
+
+        _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
+        const test_function_t *test = NULL;
         Manager *m = NULL;
 
         log_parse_environment();
         log_open();
 
+        assert_se(runtime_dir = setup_fake_runtime_dir());
         assert_se(set_unit_path(TEST_DIR "/test-path/") >= 0);
 
         for (test = tests; test && *test; test++) {

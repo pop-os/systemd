@@ -1,3 +1,5 @@
+#pragma once
+
 /***
   This file is part of systemd.
 
@@ -17,8 +19,6 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#pragma once
-
 typedef struct TunTap TunTap;
 
 #include "networkd-netdev.h"
@@ -34,5 +34,7 @@ struct TunTap {
         bool vnet_hdr;
 };
 
+DEFINE_NETDEV_CAST(TUN, TunTap);
+DEFINE_NETDEV_CAST(TAP, TunTap);
 extern const NetDevVTable tun_vtable;
 extern const NetDevVTable tap_vtable;

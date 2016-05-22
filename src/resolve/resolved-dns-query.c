@@ -62,6 +62,7 @@ static void dns_query_candidate_stop(DnsQueryCandidate *c) {
 
         while ((t = set_steal_first(c->transactions))) {
                 set_remove(t->notify_query_candidates, c);
+                set_remove(t->notify_query_candidates_done, c);
                 dns_transaction_gc(t);
         }
 }
@@ -136,6 +137,10 @@ static int dns_query_candidate_add_transaction(DnsQueryCandidate *c, DnsResource
                 goto gc;
 
         r = set_ensure_allocated(&t->notify_query_candidates, NULL);
+        if (r < 0)
+                goto gc;
+
+        r = set_ensure_allocated(&t->notify_query_candidates_done, NULL);
         if (r < 0)
                 goto gc;
 
@@ -421,6 +426,7 @@ int dns_query_new(
         DnsResourceKey *key;
         bool good = false;
         int r;
+        char key_str[DNS_RESOURCE_KEY_STRING_MAX];
 
         assert(m);
 
@@ -471,31 +477,20 @@ int dns_query_new(
         q->answer_family = AF_UNSPEC;
 
         /* First dump UTF8  question */
-        DNS_QUESTION_FOREACH(key, question_utf8) {
-                _cleanup_free_ char *p = NULL;
-
-                r = dns_resource_key_to_string(key, &p);
-                if (r < 0)
-                        return r;
-
-                log_debug("Looking up RR for %s.", strstrip(p));
-        }
+        DNS_QUESTION_FOREACH(key, question_utf8)
+                log_debug("Looking up RR for %s.",
+                          dns_resource_key_to_string(key, key_str, sizeof key_str));
 
         /* And then dump the IDNA question, but only what hasn't been dumped already through the UTF8 question. */
         DNS_QUESTION_FOREACH(key, question_idna) {
-                _cleanup_free_ char *p = NULL;
-
                 r = dns_question_contains(question_utf8, key);
                 if (r < 0)
                         return r;
                 if (r > 0)
                         continue;
 
-                r = dns_resource_key_to_string(key, &p);
-                if (r < 0)
-                        return r;
-
-                log_debug("Looking up IDNA RR for %s.", strstrip(p));
+                log_debug("Looking up IDNA RR for %s.",
+                          dns_resource_key_to_string(key, key_str, sizeof key_str));
         }
 
         LIST_PREPEND(queries, m->dns_queries, q);
@@ -815,7 +810,7 @@ static void dns_query_accept(DnsQuery *q, DnsQueryCandidate *c) {
                 switch (t->state) {
 
                 case DNS_TRANSACTION_SUCCESS: {
-                        /* We found a successfuly reply, merge it into the answer */
+                        /* We found a successfully reply, merge it into the answer */
                         r = dns_answer_extend(&q->answer, t->answer);
                         if (r < 0)
                                 goto fail;
@@ -937,7 +932,7 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
 
         assert(q);
 
-        q->n_cname_redirects ++;
+        q->n_cname_redirects++;
         if (q->n_cname_redirects > CNAME_MAX)
                 return -ELOOP;
 

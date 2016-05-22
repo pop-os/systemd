@@ -119,7 +119,7 @@ int config_parse_unit_deps(
         assert(rvalue);
 
         p = rvalue;
-        for(;;) {
+        for (;;) {
                 _cleanup_free_ char *word = NULL, *k = NULL;
                 int r;
 
@@ -574,9 +574,7 @@ int config_parse_exec(
                 void *data,
                 void *userdata) {
 
-        _cleanup_free_ char *cmd = NULL;
         ExecCommand **e = data;
-        Unit *u = userdata;
         const char *p;
         bool semicolon;
         int r;
@@ -585,7 +583,6 @@ int config_parse_exec(
         assert(lvalue);
         assert(rvalue);
         assert(e);
-        assert(u);
 
         e += ltype;
         rvalue += strspn(rvalue, WHITESPACE);
@@ -596,13 +593,7 @@ int config_parse_exec(
                 return 0;
         }
 
-        r = unit_full_printf(u, rvalue, &cmd);
-        if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve unit specifiers on %s, ignoring: %m", rvalue);
-                return 0;
-        }
-
-        p = cmd;
+        p = rvalue;
         do {
                 _cleanup_free_ char *path = NULL, *firstword = NULL;
                 bool separate_argv0 = false, ignore = false;
@@ -629,7 +620,7 @@ int config_parse_exec(
                                 separate_argv0 = true;
                         else
                                 break;
-                        f ++;
+                        f++;
                 }
 
                 if (isempty(f)) {
@@ -677,7 +668,7 @@ int config_parse_exec(
                         /* Check explicitly for an unquoted semicolon as
                          * command separator token.  */
                         if (p[0] == ';' && (!p[1] || strchr(WHITESPACE, p[1]))) {
-                                p ++;
+                                p++;
                                 p += strspn(p, WHITESPACE);
                                 semicolon = true;
                                 break;
@@ -741,16 +732,17 @@ int config_parse_exec(
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_type, service_type, ServiceType, "Failed to parse service type");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_restart, service_restart, ServiceRestart, "Failed to parse service restart specifier");
 
-int config_parse_socket_bindtodevice(const char* unit,
-                                     const char *filename,
-                                     unsigned line,
-                                     const char *section,
-                                     unsigned section_line,
-                                     const char *lvalue,
-                                     int ltype,
-                                     const char *rvalue,
-                                     void *data,
-                                     void *userdata) {
+int config_parse_socket_bindtodevice(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
 
         Socket *s = data;
         char *n;
@@ -761,6 +753,11 @@ int config_parse_socket_bindtodevice(const char* unit,
         assert(data);
 
         if (rvalue[0] && !streq(rvalue, "*")) {
+                if (!ifname_valid(rvalue)) {
+                        log_syntax(unit, LOG_ERR, filename, line, 0, "Interface name is invalid, ignoring: %s", rvalue);
+                        return 0;
+                }
+
                 n = strdup(rvalue);
                 if (!n)
                         return log_oom();
@@ -947,38 +944,6 @@ int config_parse_exec_cpu_affinity(const char *unit,
                 cpuset = NULL;
         }
         c->cpuset_ncpus = ncpus;
-
-        return 0;
-}
-
-int config_parse_exec_capabilities(const char *unit,
-                                   const char *filename,
-                                   unsigned line,
-                                   const char *section,
-                                   unsigned section_line,
-                                   const char *lvalue,
-                                   int ltype,
-                                   const char *rvalue,
-                                   void *data,
-                                   void *userdata) {
-
-        ExecContext *c = data;
-        cap_t cap;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-        assert(data);
-
-        cap = cap_from_text(rvalue);
-        if (!cap) {
-                log_syntax(unit, LOG_ERR, filename, line, errno, "Failed to parse capabilities, ignoring: %s", rvalue);
-                return 0;
-        }
-
-        if (c->capabilities)
-                cap_free(c->capabilities);
-        c->capabilities = cap;
 
         return 0;
 }
@@ -1640,7 +1605,7 @@ int config_parse_service_sockets(
         assert(data);
 
         p = rvalue;
-        for(;;) {
+        for (;;) {
                 _cleanup_free_ char *word = NULL, *k = NULL;
 
                 r = extract_first_word(&p, &word, NULL, 0);
@@ -1900,59 +1865,6 @@ int config_parse_bus_policy(
         p = NULL;
 
         return 0;
-}
-
-int config_parse_bus_endpoint_policy(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        _cleanup_free_ char *name = NULL;
-        BusPolicyAccess access;
-        ExecContext *c = data;
-        char *access_str;
-        int r;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-        assert(data);
-
-        name = strdup(rvalue);
-        if (!name)
-                return log_oom();
-
-        access_str = strpbrk(name, WHITESPACE);
-        if (!access_str) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid endpoint policy value '%s'", rvalue);
-                return 0;
-        }
-
-        *access_str = '\0';
-        access_str++;
-        access_str += strspn(access_str, WHITESPACE);
-
-        access = bus_policy_access_from_string(access_str);
-        if (access <= _BUS_POLICY_ACCESS_INVALID ||
-            access >= _BUS_POLICY_ACCESS_MAX) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid endpoint policy access type '%s'", access_str);
-                return 0;
-        }
-
-        if (!c->bus_endpoint) {
-                r = bus_endpoint_new(&c->bus_endpoint);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to create bus endpoint object: %m");
-        }
-
-        return bus_endpoint_add_policy(c->bus_endpoint, name, access);
 }
 
 int config_parse_working_directory(
@@ -2589,7 +2501,7 @@ int config_parse_syscall_filter(
 
         /* Turn on NNP, but only if it wasn't configured explicitly
          * before, and only if we are in user mode. */
-        if (!c->no_new_privileges_set && u->manager->running_as == MANAGER_USER)
+        if (!c->no_new_privileges_set && MANAGER_IS_USER(u->manager))
                 c->no_new_privileges = true;
 
         return 0;
@@ -2941,11 +2853,12 @@ int config_parse_device_allow(
                 void *data,
                 void *userdata) {
 
-        _cleanup_free_ char *path = NULL;
+        _cleanup_free_ char *path = NULL, *t = NULL;
         CGroupContext *c = data;
         CGroupDeviceAllow *a;
-        const char *m;
+        const char *m = NULL;
         size_t n;
+        int r;
 
         if (isempty(rvalue)) {
                 while (c->device_allow)
@@ -2954,8 +2867,16 @@ int config_parse_device_allow(
                 return 0;
         }
 
-        n = strcspn(rvalue, WHITESPACE);
-        path = strndup(rvalue, n);
+        r = unit_full_printf(userdata, rvalue, &t);
+        if(r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to resolve specifiers in %s, ignoring: %m",
+                           rvalue);
+        }
+
+        n = strcspn(t, WHITESPACE);
+
+        path = strndup(t, n);
         if (!path)
                 return log_oom();
 
@@ -2966,7 +2887,7 @@ int config_parse_device_allow(
                 return 0;
         }
 
-        m = rvalue + n + strspn(rvalue + n, WHITESPACE);
+        m = t + n + strspn(t + n, WHITESPACE);
         if (isempty(m))
                 m = "rwm";
 
@@ -2986,6 +2907,193 @@ int config_parse_device_allow(
         a->m = !!strchr(m, 'm');
 
         LIST_PREPEND(device_allow, c->device_allow, a);
+        return 0;
+}
+
+int config_parse_io_weight(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        uint64_t *weight = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        r = cg_weight_parse(rvalue, weight);
+        if (r < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r, "IO weight '%s' invalid. Ignoring.", rvalue);
+                return 0;
+        }
+
+        return 0;
+}
+
+int config_parse_io_device_weight(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_free_ char *path = NULL;
+        CGroupIODeviceWeight *w;
+        CGroupContext *c = data;
+        const char *weight;
+        uint64_t u;
+        size_t n;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                while (c->io_device_weights)
+                        cgroup_context_free_io_device_weight(c, c->io_device_weights);
+
+                return 0;
+        }
+
+        n = strcspn(rvalue, WHITESPACE);
+        weight = rvalue + n;
+        weight += strspn(weight, WHITESPACE);
+
+        if (isempty(weight)) {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Expected block device and device weight. Ignoring.");
+                return 0;
+        }
+
+        path = strndup(rvalue, n);
+        if (!path)
+                return log_oom();
+
+        if (!path_startswith(path, "/dev")) {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid device node path '%s'. Ignoring.", path);
+                return 0;
+        }
+
+        r = cg_weight_parse(weight, &u);
+        if (r < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r, "IO weight '%s' invalid. Ignoring.", weight);
+                return 0;
+        }
+
+        assert(u != CGROUP_WEIGHT_INVALID);
+
+        w = new0(CGroupIODeviceWeight, 1);
+        if (!w)
+                return log_oom();
+
+        w->path = path;
+        path = NULL;
+
+        w->weight = u;
+
+        LIST_PREPEND(device_weights, c->io_device_weights, w);
+        return 0;
+}
+
+int config_parse_io_limit(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_free_ char *path = NULL;
+        CGroupIODeviceLimit *l = NULL, *t;
+        CGroupContext *c = data;
+        CGroupIOLimitType type;
+        const char *limit;
+        uint64_t num;
+        size_t n;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        type = cgroup_io_limit_type_from_string(lvalue);
+        assert(type >= 0);
+
+        if (isempty(rvalue)) {
+                LIST_FOREACH(device_limits, l, c->io_device_limits)
+                        l->limits[type] = cgroup_io_limit_defaults[type];
+                return 0;
+        }
+
+        n = strcspn(rvalue, WHITESPACE);
+        limit = rvalue + n;
+        limit += strspn(limit, WHITESPACE);
+
+        if (!*limit) {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Expected space separated pair of device node and bandwidth. Ignoring.");
+                return 0;
+        }
+
+        path = strndup(rvalue, n);
+        if (!path)
+                return log_oom();
+
+        if (!path_startswith(path, "/dev")) {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid device node path '%s'. Ignoring.", path);
+                return 0;
+        }
+
+        if (streq("max", limit)) {
+                num = CGROUP_LIMIT_MAX;
+        } else {
+                r = parse_size(limit, 1000, &num);
+                if (r < 0 || num <= 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "IO Limit '%s' invalid. Ignoring.", rvalue);
+                        return 0;
+                }
+        }
+
+        LIST_FOREACH(device_limits, t, c->io_device_limits) {
+                if (path_equal(path, t->path)) {
+                        l = t;
+                        break;
+                }
+        }
+
+        if (!l) {
+                CGroupIOLimitType ttype;
+
+                l = new0(CGroupIODeviceLimit, 1);
+                if (!l)
+                        return log_oom();
+
+                l->path = path;
+                path = NULL;
+                for (ttype = 0; ttype < _CGROUP_IO_LIMIT_TYPE_MAX; ttype++)
+                        l->limits[ttype] = cgroup_io_limit_defaults[ttype];
+
+                LIST_PREPEND(device_limits, c->io_device_limits, l);
+        }
+
+        l->limits[type] = num;
+
         return 0;
 }
 
@@ -3100,7 +3208,7 @@ int config_parse_blockio_bandwidth(
                 void *userdata) {
 
         _cleanup_free_ char *path = NULL;
-        CGroupBlockIODeviceBandwidth *b;
+        CGroupBlockIODeviceBandwidth *b = NULL, *t;
         CGroupContext *c = data;
         const char *bandwidth;
         uint64_t bytes;
@@ -3115,12 +3223,10 @@ int config_parse_blockio_bandwidth(
         read = streq("BlockIOReadBandwidth", lvalue);
 
         if (isempty(rvalue)) {
-                CGroupBlockIODeviceBandwidth *next;
-
-                LIST_FOREACH_SAFE (device_bandwidths, b, next, c->blockio_device_bandwidths)
-                        if (b->read == read)
-                                cgroup_context_free_blockio_device_bandwidth(c, b);
-
+                LIST_FOREACH(device_bandwidths, b, c->blockio_device_bandwidths) {
+                        b->rbps = CGROUP_LIMIT_MAX;
+                        b->wbps = CGROUP_LIMIT_MAX;
+                }
                 return 0;
         }
 
@@ -3148,16 +3254,30 @@ int config_parse_blockio_bandwidth(
                 return 0;
         }
 
-        b = new0(CGroupBlockIODeviceBandwidth, 1);
-        if (!b)
-                return log_oom();
+        LIST_FOREACH(device_bandwidths, t, c->blockio_device_bandwidths) {
+                if (path_equal(path, t->path)) {
+                        b = t;
+                        break;
+                }
+        }
 
-        b->path = path;
-        path = NULL;
-        b->bandwidth = bytes;
-        b->read = read;
+        if (!t) {
+                b = new0(CGroupBlockIODeviceBandwidth, 1);
+                if (!b)
+                        return log_oom();
 
-        LIST_PREPEND(device_bandwidths, c->blockio_device_bandwidths, b);
+                b->path = path;
+                path = NULL;
+                b->rbps = CGROUP_LIMIT_MAX;
+                b->wbps = CGROUP_LIMIT_MAX;
+
+                LIST_PREPEND(device_bandwidths, c->blockio_device_bandwidths, b);
+        }
+
+        if (read)
+                b->rbps = bytes;
+        else
+                b->wbps = bytes;
 
         return 0;
 }
@@ -3455,7 +3575,7 @@ int config_parse_protect_home(
                 ProtectHome h;
 
                 h = protect_home_from_string(rvalue);
-                if (h < 0){
+                if (h < 0) {
                         log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse protect home value, ignoring: %s", rvalue);
                         return 0;
                 }
@@ -3498,7 +3618,7 @@ int config_parse_protect_system(
                 ProtectSystem s;
 
                 s = protect_system_from_string(rvalue);
-                if (s < 0){
+                if (s < 0) {
                         log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse protect system value, ignoring: %s", rvalue);
                         return 0;
                 }
@@ -3512,10 +3632,10 @@ int config_parse_protect_system(
 #define FOLLOW_MAX 8
 
 static int open_follow(char **filename, FILE **_f, Set *names, char **_final) {
+        char *id = NULL;
         unsigned c = 0;
         int fd, r;
         FILE *f;
-        char *id = NULL;
 
         assert(filename);
         assert(*filename);
@@ -3537,7 +3657,6 @@ static int open_follow(char **filename, FILE **_f, Set *names, char **_final) {
                  * the names of this unit, but only if it is a valid
                  * unit name. */
                 name = basename(*filename);
-
                 if (unit_name_is_valid(name, UNIT_NAME_ANY)) {
 
                         id = set_get(names, name);
@@ -3577,6 +3696,7 @@ static int open_follow(char **filename, FILE **_f, Set *names, char **_final) {
 
         *_f = f;
         *_final = id;
+
         return 0;
 }
 
@@ -3601,7 +3721,19 @@ static int merge_by_names(Unit **u, Set *names, const char *id) {
                          * ours? Then let's try it the other way
                          * round */
 
-                        other = manager_get_unit((*u)->manager, k);
+                        /* If the symlink name we are looking at is unit template, then
+                           we must search for instance of this template */
+                        if (unit_name_is_valid(k, UNIT_NAME_TEMPLATE)) {
+                                _cleanup_free_ char *instance = NULL;
+
+                                r = unit_name_replace_instance(k, (*u)->instance, &instance);
+                                if (r < 0)
+                                        return r;
+
+                                other = manager_get_unit((*u)->manager, instance);
+                        } else
+                                other = manager_get_unit((*u)->manager, k);
+
                         free(k);
 
                         if (other) {
@@ -3625,13 +3757,13 @@ static int merge_by_names(Unit **u, Set *names, const char *id) {
 }
 
 static int load_from_path(Unit *u, const char *path) {
-        int r;
         _cleanup_set_free_free_ Set *symlink_names = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *filename = NULL;
         char *id = NULL;
         Unit *merged;
         struct stat st;
+        int r;
 
         assert(u);
         assert(path);
@@ -3656,7 +3788,7 @@ static int load_from_path(Unit *u, const char *path) {
         } else  {
                 char **p;
 
-                STRV_FOREACH(p, u->manager->lookup_paths.unit_path) {
+                STRV_FOREACH(p, u->manager->lookup_paths.search_path) {
 
                         /* Instead of opening the path right away, we manually
                          * follow all symlinks and add their name to our unit
@@ -3670,24 +3802,25 @@ static int load_from_path(Unit *u, const char *path) {
                                 r = -ENOENT;
                         else
                                 r = open_follow(&filename, &f, symlink_names, &id);
+                        if (r >= 0)
+                                break;
+                        filename = mfree(filename);
+                        if (r != -ENOENT)
+                                return r;
 
-                        if (r < 0) {
-                                filename = mfree(filename);
-                                if (r != -ENOENT)
-                                        return r;
-
-                                /* Empty the symlink names for the next run */
-                                set_clear_free(symlink_names);
-                                continue;
-                        }
-
-                        break;
+                        /* Empty the symlink names for the next run */
+                        set_clear_free(symlink_names);
                 }
         }
 
         if (!filename)
                 /* Hmm, no suitable file found? */
                 return 0;
+
+        if (!unit_type_may_alias(u->type) && set_size(symlink_names) > 1) {
+                log_unit_warning(u, "Unit type of %s does not support alias names, refusing loading via symlink.", u->id);
+                return -ELOOP;
+        }
 
         merged = u;
         r = merge_by_names(&merged, symlink_names, id);
@@ -3702,10 +3835,12 @@ static int load_from_path(Unit *u, const char *path) {
         if (fstat(fileno(f), &st) < 0)
                 return -errno;
 
-        if (null_or_empty(&st))
+        if (null_or_empty(&st)) {
                 u->load_state = UNIT_MASKED;
-        else {
+                u->fragment_mtime = 0;
+        } else {
                 u->load_state = UNIT_LOADED;
+                u->fragment_mtime = timespec_load(&st.st_mtim);
 
                 /* Now, parse the file contents */
                 r = config_parse(u->id, filename, f,
@@ -3719,8 +3854,6 @@ static int load_from_path(Unit *u, const char *path) {
         free(u->fragment_path);
         u->fragment_path = filename;
         filename = NULL;
-
-        u->fragment_mtime = timespec_load(&st.st_mtim);
 
         if (u->source_path) {
                 if (stat(u->source_path, &st) >= 0)
@@ -3850,7 +3983,6 @@ void unit_dump_config_items(FILE *f) {
                 { config_parse_input,                 "INPUT" },
                 { config_parse_log_facility,          "FACILITY" },
                 { config_parse_log_level,             "LEVEL" },
-                { config_parse_exec_capabilities,     "CAPABILITIES" },
                 { config_parse_exec_secure_bits,      "SECUREBITS" },
                 { config_parse_capability_set,        "BOUNDINGSET" },
                 { config_parse_limit,                 "LIMIT" },
@@ -3897,6 +4029,9 @@ void unit_dump_config_items(FILE *f) {
                 { config_parse_memory_limit,          "LIMIT" },
                 { config_parse_device_allow,          "DEVICE" },
                 { config_parse_device_policy,         "POLICY" },
+                { config_parse_io_limit,              "LIMIT" },
+                { config_parse_io_weight,             "WEIGHT" },
+                { config_parse_io_device_weight,      "DEVICEWEIGHT" },
                 { config_parse_blockio_bandwidth,     "BANDWIDTH" },
                 { config_parse_blockio_weight,        "WEIGHT" },
                 { config_parse_blockio_device_weight, "DEVICEWEIGHT" },

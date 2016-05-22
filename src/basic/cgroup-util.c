@@ -101,6 +101,39 @@ int cg_read_pid(FILE *f, pid_t *_pid) {
         return 1;
 }
 
+int cg_read_event(const char *controller, const char *path, const char *event,
+                  char **val)
+{
+        _cleanup_free_ char *events = NULL, *content = NULL;
+        char *p, *line;
+        int r;
+
+        r = cg_get_path(controller, path, "cgroup.events", &events);
+        if (r < 0)
+                return r;
+
+        r = read_full_file(events, &content, NULL);
+        if (r < 0)
+                return r;
+
+        p = content;
+        while ((line = strsep(&p, "\n"))) {
+                char *key;
+
+                key = strsep(&line, " ");
+                if (!key || !line)
+                        return -EINVAL;
+
+                if (strcmp(key, event))
+                        continue;
+
+                *val = strdup(line);
+                return 0;
+        }
+
+        return -ENOENT;
+}
+
 int cg_enumerate_subgroups(const char *controller, const char *path, DIR **_d) {
         _cleanup_free_ char *fs = NULL;
         int r;
@@ -1007,18 +1040,12 @@ int cg_is_empty_recursive(const char *controller, const char *path) {
                 return unified;
 
         if (unified > 0) {
-                _cleanup_free_ char *populated = NULL, *t = NULL;
+                _cleanup_free_ char *t = NULL;
 
                 /* On the unified hierarchy we can check empty state
-                 * via the "cgroup.populated" attribute. */
+                 * via the "populated" attribute of "cgroup.events". */
 
-                r = cg_get_path(controller, path, "cgroup.populated", &populated);
-                if (r < 0)
-                        return r;
-
-                r = read_one_line_file(populated, &t);
-                if (r == -ENOENT)
-                        return 1;
+                r = cg_read_event(controller, path, "populated", &t);
                 if (r < 0)
                         return r;
 
@@ -1248,7 +1275,7 @@ int cg_pid_get_path_shifted(pid_t pid, const char *root, char **cgroup) {
         return 0;
 }
 
-int cg_path_decode_unit(const char *cgroup, char **unit){
+int cg_path_decode_unit(const char *cgroup, char **unit) {
         char *c, *s;
         size_t n;
 
@@ -2033,10 +2060,10 @@ int cg_mask_supported(CGroupMask *ret) {
                         mask |= CGROUP_CONTROLLER_TO_MASK(v);
                 }
 
-                /* Currently, we only support the memory and pids
+                /* Currently, we only support the memory, io and pids
                  * controller in the unified hierarchy, mask
                  * everything else off. */
-                mask &= CGROUP_MASK_MEMORY | CGROUP_MASK_PIDS;
+                mask &= CGROUP_MASK_MEMORY | CGROUP_MASK_IO | CGROUP_MASK_PIDS;
 
         } else {
                 CGroupController c;
@@ -2129,7 +2156,7 @@ int cg_unified(void) {
         if (statfs("/sys/fs/cgroup/", &fs) < 0)
                 return -errno;
 
-        if (F_TYPE_EQUAL(fs.f_type, CGROUP_SUPER_MAGIC))
+        if (F_TYPE_EQUAL(fs.f_type, CGROUP2_SUPER_MAGIC))
                 unified_cache = true;
         else if (F_TYPE_EQUAL(fs.f_type, TMPFS_MAGIC))
                 unified_cache = false;
@@ -2222,6 +2249,42 @@ bool cg_is_legacy_wanted(void) {
         return !cg_is_unified_wanted();
 }
 
+int cg_weight_parse(const char *s, uint64_t *ret) {
+        uint64_t u;
+        int r;
+
+        if (isempty(s)) {
+                *ret = CGROUP_WEIGHT_INVALID;
+                return 0;
+        }
+
+        r = safe_atou64(s, &u);
+        if (r < 0)
+                return r;
+
+        if (u < CGROUP_WEIGHT_MIN || u > CGROUP_WEIGHT_MAX)
+                return -ERANGE;
+
+        *ret = u;
+        return 0;
+}
+
+const uint64_t cgroup_io_limit_defaults[_CGROUP_IO_LIMIT_TYPE_MAX] = {
+        [CGROUP_IO_RBPS_MAX]    = CGROUP_LIMIT_MAX,
+        [CGROUP_IO_WBPS_MAX]    = CGROUP_LIMIT_MAX,
+        [CGROUP_IO_RIOPS_MAX]   = CGROUP_LIMIT_MAX,
+        [CGROUP_IO_WIOPS_MAX]   = CGROUP_LIMIT_MAX,
+};
+
+static const char* const cgroup_io_limit_type_table[_CGROUP_IO_LIMIT_TYPE_MAX] = {
+        [CGROUP_IO_RBPS_MAX]    = "IOReadBandwidthMax",
+        [CGROUP_IO_WBPS_MAX]    = "IOWriteBandwidthMax",
+        [CGROUP_IO_RIOPS_MAX]   = "IOReadIOPSMax",
+        [CGROUP_IO_WIOPS_MAX]   = "IOWriteIOPSMax",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(cgroup_io_limit_type, CGroupIOLimitType);
+
 int cg_cpu_shares_parse(const char *s, uint64_t *ret) {
         uint64_t u;
         int r;
@@ -2265,6 +2328,7 @@ int cg_blkio_weight_parse(const char *s, uint64_t *ret) {
 static const char *cgroup_controller_table[_CGROUP_CONTROLLER_MAX] = {
         [CGROUP_CONTROLLER_CPU] = "cpu",
         [CGROUP_CONTROLLER_CPUACCT] = "cpuacct",
+        [CGROUP_CONTROLLER_IO] = "io",
         [CGROUP_CONTROLLER_BLKIO] = "blkio",
         [CGROUP_CONTROLLER_MEMORY] = "memory",
         [CGROUP_CONTROLLER_DEVICES] = "devices",

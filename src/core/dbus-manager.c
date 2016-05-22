@@ -139,7 +139,7 @@ static int property_get_tainted(
         if (access("/proc/cgroups", F_OK) < 0)
                 e = stpcpy(e, "cgroups-missing:");
 
-        if (clock_is_localtime() > 0)
+        if (clock_is_localtime(NULL) > 0)
                 e = stpcpy(e, "local-hwclock:");
 
         /* remove the last ':' */
@@ -642,6 +642,104 @@ static int method_set_unit_properties(sd_bus_message *message, void *userdata, s
         return bus_unit_method_set_properties(message, u, error);
 }
 
+static int reply_unit_info(sd_bus_message *reply, Unit *u) {
+        _cleanup_free_ char *unit_path = NULL, *job_path = NULL;
+        Unit *following;
+
+        following = unit_following(u);
+
+        unit_path = unit_dbus_path(u);
+        if (!unit_path)
+                return -ENOMEM;
+
+        if (u->job) {
+                job_path = job_dbus_path(u->job);
+                if (!job_path)
+                        return -ENOMEM;
+        }
+
+        return sd_bus_message_append(
+                        reply, "(ssssssouso)",
+                        u->id,
+                        unit_description(u),
+                        unit_load_state_to_string(u->load_state),
+                        unit_active_state_to_string(unit_active_state(u)),
+                        unit_sub_state_to_string(u),
+                        following ? following->id : "",
+                        unit_path,
+                        u->job ? u->job->id : 0,
+                        u->job ? job_type_to_string(u->job->type) : "",
+                        job_path ? job_path : "/");
+}
+
+static int method_list_units_by_names(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        Manager *m = userdata;
+        int r;
+        char **unit;
+        _cleanup_strv_free_ char **units = NULL;
+
+        assert(message);
+        assert(m);
+
+        r = sd_bus_message_read_strv(message, &units);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_new_method_return(message, &reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_open_container(reply, 'a', "(ssssssouso)");
+        if (r < 0)
+                return r;
+
+        STRV_FOREACH(unit, units) {
+                Unit *u;
+
+                if (!unit_name_is_valid(*unit, UNIT_NAME_ANY))
+                        continue;
+
+                r = manager_load_unit(m, *unit, NULL, error, &u);
+                if (r < 0)
+                        return r;
+
+                r = reply_unit_info(reply, u);
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        return sd_bus_send(NULL, reply, NULL);
+}
+
+static int method_get_unit_processes(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = userdata;
+        const char *name;
+        Unit *u;
+        int r;
+
+        assert(message);
+        assert(m);
+
+        r = sd_bus_message_read(message, "s", &name);
+        if (r < 0)
+                return r;
+
+        r = manager_load_unit(m, name, NULL, error, &u);
+        if (r < 0)
+                return r;
+
+        r = bus_unit_check_load_state(u, error);
+        if (r < 0)
+                return r;
+
+        return bus_unit_method_get_processes(message, u, error);
+}
+
 static int transient_unit_from_message(
                 Manager *m,
                 sd_bus_message *message,
@@ -865,7 +963,7 @@ static int method_reset_failed(sd_bus_message *message, void *userdata, sd_bus_e
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_error *error, char **states) {
+static int list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_error *error, char **states, char **patterns) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         const char *k;
@@ -891,13 +989,8 @@ static int list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_e
                 return r;
 
         HASHMAP_FOREACH_KEY(u, k, m->units, i) {
-                _cleanup_free_ char *unit_path = NULL, *job_path = NULL;
-                Unit *following;
-
                 if (k != u->id)
                         continue;
-
-                following = unit_following(u);
 
                 if (!strv_isempty(states) &&
                     !strv_contains(states, unit_load_state_to_string(u->load_state)) &&
@@ -905,28 +998,11 @@ static int list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_e
                     !strv_contains(states, unit_sub_state_to_string(u)))
                         continue;
 
-                unit_path = unit_dbus_path(u);
-                if (!unit_path)
-                        return -ENOMEM;
+                if (!strv_isempty(patterns) &&
+                    !strv_fnmatch_or_empty(patterns, u->id, FNM_NOESCAPE))
+                        continue;
 
-                if (u->job) {
-                        job_path = job_dbus_path(u->job);
-                        if (!job_path)
-                                return -ENOMEM;
-                }
-
-                r = sd_bus_message_append(
-                                reply, "(ssssssouso)",
-                                u->id,
-                                unit_description(u),
-                                unit_load_state_to_string(u->load_state),
-                                unit_active_state_to_string(unit_active_state(u)),
-                                unit_sub_state_to_string(u),
-                                following ? following->id : "",
-                                unit_path,
-                                u->job ? u->job->id : 0,
-                                u->job ? job_type_to_string(u->job->type) : "",
-                                job_path ? job_path : "/");
+                r = reply_unit_info(reply, u);
                 if (r < 0)
                         return r;
         }
@@ -939,7 +1015,7 @@ static int list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_e
 }
 
 static int method_list_units(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return list_units_filtered(message, userdata, error, NULL);
+        return list_units_filtered(message, userdata, error, NULL, NULL);
 }
 
 static int method_list_units_filtered(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -950,7 +1026,23 @@ static int method_list_units_filtered(sd_bus_message *message, void *userdata, s
         if (r < 0)
                 return r;
 
-        return list_units_filtered(message, userdata, error, states);
+        return list_units_filtered(message, userdata, error, states, NULL);
+}
+
+static int method_list_units_by_patterns(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_strv_free_ char **states = NULL;
+        _cleanup_strv_free_ char **patterns = NULL;
+        int r;
+
+        r = sd_bus_message_read_strv(message, &states);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_read_strv(message, &patterns);
+        if (r < 0)
+                return r;
+
+        return list_units_filtered(message, userdata, error, states, patterns);
 }
 
 static int method_list_jobs(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1187,7 +1279,7 @@ static int method_reboot(sd_bus_message *message, void *userdata, sd_bus_error *
         if (r < 0)
                 return r;
 
-        if (m->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Reboot is only supported for system managers.");
 
         m->exit_code = MANAGER_REBOOT;
@@ -1206,7 +1298,7 @@ static int method_poweroff(sd_bus_message *message, void *userdata, sd_bus_error
         if (r < 0)
                 return r;
 
-        if (m->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Powering off is only supported for system managers.");
 
         m->exit_code = MANAGER_POWEROFF;
@@ -1225,7 +1317,7 @@ static int method_halt(sd_bus_message *message, void *userdata, sd_bus_error *er
         if (r < 0)
                 return r;
 
-        if (m->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Halt is only supported for system managers.");
 
         m->exit_code = MANAGER_HALT;
@@ -1244,7 +1336,7 @@ static int method_kexec(sd_bus_message *message, void *userdata, sd_bus_error *e
         if (r < 0)
                 return r;
 
-        if (m->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "KExec is only supported for system managers.");
 
         m->exit_code = MANAGER_KEXEC;
@@ -1265,7 +1357,7 @@ static int method_switch_root(sd_bus_message *message, void *userdata, sd_bus_er
         if (r < 0)
                 return r;
 
-        if (m->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Root switching is only supported by system manager.");
 
         r = sd_bus_message_read(message, "ss", &root, &init);
@@ -1433,7 +1525,7 @@ static int method_set_exit_code(sd_bus_message *message, void *userdata, sd_bus_
         if (r < 0)
                 return r;
 
-        if (m->running_as == MANAGER_SYSTEM && detect_container() <= 0)
+        if (MANAGER_IS_SYSTEM(m) && detect_container() <= 0)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "ExitCode can only be set for user service managers or in containers.");
 
         m->return_value = code;
@@ -1441,7 +1533,7 @@ static int method_set_exit_code(sd_bus_message *message, void *userdata, sd_bus_
         return sd_bus_reply_method_return(message, NULL);
 }
 
-static int method_list_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+static int list_unit_files_by_patterns(sd_bus_message *message, void *userdata, sd_bus_error *error, char **states, char **patterns) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         UnitFileList *item;
@@ -1466,7 +1558,7 @@ static int method_list_unit_files(sd_bus_message *message, void *userdata, sd_bu
         if (!h)
                 return -ENOMEM;
 
-        r = unit_file_get_list(m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER, NULL, h);
+        r = unit_file_get_list(m->unit_file_scope, NULL, h, states, patterns);
         if (r < 0)
                 goto fail;
 
@@ -1494,11 +1586,30 @@ fail:
         return r;
 }
 
+static int method_list_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return list_unit_files_by_patterns(message, userdata, error, NULL, NULL);
+}
+
+static int method_list_unit_files_by_patterns(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_strv_free_ char **states = NULL;
+        _cleanup_strv_free_ char **patterns = NULL;
+        int r;
+
+        r = sd_bus_message_read_strv(message, &states);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_read_strv(message, &patterns);
+        if (r < 0)
+                return r;
+
+        return list_unit_files_by_patterns(message, userdata, error, states, patterns);
+}
+
 static int method_get_unit_file_state(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Manager *m = userdata;
         const char *name;
         UnitFileState state;
-        UnitFileScope scope;
         int r;
 
         assert(message);
@@ -1514,9 +1625,7 @@ static int method_get_unit_file_state(sd_bus_message *message, void *userdata, s
         if (r < 0)
                 return r;
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = unit_file_get_state(scope, NULL, name, &state);
+        r = unit_file_get_state(m->unit_file_scope, NULL, name, &state);
         if (r < 0)
                 return r;
 
@@ -1526,7 +1635,6 @@ static int method_get_unit_file_state(sd_bus_message *message, void *userdata, s
 static int method_get_default_target(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_free_ char *default_target = NULL;
         Manager *m = userdata;
-        UnitFileScope scope;
         int r;
 
         assert(message);
@@ -1538,9 +1646,7 @@ static int method_get_default_target(sd_bus_message *message, void *userdata, sd
         if (r < 0)
                 return r;
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = unit_file_get_default(scope, NULL, &default_target);
+        r = unit_file_get_default(m->unit_file_scope, NULL, &default_target);
         if (r < 0)
                 return r;
 
@@ -1571,7 +1677,7 @@ static int reply_unit_file_changes_and_free(
         unsigned i;
         int r;
 
-        if (n_changes > 0) {
+        if (unit_file_changes_have_modification(changes, n_changes)) {
                 r = bus_foreach_bus(m, NULL, send_unit_files_changed, NULL);
                 if (r < 0)
                         log_debug_errno(r, "Failed to send UnitFilesChanged signal: %m");
@@ -1591,15 +1697,19 @@ static int reply_unit_file_changes_and_free(
         if (r < 0)
                 goto fail;
 
-        for (i = 0; i < n_changes; i++) {
-                r = sd_bus_message_append(
-                                reply, "(sss)",
-                                unit_file_change_type_to_string(changes[i].type),
-                                changes[i].path,
-                                changes[i].source);
-                if (r < 0)
-                        goto fail;
-        }
+        for (i = 0; i < n_changes; i++)
+                if (changes[i].type >= 0) {
+                        const char *change = unit_file_change_type_to_string(changes[i].type);
+                        assert(change != NULL);
+
+                        r = sd_bus_message_append(
+                                        reply, "(sss)",
+                                        change,
+                                        changes[i].path,
+                                        changes[i].source);
+                        if (r < 0)
+                                goto fail;
+                }
 
         r = sd_bus_message_close_container(reply);
         if (r < 0)
@@ -1613,10 +1723,61 @@ fail:
         return r;
 }
 
+/* Create an error reply, using the error information from changes[]
+ * if possible, and fall back to generating an error from error code c.
+ * The error message only describes the first error.
+ *
+ * Coordinate with unit_file_dump_changes() in install.c.
+ */
+static int install_error(
+                sd_bus_error *error,
+                int c,
+                UnitFileChange *changes,
+                unsigned n_changes) {
+        int r;
+        unsigned i;
+        assert(c < 0);
+
+        for (i = 0; i < n_changes; i++)
+                switch(changes[i].type) {
+                case 0 ... INT_MAX:
+                        continue;
+                case -EEXIST:
+                        if (changes[i].source)
+                                r = sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS,
+                                                      "File %s already exists and is a symlink to %s.",
+                                                      changes[i].path, changes[i].source);
+                        else
+                                r = sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS,
+                                                      "File %s already exists.",
+                                                      changes[i].path);
+                        goto found;
+                case -ERFKILL:
+                        r = sd_bus_error_setf(error, BUS_ERROR_UNIT_MASKED,
+                                              "Unit file %s is masked.", changes[i].path);
+                        goto found;
+                case -EADDRNOTAVAIL:
+                        r = sd_bus_error_setf(error, BUS_ERROR_UNIT_GENERATED,
+                                              "Unit %s is transient or generated.", changes[i].path);
+                        goto found;
+                case -ELOOP:
+                        r = sd_bus_error_setf(error, BUS_ERROR_UNIT_LINKED,
+                                              "Refusing to operate on linked unit file %s", changes[i].path);
+                        goto found;
+                default:
+                        r = sd_bus_error_set_errnof(error, changes[i].type, "File %s: %m", changes[i].path);
+                        goto found;
+                }
+
+        r = c;
+ found:
+        unit_file_changes_free(changes, n_changes);
+        return r;
+}
+
 static int method_enable_unit_files_generic(
                 sd_bus_message *message,
                 Manager *m,
-                const char *verb,
                 int (*call)(UnitFileScope scope, bool runtime, const char *root_dir, char *files[], bool force, UnitFileChange **changes, unsigned *n_changes),
                 bool carries_install_info,
                 sd_bus_error *error) {
@@ -1624,7 +1785,6 @@ static int method_enable_unit_files_generic(
         _cleanup_strv_free_ char **l = NULL;
         UnitFileChange *changes = NULL;
         unsigned n_changes = 0;
-        UnitFileScope scope;
         int runtime, force, r;
 
         assert(message);
@@ -1644,27 +1804,23 @@ static int method_enable_unit_files_generic(
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = call(scope, runtime, NULL, l, force, &changes, &n_changes);
-        if (r == -ESHUTDOWN)
-                return sd_bus_error_setf(error, BUS_ERROR_UNIT_MASKED, "Unit file is masked");
+        r = call(m->unit_file_scope, runtime, NULL, l, force, &changes, &n_changes);
         if (r < 0)
-                return r;
+                return install_error(error, r, changes, n_changes);
 
         return reply_unit_file_changes_and_free(m, message, carries_install_info ? r : -1, changes, n_changes);
 }
 
 static int method_enable_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_enable_unit_files_generic(message, userdata, "enable", unit_file_enable, true, error);
+        return method_enable_unit_files_generic(message, userdata, unit_file_enable, true, error);
 }
 
 static int method_reenable_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_enable_unit_files_generic(message, userdata, "enable", unit_file_reenable, true, error);
+        return method_enable_unit_files_generic(message, userdata, unit_file_reenable, true, error);
 }
 
 static int method_link_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_enable_unit_files_generic(message, userdata, "enable", unit_file_link, false, error);
+        return method_enable_unit_files_generic(message, userdata, unit_file_link, false, error);
 }
 
 static int unit_file_preset_without_mode(UnitFileScope scope, bool runtime, const char *root_dir, char **files, bool force, UnitFileChange **changes, unsigned *n_changes) {
@@ -1672,11 +1828,11 @@ static int unit_file_preset_without_mode(UnitFileScope scope, bool runtime, cons
 }
 
 static int method_preset_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_enable_unit_files_generic(message, userdata, "enable", unit_file_preset_without_mode, true, error);
+        return method_enable_unit_files_generic(message, userdata, unit_file_preset_without_mode, true, error);
 }
 
 static int method_mask_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_enable_unit_files_generic(message, userdata, "disable", unit_file_mask, false, error);
+        return method_enable_unit_files_generic(message, userdata, unit_file_mask, false, error);
 }
 
 static int method_preset_unit_files_with_mode(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1686,7 +1842,6 @@ static int method_preset_unit_files_with_mode(sd_bus_message *message, void *use
         unsigned n_changes = 0;
         Manager *m = userdata;
         UnitFilePresetMode mm;
-        UnitFileScope scope;
         int runtime, force, r;
         const char *mode;
 
@@ -1715,26 +1870,22 @@ static int method_preset_unit_files_with_mode(sd_bus_message *message, void *use
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = unit_file_preset(scope, runtime, NULL, l, mm, force, &changes, &n_changes);
+        r = unit_file_preset(m->unit_file_scope, runtime, NULL, l, mm, force, &changes, &n_changes);
         if (r < 0)
-                return r;
+                return install_error(error, r, changes, n_changes);
 
         return reply_unit_file_changes_and_free(m, message, r, changes, n_changes);
 }
 
 static int method_disable_unit_files_generic(
                 sd_bus_message *message,
-                Manager *m, const
-                char *verb,
+                Manager *m,
                 int (*call)(UnitFileScope scope, bool runtime, const char *root_dir, char *files[], UnitFileChange **changes, unsigned *n_changes),
                 sd_bus_error *error) {
 
         _cleanup_strv_free_ char **l = NULL;
         UnitFileChange *changes = NULL;
         unsigned n_changes = 0;
-        UnitFileScope scope;
         int r, runtime;
 
         assert(message);
@@ -1748,7 +1899,40 @@ static int method_disable_unit_files_generic(
         if (r < 0)
                 return r;
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
+        r = bus_verify_manage_unit_files_async(m, message, error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+
+        r = call(m->unit_file_scope, runtime, NULL, l, &changes, &n_changes);
+        if (r < 0)
+                return install_error(error, r, changes, n_changes);
+
+        return reply_unit_file_changes_and_free(m, message, -1, changes, n_changes);
+}
+
+static int method_disable_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return method_disable_unit_files_generic(message, userdata, unit_file_disable, error);
+}
+
+static int method_unmask_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return method_disable_unit_files_generic(message, userdata, unit_file_unmask, error);
+}
+
+static int method_revert_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_strv_free_ char **l = NULL;
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
+        Manager *m = userdata;
+        int r;
+
+        assert(message);
+        assert(m);
+
+        r = sd_bus_message_read_strv(message, &l);
+        if (r < 0)
+                return r;
 
         r = bus_verify_manage_unit_files_async(m, message, error);
         if (r < 0)
@@ -1756,26 +1940,17 @@ static int method_disable_unit_files_generic(
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = call(scope, runtime, NULL, l, &changes, &n_changes);
+        r = unit_file_revert(m->unit_file_scope, NULL, l, &changes, &n_changes);
         if (r < 0)
-                return r;
+                return install_error(error, r, changes, n_changes);
 
         return reply_unit_file_changes_and_free(m, message, -1, changes, n_changes);
-}
-
-static int method_disable_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_disable_unit_files_generic(message, userdata, "disable", unit_file_disable, error);
-}
-
-static int method_unmask_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return method_disable_unit_files_generic(message, userdata, "enable", unit_file_unmask, error);
 }
 
 static int method_set_default_target(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         UnitFileChange *changes = NULL;
         unsigned n_changes = 0;
         Manager *m = userdata;
-        UnitFileScope scope;
         const char *name;
         int force, r;
 
@@ -1796,11 +1971,9 @@ static int method_set_default_target(sd_bus_message *message, void *userdata, sd
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = unit_file_set_default(scope, NULL, name, force, &changes, &n_changes);
+        r = unit_file_set_default(m->unit_file_scope, NULL, name, force, &changes, &n_changes);
         if (r < 0)
-                return r;
+                return install_error(error, r, changes, n_changes);
 
         return reply_unit_file_changes_and_free(m, message, -1, changes, n_changes);
 }
@@ -1810,7 +1983,6 @@ static int method_preset_all_unit_files(sd_bus_message *message, void *userdata,
         unsigned n_changes = 0;
         Manager *m = userdata;
         UnitFilePresetMode mm;
-        UnitFileScope scope;
         const char *mode;
         int force, runtime, r;
 
@@ -1839,13 +2011,9 @@ static int method_preset_all_unit_files(sd_bus_message *message, void *userdata,
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = unit_file_preset_all(scope, runtime, NULL, mm, force, &changes, &n_changes);
-        if (r < 0) {
-                unit_file_changes_free(changes, n_changes);
-                return r;
-        }
+        r = unit_file_preset_all(m->unit_file_scope, runtime, NULL, mm, force, &changes, &n_changes);
+        if (r < 0)
+                return install_error(error, r, changes, n_changes);
 
         return reply_unit_file_changes_and_free(m, message, -1, changes, n_changes);
 }
@@ -1855,10 +2023,8 @@ static int method_add_dependency_unit_files(sd_bus_message *message, void *userd
         Manager *m = userdata;
         UnitFileChange *changes = NULL;
         unsigned n_changes = 0;
-        UnitFileScope scope;
         int runtime, force, r;
-        char *target;
-        char *type;
+        char *target, *type;
         UnitDependency dep;
 
         assert(message);
@@ -1882,13 +2048,9 @@ static int method_add_dependency_unit_files(sd_bus_message *message, void *userd
         if (dep < 0)
                 return -EINVAL;
 
-        scope = m->running_as == MANAGER_SYSTEM ? UNIT_FILE_SYSTEM : UNIT_FILE_USER;
-
-        r = unit_file_add_dependency(scope, runtime, NULL, l, target, dep, force, &changes, &n_changes);
-        if (r == -ESHUTDOWN)
-                return sd_bus_error_setf(error, BUS_ERROR_UNIT_MASKED, "Unit file is masked");
+        r = unit_file_add_dependency(m->unit_file_scope, runtime, NULL, l, target, dep, force, &changes, &n_changes);
         if (r < 0)
-                return r;
+                return install_error(error, r, changes, n_changes);
 
         return reply_unit_file_changes_and_free(m, message, -1, changes, n_changes);
 }
@@ -1924,7 +2086,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("Environment", "as", NULL, offsetof(Manager, environment), 0),
         SD_BUS_PROPERTY("ConfirmSpawn", "b", bus_property_get_bool, offsetof(Manager, confirm_spawn), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ShowStatus", "b", bus_property_get_bool, offsetof(Manager, show_status), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("UnitPath", "as", NULL, offsetof(Manager, lookup_paths.unit_path), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("UnitPath", "as", NULL, offsetof(Manager, lookup_paths.search_path), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultStandardOutput", "s", bus_property_get_exec_output, offsetof(Manager, default_std_output), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultStandardError", "s", bus_property_get_exec_output, offsetof(Manager, default_std_output), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_WRITABLE_PROPERTY("RuntimeWatchdogUSec", "t", bus_property_get_usec, property_set_runtime_watchdog, offsetof(Manager, runtime_watchdog), 0),
@@ -1936,7 +2098,8 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultTimeoutStartUSec", "t", bus_property_get_usec, offsetof(Manager, default_timeout_start_usec), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultTimeoutStopUSec", "t", bus_property_get_usec, offsetof(Manager, default_timeout_stop_usec), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultRestartUSec", "t", bus_property_get_usec, offsetof(Manager, default_restart_usec), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("DefaultStartLimitInterval", "t", bus_property_get_usec, offsetof(Manager, default_start_limit_interval), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("DefaultStartLimitIntervalSec", "t", bus_property_get_usec, offsetof(Manager, default_start_limit_interval), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("DefaultStartLimitInterval", "t", bus_property_get_usec, offsetof(Manager, default_start_limit_interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN), /* obsolete alias name */
         SD_BUS_PROPERTY("DefaultStartLimitBurst", "u", bus_property_get_unsigned, offsetof(Manager, default_start_limit_burst), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultCPUAccounting", "b", bus_property_get_bool, offsetof(Manager, default_cpu_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultBlockIOAccounting", "b", bus_property_get_bool, offsetof(Manager, default_blockio_accounting), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -1992,12 +2155,15 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_METHOD("ResetFailedUnit", "s", NULL, method_reset_failed_unit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetUnitProperties", "sba(sv)", NULL, method_set_unit_properties, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("StartTransientUnit", "ssa(sv)a(sa(sv))", "o", method_start_transient_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("GetUnitProcesses", "s", "a(sus)", method_get_unit_processes, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetJob", "u", "o", method_get_job, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("CancelJob", "u", NULL, method_cancel_job, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ClearJobs", NULL, NULL, method_clear_jobs, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ResetFailed", NULL, NULL, method_reset_failed, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ListUnits", NULL, "a(ssssssouso)", method_list_units, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ListUnitsFiltered", "as", "a(ssssssouso)", method_list_units_filtered, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("ListUnitsByPatterns", "asas", "a(ssssssouso)", method_list_units_by_patterns, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("ListUnitsByNames", "as", "a(ssssssouso)", method_list_units_by_names, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ListJobs", NULL, "a(usssoo)", method_list_jobs, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("Subscribe", NULL, NULL, method_subscribe, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("Unsubscribe", NULL, NULL, method_unsubscribe, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -2016,6 +2182,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_METHOD("UnsetEnvironment", "as", NULL, method_unset_environment, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("UnsetAndSetEnvironment", "asas", NULL, method_unset_and_set_environment, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ListUnitFiles", NULL, "a(ss)", method_list_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("ListUnitFilesByPatterns", "asas", "a(ss)", method_list_unit_files_by_patterns, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetUnitFileState", "s", "s", method_get_unit_file_state, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("EnableUnitFiles", "asbb", "ba(sss)", method_enable_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("DisableUnitFiles", "asb", "a(sss)", method_disable_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -2025,6 +2192,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_METHOD("PresetUnitFilesWithMode", "assbb", "ba(sss)", method_preset_unit_files_with_mode, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("MaskUnitFiles", "asbb", "a(sss)", method_mask_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("UnmaskUnitFiles", "asb", "a(sss)", method_unmask_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("RevertUnitFiles", "as", "a(sss)", method_revert_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetDefaultTarget", "sb", "a(sss)", method_set_default_target, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetDefaultTarget", NULL, "s", method_get_default_target, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("PresetAllUnitFiles", "sbb", "a(sss)", method_preset_all_unit_files, SD_BUS_VTABLE_UNPRIVILEGED),

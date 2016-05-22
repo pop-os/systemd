@@ -28,6 +28,7 @@
 #include "bus-util.h"
 #include "escape.h"
 #include "in-addr-util.h"
+#include "gcrypt-util.h"
 #include "parse-util.h"
 #include "resolved-def.h"
 #include "resolved-dns-packet.h"
@@ -42,13 +43,53 @@ static uint16_t arg_class = 0;
 static bool arg_legend = true;
 static uint64_t arg_flags = 0;
 
+typedef enum ServiceFamily {
+        SERVICE_FAMILY_TCP,
+        SERVICE_FAMILY_UDP,
+        SERVICE_FAMILY_SCTP,
+        _SERVICE_FAMILY_INVALID = -1,
+} ServiceFamily;
+static ServiceFamily arg_service_family = SERVICE_FAMILY_TCP;
+
+typedef enum RawType {
+        RAW_NONE,
+        RAW_PAYLOAD,
+        RAW_PACKET,
+} RawType;
+static RawType arg_raw = RAW_NONE;
+
 static enum {
         MODE_RESOLVE_HOST,
         MODE_RESOLVE_RECORD,
         MODE_RESOLVE_SERVICE,
+        MODE_RESOLVE_OPENPGP,
+        MODE_RESOLVE_TLSA,
         MODE_STATISTICS,
         MODE_RESET_STATISTICS,
 } arg_mode = MODE_RESOLVE_HOST;
+
+static ServiceFamily service_family_from_string(const char *s) {
+        if (s == NULL || streq(s, "tcp"))
+                return SERVICE_FAMILY_TCP;
+        if (streq(s, "udp"))
+                return SERVICE_FAMILY_UDP;
+        if (streq(s, "sctp"))
+                return SERVICE_FAMILY_SCTP;
+        return _SERVICE_FAMILY_INVALID;
+}
+
+static const char* service_family_to_string(ServiceFamily service) {
+        switch(service) {
+        case SERVICE_FAMILY_TCP:
+                return "_tcp";
+        case SERVICE_FAMILY_UDP:
+                return "_udp";
+        case SERVICE_FAMILY_SCTP:
+                return "_sctp";
+        default:
+                assert_not_reached("invalid service");
+        }
+}
 
 static void print_source(uint64_t flags, usec_t rtt) {
         char rtt_str[FORMAT_TIMESTAMP_MAX];
@@ -328,6 +369,50 @@ static int parse_address(const char *s, int *family, union in_addr_union *addres
         return 0;
 }
 
+static int output_rr_packet(const void *d, size_t l, int ifindex) {
+        _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *rr = NULL;
+        _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
+        int r;
+        char ifname[IF_NAMESIZE] = "";
+
+        r = dns_packet_new(&p, DNS_PROTOCOL_DNS, 0);
+        if (r < 0)
+                return log_oom();
+
+        p->refuse_compression = true;
+
+        r = dns_packet_append_blob(p, d, l, NULL);
+        if (r < 0)
+                return log_oom();
+
+        r = dns_packet_read_rr(p, &rr, NULL, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to parse RR: %m");
+
+        if (arg_raw == RAW_PAYLOAD) {
+                void *data;
+                ssize_t k;
+
+                k = dns_resource_record_payload(rr, &data);
+                if (k < 0)
+                        return log_error_errno(k, "Cannot dump RR: %m");
+                fwrite(data, 1, k, stdout);
+        } else {
+                const char *s;
+
+                s = dns_resource_record_to_string(rr);
+                if (!s)
+                        return log_oom();
+
+                if (ifindex > 0 && !if_indextoname(ifindex, ifname))
+                        log_warning_errno(errno, "Failed to resolve interface name for index %i: %m", ifindex);
+
+                printf("%s%s%s\n", s, isempty(ifname) ? "" : " # interface ", ifname);
+        }
+
+        return 0;
+}
+
 static int resolve_record(sd_bus *bus, const char *name, uint16_t class, uint16_t type) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *req = NULL, *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -336,6 +421,7 @@ static int resolve_record(sd_bus *bus, const char *name, uint16_t class, uint16_
         uint64_t flags;
         int r;
         usec_t ts;
+        bool needs_authentication = false;
 
         assert(name);
 
@@ -373,9 +459,6 @@ static int resolve_record(sd_bus *bus, const char *name, uint16_t class, uint16_
                 return bus_log_parse_error(r);
 
         while ((r = sd_bus_message_enter_container(reply, 'r', "iqqay")) > 0) {
-                _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *rr = NULL;
-                _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
-                const char *s;
                 uint16_t c, t;
                 int ifindex;
                 const void *d;
@@ -395,29 +478,20 @@ static int resolve_record(sd_bus *bus, const char *name, uint16_t class, uint16_
                 if (r < 0)
                         return bus_log_parse_error(r);
 
-                r = dns_packet_new(&p, DNS_PROTOCOL_DNS, 0);
-                if (r < 0)
-                        return log_oom();
+                if (arg_raw == RAW_PACKET) {
+                        uint64_t u64 = htole64(l);
 
-                p->refuse_compression = true;
+                        fwrite(&u64, sizeof(u64), 1, stdout);
+                        fwrite(d, 1, l, stdout);
+                } else {
+                        r = output_rr_packet(d, l, ifindex);
+                        if (r < 0)
+                                return r;
+                }
 
-                r = dns_packet_append_blob(p, d, l, NULL);
-                if (r < 0)
-                        return log_oom();
+                if (dns_type_needs_authentication(t))
+                        needs_authentication = true;
 
-                r = dns_packet_read_rr(p, &rr, NULL, NULL);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to parse RR: %m");
-
-                s = dns_resource_record_to_string(rr);
-                if (!s)
-                        return log_oom();
-
-                ifname[0] = 0;
-                if (ifindex > 0 && !if_indextoname(ifindex, ifname))
-                        log_warning_errno(errno, "Failed to resolve interface name for index %i: %m", ifindex);
-
-                printf("%s%s%s\n", s, isempty(ifname) ? "" : " # interface ", ifname);
                 n++;
         }
         if (r < 0)
@@ -437,6 +511,18 @@ static int resolve_record(sd_bus *bus, const char *name, uint16_t class, uint16_
         }
 
         print_source(flags, ts);
+
+        if ((flags & SD_RESOLVED_AUTHENTICATED) == 0 && needs_authentication) {
+                fflush(stdout);
+
+                fprintf(stderr, "\n%s"
+                       "WARNING: The resources shown contain cryptographic key data which could not be\n"
+                       "         authenticated. It is not suitable to authenticate any communication.\n"
+                       "         This is usually indication that DNSSEC authentication was not enabled\n"
+                       "         or is not available for the selected protocol or DNS servers.%s\n",
+                       ansi_highlight_red(),
+                       ansi_normal());
+        }
 
         return 0;
 }
@@ -545,15 +631,10 @@ static int resolve_rfc4501(sd_bus *bus, const char *name) {
         } else
                 n = p;
 
-        if (type == 0)
-                type = arg_type;
-        if (type == 0)
-                type = DNS_TYPE_A;
-
         if (class == 0)
-                class = arg_class;
-        if (class == 0)
-                class = DNS_CLASS_IN;
+                class = arg_class ?: DNS_CLASS_IN;
+        if (type == 0)
+                type = arg_type ?: DNS_TYPE_A;
 
         return resolve_record(bus, n, class, type);
 
@@ -763,6 +844,68 @@ static int resolve_service(sd_bus *bus, const char *name, const char *type, cons
         return 0;
 }
 
+static int resolve_openpgp(sd_bus *bus, const char *address) {
+        const char *domain, *full;
+        int r;
+        _cleanup_free_ char *hashed = NULL;
+
+        assert(bus);
+        assert(address);
+
+        domain = strrchr(address, '@');
+        if (!domain) {
+                log_error("Address does not contain '@': \"%s\"", address);
+                return -EINVAL;
+        } else if (domain == address || domain[1] == '\0') {
+                log_error("Address starts or ends with '@': \"%s\"", address);
+                return -EINVAL;
+        }
+        domain++;
+
+        r = string_hashsum_sha224(address, domain - 1 - address, &hashed);
+        if (r < 0)
+                return log_error_errno(r, "Hashing failed: %m");
+
+        full = strjoina(hashed, "._openpgpkey.", domain);
+        log_debug("Looking up \"%s\".", full);
+
+        return resolve_record(bus, full,
+                              arg_class ?: DNS_CLASS_IN,
+                              arg_type ?: DNS_TYPE_OPENPGPKEY);
+}
+
+static int resolve_tlsa(sd_bus *bus, const char *address) {
+        const char *port;
+        uint16_t port_num = 443;
+        _cleanup_free_ char *full = NULL;
+        int r;
+
+        assert(bus);
+        assert(address);
+
+        port = strrchr(address, ':');
+        if (port) {
+                r = safe_atou16(port + 1, &port_num);
+                if (r < 0 || port_num == 0)
+                        return log_error_errno(r, "Invalid port \"%s\".", port + 1);
+
+                address = strndupa(address, port - address);
+        }
+
+        r = asprintf(&full, "_%u.%s.%s",
+                     port_num,
+                     service_family_to_string(arg_service_family),
+                     address);
+        if (r < 0)
+                return log_oom();
+
+        log_debug("Looking up \"%s\".", full);
+
+        return resolve_record(bus, full,
+                              arg_class ?: DNS_CLASS_IN,
+                              arg_type ?: DNS_TYPE_TLSA);
+}
+
 static int show_statistics(sd_bus *bus) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
@@ -931,26 +1074,34 @@ static void help_dns_classes(void) {
 }
 
 static void help(void) {
-        printf("%s [OPTIONS...] NAME...\n"
-               "%s [OPTIONS...] --service [[NAME] TYPE] DOMAIN\n\n"
+        printf("%1$s [OPTIONS...] HOSTNAME|ADDRESS...\n"
+               "%1$s [OPTIONS...] --service [[NAME] TYPE] DOMAIN\n"
+               "%1$s [OPTIONS...] --openpgp EMAIL@DOMAIN...\n"
+               "%1$s [OPTIONS...] --statistics\n"
+               "%1$s [OPTIONS...] --reset-statistics\n"
+               "\n"
                "Resolve domain names, IPv4 and IPv6 addresses, DNS resource records, and services.\n\n"
-               "  -h --help                   Show this help\n"
-               "     --version                Show package version\n"
-               "  -4                          Resolve IPv4 addresses\n"
-               "  -6                          Resolve IPv6 addresses\n"
-               "  -i --interface=INTERFACE    Look on interface\n"
-               "  -p --protocol=PROTOCOL|help Look via protocol\n"
-               "  -t --type=TYPE|help         Query RR with DNS type\n"
-               "  -c --class=CLASS|help       Query RR with DNS class\n"
-               "     --service                Resolve service (SRV)\n"
-               "     --service-address=BOOL   Do [not] resolve address for services\n"
-               "     --service-txt=BOOL       Do [not] resolve TXT records for services\n"
-               "     --cname=BOOL             Do [not] follow CNAME redirects\n"
-               "     --search=BOOL            Do [not] use search domains\n"
-               "     --legend=BOOL            Do [not] print column headers and meta information\n"
-               "     --statistics             Show resolver statistics\n"
-               "     --reset-statistics       Reset resolver statistics\n"
-               , program_invocation_short_name, program_invocation_short_name);
+               "  -h --help                 Show this help\n"
+               "     --version              Show package version\n"
+               "  -4                        Resolve IPv4 addresses\n"
+               "  -6                        Resolve IPv6 addresses\n"
+               "  -i --interface=INTERFACE  Look on interface\n"
+               "  -p --protocol=PROTO|help  Look via protocol\n"
+               "  -t --type=TYPE|help       Query RR with DNS type\n"
+               "  -c --class=CLASS|help     Query RR with DNS class\n"
+               "     --service              Resolve service (SRV)\n"
+               "     --service-address=BOOL Resolve address for services (default: yes)\n"
+               "     --service-txt=BOOL     Resolve TXT records for services (default: yes)\n"
+               "     --openpgp              Query OpenPGP public key\n"
+               "     --tlsa                 Query TLS public key\n"
+               "     --cname=BOOL           Follow CNAME redirects (default: yes)\n"
+               "     --search=BOOL          Use search domains for single-label names\n"
+               "                                                              (default: yes)\n"
+               "     --raw[=payload|packet] Dump the answer as binary data\n"
+               "     --legend=BOOL          Print headers and additional info (default: yes)\n"
+               "     --statistics           Show resolver statistics\n"
+               "     --reset-statistics     Reset resolver statistics\n"
+               , program_invocation_short_name);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -961,6 +1112,9 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_CNAME,
                 ARG_SERVICE_ADDRESS,
                 ARG_SERVICE_TXT,
+                ARG_OPENPGP,
+                ARG_TLSA,
+                ARG_RAW,
                 ARG_SEARCH,
                 ARG_STATISTICS,
                 ARG_RESET_STATISTICS,
@@ -978,6 +1132,9 @@ static int parse_argv(int argc, char *argv[]) {
                 { "service",          no_argument,       NULL, ARG_SERVICE          },
                 { "service-address",  required_argument, NULL, ARG_SERVICE_ADDRESS  },
                 { "service-txt",      required_argument, NULL, ARG_SERVICE_TXT      },
+                { "openpgp",          no_argument,       NULL, ARG_OPENPGP          },
+                { "tlsa",             optional_argument, NULL, ARG_TLSA             },
+                { "raw",              optional_argument, NULL, ARG_RAW              },
                 { "search",           required_argument, NULL, ARG_SEARCH           },
                 { "statistics",       no_argument,       NULL, ARG_STATISTICS,      },
                 { "reset-statistics", no_argument,       NULL, ARG_RESET_STATISTICS },
@@ -1087,44 +1244,63 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_mode = MODE_RESOLVE_SERVICE;
                         break;
 
+                case ARG_OPENPGP:
+                        arg_mode = MODE_RESOLVE_OPENPGP;
+                        break;
+
+                case ARG_TLSA:
+                        arg_mode = MODE_RESOLVE_TLSA;
+                        arg_service_family = service_family_from_string(optarg);
+                        if (arg_service_family < 0) {
+                                log_error("Unknown service family \"%s\".", optarg);
+                                return -EINVAL;
+                        }
+                        break;
+
+                case ARG_RAW:
+                        if (on_tty()) {
+                                log_error("Refusing to write binary data to tty.");
+                                return -ENOTTY;
+                        }
+
+                        if (optarg == NULL || streq(optarg, "payload"))
+                                arg_raw = RAW_PAYLOAD;
+                        else if (streq(optarg, "packet"))
+                                arg_raw = RAW_PACKET;
+                        else {
+                                log_error("Unknown --raw specifier \"%s\".", optarg);
+                                return -EINVAL;
+                        }
+
+                        arg_legend = false;
+                        break;
+
                 case ARG_CNAME:
                         r = parse_boolean(optarg);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --cname= argument.");
-                        if (r == 0)
-                                arg_flags |= SD_RESOLVED_NO_CNAME;
-                        else
-                                arg_flags &= ~SD_RESOLVED_NO_CNAME;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_CNAME, r == 0);
                         break;
 
                 case ARG_SERVICE_ADDRESS:
                         r = parse_boolean(optarg);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --service-address= argument.");
-                        if (r == 0)
-                                arg_flags |= SD_RESOLVED_NO_ADDRESS;
-                        else
-                                arg_flags &= ~SD_RESOLVED_NO_ADDRESS;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_ADDRESS, r == 0);
                         break;
 
                 case ARG_SERVICE_TXT:
                         r = parse_boolean(optarg);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --service-txt= argument.");
-                        if (r == 0)
-                                arg_flags |= SD_RESOLVED_NO_TXT;
-                        else
-                                arg_flags &= ~SD_RESOLVED_NO_TXT;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_TXT, r == 0);
                         break;
 
                 case ARG_SEARCH:
                         r = parse_boolean(optarg);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse --search argument.");
-                        if (r == 0)
-                                arg_flags |= SD_RESOLVED_NO_SEARCH;
-                        else
-                                arg_flags &= ~SD_RESOLVED_NO_SEARCH;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_SEARCH, r == 0);
                         break;
 
                 case ARG_STATISTICS:
@@ -1147,7 +1323,7 @@ static int parse_argv(int argc, char *argv[]) {
                 return -EINVAL;
         }
 
-        if (arg_type != 0 && arg_mode != MODE_RESOLVE_RECORD) {
+        if (arg_type != 0 && arg_mode == MODE_RESOLVE_SERVICE) {
                 log_error("--service and --type= may not be combined.");
                 return -EINVAL;
         }
@@ -1244,6 +1420,42 @@ int main(int argc, char **argv) {
                         goto finish;
                 }
 
+                break;
+
+        case MODE_RESOLVE_OPENPGP:
+                if (argc < optind + 1) {
+                        log_error("E-mail address required.");
+                        r = -EINVAL;
+                        goto finish;
+
+                }
+
+                r = 0;
+                while (optind < argc) {
+                        int k;
+
+                        k = resolve_openpgp(bus, argv[optind++]);
+                        if (k < 0)
+                                r = k;
+                }
+                break;
+
+        case MODE_RESOLVE_TLSA:
+                if (argc < optind + 1) {
+                        log_error("Domain name required.");
+                        r = -EINVAL;
+                        goto finish;
+
+                }
+
+                r = 0;
+                while (optind < argc) {
+                        int k;
+
+                        k = resolve_tlsa(bus, argv[optind++]);
+                        if (k < 0)
+                                r = k;
+                }
                 break;
 
         case MODE_STATISTICS:

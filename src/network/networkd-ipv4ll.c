@@ -21,7 +21,7 @@
 #include <linux/if.h>
 
 #include "network-internal.h"
-#include "networkd-link.h"
+#include "networkd.h"
 
 static int ipv4ll_address_lost(Link *link) {
         _cleanup_address_free_ Address *address = NULL;
@@ -51,7 +51,7 @@ static int ipv4ll_address_lost(Link *link) {
         address->prefixlen = 16;
         address->scope = RT_SCOPE_LINK;
 
-        address_remove(address, link, &link_address_remove_handler);
+        address_remove(address, link, link_address_remove_handler);
 
         r = route_new(&route);
         if (r < 0) {
@@ -63,7 +63,7 @@ static int ipv4ll_address_lost(Link *link) {
         route->scope = RT_SCOPE_LINK;
         route->priority = IPV4LL_ROUTE_METRIC;
 
-        route_remove(route, link, &link_route_remove_handler);
+        route_remove(route, link, link_route_remove_handler);
 
         link_check_ready(link);
 
@@ -165,7 +165,7 @@ static int ipv4ll_address_claimed(sd_ipv4ll *ll, Link *link) {
         return 0;
 }
 
-static void ipv4ll_handler(sd_ipv4ll *ll, int event, void *userdata){
+static void ipv4ll_handler(sd_ipv4ll *ll, int event, void *userdata) {
         Link *link = userdata;
         int r;
 

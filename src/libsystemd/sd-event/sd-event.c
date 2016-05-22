@@ -951,7 +951,7 @@ static sd_event_source *source_new(sd_event *e, bool floating, EventSourceType t
                 sd_event_ref(e);
 
         LIST_PREPEND(sources, e->sources, s);
-        e->n_sources ++;
+        e->n_sources++;
 
         return s;
 }
@@ -1072,6 +1072,10 @@ _public_ int sd_event_add_time(
         assert_return(e->state != SD_EVENT_FINISHED, -ESTALE);
         assert_return(!event_pid_changed(e), -ECHILD);
 
+        if (IN_SET(clock, CLOCK_BOOTTIME, CLOCK_BOOTTIME_ALARM) &&
+            !clock_boottime_supported())
+                return -EOPNOTSUPP;
+
         if (!callback)
                 callback = time_exit_callback;
 
@@ -1145,8 +1149,7 @@ _public_ int sd_event_add_signal(
         int r;
 
         assert_return(e, -EINVAL);
-        assert_return(sig > 0, -EINVAL);
-        assert_return(sig < _NSIG, -EINVAL);
+        assert_return(SIGNAL_VALID(sig), -EINVAL);
         assert_return(e->state != SD_EVENT_FINISHED, -ESTALE);
         assert_return(!event_pid_changed(e), -ECHILD);
 
@@ -1235,7 +1238,7 @@ _public_ int sd_event_add_child(
                 return r;
         }
 
-        e->n_enabled_child_sources ++;
+        e->n_enabled_child_sources++;
 
         r = event_make_signal_data(e, SIGCHLD, NULL);
         if (r < 0) {
@@ -2200,7 +2203,7 @@ static int process_signal(sd_event *e, struct signal_data *d, uint32_t events) {
                 if (_unlikely_(n != sizeof(si)))
                         return -EIO;
 
-                assert(si.ssi_signo < _NSIG);
+                assert(SIGNAL_VALID(si.ssi_signo));
 
                 read_one = true;
 
@@ -2528,7 +2531,8 @@ _public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
         }
 
         dual_timestamp_get(&e->timestamp);
-        e->timestamp_boottime = now(CLOCK_BOOTTIME);
+        if (clock_boottime_supported())
+                e->timestamp_boottime = now(CLOCK_BOOTTIME);
 
         for (i = 0; i < m; i++) {
 
@@ -2762,6 +2766,9 @@ _public_ int sd_event_now(sd_event *e, clockid_t clock, uint64_t *usec) {
                              CLOCK_BOOTTIME,
                              CLOCK_BOOTTIME_ALARM), -EOPNOTSUPP);
 
+        if (IN_SET(clock, CLOCK_BOOTTIME, CLOCK_BOOTTIME_ALARM) && !clock_boottime_supported())
+                return -EOPNOTSUPP;
+
         if (!dual_timestamp_is_set(&e->timestamp)) {
                 /* Implicitly fall back to now() if we never ran
                  * before and thus have no cached time. */
@@ -2780,9 +2787,13 @@ _public_ int sd_event_now(sd_event *e, clockid_t clock, uint64_t *usec) {
                 *usec = e->timestamp.monotonic;
                 break;
 
-        default:
+        case CLOCK_BOOTTIME:
+        case CLOCK_BOOTTIME_ALARM:
                 *usec = e->timestamp_boottime;
                 break;
+
+        default:
+                assert_not_reached("Unknown clock?");
         }
 
         return 0;

@@ -25,6 +25,7 @@
 
 #include "alloc-util.h"
 #include "conf-parser.h"
+#include "extract-word.h"
 #include "missing.h"
 #include "networkd-netdev-bond.h"
 #include "string-table.h"
@@ -375,7 +376,7 @@ int config_parse_arp_ip_target_address(const char *unit,
                 }
 
                 LIST_PREPEND(arp_ip_target, b->arp_ip_targets, buffer);
-                b->n_arp_ip_targets ++;
+                b->n_arp_ip_targets++;
 
                 buffer = NULL;
         }

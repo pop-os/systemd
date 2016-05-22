@@ -66,18 +66,16 @@
     <para><literallayout><filename>/etc/systemd/system/*</filename>
 <filename>/run/systemd/system/*</filename>
 <filename>/usr/lib/systemd/system/*</filename>
-<filename>...</filename>
+<filename>…</filename>
     </literallayout></para>
 
-    <para><literallayout><filename>$XDG_CONFIG_HOME/systemd/user/*</filename>
-<filename>$HOME/.config/systemd/user/*</filename>
+    <para><literallayout><filename>~/.config/systemd/user/*</filename>
 <filename>/etc/systemd/user/*</filename>
 <filename>$XDG_RUNTIME_DIR/systemd/user/*</filename>
 <filename>/run/systemd/user/*</filename>
-<filename>$XDG_DATA_HOME/systemd/user/*</filename>
-<filename>$HOME/.local/share/systemd/user/*</filename>
+<filename>~/.local/share/systemd/user/*</filename>
 <filename>/usr/lib/systemd/user/*</filename>
-<filename>...</filename>
+<filename>…</filename>
     </literallayout></para>
   </refsynopsisdiv>
 
@@ -558,14 +556,17 @@
         between them are shut down, the inverse of the start-up order
         is applied. i.e. if a unit is configured with
         <varname>After=</varname> on another unit, the former is
-        stopped before the latter if both are shut down. If one unit
-        with an ordering dependency on another unit is shut down while
-        the latter is started up, the shut down is ordered before the
-        start-up regardless of whether the ordering dependency is
-        actually of type <varname>After=</varname> or
-        <varname>Before=</varname>. If two units have no ordering
-        dependencies between them, they are shut down or started up
-        simultaneously, and no ordering takes place.
+        stopped before the latter if both are shut down. Given two units
+        with any ordering dependency between them, if one unit is shut
+        down and the other is started up, the shutdown is ordered
+        before the start-up. It doesn't matter if the ordering
+        dependency is <varname>After=</varname> or
+        <varname>Before=</varname>. It also doesn't matter which of the
+        two is shut down, as long as one is shut down and the other is
+        started up. The shutdown is ordered before the start-up in all
+        cases. If two units have no ordering dependencies between them,
+        they are shut down or started up simultaneously, and no ordering
+        takes place.
         </para></listitem>
       </varlistentry>
 
@@ -602,7 +603,7 @@
         <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for details). If a unit that has this setting set is started,
         its processes will see the same <filename>/tmp</filename>,
-        <filename>/tmp/var</filename> and network namespace as one
+        <filename>/var/tmp</filename> and network namespace as one
         listed unit that is started. If multiple listed units are
         already started, it is not defined which namespace is joined.
         Note that this setting only has an effect if
@@ -750,14 +751,14 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>StartLimitInterval=</varname></term>
+        <term><varname>StartLimitIntervalSec=</varname></term>
         <term><varname>StartLimitBurst=</varname></term>
 
         <listitem><para>Configure unit start rate limiting. By default, units which are started more than 5 times
         within 10 seconds are not permitted to start any more times until the 10 second interval ends. With these two
-        options, this rate limiting may be modified. Use <varname>StartLimitInterval=</varname> to configure the
-        checking interval (defaults to <varname>DefaultStartLimitInterval=</varname> in manager configuration file, set
-        to 0 to disable any kind of rate limiting). Use <varname>StartLimitBurst=</varname> to configure how many
+        options, this rate limiting may be modified. Use <varname>StartLimitIntervalSec=</varname> to configure the
+        checking interval (defaults to <varname>DefaultStartLimitIntervalSec=</varname> in manager configuration file,
+        set to 0 to disable any kind of rate limiting). Use <varname>StartLimitBurst=</varname> to configure how many
         starts per interval are allowed (defaults to <varname>DefaultStartLimitBurst=</varname> in manager
         configuration file). These configuration options are particularly useful in conjunction with the service
         setting <varname>Restart=</varname> (see
@@ -768,14 +769,17 @@
         manually at a later point, from which point on, the restart logic is again activated. Note that
         <command>systemctl reset-failed</command> will cause the restart rate counter for a service to be flushed,
         which is useful if the administrator wants to manually start a unit and the start limit interferes with
-        that.</para></listitem>
+        that. Note that this rate-limiting is enforced after any unit condition checks are executed, and hence unit
+        activations with failing conditions are not counted by this rate limiting. Slice, target, device and scope
+        units do not enforce this setting, as they are unit types whose activation may either never fail, or may
+        succeed only a single time.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>StartLimitAction=</varname></term>
 
         <listitem><para>Configure the action to take if the rate limit configured with
-        <varname>StartLimitInterval=</varname> and <varname>StartLimitBurst=</varname> is hit. Takes one of
+        <varname>StartLimitIntervalSec=</varname> and <varname>StartLimitBurst=</varname> is hit. Takes one of
         <option>none</option>, <option>reboot</option>, <option>reboot-force</option>,
         <option>reboot-immediate</option>, <option>poweroff</option>, <option>poweroff-force</option> or
         <option>poweroff-immediate</option>. If <option>none</option> is set, hitting the rate limit will trigger no
@@ -1101,13 +1105,12 @@
       <varlistentry>
         <term><varname>Alias=</varname></term>
 
-        <listitem><para>A space-separated list of additional names
-        this unit shall be installed under. The names listed here must
-        have the same suffix (i.e. type) as the unit file name. This
-        option may be specified more than once, in which case all
-        listed names are used. At installation time,
-        <command>systemctl enable</command> will create symlinks from
-        these names to the unit filename.</para></listitem>
+        <listitem><para>A space-separated list of additional names this unit shall be installed under. The names listed
+        here must have the same suffix (i.e. type) as the unit file name. This option may be specified more than once,
+        in which case all listed names are used. At installation time, <command>systemctl enable</command> will create
+        symlinks from these names to the unit filename. Note that not all unit types support such alias names, and this
+        setting is not supported for them. Specifically, mount, slice, swap, and automount units do not support
+        aliasing.</para></listitem>
       </varlistentry>
 
       <varlistentry>

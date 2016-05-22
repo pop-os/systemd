@@ -23,6 +23,7 @@ typedef struct BusName BusName;
 typedef struct BusNamePolicy BusNamePolicy;
 
 #include "unit.h"
+#include "bus-policy.h"
 
 typedef enum BusNameResult {
         BUSNAME_SUCCESS,
@@ -31,6 +32,7 @@ typedef enum BusNameResult {
         BUSNAME_FAILURE_EXIT_CODE,
         BUSNAME_FAILURE_SIGNAL,
         BUSNAME_FAILURE_CORE_DUMP,
+        BUSNAME_FAILURE_START_LIMIT_HIT,
         BUSNAME_FAILURE_SERVICE_START_LIMIT_HIT,
         _BUSNAME_RESULT_MAX,
         _BUSNAME_RESULT_INVALID = -1

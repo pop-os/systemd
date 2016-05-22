@@ -1,3 +1,5 @@
+#pragma once
+
 /***
   This file is part of systemd.
 
@@ -17,8 +19,6 @@
   You should have received a copy of the GNU Lesser General Public License
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
-
-#pragma once
 
 #include "sd-dhcp-server.h"
 #include "sd-event.h"
@@ -62,6 +62,8 @@ struct sd_dhcp_server {
 
         struct in_addr *ntp, *dns;
         unsigned n_ntp, n_dns;
+
+        bool emit_router;
 
         Hashmap *leases_by_client_id;
         DHCPLease **bound_leases;

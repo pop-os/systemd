@@ -86,6 +86,15 @@ static bool mount_is_network(const MountParameters *p) {
         return mount_needs_network(p->options, p->fstype);
 }
 
+static bool mount_is_loop(const MountParameters *p) {
+        assert(p);
+
+        if (fstab_test_option(p->options, "loop\0"))
+                return true;
+
+        return false;
+}
+
 static bool mount_is_bind(const MountParameters *p) {
         assert(p);
 
@@ -102,6 +111,28 @@ static bool mount_is_auto(const MountParameters *p) {
         assert(p);
 
         return !fstab_test_option(p->options, "noauto\0");
+}
+
+static bool mount_is_automount(const MountParameters *p) {
+        assert(p);
+
+        return fstab_test_option(p->options,
+                                 "comment=systemd.automount\0"
+                                 "x-systemd.automount\0");
+}
+
+static bool mount_state_active(MountState state) {
+        return IN_SET(state,
+                      MOUNT_MOUNTING,
+                      MOUNT_MOUNTING_DONE,
+                      MOUNT_REMOUNTING,
+                      MOUNT_UNMOUNTING,
+                      MOUNT_MOUNTING_SIGTERM,
+                      MOUNT_MOUNTING_SIGKILL,
+                      MOUNT_UNMOUNTING_SIGTERM,
+                      MOUNT_UNMOUNTING_SIGKILL,
+                      MOUNT_REMOUNTING_SIGTERM,
+                      MOUNT_REMOUNTING_SIGKILL);
 }
 
 static bool needs_quota(const MountParameters *p) {
@@ -261,12 +292,12 @@ static int mount_add_mount_links(Mount *m) {
         }
 
         /* Adds in links to other mount points that might be needed
-         * for the source path (if this is a bind mount) to be
+         * for the source path (if this is a bind mount or a loop mount) to be
          * available. */
         pm = get_mount_parameters_fragment(m);
         if (pm && pm->what &&
             path_is_absolute(pm->what) &&
-            !mount_is_network(pm)) {
+            (mount_is_bind(pm) || mount_is_loop(pm) || !mount_is_network(pm))) {
 
                 r = unit_require_mounts_for(UNIT(m), pm->what);
                 if (r < 0)
@@ -328,7 +359,7 @@ static int mount_add_device_links(Mount *m) {
         if (path_equal(m->where, "/"))
                 return 0;
 
-        if (mount_is_auto(p) && UNIT(m)->manager->running_as == MANAGER_SYSTEM)
+        if (mount_is_auto(p) && !mount_is_automount(p) && MANAGER_IS_SYSTEM(UNIT(m)->manager))
                 device_wants_mount = true;
 
         r = unit_add_node_link(UNIT(m), p->what, device_wants_mount, m->from_fragment ? UNIT_BINDS_TO : UNIT_REQUIRES);
@@ -344,7 +375,7 @@ static int mount_add_quota_links(Mount *m) {
 
         assert(m);
 
-        if (UNIT(m)->manager->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(UNIT(m)->manager))
                 return 0;
 
         p = get_mount_parameters_fragment(m);
@@ -368,8 +399,8 @@ static int mount_add_quota_links(Mount *m) {
 static bool should_umount(Mount *m) {
         MountParameters *p;
 
-        if (path_equal(m->where, "/") ||
-            path_equal(m->where, "/usr"))
+        if (PATH_IN_SET(m->where, "/", "/usr") ||
+            path_startswith(m->where, "/run/initramfs"))
                 return false;
 
         p = get_mount_parameters(m);
@@ -390,16 +421,17 @@ static int mount_add_default_dependencies(Mount *m) {
         if (!UNIT(m)->default_dependencies)
                 return 0;
 
-        if (UNIT(m)->manager->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(UNIT(m)->manager))
                 return 0;
 
-        /* We do not add any default dependencies to / and /usr, since
-         * they are guaranteed to stay mounted the whole time, since
-         * our system is on it. Also, don't bother with anything
-         * mounted below virtual file systems, it's also going to be
-         * virtual, and hence not worth the effort. */
-        if (path_equal(m->where, "/") ||
-            path_equal(m->where, "/usr") ||
+        /* We do not add any default dependencies to /, /usr or
+         * /run/initramfs/, since they are guaranteed to stay
+         * mounted the whole time, since our system is on it.
+         * Also, don't bother with anything mounted below virtual
+         * file systems, it's also going to be virtual, and hence
+         * not worth the effort. */
+        if (PATH_IN_SET(m->where, "/", "/usr") ||
+            path_startswith(m->where, "/run/initramfs") ||
             path_startswith(m->where, "/proc") ||
             path_startswith(m->where, "/sys") ||
             path_startswith(m->where, "/dev"))
@@ -566,23 +598,6 @@ static int mount_load(Unit *u) {
         return mount_verify(m);
 }
 
-static int mount_notify_automount(Mount *m, MountState old_state, MountState state) {
-        Unit *p;
-        int r;
-        Iterator i;
-
-        assert(m);
-
-        SET_FOREACH(p, UNIT(m)->dependencies[UNIT_TRIGGERED_BY], i)
-                if (p->type == UNIT_AUTOMOUNT) {
-                         r = automount_update_mount(AUTOMOUNT(p), old_state, state);
-                         if (r < 0)
-                                 return r;
-                }
-
-        return 0;
-}
-
 static void mount_set_state(Mount *m, MountState state) {
         MountState old_state;
         assert(m);
@@ -590,23 +605,12 @@ static void mount_set_state(Mount *m, MountState state) {
         old_state = m->state;
         m->state = state;
 
-        if (state != MOUNT_MOUNTING &&
-            state != MOUNT_MOUNTING_DONE &&
-            state != MOUNT_REMOUNTING &&
-            state != MOUNT_UNMOUNTING &&
-            state != MOUNT_MOUNTING_SIGTERM &&
-            state != MOUNT_MOUNTING_SIGKILL &&
-            state != MOUNT_UNMOUNTING_SIGTERM &&
-            state != MOUNT_UNMOUNTING_SIGKILL &&
-            state != MOUNT_REMOUNTING_SIGTERM &&
-            state != MOUNT_REMOUNTING_SIGKILL) {
+        if (!mount_state_active(state)) {
                 m->timer_event_source = sd_event_source_unref(m->timer_event_source);
                 mount_unwatch_control_pid(m);
                 m->control_command = NULL;
                 m->control_command_id = _MOUNT_EXEC_COMMAND_INVALID;
         }
-
-        mount_notify_automount(m, old_state, state);
 
         if (state != old_state)
                 log_unit_debug(UNIT(m), "Changed %s -> %s", mount_state_to_string(old_state), mount_state_to_string(state));
@@ -633,17 +637,7 @@ static int mount_coldplug(Unit *u) {
 
         if (m->control_pid > 0 &&
             pid_is_unwaited(m->control_pid) &&
-            IN_SET(new_state,
-                   MOUNT_MOUNTING,
-                   MOUNT_MOUNTING_DONE,
-                   MOUNT_REMOUNTING,
-                   MOUNT_UNMOUNTING,
-                   MOUNT_MOUNTING_SIGTERM,
-                   MOUNT_MOUNTING_SIGKILL,
-                   MOUNT_UNMOUNTING_SIGTERM,
-                   MOUNT_UNMOUNTING_SIGKILL,
-                   MOUNT_REMOUNTING_SIGTERM,
-                   MOUNT_REMOUNTING_SIGKILL)) {
+            mount_state_active(new_state)) {
 
                 r = unit_watch_pid(UNIT(m), m->control_pid);
                 if (r < 0)
@@ -703,7 +697,6 @@ static int mount_spawn(Mount *m, ExecCommand *c, pid_t *_pid) {
                 .apply_permissions = true,
                 .apply_chroot      = true,
                 .apply_tty_stdin   = true,
-                .bus_endpoint_fd   = -1,
                 .stdin_fd          = -1,
                 .stdout_fd         = -1,
                 .stderr_fd         = -1,
@@ -967,6 +960,7 @@ fail:
 
 static int mount_start(Unit *u) {
         Mount *m = MOUNT(u);
+        int r;
 
         assert(m);
 
@@ -984,6 +978,12 @@ static int mount_start(Unit *u) {
                 return 0;
 
         assert(m->state == MOUNT_DEAD || m->state == MOUNT_FAILED);
+
+        r = unit_start_limit_test(u);
+        if (r < 0) {
+                mount_enter_dead(m, MOUNT_FAILURE_START_LIMIT_HIT);
+                return r;
+        }
 
         m->result = MOUNT_SUCCESS;
         m->reload_result = MOUNT_SUCCESS;
@@ -1385,7 +1385,7 @@ static int mount_setup_unit(
                         goto fail;
                 }
 
-                if (m->running_as == MANAGER_SYSTEM) {
+                if (MANAGER_IS_SYSTEM(m)) {
                         const char* target;
 
                         target = mount_needs_network(options, fstype) ?  SPECIAL_REMOTE_FS_TARGET : SPECIAL_LOCAL_FS_TARGET;
@@ -1413,7 +1413,7 @@ static int mount_setup_unit(
                         }
                 }
 
-                if (m->running_as == MANAGER_SYSTEM &&
+                if (MANAGER_IS_SYSTEM(m) &&
                     mount_needs_network(options, fstype)) {
                         /* _netdev option may have shown up late, or on a
                          * remount. Add remote-fs dependencies, even though
@@ -1782,6 +1782,14 @@ static int mount_kill(Unit *u, KillWho who, int signo, sd_bus_error *error) {
         return unit_kill_common(u, who, signo, -1, MOUNT(u)->control_pid, error);
 }
 
+static int mount_control_pid(Unit *u) {
+        Mount *m = MOUNT(u);
+
+        assert(m);
+
+        return m->control_pid;
+}
+
 static const char* const mount_exec_command_table[_MOUNT_EXEC_COMMAND_MAX] = {
         [MOUNT_EXEC_MOUNT] = "ExecMount",
         [MOUNT_EXEC_UNMOUNT] = "ExecUnmount",
@@ -1796,7 +1804,8 @@ static const char* const mount_result_table[_MOUNT_RESULT_MAX] = {
         [MOUNT_FAILURE_TIMEOUT] = "timeout",
         [MOUNT_FAILURE_EXIT_CODE] = "exit-code",
         [MOUNT_FAILURE_SIGNAL] = "signal",
-        [MOUNT_FAILURE_CORE_DUMP] = "core-dump"
+        [MOUNT_FAILURE_CORE_DUMP] = "core-dump",
+        [MOUNT_FAILURE_START_LIMIT_HIT] = "start-limit-hit",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(mount_result, MountResult);
@@ -1813,9 +1822,6 @@ const UnitVTable mount_vtable = {
                 "Mount\0"
                 "Install\0",
         .private_section = "Mount",
-
-        .no_alias = true,
-        .no_instances = true,
 
         .init = mount_init,
         .load = mount_load,
@@ -1842,6 +1848,8 @@ const UnitVTable mount_vtable = {
         .sigchld_event = mount_sigchld_event,
 
         .reset_failed = mount_reset_failed,
+
+        .control_pid = mount_control_pid,
 
         .bus_vtable = bus_mount_vtable,
         .bus_set_property = bus_mount_set_property,

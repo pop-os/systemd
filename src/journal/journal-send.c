@@ -50,7 +50,7 @@
                 *_f = alloca(_fl + 10);           \
                 memcpy(*_f, "CODE_FUNC=", 10);    \
                 memcpy(*_f + 10, _func, _fl);     \
-        } while(false)
+        } while (false)
 
 /* We open a single fd, and we'll share it with the current process,
  * all its threads, and all its subprocesses. This means we need to
@@ -208,13 +208,13 @@ _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         struct iovec *w;
         uint64_t *l;
         int i, j = 0;
-        struct sockaddr_un sa = {
-                .sun_family = AF_UNIX,
-                .sun_path = "/run/systemd/journal/socket",
+        static const union sockaddr_union sa = {
+                .un.sun_family = AF_UNIX,
+                .un.sun_path = "/run/systemd/journal/socket",
         };
         struct msghdr mh = {
-                .msg_name = &sa,
-                .msg_namelen = offsetof(struct sockaddr_un, sun_path) + strlen(sa.sun_path),
+                .msg_name = (struct sockaddr*) &sa.sa,
+                .msg_namelen = SOCKADDR_UN_LEN(sa.un),
         };
         ssize_t k;
         bool have_syslog_identifier = false;
@@ -316,7 +316,7 @@ _public_ int sd_journal_sendv(const struct iovec *iov, int n) {
         buffer_fd = memfd_new(NULL);
         if (buffer_fd < 0) {
                 if (buffer_fd == -ENOSYS) {
-                        buffer_fd = open_tmpfile("/dev/shm", O_RDWR | O_CLOEXEC);
+                        buffer_fd = open_tmpfile_unlinkable("/dev/shm", O_RDWR | O_CLOEXEC);
                         if (buffer_fd < 0)
                                 return buffer_fd;
 
@@ -392,7 +392,7 @@ _public_ int sd_journal_perror(const char *message) {
 }
 
 _public_ int sd_journal_stream_fd(const char *identifier, int priority, int level_prefix) {
-        union sockaddr_union sa = {
+        static const union sockaddr_union sa = {
                 .un.sun_family = AF_UNIX,
                 .un.sun_path = "/run/systemd/journal/stdout",
         };
@@ -408,7 +408,7 @@ _public_ int sd_journal_stream_fd(const char *identifier, int priority, int leve
         if (fd < 0)
                 return -errno;
 
-        r = connect(fd, &sa.sa, offsetof(union sockaddr_union, un.sun_path) + strlen(sa.un.sun_path));
+        r = connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
         if (r < 0)
                 return -errno;
 

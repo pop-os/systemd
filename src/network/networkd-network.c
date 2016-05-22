@@ -113,11 +113,14 @@ static int network_load_one(Manager *manager, const char *filename) {
 
         network->dhcp_server_emit_dns = true;
         network->dhcp_server_emit_ntp = true;
+        network->dhcp_server_emit_router = true;
         network->dhcp_server_emit_timezone = true;
 
         network->use_bpdu = true;
         network->allow_port_to_be_root = true;
         network->unicast_flood = true;
+
+        network->lldp_mode = LLDP_MODE_ROUTERS_ONLY;
 
         network->llmnr = RESOLVE_SUPPORT_YES;
         network->mdns = RESOLVE_SUPPORT_NO;
@@ -129,6 +132,8 @@ static int network_load_one(Manager *manager, const char *filename) {
         network->ipv6_accept_ra = -1;
         network->ipv6_dad_transmits = -1;
         network->ipv6_hop_limit = -1;
+        network->duid.type = _DUID_TYPE_INVALID;
+        network->proxy_arp = -1;
 
         r = config_parse(NULL, filename, file,
                          "Match\0"
@@ -394,6 +399,19 @@ int network_apply(Manager *manager, Network *network, Link *link) {
         return 0;
 }
 
+bool network_has_static_ipv6_addresses(Network *network) {
+        Address *address;
+
+        assert(network);
+
+        LIST_FOREACH(addresses, address, network->static_addresses) {
+                if (address->family == AF_INET6)
+                        return true;
+        }
+
+        return false;
+}
+
 int config_parse_netdev(const char *unit,
                 const char *filename,
                 unsigned line,
@@ -627,10 +645,7 @@ int config_parse_ipv4ll(
          * config_parse_address_family_boolean(), except that it
          * applies only to IPv4 */
 
-        if (parse_boolean(rvalue))
-                *link_local |= ADDRESS_FAMILY_IPV4;
-        else
-                *link_local &= ~ADDRESS_FAMILY_IPV4;
+        SET_FLAG(*link_local, ADDRESS_FAMILY_IPV4, parse_boolean(rvalue));
 
         return 0;
 }
@@ -994,6 +1009,10 @@ int config_parse_dnssec_negative_trust_anchors(
                         continue;
                 }
 
+                r = set_ensure_allocated(&n->dnssec_negative_trust_anchors, &dns_name_hash_ops);
+                if (r < 0)
+                        return log_oom();
+
                 r = set_put(n->dnssec_negative_trust_anchors, w);
                 if (r < 0)
                         return log_oom();
@@ -1013,3 +1032,13 @@ static const char* const dhcp_use_domains_table[_DHCP_USE_DOMAINS_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(dhcp_use_domains, DHCPUseDomains, DHCP_USE_DOMAINS_YES);
+
+DEFINE_CONFIG_PARSE_ENUM(config_parse_lldp_mode, lldp_mode, LLDPMode, "Failed to parse LLDP= setting.");
+
+static const char* const lldp_mode_table[_LLDP_MODE_MAX] = {
+        [LLDP_MODE_NO] = "no",
+        [LLDP_MODE_YES] = "yes",
+        [LLDP_MODE_ROUTERS_ONLY] = "routers-only",
+};
+
+DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(lldp_mode, LLDPMode, LLDP_MODE_YES);

@@ -149,7 +149,7 @@ static int busname_add_default_default_dependencies(BusName *n) {
         if (r < 0)
                 return r;
 
-        if (UNIT(n)->manager->running_as == MANAGER_SYSTEM) {
+        if (MANAGER_IS_SYSTEM(UNIT(n)->manager)) {
                 r = unit_add_two_dependencies_by_name(UNIT(n), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, NULL, true);
                 if (r < 0)
                         return r;
@@ -318,7 +318,7 @@ static int busname_open_fd(BusName *n) {
         if (n->starter_fd >= 0)
                 return 0;
 
-        mode = UNIT(n)->manager->running_as == MANAGER_SYSTEM ? "system" : "user";
+        mode = MANAGER_IS_SYSTEM(UNIT(n)->manager) ? "system" : "user";
         n->starter_fd = bus_kernel_open_bus_fd(mode, &path);
         if (n->starter_fd < 0)
                 return log_unit_warning_errno(UNIT(n), n->starter_fd, "Failed to open %s: %m", path ?: "kdbus");
@@ -607,6 +607,7 @@ fail:
 
 static int busname_start(Unit *u) {
         BusName *n = BUSNAME(u);
+        int r;
 
         assert(n);
 
@@ -631,6 +632,12 @@ static int busname_start(Unit *u) {
         }
 
         assert(IN_SET(n->state, BUSNAME_DEAD, BUSNAME_FAILED));
+
+        r = unit_start_limit_test(u);
+        if (r < 0) {
+                busname_enter_dead(n, BUSNAME_FAILURE_START_LIMIT_HIT);
+                return r;
+        }
 
         n->result = BUSNAME_SUCCESS;
         busname_enter_making(n);
@@ -999,6 +1006,14 @@ static bool busname_supported(void) {
         return supported;
 }
 
+static int busname_control_pid(Unit *u) {
+        BusName *n = BUSNAME(u);
+
+        assert(n);
+
+        return n->control_pid;
+}
+
 static const char* const busname_result_table[_BUSNAME_RESULT_MAX] = {
         [BUSNAME_SUCCESS] = "success",
         [BUSNAME_FAILURE_RESOURCES] = "resources",
@@ -1006,6 +1021,7 @@ static const char* const busname_result_table[_BUSNAME_RESULT_MAX] = {
         [BUSNAME_FAILURE_EXIT_CODE] = "exit-code",
         [BUSNAME_FAILURE_SIGNAL] = "signal",
         [BUSNAME_FAILURE_CORE_DUMP] = "core-dump",
+        [BUSNAME_FAILURE_START_LIMIT_HIT] = "start-limit-hit",
         [BUSNAME_FAILURE_SERVICE_START_LIMIT_HIT] = "service-start-limit-hit",
 };
 
@@ -1019,9 +1035,6 @@ const UnitVTable busname_vtable = {
                 "BusName\0"
                 "Install\0",
         .private_section = "BusName",
-
-        .no_alias = true,
-        .no_instances = true,
 
         .init = busname_init,
         .done = busname_done,
@@ -1051,6 +1064,8 @@ const UnitVTable busname_vtable = {
         .reset_failed = busname_reset_failed,
 
         .supported = busname_supported,
+
+        .control_pid = busname_control_pid,
 
         .bus_vtable = bus_busname_vtable,
 

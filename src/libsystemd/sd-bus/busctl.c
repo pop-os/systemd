@@ -62,15 +62,6 @@ static bool arg_allow_interactive_authorization = true;
 static bool arg_augment_creds = true;
 static usec_t arg_timeout = 0;
 
-static void pager_open_if_enabled(void) {
-
-        /* Cache result before we open the pager */
-        if (arg_no_pager)
-                return;
-
-        pager_open(false);
-}
-
 #define NAME_IS_ACQUIRED INT_TO_PTR(1)
 #define NAME_IS_ACTIVATABLE INT_TO_PTR(2)
 
@@ -95,7 +86,7 @@ static int list_bus_names(sd_bus *bus, char **argv) {
         if (r < 0)
                 return log_error_errno(r, "Failed to list names: %m");
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         names = hashmap_new(&string_hash_ops);
         if (!names)
@@ -258,8 +249,8 @@ static void print_subtree(const char *prefix, const char *path, char **l) {
                 l++;
         }
 
-        vertical = strjoina(prefix, draw_special_char(DRAW_TREE_VERTICAL));
-        space = strjoina(prefix, draw_special_char(DRAW_TREE_SPACE));
+        vertical = strjoina(prefix, special_glyph(TREE_VERTICAL));
+        space = strjoina(prefix, special_glyph(TREE_SPACE));
 
         for (;;) {
                 bool has_more = false;
@@ -280,7 +271,7 @@ static void print_subtree(const char *prefix, const char *path, char **l) {
                         n++;
                 }
 
-                printf("%s%s%s\n", prefix, draw_special_char(has_more ? DRAW_TREE_BRANCH : DRAW_TREE_RIGHT), *l);
+                printf("%s%s%s\n", prefix, special_glyph(has_more ? TREE_BRANCH : TREE_RIGHT), *l);
 
                 print_subtree(has_more ? vertical : space, *l, l);
                 l = n;
@@ -289,7 +280,7 @@ static void print_subtree(const char *prefix, const char *path, char **l) {
 
 static void print_tree(const char *prefix, char **l) {
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         prefix = strempty(prefix);
 
@@ -409,7 +400,7 @@ static int tree_one(sd_bus *bus, const char *service, const char *prefix, bool m
                 p = NULL;
         }
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         l = set_get_strv(done);
         if (!l)
@@ -438,7 +429,7 @@ static int tree(sd_bus *bus, char **argv) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to get name list: %m");
 
-                pager_open_if_enabled();
+                pager_open(arg_no_pager, false);
 
                 STRV_FOREACH(i, names) {
                         int q;
@@ -468,7 +459,7 @@ static int tree(sd_bus *bus, char **argv) {
                                 printf("\n");
 
                         if (argv[2]) {
-                                pager_open_if_enabled();
+                                pager_open(arg_no_pager, false);
                                 printf("Service %s%s%s:\n", ansi_highlight(), *i, ansi_normal());
                         }
 
@@ -501,8 +492,10 @@ static int format_cmdline(sd_bus_message *m, FILE *f, bool needs_space) {
                 } basic;
 
                 r = sd_bus_message_peek_type(m, &type, &contents);
-                if (r <= 0)
+                if (r < 0)
                         return r;
+                if (r == 0)
+                        return needs_space;
 
                 if (bus_type_is_container(type) > 0) {
 
@@ -533,17 +526,22 @@ static int format_cmdline(sd_bus_message *m, FILE *f, bool needs_space) {
                                         fputc(' ', f);
 
                                 fprintf(f, "%u", n);
+                                needs_space = true;
+
                         } else if (type == SD_BUS_TYPE_VARIANT) {
 
                                 if (needs_space)
                                         fputc(' ', f);
 
                                 fprintf(f, "%s", contents);
+                                needs_space = true;
                         }
 
-                        r = format_cmdline(m, f, needs_space || IN_SET(type, SD_BUS_TYPE_ARRAY, SD_BUS_TYPE_VARIANT));
+                        r = format_cmdline(m, f, needs_space);
                         if (r < 0)
                                 return r;
+
+                        needs_space = r > 0;
 
                         r = sd_bus_message_exit_container(m);
                         if (r < 0)
@@ -985,7 +983,7 @@ static int introspect(sd_bus *bus, char **argv) {
                         return bus_log_parse_error(r);
         }
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         name_width = strlen("NAME");
         type_width = strlen("TYPE");
@@ -1081,9 +1079,20 @@ static int message_pcap(sd_bus_message *m, FILE *f) {
 }
 
 static int monitor(sd_bus *bus, char *argv[], int (*dump)(sd_bus_message *m, FILE *f)) {
-        bool added_something = false;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *message = NULL;
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char **i;
+        uint32_t flags = 0;
         int r;
+
+        /* upgrade connection; it's not used for anything else after this call */
+        r = sd_bus_message_new_method_call(bus, &message, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.Monitoring", "BecomeMonitor");
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        r = sd_bus_message_open_container(message, 'a', "s");
+        if (r < 0)
+                return bus_log_create_error(r);
 
         STRV_FOREACH(i, argv+1) {
                 _cleanup_free_ char *m = NULL;
@@ -1097,34 +1106,38 @@ static int monitor(sd_bus *bus, char *argv[], int (*dump)(sd_bus_message *m, FIL
                 if (!m)
                         return log_oom();
 
-                r = sd_bus_add_match(bus, NULL, m, NULL, NULL);
+                r = sd_bus_message_append_basic(message, 's', m);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add match: %m");
+                        return bus_log_create_error(r);
 
                 free(m);
                 m = strjoin("destination='", *i, "'", NULL);
                 if (!m)
                         return log_oom();
 
-                r = sd_bus_add_match(bus, NULL, m, NULL, NULL);
+                r = sd_bus_message_append_basic(message, 's', m);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add match: %m");
-
-                added_something = true;
+                        return bus_log_create_error(r);
         }
 
         STRV_FOREACH(i, arg_matches) {
-                r = sd_bus_add_match(bus, NULL, *i, NULL, NULL);
+                r = sd_bus_message_append_basic(message, 's', *i);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add match: %m");
-
-                added_something = true;
+                        return bus_log_create_error(r);
         }
 
-        if (!added_something) {
-                r = sd_bus_add_match(bus, NULL, "", NULL, NULL);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to add match: %m");
+        r = sd_bus_message_close_container(message);
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        r = sd_bus_message_append_basic(message, 'u', &flags);
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        r = sd_bus_call(bus, message, arg_timeout, &error, NULL);
+        if (r < 0) {
+                log_error("%s", bus_error_message(&error, r));
+                return r;
         }
 
         log_info("Monitoring bus message stream.");
@@ -1552,7 +1565,7 @@ static int call(sd_bus *bus, char *argv[]) {
         if (r == 0 && !arg_quiet) {
 
                 if (arg_verbose) {
-                        pager_open_if_enabled();
+                        pager_open(arg_no_pager, false);
 
                         r = bus_message_dump(reply, stdout, 0);
                         if (r < 0)
@@ -1607,7 +1620,7 @@ static int get_property(sd_bus *bus, char *argv[]) {
                         return bus_log_parse_error(r);
 
                 if (arg_verbose)  {
-                        pager_open_if_enabled();
+                        pager_open(arg_no_pager, false);
 
                         r = bus_message_dump(reply, stdout, BUS_MESSAGE_DUMP_SUBTREE_ONLY);
                         if (r < 0)

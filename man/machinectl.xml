@@ -133,7 +133,16 @@
 
         <para>When listing VM or container images, do not suppress
         images beginning in a dot character
-        (<literal>.</literal>).</para></listitem>
+        (<literal>.</literal>).</para>
+
+        <para>When cleaning VM or container images, remove all images, not just hidden ones.</para></listitem>
+      </varlistentry>
+
+       <varlistentry>
+        <term><option>--value</option></term>
+
+        <listitem><para>When printing properties with <command>show</command>, only print the value,
+        and skip the property name and <literal>=</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -186,16 +195,14 @@
       </varlistentry>
 
       <varlistentry>
-         <term><option>--setenv=</option></term>
+        <term><option>-E <replaceable>NAME</replaceable>=<replaceable>VALUE</replaceable></option></term>
+        <term><option>--setenv=<replaceable>NAME</replaceable>=<replaceable>VALUE</replaceable></option></term>
 
-         <listitem><para>When used with the <command>shell</command>
-         command, sets an environment variable to pass to the executed
-         shell. Takes a pair of environment variable name and value,
-         separated by <literal>=</literal> as argument. This switch
-         may be used multiple times to set multiple environment
-         variables. Note that this switch is not supported for the
-         <command>login</command> command (see
-         below).</para></listitem>
+         <listitem><para>When used with the <command>shell</command> command, sets an environment
+         variable to pass to the executed shell. Takes an environment variable name and value,
+         separated by <literal>=</literal>. This switch may be used multiple times to set multiple
+         environment variables. Note that this switch is not supported for the
+         <command>login</command> command (see below).</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -210,9 +217,11 @@
         <term><option>--read-only</option></term>
 
         <listitem><para>When used with <command>bind</command>, applies
-        a read-only bind mount.</para></listitem>
-      </varlistentry>
+        a read-only bind mount.</para>
 
+        <para>When used with <command>clone</command>, <command>import-raw</command> or <command>import-tar</command> a
+        read-only container or VM image is created.</para></listitem>
+      </varlistentry>
 
       <varlistentry>
         <term><option>-n</option></term>
@@ -580,19 +589,20 @@
       <varlistentry>
         <term><command>clone</command> <replaceable>NAME</replaceable> <replaceable>NAME</replaceable></term>
 
-        <listitem><para>Clones a container or VM image. The
-        arguments specify the name of the image to clone and the name
-        of the newly cloned image. Note that plain directory container
-        images are cloned into subvolume images with this command.
-        Note that cloning a container or VM image is optimized for
-        btrfs file systems, and might not be efficient on others, due
-        to file system limitations.</para>
+        <listitem><para>Clones a container or VM image. The arguments specify the name of the image to clone and the
+        name of the newly cloned image. Note that plain directory container images are cloned into btrfs subvolume
+        images with this command, if the underlying file system supports this.  Note that cloning a container or VM
+        image is optimized for btrfs file systems, and might not be efficient on others, due to file system
+        limitations.</para>
 
         <para>Note that this command leaves host name, machine ID and
         all other settings that could identify the instance
         unmodified. The original image and the cloned copy will hence
         share these credentials, and it might be necessary to manually
-        change them in the copy.</para></listitem>
+        change them in the copy.</para>
+
+        <para>If combined with the <option>--read-only</option> switch a read-only cloned image is
+        created.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -651,6 +661,23 @@
         name alters both the quota setting within the file system as
         well as the loopback file and file system size
         itself.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><command>clean</command></term>
+
+        <listitem><para>Remove hidden VM or container images (or all). This command removes all hidden machine images
+        from <filename>/var/lib/machines</filename>, i.e. those whose name begins with a dot. Use <command>machinectl
+        list-images --all</command> to see a list of all machine images, including the hidden ones.</para>
+
+        <para>When combined with the <option>--all</option> switch removes all images, not just hidden ones. This
+        command effectively empties <filename>/var/lib/machines</filename>.</para>
+
+        <para>Note that commands such as <command>machinectl pull-tar</command> or <command>machinectl
+        pull-raw</command> usually create hidden, read-only, unmodified machine images from the downloaded image first,
+        before cloning a writable working copy of it, in order to avoid duplicate downloads in case of images that are
+        reused multiple times. Use <command>machinectl clean</command> to remove old, hidden images created this
+        way.</para></listitem>
       </varlistentry>
 
     </variablelist></refsect2>
@@ -933,12 +960,12 @@
       <title>Download a Fedora image, set a root password in it, start
       it as service</title>
 
-      <programlisting># machinectl pull-raw --verify=no http://ftp.halifax.rwth-aachen.de/fedora/linux/releases/21/Cloud/Images/x86_64/Fedora-Cloud-Base-20141203-21.x86_64.raw.xz
-# systemd-nspawn -M Fedora-Cloud-Base-20141203-21
+      <programlisting># machinectl pull-raw --verify=no https://dl.fedoraproject.org/pub/fedora/linux/releases/23/Cloud/x86_64/Images/Fedora-Cloud-Base-23-20151030.x86_64.raw.xz
+# systemd-nspawn -M Fedora-Cloud-Base-23-20151030
 # passwd
 # exit
-# machinectl start Fedora-Cloud-Base-20141203-21
-# machinectl login Fedora-Cloud-Base-20141203-21</programlisting>
+# machinectl start Fedora-Cloud-Base-23-20151030
+# machinectl login Fedora-Cloud-Base-23-20151030</programlisting>
 
       <para>This downloads the specified <filename>.raw</filename>
       image with verification disabled. Then, a shell is opened in it

@@ -94,11 +94,9 @@
     required to access <filename>/tmp</filename> and
     <filename>/var/tmp</filename>.</para>
 
-    <para>Units whose output standard output or error output is
-    connected to any other sink but <option>null</option>,
-    <option>tty</option> and <option>socket</option> automatically
-    acquire dependencies of type <varname>After=</varname> on
-    <filename>journald.socket</filename>.</para>
+    <para>Units whose standard output or error output is connected to <option>journal</option>, <option>syslog</option>
+    or <option>kmsg</option> (or their combinations with console output, see below) automatically acquire dependencies
+    of type <varname>After=</varname> on <filename>systemd-journald.socket</filename>.</para>
   </refsect1>
 
   <refsect1>
@@ -470,6 +468,10 @@
         similar to the same option of
         <varname>StandardInput=</varname>.</para>
 
+        <para>If the standard output (or error output, see below) of a unit is connected to the journal, syslog or the
+        kernel log buffer, the unit will implicitly gain a dependency of type <varname>After=</varname> on
+        <filename>systemd-journald.socket</filename> (also see the automatic dependencies section above).</para>
+
         <para>This setting defaults to the value set with
         <option>DefaultStandardOutput=</option> in
         <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
@@ -627,27 +629,23 @@
         <term><varname>LimitNICE=</varname></term>
         <term><varname>LimitRTPRIO=</varname></term>
         <term><varname>LimitRTTIME=</varname></term>
-        <listitem><para>These settings set both soft and hard limits
-        of various resources for executed processes. See
-        <citerefentry><refentrytitle>setrlimit</refentrytitle><manvolnum>2</manvolnum></citerefentry>
-        for details. The resource limit is possible to specify in two formats,
-        <option>value</option> to set soft and hard limits to the same value,
-        or <option>soft:hard</option> to set both limits individually (e.g. LimitAS=4G:16G).
-        Use the string <varname>infinity</varname> to
-        configure no limit on a specific resource. The multiplicative
-        suffixes K (=1024), M (=1024*1024) and so on for G, T, P and E
-        may be used for resource limits measured in bytes
-        (e.g. LimitAS=16G). For the limits referring to time values,
-        the usual time units ms, s, min, h and so on may be used (see
-        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        for details). Note that if no time unit is specified for
-        <varname>LimitCPU=</varname> the default unit of seconds is
-        implied, while for <varname>LimitRTTIME=</varname> the default
-        unit of microseconds is implied. Also, note that the effective
-        granularity of the limits might influence their
-        enforcement. For example, time limits specified for
-        <varname>LimitCPU=</varname> will be rounded up implicitly to
-        multiples of 1s.</para>
+        <listitem><para>Set soft and hard limits on various resources for executed processes. See
+        <citerefentry><refentrytitle>setrlimit</refentrytitle><manvolnum>2</manvolnum></citerefentry> for details on
+        the resource limit concept. Resource limits may be specified in two formats: either as single value to set a
+        specific soft and hard limit to the same value, or as colon-separated pair <option>soft:hard</option> to set
+        both limits individually (e.g. <literal>LimitAS=4G:16G</literal>).  Use the string <varname>infinity</varname>
+        to configure no limit on a specific resource. The multiplicative suffixes K, M, G, T, P and E (to the base
+        1024) may be used for resource limits measured in bytes (e.g. LimitAS=16G). For the limits referring to time
+        values, the usual time units ms, s, min, h and so on may be used (see
+        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details). Note that if no time unit is specified for <varname>LimitCPU=</varname> the default unit of seconds
+        is implied, while for <varname>LimitRTTIME=</varname> the default unit of microseconds is implied. Also, note
+        that the effective granularity of the limits might influence their enforcement. For example, time limits
+        specified for <varname>LimitCPU=</varname> will be rounded up implicitly to multiples of 1s. For
+        <varname>LimitNICE=</varname> the value may be specified in two syntaxes: if prefixed with <literal>+</literal>
+        or <literal>-</literal>, the value is understood as regular Linux nice value in the range -20..19. If not
+        prefixed like this the value is understood as raw resource limit parameter in the range 0..40 (with 0 being
+        equivalent to 1).</para>
 
         <para>Note that most process resource limits configured with
         these options are per-process, and processes may fork in order
@@ -778,32 +776,21 @@
       <varlistentry>
         <term><varname>CapabilityBoundingSet=</varname></term>
 
-        <listitem><para>Controls which capabilities to include in the
-        capability bounding set for the executed process. See
-        <citerefentry project='man-pages'><refentrytitle>capabilities</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        for details. Takes a whitespace-separated list of capability
-        names as read by
-        <citerefentry project='mankier'><refentrytitle>cap_from_name</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
-        e.g. <constant>CAP_SYS_ADMIN</constant>,
-        <constant>CAP_DAC_OVERRIDE</constant>,
-        <constant>CAP_SYS_PTRACE</constant>. Capabilities listed will
-        be included in the bounding set, all others are removed. If
-        the list of capabilities is prefixed with
-        <literal>~</literal>, all but the listed capabilities will be
-        included, the effect of the assignment inverted. Note that
-        this option also affects the respective capabilities in the
-        effective, permitted and inheritable capability sets, on top
-        of what <varname>Capabilities=</varname> does. If this option
-        is not used, the capability bounding set is not modified on
-        process execution, hence no limits on the capabilities of the
-        process are enforced. This option may appear more than once, in
-        which case the bounding sets are merged. If the empty string
-        is assigned to this option, the bounding set is reset to the
-        empty capability set, and all prior settings have no effect.
-        If set to <literal>~</literal> (without any further argument),
-        the bounding set is reset to the full set of available
-        capabilities, also undoing any previous
-        settings.</para></listitem>
+        <listitem><para>Controls which capabilities to include in the capability bounding set for the executed
+        process. See <citerefentry
+        project='man-pages'><refentrytitle>capabilities</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details. Takes a whitespace-separated list of capability names as read by <citerefentry
+        project='mankier'><refentrytitle>cap_from_name</refentrytitle><manvolnum>3</manvolnum></citerefentry>,
+        e.g. <constant>CAP_SYS_ADMIN</constant>, <constant>CAP_DAC_OVERRIDE</constant>,
+        <constant>CAP_SYS_PTRACE</constant>. Capabilities listed will be included in the bounding set, all others are
+        removed. If the list of capabilities is prefixed with <literal>~</literal>, all but the listed capabilities
+        will be included, the effect of the assignment inverted. Note that this option also affects the respective
+        capabilities in the effective, permitted and inheritable capability sets. If this option is not used, the
+        capability bounding set is not modified on process execution, hence no limits on the capabilities of the
+        process are enforced. This option may appear more than once, in which case the bounding sets are merged. If the
+        empty string is assigned to this option, the bounding set is reset to the empty capability set, and all prior
+        settings have no effect.  If set to <literal>~</literal> (without any further argument), the bounding set is
+        reset to the full set of available capabilities, also undoing any previous settings.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -854,20 +841,6 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>Capabilities=</varname></term>
-        <listitem><para>Controls the
-        <citerefentry project='man-pages'><refentrytitle>capabilities</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        set for the executed process. Take a capability string
-        describing the effective, permitted and inherited capability
-        sets as documented in
-        <citerefentry project='mankier'><refentrytitle>cap_from_text</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
-        Note that these capability sets are usually influenced (and
-        filtered) by the capabilities attached to the executed file.
-        Due to that <varname>CapabilityBoundingSet=</varname> is
-        probably a much more useful setting.</para></listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><varname>ReadWriteDirectories=</varname></term>
         <term><varname>ReadOnlyDirectories=</varname></term>
         <term><varname>InaccessibleDirectories=</varname></term>
@@ -884,9 +857,12 @@
         reading only, writing will be refused even if the usual file
         access controls would permit this. Directories listed in
         <varname>InaccessibleDirectories=</varname> will be made
-        inaccessible for processes inside the namespace. Note that
-        restricting access with these options does not extend to
-        submounts of a directory that are created later on. These
+        inaccessible for processes inside the namespace, and may not
+        countain any other mountpoints, including those specified by
+        <varname>ReadWriteDirectories=</varname> or
+        <varname>ReadOnlyDirectories=</varname>.
+        Note that restricting access with these options does not extend
+        to submounts of a directory that are created later on. These
         options may be specified more than once, in which case all
         directories listed will have limited access from within the
         namespace. If the empty string is assigned to this option, the
@@ -957,7 +933,10 @@
         (propagation in the opposite direction continues to work).
         This means that this setting may not be used for services
         which shall be able to install mount points in the main mount
-        namespace.</para></listitem>
+        namespace. The /dev namespace will be mounted read-only and 'noexec'.
+        The latter may break old programs which try to set up executable
+        memory by using <citerefentry><refentrytitle>mmap</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+        of <filename>/dev/zero</filename> instead of using <constant>MAP_ANON</constant>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1180,7 +1159,9 @@
         first character of the list is <literal>~</literal>, the
         effect is inverted: only the listed system calls will result
         in immediate process termination (blacklisting). If running in
-        user mode and this option is used,
+        user mode, or in system mode, but without the
+        <constant>CAP_SYS_ADMIN</constant> capabiblity (e.g. setting
+        <varname>User=nobody</varname>),
         <varname>NoNewPrivileges=yes</varname> is implied. This
         feature makes use of the Secure Computing Mode 2 interfaces of
         the kernel ('seccomp filtering') and is useful for enforcing a
@@ -1239,8 +1220,10 @@
         systems. The special <constant>native</constant> identifier
         implicitly maps to the native architecture of the system (or
         more strictly: to the architecture the system manager is
-        compiled for). If running in user mode and this option is
-        used, <varname>NoNewPrivileges=yes</varname> is implied. Note
+        compiled for). If running in user mode, or in system mode,
+        but without the <constant>CAP_SYS_ADMIN</constant>
+        capabiblity (e.g. setting <varname>User=nobody</varname>),
+        <varname>NoNewPrivileges=yes</varname> is implied. Note
         that setting this option to a non-empty list implies that
         <constant>native</constant> is included too. By default, this
         option is set to the empty list, i.e. no architecture system
@@ -1269,8 +1252,10 @@
         <function>socketpair()</function> (which creates connected
         AF_UNIX sockets only) are unaffected. Note that this option
         has no effect on 32-bit x86 and is ignored (but works
-        correctly on x86-64). If running in user mode and this option
-        is used, <varname>NoNewPrivileges=yes</varname> is implied. By
+        correctly on x86-64). If running in user mode, or in system
+        mode, but without the <constant>CAP_SYS_ADMIN</constant>
+        capabiblity (e.g. setting <varname>User=nobody</varname>),
+        <varname>NoNewPrivileges=yes</varname> is implied. By
         default, no restriction applies, all address families are
         accessible to processes. If assigned the empty string, any
         previous list changes are undone.</para>
@@ -1287,14 +1272,17 @@
       <varlistentry>
         <term><varname>Personality=</varname></term>
 
-        <listitem><para>Controls which kernel architecture
-        <citerefentry project='man-pages'><refentrytitle>uname</refentrytitle><manvolnum>2</manvolnum></citerefentry>
-        shall report, when invoked by unit processes. Takes one of
-        <constant>x86</constant> and <constant>x86-64</constant>. This
-        is useful when running 32-bit services on a 64-bit host
-        system. If not specified, the personality is left unmodified
-        and thus reflects the personality of the host system's
-        kernel.</para></listitem>
+        <listitem><para>Controls which kernel architecture <citerefentry
+        project='man-pages'><refentrytitle>uname</refentrytitle><manvolnum>2</manvolnum></citerefentry> shall report,
+        when invoked by unit processes. Takes one of the architecture identifiers <constant>x86</constant>,
+        <constant>x86-64</constant>, <constant>ppc</constant>, <constant>ppc-le</constant>, <constant>ppc64</constant>,
+        <constant>ppc64-le</constant>, <constant>s390</constant> or <constant>s390x</constant>. Which personality
+        architectures are supported depends on the system architecture. Usually the 64bit versions of the various
+        system architectures support their immediate 32bit personality architecture counterpart, but no others. For
+        example, <constant>x86-64</constant> systems support the <constant>x86-64</constant> and
+        <constant>x86</constant> personalities but no others. The personality feature is useful when running 32-bit
+        services on a 64-bit host system. If not specified, the personality is left unmodified and thus reflects the
+        personality of the host system's kernel.</para></listitem>
       </varlistentry>
 
       <varlistentry>

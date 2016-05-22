@@ -94,19 +94,6 @@ int fdset_put(FDSet *s, int fd) {
         return set_put(MAKE_SET(s), FD_TO_PTR(fd));
 }
 
-int fdset_consume(FDSet *s, int fd) {
-        int r;
-
-        assert(s);
-        assert(fd >= 0);
-
-        r = fdset_put(s, fd);
-        if (r <= 0)
-                safe_close(fd);
-
-        return r;
-}
-
 int fdset_put_dup(FDSet *s, int fd) {
         int copy, r;
 
@@ -164,7 +151,7 @@ int fdset_new_fill(FDSet **_s) {
         while ((de = readdir(d))) {
                 int fd = -1;
 
-                if (hidden_file(de->d_name))
+                if (hidden_or_backup_file(de->d_name))
                         continue;
 
                 r = safe_atoi(de->d_name, &fd);

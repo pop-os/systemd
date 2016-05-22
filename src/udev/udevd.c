@@ -400,10 +400,11 @@ static void worker_spawn(Manager *manager, struct event *event) {
                         goto out;
                 }
 
-                /* request TERM signal if parent exits */
-                prctl(PR_SET_PDEATHSIG, SIGTERM);
+                /* Request TERM signal if parent exits.
+                   Ignore error, not much we can do in that case. */
+                (void) prctl(PR_SET_PDEATHSIG, SIGTERM);
 
-                /* reset OOM score, we only protect the main daemon */
+                /* Reset OOM score, we only protect the main daemon. */
                 write_string_file("/proc/self/oom_score_adj", "0", 0);
 
                 for (;;) {
@@ -1695,7 +1696,7 @@ int main(int argc, char *argv[]) {
 
         umask(022);
 
-        r = mac_selinux_init("/dev");
+        r = mac_selinux_init();
         if (r < 0) {
                 log_error_errno(r, "could not initialize labelling: %m");
                 goto exit;
@@ -1715,7 +1716,7 @@ int main(int argc, char *argv[]) {
                    by PID1. otherwise we are not guaranteed to have a dedicated cgroup */
                 r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, 0, &cgroup);
                 if (r < 0) {
-                        if (r == -ENOENT || r == -ENOEXEC)
+                        if (r == -ENOENT || r == -ENOMEDIUM)
                                 log_debug_errno(r, "did not find dedicated cgroup: %m");
                         else
                                 log_warning_errno(r, "failed to get cgroup: %m");

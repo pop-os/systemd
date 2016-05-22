@@ -27,6 +27,7 @@
 #include "sd-daemon.h"
 
 #include "alloc-util.h"
+#include "escape.h"
 #include "fd-util.h"
 #include "log.h"
 #include "macro.h"
@@ -40,7 +41,7 @@ static bool arg_accept = false;
 static int arg_socket_type = SOCK_STREAM;
 static char** arg_args = NULL;
 static char** arg_setenv = NULL;
-static const char *arg_fdname = NULL;
+static char **arg_fdnames = NULL;
 static bool arg_inetd = false;
 
 static int add_epoll(int epoll_fd, int fd) {
@@ -76,7 +77,7 @@ static int open_sockets(int *epoll_fd, bool accept) {
                         if (r < 0)
                                 return r;
 
-                        count ++;
+                        count++;
                 }
         }
 
@@ -104,7 +105,7 @@ static int open_sockets(int *epoll_fd, bool accept) {
                 }
 
                 assert(fd == SD_LISTEN_FDS_START + count);
-                count ++;
+                count++;
         }
 
         if (arg_listen)
@@ -134,7 +135,6 @@ static int exec_process(const char* name, char **argv, char **env, int start_fd,
         _cleanup_free_ char *joined = NULL;
         unsigned n_env = 0, length;
         const char *tocopy;
-        unsigned i;
         char **s;
         int r;
 
@@ -176,7 +176,7 @@ static int exec_process(const char* name, char **argv, char **env, int start_fd,
                         if (!envp[n_env])
                                 return log_oom();
 
-                        n_env ++;
+                        n_env++;
                 }
         }
 
@@ -191,7 +191,7 @@ static int exec_process(const char* name, char **argv, char **env, int start_fd,
                 if (!envp[n_env])
                         return log_oom();
 
-                n_env ++;
+                n_env++;
         }
 
         if (arg_inetd) {
@@ -224,25 +224,30 @@ static int exec_process(const char* name, char **argv, char **env, int start_fd,
                 if (asprintf((char**)(envp + n_env++), "LISTEN_PID=" PID_FMT, getpid()) < 0)
                         return log_oom();
 
-                if (arg_fdname) {
+                if (arg_fdnames) {
+                        _cleanup_free_ char *names = NULL;
+                        size_t len;
                         char *e;
+                        int i;
 
-                        e = strappend("LISTEN_FDNAMES=", arg_fdname);
-                        if (!e)
+                        len = strv_length(arg_fdnames);
+                        if (len == 1)
+                                for (i = 1; i < n_fds; i++) {
+                                        r = strv_extend(&arg_fdnames, arg_fdnames[0]);
+                                        if (r < 0)
+                                                return log_error_errno(r, "Failed to extend strv: %m");
+                                }
+                        else if (len != (unsigned) n_fds)
+                                log_warning("The number of fd names is different than number of fds: %zu vs %d",
+                                            len, n_fds);
+
+                        names = strv_join(arg_fdnames, ":");
+                        if (!names)
                                 return log_oom();
 
-                        for (i = 1; i < (unsigned) n_fds; i++) {
-                                char *c;
-
-                                c = strjoin(e, ":", arg_fdname, NULL);
-                                if (!c) {
-                                        free(e);
-                                        return log_oom();
-                                }
-
-                                free(e);
-                                e = c;
-                        }
+                        e = strappend("LISTEN_FDNAMES=", names);
+                        if (!e)
+                                return log_oom();
 
                         envp[n_env++] = e;
                 }
@@ -311,19 +316,31 @@ static int do_accept(const char* name, char **argv, char **envp, int fd) {
 }
 
 /* SIGCHLD handler. */
-static void sigchld_hdl(int sig, siginfo_t *t, void *data) {
+static void sigchld_hdl(int sig) {
         PROTECT_ERRNO;
 
-        log_info("Child %d died with code %d", t->si_pid, t->si_status);
+        for (;;) {
+                siginfo_t si;
+                int r;
 
-        /* Wait for a dead child. */
-        (void) waitpid(t->si_pid, NULL, 0);
+                si.si_pid = 0;
+                r = waitid(P_ALL, 0, &si, WEXITED|WNOHANG);
+                if (r < 0) {
+                        if (errno != ECHILD)
+                                log_error_errno(errno, "Failed to reap children: %m");
+                        return;
+                }
+                if (si.si_pid == 0)
+                        return;
+
+                log_info("Child %d died with code %d", si.si_pid, si.si_status);
+        }
 }
 
 static int install_chld_handler(void) {
         static const struct sigaction act = {
-                .sa_flags = SA_SIGINFO,
-                .sa_sigaction = sigchld_hdl,
+                .sa_flags = SA_NOCLDSTOP,
+                .sa_handler = sigchld_hdl,
         };
 
         int r;
@@ -339,14 +356,15 @@ static void help(void) {
         printf("%s [OPTIONS...]\n\n"
                "Listen on sockets and launch child on connection.\n\n"
                "Options:\n"
-               "  -h --help                Show this help and exit\n"
-               "     --version             Print version string and exit\n"
-               "  -l --listen=ADDR         Listen for raw connections at ADDR\n"
-               "  -d --datagram            Listen on datagram instead of stream socket\n"
-               "     --seqpacket           Listen on SOCK_SEQPACKET instead of stream socket\n"
-               "  -a --accept              Spawn separate child for each connection\n"
-               "  -E --setenv=NAME[=VALUE] Pass an environment variable to children\n"
-               "     --inetd               Enable inetd file descriptor passing protocol\n"
+               "  -h --help                  Show this help and exit\n"
+               "     --version               Print version string and exit\n"
+               "  -l --listen=ADDR           Listen for raw connections at ADDR\n"
+               "  -d --datagram              Listen on datagram instead of stream socket\n"
+               "     --seqpacket             Listen on SOCK_SEQPACKET instead of stream socket\n"
+               "  -a --accept                Spawn separate child for each connection\n"
+               "  -E --setenv=NAME[=VALUE]   Pass an environment variable to children\n"
+               "     --fdname=NAME[:NAME...] Specify names for file descriptors\n"
+               "     --inetd                 Enable inetd file descriptor passing protocol\n"
                "\n"
                "Note: file descriptors from sd_listen_fds() will be passed through.\n"
                , program_invocation_short_name);
@@ -379,7 +397,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "+hl:aEd", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "+hl:aE:d", options, NULL)) >= 0)
                 switch(c) {
                 case 'h':
                         help();
@@ -424,14 +442,30 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
-                case ARG_FDNAME:
-                        if (!fdname_is_valid(optarg)) {
-                                log_error("File descriptor name %s is not valid, refusing.", optarg);
-                                return -EINVAL;
-                        }
+                case ARG_FDNAME: {
+                        _cleanup_strv_free_ char **names;
+                        char **s;
 
-                        arg_fdname = optarg;
+                        names = strv_split(optarg, ":");
+                        if (!names)
+                                return log_oom();
+
+                        STRV_FOREACH(s, names)
+                                if (!fdname_is_valid(*s)) {
+                                        _cleanup_free_ char *esc;
+
+                                        esc = cescape(*s);
+                                        log_warning("File descriptor name \"%s\" is not valid.", esc);
+                                }
+
+                        /* Empty optargs means one empty name */
+                        r = strv_extend_strv(&arg_fdnames,
+                                             strv_isempty(names) ? STRV_MAKE("") : names,
+                                             false);
+                        if (r < 0)
+                                return log_error_errno(r, "strv_extend_strv: %m");
                         break;
+                }
 
                 case ARG_INETD:
                         arg_inetd = true;

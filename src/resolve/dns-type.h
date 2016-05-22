@@ -1,3 +1,5 @@
+#pragma once
+
 /***
   This file is part of systemd.
 
@@ -16,8 +18,6 @@
   You should have received a copy of the GNU Lesser General Public License
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
-
-#pragma once
 
 #include "macro.h"
 
@@ -124,6 +124,9 @@ enum {
         _DNS_CLASS_INVALID = -1
 };
 
+#define _DNS_CLASS_STRING_MAX (sizeof "CLASS" + DECIMAL_STR_MAX(uint16_t))
+#define _DNS_TYPE_STRING_MAX (sizeof "CLASS" + DECIMAL_STR_MAX(uint16_t))
+
 bool dns_type_is_pseudo(uint16_t type);
 bool dns_type_is_valid_query(uint16_t type);
 bool dns_type_is_valid_rr(uint16_t type);
@@ -132,7 +135,8 @@ bool dns_type_is_dnssec(uint16_t type);
 bool dns_type_is_obsolete(uint16_t type);
 bool dns_type_may_wildcard(uint16_t type);
 bool dns_type_apex_only(uint16_t type);
-int dns_type_to_af(uint16_t t);
+bool dns_type_needs_authentication(uint16_t type);
+int dns_type_to_af(uint16_t type);
 
 bool dns_class_is_pseudo(uint16_t class);
 bool dns_class_is_valid_rr(uint16_t class);
@@ -141,7 +145,7 @@ bool dns_class_is_valid_rr(uint16_t class);
 const char *dns_type_to_string(int type);
 int dns_type_from_string(const char *s);
 
-const char *dns_class_to_string(uint16_t type);
+const char *dns_class_to_string(uint16_t class);
 int dns_class_from_string(const char *name);
 
 /* https://tools.ietf.org/html/draft-ietf-dane-protocol-23#section-7.2 */
@@ -152,3 +156,6 @@ const char *tlsa_selector_to_string(uint8_t selector);
 
 /* https://tools.ietf.org/html/draft-ietf-dane-protocol-23#section-7.4 */
 const char *tlsa_matching_type_to_string(uint8_t selector);
+
+/* https://tools.ietf.org/html/rfc6844#section-5.1 */
+#define CAA_FLAG_CRITICAL (1u << 7)

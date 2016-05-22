@@ -485,7 +485,7 @@ int manager_new(Manager **ret) {
 
         m->llmnr_support = RESOLVE_SUPPORT_YES;
         m->mdns_support = RESOLVE_SUPPORT_NO;
-        m->dnssec_mode = DNSSEC_NO;
+        m->dnssec_mode = DEFAULT_DNSSEC_MODE;
         m->read_resolv_conf = true;
         m->need_builtin_fallbacks = true;
         m->etc_hosts_last = m->etc_hosts_mtime = USEC_INFINITY;
@@ -617,18 +617,16 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         struct msghdr mh = {};
         struct cmsghdr *cmsg;
         struct iovec iov;
-        int ms = 0, r;
-        ssize_t l;
+        ssize_t ms, l;
+        int r;
 
         assert(m);
         assert(fd >= 0);
         assert(ret);
 
-        r = ioctl(fd, FIONREAD, &ms);
-        if (r < 0)
-                return -errno;
+        ms = next_datagram_size_fd(fd);
         if (ms < 0)
-                return -EIO;
+                return ms;
 
         r = dns_packet_new(&p, protocol, ms);
         if (r < 0)
@@ -1215,11 +1213,11 @@ void manager_dnssec_verdict(Manager *m, DnssecVerdict verdict, const DnsResource
         assert(verdict < _DNSSEC_VERDICT_MAX);
 
         if (log_get_max_level() >= LOG_DEBUG) {
-                _cleanup_free_ char *s = NULL;
+                char s[DNS_RESOURCE_KEY_STRING_MAX];
 
-                (void) dns_resource_key_to_string(key, &s);
-
-                log_debug("Found verdict for lookup %s: %s", s ? strstrip(s) : "n/a", dnssec_verdict_to_string(verdict));
+                log_debug("Found verdict for lookup %s: %s",
+                          dns_resource_key_to_string(key, s, sizeof s),
+                          dnssec_verdict_to_string(verdict));
         }
 
         m->n_dnssec_verdict[verdict]++;

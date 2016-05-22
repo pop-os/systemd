@@ -35,7 +35,7 @@ LICENSE:
         - except src/udev/* which is (currently still) GPLv2, GPLv2+
 
 REQUIREMENTS:
-        Linux kernel >= 3.11
+        Linux kernel >= 3.12
         Linux kernel >= 4.2 for unified cgroup hierarchy support
 
         Kernel Config Options:
@@ -88,10 +88,6 @@ REQUIREMENTS:
         Required for CPUQuota= in resource control unit settings
           CONFIG_CFS_BANDWIDTH
 
-        For systemd-bootchart, several proc debug interfaces are required:
-          CONFIG_SCHEDSTATS
-          CONFIG_SCHED_DEBUG
-
         For UEFI systems:
           CONFIG_EFIVAR_FS
           CONFIG_EFI_PARTITION
@@ -122,6 +118,7 @@ REQUIREMENTS:
         glibc >= 2.16
         libcap
         libmount >= 2.27.1 (from util-linux)
+                (util-linux *must* be built with --enable-libmount-force-mountinfo)
         libseccomp >= 1.0.0 (optional)
         libblkid >= 2.24 (from util-linux) (optional)
         libkmod >= 15 (optional)
@@ -199,9 +196,6 @@ USERS AND GROUPS:
 
         Similarly, the name resolution daemon requires the
         "systemd-resolve" system user and group to exist.
-
-        Similarly, the kdbus dbus1 proxy daemon requires the
-        "systemd-bus-proxy" system user and group to exist.
 
         Similarly, the coredump support requires the
         "systemd-coredump" system user and group to exist.

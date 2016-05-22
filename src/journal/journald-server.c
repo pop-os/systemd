@@ -251,15 +251,15 @@ static int open_journal(
         assert(ret);
 
         if (reliably)
-                r = journal_file_open_reliably(fname, flags, 0640, s->compress, seal, metrics, s->mmap, NULL, &f);
+                r = journal_file_open_reliably(fname, flags, 0640, s->compress, seal, metrics, s->mmap, s->deferred_closes, NULL, &f);
         else
-                r = journal_file_open(fname, flags, 0640, s->compress, seal, metrics, s->mmap, NULL, &f);
+                r = journal_file_open(-1, fname, flags, 0640, s->compress, seal, metrics, s->mmap, s->deferred_closes, NULL, &f);
         if (r < 0)
                 return r;
 
         r = journal_file_enable_post_change_timer(f, s->event, POST_CHANGE_TIMER_INTERVAL_USEC);
         if (r < 0) {
-                journal_file_close(f);
+                (void) journal_file_close(f);
                 return r;
         }
 
@@ -302,7 +302,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
                 /* Too many open? Then let's close one */
                 f = ordered_hashmap_steal_first(s->user_journals);
                 assert(f);
-                journal_file_close(f);
+                (void) journal_file_close(f);
         }
 
         r = open_journal(s, true, p, O_RDWR|O_CREAT, s->seal, &s->system_metrics, &f);
@@ -313,7 +313,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
 
         r = ordered_hashmap_put(s->user_journals, UID_TO_PTR(uid), f);
         if (r < 0) {
-                journal_file_close(f);
+                (void) journal_file_close(f);
                 return s->system_journal;
         }
 
@@ -333,7 +333,7 @@ static int do_rotate(
         if (!*f)
                 return -EINVAL;
 
-        r = journal_file_rotate(f, s->compress, seal);
+        r = journal_file_rotate(f, s->compress, seal, s->deferred_closes);
         if (r < 0)
                 if (*f)
                         log_error_errno(r, "Failed to rotate %s: %m", (*f)->path);
@@ -364,6 +364,13 @@ void server_rotate(Server *s) {
                         /* Old file has been closed and deallocated */
                         ordered_hashmap_remove(s->user_journals, k);
         }
+
+        /* Perform any deferred closes which aren't still offlining. */
+        SET_FOREACH(f, s->deferred_closes, i)
+                if (!journal_file_is_offlining(f)) {
+                        (void) set_remove(s->deferred_closes, f);
+                        (void) journal_file_close(f);
+                }
 }
 
 void server_sync(Server *s) {
@@ -372,13 +379,13 @@ void server_sync(Server *s) {
         int r;
 
         if (s->system_journal) {
-                r = journal_file_set_offline(s->system_journal);
+                r = journal_file_set_offline(s->system_journal, false);
                 if (r < 0)
                         log_warning_errno(r, "Failed to sync system journal, ignoring: %m");
         }
 
         ORDERED_HASHMAP_FOREACH(f, s->user_journals, i) {
-                r = journal_file_set_offline(f);
+                r = journal_file_set_offline(f, false);
                 if (r < 0)
                         log_warning_errno(r, "Failed to sync user journal, ignoring: %m");
         }
@@ -485,38 +492,36 @@ static void server_cache_hostname(Server *s) {
 }
 
 static bool shall_try_append_again(JournalFile *f, int r) {
-
-        /* -E2BIG            Hit configured limit
-           -EFBIG            Hit fs limit
-           -EDQUOT           Quota limit hit
-           -ENOSPC           Disk full
-           -EIO              I/O error of some kind (mmap)
-           -EHOSTDOWN        Other machine
-           -EBUSY            Unclean shutdown
-           -EPROTONOSUPPORT  Unsupported feature
-           -EBADMSG          Corrupted
-           -ENODATA          Truncated
-           -ESHUTDOWN        Already archived
-           -EIDRM            Journal file has been deleted */
-
-        if (r == -E2BIG || r == -EFBIG || r == -EDQUOT || r == -ENOSPC)
+        switch(r) {
+        case -E2BIG:           /* Hit configured limit          */
+        case -EFBIG:           /* Hit fs limit                  */
+        case -EDQUOT:          /* Quota limit hit               */
+        case -ENOSPC:          /* Disk full                     */
                 log_debug("%s: Allocation limit reached, rotating.", f->path);
-        else if (r == -EHOSTDOWN)
-                log_info("%s: Journal file from other machine, rotating.", f->path);
-        else if (r == -EBUSY)
-                log_info("%s: Unclean shutdown, rotating.", f->path);
-        else if (r == -EPROTONOSUPPORT)
-                log_info("%s: Unsupported feature, rotating.", f->path);
-        else if (r == -EBADMSG || r == -ENODATA || r == ESHUTDOWN)
-                log_warning("%s: Journal file corrupted, rotating.", f->path);
-        else if (r == -EIO)
+                return true;
+        case -EIO:             /* I/O error of some kind (mmap) */
                 log_warning("%s: IO error, rotating.", f->path);
-        else if (r == -EIDRM)
+                return true;
+        case -EHOSTDOWN:       /* Other machine                 */
+                log_info("%s: Journal file from other machine, rotating.", f->path);
+                return true;
+        case -EBUSY:           /* Unclean shutdown              */
+                log_info("%s: Unclean shutdown, rotating.", f->path);
+                return true;
+        case -EPROTONOSUPPORT: /* Unsupported feature           */
+                log_info("%s: Unsupported feature, rotating.", f->path);
+                return true;
+        case -EBADMSG:         /* Corrupted                     */
+        case -ENODATA:         /* Truncated                     */
+        case -ESHUTDOWN:       /* Already archived              */
+                log_warning("%s: Journal file corrupted, rotating.", f->path);
+                return true;
+        case -EIDRM:           /* Journal file has been deleted */
                 log_warning("%s: Journal file has been deleted, rotating.", f->path);
-        else
+                return true;
+        default:
                 return false;
-
-        return true;
+        }
 }
 
 static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned n, int priority) {
@@ -1400,7 +1405,7 @@ static int server_parse_proc_cmdline(Server *s) {
         }
 
         p = line;
-        for(;;) {
+        for (;;) {
                 _cleanup_free_ char *word = NULL;
 
                 r = extract_first_word(&p, &word, NULL, 0);
@@ -1655,7 +1660,7 @@ static int server_connect_notify(Server *s) {
           it. Specifically: given that PID 1 might block on
           dbus-daemon during IPC, and dbus-daemon is logging to us,
           and might hence block on us, we might end up in a deadlock
-          if we block on sending PID 1 notification messages -- by
+          if we block on sending PID 1 notification messages — by
           generating a full blocking circle. To avoid this, let's
           create a non-blocking socket, and connect it to the
           notification socket, and then wait for POLLOUT before we
@@ -1691,7 +1696,7 @@ static int server_connect_notify(Server *s) {
         if (sa.un.sun_path[0] == '@')
                 sa.un.sun_path[0] = 0;
 
-        r = connect(s->notify_fd, &sa.sa, offsetof(struct sockaddr_un, sun_path) + strlen(e));
+        r = connect(s->notify_fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
         if (r < 0)
                 return log_error_errno(errno, "Failed to connect to notify socket: %m");
 
@@ -1763,6 +1768,10 @@ int server_init(Server *s) {
 
         s->mmap = mmap_cache_new();
         if (!s->mmap)
+                return log_oom();
+
+        s->deferred_closes = set_new(NULL);
+        if (!s->deferred_closes)
                 return log_oom();
 
         r = sd_event_default(&s->event);
@@ -1918,17 +1927,22 @@ void server_done(Server *s) {
         JournalFile *f;
         assert(s);
 
+        if (s->deferred_closes) {
+                journal_file_close_set(s->deferred_closes);
+                set_free(s->deferred_closes);
+        }
+
         while (s->stdout_streams)
                 stdout_stream_free(s->stdout_streams);
 
         if (s->system_journal)
-                journal_file_close(s->system_journal);
+                (void) journal_file_close(s->system_journal);
 
         if (s->runtime_journal)
-                journal_file_close(s->runtime_journal);
+                (void) journal_file_close(s->runtime_journal);
 
         while ((f = ordered_hashmap_steal_first(s->user_journals)))
-                journal_file_close(f);
+                (void) journal_file_close(f);
 
         ordered_hashmap_free(s->user_journals);
 

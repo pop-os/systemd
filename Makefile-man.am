@@ -94,12 +94,9 @@ MANPAGES += \
 	man/shutdown.8 \
 	man/sysctl.d.5 \
 	man/systemctl.1 \
-	man/systemd-activate.8 \
 	man/systemd-analyze.1 \
 	man/systemd-ask-password-console.service.8 \
 	man/systemd-ask-password.1 \
-	man/systemd-bus-proxyd.8 \
-	man/systemd-bus-proxyd.service.8 \
 	man/systemd-cat.1 \
 	man/systemd-cgls.1 \
 	man/systemd-cgtop.1 \
@@ -126,6 +123,7 @@ MANPAGES += \
 	man/systemd-resolve.1 \
 	man/systemd-run.1 \
 	man/systemd-sleep.conf.5 \
+	man/systemd-socket-activate.1 \
 	man/systemd-socket-proxyd.8 \
 	man/systemd-suspend.service.8 \
 	man/systemd-sysctl.service.8 \
@@ -146,6 +144,7 @@ MANPAGES += \
 	man/systemd.link.5 \
 	man/systemd.mount.5 \
 	man/systemd.nspawn.5 \
+	man/systemd.offline-updates.7 \
 	man/systemd.path.5 \
 	man/systemd.preset.5 \
 	man/systemd.resource-control.5 \
@@ -243,6 +242,7 @@ MANPAGES_ALIAS += \
 	man/SD_JOURNAL_INVALIDATE.3 \
 	man/SD_JOURNAL_LOCAL_ONLY.3 \
 	man/SD_JOURNAL_NOP.3 \
+	man/SD_JOURNAL_OS_ROOT.3 \
 	man/SD_JOURNAL_RUNTIME_ONLY.3 \
 	man/SD_JOURNAL_SUPPRESS_LOCATION.3 \
 	man/SD_JOURNAL_SYSTEM.3 \
@@ -389,9 +389,10 @@ MANPAGES_ALIAS += \
 	man/sd_journal_get_timeout.3 \
 	man/sd_journal_has_persistent_files.3 \
 	man/sd_journal_next_skip.3 \
-	man/sd_journal_open_container.3 \
 	man/sd_journal_open_directory.3 \
+	man/sd_journal_open_directory_fd.3 \
 	man/sd_journal_open_files.3 \
+	man/sd_journal_open_files_fd.3 \
 	man/sd_journal_perror.3 \
 	man/sd_journal_previous.3 \
 	man/sd_journal_previous_skip.3 \
@@ -421,7 +422,6 @@ MANPAGES_ALIAS += \
 	man/systemd-ask-password-console.path.8 \
 	man/systemd-ask-password-wall.path.8 \
 	man/systemd-ask-password-wall.service.8 \
-	man/systemd-bus-proxyd.socket.8 \
 	man/systemd-fsck-root.service.8 \
 	man/systemd-fsck.8 \
 	man/systemd-hibernate-resume.8 \
@@ -573,6 +573,7 @@ man/SD_JOURNAL_FOREACH_UNIQUE.3: man/sd_journal_query_unique.3
 man/SD_JOURNAL_INVALIDATE.3: man/sd_journal_get_fd.3
 man/SD_JOURNAL_LOCAL_ONLY.3: man/sd_journal_open.3
 man/SD_JOURNAL_NOP.3: man/sd_journal_get_fd.3
+man/SD_JOURNAL_OS_ROOT.3: man/sd_journal_open.3
 man/SD_JOURNAL_RUNTIME_ONLY.3: man/sd_journal_open.3
 man/SD_JOURNAL_SUPPRESS_LOCATION.3: man/sd_journal_print.3
 man/SD_JOURNAL_SYSTEM.3: man/sd_journal_open.3
@@ -719,9 +720,10 @@ man/sd_journal_get_monotonic_usec.3: man/sd_journal_get_realtime_usec.3
 man/sd_journal_get_timeout.3: man/sd_journal_get_fd.3
 man/sd_journal_has_persistent_files.3: man/sd_journal_has_runtime_files.3
 man/sd_journal_next_skip.3: man/sd_journal_next.3
-man/sd_journal_open_container.3: man/sd_journal_open.3
 man/sd_journal_open_directory.3: man/sd_journal_open.3
+man/sd_journal_open_directory_fd.3: man/sd_journal_open.3
 man/sd_journal_open_files.3: man/sd_journal_open.3
+man/sd_journal_open_files_fd.3: man/sd_journal_open.3
 man/sd_journal_perror.3: man/sd_journal_print.3
 man/sd_journal_previous.3: man/sd_journal_next.3
 man/sd_journal_previous_skip.3: man/sd_journal_next.3
@@ -751,7 +753,6 @@ man/system.conf.d.5: man/systemd-system.conf.5
 man/systemd-ask-password-console.path.8: man/systemd-ask-password-console.service.8
 man/systemd-ask-password-wall.path.8: man/systemd-ask-password-console.service.8
 man/systemd-ask-password-wall.service.8: man/systemd-ask-password-console.service.8
-man/systemd-bus-proxyd.socket.8: man/systemd-bus-proxyd.service.8
 man/systemd-fsck-root.service.8: man/systemd-fsck@.service.8
 man/systemd-fsck.8: man/systemd-fsck@.service.8
 man/systemd-hibernate-resume.8: man/systemd-hibernate-resume@.service.8
@@ -1035,6 +1036,9 @@ man/SD_JOURNAL_LOCAL_ONLY.html: man/sd_journal_open.html
 	$(html-alias)
 
 man/SD_JOURNAL_NOP.html: man/sd_journal_get_fd.html
+	$(html-alias)
+
+man/SD_JOURNAL_OS_ROOT.html: man/sd_journal_open.html
 	$(html-alias)
 
 man/SD_JOURNAL_RUNTIME_ONLY.html: man/sd_journal_open.html
@@ -1475,13 +1479,16 @@ man/sd_journal_has_persistent_files.html: man/sd_journal_has_runtime_files.html
 man/sd_journal_next_skip.html: man/sd_journal_next.html
 	$(html-alias)
 
-man/sd_journal_open_container.html: man/sd_journal_open.html
-	$(html-alias)
-
 man/sd_journal_open_directory.html: man/sd_journal_open.html
 	$(html-alias)
 
+man/sd_journal_open_directory_fd.html: man/sd_journal_open.html
+	$(html-alias)
+
 man/sd_journal_open_files.html: man/sd_journal_open.html
+	$(html-alias)
+
+man/sd_journal_open_files_fd.html: man/sd_journal_open.html
 	$(html-alias)
 
 man/sd_journal_perror.html: man/sd_journal_print.html
@@ -1569,9 +1576,6 @@ man/systemd-ask-password-wall.path.html: man/systemd-ask-password-console.servic
 	$(html-alias)
 
 man/systemd-ask-password-wall.service.html: man/systemd-ask-password-console.service.html
-	$(html-alias)
-
-man/systemd-bus-proxyd.socket.html: man/systemd-bus-proxyd.service.html
 	$(html-alias)
 
 man/systemd-fsck-root.service.html: man/systemd-fsck@.service.html
@@ -1850,27 +1854,25 @@ man/systemd-binfmt.html: man/systemd-binfmt.service.html
 
 endif
 
-if ENABLE_BOOTCHART
-MANPAGES += \
-	man/bootchart.conf.5 \
-	man/systemd-bootchart.1
-MANPAGES_ALIAS += \
-	man/bootchart.conf.d.5
-man/bootchart.conf.d.5: man/bootchart.conf.5
-man/bootchart.conf.d.html: man/bootchart.conf.html
-	$(html-alias)
-
-endif
-
 if ENABLE_COREDUMP
 MANPAGES += \
 	man/coredump.conf.5 \
 	man/coredumpctl.1 \
 	man/systemd-coredump.8
 MANPAGES_ALIAS += \
-	man/coredump.conf.d.5
+	man/coredump.conf.d.5 \
+	man/systemd-coredump.socket.8 \
+	man/systemd-coredump@.service.8
 man/coredump.conf.d.5: man/coredump.conf.5
+man/systemd-coredump.socket.8: man/systemd-coredump.8
+man/systemd-coredump@.service.8: man/systemd-coredump.8
 man/coredump.conf.d.html: man/coredump.conf.html
+	$(html-alias)
+
+man/systemd-coredump.socket.html: man/systemd-coredump.html
+	$(html-alias)
+
+man/systemd-coredump@.service.html: man/systemd-coredump.html
 	$(html-alias)
 
 endif
@@ -1914,6 +1916,17 @@ MANPAGES += \
 MANPAGES_ALIAS += \
 	#
 
+
+endif
+
+if ENABLE_IMPORTD
+MANPAGES += \
+	man/systemd-importd.service.8
+MANPAGES_ALIAS += \
+	man/systemd-importd.8
+man/systemd-importd.8: man/systemd-importd.service.8
+man/systemd-importd.html: man/systemd-importd.service.html
+	$(html-alias)
 
 endif
 
@@ -1968,15 +1981,21 @@ endif
 if ENABLE_NETWORKD
 MANPAGES += \
 	man/networkctl.1 \
+	man/networkd.conf.5 \
 	man/systemd-networkd-wait-online.service.8 \
 	man/systemd-networkd.service.8 \
 	man/systemd.netdev.5 \
 	man/systemd.network.5
 MANPAGES_ALIAS += \
+	man/networkd.conf.d.5 \
 	man/systemd-networkd-wait-online.8 \
 	man/systemd-networkd.8
+man/networkd.conf.d.5: man/networkd.conf.5
 man/systemd-networkd-wait-online.8: man/systemd-networkd-wait-online.service.8
 man/systemd-networkd.8: man/systemd-networkd.service.8
+man/networkd.conf.d.html: man/networkd.conf.html
+	$(html-alias)
+
 man/systemd-networkd-wait-online.html: man/systemd-networkd-wait-online.service.html
 	$(html-alias)
 
@@ -2456,7 +2475,6 @@ endif
 
 EXTRA_DIST += \
 	man/binfmt.d.xml \
-	man/bootchart.conf.xml \
 	man/bootctl.xml \
 	man/bootup.xml \
 	man/busctl.xml \
@@ -2488,6 +2506,7 @@ EXTRA_DIST += \
 	man/machinectl.xml \
 	man/modules-load.d.xml \
 	man/networkctl.xml \
+	man/networkd.conf.xml \
 	man/nss-myhostname.xml \
 	man/nss-mymachines.xml \
 	man/nss-resolve.xml \
@@ -2574,15 +2593,11 @@ EXTRA_DIST += \
 	man/standard-options.xml \
 	man/sysctl.d.xml \
 	man/systemctl.xml \
-	man/systemd-activate.xml \
 	man/systemd-analyze.xml \
 	man/systemd-ask-password-console.service.xml \
 	man/systemd-ask-password.xml \
 	man/systemd-backlight@.service.xml \
 	man/systemd-binfmt.service.xml \
-	man/systemd-bootchart.xml \
-	man/systemd-bus-proxyd.service.xml \
-	man/systemd-bus-proxyd.xml \
 	man/systemd-cat.xml \
 	man/systemd-cgls.xml \
 	man/systemd-cgtop.xml \
@@ -2603,6 +2618,7 @@ EXTRA_DIST += \
 	man/systemd-hibernate-resume@.service.xml \
 	man/systemd-hostnamed.service.xml \
 	man/systemd-hwdb.xml \
+	man/systemd-importd.service.xml \
 	man/systemd-inhibit.xml \
 	man/systemd-initctl.service.xml \
 	man/systemd-journal-gatewayd.service.xml \
@@ -2628,6 +2644,7 @@ EXTRA_DIST += \
 	man/systemd-rfkill.service.xml \
 	man/systemd-run.xml \
 	man/systemd-sleep.conf.xml \
+	man/systemd-socket-activate.xml \
 	man/systemd-socket-proxyd.xml \
 	man/systemd-suspend.service.xml \
 	man/systemd-sysctl.service.xml \
@@ -2655,6 +2672,7 @@ EXTRA_DIST += \
 	man/systemd.netdev.xml \
 	man/systemd.network.xml \
 	man/systemd.nspawn.xml \
+	man/systemd.offline-updates.xml \
 	man/systemd.path.xml \
 	man/systemd.preset.xml \
 	man/systemd.resource-control.xml \

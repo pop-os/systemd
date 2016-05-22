@@ -72,13 +72,13 @@ static bool arg_batch = false;
 static bool arg_raw = false;
 static usec_t arg_delay = 1*USEC_PER_SEC;
 static char* arg_machine = NULL;
+static bool arg_recursive = true;
 
-enum {
+static enum {
         COUNT_PIDS,
         COUNT_USERSPACE_PROCESSES,
         COUNT_ALL_PROCESSES,
 } arg_count = COUNT_PIDS;
-static bool arg_recursive = true;
 
 static enum {
         ORDER_PATH,
@@ -269,13 +269,15 @@ static int process(
                 if (g->memory > 0)
                         g->memory_valid = true;
 
-        } else if (streq(controller, "blkio") && cg_unified() <= 0) {
+        } else if ((streq(controller, "io") && cg_unified() > 0) ||
+                   (streq(controller, "blkio") && cg_unified() <= 0)) {
                 _cleanup_fclose_ FILE *f = NULL;
                 _cleanup_free_ char *p = NULL;
+                bool unified = cg_unified() > 0;
                 uint64_t wr = 0, rd = 0;
                 nsec_t timestamp;
 
-                r = cg_get_path(controller, path, "blkio.io_service_bytes", &p);
+                r = cg_get_path(controller, path, unified ? "io.stat" : "blkio.io_service_bytes", &p);
                 if (r < 0)
                         return r;
 
@@ -293,25 +295,38 @@ static int process(
                         if (!fgets(line, sizeof(line), f))
                                 break;
 
+                        /* Trim and skip the device */
                         l = strstrip(line);
                         l += strcspn(l, WHITESPACE);
                         l += strspn(l, WHITESPACE);
 
-                        if (first_word(l, "Read")) {
-                                l += 4;
-                                q = &rd;
-                        } else if (first_word(l, "Write")) {
-                                l += 5;
-                                q = &wr;
-                        } else
-                                continue;
+                        if (unified) {
+                                while (!isempty(l)) {
+                                        if (sscanf(l, "rbytes=%" SCNu64, &k))
+                                                rd += k;
+                                        else if (sscanf(l, "wbytes=%" SCNu64, &k))
+                                                wr += k;
 
-                        l += strspn(l, WHITESPACE);
-                        r = safe_atou64(l, &k);
-                        if (r < 0)
-                                continue;
+                                        l += strcspn(l, WHITESPACE);
+                                        l += strspn(l, WHITESPACE);
+                                }
+                        } else {
+                                if (first_word(l, "Read")) {
+                                        l += 4;
+                                        q = &rd;
+                                } else if (first_word(l, "Write")) {
+                                        l += 5;
+                                        q = &wr;
+                                } else
+                                        continue;
 
-                        *q += k;
+                                l += strspn(l, WHITESPACE);
+                                r = safe_atou64(l, &k);
+                                if (r < 0)
+                                        continue;
+
+                                *q += k;
+                        }
                 }
 
                 timestamp = now_nsec(CLOCK_MONOTONIC);
@@ -362,7 +377,7 @@ static int refresh_one(
                 Group **ret) {
 
         _cleanup_closedir_ DIR *d = NULL;
-        Group *ours;
+        Group *ours = NULL;
         int r;
 
         assert(controller);
@@ -437,6 +452,9 @@ static int refresh(const char *root, Hashmap *a, Hashmap *b, unsigned iteration)
         if (r < 0)
                 return r;
         r = refresh_one("memory", root, a, b, iteration, 0, NULL);
+        if (r < 0)
+                return r;
+        r = refresh_one("io", root, a, b, iteration, 0, NULL);
         if (r < 0)
                 return r;
         r = refresh_one("blkio", root, a, b, iteration, 0, NULL);

@@ -105,6 +105,8 @@ static void test_compress_decompress(const char* label, const char* type,
                 int r;
 
                 size = permute(i);
+                if (size == 0)
+                        continue;
 
                 log_debug("%s %zu %zu", type, i, size);
 
@@ -162,7 +164,7 @@ int main(int argc, char *argv[]) {
                 arg_duration = x * USEC_PER_SEC;
         }
         if (argc == 3)
-                (void) safe_atolu(argv[2], &arg_start);
+                (void) safe_atozu(argv[2], &arg_start);
         else
                 arg_start = getpid();
 

@@ -36,6 +36,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -100,6 +101,16 @@ static inline void qsort_safe(void *base, size_t nmemb, size_t size, comparison_
 
         assert(base);
         qsort(base, nmemb, size, compar);
+}
+
+/**
+ * Normal memcpy requires src to be nonnull. We do nothing if n is 0.
+ */
+static inline void memcpy_safe(void *dst, const void *src, size_t n) {
+        if (n == 0)
+                return;
+        assert(src);
+        memcpy(dst, src, n);
 }
 
 int on_ac_power(void);
@@ -173,6 +184,6 @@ int namespace_enter(int pidns_fd, int mntns_fd, int netns_fd, int userns_fd, int
 
 uint64_t physical_memory(void);
 
-int update_reboot_param_file(const char *param);
+int update_reboot_parameter_and_warn(const char *param);
 
 int version(void);

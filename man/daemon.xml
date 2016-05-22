@@ -180,14 +180,12 @@
       functionality of the init system, it is recommended not to
       execute them when run as new-style service.</para>
 
-      <para>Note that new-style init systems guarantee execution of
-      daemon processes in a clean process context: it is guaranteed
-      that the environment block is sanitized, that the signal
-      handlers and mask is reset and that no left-over file
-      descriptors are passed. Daemons will be executed in their own
-      session, with standard input/output/error connected to
-      <filename>/dev/null</filename> unless otherwise configured. The
-      umask is reset.
+      <para>Note that new-style init systems guarantee execution of daemon processes in a clean process context: it is
+      guaranteed that the environment block is sanitized, that the signal handlers and mask is reset and that no
+      left-over file descriptors are passed. Daemons will be executed in their own session, with standard input
+      connected to <filename>/dev/null</filename> and standard output/error connected to the
+      <citerefentry><refentrytitle>systemd-journald.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+      logging service, unless otherwise configured. The umask is reset.
       </para>
 
       <para>It is recommended for new-style daemons to implement the
@@ -234,7 +232,7 @@
         bus-activatable by supplying a D-Bus service activation
         configuration file. This has multiple advantages: your daemon
         may be started lazily on-demand; it may be started in parallel
-        to other daemons requiring it -- which maximizes
+        to other daemons requiring it — which maximizes
         parallelization and boot-up speed; your daemon can be
         restarted on failure without losing any bus requests, as the
         bus queues requests for activatable services. See below for

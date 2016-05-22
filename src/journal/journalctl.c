@@ -95,11 +95,13 @@ static bool arg_boot = false;
 static sd_id128_t arg_boot_id = {};
 static int arg_boot_offset = 0;
 static bool arg_dmesg = false;
+static bool arg_no_hostname = false;
 static const char *arg_cursor = NULL;
 static const char *arg_after_cursor = NULL;
 static bool arg_show_cursor = false;
 static const char *arg_directory = NULL;
 static char **arg_file = NULL;
+static bool arg_file_stdin = false;
 static int arg_priorities = 0xFF;
 static const char *arg_verify_key = NULL;
 #ifdef HAVE_GCRYPT
@@ -225,14 +227,6 @@ static int add_matches_for_device(sd_journal *j, const char *devpath) {
         return 0;
 }
 
-static void pager_open_if_enabled(void) {
-
-        if (arg_no_pager)
-                return;
-
-        pager_open(arg_pager_end);
-}
-
 static char *format_timestamp_maybe_utc(char *buf, size_t l, usec_t t) {
 
         if (arg_utc)
@@ -278,7 +272,7 @@ static int parse_boot_descriptor(const char *x, sd_id128_t *boot_id, int *offset
 
 static void help(void) {
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, arg_pager_end);
 
         printf("%s [OPTIONS...] [MATCHES...]\n\n"
                "Query the journal.\n\n"
@@ -312,6 +306,7 @@ static void help(void) {
                "  -a --all                 Show all fields, including long and unprintable\n"
                "  -q --quiet               Do not show info messages and privilege warning\n"
                "     --no-pager            Do not pipe output into a pager\n"
+               "     --no-hostname         Suppress output of hostname field\n"
                "  -m --merge               Show entries from all available journals\n"
                "  -D --directory=PATH      Show journal files from directory\n"
                "     --file=PATH           Show journal file\n"
@@ -378,6 +373,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_VACUUM_SIZE,
                 ARG_VACUUM_FILES,
                 ARG_VACUUM_TIME,
+                ARG_NO_HOSTNAME,
         };
 
         static const struct option options[] = {
@@ -435,6 +431,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "vacuum-size",    required_argument, NULL, ARG_VACUUM_SIZE    },
                 { "vacuum-files",   required_argument, NULL, ARG_VACUUM_FILES   },
                 { "vacuum-time",    required_argument, NULL, ARG_VACUUM_TIME    },
+                { "no-hostname",    no_argument,       NULL, ARG_NO_HOSTNAME    },
                 {}
         };
 
@@ -596,9 +593,17 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_FILE:
-                        r = glob_extend(&arg_file, optarg);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to add paths: %m");
+                        if (streq(optarg, "-"))
+                                /* An undocumented feature: we can read journal files from STDIN. We don't document
+                                 * this though, since after all we only support this for mmap-able, seekable files, and
+                                 * not for example pipes which are probably the primary usecase for reading things from
+                                 * STDIN. To avoid confusion we hence don't document this feature. */
+                                arg_file_stdin = true;
+                        else {
+                                r = glob_extend(&arg_file, optarg);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to add paths: %m");
+                        }
                         break;
 
                 case ARG_ROOT:
@@ -788,6 +793,10 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_action = ACTION_LIST_FIELD_NAMES;
                         break;
 
+                case ARG_NO_HOSTNAME:
+                        arg_no_hostname = true;
+                        break;
+
                 case 'x':
                         arg_catalog = true;
                         break;
@@ -862,6 +871,18 @@ static int parse_argv(int argc, char *argv[]) {
         if ((arg_boot || arg_action == ACTION_LIST_BOOTS) && (arg_file || arg_directory || arg_merge)) {
                 log_error("Using --boot or --list-boots with --file, --directory or --merge is not supported.");
                 return -EINVAL;
+        }
+
+        if (!strv_isempty(arg_system_units) && (arg_journal_type == SD_JOURNAL_CURRENT_USER)) {
+
+                /* Specifying --user and --unit= at the same time makes no sense (as the former excludes the user
+                 * journal, but the latter excludes the system journal, thus resulting in empty output). Let's be nice
+                 * to users, and automatically turn --unit= into --user-unit= if combined with --user. */
+                r = strv_extend_strv(&arg_user_units, arg_system_units, true);
+                if (r < 0)
+                        return -ENOMEM;
+
+                arg_system_units = strv_free(arg_system_units);
         }
 
         return 1;
@@ -988,18 +1009,18 @@ static void boot_id_free_all(BootId *l) {
         }
 }
 
-static int discover_next_boot(
-                sd_journal *j,
-                BootId **boot,
+static int discover_next_boot(sd_journal *j,
+                sd_id128_t previous_boot_id,
                 bool advance_older,
-                bool read_realtime) {
+                BootId **ret) {
 
-        int r;
-        char match[9+32+1] = "_BOOT_ID=";
         _cleanup_free_ BootId *next_boot = NULL;
+        char match[9+32+1] = "_BOOT_ID=";
+        sd_id128_t boot_id;
+        int r;
 
         assert(j);
-        assert(boot);
+        assert(ret);
 
         /* We expect the journal to be on the last position of a boot
          * (in relation to the direction we are going), so that the next
@@ -1012,28 +1033,39 @@ static int discover_next_boot(
          * we can actually advance to a *different* boot. */
         sd_journal_flush_matches(j);
 
-        if (advance_older)
-                r = sd_journal_previous(j);
-        else
-                r = sd_journal_next(j);
-        if (r < 0)
-                return r;
-        else if (r == 0)
-                return 0; /* End of journal, yay. */
+        do {
+                if (advance_older)
+                        r = sd_journal_previous(j);
+                else
+                        r = sd_journal_next(j);
+                if (r < 0)
+                        return r;
+                else if (r == 0)
+                        return 0; /* End of journal, yay. */
+
+                r = sd_journal_get_monotonic_usec(j, NULL, &boot_id);
+                if (r < 0)
+                        return r;
+
+                /* We iterate through this in a loop, until the boot ID differs from the previous one. Note that
+                 * normally, this will only require a single iteration, as we seeked to the last entry of the previous
+                 * boot entry already. However, it might happen that the per-journal-field entry arrays are less
+                 * complete than the main entry array, and hence might reference an entry that's not actually the last
+                 * one of the boot ID as last one. Let's hence use the per-field array is initial seek position to
+                 * speed things up, but let's not trust that it is complete, and hence, manually advance as
+                 * necessary. */
+
+        } while (sd_id128_equal(boot_id, previous_boot_id));
 
         next_boot = new0(BootId, 1);
         if (!next_boot)
                 return -ENOMEM;
 
-        r = sd_journal_get_monotonic_usec(j, NULL, &next_boot->id);
+        next_boot->id = boot_id;
+
+        r = sd_journal_get_realtime_usec(j, &next_boot->first);
         if (r < 0)
                 return r;
-
-        if (read_realtime) {
-                r = sd_journal_get_realtime_usec(j, &next_boot->first);
-                if (r < 0)
-                        return r;
-        }
 
         /* Now seek to the last occurrence of this boot ID. */
         sd_id128_to_string(next_boot->id, match + 9);
@@ -1057,13 +1089,11 @@ static int discover_next_boot(
         else if (r == 0)
                 return -ENODATA; /* This shouldn't happen. We just came from this very boot ID. */
 
-        if (read_realtime) {
-                r = sd_journal_get_realtime_usec(j, &next_boot->last);
-                if (r < 0)
-                        return r;
-        }
+        r = sd_journal_get_realtime_usec(j, &next_boot->last);
+        if (r < 0)
+                return r;
 
-        *boot = next_boot;
+        *ret = next_boot;
         next_boot = NULL;
 
         return 0;
@@ -1072,47 +1102,48 @@ static int discover_next_boot(
 static int get_boots(
                 sd_journal *j,
                 BootId **boots,
-                BootId *query_ref_boot,
+                sd_id128_t *query_ref_boot,
                 int ref_boot_offset) {
 
         bool skip_once;
         int r, count = 0;
         BootId *head = NULL, *tail = NULL;
         const bool advance_older = query_ref_boot && ref_boot_offset <= 0;
+        sd_id128_t previous_boot_id;
 
         assert(j);
 
         /* Adjust for the asymmetry that offset 0 is
          * the last (and current) boot, while 1 is considered the
          * (chronological) first boot in the journal. */
-        skip_once = query_ref_boot && sd_id128_is_null(query_ref_boot->id) && ref_boot_offset < 0;
+        skip_once = query_ref_boot && sd_id128_is_null(*query_ref_boot) && ref_boot_offset < 0;
 
         /* Advance to the earliest/latest occurrence of our reference
          * boot ID (taking our lookup direction into account), so that
          * discover_next_boot() can do its job.
          * If no reference is given, the journal head/tail will do,
          * they're "virtual" boots after all. */
-        if (query_ref_boot && !sd_id128_is_null(query_ref_boot->id)) {
+        if (query_ref_boot && !sd_id128_is_null(*query_ref_boot)) {
                 char match[9+32+1] = "_BOOT_ID=";
 
                 sd_journal_flush_matches(j);
 
-                sd_id128_to_string(query_ref_boot->id, match + 9);
+                sd_id128_to_string(*query_ref_boot, match + 9);
                 r = sd_journal_add_match(j, match, sizeof(match) - 1);
                 if (r < 0)
                         return r;
 
                 if (advance_older)
-                        r = sd_journal_seek_head(j);
+                        r = sd_journal_seek_head(j); /* seek to oldest */
                 else
-                        r = sd_journal_seek_tail(j);
+                        r = sd_journal_seek_tail(j); /* seek to newest */
                 if (r < 0)
                         return r;
 
                 if (advance_older)
-                        r = sd_journal_next(j);
+                        r = sd_journal_next(j);     /* read the oldest entry */
                 else
-                        r = sd_journal_previous(j);
+                        r = sd_journal_previous(j); /* read the most recently added entry */
                 if (r < 0)
                         return r;
                 else if (r == 0)
@@ -1121,21 +1152,31 @@ static int get_boots(
                         count = 1;
                         goto finish;
                 }
+
+                /* At this point the read pointer is positioned at the oldest/newest occurence of the reference boot
+                 * ID. After flushing the matches, one more invocation of _previous()/_next() will hence place us at
+                 * the following entry, which must then have an older/newer boot ID */
         } else {
+
                 if (advance_older)
-                        r = sd_journal_seek_tail(j);
+                        r = sd_journal_seek_tail(j); /* seek to newest */
                 else
-                        r = sd_journal_seek_head(j);
+                        r = sd_journal_seek_head(j); /* seek to oldest */
                 if (r < 0)
                         return r;
 
-                /* No sd_journal_next/previous here. */
+                /* No sd_journal_next()/_previous() here.
+                 *
+                 * At this point the read pointer is positioned after the newest/before the oldest entry in the whole
+                 * journal. The next invocation of _previous()/_next() will hence position us at the newest/oldest
+                 * entry we have. */
         }
 
+        previous_boot_id = SD_ID128_NULL;
         for (;;) {
                 _cleanup_free_ BootId *current = NULL;
 
-                r = discover_next_boot(j, &current, advance_older, !query_ref_boot);
+                r = discover_next_boot(j, previous_boot_id, advance_older, &current);
                 if (r < 0) {
                         boot_id_free_all(head);
                         return r;
@@ -1144,6 +1185,8 @@ static int get_boots(
                 if (!current)
                         break;
 
+                previous_boot_id = current->id;
+
                 if (query_ref_boot) {
                         if (!skip_once)
                                 ref_boot_offset += advance_older ? 1 : -1;
@@ -1151,7 +1194,7 @@ static int get_boots(
 
                         if (ref_boot_offset == 0) {
                                 count = 1;
-                                query_ref_boot->id = current->id;
+                                *query_ref_boot = current->id;
                                 break;
                         }
                 } else {
@@ -1183,7 +1226,7 @@ static int list_boots(sd_journal *j) {
         if (count == 0)
                 return count;
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, arg_pager_end);
 
         /* numbers are one less, but we need an extra char for the sign */
         w = DECIMAL_STR_WIDTH(count - 1) + 1;
@@ -1207,8 +1250,8 @@ static int list_boots(sd_journal *j) {
 
 static int add_boot(sd_journal *j) {
         char match[9+32+1] = "_BOOT_ID=";
+        sd_id128_t ref_boot_id;
         int r;
-        BootId ref_boot_id = {};
 
         assert(j);
 
@@ -1218,7 +1261,7 @@ static int add_boot(sd_journal *j) {
         if (arg_boot_offset == 0 && sd_id128_equal(arg_boot_id, SD_ID128_NULL))
                 return add_match_this_boot(j, arg_machine);
 
-        ref_boot_id.id = arg_boot_id;
+        ref_boot_id = arg_boot_id;
         r = get_boots(j, NULL, &ref_boot_id, arg_boot_offset);
         assert(r <= 1);
         if (r <= 0) {
@@ -1234,7 +1277,7 @@ static int add_boot(sd_journal *j) {
                 return r == 0 ? -ENODATA : r;
         }
 
-        sd_id128_to_string(ref_boot_id.id, match + 9);
+        sd_id128_to_string(ref_boot_id, match + 9);
 
         r = sd_journal_add_match(j, match, sizeof(match) - 1);
         if (r < 0)
@@ -1363,7 +1406,7 @@ static int add_units(sd_journal *j) {
                         r = sd_journal_add_disjunction(j);
                         if (r < 0)
                                 return r;
-                        count ++;
+                        count++;
                 }
         }
 
@@ -1383,7 +1426,7 @@ static int add_units(sd_journal *j) {
                         r = sd_journal_add_disjunction(j);
                         if (r < 0)
                                 return r;
-                        count ++;
+                        count++;
                 }
         }
 
@@ -1408,7 +1451,7 @@ static int add_units(sd_journal *j) {
                         r = sd_journal_add_disjunction(j);
                         if (r < 0)
                                 return r;
-                        count ++;
+                        count++;
                 }
         }
 
@@ -1428,7 +1471,7 @@ static int add_units(sd_journal *j) {
                         r = sd_journal_add_disjunction(j);
                         if (r < 0)
                                 return r;
-                        count ++;
+                        count++;
                 }
         }
 
@@ -1847,7 +1890,7 @@ static int access_check(sd_journal *j) {
                         break;
 
                 default:
-                        log_warning_errno(err, "An error was encountered while opening journal file %s, ignoring file.", path);
+                        log_warning_errno(err, "An error was encountered while opening journal file or directory %s, ignoring file: %m", path);
                         break;
                 }
         }
@@ -2061,7 +2104,7 @@ int main(int argc, char *argv[]) {
                 } else {
                         bool oneline = arg_action == ACTION_LIST_CATALOG;
 
-                        pager_open_if_enabled();
+                        pager_open(arg_no_pager, arg_pager_end);
 
                         if (optind < argc)
                                 r = catalog_list_items(stdout, database, oneline, argv + optind);
@@ -2103,11 +2146,61 @@ int main(int argc, char *argv[]) {
 
         if (arg_directory)
                 r = sd_journal_open_directory(&j, arg_directory, arg_journal_type);
-        else if (arg_file)
+        else if (arg_file_stdin) {
+                int ifd = STDIN_FILENO;
+                r = sd_journal_open_files_fd(&j, &ifd, 1, 0);
+        } else if (arg_file)
                 r = sd_journal_open_files(&j, (const char**) arg_file, 0);
-        else if (arg_machine)
-                r = sd_journal_open_container(&j, arg_machine, 0);
-        else
+        else if (arg_machine) {
+                _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+                _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+                _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+                int fd;
+
+                if (geteuid() != 0) {
+                        /* The file descriptor returned by OpenMachineRootDirectory() will be owned by users/groups of
+                         * the container, thus we need root privileges to override them. */
+                        log_error("Using the --machine= switch requires root privileges.");
+                        r = -EPERM;
+                        goto finish;
+                }
+
+                r = sd_bus_open_system(&bus);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to open system bus: %m");
+                        goto finish;
+                }
+
+                r = sd_bus_call_method(
+                                bus,
+                                "org.freedesktop.machine1",
+                                "/org/freedesktop/machine1",
+                                "org.freedesktop.machine1.Manager",
+                                "OpenMachineRootDirectory",
+                                &error,
+                                &reply,
+                                "s", arg_machine);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to open root directory: %s", bus_error_message(&error, r));
+                        goto finish;
+                }
+
+                r = sd_bus_message_read(reply, "h", &fd);
+                if (r < 0) {
+                        bus_log_parse_error(r);
+                        goto finish;
+                }
+
+                fd = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+                if (fd < 0) {
+                        r = log_error_errno(errno, "Failed to duplicate file descriptor: %m");
+                        goto finish;
+                }
+
+                r = sd_journal_open_directory_fd(&j, fd, SD_JOURNAL_OS_ROOT);
+                if (r < 0)
+                        safe_close(fd);
+        } else
                 r = sd_journal_open(&j, !arg_merge*SD_JOURNAL_LOCAL_ONLY + arg_journal_type);
         if (r < 0) {
                 log_error_errno(r, "Failed to open %s: %m", arg_directory ?: arg_file ? "files" : "journal");
@@ -2181,7 +2274,7 @@ int main(int argc, char *argv[]) {
 
                 SD_JOURNAL_FOREACH_FIELD(j, field) {
                         printf("%s\n", field);
-                        n_shown ++;
+                        n_shown++;
                 }
 
                 r = 0;
@@ -2273,7 +2366,7 @@ int main(int argc, char *argv[]) {
                         else
                                 printf("%.*s\n", (int) size, (const char*) data);
 
-                        n_shown ++;
+                        n_shown++;
                 }
 
                 r = 0;
@@ -2283,6 +2376,10 @@ int main(int argc, char *argv[]) {
         /* Opening the fd now means the first sd_journal_wait() will actually wait */
         if (arg_follow) {
                 r = sd_journal_get_fd(j);
+                if (r == -EMEDIUMTYPE) {
+                        log_error_errno(r, "The --follow switch is not supported in conjunction with reading from STDIN.");
+                        goto finish;
+                }
                 if (r < 0) {
                         log_error_errno(r, "Failed to get journal fd: %m");
                         goto finish;
@@ -2368,7 +2465,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (!arg_follow)
-                pager_open_if_enabled();
+                pager_open(arg_no_pager, arg_pager_end);
 
         if (!arg_quiet) {
                 usec_t start, end;
@@ -2452,7 +2549,8 @@ int main(int argc, char *argv[]) {
                                 arg_full * OUTPUT_FULL_WIDTH |
                                 colors_enabled() * OUTPUT_COLOR |
                                 arg_catalog * OUTPUT_CATALOG |
-                                arg_utc * OUTPUT_UTC;
+                                arg_utc * OUTPUT_UTC |
+                                arg_no_hostname * OUTPUT_NO_HOSTNAME;
 
                         r = output_journal(stdout, j, arg_output, 0, flags, &ellipsized);
                         need_seek = true;

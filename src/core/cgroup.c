@@ -32,6 +32,7 @@
 #include "special.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "stdio-util.h"
 
 #define CGROUP_CPU_QUOTA_PERIOD_USEC ((usec_t) 100 * USEC_PER_MSEC)
 
@@ -47,6 +48,9 @@ void cgroup_context_init(CGroupContext *c) {
 
         c->memory_limit = (uint64_t) -1;
 
+        c->io_weight = CGROUP_WEIGHT_INVALID;
+        c->startup_io_weight = CGROUP_WEIGHT_INVALID;
+
         c->blockio_weight = CGROUP_BLKIO_WEIGHT_INVALID;
         c->startup_blockio_weight = CGROUP_BLKIO_WEIGHT_INVALID;
 
@@ -60,6 +64,24 @@ void cgroup_context_free_device_allow(CGroupContext *c, CGroupDeviceAllow *a) {
         LIST_REMOVE(device_allow, c->device_allow, a);
         free(a->path);
         free(a);
+}
+
+void cgroup_context_free_io_device_weight(CGroupContext *c, CGroupIODeviceWeight *w) {
+        assert(c);
+        assert(w);
+
+        LIST_REMOVE(device_weights, c->io_device_weights, w);
+        free(w->path);
+        free(w);
+}
+
+void cgroup_context_free_io_device_limit(CGroupContext *c, CGroupIODeviceLimit *l) {
+        assert(c);
+        assert(l);
+
+        LIST_REMOVE(device_limits, c->io_device_limits, l);
+        free(l->path);
+        free(l);
 }
 
 void cgroup_context_free_blockio_device_weight(CGroupContext *c, CGroupBlockIODeviceWeight *w) {
@@ -83,6 +105,12 @@ void cgroup_context_free_blockio_device_bandwidth(CGroupContext *c, CGroupBlockI
 void cgroup_context_done(CGroupContext *c) {
         assert(c);
 
+        while (c->io_device_weights)
+                cgroup_context_free_io_device_weight(c, c->io_device_weights);
+
+        while (c->io_device_limits)
+                cgroup_context_free_io_device_limit(c, c->io_device_limits);
+
         while (c->blockio_device_weights)
                 cgroup_context_free_blockio_device_weight(c, c->blockio_device_weights);
 
@@ -94,6 +122,8 @@ void cgroup_context_done(CGroupContext *c) {
 }
 
 void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
+        CGroupIODeviceLimit *il;
+        CGroupIODeviceWeight *iw;
         CGroupBlockIODeviceBandwidth *b;
         CGroupBlockIODeviceWeight *w;
         CGroupDeviceAllow *a;
@@ -106,12 +136,15 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
 
         fprintf(f,
                 "%sCPUAccounting=%s\n"
+                "%sIOAccounting=%s\n"
                 "%sBlockIOAccounting=%s\n"
                 "%sMemoryAccounting=%s\n"
                 "%sTasksAccounting=%s\n"
                 "%sCPUShares=%" PRIu64 "\n"
                 "%sStartupCPUShares=%" PRIu64 "\n"
                 "%sCPUQuotaPerSecSec=%s\n"
+                "%sIOWeight=%" PRIu64 "\n"
+                "%sStartupIOWeight=%" PRIu64 "\n"
                 "%sBlockIOWeight=%" PRIu64 "\n"
                 "%sStartupBlockIOWeight=%" PRIu64 "\n"
                 "%sMemoryLimit=%" PRIu64 "\n"
@@ -119,12 +152,15 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                 "%sDevicePolicy=%s\n"
                 "%sDelegate=%s\n",
                 prefix, yes_no(c->cpu_accounting),
+                prefix, yes_no(c->io_accounting),
                 prefix, yes_no(c->blockio_accounting),
                 prefix, yes_no(c->memory_accounting),
                 prefix, yes_no(c->tasks_accounting),
                 prefix, c->cpu_shares,
                 prefix, c->startup_cpu_shares,
                 prefix, format_timespan(u, sizeof(u), c->cpu_quota_per_sec_usec, 1),
+                prefix, c->io_weight,
+                prefix, c->startup_io_weight,
                 prefix, c->blockio_weight,
                 prefix, c->startup_blockio_weight,
                 prefix, c->memory_limit,
@@ -139,6 +175,27 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                         a->path,
                         a->r ? "r" : "", a->w ? "w" : "", a->m ? "m" : "");
 
+        LIST_FOREACH(device_weights, iw, c->io_device_weights)
+                fprintf(f,
+                        "%sIODeviceWeight=%s %" PRIu64,
+                        prefix,
+                        iw->path,
+                        iw->weight);
+
+        LIST_FOREACH(device_limits, il, c->io_device_limits) {
+                char buf[FORMAT_BYTES_MAX];
+                CGroupIOLimitType type;
+
+                for (type = 0; type < _CGROUP_IO_LIMIT_TYPE_MAX; type++)
+                        if (il->limits[type] != cgroup_io_limit_defaults[type])
+                                fprintf(f,
+                                        "%s%s=%s %s\n",
+                                        prefix,
+                                        cgroup_io_limit_type_to_string(type),
+                                        il->path,
+                                        format_bytes(buf, sizeof(buf), il->limits[type]));
+        }
+
         LIST_FOREACH(device_weights, w, c->blockio_device_weights)
                 fprintf(f,
                         "%sBlockIODeviceWeight=%s %" PRIu64,
@@ -149,16 +206,22 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
         LIST_FOREACH(device_bandwidths, b, c->blockio_device_bandwidths) {
                 char buf[FORMAT_BYTES_MAX];
 
-                fprintf(f,
-                        "%s%s=%s %s\n",
-                        prefix,
-                        b->read ? "BlockIOReadBandwidth" : "BlockIOWriteBandwidth",
-                        b->path,
-                        format_bytes(buf, sizeof(buf), b->bandwidth));
+                if (b->rbps != CGROUP_LIMIT_MAX)
+                        fprintf(f,
+                                "%sBlockIOReadBandwidth=%s %s\n",
+                                prefix,
+                                b->path,
+                                format_bytes(buf, sizeof(buf), b->rbps));
+                if (b->wbps != CGROUP_LIMIT_MAX)
+                        fprintf(f,
+                                "%sBlockIOWriteBandwidth=%s %s\n",
+                                prefix,
+                                b->path,
+                                format_bytes(buf, sizeof(buf), b->wbps));
         }
 }
 
-static int lookup_blkio_device(const char *p, dev_t *dev) {
+static int lookup_block_device(const char *p, dev_t *dev) {
         struct stat st;
         int r;
 
@@ -295,6 +358,144 @@ fail:
         return -errno;
 }
 
+static bool cgroup_context_has_io_config(CGroupContext *c) {
+        return c->io_accounting ||
+                c->io_weight != CGROUP_WEIGHT_INVALID ||
+                c->startup_io_weight != CGROUP_WEIGHT_INVALID ||
+                c->io_device_weights ||
+                c->io_device_limits;
+}
+
+static bool cgroup_context_has_blockio_config(CGroupContext *c) {
+        return c->blockio_accounting ||
+                c->blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID ||
+                c->startup_blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID ||
+                c->blockio_device_weights ||
+                c->blockio_device_bandwidths;
+}
+
+static uint64_t cgroup_context_io_weight(CGroupContext *c, ManagerState state) {
+        if (IN_SET(state, MANAGER_STARTING, MANAGER_INITIALIZING) &&
+            c->startup_io_weight != CGROUP_WEIGHT_INVALID)
+                return c->startup_io_weight;
+        else if (c->io_weight != CGROUP_WEIGHT_INVALID)
+                return c->io_weight;
+        else
+                return CGROUP_WEIGHT_DEFAULT;
+}
+
+static uint64_t cgroup_context_blkio_weight(CGroupContext *c, ManagerState state) {
+        if (IN_SET(state, MANAGER_STARTING, MANAGER_INITIALIZING) &&
+            c->startup_blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID)
+                return c->startup_blockio_weight;
+        else if (c->blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID)
+                return c->blockio_weight;
+        else
+                return CGROUP_BLKIO_WEIGHT_DEFAULT;
+}
+
+static uint64_t cgroup_weight_blkio_to_io(uint64_t blkio_weight) {
+        return CLAMP(blkio_weight * CGROUP_WEIGHT_DEFAULT / CGROUP_BLKIO_WEIGHT_DEFAULT,
+                     CGROUP_WEIGHT_MIN, CGROUP_WEIGHT_MAX);
+}
+
+static uint64_t cgroup_weight_io_to_blkio(uint64_t io_weight) {
+        return CLAMP(io_weight * CGROUP_BLKIO_WEIGHT_DEFAULT / CGROUP_WEIGHT_DEFAULT,
+                     CGROUP_BLKIO_WEIGHT_MIN, CGROUP_BLKIO_WEIGHT_MAX);
+}
+
+static void cgroup_apply_io_device_weight(const char *path, const char *dev_path, uint64_t io_weight) {
+        char buf[DECIMAL_STR_MAX(dev_t)*2+2+DECIMAL_STR_MAX(uint64_t)+1];
+        dev_t dev;
+        int r;
+
+        r = lookup_block_device(dev_path, &dev);
+        if (r < 0)
+                return;
+
+        xsprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), io_weight);
+        r = cg_set_attribute("io", path, "io.weight", buf);
+        if (r < 0)
+                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to set io.weight on %s: %m", path);
+}
+
+static void cgroup_apply_blkio_device_weight(const char *path, const char *dev_path, uint64_t blkio_weight) {
+        char buf[DECIMAL_STR_MAX(dev_t)*2+2+DECIMAL_STR_MAX(uint64_t)+1];
+        dev_t dev;
+        int r;
+
+        r = lookup_block_device(dev_path, &dev);
+        if (r < 0)
+                return;
+
+        xsprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), blkio_weight);
+        r = cg_set_attribute("blkio", path, "blkio.weight_device", buf);
+        if (r < 0)
+                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to set blkio.weight_device on %s: %m", path);
+}
+
+static unsigned cgroup_apply_io_device_limit(const char *path, const char *dev_path, uint64_t *limits) {
+        char limit_bufs[_CGROUP_IO_LIMIT_TYPE_MAX][DECIMAL_STR_MAX(uint64_t)];
+        char buf[DECIMAL_STR_MAX(dev_t)*2+2+(6+DECIMAL_STR_MAX(uint64_t)+1)*4];
+        CGroupIOLimitType type;
+        dev_t dev;
+        unsigned n = 0;
+        int r;
+
+        r = lookup_block_device(dev_path, &dev);
+        if (r < 0)
+                return 0;
+
+        for (type = 0; type < _CGROUP_IO_LIMIT_TYPE_MAX; type++) {
+                if (limits[type] != cgroup_io_limit_defaults[type]) {
+                        xsprintf(limit_bufs[type], "%" PRIu64, limits[type]);
+                        n++;
+                } else {
+                        xsprintf(limit_bufs[type], "%s", limits[type] == CGROUP_LIMIT_MAX ? "max" : "0");
+                }
+        }
+
+        xsprintf(buf, "%u:%u rbps=%s wbps=%s riops=%s wiops=%s\n", major(dev), minor(dev),
+                 limit_bufs[CGROUP_IO_RBPS_MAX], limit_bufs[CGROUP_IO_WBPS_MAX],
+                 limit_bufs[CGROUP_IO_RIOPS_MAX], limit_bufs[CGROUP_IO_WIOPS_MAX]);
+        r = cg_set_attribute("io", path, "io.max", buf);
+        if (r < 0)
+                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to set io.max on %s: %m", path);
+        return n;
+}
+
+static unsigned cgroup_apply_blkio_device_limit(const char *path, const char *dev_path, uint64_t rbps, uint64_t wbps) {
+        char buf[DECIMAL_STR_MAX(dev_t)*2+2+DECIMAL_STR_MAX(uint64_t)+1];
+        dev_t dev;
+        unsigned n = 0;
+        int r;
+
+        r = lookup_block_device(dev_path, &dev);
+        if (r < 0)
+                return 0;
+
+        if (rbps != CGROUP_LIMIT_MAX)
+                n++;
+        sprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), rbps);
+        r = cg_set_attribute("blkio", path, "blkio.throttle.read_bps_device", buf);
+        if (r < 0)
+                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to set blkio.throttle.read_bps_device on %s: %m", path);
+
+        if (wbps != CGROUP_LIMIT_MAX)
+                n++;
+        sprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), wbps);
+        r = cg_set_attribute("blkio", path, "blkio.throttle.write_bps_device", buf);
+        if (r < 0)
+                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to set blkio.throttle.write_bps_device on %s: %m", path);
+
+        return n;
+}
+
 void cgroup_context_apply(CGroupContext *c, CGroupMask mask, const char *path, ManagerState state) {
         bool is_root;
         int r;
@@ -343,53 +544,120 @@ void cgroup_context_apply(CGroupContext *c, CGroupMask mask, const char *path, M
                                        "Failed to set cpu.cfs_quota_us on %s: %m", path);
         }
 
-        if (mask & CGROUP_MASK_BLKIO) {
-                char buf[MAX(DECIMAL_STR_MAX(uint64_t)+1,
-                             DECIMAL_STR_MAX(dev_t)*2+2+DECIMAL_STR_MAX(uint64_t)+1)];
-                CGroupBlockIODeviceWeight *w;
-                CGroupBlockIODeviceBandwidth *b;
+        if (mask & CGROUP_MASK_IO) {
+                bool has_io = cgroup_context_has_io_config(c);
+                bool has_blockio = cgroup_context_has_blockio_config(c);
 
                 if (!is_root) {
-                        sprintf(buf, "%" PRIu64 "\n",
-                                IN_SET(state, MANAGER_STARTING, MANAGER_INITIALIZING) && c->startup_blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID ? c->startup_blockio_weight :
-                                c->blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID ? c->blockio_weight : CGROUP_BLKIO_WEIGHT_DEFAULT);
+                        char buf[8+DECIMAL_STR_MAX(uint64_t)+1];
+                        uint64_t weight;
+
+                        if (has_io)
+                                weight = cgroup_context_io_weight(c, state);
+                        else if (has_blockio)
+                                weight = cgroup_weight_blkio_to_io(cgroup_context_blkio_weight(c, state));
+                        else
+                                weight = CGROUP_WEIGHT_DEFAULT;
+
+                        xsprintf(buf, "default %" PRIu64 "\n", weight);
+                        r = cg_set_attribute("io", path, "io.weight", buf);
+                        if (r < 0)
+                                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                                               "Failed to set io.weight on %s: %m", path);
+
+                        if (has_io) {
+                                CGroupIODeviceWeight *w;
+
+                                /* FIXME: no way to reset this list */
+                                LIST_FOREACH(device_weights, w, c->io_device_weights)
+                                        cgroup_apply_io_device_weight(path, w->path, w->weight);
+                        } else if (has_blockio) {
+                                CGroupBlockIODeviceWeight *w;
+
+                                /* FIXME: no way to reset this list */
+                                LIST_FOREACH(device_weights, w, c->blockio_device_weights)
+                                        cgroup_apply_io_device_weight(path, w->path, cgroup_weight_blkio_to_io(w->weight));
+                        }
+                }
+
+                /* Apply limits and free ones without config. */
+                if (has_io) {
+                        CGroupIODeviceLimit *l, *next;
+
+                        LIST_FOREACH_SAFE(device_limits, l, next, c->io_device_limits) {
+                                if (!cgroup_apply_io_device_limit(path, l->path, l->limits))
+                                        cgroup_context_free_io_device_limit(c, l);
+                        }
+                } else if (has_blockio) {
+                        CGroupBlockIODeviceBandwidth *b, *next;
+
+                        LIST_FOREACH_SAFE(device_bandwidths, b, next, c->blockio_device_bandwidths) {
+                                uint64_t limits[_CGROUP_IO_LIMIT_TYPE_MAX];
+                                CGroupIOLimitType type;
+
+                                for (type = 0; type < _CGROUP_IO_LIMIT_TYPE_MAX; type++)
+                                        limits[type] = cgroup_io_limit_defaults[type];
+
+                                limits[CGROUP_IO_RBPS_MAX] = b->rbps;
+                                limits[CGROUP_IO_WBPS_MAX] = b->wbps;
+
+                                if (!cgroup_apply_io_device_limit(path, b->path, limits))
+                                        cgroup_context_free_blockio_device_bandwidth(c, b);
+                        }
+                }
+        }
+
+        if (mask & CGROUP_MASK_BLKIO) {
+                bool has_io = cgroup_context_has_io_config(c);
+                bool has_blockio = cgroup_context_has_blockio_config(c);
+
+                if (!is_root) {
+                        char buf[DECIMAL_STR_MAX(uint64_t)+1];
+                        uint64_t weight;
+
+                        if (has_blockio)
+                                weight = cgroup_context_blkio_weight(c, state);
+                        else if (has_io)
+                                weight = cgroup_weight_io_to_blkio(cgroup_context_io_weight(c, state));
+                        else
+                                weight = CGROUP_BLKIO_WEIGHT_DEFAULT;
+
+                        xsprintf(buf, "%" PRIu64 "\n", weight);
                         r = cg_set_attribute("blkio", path, "blkio.weight", buf);
                         if (r < 0)
                                 log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
                                                "Failed to set blkio.weight on %s: %m", path);
 
-                        /* FIXME: no way to reset this list */
-                        LIST_FOREACH(device_weights, w, c->blockio_device_weights) {
-                                dev_t dev;
+                        if (has_blockio) {
+                                CGroupBlockIODeviceWeight *w;
 
-                                r = lookup_blkio_device(w->path, &dev);
-                                if (r < 0)
-                                        continue;
+                                /* FIXME: no way to reset this list */
+                                LIST_FOREACH(device_weights, w, c->blockio_device_weights)
+                                        cgroup_apply_blkio_device_weight(path, w->path, w->weight);
+                        } else if (has_io) {
+                                CGroupIODeviceWeight *w;
 
-                                sprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), w->weight);
-                                r = cg_set_attribute("blkio", path, "blkio.weight_device", buf);
-                                if (r < 0)
-                                        log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
-                                                       "Failed to set blkio.weight_device on %s: %m", path);
+                                /* FIXME: no way to reset this list */
+                                LIST_FOREACH(device_weights, w, c->io_device_weights)
+                                        cgroup_apply_blkio_device_weight(path, w->path, cgroup_weight_io_to_blkio(w->weight));
                         }
                 }
 
-                /* FIXME: no way to reset this list */
-                LIST_FOREACH(device_bandwidths, b, c->blockio_device_bandwidths) {
-                        const char *a;
-                        dev_t dev;
+                /* Apply limits and free ones without config. */
+                if (has_blockio) {
+                        CGroupBlockIODeviceBandwidth *b, *next;
 
-                        r = lookup_blkio_device(b->path, &dev);
-                        if (r < 0)
-                                continue;
+                        LIST_FOREACH_SAFE(device_bandwidths, b, next, c->blockio_device_bandwidths) {
+                                if (!cgroup_apply_blkio_device_limit(path, b->path, b->rbps, b->wbps))
+                                        cgroup_context_free_blockio_device_bandwidth(c, b);
+                        }
+                } else if (has_io) {
+                        CGroupIODeviceLimit *l, *next;
 
-                        a = b->read ? "blkio.throttle.read_bps_device" : "blkio.throttle.write_bps_device";
-
-                        sprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), b->bandwidth);
-                        r = cg_set_attribute("blkio", path, a, buf);
-                        if (r < 0)
-                                log_full_errno(IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
-                                               "Failed to set %s on %s: %m", a, path);
+                        LIST_FOREACH_SAFE(device_limits, l, next, c->io_device_limits) {
+                                if (!cgroup_apply_blkio_device_limit(path, l->path, l->limits[CGROUP_IO_RBPS_MAX], l->limits[CGROUP_IO_WBPS_MAX]))
+                                        cgroup_context_free_io_device_limit(c, l);
+                        }
                 }
         }
 
@@ -506,12 +774,8 @@ CGroupMask cgroup_context_get_mask(CGroupContext *c) {
             c->cpu_quota_per_sec_usec != USEC_INFINITY)
                 mask |= CGROUP_MASK_CPUACCT | CGROUP_MASK_CPU;
 
-        if (c->blockio_accounting ||
-            c->blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID ||
-            c->startup_blockio_weight != CGROUP_BLKIO_WEIGHT_INVALID ||
-            c->blockio_device_weights ||
-            c->blockio_device_bandwidths)
-                mask |= CGROUP_MASK_BLKIO;
+        if (cgroup_context_has_io_config(c) || cgroup_context_has_blockio_config(c))
+                mask |= CGROUP_MASK_IO | CGROUP_MASK_BLKIO;
 
         if (c->memory_accounting ||
             c->memory_limit != (uint64_t) -1)
@@ -765,7 +1029,7 @@ int unit_set_cgroup_path(Unit *u, const char *path) {
 }
 
 int unit_watch_cgroup(Unit *u) {
-        _cleanup_free_ char *populated = NULL;
+        _cleanup_free_ char *events = NULL;
         int r;
 
         assert(u);
@@ -791,11 +1055,11 @@ int unit_watch_cgroup(Unit *u) {
         if (r < 0)
                 return log_oom();
 
-        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "cgroup.populated", &populated);
+        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "cgroup.events", &events);
         if (r < 0)
                 return log_oom();
 
-        u->cgroup_inotify_wd = inotify_add_watch(u->manager->cgroup_inotify_fd, populated, IN_MODIFY);
+        u->cgroup_inotify_wd = inotify_add_watch(u->manager->cgroup_inotify_fd, events, IN_MODIFY);
         if (u->cgroup_inotify_wd < 0) {
 
                 if (errno == ENOENT) /* If the directory is already
@@ -857,6 +1121,7 @@ static int unit_create_cgroup(
         /* Keep track that this is now realized */
         u->cgroup_realized = true;
         u->cgroup_realized_mask = target_mask;
+        u->cgroup_enabled_mask = enable_mask;
 
         if (u->type != UNIT_SLICE && !c->delegate) {
 
@@ -886,10 +1151,10 @@ int unit_attach_pids_to_cgroup(Unit *u) {
         return 0;
 }
 
-static bool unit_has_mask_realized(Unit *u, CGroupMask target_mask) {
+static bool unit_has_mask_realized(Unit *u, CGroupMask target_mask, CGroupMask enable_mask) {
         assert(u);
 
-        return u->cgroup_realized && u->cgroup_realized_mask == target_mask;
+        return u->cgroup_realized && u->cgroup_realized_mask == target_mask && u->cgroup_enabled_mask == enable_mask;
 }
 
 /* Check if necessary controllers and attributes for a unit are in place.
@@ -910,7 +1175,9 @@ static int unit_realize_cgroup_now(Unit *u, ManagerState state) {
         }
 
         target_mask = unit_get_target_mask(u);
-        if (unit_has_mask_realized(u, target_mask))
+        enable_mask = unit_get_enable_mask(u);
+
+        if (unit_has_mask_realized(u, target_mask, enable_mask))
                 return 0;
 
         /* First, realize parents */
@@ -921,7 +1188,6 @@ static int unit_realize_cgroup_now(Unit *u, ManagerState state) {
         }
 
         /* And then do the real work */
-        enable_mask = unit_get_enable_mask(u);
         r = unit_create_cgroup(u, target_mask, enable_mask);
         if (r < 0)
                 return r;
@@ -990,7 +1256,7 @@ static void unit_queue_siblings(Unit *u) {
                         /* If the unit doesn't need any new controllers
                          * and has current ones realized, it doesn't need
                          * any changes. */
-                        if (unit_has_mask_realized(m, unit_get_target_mask(m)))
+                        if (unit_has_mask_realized(m, unit_get_target_mask(m), unit_get_enable_mask(m)))
                                 continue;
 
                         unit_add_to_cgroup_queue(m);
@@ -1069,6 +1335,7 @@ void unit_prune_cgroup(Unit *u) {
 
         u->cgroup_realized = false;
         u->cgroup_realized_mask = 0;
+        u->cgroup_enabled_mask = 0;
 }
 
 int unit_search_main_pid(Unit *u, pid_t *ret) {
@@ -1265,7 +1532,7 @@ int manager_setup_cgroup(Manager *m) {
          * it. This is to support live upgrades from older systemd
          * versions where PID 1 was moved there. Also see
          * cg_get_root_path(). */
-        if (!e && m->running_as == MANAGER_SYSTEM) {
+        if (!e && MANAGER_IS_SYSTEM(m)) {
                 e = endswith(m->cgroup_root, "/" SPECIAL_SYSTEM_SLICE);
                 if (!e)
                         e = endswith(m->cgroup_root, "/system"); /* even more legacy */
@@ -1312,13 +1579,15 @@ int manager_setup_cgroup(Manager *m) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to watch control group inotify object: %m");
 
-                        r = sd_event_source_set_priority(m->cgroup_inotify_event_source, SD_EVENT_PRIORITY_IDLE - 5);
+                        /* Process cgroup empty notifications early, but after service notifications and SIGCHLD. Also
+                         * see handling of cgroup agent notifications, for the classic cgroup hierarchy support. */
+                        r = sd_event_source_set_priority(m->cgroup_inotify_event_source, SD_EVENT_PRIORITY_NORMAL-5);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set priority of inotify event source: %m");
 
                         (void) sd_event_source_set_description(m->cgroup_inotify_event_source, "cgroup-inotify");
 
-                } else if (m->running_as == MANAGER_SYSTEM) {
+                } else if (MANAGER_IS_SYSTEM(m)) {
 
                         /* On the legacy hierarchy we only get
                          * notifications via cgroup agents. (Which
@@ -1458,6 +1727,8 @@ int manager_notify_cgroup_empty(Manager *m, const char *cgroup) {
         assert(m);
         assert(cgroup);
 
+        log_debug("Got cgroup empty notification for: %s", cgroup);
+
         u = manager_get_unit_by_cgroup(m, cgroup);
         if (!u)
                 return 0;
@@ -1594,6 +1865,10 @@ void unit_invalidate_cgroup(Unit *u, CGroupMask m) {
         if (m == 0)
                 return;
 
+        /* always invalidate compat pairs together */
+        if (m & (CGROUP_MASK_IO | CGROUP_MASK_BLKIO))
+                m |= CGROUP_MASK_IO | CGROUP_MASK_BLKIO;
+
         if ((u->cgroup_realized_mask & m) == 0)
                 return;
 
@@ -1608,7 +1883,7 @@ void manager_invalidate_startup_units(Manager *m) {
         assert(m);
 
         SET_FOREACH(u, m->startup_units, i)
-                unit_invalidate_cgroup(u, CGROUP_MASK_CPU|CGROUP_MASK_BLKIO);
+                unit_invalidate_cgroup(u, CGROUP_MASK_CPU|CGROUP_MASK_IO|CGROUP_MASK_BLKIO);
 }
 
 static const char* const cgroup_device_policy_table[_CGROUP_DEVICE_POLICY_MAX] = {

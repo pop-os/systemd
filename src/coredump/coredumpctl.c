@@ -54,7 +54,7 @@ static enum {
 } arg_action = ACTION_LIST;
 static const char* arg_field = NULL;
 static const char *arg_directory = NULL;
-static int arg_no_pager = false;
+static bool arg_no_pager = false;
 static int arg_no_legend = false;
 static int arg_one = false;
 static FILE* arg_output = NULL;
@@ -664,7 +664,7 @@ static int save_core(sd_journal *j, int fd, char **path, bool *unlink_temp) {
 #endif
                 } else {
                         if (r == -ENOENT)
-                                log_error("Cannot retrieve coredump from journal nor disk.");
+                                log_error("Cannot retrieve coredump from journal or disk.");
                         else
                                 log_error_errno(r, "Failed to retrieve COREDUMP field: %m");
                         goto error;
@@ -852,9 +852,7 @@ int main(int argc, char *argv[]) {
 
         case ACTION_LIST:
         case ACTION_INFO:
-                if (!arg_no_pager)
-                        pager_open(false);
-
+                pager_open(arg_no_pager, false);
                 r = dump_list(j);
                 break;
 
