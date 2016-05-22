@@ -16,10 +16,10 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 157 insertions(+), 101 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 510f018..c4cc217 100644
+index edd9179..862ecd5 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1093,8 +1093,25 @@ int get_timezone(char **tz) {
+@@ -1114,8 +1114,25 @@ int get_timezone(char **tz) {
          int r;
  
          r = readlink_malloc("/etc/localtime", &t);
@@ -81,10 +81,10 @@ index ccf61d2..119d284 100644
          for (i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
 diff --git a/src/locale/localed.c b/src/locale/localed.c
-index f0fe59c..236fba7 100644
+index 3b22a58..39fd465 100644
 --- a/src/locale/localed.c
 +++ b/src/locale/localed.c
-@@ -163,6 +163,24 @@ static int locale_read_data(Context *c) {
+@@ -164,6 +164,24 @@ static int locale_read_data(Context *c) {
                             "LC_IDENTIFICATION", &c->locale[LOCALE_LC_IDENTIFICATION],
                             NULL);
  
@@ -109,7 +109,7 @@ index f0fe59c..236fba7 100644
          if (r == -ENOENT) {
                  int p;
  
-@@ -200,67 +218,17 @@ static int vconsole_read_data(Context *c) {
+@@ -201,67 +219,17 @@ static int vconsole_read_data(Context *c) {
  }
  
  static int x11_read_data(Context *c) {
@@ -184,7 +184,7 @@ index f0fe59c..236fba7 100644
  }
  
  static int context_read_data(Context *c) {
-@@ -276,10 +244,15 @@ static int context_read_data(Context *c) {
+@@ -277,10 +245,15 @@ static int context_read_data(Context *c) {
  static int locale_write_data(Context *c, char ***settings) {
          int r, p;
          _cleanup_strv_free_ char **l = NULL;
@@ -201,7 +201,7 @@ index f0fe59c..236fba7 100644
          if (r < 0 && r != -ENOENT)
                  return r;
  
-@@ -306,13 +279,13 @@ static int locale_write_data(Context *c, char ***settings) {
+@@ -307,13 +280,13 @@ static int locale_write_data(Context *c, char ***settings) {
          }
  
          if (strv_isempty(l)) {
@@ -217,7 +217,7 @@ index f0fe59c..236fba7 100644
          if (r < 0)
                  return r;
  
-@@ -433,65 +406,99 @@ static int vconsole_write_data(Context *c) {
+@@ -434,65 +407,99 @@ static int vconsole_write_data(Context *c) {
  }
  
  static int x11_write_data(Context *c) {
@@ -357,7 +357,7 @@ index f0fe59c..236fba7 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 4e12056..0d95316 100644
+index ffec609..387d245 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -86,6 +86,7 @@ static int context_read_data(Context *c) {

@@ -12,12 +12,12 @@ Forwarded: http://lists.freedesktop.org/archives/systemd-devel/2014-April/018960
  1 file changed, 6 insertions(+)
 
 diff --git a/src/shared/sleep-config.c b/src/shared/sleep-config.c
-index a0aef66..36549c2 100644
+index f00624d..0164eac 100644
 --- a/src/shared/sleep-config.c
 +++ b/src/shared/sleep-config.c
-@@ -231,6 +231,12 @@ static bool enough_memory_for_hibernation(void) {
-         size_t size = 0, used = 0;
-         int r;
+@@ -235,6 +235,12 @@ static bool enough_memory_for_hibernation(void) {
+         if (getenv_bool("SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK") > 0)
+                 return true;
  
 +        /* TuxOnIce is an alternate implementation for hibernation.
 +         * It can be configured to compress the image to a file or an inactive

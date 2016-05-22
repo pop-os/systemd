@@ -14,10 +14,10 @@ Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
  1 file changed, 1 insertion(+), 18 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index d39e3dc..b3474d8 100644
+index 2fff3f2..8919d13 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -3544,24 +3544,7 @@ int unit_kill_context(
+@@ -3588,24 +3588,7 @@ int unit_kill_context(
                                  log_unit_warning_errno(u, r, "Failed to kill control group %s, ignoring: %m", u->cgroup_path);
  
                  } else if (r > 0) {
@@ -30,7 +30,7 @@ index d39e3dc..b3474d8 100644
 -                         * cases. It doesn't work at all in
 -                         * containers, and outside of containers it
 -                         * can be confused easily by left-over
--                         * directories in the cgroup -- which however
+-                         * directories in the cgroup — which however
 -                         * should not exist in non-delegated units. On
 -                         * the unified hierarchy that's different,
 -                         * there we get proper events. Hence rely on

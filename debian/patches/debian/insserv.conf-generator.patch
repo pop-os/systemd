@@ -25,10 +25,10 @@ It has the following modifications:
  create mode 100644 src/insserv-generator/insserv-generator.c
 
 diff --git a/Makefile.am b/Makefile.am
-index 1caaccd..2db5ea6 100644
+index 305099a..5836478 100644
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -421,6 +421,7 @@ rootlibexec_PROGRAMS += \
+@@ -406,6 +406,7 @@ rootlibexec_PROGRAMS += \
  endif
  
  systemgenerator_PROGRAMS = \
@@ -36,7 +36,7 @@ index 1caaccd..2db5ea6 100644
  	systemd-getty-generator \
  	systemd-fstab-generator \
  	systemd-system-update-generator \
-@@ -2549,6 +2550,13 @@ systemd_delta_LDADD = \
+@@ -2615,6 +2616,13 @@ systemd_delta_LDADD = \
  	libshared.la
  
  # ------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ index 0000000..9d07505
 +.PHONY: all clean
 diff --git a/src/insserv-generator/insserv-generator.c b/src/insserv-generator/insserv-generator.c
 new file mode 100644
-index 0000000..665579c
+index 0000000..58c1ed2
 --- /dev/null
 +++ b/src/insserv-generator/insserv-generator.c
 @@ -0,0 +1,333 @@
@@ -387,7 +387,7 @@ index 0000000..665579c
 +
 +                while ((de = readdir(d))) {
 +                        char *path = NULL;
-+                        if (hidden_file(de->d_name))
++                        if (hidden_or_backup_file(de->d_name))
 +                                continue;
 +
 +                        path = strjoin("/etc/insserv.conf.d/", de->d_name, NULL);

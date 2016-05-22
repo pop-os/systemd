@@ -9,10 +9,10 @@ launching systemd user instances.
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/src/login/systemd-user.m4 b/src/login/systemd-user.m4
-index 7933508..f35e779 100644
+index f188a8e..f20d402 100644
 --- a/src/login/systemd-user.m4
 +++ b/src/login/systemd-user.m4
-@@ -2,10 +2,11 @@
+@@ -2,11 +2,12 @@
  #
  # Used by systemd --user instances.
  
@@ -23,6 +23,7 @@ index 7933508..f35e779 100644
  session  required pam_selinux.so close
  session  required pam_selinux.so nottys open
  )m4_dnl
+ session  required pam_loginuid.so
 -session  include system-auth
-+@include common-session-noninteractive
-+session optional pam_systemd.so
+++@include common-session-noninteractive
+++session optional pam_systemd.so

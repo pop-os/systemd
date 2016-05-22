@@ -21,14 +21,14 @@ This reverts commit fe30727643a7c53faa29f1caa8dcabcb2b6f6fcb.
 Signed-off-by: Stefan Lippers-Hollmann <s.l-h@gmx.de>
 ---
  src/network/networkd-link.c  | 20 ++++++++++++--------
- src/network/networkd-ndisc.c | 13 ++++++++-----
- 2 files changed, 20 insertions(+), 13 deletions(-)
+ src/network/networkd-ndisc.c | 12 ++++++++----
+ 2 files changed, 20 insertions(+), 12 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 692c0bf..16c9927 100644
+index a021fc8..999f6d5 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -623,9 +623,6 @@ void link_check_ready(Link *link) {
+@@ -712,9 +712,6 @@ void link_check_ready(Link *link) {
               !link->dhcp4_configured && !link->dhcp6_configured))
                  return;
  
@@ -38,7 +38,7 @@ index 692c0bf..16c9927 100644
          SET_FOREACH(a, link->addresses, i)
                  if (!address_is_ready(a))
                          return;
-@@ -1923,6 +1920,7 @@ static int link_set_ipv6_privacy_extensions(Link *link) {
+@@ -2132,6 +2129,7 @@ static int link_set_ipv6_privacy_extensions(Link *link) {
  
  static int link_set_ipv6_accept_ra(Link *link) {
          const char *p = NULL;
@@ -46,7 +46,7 @@ index 692c0bf..16c9927 100644
          int r;
  
          /* Make this a NOP if IPv6 is not available */
-@@ -1935,12 +1933,16 @@ static int link_set_ipv6_accept_ra(Link *link) {
+@@ -2144,12 +2142,16 @@ static int link_set_ipv6_accept_ra(Link *link) {
          if (!link->network)
                  return 0;
  
@@ -66,7 +66,7 @@ index 692c0bf..16c9927 100644
  
          return 0;
  }
-@@ -2001,6 +2003,7 @@ static int link_set_ipv6_hop_limit(Link *link) {
+@@ -2210,6 +2212,7 @@ static int link_set_ipv6_hop_limit(Link *link) {
          return 0;
  }
  
@@ -74,7 +74,7 @@ index 692c0bf..16c9927 100644
  static int link_drop_foreign_config(Link *link) {
          Address *address;
          Route *route;
-@@ -2008,7 +2011,6 @@ static int link_drop_foreign_config(Link *link) {
+@@ -2217,7 +2220,6 @@ static int link_drop_foreign_config(Link *link) {
          int r;
  
          SET_FOREACH(address, link->addresses_foreign, i) {
@@ -82,7 +82,7 @@ index 692c0bf..16c9927 100644
                  if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1)
                          continue;
  
-@@ -2018,7 +2020,6 @@ static int link_drop_foreign_config(Link *link) {
+@@ -2227,7 +2229,6 @@ static int link_drop_foreign_config(Link *link) {
          }
  
          SET_FOREACH(route, link->routes_foreign, i) {
@@ -90,15 +90,15 @@ index 692c0bf..16c9927 100644
                  if (route->protocol == RTPROT_KERNEL)
                          continue;
  
-@@ -2029,6 +2030,7 @@ static int link_drop_foreign_config(Link *link) {
+@@ -2238,6 +2239,7 @@ static int link_drop_foreign_config(Link *link) {
  
          return 0;
  }
 +*/
  
- static int link_configure(Link *link) {
+ static int link_update_lldp(Link *link) {
          int r;
-@@ -2039,11 +2041,13 @@ static int link_configure(Link *link) {
+@@ -2269,11 +2271,13 @@ static int link_configure(Link *link) {
  
          /* Drop foreign config, but ignore loopback or critical devices.
           * We do not want to remove loopback address or addresses used for root NFS. */
@@ -113,29 +113,28 @@ index 692c0bf..16c9927 100644
          r = link_set_bridge_fdb(link);
          if (r < 0)
 diff --git a/src/network/networkd-ndisc.c b/src/network/networkd-ndisc.c
-index f2287be..5f362e9 100644
+index 1a380bd..22bc79d 100644
 --- a/src/network/networkd-ndisc.c
 +++ b/src/network/networkd-ndisc.c
-@@ -24,7 +24,7 @@
- #include "sd-ndisc.h"
+@@ -26,6 +26,7 @@
  
- #include "networkd-link.h"
--
+ #include "networkd.h"
+ 
 +/*
  static int ndisc_netlink_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userdata) {
          _cleanup_link_unref_ Link *link = userdata;
          int r;
-@@ -75,7 +75,6 @@ static void ndisc_prefix_autonomous_handler(sd_ndisc *nd, const struct in6_addr
+@@ -76,7 +77,6 @@ static void ndisc_prefix_autonomous_handler(sd_ndisc *nd, const struct in6_addr
          if (in_addr_is_null(AF_INET6, (const union in_addr_union *) &link->network->ipv6_token) == 0)
                  memcpy(((char *)&address->in_addr.in6) + 8, ((char *)&link->network->ipv6_token) + 8, 8);
          else {
 -                /* see RFC4291 section 2.5.1 */
-                 address->in_addr.in6.__in6_u.__u6_addr8[8]  = link->mac.ether_addr_octet[0];
-                 address->in_addr.in6.__in6_u.__u6_addr8[8] ^= 1 << 1;
-                 address->in_addr.in6.__in6_u.__u6_addr8[9]  = link->mac.ether_addr_octet[1];
-@@ -138,11 +137,12 @@ static void ndisc_prefix_onlink_handler(sd_ndisc *nd, const struct in6_addr *pre
+                 address->in_addr.in6.s6_addr[8]  = link->mac.ether_addr_octet[0];
+                 address->in_addr.in6.s6_addr[8] ^= 1 << 1;
+                 address->in_addr.in6.s6_addr[9]  = link->mac.ether_addr_octet[1];
+@@ -139,11 +139,12 @@ static void ndisc_prefix_onlink_handler(sd_ndisc *nd, const struct in6_addr *pre
  
-         link->ndisc_messages ++;
+         link->ndisc_messages++;
  }
 +*/
  
@@ -147,7 +146,7 @@ index f2287be..5f362e9 100644
          int r;
  
          assert(link);
-@@ -161,6 +161,8 @@ static void ndisc_router_handler(sd_ndisc *nd, uint8_t flags, const struct in6_a
+@@ -166,6 +167,8 @@ static void ndisc_router_handler(sd_ndisc *nd, uint8_t flags, const struct in6_a
                          log_link_warning_errno(link, r, "Starting DHCPv6 client on NDisc request failed: %m");
          }
  
@@ -156,15 +155,15 @@ index f2287be..5f362e9 100644
          if (!gateway)
                  return;
  
-@@ -187,6 +189,7 @@ static void ndisc_router_handler(sd_ndisc *nd, uint8_t flags, const struct in6_a
+@@ -192,6 +195,7 @@ static void ndisc_router_handler(sd_ndisc *nd, uint8_t flags, const struct in6_a
          }
  
-         link->ndisc_messages ++;
+         link->ndisc_messages++;
 +*/
  }
  
  static void ndisc_handler(sd_ndisc *nd, int event, void *userdata) {
-@@ -240,8 +243,8 @@ int ndisc_configure(Link *link) {
+@@ -249,8 +253,8 @@ int ndisc_configure(Link *link) {
  
          r = sd_ndisc_set_callback(link->ndisc_router_discovery,
                                    ndisc_router_handler,

@@ -30,7 +30,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1578080
  4 files changed, 7 insertions(+), 10 deletions(-)
 
 diff --git a/man/systemd-system.conf.xml b/man/systemd-system.conf.xml
-index edc6df9..0227347 100644
+index 8833e73..9b2324c 100644
 --- a/man/systemd-system.conf.xml
 +++ b/man/systemd-system.conf.xml
 @@ -317,9 +317,7 @@
@@ -54,11 +54,11 @@ index edc6df9..0227347 100644
  
        <varlistentry>
 diff --git a/src/core/main.c b/src/core/main.c
-index 77f9239..1da388b 100644
+index 5f6d96a..75172d5 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -123,8 +123,8 @@ static FILE* arg_serialization = NULL;
- static bool arg_default_cpu_accounting = false;
+@@ -125,8 +125,8 @@ static bool arg_default_cpu_accounting = false;
+ static bool arg_default_io_accounting = false;
  static bool arg_default_blockio_accounting = false;
  static bool arg_default_memory_accounting = false;
 -static bool arg_default_tasks_accounting = true;
@@ -67,27 +67,27 @@ index 77f9239..1da388b 100644
 +static uint64_t arg_default_tasks_max = (uint64_t) -1;
  static sd_id128_t arg_machine_id = {};
  
- static void pager_open_if_enabled(void) {
+ noreturn static void freeze_or_reboot(void) {
 diff --git a/src/core/manager.c b/src/core/manager.c
-index f36cf5e..4240dac 100644
+index 7838f56..7339652 100644
 --- a/src/core/manager.c
 +++ b/src/core/manager.c
-@@ -578,8 +578,7 @@ int manager_new(ManagerRunningAs running_as, bool test_run, Manager **_m) {
-         m->running_as = running_as;
+@@ -564,8 +564,7 @@ int manager_new(UnitFileScope scope, bool test_run, Manager **_m) {
+         m->unit_file_scope = scope;
          m->exit_code = _MANAGER_EXIT_CODE_INVALID;
          m->default_timer_accuracy_usec = USEC_PER_MINUTE;
 -        m->default_tasks_accounting = true;
 -        m->default_tasks_max = UINT64_C(512);
 +        m->default_tasks_max = (uint64_t) -1;
  
-         /* Prepare log fields we can use for structured logging */
-         m->unit_log_field = unit_log_fields[running_as];
+ #ifdef ENABLE_EFI
+         if (MANAGER_IS_SYSTEM(m) && detect_container() <= 0)
 diff --git a/src/core/system.conf b/src/core/system.conf
-index e2ded27..63bff08 100644
+index db8b7ac..fd9b60e 100644
 --- a/src/core/system.conf
 +++ b/src/core/system.conf
-@@ -40,8 +40,8 @@
- #DefaultCPUAccounting=no
+@@ -41,8 +41,8 @@
+ #DefaultIOAccounting=no
  #DefaultBlockIOAccounting=no
  #DefaultMemoryAccounting=no
 -#DefaultTasksAccounting=yes

@@ -12,6 +12,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_226@LIBSYSTEMD_226 226
  LIBSYSTEMD_227@LIBSYSTEMD_227 227
  LIBSYSTEMD_229@LIBSYSTEMD_229 229
+ LIBSYSTEMD_230@LIBSYSTEMD_230 230
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -346,7 +347,9 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_journal_open@LIBSYSTEMD_209 0
  sd_journal_open_container@LIBSYSTEMD_209 0
  sd_journal_open_directory@LIBSYSTEMD_209 0
+ sd_journal_open_directory_fd@LIBSYSTEMD_230 230
  sd_journal_open_files@LIBSYSTEMD_209 0
+ sd_journal_open_files_fd@LIBSYSTEMD_230 230
  sd_journal_perror@LIBSYSTEMD_209 0
  sd_journal_perror_with_location@LIBSYSTEMD_209 0
  sd_journal_previous@LIBSYSTEMD_209 0

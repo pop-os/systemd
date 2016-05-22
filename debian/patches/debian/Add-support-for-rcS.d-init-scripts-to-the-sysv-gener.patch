@@ -12,10 +12,10 @@ adjustments to the test suite.
  4 files changed, 38 insertions(+), 10 deletions(-)
 
 diff --git a/man/systemd.special.xml b/man/systemd.special.xml
-index 055d854..41e55a8 100644
+index 26974ed..611313b 100644
 --- a/man/systemd.special.xml
 +++ b/man/systemd.special.xml
-@@ -344,6 +344,11 @@
+@@ -345,6 +345,11 @@
            target unit for those mounts listed in
            <filename>/etc/fstab</filename> that have the
            <option>auto</option> mount option set.</para>
@@ -28,7 +28,7 @@ index 055d854..41e55a8 100644
        </varlistentry>
        <varlistentry>
 diff --git a/src/insserv-generator/insserv-generator.c b/src/insserv-generator/insserv-generator.c
-index 665579c..71cffe1 100644
+index 58c1ed2..7f1ada0 100644
 --- a/src/insserv-generator/insserv-generator.c
 +++ b/src/insserv-generator/insserv-generator.c
 @@ -65,7 +65,7 @@ static int sysv_translate_facility(const char *name, const char *filename, char
@@ -41,7 +41,7 @@ index 665579c..71cffe1 100644
                  "named",                SPECIAL_NSS_LOOKUP_TARGET,
                  "portmap",              SPECIAL_RPCBIND_TARGET,
 diff --git a/src/sysv-generator/sysv-generator.c b/src/sysv-generator/sysv-generator.c
-index 5a6818a..8a715bb 100644
+index fe4bbee..fe1cbdd 100644
 --- a/src/sysv-generator/sysv-generator.c
 +++ b/src/sysv-generator/sysv-generator.c
 @@ -43,6 +43,7 @@
@@ -127,7 +127,7 @@ index 5a6818a..8a715bb 100644
                  if (other->sysv_start_priority < s->sysv_start_priority) {
                          r = strv_extend(&s->after, other->name);
                          if (r < 0)
-@@ -870,8 +889,12 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
+@@ -911,8 +930,12 @@ static int set_dependencies_from_rcnd(const LookupPaths *lp, Hashmap *all_servic
                                  }
  
                                  if (de->d_name[0] == 'S')  {
@@ -142,10 +142,10 @@ index 5a6818a..8a715bb 100644
  
                                          r = set_ensure_allocated(&runlevel_services[i], NULL);
 diff --git a/test/sysv-generator-test.py b/test/sysv-generator-test.py
-index aca5f1e..04bc598 100644
+index 838dd57..f92bf25 100755
 --- a/test/sysv-generator-test.py
 +++ b/test/sysv-generator-test.py
-@@ -184,7 +184,7 @@ class SysvGeneratorTest(unittest.TestCase):
+@@ -186,7 +186,7 @@ class SysvGeneratorTest(unittest.TestCase):
          # $local_fs does not need translation, don't expect any dependency
          # fields here
          self.assertEqual(set(s.options('Unit')),
@@ -154,7 +154,7 @@ index aca5f1e..04bc598 100644
  
          self.assertEqual(s.get('Service', 'Type'), 'forking')
          init_script = os.path.join(self.init_d_dir, 'foo')
-@@ -260,9 +260,9 @@ class SysvGeneratorTest(unittest.TestCase):
+@@ -262,9 +262,9 @@ class SysvGeneratorTest(unittest.TestCase):
                           ['may1.service', 'must1.service', 'must2.service', 'ne_may2.service'])
  
          # other services should not depend on each other
@@ -167,7 +167,7 @@ index aca5f1e..04bc598 100644
  
      def test_symlink_prio_deps(self):
          '''script without LSB headers use rcN.d priority'''
-@@ -292,7 +292,7 @@ class SysvGeneratorTest(unittest.TestCase):
+@@ -294,7 +294,7 @@ class SysvGeneratorTest(unittest.TestCase):
          err, results = self.run_generator()
          self.assertEqual(list(results), ['foo.service'])
          self.assertEqual(set(results['foo.service'].options('Unit')),

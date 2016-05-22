@@ -1,5 +1,10 @@
-systemd (229-7) UNRELEASED; urgency=medium
+systemd (230-1) UNRELEASED; urgency=medium
 
+  * New upstream release 230.
+    - Fix rare assertion failure in hashmaps. (Closes: #816612)
+    - Fix leaking scope units. (Closes: #805477)
+    - Fix wrong socket ownership after daemon-reload. (LP: #1577001)
+    - udev: Fix touch screen detection. (LP: #1530384)
   * Drop cmdline-upstart-boot autopkgtest. It was still needed up to Ubuntu
     16.04 LTS, but upstart-sysv is not supported any more in Debian and Ubuntu
     now.

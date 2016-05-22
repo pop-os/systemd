@@ -13,7 +13,7 @@ Closes: #721347
  1 file changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/configure.ac b/configure.ac
-index 5fd73c5..6da892b 100644
+index 329861a..6e18b75 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -94,16 +94,16 @@ AC_PROG_AWK
