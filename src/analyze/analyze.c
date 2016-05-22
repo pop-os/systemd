@@ -28,6 +28,7 @@
 #include "alloc-util.h"
 #include "analyze-verify.h"
 #include "bus-error.h"
+#include "bus-unit-util.h"
 #include "bus-util.h"
 #include "glob-util.h"
 #include "hashmap.h"
@@ -60,7 +61,7 @@
                 svg("  <text class=\"%s\" x=\"%.03f\" y=\"%.03f\">", (b) ? "left" : "right", SCALE_X * (x) + (b ? 5.0 : -5.0), SCALE_Y * (y) + 14.0); \
                 svg(format, ## __VA_ARGS__);                            \
                 svg("</text>\n");                                       \
-        } while(false)
+        } while (false)
 
 static enum dot {
         DEP_ALL,
@@ -122,14 +123,6 @@ struct host_info {
         char *virtualization;
         char *architecture;
 };
-
-static void pager_open_if_enabled(void) {
-
-        if (arg_no_pager)
-                return;
-
-        pager_open(false);
-}
 
 static int bus_get_uint64_property(sd_bus *bus, const char *path, const char *interface, const char *property, uint64_t *val) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -759,9 +752,9 @@ static int list_dependencies_print(const char *name, unsigned int level, unsigne
         char ts[FORMAT_TIMESPAN_MAX], ts2[FORMAT_TIMESPAN_MAX];
 
         for (i = level; i != 0; i--)
-                printf("%s", draw_special_char(branches & (1 << (i-1)) ? DRAW_TREE_VERTICAL : DRAW_TREE_SPACE));
+                printf("%s", special_glyph(branches & (1 << (i-1)) ? TREE_VERTICAL : TREE_SPACE));
 
-        printf("%s", draw_special_char(last ? DRAW_TREE_RIGHT : DRAW_TREE_BRANCH));
+        printf("%s", special_glyph(last ? TREE_RIGHT : TREE_BRANCH));
 
         if (times) {
                 if (times->time)
@@ -965,7 +958,7 @@ static int analyze_critical_chain(sd_bus *bus, char *names[]) {
         }
         unit_times_hashmap = h;
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         puts("The time after the unit is active or started is printed after the \"@\" character.\n"
              "The time the unit takes to start is printed after the \"+\" character.\n");
@@ -993,7 +986,7 @@ static int analyze_blame(sd_bus *bus) {
 
         qsort(times, n, sizeof(struct unit_times), compare_unit_time);
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         for (i = 0; i < (unsigned) n; i++) {
                 char ts[FORMAT_TIMESPAN_MAX];
@@ -1206,7 +1199,7 @@ static int dump(sd_bus *bus, char **args) {
                 return -E2BIG;
         }
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         r = sd_bus_call_method(
                         bus,
@@ -1284,7 +1277,7 @@ static int set_log_target(sd_bus *bus, char **args) {
 
 static void help(void) {
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         printf("%s [OPTIONS...] {COMMAND} ...\n\n"
                "Profile systemd, show unit dependencies, check unit files.\n\n"
@@ -1451,7 +1444,7 @@ int main(int argc, char *argv[]) {
 
         if (streq_ptr(argv[optind], "verify"))
                 r = verify_units(argv+optind+1,
-                                 arg_user ? MANAGER_USER : MANAGER_SYSTEM,
+                                 arg_user ? UNIT_FILE_USER : UNIT_FILE_SYSTEM,
                                  arg_man);
         else {
                 _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;

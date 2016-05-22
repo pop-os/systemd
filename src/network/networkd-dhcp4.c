@@ -24,7 +24,7 @@
 #include "dhcp-lease-internal.h"
 #include "hostname-util.h"
 #include "network-internal.h"
-#include "networkd-link.h"
+#include "networkd.h"
 
 static int dhcp4_route_handler(sd_netlink *rtnl, sd_netlink_message *m,
                                void *userdata) {
@@ -34,7 +34,7 @@ static int dhcp4_route_handler(sd_netlink *rtnl, sd_netlink_message *m,
         assert(link);
         assert(link->dhcp4_messages > 0);
 
-        link->dhcp4_messages --;
+        link->dhcp4_messages--;
 
         r = sd_netlink_message_get_errno(m);
         if (r < 0 && r != -EEXIST) {
@@ -57,6 +57,10 @@ static int link_set_dhcp_routes(Link *link) {
 
         assert(link);
         assert(link->dhcp_lease);
+        assert(link->network);
+
+        if (!link->network->dhcp_use_routes)
+                return 0;
 
         r = sd_dhcp_lease_get_router(link->dhcp_lease, &gateway);
         if (r < 0 && r != -ENODATA)
@@ -92,25 +96,25 @@ static int link_set_dhcp_routes(Link *link) {
                 route_gw->protocol = RTPROT_DHCP;
                 route_gw->priority = link->network->dhcp_route_metric;
 
-                r = route_configure(route_gw, link, &dhcp4_route_handler);
+                r = route_configure(route_gw, link, dhcp4_route_handler);
                 if (r < 0)
                         return log_link_warning_errno(link, r, "Could not set host route: %m");
 
-                link->dhcp4_messages ++;
+                link->dhcp4_messages++;
 
                 route->family = AF_INET;
                 route->gw.in = gateway;
                 route->prefsrc.in = address;
                 route->priority = link->network->dhcp_route_metric;
 
-                r = route_configure(route, link, &dhcp4_route_handler);
+                r = route_configure(route, link, dhcp4_route_handler);
                 if (r < 0) {
                         log_link_warning_errno(link, r, "Could not set routes: %m");
                         link_enter_failed(link);
                         return r;
                 }
 
-                link->dhcp4_messages ++;
+                link->dhcp4_messages++;
         }
 
         n = sd_dhcp_lease_get_routes(link->dhcp_lease, &static_routes);
@@ -133,11 +137,11 @@ static int link_set_dhcp_routes(Link *link) {
                 assert_se(sd_dhcp_route_get_destination_prefix_length(static_routes[i], &route->dst_prefixlen) >= 0);
                 route->priority = link->network->dhcp_route_metric;
 
-                r = route_configure(route, link, &dhcp4_route_handler);
+                r = route_configure(route, link, dhcp4_route_handler);
                 if (r < 0)
                         return log_link_warning_errno(link, r, "Could not set host route: %m");
 
-                link->dhcp4_messages ++;
+                link->dhcp4_messages++;
         }
 
         return 0;
@@ -173,7 +177,7 @@ static int dhcp_lease_lost(Link *link) {
                                         assert_se(sd_dhcp_route_get_destination_prefix_length(routes[i], &route->dst_prefixlen) >= 0);
 
                                         route_remove(route, link,
-                                                   &link_route_remove_handler);
+                                                     link_route_remove_handler);
                                 }
                         }
                 }
@@ -194,7 +198,7 @@ static int dhcp_lease_lost(Link *link) {
                                 route_gw->scope = RT_SCOPE_LINK;
 
                                 route_remove(route_gw, link,
-                                           &link_route_remove_handler);
+                                             link_route_remove_handler);
                         }
 
                         r = route_new(&route);
@@ -203,7 +207,7 @@ static int dhcp_lease_lost(Link *link) {
                                 route->gw.in = gateway;
 
                                 route_remove(route, link,
-                                           &link_route_remove_handler);
+                                             link_route_remove_handler);
                         }
                 }
 
@@ -217,7 +221,7 @@ static int dhcp_lease_lost(Link *link) {
                         address->in_addr.in = addr;
                         address->prefixlen = prefixlen;
 
-                        address_remove(address, link, &link_address_remove_handler);
+                        address_remove(address, link, link_address_remove_handler);
                 }
         }
 
@@ -305,7 +309,7 @@ static int dhcp4_update_address(Link *link,
 
         /* allow reusing an existing address and simply update its lifetime
          * in case it already exists */
-        r = address_configure(addr, link, &dhcp4_address_handler, true);
+        r = address_configure(addr, link, dhcp4_address_handler, true);
         if (r < 0)
                 return r;
 
@@ -624,14 +628,24 @@ int dhcp4_configure(Link *link) {
         }
 
         switch (link->network->dhcp_client_identifier) {
-        case DHCP_CLIENT_ID_DUID:
-                /* Library defaults to this. */
+        case DHCP_CLIENT_ID_DUID: {
+                /* If configured, apply user specified DUID and/or IAID */
+                const DUID *duid = link_duid(link);
+
+                r = sd_dhcp_client_set_iaid_duid(link->dhcp_client,
+                                                 link->network->iaid,
+                                                 duid->type,
+                                                 duid->raw_data_len > 0 ? duid->raw_data : NULL,
+                                                 duid->raw_data_len);
+                if (r < 0)
+                        return r;
                 break;
+        }
         case DHCP_CLIENT_ID_MAC:
                 r = sd_dhcp_client_set_client_id(link->dhcp_client,
                                                  ARPHRD_ETHER,
                                                  (const uint8_t *) &link->mac,
-                                                 sizeof (link->mac));
+                                                 sizeof(link->mac));
                 if (r < 0)
                         return r;
                 break;

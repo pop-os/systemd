@@ -23,7 +23,7 @@
 #include "sd-dhcp6-client.h"
 
 #include "network-internal.h"
-#include "networkd-link.h"
+#include "networkd.h"
 
 static int dhcp6_lease_address_acquired(sd_dhcp6_client *client, Link *link);
 
@@ -103,8 +103,8 @@ static int dhcp6_lease_address_acquired(sd_dhcp6_client *client, Link *link) {
         sd_dhcp6_lease_reset_address_iter(lease);
 
         while (sd_dhcp6_lease_get_address(lease, &ip6_addr,
-                                                &lifetime_preferred,
-                                                &lifetime_valid) >= 0) {
+                                                 &lifetime_preferred,
+                                                 &lifetime_valid) >= 0) {
 
                 r = dhcp6_address_change(link, &ip6_addr, lifetime_preferred, lifetime_valid);
                 if (r < 0)
@@ -194,18 +194,13 @@ int dhcp6_request_address(Link *link) {
         if (r < 0)
                 return r;
 
-        if (running) {
-                r = sd_dhcp6_client_start(link->dhcp6_client);
-                if (r < 0)
-                        return r;
-        }
-
         return 0;
 }
 
 int dhcp6_configure(Link *link) {
         sd_dhcp6_client *client = NULL;
         int r;
+        const DUID *duid;
 
         assert(link);
 
@@ -227,6 +222,18 @@ int dhcp6_configure(Link *link) {
         r = sd_dhcp6_client_set_mac(client,
                                     (const uint8_t *) &link->mac,
                                     sizeof (link->mac), ARPHRD_ETHER);
+        if (r < 0)
+                goto error;
+
+        r = sd_dhcp6_client_set_iaid(client, link->network->iaid);
+        if (r < 0)
+                goto error;
+
+        duid = link_duid(link);
+        r = sd_dhcp6_client_set_duid(client,
+                                     duid->type,
+                                     duid->raw_data_len > 0 ? duid->raw_data : NULL,
+                                     duid->raw_data_len);
         if (r < 0)
                 goto error;
 

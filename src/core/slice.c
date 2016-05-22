@@ -34,6 +34,13 @@ static const UnitActiveState state_translation_table[_SLICE_STATE_MAX] = {
         [SLICE_ACTIVE] = UNIT_ACTIVE
 };
 
+static void slice_init(Unit *u) {
+        assert(u);
+        assert(u->load_state == UNIT_STUB);
+
+        u->ignore_on_isolate = true;
+}
+
 static void slice_set_state(Slice *t, SliceState state) {
         SliceState old_state;
         assert(t);
@@ -128,6 +135,7 @@ static int slice_load(Unit *u) {
         int r;
 
         assert(s);
+        assert(u->load_state == UNIT_STUB);
 
         r = unit_load_fragment_and_dropin_optional(u);
         if (r < 0)
@@ -301,10 +309,9 @@ const UnitVTable slice_vtable = {
                 "Install\0",
         .private_section = "Slice",
 
-        .no_alias = true,
-        .no_instances = true,
         .can_transient = true,
 
+        .init = slice_init,
         .load = slice_load,
 
         .coldplug = slice_coldplug,

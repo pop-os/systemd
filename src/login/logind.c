@@ -41,6 +41,37 @@
 
 static void manager_free(Manager *m);
 
+static void manager_reset_config(Manager *m) {
+        m->n_autovts = 6;
+        m->reserve_vt = 6;
+        m->remove_ipc = true;
+        m->inhibit_delay_max = 5 * USEC_PER_SEC;
+        m->handle_power_key = HANDLE_POWEROFF;
+        m->handle_suspend_key = HANDLE_SUSPEND;
+        m->handle_hibernate_key = HANDLE_HIBERNATE;
+        m->handle_lid_switch = HANDLE_SUSPEND;
+        m->handle_lid_switch_docked = HANDLE_IGNORE;
+        m->power_key_ignore_inhibited = false;
+        m->suspend_key_ignore_inhibited = false;
+        m->hibernate_key_ignore_inhibited = false;
+        m->lid_switch_ignore_inhibited = true;
+
+        m->holdoff_timeout_usec = 30 * USEC_PER_SEC;
+
+        m->idle_action_usec = 30 * USEC_PER_MINUTE;
+        m->idle_action = HANDLE_IGNORE;
+
+        m->runtime_dir_size = PAGE_ALIGN((size_t) (physical_memory() / 10)); /* 10% */
+        m->user_tasks_max = 12288;
+        m->sessions_max = 8192;
+        m->inhibitors_max = 8192;
+
+        m->kill_user_processes = KILL_USER_PROCESSES;
+
+        m->kill_only_users = strv_free(m->kill_only_users);
+        m->kill_exclude_users = strv_free(m->kill_exclude_users);
+}
+
 static Manager *manager_new(void) {
         Manager *m;
         int r;
@@ -52,24 +83,7 @@ static Manager *manager_new(void) {
         m->console_active_fd = -1;
         m->reserve_vt_fd = -1;
 
-        m->n_autovts = 6;
-        m->reserve_vt = 6;
-        m->remove_ipc = true;
-        m->inhibit_delay_max = 5 * USEC_PER_SEC;
-        m->handle_power_key = HANDLE_POWEROFF;
-        m->handle_suspend_key = HANDLE_SUSPEND;
-        m->handle_hibernate_key = HANDLE_HIBERNATE;
-        m->handle_lid_switch = HANDLE_SUSPEND;
-        m->handle_lid_switch_docked = HANDLE_IGNORE;
-        m->lid_switch_ignore_inhibited = true;
-        m->holdoff_timeout_usec = 30 * USEC_PER_SEC;
-
-        m->idle_action_usec = 30 * USEC_PER_MINUTE;
-        m->idle_action = HANDLE_IGNORE;
         m->idle_action_not_before_usec = now(CLOCK_MONOTONIC);
-
-        m->runtime_dir_size = PAGE_ALIGN((size_t) (physical_memory() / 10)); /* 10% */
-        m->user_tasks_max = UINT64_C(12288);
 
         m->devices = hashmap_new(&string_hash_ops);
         m->seats = hashmap_new(&string_hash_ops);
@@ -84,10 +98,6 @@ static Manager *manager_new(void) {
         if (!m->devices || !m->seats || !m->sessions || !m->users || !m->inhibitors || !m->buttons || !m->user_units || !m->session_units)
                 goto fail;
 
-        m->kill_exclude_users = strv_new("root", NULL);
-        if (!m->kill_exclude_users)
-                goto fail;
-
         m->udev = udev_new();
         if (!m->udev)
                 goto fail;
@@ -97,6 +107,8 @@ static Manager *manager_new(void) {
                 goto fail;
 
         sd_event_set_watchdog(m->event, true);
+
+        manager_reset_config(m);
 
         return m;
 
@@ -676,7 +688,7 @@ static int manager_connect_bus(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to register name: %m");
 
-        r = sd_bus_attach_event(m->bus, m->event, 0);
+        r = sd_bus_attach_event(m->bus, m->event, SD_EVENT_PRIORITY_NORMAL);
         if (r < 0)
                 return log_error_errno(r, "Failed to attach bus to event loop: %m");
 
@@ -986,6 +998,30 @@ static int manager_dispatch_idle_action(sd_event_source *s, uint64_t t, void *us
         return 0;
 }
 
+static int manager_parse_config_file(Manager *m) {
+        assert(m);
+
+        return config_parse_many(PKGSYSCONFDIR "/logind.conf",
+                                 CONF_PATHS_NULSTR("systemd/logind.conf.d"),
+                                 "Login\0",
+                                 config_item_perf_lookup, logind_gperf_lookup,
+                                 false, m);
+}
+
+static int manager_dispatch_reload_signal(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+        Manager *m = userdata;
+        int r;
+
+        manager_reset_config(m);
+        r = manager_parse_config_file(m);
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse config file, using defaults: %m");
+        else
+                log_info("Config file reloaded.");
+
+        return 0;
+}
+
 static int manager_startup(Manager *m) {
         int r;
         Seat *seat;
@@ -996,6 +1032,12 @@ static int manager_startup(Manager *m) {
         Iterator i;
 
         assert(m);
+
+        assert_se(sigprocmask_many(SIG_SETMASK, NULL, SIGHUP, -1) >= 0);
+
+        r = sd_event_add_signal(m->event, NULL, SIGHUP, manager_dispatch_reload_signal, m);
+        if (r < 0)
+                return log_error_errno(r, "Failed to register SIGHUP handler: %m");
 
         /* Connect to console */
         r = manager_connect_console(m);
@@ -1099,16 +1141,6 @@ static int manager_run(Manager *m) {
         }
 }
 
-static int manager_parse_config_file(Manager *m) {
-        assert(m);
-
-        return config_parse_many(PKGSYSCONFDIR "/logind.conf",
-                                 CONF_PATHS_NULSTR("systemd/logind.conf.d"),
-                                 "Login\0",
-                                 config_item_perf_lookup, logind_gperf_lookup,
-                                 false, m);
-}
-
 int main(int argc, char *argv[]) {
         Manager *m = NULL;
         int r;
@@ -1126,7 +1158,7 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        r = mac_selinux_init("/run");
+        r = mac_selinux_init();
         if (r < 0) {
                 log_error_errno(r, "Could not initialize labelling: %m");
                 goto finish;

@@ -265,7 +265,7 @@ static int device_add_udev_wants(Unit *u, struct udev_device *dev) {
         assert(u);
         assert(dev);
 
-        property = u->manager->running_as == MANAGER_USER ? "SYSTEMD_USER_WANTS" : "SYSTEMD_WANTS";
+        property = MANAGER_IS_USER(u->manager) ? "SYSTEMD_USER_WANTS" : "SYSTEMD_WANTS";
         wants = udev_device_get_property_value(dev, property);
         if (!wants)
                 return 0;
@@ -318,11 +318,11 @@ static int device_setup_unit(Manager *m, struct udev_device *dev, const char *pa
          * the GC to have garbaged it. That's desired since the device
          * unit may have a dependency on the mount unit which was
          * added during the loading of the later. */
-        if (u && DEVICE(u)->state == DEVICE_PLUGGED) {
+        if (dev && u && DEVICE(u)->state == DEVICE_PLUGGED) {
                 /* This unit is in plugged state: we're sure it's
                  * attached to a device. */
                 if (!path_equal(DEVICE(u)->sysfs, sysfs)) {
-                        log_unit_error(u, "Dev %s appeared twice with different sysfs paths %s and %s",
+                        log_unit_debug(u, "Dev %s appeared twice with different sysfs paths %s and %s",
                                        e, DEVICE(u)->sysfs, sysfs);
                         return -EEXIST;
                 }
@@ -840,8 +840,6 @@ const UnitVTable device_vtable = {
                 "Unit\0"
                 "Device\0"
                 "Install\0",
-
-        .no_instances = true,
 
         .init = device_init,
         .done = device_done,

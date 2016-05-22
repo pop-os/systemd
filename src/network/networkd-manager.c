@@ -457,11 +457,9 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
                 break;
 
         case RTM_DELROUTE:
-
-                if (route)
-                        route_drop(route);
-
+                route_free(route);
                 break;
+
         default:
                 assert_not_reached("Received invalid RTNL message type");
         }
@@ -1037,6 +1035,8 @@ int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
+        m->duid.type = DUID_TYPE_EN;
+
         *ret = m;
         m = NULL;
 
@@ -1091,22 +1091,19 @@ static bool manager_check_idle(void *userdata) {
 
         assert(m);
 
+        /* Check whether we are idle now. The only case when we decide to be idle is when there's only a loopback
+         * device around, for which we have no configuration, and which already left the PENDING state. In all other
+         * cases we are not idle. */
+
         HASHMAP_FOREACH(link, m->links, i) {
-                /* we are not woken on udev activity, so let's just wait for the
-                 * pending udev event */
+                /* We are not woken on udev activity, so let's just wait for the pending udev event */
                 if (link->state == LINK_STATE_PENDING)
                         return false;
 
-                if (!link->network)
-                        continue;
+                if ((link->flags & IFF_LOOPBACK) == 0)
+                        return false;
 
-                /* we are not woken on netork activity, so let's stay around */
-                if (link_lldp_enabled(link) ||
-                    link_ipv4ll_enabled(link) ||
-                    link_dhcp4_server_enabled(link) ||
-                    link_dhcp4_enabled(link) ||
-                    link_dhcp6_enabled(link) ||
-                    link_ipv6_accept_ra_enabled(link))
+                if (link->network)
                         return false;
         }
 

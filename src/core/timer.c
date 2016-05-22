@@ -109,7 +109,7 @@ static int timer_add_default_dependencies(Timer *t) {
         if (r < 0)
                 return r;
 
-        if (UNIT(t)->manager->running_as == MANAGER_SYSTEM) {
+        if (MANAGER_IS_SYSTEM(UNIT(t)->manager)) {
                 r = unit_add_two_dependencies_by_name(UNIT(t), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, NULL, true);
                 if (r < 0)
                         return r;
@@ -135,7 +135,7 @@ static int timer_setup_persistent(Timer *t) {
         if (!t->persistent)
                 return 0;
 
-        if (UNIT(t)->manager->running_as == MANAGER_SYSTEM) {
+        if (MANAGER_IS_SYSTEM(UNIT(t)->manager)) {
 
                 r = unit_require_mounts_for(UNIT(t), "/var/lib/systemd/timers");
                 if (r < 0)
@@ -320,7 +320,7 @@ static usec_t monotonic_to_boottime(usec_t t) {
         if (t <= 0)
                 return 0;
 
-        a = now(CLOCK_BOOTTIME);
+        a = now(clock_boottime_or_monotonic());
         b = now(CLOCK_MONOTONIC);
 
         if (t + a > b)
@@ -334,7 +334,7 @@ static void add_random(Timer *t, usec_t *v) {
         usec_t add;
 
         assert(t);
-        assert(*v);
+        assert(v);
 
         if (t->random_usec == 0)
                 return;
@@ -373,7 +373,7 @@ static void timer_enter_waiting(Timer *t, bool initial) {
          * rather than the monotonic clock. */
 
         ts_realtime = now(CLOCK_REALTIME);
-        ts_monotonic = now(t->wake_system ? CLOCK_BOOTTIME : CLOCK_MONOTONIC);
+        ts_monotonic = now(t->wake_system ? clock_boottime_or_monotonic() : CLOCK_MONOTONIC);
         t->next_elapse_monotonic_or_boottime = t->next_elapse_realtime = 0;
 
         LIST_FOREACH(value, v, t->values) {
@@ -599,6 +599,7 @@ static int timer_start(Unit *u) {
         Timer *t = TIMER(u);
         TimerValue *v;
         Unit *trigger;
+        int r;
 
         assert(t);
         assert(t->state == TIMER_DEAD || t->state == TIMER_FAILED);
@@ -607,6 +608,12 @@ static int timer_start(Unit *u) {
         if (!trigger || trigger->load_state != UNIT_LOADED) {
                 log_unit_error(u, "Refusing to start, unit to trigger not loaded.");
                 return -ENOENT;
+        }
+
+        r = unit_start_limit_test(u);
+        if (r < 0) {
+                timer_enter_dead(t, TIMER_FAILURE_START_LIMIT_HIT);
+                return r;
         }
 
         t->last_trigger = DUAL_TIMESTAMP_NULL;
@@ -808,7 +815,8 @@ DEFINE_STRING_TABLE_LOOKUP(timer_base, TimerBase);
 
 static const char* const timer_result_table[_TIMER_RESULT_MAX] = {
         [TIMER_SUCCESS] = "success",
-        [TIMER_FAILURE_RESOURCES] = "resources"
+        [TIMER_FAILURE_RESOURCES] = "resources",
+        [TIMER_FAILURE_START_LIMIT_HIT] = "start-limit-hit",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(timer_result, TimerResult);

@@ -17,9 +17,13 @@
     along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <net/if.h>
-#include <sys/ioctl.h>
+#include <fcntl.h>
 #include <linux/if_tun.h>
+#include <net/if.h>
+#include <netinet/if_ether.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "alloc-util.h"
 #include "fd-util.h"
@@ -87,7 +91,7 @@ static int netdev_tuntap_add(NetDev *netdev, struct ifreq *ifr) {
 
         assert(t);
 
-        if(t->user_name) {
+        if (t->user_name) {
 
                 user = t->user_name;
 
@@ -126,7 +130,7 @@ static int netdev_create_tuntap(NetDev *netdev) {
         int r;
 
         r = netdev_fill_tuntap_message(netdev, &ifr);
-        if(r < 0)
+        if (r < 0)
                 return r;
 
         return netdev_tuntap_add(netdev, &ifr);

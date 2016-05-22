@@ -270,8 +270,10 @@ static void test_sd_event_now(void) {
         assert_se(sd_event_now(e, CLOCK_MONOTONIC, &event_now) > 0);
         assert_se(sd_event_now(e, CLOCK_REALTIME, &event_now) > 0);
         assert_se(sd_event_now(e, CLOCK_REALTIME_ALARM, &event_now) > 0);
-        assert_se(sd_event_now(e, CLOCK_BOOTTIME, &event_now) > 0);
-        assert_se(sd_event_now(e, CLOCK_BOOTTIME_ALARM, &event_now) > 0);
+        if (clock_boottime_supported()) {
+                assert_se(sd_event_now(e, CLOCK_BOOTTIME, &event_now) > 0);
+                assert_se(sd_event_now(e, CLOCK_BOOTTIME_ALARM, &event_now) > 0);
+        }
         assert_se(sd_event_now(e, -1, &event_now) == -EOPNOTSUPP);
         assert_se(sd_event_now(e, 900 /* arbitrary big number */, &event_now) == -EOPNOTSUPP);
 
@@ -280,8 +282,10 @@ static void test_sd_event_now(void) {
         assert_se(sd_event_now(e, CLOCK_MONOTONIC, &event_now) == 0);
         assert_se(sd_event_now(e, CLOCK_REALTIME, &event_now) == 0);
         assert_se(sd_event_now(e, CLOCK_REALTIME_ALARM, &event_now) == 0);
-        assert_se(sd_event_now(e, CLOCK_BOOTTIME, &event_now) == 0);
-        assert_se(sd_event_now(e, CLOCK_BOOTTIME_ALARM, &event_now) == 0);
+        if (clock_boottime_supported()) {
+                assert_se(sd_event_now(e, CLOCK_BOOTTIME, &event_now) == 0);
+                assert_se(sd_event_now(e, CLOCK_BOOTTIME_ALARM, &event_now) == 0);
+        }
         assert_se(sd_event_now(e, -1, &event_now) == -EOPNOTSUPP);
         assert_se(sd_event_now(e, 900 /* arbitrary big number */, &event_now) == -EOPNOTSUPP);
 }
@@ -291,7 +295,7 @@ static int n_rtqueue = 0;
 
 static int rtqueue_handler(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
         last_rtqueue_sigval = si->ssi_int;
-        n_rtqueue ++;
+        n_rtqueue++;
         return 0;
 }
 

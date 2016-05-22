@@ -27,6 +27,29 @@
 #include "string-util.h"
 #include "util.h"
 
+static void test_ifname_valid(void) {
+        assert(ifname_valid("foo"));
+        assert(ifname_valid("eth0"));
+
+        assert(!ifname_valid("0"));
+        assert(!ifname_valid("99"));
+        assert(ifname_valid("a99"));
+        assert(ifname_valid("99a"));
+
+        assert(!ifname_valid(NULL));
+        assert(!ifname_valid(""));
+        assert(!ifname_valid(" "));
+        assert(!ifname_valid(" foo"));
+        assert(!ifname_valid("bar\n"));
+        assert(!ifname_valid("."));
+        assert(!ifname_valid(".."));
+        assert(ifname_valid("foo.bar"));
+        assert(!ifname_valid("x:y"));
+
+        assert(ifname_valid("xxxxxxxxxxxxxxx"));
+        assert(!ifname_valid("xxxxxxxxxxxxxxxx"));
+}
+
 static void test_socket_address_parse(void) {
         SocketAddress a;
 
@@ -343,9 +366,26 @@ static void test_sockaddr_equal(void) {
         assert_se(!sockaddr_equal(&b, &c));
 }
 
+static void test_sockaddr_un_len(void) {
+        static const struct sockaddr_un fs = {
+                .sun_family = AF_UNIX,
+                .sun_path = "/foo/bar/waldo",
+        };
+
+        static const struct sockaddr_un abstract = {
+                .sun_family = AF_UNIX,
+                .sun_path = "\0foobar",
+        };
+
+        assert_se(SOCKADDR_UN_LEN(fs) == offsetof(struct sockaddr_un, sun_path) + strlen(fs.sun_path));
+        assert_se(SOCKADDR_UN_LEN(abstract) == offsetof(struct sockaddr_un, sun_path) + 1 + strlen(abstract.sun_path + 1));
+}
+
 int main(int argc, char *argv[]) {
 
         log_set_max_level(LOG_DEBUG);
+
+        test_ifname_valid();
 
         test_socket_address_parse();
         test_socket_address_parse_netlink();
@@ -362,6 +402,8 @@ int main(int argc, char *argv[]) {
         test_nameinfo_pretty();
 
         test_sockaddr_equal();
+
+        test_sockaddr_un_len();
 
         return 0;
 }

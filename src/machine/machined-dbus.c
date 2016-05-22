@@ -706,6 +706,26 @@ static int method_copy_machine(sd_bus_message *message, void *userdata, sd_bus_e
         return bus_machine_method_copy(message, machine, error);
 }
 
+static int method_open_machine_root_directory(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = userdata;
+        Machine *machine;
+        const char *name;
+        int r;
+
+        assert(message);
+        assert(m);
+
+        r = sd_bus_message_read(message, "s", &name);
+        if (r < 0)
+                return r;
+
+        machine = hashmap_get(m->machines, name);
+        if (!machine)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_MACHINE, "No machine '%s' known", name);
+
+        return bus_machine_method_open_root_directory(message, machine, error);
+}
+
 static int method_remove_image(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_(image_unrefp) Image* i = NULL;
         const char *name;
@@ -800,6 +820,93 @@ static int method_mark_image_read_only(sd_bus_message *message, void *userdata, 
 
         i->userdata = userdata;
         return bus_image_method_mark_read_only(message, i, error);
+}
+
+static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        enum {
+                REMOVE_ALL,
+                REMOVE_HIDDEN,
+        } mode;
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(image_hashmap_freep) Hashmap *images = NULL;
+        Manager *m = userdata;
+        Image *image;
+        const char *mm;
+        Iterator i;
+        int r;
+
+        assert(message);
+
+        r = sd_bus_message_read(message, "s", &mm);
+        if (r < 0)
+                return r;
+
+        if (streq(mm, "all"))
+                mode = REMOVE_ALL;
+        else if (streq(mm, "hidden"))
+                mode = REMOVE_HIDDEN;
+        else
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unknown mode '%s'.", mm);
+
+        r = bus_verify_polkit_async(
+                        message,
+                        CAP_SYS_ADMIN,
+                        "org.freedesktop.machine1.manage-machines",
+                        NULL,
+                        false,
+                        UID_INVALID,
+                        &m->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        images = hashmap_new(&string_hash_ops);
+        if (!images)
+                return -ENOMEM;
+
+        r = image_discover(images);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_new_method_return(message, &reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_open_container(reply, 'a', "(st)");
+        if (r < 0)
+                return r;
+
+        HASHMAP_FOREACH(image, images, i) {
+
+                /* We can't remove vendor images (i.e. those in /usr) */
+                if (IMAGE_IS_VENDOR(image))
+                        continue;
+
+                if (IMAGE_IS_HOST(image))
+                        continue;
+
+                if (mode == REMOVE_HIDDEN && !IMAGE_IS_HIDDEN(image))
+                        continue;
+
+                r = image_remove(image);
+                if (r == -EBUSY) /* keep images that are currently being used. */
+                        continue;
+                if (r < 0)
+                        return sd_bus_error_set_errnof(error, r, "Failed to remove image %s: %m", image->name);
+
+                r = sd_bus_message_append(reply, "(st)", image->name, image->usage_exclusive);
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        return sd_bus_send(NULL, reply, NULL);
 }
 
 static int method_set_pool_limit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1138,12 +1245,14 @@ const sd_bus_vtable manager_vtable[] = {
         SD_BUS_METHOD("BindMountMachine", "sssbb", NULL, method_bind_mount_machine, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("CopyFromMachine", "sss", NULL, method_copy_machine, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("CopyToMachine", "sss", NULL, method_copy_machine, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("OpenMachineRootDirectory", "s", "h", method_open_machine_root_directory, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("RemoveImage", "s", NULL, method_remove_image, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("RenameImage", "ss", NULL, method_rename_image, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("CloneImage", "ssb", NULL, method_clone_image, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("MarkImageReadOnly", "sb", NULL, method_mark_image_read_only, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetPoolLimit", "t", NULL, method_set_pool_limit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetImageLimit", "st", NULL, method_set_image_limit, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("CleanPool", "s", "a(st)", method_clean_pool, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("MapFromMachineUser", "su", "u", method_map_from_machine_user, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("MapToMachineUser", "u", "sou", method_map_to_machine_user, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("MapFromMachineGroup", "su", "u", method_map_from_machine_group, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -1212,7 +1321,7 @@ int match_properties_changed(sd_bus_message *message, void *userdata, sd_bus_err
         r = unit_name_from_dbus_path(path, &unit);
         if (r == -EINVAL) /* not for a unit */
                 return 0;
-        if (r < 0){
+        if (r < 0) {
                 log_oom();
                 return 0;
         }

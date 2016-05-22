@@ -55,8 +55,7 @@ int chown_cgroup(pid_t pid, uid_t uid_shift) {
                        "cgroup.events",
                        "cgroup.clone_children",
                        "cgroup.controllers",
-                       "cgroup.subtree_control",
-                       "cgroup.populated")
+                       "cgroup.subtree_control")
                 if (fchownat(fd, fn, uid_shift, uid_shift, 0) < 0)
                         log_full_errno(errno == ENOENT ? LOG_DEBUG :  LOG_WARNING, errno,
                                        "Failed to chown() cgroup file %s, ignoring: %m", fn);
@@ -73,7 +72,7 @@ int sync_cgroup(pid_t pid, bool unified_requested) {
 
         unified = cg_unified();
         if (unified < 0)
-                return log_error_errno(unified, "Failed to determine whether the unified hierachy is used: %m");
+                return log_error_errno(unified, "Failed to determine whether the unified hierarchy is used: %m");
 
         if ((unified > 0) == unified_requested)
                 return 0;
@@ -94,7 +93,7 @@ int sync_cgroup(pid_t pid, bool unified_requested) {
         if (unified)
                 r = mount("cgroup", tree, "cgroup", MS_NOSUID|MS_NOEXEC|MS_NODEV, "none,name=systemd,xattr");
         else
-                r = mount("cgroup", tree, "cgroup", MS_NOSUID|MS_NOEXEC|MS_NODEV, "__DEVEL__sane_behavior");
+                r = mount("cgroup", tree, "cgroup2", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
         if (r < 0) {
                 r = log_error_errno(errno, "Failed to mount unified hierarchy: %m");
                 goto finish;
@@ -135,7 +134,7 @@ int create_subcgroup(pid_t pid, bool unified_requested) {
 
         unified = cg_unified();
         if (unified < 0)
-                return log_error_errno(unified, "Failed to determine whether the unified hierachy is used: %m");
+                return log_error_errno(unified, "Failed to determine whether the unified hierarchy is used: %m");
         if (unified == 0)
                 return 0;
 

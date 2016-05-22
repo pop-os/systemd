@@ -20,7 +20,7 @@
 AC_PREREQ([2.64])
 
 AC_INIT([systemd],
-        [229],
+        [230],
         [http://github.com/systemd/systemd/issues],
         [systemd],
         [http://www.freedesktop.org/wiki/Software/systemd])
@@ -295,11 +295,20 @@ CAP_LIBS="$LIBS"
 LIBS="$save_LIBS"
 AC_SUBST(CAP_LIBS)
 
-AC_CHECK_FUNCS([memfd_create])
 AC_CHECK_FUNCS([__secure_getenv secure_getenv])
-AC_CHECK_DECLS([gettid, pivot_root, name_to_handle_at, setns, getrandom, renameat2,
-                kcmp, keyctl, key_serial_t, char16_t, char32_t, LO_FLAGS_PARTSCAN],
-               [], [], [[
+AC_CHECK_DECLS([
+        memfd_create,
+        gettid,
+        pivot_root,
+        name_to_handle_at,
+        setns,
+        getrandom,
+        renameat2,
+        kcmp,
+        keyctl,
+        LO_FLAGS_PARTSCAN,
+        copy_file_range],
+        [], [], [[
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/mount.h>
@@ -307,6 +316,11 @@ AC_CHECK_DECLS([gettid, pivot_root, name_to_handle_at, setns, getrandom, renamea
 #include <sched.h>
 #include <linux/loop.h>
 #include <linux/random.h>
+]])
+
+AC_CHECK_TYPES([char16_t, char32_t, key_serial_t],
+               [], [], [[
+#include <uchar.h>
 ]])
 
 AC_CHECK_DECLS([IFLA_INET6_ADDR_GEN_MODE,
@@ -320,8 +334,9 @@ AC_CHECK_DECLS([IFLA_INET6_ADDR_GEN_MODE,
                 IFLA_IPTUN_ENCAP_DPORT,
                 IFLA_GRE_ENCAP_DPORT,
                 IFLA_BRIDGE_VLAN_INFO,
+                IFLA_BRPORT_PROXYARP,
                 IFLA_BRPORT_LEARNING_SYNC,
-                IFLA_BR_PRIORITY,
+                IFLA_BR_VLAN_DEFAULT_PVID,
                 NDA_IFINDEX,
                 IFA_FLAGS],
 [], [], [[
@@ -361,17 +376,6 @@ AC_ARG_ENABLE([utmp], AS_HELP_STRING([--disable-utmp], [disable utmp/wtmp log ha
                 AC_MSG_ERROR(bad value ${enableval} for --enable-utmp)))
 AS_IF([test "x$have_utmp" = "xyes"], [AC_DEFINE(HAVE_UTMP, 1, [Define if utmp/wtmp support is enabled])])
 AM_CONDITIONAL([HAVE_UTMP], [test "x$have_utmp" = "xyes"])
-
-# ------------------------------------------------------------------------------
-have_compat_libs=no
-AC_ARG_ENABLE([compat_libs], AS_HELP_STRING([--enable-compat-libs],[Enable creation of compatibility libraries]),
-                [case "${enableval}" in
-                        yes) have_compat_libs=yes ;;
-                        no) have_compat_libs=no ;;
-                        *) AC_MSG_ERROR(bad value ${enableval} for --enable-compat-libs) ;;
-                esac],
-                [have_compat_libs=no])
-AM_CONDITIONAL([ENABLE_COMPAT_LIBS], [test "$have_compat_libs" = "yes"])
 
 # ------------------------------------------------------------------------------
 have_coverage=no
@@ -502,6 +506,22 @@ if test "x$enable_apparmor" != "xno"; then
         fi
 fi
 AM_CONDITIONAL(HAVE_APPARMOR, [test "$have_apparmor" = "yes"])
+
+have_adm_group=no
+AC_ARG_ENABLE(adm-group, AS_HELP_STRING([--disable-adm-group], [disable adm group]))
+AS_IF([test "x$enable_adm_group" != "xno"], [
+        AC_DEFINE(ENABLE_ADM_GROUP, 1, [Define if the ACL for adm group should be enabled])
+        have_adm_group=yes
+        M4_DEFINES="$M4_DEFINES -DENABLE_ADM_GROUP"
+])
+
+have_wheel_group=no
+AC_ARG_ENABLE(wheel-group, AS_HELP_STRING([--disable-wheel-group], [disable wheel group]))
+AS_IF([test "x$enable_wheel_group" != "xno"], [
+        AC_DEFINE(ENABLE_WHEEL_GROUP, 1, [Define if the ACL for wheel group should be enabled])
+        have_wheel_group=yes
+        M4_DEFINES="$M4_DEFINES -DENABLE_WHEEL_GROUP"
+])
 
 
 AC_ARG_WITH(debug-shell,
@@ -877,7 +897,7 @@ AM_CONDITIONAL(HAVE_MICROHTTPD, [test "$have_microhttpd" = "yes"])
 have_libcurl=no
 AC_ARG_ENABLE(libcurl, AS_HELP_STRING([--disable-libcurl], [disable libcurl support]))
 if test "x$enable_libcurl" != "xno"; then
-        PKG_CHECK_MODULES(LIBCURL, [libcurl],
+        PKG_CHECK_MODULES(LIBCURL, [libcurl >= 7.32.0],
                 [AC_DEFINE(HAVE_LIBCURL, 1, [Define if libcurl is available])
                  have_libcurl=yes
                  M4_DEFINES="$M4_DEFINES -DHAVE_LIBCURL"],
@@ -936,14 +956,6 @@ if test "x$enable_vconsole" != "xno"; then
         have_vconsole=yes
 fi
 AM_CONDITIONAL(ENABLE_VCONSOLE, [test "$have_vconsole" = "yes"])
-
-# ------------------------------------------------------------------------------
-have_bootchart=no
-AC_ARG_ENABLE(bootchart, AS_HELP_STRING([--disable-bootchart], [disable bootchart tool]))
-if test "x$enable_bootchart" != "xno"; then
-        have_bootchart=yes
-fi
-AM_CONDITIONAL(ENABLE_BOOTCHART, [test "$have_bootchart" = "yes"])
 
 # ------------------------------------------------------------------------------
 have_quotacheck=no
@@ -1010,14 +1022,24 @@ fi
 AM_CONDITIONAL(ENABLE_LOGIND, [test "$have_logind" = "yes"])
 AS_IF([test "$have_logind" = "yes"], [ AC_DEFINE(HAVE_LOGIND, [1], [Logind support available]) ])
 
+AC_ARG_WITH([kill-user-processes],
+        [AS_HELP_STRING([--without-kill-user-processes], [Set logind's KillUserProcesses=no by default])])
+AS_IF([test "$with_kill_user_processes" != "no"],
+       [kill_user_processes=true
+        KILL_USER_PROCESSES=yes],
+       [kill_user_processes=false
+        KILL_USER_PROCESSES=no])
+AC_DEFINE_UNQUOTED(KILL_USER_PROCESSES, [$kill_user_processes], [Default KillUserProcesses setting])
+AC_SUBST(KILL_USER_PROCESSES)
+
 # ------------------------------------------------------------------------------
 have_machined=no
 AC_ARG_ENABLE(machined, AS_HELP_STRING([--disable-machined], [disable machine daemon]))
 if test "x$enable_machined" != "xno"; then
         have_machined=yes
+        AC_DEFINE(HAVE_MACHINED, [1], [systemd-machined is enabled])
 fi
 AM_CONDITIONAL(ENABLE_MACHINED, [test "$have_machined" = "yes"])
-AS_IF([test "$have_machined" = "yes"], [ AC_DEFINE(HAVE_MACHINED, [1], [Machined support available]) ])
 
 # ------------------------------------------------------------------------------
 have_importd=no
@@ -1127,6 +1149,7 @@ AS_IF([test "x$enable_resolved" != "xno"], [
 
         have_resolved=yes
         M4_DEFINES="$M4_DEFINES -DENABLE_RESOLVED"
+        AC_DEFINE(HAVE_RESOLVED, [1], [systemd-resolved is enabled])
 ])
 AM_CONDITIONAL(ENABLE_RESOLVED, [test "$have_resolved" = "yes"])
 
@@ -1138,6 +1161,20 @@ AC_ARG_WITH(dns-servers,
 
 AC_DEFINE_UNQUOTED(DNS_SERVERS, ["$DNS_SERVERS"], [Default DNS Servers])
 AC_SUBST(DNS_SERVERS)
+
+AC_ARG_WITH(default-dnssec,
+        AS_HELP_STRING([--with-default-dnssec=MODE],
+               [Default DNSSEC mode, defaults to "allow-downgrade"]),
+        [DEFAULT_DNSSEC_MODE="$withval"],
+        [DEFAULT_DNSSEC_MODE="allow-downgrade"])
+
+AS_CASE("x${DEFAULT_DNSSEC_MODE}",
+        [xno], [mode=DNSSEC_NO],
+        [xyes], [mode=DNSSEC_YES],
+        [xallow-downgrade], [mode=DNSSEC_ALLOW_DOWNGRADE],
+        AC_MSG_ERROR(Bad DNSSEC mode ${DEFAULT_DNSSEC_MODE}))
+AC_DEFINE_UNQUOTED(DEFAULT_DNSSEC_MODE, [$mode], [Default DNSSEC mode])
+AC_SUBST(DEFAULT_DNSSEC_MODE)
 
 # ------------------------------------------------------------------------------
 have_networkd=no
@@ -1218,6 +1255,28 @@ AS_IF([test "x$enable_gnuefi" != "xno"], [
 AM_CONDITIONAL(HAVE_GNUEFI, [test "x$have_gnuefi" = xyes])
 
 # ------------------------------------------------------------------------------
+have_tpm=no
+AC_ARG_ENABLE([tpm], AS_HELP_STRING([--enable-tpm],[Enable optional TPM support]),
+                [case "${enableval}" in
+                        yes) have_tpm=yes ;;
+                        no) have_tpm=no ;;
+                        *) AC_MSG_ERROR(bad value ${enableval} for --enable-tpm) ;;
+                esac],
+                [have_tpm=no])
+
+if test "x${have_tpm}" != xno ; then
+        AC_DEFINE(SD_BOOT_LOG_TPM, 1, [Define if TPM should be used to log events and extend the registers])
+fi
+
+AC_ARG_WITH(tpm-pcrindex,
+        AS_HELP_STRING([--with-tpm-pcrindex=<NUM>],
+                [TPM PCR register number to use]),
+        [SD_TPM_PCR="$withval"],
+        [SD_TPM_PCR="8"])
+
+AC_DEFINE_UNQUOTED(SD_TPM_PCR, [$SD_TPM_PCR], [TPM PCR register number to use])
+
+# ------------------------------------------------------------------------------
 have_kdbus=no
 AC_ARG_ENABLE(kdbus, AS_HELP_STRING([--disable-kdbus], [do not connect to kdbus by default]))
 if test "x$enable_kdbus" != "xno"; then
@@ -1292,6 +1351,7 @@ if test "x$enable_myhostname" != "xno"; then
         AC_CHECK_FUNCS([gethostbyaddr gethostbyname gettimeofday inet_ntoa memset select socket strcspn strdup strerror strncasecmp strcasecmp strspn])
 
         have_myhostname=yes
+        AC_DEFINE(HAVE_MYHOSTNAME, [1], [nss-myhostname is enabled])
 fi
 AM_CONDITIONAL(HAVE_MYHOSTNAME, [test "$have_myhostname" = "yes"])
 
@@ -1458,9 +1518,10 @@ AS_IF([test x"$cross_compiling" = "xyes"], [], [
 ])
 
 AC_ARG_ENABLE(tests,
-        [AC_HELP_STRING([--disable-tests], [disable tests])],
+        [AC_HELP_STRING([--disable-tests], [disable tests, or enable extra tests with =unsafe])],
         enable_tests=$enableval, enable_tests=yes)
-AM_CONDITIONAL(ENABLE_TESTS, [test x$enable_tests = xyes])
+AM_CONDITIONAL(ENABLE_TESTS, [test x$enable_tests = xyes -o x$enable_tests = xunsafe])
+AM_CONDITIONAL(ENABLE_UNSAFE_TESTS, [test x$enable_tests = xunsafe])
 
 AC_ARG_ENABLE(debug,
         [AC_HELP_STRING([--enable-debug@<:@=LIST@:>@], [enable extra debugging (hashmap,mmap-cache)])],
@@ -1511,104 +1572,108 @@ AC_OUTPUT
 AC_MSG_RESULT([
         $PACKAGE_NAME $VERSION
 
-        libcryptsetup:           ${have_libcryptsetup}
-        PAM:                     ${have_pam}
-        AUDIT:                   ${have_audit}
-        IMA:                     ${have_ima}
-        AppArmor:                ${have_apparmor}
-        SELinux:                 ${have_selinux}
-        SECCOMP:                 ${have_seccomp}
-        SMACK:                   ${have_smack}
-        ZLIB:                    ${have_zlib}
-        XZ:                      ${have_xz}
-        LZ4:                     ${have_lz4}
-        BZIP2:                   ${have_bzip2}
-        ACL:                     ${have_acl}
-        GCRYPT:                  ${have_gcrypt}
-        QRENCODE:                ${have_qrencode}
-        MICROHTTPD:              ${have_microhttpd}
-        GNUTLS:                  ${have_gnutls}
-        libcurl:                 ${have_libcurl}
-        libidn:                  ${have_libidn}
-        libiptc:                 ${have_libiptc}
-        ELFUTILS:                ${have_elfutils}
-        binfmt:                  ${have_binfmt}
-        vconsole:                ${have_vconsole}
-        bootchart:               ${have_bootchart}
-        quotacheck:              ${have_quotacheck}
-        tmpfiles:                ${have_tmpfiles}
-        sysusers:                ${have_sysusers}
-        firstboot:               ${have_firstboot}
-        randomseed:              ${have_randomseed}
-        backlight:               ${have_backlight}
-        rfkill:                  ${have_rfkill}
-        logind:                  ${have_logind}
-        machined:                ${have_machined}
-        importd:                 ${have_importd}
-        hostnamed:               ${have_hostnamed}
-        timedated:               ${have_timedated}
-        timesyncd:               ${have_timesyncd}
-        default NTP servers:     ${NTP_SERVERS}
-        time epoch:              ${TIME_EPOCH}
-        localed:                 ${have_localed}
-        networkd:                ${have_networkd}
-        resolved:                ${have_resolved}
-        default DNS servers:     ${DNS_SERVERS}
-        coredump:                ${have_coredump}
-        polkit:                  ${have_polkit}
-        efi:                     ${have_efi}
-        gnuefi:                  ${have_gnuefi}
-        efi arch:                ${EFI_ARCH}
-        EFI machine type:        ${EFI_MACHINE_TYPE_NAME}
-        EFI CC                   ${EFI_CC}
-        EFI libdir:              ${EFI_LIB_DIR}
-        EFI ldsdir:              ${EFI_LDS_DIR}
-        EFI includedir:          ${EFI_INC_DIR}
-        kmod:                    ${have_kmod}
-        xkbcommon:               ${have_xkbcommon}
-        blkid:                   ${have_blkid}
-        libmount:                ${have_libmount}
-        dbus:                    ${have_dbus}
-        nss-myhostname:          ${have_myhostname}
-        hwdb:                    ${enable_hwdb}
-        kdbus:                   ${have_kdbus}
-        Python:                  ${have_python}
-        man pages:               ${have_manpages}
-        test coverage:           ${have_coverage}
-        Split /usr:              ${enable_split_usr}
-        SysV compatibility:      ${SYSTEM_SYSV_COMPAT}
-        compatibility libraries: ${have_compat_libs}
-        utmp/wtmp support:       ${have_utmp}
-        ldconfig support:        ${enable_ldconfig}
-        hibernate support:       ${enable_hibernate}
-        extra debugging:         ${enable_debug}
+        libcryptsetup:                     ${have_libcryptsetup}
+        PAM:                               ${have_pam}
+        AUDIT:                             ${have_audit}
+        IMA:                               ${have_ima}
+        AppArmor:                          ${have_apparmor}
+        SELinux:                           ${have_selinux}
+        SECCOMP:                           ${have_seccomp}
+        SMACK:                             ${have_smack}
+        ZLIB:                              ${have_zlib}
+        XZ:                                ${have_xz}
+        LZ4:                               ${have_lz4}
+        BZIP2:                             ${have_bzip2}
+        ACL:                               ${have_acl}
+        GCRYPT:                            ${have_gcrypt}
+        QRENCODE:                          ${have_qrencode}
+        MICROHTTPD:                        ${have_microhttpd}
+        GNUTLS:                            ${have_gnutls}
+        libcurl:                           ${have_libcurl}
+        libidn:                            ${have_libidn}
+        libiptc:                           ${have_libiptc}
+        ELFUTILS:                          ${have_elfutils}
+        binfmt:                            ${have_binfmt}
+        vconsole:                          ${have_vconsole}
+        quotacheck:                        ${have_quotacheck}
+        tmpfiles:                          ${have_tmpfiles}
+        sysusers:                          ${have_sysusers}
+        firstboot:                         ${have_firstboot}
+        randomseed:                        ${have_randomseed}
+        backlight:                         ${have_backlight}
+        rfkill:                            ${have_rfkill}
+        logind:                            ${have_logind}
+        Default KillUserProcesses setting: ${KILL_USER_PROCESSES}
+        machined:                          ${have_machined}
+        importd:                           ${have_importd}
+        hostnamed:                         ${have_hostnamed}
+        timedated:                         ${have_timedated}
+        timesyncd:                         ${have_timesyncd}
+        Default NTP servers:               ${NTP_SERVERS}
+        time epoch:                        ${TIME_EPOCH}
+        localed:                           ${have_localed}
+        networkd:                          ${have_networkd}
+        resolved:                          ${have_resolved}
+        Default DNS servers:               ${DNS_SERVERS}
+        Default DNSSEC mode:               ${DEFAULT_DNSSEC_MODE}
+        coredump:                          ${have_coredump}
+        polkit:                            ${have_polkit}
+        efi:                               ${have_efi}
+        gnuefi:                            ${have_gnuefi}
+        efi arch:                          ${EFI_ARCH}
+        EFI machine type:                  ${EFI_MACHINE_TYPE_NAME}
+        EFI CC                             ${EFI_CC}
+        EFI libdir:                        ${EFI_LIB_DIR}
+        EFI ldsdir:                        ${EFI_LDS_DIR}
+        EFI includedir:                    ${EFI_INC_DIR}
+        kmod:                              ${have_kmod}
+        xkbcommon:                         ${have_xkbcommon}
+        blkid:                             ${have_blkid}
+        libmount:                          ${have_libmount}
+        dbus:                              ${have_dbus}
+        nss-myhostname:                    ${have_myhostname}
+        hwdb:                              ${enable_hwdb}
+        tpm:                               ${have_tpm}
+        kdbus:                             ${have_kdbus}
+        Python:                            ${have_python}
+        man pages:                         ${have_manpages}
+        test coverage:                     ${have_coverage}
+        Split /usr:                        ${enable_split_usr}
+        SysV compatibility:                ${SYSTEM_SYSV_COMPAT}
+        utmp/wtmp support:                 ${have_utmp}
+        ldconfig support:                  ${enable_ldconfig}
+        hibernate support:                 ${enable_hibernate}
+        extra debugging:                   ${enable_debug}
+        tests:                             ${enable_tests}
 
-        prefix:                  ${prefix}
-        rootprefix:              ${with_rootprefix}
-        sysconf dir:             ${sysconfdir}
-        datarootdir:             ${datarootdir}
-        includedir:              ${includedir}
-        lib dir:                 ${libdir}
-        rootlib dir:             ${with_rootlibdir}
-        SysV init scripts:       ${SYSTEM_SYSVINIT_PATH}
-        SysV rc?.d directories:  ${SYSTEM_SYSVRCND_PATH}
-        Build Python:            ${PYTHON}
-        PAM modules dir:         ${with_pamlibdir}
-        PAM configuration dir:   ${with_pamconfdir}
-        D-Bus policy dir:        ${with_dbuspolicydir}
-        D-Bus session dir:       ${with_dbussessionservicedir}
-        D-Bus system dir:        ${with_dbussystemservicedir}
-        Bash completions dir:    ${with_bashcompletiondir}
-        Zsh completions dir:     ${with_zshcompletiondir}
-        Extra start script:      ${RC_LOCAL_SCRIPT_PATH_START}
-        Extra stop script:       ${RC_LOCAL_SCRIPT_PATH_STOP}
-        Debug shell:             ${SUSHELL} @ ${DEBUGTTY}
-        TTY GID:                 ${TTY_GID}
-        Maximum System UID:      ${SYSTEM_UID_MAX}
-        Maximum System GID:      ${SYSTEM_GID_MAX}
-        Certificate root:        ${CERTIFICATEROOT}
+        prefix:                            ${prefix}
+        rootprefix:                        ${with_rootprefix}
+        sysconf dir:                       ${sysconfdir}
+        datarootdir:                       ${datarootdir}
+        includedir:                        ${includedir}
+        lib dir:                           ${libdir}
+        rootlib dir:                       ${with_rootlibdir}
+        SysV init scripts:                 ${SYSTEM_SYSVINIT_PATH}
+        SysV rc?.d directories:            ${SYSTEM_SYSVRCND_PATH}
+        Build Python:                      ${PYTHON}
+        PAM modules dir:                   ${with_pamlibdir}
+        PAM configuration dir:             ${with_pamconfdir}
+        D-Bus policy dir:                  ${with_dbuspolicydir}
+        D-Bus session dir:                 ${with_dbussessionservicedir}
+        D-Bus system dir:                  ${with_dbussystemservicedir}
+        Bash completions dir:              ${with_bashcompletiondir}
+        Zsh completions dir:               ${with_zshcompletiondir}
+        Extra start script:                ${RC_LOCAL_SCRIPT_PATH_START}
+        Extra stop script:                 ${RC_LOCAL_SCRIPT_PATH_STOP}
+        Adm group:                         ${have_adm_group}
+        Wheel group:                       ${have_wheel_group}
+        Debug shell:                       ${SUSHELL} @ ${DEBUGTTY}
+        TTY GID:                           ${TTY_GID}
+        Maximum System UID:                ${SYSTEM_UID_MAX}
+        Maximum System GID:                ${SYSTEM_GID_MAX}
+        Certificate root:                  ${CERTIFICATEROOT}
 
-        CFLAGS:                  ${OUR_CFLAGS} ${CFLAGS}
-        CPPFLAGS:                ${OUR_CPPFLAGS} ${CPPFLAGS}
-        LDFLAGS:                 ${OUR_LDFLAGS} ${LDFLAGS}
+        CFLAGS:   ${OUR_CFLAGS} ${CFLAGS}
+        CPPFLAGS: ${OUR_CPPFLAGS} ${CPPFLAGS}
+        LDFLAGS:  ${OUR_LDFLAGS} ${LDFLAGS}
 ])

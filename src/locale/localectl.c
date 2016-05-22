@@ -46,14 +46,6 @@ static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static char *arg_host = NULL;
 static bool arg_convert = true;
 
-static void pager_open_if_enabled(void) {
-
-        if (arg_no_pager)
-                return;
-
-        pager_open(false);
-}
-
 static void polkit_agent_open_if_enabled(void) {
 
         /* Open the polkit agent as a child process if necessary */
@@ -124,11 +116,11 @@ static void print_overridden_variables(void) {
                 if (variables[j]) {
                         if (print_warning) {
                                 log_warning("Warning: Settings on kernel command line override system locale settings in /etc/locale.conf.\n"
-                                            "  Command Line: %s=%s", locale_variable_to_string(j), variables[j]);
+                                            "    Command Line: %s=%s", locale_variable_to_string(j), variables[j]);
 
                                 print_warning = false;
                         } else
-                                log_warning("                %s=%s", locale_variable_to_string(j), variables[j]);
+                                log_warning("                  %s=%s", locale_variable_to_string(j), variables[j]);
                 }
  finish:
         for (j = 0; j < _VARIABLE_LC_MAX; j++)
@@ -139,7 +131,7 @@ static void print_status_info(StatusInfo *i) {
         assert(i);
 
         if (strv_isempty(i->locale))
-                puts("   System Locale: n/a\n");
+                puts("   System Locale: n/a");
         else {
                 char **j;
 
@@ -239,7 +231,7 @@ static int list_locales(sd_bus *bus, char **args, unsigned n) {
         if (r < 0)
                 return log_error_errno(r, "Failed to read list of locales: %m");
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
         strv_print(l);
 
         return 0;
@@ -341,7 +333,7 @@ static int list_vconsole_keymaps(sd_bus *bus, char **args, unsigned n) {
 
         strv_sort(l);
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         strv_print(l);
 
@@ -479,7 +471,7 @@ static int list_x11_keymaps(sd_bus *bus, char **args, unsigned n) {
         strv_sort(list);
         strv_uniq(list);
 
-        pager_open_if_enabled();
+        pager_open(arg_no_pager, false);
 
         strv_print(list);
         return 0;

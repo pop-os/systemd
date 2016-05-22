@@ -352,7 +352,7 @@ static int parse_env_file_internal(
                 case KEY:
                         if (strchr(newline, c)) {
                                 state = PRE_KEY;
-                                line ++;
+                                line++;
                                 n_key = 0;
                         } else if (c == '=') {
                                 state = PRE_VALUE;
@@ -376,7 +376,7 @@ static int parse_env_file_internal(
                 case PRE_VALUE:
                         if (strchr(newline, c)) {
                                 state = PRE_KEY;
-                                line ++;
+                                line++;
                                 key[n_key] = 0;
 
                                 if (value)
@@ -416,7 +416,7 @@ static int parse_env_file_internal(
                 case VALUE:
                         if (strchr(newline, c)) {
                                 state = PRE_KEY;
-                                line ++;
+                                line++;
 
                                 key[n_key] = 0;
 
@@ -535,7 +535,7 @@ static int parse_env_file_internal(
                                 state = COMMENT_ESCAPE;
                         else if (strchr(newline, c)) {
                                 state = PRE_KEY;
-                                line ++;
+                                line++;
                         }
                         break;
 
@@ -588,7 +588,7 @@ static int parse_env_file_push(
         va_list aq, *ap = userdata;
 
         if (!utf8_is_valid(key)) {
-                _cleanup_free_ char *p;
+                _cleanup_free_ char *p = NULL;
 
                 p = utf8_escape_invalid(key);
                 log_error("%s:%u: invalid UTF-8 in key '%s', ignoring.", strna(filename), line, p);
@@ -596,7 +596,7 @@ static int parse_env_file_push(
         }
 
         if (value && !utf8_is_valid(value)) {
-                _cleanup_free_ char *p;
+                _cleanup_free_ char *p = NULL;
 
                 p = utf8_escape_invalid(value);
                 log_error("%s:%u: invalid UTF-8 value for key %s: '%s', ignoring.", strna(filename), line, key, p);
@@ -908,7 +908,7 @@ int get_proc_field(const char *filename, const char *pattern, const char *termin
                 /* Back off one char if there's nothing but whitespace
                    and zeros */
                 if (!*t || isspace(*t))
-                        t --;
+                        t--;
         }
 
         len = strcspn(t, terminator);
@@ -1069,7 +1069,7 @@ int fflush_and_check(FILE *f) {
 
 /* This is much like like mkostemp() but is subject to umask(). */
 int mkostemp_safe(char *pattern, int flags) {
-        _cleanup_umask_ mode_t u;
+        _cleanup_umask_ mode_t u = 0;
         int fd;
 
         assert(pattern);
@@ -1080,30 +1080,6 @@ int mkostemp_safe(char *pattern, int flags) {
         if (fd < 0)
                 return -errno;
 
-        return fd;
-}
-
-int open_tmpfile(const char *path, int flags) {
-        char *p;
-        int fd;
-
-        assert(path);
-
-#ifdef O_TMPFILE
-        /* Try O_TMPFILE first, if it is supported */
-        fd = open(path, flags|O_TMPFILE|O_EXCL, S_IRUSR|S_IWUSR);
-        if (fd >= 0)
-                return fd;
-#endif
-
-        /* Fall back to unguessable name + unlinking */
-        p = strjoina(path, "/systemd-tmp-XXXXXX");
-
-        fd = mkostemp_safe(p, flags);
-        if (fd < 0)
-                return fd;
-
-        unlink(p);
         return fd;
 }
 
@@ -1277,4 +1253,104 @@ int fputs_with_space(FILE *f, const char *s, const char *separator, bool *space)
         }
 
         return fputs(s, f);
+}
+
+int open_tmpfile_unlinkable(const char *directory, int flags) {
+        char *p;
+        int fd;
+
+        assert(directory);
+
+        /* Returns an unlinked temporary file that cannot be linked into the file system anymore */
+
+#ifdef O_TMPFILE
+        /* Try O_TMPFILE first, if it is supported */
+        fd = open(directory, flags|O_TMPFILE|O_EXCL, S_IRUSR|S_IWUSR);
+        if (fd >= 0)
+                return fd;
+#endif
+
+        /* Fall back to unguessable name + unlinking */
+        p = strjoina(directory, "/systemd-tmp-XXXXXX");
+
+        fd = mkostemp_safe(p, flags);
+        if (fd < 0)
+                return fd;
+
+        (void) unlink(p);
+
+        return fd;
+}
+
+int open_tmpfile_linkable(const char *target, int flags, char **ret_path) {
+        _cleanup_free_ char *tmp = NULL;
+        int r, fd;
+
+        assert(target);
+        assert(ret_path);
+
+        /* Don't allow O_EXCL, as that has a special meaning for O_TMPFILE */
+        assert((flags & O_EXCL) == 0);
+
+        /* Creates a temporary file, that shall be renamed to "target" later. If possible, this uses O_TMPFILE – in
+         * which case "ret_path" will be returned as NULL. If not possible a the tempoary path name used is returned in
+         * "ret_path". Use link_tmpfile() below to rename the result after writing the file in full. */
+
+#ifdef O_TMPFILE
+        {
+                _cleanup_free_ char *dn = NULL;
+
+                dn = dirname_malloc(target);
+                if (!dn)
+                        return -ENOMEM;
+
+                fd = open(dn, O_TMPFILE|flags, 0640);
+                if (fd >= 0) {
+                        *ret_path = NULL;
+                        return fd;
+                }
+
+                log_debug_errno(errno, "Failed to use O_TMPFILE on %s: %m", dn);
+        }
+#endif
+
+        r = tempfn_random(target, NULL, &tmp);
+        if (r < 0)
+                return r;
+
+        fd = open(tmp, O_CREAT|O_EXCL|O_NOFOLLOW|O_NOCTTY|flags, 0640);
+        if (fd < 0)
+                return -errno;
+
+        *ret_path = tmp;
+        tmp = NULL;
+
+        return fd;
+}
+
+int link_tmpfile(int fd, const char *path, const char *target) {
+
+        assert(fd >= 0);
+        assert(target);
+
+        /* Moves a temporary file created with open_tmpfile() above into its final place. if "path" is NULL an fd
+         * created with O_TMPFILE is assumed, and linkat() is used. Otherwise it is assumed O_TMPFILE is not supported
+         * on the directory, and renameat2() is used instead.
+         *
+         * Note that in both cases we will not replace existing files. This is because linkat() does not support this
+         * operation currently (renameat2() does), and there is no nice way to emulate this. */
+
+        if (path) {
+                if (rename_noreplace(AT_FDCWD, path, AT_FDCWD, target) < 0)
+                        return -errno;
+        } else {
+                char proc_fd_path[strlen("/proc/self/fd/") + DECIMAL_STR_MAX(fd) + 1];
+
+                xsprintf(proc_fd_path, "/proc/self/fd/%i", fd);
+
+                if (linkat(AT_FDCWD, proc_fd_path, AT_FDCWD, target, AT_SYMLINK_FOLLOW) < 0)
+                        return -errno;
+        }
+
+        return 0;
 }

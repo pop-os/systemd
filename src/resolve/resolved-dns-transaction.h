@@ -64,7 +64,6 @@ struct DnsTransaction {
         DnsScope *scope;
 
         DnsResourceKey *key;
-        char *key_string;
 
         DnsTransactionState state;
 
@@ -119,17 +118,17 @@ struct DnsTransaction {
         /* Query candidates this transaction is referenced by and that
          * shall be notified about this specific transaction
          * completing. */
-        Set *notify_query_candidates;
+        Set *notify_query_candidates, *notify_query_candidates_done;
 
         /* Zone items this transaction is referenced by and that shall
          * be notified about completion. */
-        Set *notify_zone_items;
+        Set *notify_zone_items, *notify_zone_items_done;
 
         /* Other transactions that this transactions is referenced by
          * and that shall be notified about completion. This is used
          * when transactions want to validate their RRsets, but need
          * another DNSKEY or DS RR to do so. */
-        Set *notify_transactions;
+        Set *notify_transactions, *notify_transactions_done;
 
         /* The opposite direction: the transactions this transaction
          * created in order to request DNSKEY or DS RRs. */
@@ -152,8 +151,6 @@ void dns_transaction_complete(DnsTransaction *t, DnsTransactionState state);
 void dns_transaction_notify(DnsTransaction *t, DnsTransaction *source);
 int dns_transaction_validate_dnssec(DnsTransaction *t);
 int dns_transaction_request_dnssec_keys(DnsTransaction *t);
-
-const char *dns_transaction_key_string(DnsTransaction *t);
 
 const char* dns_transaction_state_to_string(DnsTransactionState p) _const_;
 DnsTransactionState dns_transaction_state_from_string(const char *s) _pure_;

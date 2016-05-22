@@ -99,6 +99,7 @@ char *format_timespan(char *buf, size_t l, usec_t t, usec_t accuracy);
 
 void dual_timestamp_serialize(FILE *f, const char *name, dual_timestamp *t);
 int dual_timestamp_deserialize(const char *value, dual_timestamp *t);
+int timestamp_deserialize(const char *value, usec_t *timestamp);
 
 int parse_timestamp(const char *t, usec_t *usec);
 
@@ -111,6 +112,7 @@ bool ntp_synced(void);
 int get_timezones(char ***l);
 bool timezone_is_valid(const char *name);
 
+bool clock_boottime_supported(void);
 clockid_t clock_boottime_or_monotonic(void);
 
 #define xstrftime(buf, fmt, tm) \

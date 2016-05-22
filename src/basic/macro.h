@@ -23,10 +23,15 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <sys/param.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 
 #define _printf_(a,b) __attribute__ ((format (printf, a, b)))
-#define _alloc_(...) __attribute__ ((alloc_size(__VA_ARGS__)))
+#ifdef __clang__
+#  define _alloc_(...)
+#else
+#  define _alloc_(...) __attribute__ ((alloc_size(__VA_ARGS__)))
+#endif
 #define _sentinel_ __attribute__ ((sentinel))
 #define _unused_ __attribute__ ((unused))
 #define _destructor_ __attribute__ ((destructor))
@@ -224,7 +229,7 @@ static inline unsigned long ALIGN_POWER2(unsigned long u) {
 /* We override the glibc assert() here. */
 #undef assert
 #ifdef NDEBUG
-#define assert(expr) do {} while(false)
+#define assert(expr) do {} while (false)
 #else
 #define assert(expr) assert_message_se(expr, #expr)
 #endif
@@ -360,6 +365,12 @@ static inline unsigned long ALIGN_POWER2(unsigned long u) {
                 }                               \
                 _found;                         \
         })
+
+#define SWAP_TWO(x, y) do {                        \
+                typeof(x) _t = (x);                \
+                (x) = (y);                         \
+                (y) = (_t);                        \
+        } while (false)
 
 /* Define C11 thread_local attribute even on older gcc compiler
  * version */

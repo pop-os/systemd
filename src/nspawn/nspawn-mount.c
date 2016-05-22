@@ -438,20 +438,21 @@ static int mount_bind(const char *dest, CustomMount *m) {
                 r = mkdir_parents_label(where, 0755);
                 if (r < 0)
                         return log_error_errno(r, "Failed to make parents of %s: %m", where);
+
+                /* Create the mount point. Any non-directory file can be
+                * mounted on any non-directory file (regular, fifo, socket,
+                * char, block).
+                */
+                if (S_ISDIR(source_st.st_mode))
+                        r = mkdir_label(where, 0755);
+                else
+                        r = touch(where);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to create mount point %s: %m", where);
+
         } else {
                 return log_error_errno(errno, "Failed to stat %s: %m", where);
         }
-
-        /* Create the mount point. Any non-directory file can be
-         * mounted on any non-directory file (regular, fifo, socket,
-         * char, block).
-         */
-        if (S_ISDIR(source_st.st_mode))
-                r = mkdir_label(where, 0755);
-        else
-                r = touch(where);
-        if (r < 0 && r != -EEXIST)
-                return log_error_errno(r, "Failed to create mount point %s: %m", where);
 
         if (mount(m->source, where, NULL, mount_flags, mount_opts) < 0)
                 return log_error_errno(errno, "mount(%s) failed: %m", where);
@@ -750,7 +751,7 @@ static int mount_unified_cgroups(const char *dest) {
                 return -EINVAL;
         }
 
-        if (mount("cgroup", p, "cgroup", MS_NOSUID|MS_NOEXEC|MS_NODEV, "__DEVEL__sane_behavior") < 0)
+        if (mount("cgroup", p, "cgroup2", MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL) < 0)
                 return log_error_errno(errno, "Failed to mount unified cgroup hierarchy to %s: %m", p);
 
         return 0;

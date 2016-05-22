@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/mount.h>
+#include <sys/wait.h>
 
 /* When we include libgen.h because we need dirname() we immediately
  * undefine basename() since libgen.h defines it as a macro to the POSIX
@@ -45,6 +46,7 @@
 #include "mkdir.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "signal-util.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "user-util.h"
@@ -165,7 +167,7 @@ int bus_machine_method_kill(sd_bus_message *message, void *userdata, sd_bus_erro
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid kill parameter '%s'", swho);
         }
 
-        if (signo <= 0 || signo >= _NSIG)
+        if (!SIGNAL_VALID(signo))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid signal %i", signo);
 
         r = bus_verify_polkit_async(
@@ -728,7 +730,7 @@ int bus_machine_method_open_shell(sd_bus_message *message, void *userdata, sd_bu
                 return r;
 
         /* Name and mode */
-        unit = strjoina("container-shell@", p, ".service", NULL);
+        unit = strjoina("container-shell@", p, ".service");
         r = sd_bus_message_append(tm, "ss", unit, "fail");
         if (r < 0)
                 return r;
@@ -1083,52 +1085,11 @@ finish:
         return r;
 }
 
-static int machine_operation_done(sd_event_source *s, const siginfo_t *si, void *userdata) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        MachineOperation *o = userdata;
-        int r;
-
-        assert(o);
-        assert(si);
-
-        o->pid = 0;
-
-        if (si->si_code != CLD_EXITED) {
-                r = sd_bus_error_setf(&error, SD_BUS_ERROR_FAILED, "Child died abnormally.");
-                goto fail;
-        }
-
-        if (si->si_status != EXIT_SUCCESS) {
-                if (read(o->errno_fd, &r, sizeof(r)) == sizeof(r))
-                        r = sd_bus_error_set_errnof(&error, r, "%m");
-                else
-                        r = sd_bus_error_setf(&error, SD_BUS_ERROR_FAILED, "Child failed.");
-
-                goto fail;
-        }
-
-        r = sd_bus_reply_method_return(o->message, NULL);
-        if (r < 0)
-                log_error_errno(r, "Failed to reply to message: %m");
-
-        machine_operation_unref(o);
-        return 0;
-
-fail:
-        r = sd_bus_reply_method_error(o->message, &error);
-        if (r < 0)
-                log_error_errno(r, "Failed to reply to message: %m");
-
-        machine_operation_unref(o);
-        return 0;
-}
-
 int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         const char *src, *dest, *host_path, *container_path, *host_basename, *host_dirname, *container_basename, *container_dirname;
         _cleanup_close_pair_ int errno_pipe_fd[2] = { -1, -1 };
         _cleanup_close_ int hostfd = -1;
         Machine *m = userdata;
-        MachineOperation *o;
         bool copy_from;
         pid_t child;
         char *t;
@@ -1137,7 +1098,7 @@ int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_erro
         assert(message);
         assert(m);
 
-        if (m->n_operations >= MACHINE_OPERATIONS_MAX)
+        if (m->manager->n_operations >= OPERATIONS_MAX)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_LIMITS_EXCEEDED, "Too many ongoing copies.");
 
         if (m->class != MACHINE_CONTAINER)
@@ -1247,29 +1208,107 @@ int bus_machine_method_copy(sd_bus_message *message, void *userdata, sd_bus_erro
 
         errno_pipe_fd[1] = safe_close(errno_pipe_fd[1]);
 
-        /* Copying might take a while, hence install a watch the
-         * child, and return */
+        /* Copying might take a while, hence install a watch on the child, and return */
 
-        o = new0(MachineOperation, 1);
-        if (!o)
-                return log_oom();
-
-        o->pid = child;
-        o->message = sd_bus_message_ref(message);
-        o->errno_fd = errno_pipe_fd[0];
+        r = operation_new(m->manager, m, child, message, errno_pipe_fd[0]);
+        if (r < 0) {
+                (void) sigkill_wait(child);
+                return r;
+        }
         errno_pipe_fd[0] = -1;
 
-        r = sd_event_add_child(m->manager->event, &o->event_source, child, WEXITED, machine_operation_done, o);
-        if (r < 0) {
-                machine_operation_unref(o);
-                return log_oom();
+        return 1;
+}
+
+int bus_machine_method_open_root_directory(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_close_ int fd = -1;
+        Machine *m = userdata;
+        int r;
+
+        assert(message);
+        assert(m);
+
+        r = bus_verify_polkit_async(
+                        message,
+                        CAP_SYS_ADMIN,
+                        "org.freedesktop.machine1.manage-machines",
+                        NULL,
+                        false,
+                        UID_INVALID,
+                        &m->manager->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        switch (m->class) {
+
+        case MACHINE_HOST:
+                fd = open("/", O_RDONLY|O_CLOEXEC|O_DIRECTORY);
+                if (fd < 0)
+                        return -errno;
+
+                break;
+
+        case MACHINE_CONTAINER: {
+                _cleanup_close_ int mntns_fd = -1, root_fd = -1;
+                _cleanup_close_pair_ int pair[2] = { -1, -1 };
+                siginfo_t si;
+                pid_t child;
+
+                r = namespace_open(m->leader, NULL, &mntns_fd, NULL, NULL, &root_fd);
+                if (r < 0)
+                        return r;
+
+                if (socketpair(AF_UNIX, SOCK_DGRAM, 0, pair) < 0)
+                        return -errno;
+
+                child = fork();
+                if (child < 0)
+                        return sd_bus_error_set_errnof(error, errno, "Failed to fork(): %m");
+
+                if (child == 0) {
+                        _cleanup_close_ int dfd = -1;
+
+                        pair[0] = safe_close(pair[0]);
+
+                        r = namespace_enter(-1, mntns_fd, -1, -1, root_fd);
+                        if (r < 0)
+                                _exit(EXIT_FAILURE);
+
+                        dfd = open("/", O_RDONLY|O_CLOEXEC|O_DIRECTORY);
+                        if (dfd < 0)
+                                _exit(EXIT_FAILURE);
+
+                        r = send_one_fd(pair[1], dfd, 0);
+                        dfd = safe_close(dfd);
+                        if (r < 0)
+                                _exit(EXIT_FAILURE);
+
+                        _exit(EXIT_SUCCESS);
+                }
+
+                pair[1] = safe_close(pair[1]);
+
+                r = wait_for_terminate(child, &si);
+                if (r < 0)
+                        return sd_bus_error_set_errnof(error, r, "Failed to wait for child: %m");
+                if (si.si_code != CLD_EXITED || si.si_status != EXIT_SUCCESS)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_FAILED, "Child died abnormally.");
+
+                fd = receive_one_fd(pair[0], MSG_DONTWAIT);
+                if (fd < 0)
+                        return fd;
+
+                break;
         }
 
-        LIST_PREPEND(operations, m->operations, o);
-        m->n_operations++;
-        o->machine = m;
+        default:
+                return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Opening the root directory is only supported on container machines.");
+        }
 
-        return 1;
+        return sd_bus_reply_method_return(message, "h", fd);
 }
 
 const sd_bus_vtable machine_vtable[] = {
@@ -1295,6 +1334,7 @@ const sd_bus_vtable machine_vtable[] = {
         SD_BUS_METHOD("BindMount", "ssbb", NULL, bus_machine_method_bind_mount, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("CopyFrom", "ss", NULL, bus_machine_method_copy, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("CopyTo", "ss", NULL, bus_machine_method_copy, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("OpenRootDirectory", NULL, "h", bus_machine_method_open_root_directory, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_VTABLE_END
 };
 

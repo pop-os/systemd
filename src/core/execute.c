@@ -24,6 +24,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <string.h>
+#include <sys/capability.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
@@ -57,7 +58,6 @@
 #endif
 #include "async.h"
 #include "barrier.h"
-#include "bus-endpoint.h"
 #include "cap-list.h"
 #include "capability-util.h"
 #include "def.h"
@@ -271,7 +271,7 @@ static int connect_journal_socket(int fd, uid_t uid, gid_t gid) {
                 }
         }
 
-        r = connect(fd, &sa.sa, offsetof(struct sockaddr_un, sun_path) + strlen(sa.un.sun_path));
+        r = connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
         if (r < 0)
                 r = -errno;
 
@@ -747,10 +747,10 @@ static int enforce_groups(const ExecContext *context, const char *username, gid_
 static int enforce_user(const ExecContext *context, uid_t uid) {
         assert(context);
 
-        /* Sets (but doesn't lookup) the uid and make sure we keep the
+        /* Sets (but doesn't look up) the uid and make sure we keep the
          * capabilities while doing so. */
 
-        if (context->capabilities || context->capability_ambient_set != 0) {
+        if (context->capability_ambient_set != 0) {
 
                 /* First step: If we need to keep capabilities but
                  * drop privileges we need to make sure we keep our
@@ -762,31 +762,9 @@ static int enforce_user(const ExecContext *context, uid_t uid) {
                                 if (prctl(PR_SET_SECUREBITS, sb) < 0)
                                         return -errno;
                 }
-
-                /* Second step: set the capabilities. This will reduce
-                 * the capabilities to the minimum we need. */
-
-                if (context->capabilities) {
-                        _cleanup_cap_free_ cap_t d = NULL;
-                        static const cap_value_t bits[] = {
-                                CAP_SETUID,   /* Necessary so that we can run setresuid() below */
-                                CAP_SETPCAP   /* Necessary so that we can set PR_SET_SECUREBITS later on */
-                        };
-
-                        d = cap_dup(context->capabilities);
-                        if (!d)
-                                return -errno;
-
-                        if (cap_set_flag(d, CAP_EFFECTIVE, ELEMENTSOF(bits), bits, CAP_SET) < 0 ||
-                            cap_set_flag(d, CAP_PERMITTED, ELEMENTSOF(bits), bits, CAP_SET) < 0)
-                                return -errno;
-
-                        if (cap_set_proc(d) < 0)
-                                return -errno;
-                }
         }
 
-        /* Third step: actually set the uids */
+        /* Second step: actually set the uids */
         if (setresuid(uid, uid, uid) < 0)
                 return -errno;
 
@@ -1387,9 +1365,6 @@ static bool exec_needs_mount_namespace(
         if (context->private_tmp && runtime && (runtime->tmp_dir || runtime->var_tmp_dir))
                 return true;
 
-        if (params->bus_endpoint_path)
-                return true;
-
         if (context->private_devices ||
             context->protect_system != PROTECT_SYSTEM_NO ||
             context->protect_home != PROTECT_HOME_NO)
@@ -1422,9 +1397,6 @@ static int close_remaining_fds(
                 memcpy(dont_close + n_dont_close, fds, sizeof(int) * n_fds);
                 n_dont_close += n_fds;
         }
-
-        if (params->bus_endpoint_fd >= 0)
-                dont_close[n_dont_close++] = params->bus_endpoint_fd;
 
         if (runtime) {
                 if (runtime->netns_storage_socket[0] >= 0)
@@ -1655,16 +1627,6 @@ static int exec_child(
                 }
         }
 
-        if (params->bus_endpoint_fd >= 0 && context->bus_endpoint) {
-                uid_t ep_uid = (uid == UID_INVALID) ? 0 : uid;
-
-                r = bus_kernel_set_endpoint_policy(params->bus_endpoint_fd, ep_uid, context->bus_endpoint);
-                if (r < 0) {
-                        *exit_status = EXIT_BUS_ENDPOINT;
-                        return r;
-                }
-        }
-
         /* If delegation is enabled we'll pass ownership of the cgroup
          * (but only in systemd's own controller hierarchy!) to the
          * user of the new process. */
@@ -1787,7 +1749,6 @@ static int exec_child(
                                 context->inaccessible_dirs,
                                 tmp,
                                 var,
-                                params->bus_endpoint_path,
                                 context->private_devices,
                                 context->protect_home,
                                 context->protect_system,
@@ -1864,6 +1825,11 @@ static int exec_child(
 
         if (params->apply_permissions) {
 
+                bool use_address_families = context->address_families_whitelist ||
+                        !set_isempty(context->address_families);
+                bool use_syscall_filter = context->syscall_whitelist ||
+                        !set_isempty(context->syscall_filter) ||
+                        !set_isempty(context->syscall_archs);
                 int secure_bits = context->secure_bits;
 
                 for (i = 0; i < _RLIMIT_MAX; i++) {
@@ -1892,21 +1858,6 @@ static int exec_child(
                                 *exit_status = EXIT_CAPABILITIES;
                                 return r;
                         }
-
-                        if (context->capabilities) {
-
-                                /* The capabilities in ambient set need to be also in the inherited
-                                 * set. If they aren't, trying to get them will fail. Add the ambient
-                                 * set inherited capabilities to the capability set in the context.
-                                 * This is needed because if capabilities are set (using "Capabilities="
-                                 * keyword), they will override whatever we set now. */
-
-                                r = capability_update_inherited_set(context->capabilities, context->capability_ambient_set);
-                                if (r < 0) {
-                                        *exit_status = EXIT_CAPABILITIES;
-                                        return r;
-                                }
-                        }
                 }
 
                 if (context->user) {
@@ -1931,7 +1882,7 @@ static int exec_child(
                                  * also to the context secure_bits so that we don't try to
                                  * drop the bit away next. */
 
-                                 secure_bits |= 1<<SECURE_KEEP_CAPS;
+                                secure_bits |= 1<<SECURE_KEEP_CAPS;
                         }
                 }
 
@@ -1945,21 +1896,15 @@ static int exec_child(
                                 return -errno;
                         }
 
-                if (context->capabilities)
-                        if (cap_set_proc(context->capabilities) < 0) {
-                                *exit_status = EXIT_CAPABILITIES;
-                                return -errno;
-                        }
-
-                if (context->no_new_privileges)
+                if (context->no_new_privileges ||
+                    (!have_effective_cap(CAP_SYS_ADMIN) && (use_address_families || use_syscall_filter)))
                         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) {
                                 *exit_status = EXIT_NO_NEW_PRIVILEGES;
                                 return -errno;
                         }
 
 #ifdef HAVE_SECCOMP
-                if (context->address_families_whitelist ||
-                    !set_isempty(context->address_families)) {
+                if (use_address_families) {
                         r = apply_address_families(context);
                         if (r < 0) {
                                 *exit_status = EXIT_ADDRESS_FAMILIES;
@@ -1967,9 +1912,7 @@ static int exec_child(
                         }
                 }
 
-                if (context->syscall_whitelist ||
-                    !set_isempty(context->syscall_filter) ||
-                    !set_isempty(context->syscall_archs)) {
+                if (use_syscall_filter) {
                         r = apply_seccomp(context);
                         if (r < 0) {
                                 *exit_status = EXIT_SECCOMP;
@@ -2193,11 +2136,6 @@ void exec_context_done(ExecContext *c) {
 
         c->pam_name = mfree(c->pam_name);
 
-        if (c->capabilities) {
-                cap_free(c->capabilities);
-                c->capabilities = NULL;
-        }
-
         c->read_only_dirs = strv_free(c->read_only_dirs);
         c->read_write_dirs = strv_free(c->read_write_dirs);
         c->inaccessible_dirs = strv_free(c->inaccessible_dirs);
@@ -2214,9 +2152,6 @@ void exec_context_done(ExecContext *c) {
         c->address_families = set_free(c->address_families);
 
         c->runtime_directory = strv_free(c->runtime_directory);
-
-        bus_endpoint_free(c->bus_endpoint);
-        c->bus_endpoint = NULL;
 }
 
 int exec_context_destroy_runtime_directory(ExecContext *c, const char *runtime_prefix) {
@@ -2306,7 +2241,7 @@ int exec_context_load_environment(Unit *unit, const ExecContext *c, char ***l) {
 
                 if (fn[0] == '-') {
                         ignore = true;
-                        fn ++;
+                        fn++;
                 }
 
                 if (!path_is_absolute(fn)) {
@@ -2557,14 +2492,6 @@ void exec_context_dump(ExecContext *c, FILE* f, const char *prefix) {
                         "%sSyslogLevel: %s\n",
                         prefix, strna(fac_str),
                         prefix, strna(lvl_str));
-        }
-
-        if (c->capabilities) {
-                _cleanup_cap_free_charp_ char *t;
-
-                t = cap_to_text(c->capabilities, NULL);
-                if (t)
-                        fprintf(f, "%sCapabilities: %s\n", prefix, t);
         }
 
         if (c->secure_bits)

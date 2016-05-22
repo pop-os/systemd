@@ -65,7 +65,7 @@
       <command>systemd-resolve</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
       <command> --type=<replaceable>TYPE</replaceable></command>
-      <arg choice="plain" rep="repeat"><replaceable>RRDOMAIN</replaceable></arg>
+      <arg choice="plain" rep="repeat"><replaceable>DOMAIN</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis>
@@ -74,6 +74,20 @@
       <command> --service</command>
       <arg choice="plain"><arg choice="opt"><arg choice="opt"><replaceable>NAME</replaceable></arg>
       <replaceable>TYPE</replaceable></arg> <replaceable>DOMAIN</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis>
+      <command>systemd-resolve</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <command> --openpgp</command>
+      <arg choice="plain"><replaceable>USER@DOMAIN</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis>
+      <command>systemd-resolve</command>
+      <arg choice="opt" rep="repeat">OPTIONS</arg>
+      <command> --tlsa</command>
+      <arg choice="plain"><replaceable>DOMAIN<optional>:PORT</optional></replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis>
@@ -114,8 +128,17 @@
     is assumed to be a domain name, that is already prefixed with an SRV type, and an SRV lookup is done (no
     TXT).</para>
 
+    <para>The <option>--openpgp</option> switch may be used to query PGP keys stored as
+    <ulink url="https://tools.ietf.org/html/draft-wouters-dane-openpgp-02">OPENPGPKEY</ulink> resource records.
+    When this option is specified one or more e-mail address must be specified.</para>
+
+    <para>The <option>--tlsa</option> switch maybe be used to query TLS public
+    keys stored as
+    <ulink url="https://tools.ietf.org/html/rfc6698">TLSA</ulink> resource records.
+    When this option is specified one or more domain names must be specified.</para>
+
     <para>The <option>--statistics</option> switch may be used to show resolver statistics, including information about
-    the number of succesful and failed DNSSEC validations.</para>
+    the number of successful and failed DNSSEC validations.</para>
 
     <para>The <option>--reset-statistics</option> may be used to reset various statistics counters maintained the
     resolver, including those shown in the <option>--statistics</option> output. This operation requires root
@@ -152,7 +175,7 @@
         <listitem><para>Specifies the network protocol for the query. May be one of <literal>dns</literal>
         (i.e. classic unicast DNS), <literal>llmnr</literal> (<ulink
         url="https://tools.ietf.org/html/rfc4795">Link-Local Multicast Name Resolution</ulink>),
-        <literal>llmr-ipv4</literal>, <literal>llmnr-ipv6</literal> (LLMNR via the indicated underlying IP
+        <literal>llmnr-ipv4</literal>, <literal>llmnr-ipv6</literal> (LLMNR via the indicated underlying IP
         protocols). By default the lookup is done via all protocols suitable for the lookup. If used, limits the set of
         protocols that may be used. Use this option multiple times to enable resolving via multiple protocols at the
         same time. The setting <literal>llmnr</literal> is identical to specifying this switch once with
@@ -198,6 +221,28 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>--openpgp</option></term>
+
+        <listitem><para>Enables OPENPGPKEY resource record resolution (see above). Specified e-mail
+        addresses are converted to the corresponding DNS domain name, and any OPENPGPKEY keys are
+        printed.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--tlsa</option></term>
+
+        <listitem><para>Enables TLSA resource record resolution (see above).
+        A query will be performed for each of the specified names prefixed with
+        the port and family
+        (<literal>_<replaceable>port</replaceable>._<replaceable>family</replaceable>.<replaceable>domain</replaceable></literal>).
+        The port number may be specified after a colon
+        (<literal>:</literal>), otherwise <constant>443</constant> will be used
+        by default. The family may be specified as an argument after
+        <option>--tlsa</option>, otherwise <constant>tcp</constant> will be
+        used.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--cname=</option><replaceable>BOOL</replaceable></term>
 
         <listitem><para>Takes a boolean parameter. If true (the default), DNS CNAME or DNAME redirections are
@@ -211,6 +256,16 @@
         <listitem><para>Takes a boolean parameter. If true (the default), any specified single-label hostnames will be
         searched in the domains configured in the search domain list, if it is non-empty. Otherwise, the search domain
         logic is disabled.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--raw</option><optional>=payload|packet</optional></term>
+
+        <listitem><para>Dump the answer as binary data. If there is no argument or if the argument is
+        <literal>payload</literal>, the payload of the packet is exported. If the argument is
+        <literal>packet</literal>, the whole packet is dumped in wire format, prefixed by
+        length specified as a little-endian 64-bit number. This format allows multiple packets
+        to be dumped and unambigously parsed.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -244,27 +299,70 @@
     <example>
       <title>Retrieve the addresses of the <literal>www.0pointer.net</literal> domain</title>
 
-      <programlisting>$ systemd-resolve www.0pointer.net</programlisting>
+      <programlisting>$ systemd-resolve www.0pointer.net
+www.0pointer.net: 2a01:238:43ed:c300:10c3:bcf3:3266:da74
+                  85.214.157.71
+
+-- Information acquired via protocol DNS in 611.6ms.
+-- Data is authenticated: no
+</programlisting>
     </example>
 
     <example>
       <title>Retrieve the domain of the <literal>85.214.157.71</literal> IP address</title>
 
-      <programlisting>$ systemd-resolve 85.214.157.71</programlisting>
+      <programlisting>$ systemd-resolve 85.214.157.71
+85.214.157.71: gardel.0pointer.net
+
+-- Information acquired via protocol DNS in 1.2997s.
+-- Data is authenticated: no
+</programlisting>
     </example>
 
     <example>
       <title>Retrieve the MX record of the <literal>0pointer.net</literal> domain</title>
 
-      <programlisting>$ systemd-resolve -t MX 0pointer.net</programlisting>
+      <programlisting>$ systemd-resolve -t MX yahoo.com --legend=no
+yahoo.com. IN MX    1 mta7.am0.yahoodns.net
+yahoo.com. IN MX    1 mta6.am0.yahoodns.net
+yahoo.com. IN MX    1 mta5.am0.yahoodns.net
+</programlisting>
     </example>
 
     <example>
       <title>Resolve an SRV service</title>
 
-      <programlisting>$ systemd-resolve --service _xmpp-server._tcp gmail.com</programlisting>
+      <programlisting>$ systemd-resolve --service _xmpp-server._tcp gmail.com
+_xmpp-server._tcp/gmail.com: alt1.xmpp-server.l.google.com:5269 [priority=20, weight=0]
+                             173.194.210.125
+                             alt4.xmpp-server.l.google.com:5269 [priority=20, weight=0]
+                             173.194.65.125
+                             ...
+</programlisting>
     </example>
 
+    <example>
+      <title>Retrieve a PGP key</title>
+
+      <programlisting>$ systemd-resolve --openpgp zbyszek@fedoraproject.org
+d08ee310438ca124a6149ea5cc21b6313b390dce485576eff96f8722._openpgpkey.fedoraproject.org. IN OPENPGPKEY
+        mQINBFBHPMsBEACeInGYJCb+7TurKfb6wGyTottCDtiSJB310i37/6ZYoeIay/5soJjlMyf
+        MFQ9T2XNT/0LM6gTa0MpC1st9LnzYTMsT6tzRly1D1UbVI6xw0g0vE5y2Cjk3xUwAynCsSs
+        ...
+</programlisting>
+    </example>
+
+    <example>
+      <title>Retrieve a TLS key (<literal>=tcp</literal> and
+      <literal>:443</literal> could be skipped)</title>
+
+      <programlisting>$ systemd-resolve --tlsa=tcp fedoraproject.org:443
+_443._tcp.fedoraproject.org IN TLSA 0 0 1 19400be5b7a31fb733917700789d2f0a2471c0c9d506c0e504c06c16d7cb17c0
+        -- Cert. usage: CA constraint
+        -- Selector: Full Certificate
+        -- Matching type: SHA-256
+</programlisting>
+    </example>
   </refsect1>
 
   <refsect1>

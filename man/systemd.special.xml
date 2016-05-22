@@ -83,6 +83,7 @@
     <filename>remote-fs.target</filename>,
     <filename>remote-fs-pre.target</filename>,
     <filename>rescue.target</filename>,
+    <filename>initrd-root-device.target</filename>,
     <filename>initrd-root-fs.target</filename>,
     <filename>rpcbind.target</filename>,
     <filename>runlevel2.target</filename>,
@@ -205,7 +206,7 @@
         <term><filename>emergency.target</filename></term>
         <listitem>
           <para>A special target unit that starts an emergency shell on the main console. This target does not pull in
-          any serices or mounts. It is the most minimal version of starting the system in order to acquire an
+          any services or mounts. It is the most minimal version of starting the system in order to acquire an
           interactive shell; the only processes running are usually just the system manager (PID 1) and the shell
           process. This unit is supposed to be used with the kernel command line option
           <varname>systemd.unit=</varname>; it is also used when a file system check on a required file system fails,
@@ -465,6 +466,18 @@
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term><filename>initrd-root-device.target</filename></term>
+        <listitem>
+          <para>A special initrd target unit that is reached when the root filesystem device is available, but before
+          it has been mounted.
+          <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+          and
+          <citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+          automatically setup the appropiate dependencies to make this happen.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term><filename>initrd-root-fs.target</filename></term>
         <listitem>
           <para><citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>3</manvolnum></citerefentry>
@@ -526,7 +539,7 @@
           <para>A special target unit that sets up all slice units (see
           <citerefentry><refentrytitle>systemd.slice</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
           details) that shall be active after boot. By default the generic <filename>user.slice</filename>,
-          <filename>system.slice</filename>, <filename>machines.slice</filename> slice units, as well as the the root
+          <filename>system.slice</filename>, <filename>machines.slice</filename> slice units, as well as the root
           slice unit <filename>-.slice</filename> are pulled in and ordered before this unit (see below).</para>
 
           <para>It's a good idea to add <varname>WantedBy=slices.target</varname> lines to the <literal>[Install]</literal>
@@ -742,7 +755,7 @@
           defined what that is supposed to mean, with one exception:
           at shutdown, a unit that is ordered after
           <filename>network.target</filename> will be stopped before
-          the network -- to whatever level it might be set up then --
+          the network — to whatever level it might be set up then —
           is shut down. It is hence useful when writing service files
           that require network access on shutdown, which should order
           themselves after this target, but not pull it in. Also see

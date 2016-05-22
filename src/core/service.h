@@ -80,12 +80,13 @@ typedef enum NotifyState {
 
 typedef enum ServiceResult {
         SERVICE_SUCCESS,
-        SERVICE_FAILURE_RESOURCES,
+        SERVICE_FAILURE_RESOURCES, /* a bit of a misnomer, just our catch-all error for errnos we didn't expect */
         SERVICE_FAILURE_TIMEOUT,
         SERVICE_FAILURE_EXIT_CODE,
         SERVICE_FAILURE_SIGNAL,
         SERVICE_FAILURE_CORE_DUMP,
         SERVICE_FAILURE_WATCHDOG,
+        SERVICE_FAILURE_START_LIMIT_HIT,
         _SERVICE_RESULT_MAX,
         _SERVICE_RESULT_INVALID = -1
 } ServiceResult;
@@ -150,8 +151,6 @@ struct Service {
         int socket_fd;
         bool socket_fd_selinux_context_net;
 
-        int bus_endpoint_fd;
-
         bool permissions_start_only;
         bool root_directory_start_only;
         bool remain_after_exit;
@@ -200,6 +199,7 @@ struct Service {
 extern const UnitVTable service_vtable;
 
 int service_set_socket_fd(Service *s, int fd, struct Socket *socket, bool selinux_context_net);
+void service_close_socket_fd(Service *s);
 
 const char* service_restart_to_string(ServiceRestart i) _const_;
 ServiceRestart service_restart_from_string(const char *s) _pure_;

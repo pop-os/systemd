@@ -49,6 +49,7 @@
 #include "journald-native.h"
 #include "log.h"
 #include "macro.h"
+#include "missing.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "process-util.h"
@@ -212,6 +213,10 @@ static int fix_xattr(int fd, const char *context[_CONTEXT_MAX]) {
 
 #define filename_escape(s) xescape((s), "./ ")
 
+static inline const char *coredump_tmpfile_name(const char *s) {
+        return s ? s : "(unnamed temporary file)";
+}
+
 static int fix_permissions(
                 int fd,
                 const char *filename,
@@ -219,8 +224,9 @@ static int fix_permissions(
                 const char *context[_CONTEXT_MAX],
                 uid_t uid) {
 
+        int r;
+
         assert(fd >= 0);
-        assert(filename);
         assert(target);
         assert(context);
 
@@ -230,10 +236,11 @@ static int fix_permissions(
         (void) fix_xattr(fd, context);
 
         if (fsync(fd) < 0)
-                return log_error_errno(errno, "Failed to sync coredump %s: %m", filename);
+                return log_error_errno(errno, "Failed to sync coredump %s: %m", coredump_tmpfile_name(filename));
 
-        if (rename(filename, target) < 0)
-                return log_error_errno(errno, "Failed to rename coredump %s -> %s: %m", filename, target);
+        r = link_tmpfile(fd, filename, target);
+        if (r < 0)
+                return log_error_errno(r, "Failed to move coredump %s into place: %m", target);
 
         return 0;
 }
@@ -335,15 +342,11 @@ static int save_external_coredump(
         if (r < 0)
                 return log_error_errno(r, "Failed to determine coredump file name: %m");
 
-        r = tempfn_random(fn, NULL, &tmp);
-        if (r < 0)
-                return log_error_errno(r, "Failed to determine temporary file name: %m");
-
         mkdir_p_label("/var/lib/systemd/coredump", 0755);
 
-        fd = open(tmp, O_CREAT|O_EXCL|O_RDWR|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW, 0640);
+        fd = open_tmpfile_linkable(fn, O_RDWR|O_CLOEXEC, &tmp);
         if (fd < 0)
-                return log_error_errno(errno, "Failed to create coredump file %s: %m", tmp);
+                return log_error_errno(fd, "Failed to create temporary file for coredump %s: %m", fn);
 
         r = copy_bytes(input_fd, fd, max_size, false);
         if (r == -EFBIG) {
@@ -358,12 +361,12 @@ static int save_external_coredump(
         }
 
         if (fstat(fd, &st) < 0) {
-                log_error_errno(errno, "Failed to fstat coredump %s: %m", tmp);
+                log_error_errno(errno, "Failed to fstat coredump %s: %m", coredump_tmpfile_name(tmp));
                 goto fail;
         }
 
         if (lseek(fd, 0, SEEK_SET) == (off_t) -1) {
-                log_error_errno(errno, "Failed to seek on %s: %m", tmp);
+                log_error_errno(errno, "Failed to seek on %s: %m", coredump_tmpfile_name(tmp));
                 goto fail;
         }
 
@@ -381,21 +384,15 @@ static int save_external_coredump(
                         goto uncompressed;
                 }
 
-                r = tempfn_random(fn_compressed, NULL, &tmp_compressed);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to determine temporary file name for %s: %m", fn_compressed);
-                        goto uncompressed;
-                }
-
-                fd_compressed = open(tmp_compressed, O_CREAT|O_EXCL|O_RDWR|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW, 0640);
+                fd_compressed = open_tmpfile_linkable(fn_compressed, O_RDWR|O_CLOEXEC, &tmp_compressed);
                 if (fd_compressed < 0) {
-                        log_error_errno(errno, "Failed to create file %s: %m", tmp_compressed);
+                        log_error_errno(fd_compressed, "Failed to create temporary file for coredump %s: %m", fn_compressed);
                         goto uncompressed;
                 }
 
                 r = compress_stream(fd, fd_compressed, -1);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to compress %s: %m", tmp_compressed);
+                        log_error_errno(r, "Failed to compress %s: %m", coredump_tmpfile_name(tmp_compressed));
                         goto fail_compressed;
                 }
 
@@ -404,7 +401,8 @@ static int save_external_coredump(
                         goto fail_compressed;
 
                 /* OK, this worked, we can get rid of the uncompressed version now */
-                unlink_noerrno(tmp);
+                if (tmp)
+                        unlink_noerrno(tmp);
 
                 *ret_filename = fn_compressed;     /* compressed */
                 *ret_node_fd = fd_compressed;      /* compressed */
@@ -417,7 +415,8 @@ static int save_external_coredump(
                 return 0;
 
         fail_compressed:
-                (void) unlink(tmp_compressed);
+                if (tmp_compressed)
+                        (void) unlink(tmp_compressed);
         }
 
 uncompressed:
@@ -438,7 +437,8 @@ uncompressed:
         return 0;
 
 fail:
-        (void) unlink(tmp);
+        if (tmp)
+                (void) unlink(tmp);
         return r;
 }
 
@@ -739,15 +739,16 @@ static int process_socket(int fd) {
                         .msg_iovlen = 1,
                 };
                 ssize_t n;
-                int l;
+                ssize_t l;
 
                 if (!GREEDY_REALLOC(iovec, n_iovec_allocated, n_iovec + 3)) {
                         r = log_oom();
                         goto finish;
                 }
 
-                if (ioctl(fd, FIONREAD, &l) < 0) {
-                        r = log_error_errno(errno, "FIONREAD failed: %m");
+                l = next_datagram_size_fd(fd);
+                if (l < 0) {
+                        r = log_error_errno(l, "Failed to determine datagram size to read: %m");
                         goto finish;
                 }
 
@@ -847,7 +848,7 @@ static int send_iovec(const struct iovec iovec[], size_t n_iovec, int input_fd) 
         if (fd < 0)
                 return log_error_errno(errno, "Failed to create coredump socket: %m");
 
-        if (connect(fd, &sa.sa, offsetof(union sockaddr_union, un.sun_path) + strlen(sa.un.sun_path)) < 0)
+        if (connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0)
                 return log_error_errno(errno, "Failed to connect to coredump service: %m");
 
         for (i = 0; i < n_iovec; i++) {
@@ -1095,7 +1096,7 @@ static int process_kernel(int argc, char* argv[]) {
                         IOVEC_SET_STRING(iovec[n_iovec++], core_environ);
         }
 
-        core_timestamp = strjoina("COREDUMP_TIMESTAMP=", context[CONTEXT_TIMESTAMP], "000000", NULL);
+        core_timestamp = strjoina("COREDUMP_TIMESTAMP=", context[CONTEXT_TIMESTAMP], "000000");
         IOVEC_SET_STRING(iovec[n_iovec++], core_timestamp);
 
         IOVEC_SET_STRING(iovec[n_iovec++], "MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1");

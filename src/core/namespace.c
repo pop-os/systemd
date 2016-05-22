@@ -44,6 +44,8 @@
 #include "user-util.h"
 #include "util.h"
 
+#define DEV_MOUNT_OPTIONS (MS_NOSUID|MS_STRICTATIME|MS_NOEXEC)
+
 typedef enum MountMode {
         /* This is ordered by priority! */
         INACCESSIBLE,
@@ -51,7 +53,6 @@ typedef enum MountMode {
         PRIVATE_TMP,
         PRIVATE_VAR_TMP,
         PRIVATE_DEV,
-        PRIVATE_BUS_ENDPOINT,
         READWRITE
 } MountMode;
 
@@ -154,7 +155,7 @@ static int mount_dev(BindMount *m) {
 
         dev = strjoina(temporary_mount, "/dev");
         (void) mkdir(dev, 0755);
-        if (mount("tmpfs", dev, "tmpfs", MS_NOSUID|MS_STRICTATIME, "mode=755") < 0) {
+        if (mount("tmpfs", dev, "tmpfs", DEV_MOUNT_OPTIONS, "mode=755") < 0) {
                 r = -errno;
                 goto fail;
         }
@@ -238,6 +239,8 @@ static int mount_dev(BindMount *m) {
          */
         (void) mkdir_p_label(m->path, 0755);
 
+        /* Unmount everything in old /dev */
+        umount_recursive(m->path, 0);
         if (mount(dev, m->path, NULL, MS_MOVE, NULL) < 0) {
                 r = -errno;
                 goto fail;
@@ -263,78 +266,6 @@ fail:
 
         umount(dev);
         rmdir(dev);
-        rmdir(temporary_mount);
-
-        return r;
-}
-
-static int mount_kdbus(BindMount *m) {
-
-        char temporary_mount[] = "/tmp/kdbus-dev-XXXXXX";
-        _cleanup_free_ char *basepath = NULL;
-        _cleanup_umask_ mode_t u;
-        char *busnode = NULL, *root;
-        struct stat st;
-        int r;
-
-        assert(m);
-
-        u = umask(0000);
-
-        if (!mkdtemp(temporary_mount))
-                return log_error_errno(errno, "Failed create temp dir: %m");
-
-        root = strjoina(temporary_mount, "/kdbus");
-        (void) mkdir(root, 0755);
-        if (mount("tmpfs", root, "tmpfs", MS_NOSUID|MS_STRICTATIME, "mode=777") < 0) {
-                r = -errno;
-                goto fail;
-        }
-
-        /* create a new /dev/null dev node copy so we have some fodder to
-         * bind-mount the custom endpoint over. */
-        if (stat("/dev/null", &st) < 0) {
-                r = log_error_errno(errno, "Failed to stat /dev/null: %m");
-                goto fail;
-        }
-
-        busnode = strjoina(root, "/bus");
-        if (mknod(busnode, (st.st_mode & ~07777) | 0600, st.st_rdev) < 0) {
-                r = log_error_errno(errno, "mknod() for %s failed: %m",
-                                    busnode);
-                goto fail;
-        }
-
-        r = mount(m->path, busnode, NULL, MS_BIND, NULL);
-        if (r < 0) {
-                r = log_error_errno(errno, "bind mount of %s failed: %m",
-                                    m->path);
-                goto fail;
-        }
-
-        basepath = dirname_malloc(m->path);
-        if (!basepath) {
-                r = -ENOMEM;
-                goto fail;
-        }
-
-        if (mount(root, basepath, NULL, MS_MOVE, NULL) < 0) {
-                r = log_error_errno(errno, "bind mount of %s failed: %m",
-                                    basepath);
-                goto fail;
-        }
-
-        rmdir(temporary_mount);
-        return 0;
-
-fail:
-        if (busnode) {
-                umount(busnode);
-                unlink(busnode);
-        }
-
-        umount(root);
-        rmdir(root);
         rmdir(temporary_mount);
 
         return r;
@@ -379,9 +310,6 @@ static int apply_mount(
         case PRIVATE_DEV:
                 return mount_dev(m);
 
-        case PRIVATE_BUS_ENDPOINT:
-                return mount_kdbus(m);
-
         default:
                 assert_not_reached("Unknown mode");
         }
@@ -404,9 +332,11 @@ static int make_read_only(BindMount *m) {
 
         if (IN_SET(m->mode, INACCESSIBLE, READONLY))
                 r = bind_remount_recursive(m->path, true);
-        else if (IN_SET(m->mode, READWRITE, PRIVATE_TMP, PRIVATE_VAR_TMP, PRIVATE_DEV))
+        else if (IN_SET(m->mode, READWRITE, PRIVATE_TMP, PRIVATE_VAR_TMP, PRIVATE_DEV)) {
                 r = bind_remount_recursive(m->path, false);
-        else
+                if (r == 0 && m->mode == PRIVATE_DEV) /* can be readonly but the submounts can't*/
+                        r = mount(NULL, m->path, NULL, MS_REMOUNT|DEV_MOUNT_OPTIONS|MS_RDONLY, NULL);
+        } else
                 r = 0;
 
         if (m->ignore && r == -ENOENT)
@@ -422,7 +352,6 @@ int setup_namespace(
                 char** inaccessible_dirs,
                 const char* tmp_dir,
                 const char* var_tmp_dir,
-                const char* bus_endpoint_path,
                 bool private_dev,
                 ProtectHome protect_home,
                 ProtectSystem protect_system,
@@ -438,7 +367,7 @@ int setup_namespace(
         if (unshare(CLONE_NEWNS) < 0)
                 return -errno;
 
-        n = !!tmp_dir + !!var_tmp_dir + !!bus_endpoint_path +
+        n = !!tmp_dir + !!var_tmp_dir +
                 strv_length(read_write_dirs) +
                 strv_length(read_only_dirs) +
                 strv_length(inaccessible_dirs) +
@@ -476,12 +405,6 @@ int setup_namespace(
                 if (private_dev) {
                         m->path = prefix_roota(root_directory, "/dev");
                         m->mode = PRIVATE_DEV;
-                        m++;
-                }
-
-                if (bus_endpoint_path) {
-                        m->path = prefix_roota(root_directory, bus_endpoint_path);
-                        m->mode = PRIVATE_BUS_ENDPOINT;
                         m++;
                 }
 

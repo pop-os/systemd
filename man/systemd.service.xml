@@ -100,18 +100,13 @@
     their activated <filename>.socket</filename> units via an
     automatic <varname>After=</varname> dependency.</para>
 
-    <para>Unless <varname>DefaultDependencies=</varname> is set to
-    <option>false</option>, service units will implicitly have
-    dependencies of type <varname>Requires=</varname> and
-    <varname>After=</varname> on <filename>sysinit.target</filename>,
-    a dependency of type <varname>After=</varname> on
-    <filename>basic.target</filename> as well as dependencies of
-    type <varname>Conflicts=</varname> and <varname>Before=</varname>
-    on <filename>shutdown.target</filename>. These ensure that normal
-    service units pull in basic system initialization, and are
-    terminated cleanly prior to system shutdown. Only services
-    involved with early boot or late system shutdown should disable
-    this option.</para>
+    <para>Unless <varname>DefaultDependencies=</varname> in the <literal>[Unit]</literal> is set to
+    <option>false</option>, service units will implicitly have dependencies of type <varname>Requires=</varname> and
+    <varname>After=</varname> on <filename>sysinit.target</filename>, a dependency of type <varname>After=</varname> on
+    <filename>basic.target</filename> as well as dependencies of type <varname>Conflicts=</varname> and
+    <varname>Before=</varname> on <filename>shutdown.target</filename>. These ensure that normal service units pull in
+    basic system initialization, and are terminated cleanly prior to system shutdown. Only services involved with early
+    boot or late system shutdown should disable this option.</para>
 
     <para>Instanced service units (i.e. service units with an <literal>@</literal> in their name) are assigned by
     default a per-template slice unit (see
@@ -273,42 +268,6 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>BusPolicy=</varname></term>
-
-        <listitem><para>If specified, a custom kdbus
-        endpoint will be created and installed as the default bus node
-        for the service. Such a custom endpoint can hold an own set of
-        policy rules that are enforced on top of the bus-wide ones.
-        The custom endpoint is named after the service it was created
-        for, and its node will be bind-mounted over the default bus
-        node location, so the service can only access the bus through
-        its own endpoint. Note that custom bus endpoints default to a
-        "deny all" policy. Hence, if at least one
-        <varname>BusPolicy=</varname> directive is given, you have to
-        make sure to add explicit rules for everything the service
-        should be able to do.</para>
-        <para>The value of this directive is comprised
-        of two parts; the bus name, and a verb to
-        specify to granted access, which is one of
-        <option>see</option>,
-        <option>talk</option>, or
-        <option>own</option>.
-        <option>talk</option> implies
-        <option>see</option>, and <option>own</option>
-        implies both <option>talk</option> and
-        <option>see</option>.
-        If multiple access levels are specified for the
-        same bus name, the most powerful one takes
-        effect.
-        </para>
-        <para>Examples:</para>
-        <programlisting>BusPolicy=org.freedesktop.systemd1 talk</programlisting>
-        <programlisting>BusPolicy=org.foo.bar see</programlisting>
-        <para>This option is only available on kdbus enabled systems.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><varname>ExecStart=</varname></term>
         <listitem><para>Commands with their arguments that are
         executed when this service is started. The value is split into
@@ -446,7 +405,7 @@
         asynchronous one.</para>
 
         <para>Note that the commands specified in <varname>ExecStop=</varname> are only executed when the service
-        started successfuly first. They are not invoked if the service was never started at all, or in case its
+        started successfully first. They are not invoked if the service was never started at all, or in case its
         start-up failed, for example because any of the commands specified in <varname>ExecStart=</varname>,
         <varname>ExecStartPre=</varname> or <varname>ExecStartPost=</varname> failed (and weren't prefixed with
         <literal>-</literal>, see above) or timed out. Use <varname>ExecStopPost=</varname> to invoke commands when a

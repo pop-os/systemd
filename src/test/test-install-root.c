@@ -30,6 +30,8 @@ static void test_basic_mask_and_enable(const char *root) {
         UnitFileChange *changes = NULL;
         unsigned n_changes = 0;
 
+        log_set_max_level(LOG_DEBUG);
+
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "a.service", NULL) == -ENOENT);
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "b.service", NULL) == -ENOENT);
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "c.service", NULL) == -ENOENT);
@@ -78,7 +80,7 @@ static void test_basic_mask_and_enable(const char *root) {
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "d.service", &state) >= 0 && state == UNIT_FILE_MASKED);
 
         /* Enabling a masked unit should fail! */
-        assert_se(unit_file_enable(UNIT_FILE_SYSTEM, false, root, STRV_MAKE("a.service"), false, &changes, &n_changes) == -ESHUTDOWN);
+        assert_se(unit_file_enable(UNIT_FILE_SYSTEM, false, root, STRV_MAKE("a.service"), false, &changes, &n_changes) == -ERFKILL);
         unit_file_changes_free(changes, n_changes);
         changes = NULL; n_changes = 0;
 
@@ -105,7 +107,7 @@ static void test_basic_mask_and_enable(const char *root) {
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "d.service", &state) >= 0 && state == UNIT_FILE_ENABLED);
 
         /* Enabling it again should succeed but be a NOP */
-        assert_se(unit_file_enable(UNIT_FILE_SYSTEM, false, root, STRV_MAKE("a.service"), false, &changes, &n_changes) == 1);
+        assert_se(unit_file_enable(UNIT_FILE_SYSTEM, false, root, STRV_MAKE("a.service"), false, &changes, &n_changes) >= 0);
         assert_se(n_changes == 0);
         unit_file_changes_free(changes, n_changes);
         changes = NULL; n_changes = 0;
@@ -604,7 +606,7 @@ static void test_preset_and_list(const char *root) {
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "preset-no.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
 
         assert_se(h = hashmap_new(&string_hash_ops));
-        assert_se(unit_file_get_list(UNIT_FILE_SYSTEM, root, h) >= 0);
+        assert_se(unit_file_get_list(UNIT_FILE_SYSTEM, root, h, NULL, NULL) >= 0);
 
         p = strjoina(root, "/usr/lib/systemd/system/preset-yes.service");
         q = strjoina(root, "/usr/lib/systemd/system/preset-no.service");
@@ -626,6 +628,104 @@ static void test_preset_and_list(const char *root) {
         unit_file_list_free(h);
 
         assert_se(got_yes && got_no);
+}
+
+static void test_revert(const char *root) {
+        const char *p;
+        UnitFileState state;
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
+
+        assert(root);
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "xx.service", NULL) == -ENOENT);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "yy.service", NULL) == -ENOENT);
+
+        p = strjoina(root, "/usr/lib/systemd/system/xx.service");
+        assert_se(write_string_file(p, "# Empty\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "xx.service", NULL) >= 0);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "xx.service", &state) >= 0 && state == UNIT_FILE_STATIC);
+
+        /* Initially there's nothing to revert */
+        assert_se(unit_file_revert(UNIT_FILE_SYSTEM, root, STRV_MAKE("xx.service"), &changes, &n_changes) >= 0);
+        assert_se(n_changes == 0);
+        unit_file_changes_free(changes, n_changes);
+        changes = NULL; n_changes = 0;
+
+        p = strjoina(root, SYSTEM_CONFIG_UNIT_PATH"/xx.service");
+        assert_se(write_string_file(p, "# Empty override\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        /* Revert the override file */
+        assert_se(unit_file_revert(UNIT_FILE_SYSTEM, root, STRV_MAKE("xx.service"), &changes, &n_changes) >= 0);
+        assert_se(n_changes == 1);
+        assert_se(changes[0].type == UNIT_FILE_UNLINK);
+        assert_se(streq(changes[0].path, p));
+        unit_file_changes_free(changes, n_changes);
+        changes = NULL; n_changes = 0;
+
+        p = strjoina(root, SYSTEM_CONFIG_UNIT_PATH"/xx.service.d/dropin.conf");
+        assert_se(mkdir_parents(p, 0755) >= 0);
+        assert_se(write_string_file(p, "# Empty dropin\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        /* Revert the dropin file */
+        assert_se(unit_file_revert(UNIT_FILE_SYSTEM, root, STRV_MAKE("xx.service"), &changes, &n_changes) >= 0);
+        assert_se(n_changes == 2);
+        assert_se(changes[0].type == UNIT_FILE_UNLINK);
+        assert_se(streq(changes[0].path, p));
+
+        p = strjoina(root, SYSTEM_CONFIG_UNIT_PATH"/xx.service.d");
+        assert_se(changes[1].type == UNIT_FILE_UNLINK);
+        assert_se(streq(changes[1].path, p));
+        unit_file_changes_free(changes, n_changes);
+        changes = NULL; n_changes = 0;
+}
+
+static void test_preset_order(const char *root) {
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
+        const char *p;
+        UnitFileState state;
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-1.service", &state) == -ENOENT);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-2.service", &state) == -ENOENT);
+
+        p = strjoina(root, "/usr/lib/systemd/system/prefix-1.service");
+        assert_se(write_string_file(p,
+                                    "[Install]\n"
+                                    "WantedBy=multi-user.target\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        p = strjoina(root, "/usr/lib/systemd/system/prefix-2.service");
+        assert_se(write_string_file(p,
+                                    "[Install]\n"
+                                    "WantedBy=multi-user.target\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        p = strjoina(root, "/usr/lib/systemd/system-preset/test.preset");
+        assert_se(write_string_file(p,
+                                    "enable prefix-1.service\n"
+                                    "disable prefix-*.service\n"
+                                    "enable prefix-2.service\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-1.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-2.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
+
+        assert_se(unit_file_preset(UNIT_FILE_SYSTEM, false, root, STRV_MAKE("prefix-1.service"), UNIT_FILE_PRESET_FULL, false, &changes, &n_changes) >= 0);
+        assert_se(n_changes == 1);
+        assert_se(changes[0].type == UNIT_FILE_SYMLINK);
+        assert_se(streq(changes[0].source, "/usr/lib/systemd/system/prefix-1.service"));
+        p = strjoina(root, SYSTEM_CONFIG_UNIT_PATH"/multi-user.target.wants/prefix-1.service");
+        assert_se(streq(changes[0].path, p));
+        unit_file_changes_free(changes, n_changes);
+        changes = NULL; n_changes = 0;
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-1.service", &state) >= 0 && state == UNIT_FILE_ENABLED);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-2.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
+
+        assert_se(unit_file_preset(UNIT_FILE_SYSTEM, false, root, STRV_MAKE("prefix-2.service"), UNIT_FILE_PRESET_FULL, false, &changes, &n_changes) >= 0);
+        assert_se(n_changes == 0);
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-1.service", &state) >= 0 && state == UNIT_FILE_ENABLED);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-2.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
 }
 
 int main(int argc, char *argv[]) {
@@ -656,6 +756,8 @@ int main(int argc, char *argv[]) {
         test_template_enable(root);
         test_indirect(root);
         test_preset_and_list(root);
+        test_preset_order(root);
+        test_revert(root);
 
         assert_se(rm_rf(root, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
 

@@ -301,7 +301,7 @@ int manager_etc_hosts_read(Manager *m) {
         FOREACH_LINE(line, f, return log_error_errno(errno, "Failed to read /etc/hosts: %m")) {
                 char *l;
 
-                nr ++;
+                nr++;
 
                 l = strstrip(line);
                 if (isempty(l))
@@ -363,7 +363,7 @@ int manager_etc_hosts_lookup(Manager *m, DnsQuestion* q, DnsAnswer **answer) {
                         if (!IN_SET(t->class, DNS_CLASS_IN, DNS_CLASS_ANY))
                                 continue;
 
-                        r = dns_name_equal(DNS_RESOURCE_KEY_NAME(t), name);
+                        r = dns_name_equal(dns_resource_key_name(t), name);
                         if (r < 0)
                                 return r;
                         if (r > 0) {
@@ -413,7 +413,7 @@ int manager_etc_hosts_lookup(Manager *m, DnsQuestion* q, DnsAnswer **answer) {
                 if (!IN_SET(t->class, DNS_CLASS_IN, DNS_CLASS_ANY))
                         continue;
 
-                r = dns_name_equal(DNS_RESOURCE_KEY_NAME(t), name);
+                r = dns_name_equal(dns_resource_key_name(t), name);
                 if (r < 0)
                         return r;
                 if (r == 0)

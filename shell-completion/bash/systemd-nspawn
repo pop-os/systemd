@@ -45,7 +45,10 @@ __get_env() {
 }
 
 __get_interfaces(){
-    cut -f 1 -d ' ' /proc/net/dev | tail -n +3 | tr -s '\n' | tr -d ':' | xargs
+        { cd /sys/class/net && echo *; } | \
+        while read -d' ' -r name; do
+                [[ "$name" != "lo" ]] && echo "$name"
+        done
 }
 
 _systemd_nspawn() {
@@ -57,14 +60,14 @@ _systemd_nspawn() {
                       [ARG]='-D --directory -u --user --uuid --capability --drop-capability --link-journal --bind --bind-ro -M --machine
                              -S --slice --setenv -Z --selinux-context -L --selinux-apifs-context --register --network-interface --network-bridge
                              --personality -i --image --tmpfs --volatile
-                             --network-macvlan --kill-signal'
+                             --network-macvlan --kill-signal --template'
         )
 
         _init_completion || return
 
         if __contains_word "$prev" ${OPTS[ARG]}; then
                 case $prev in
-                        --directory|-D)
+                        --directory|-D|--template)
                                 compopt -o nospace
                                 comps=$(compgen -S/ -A directory -- "$cur" )
                         ;;

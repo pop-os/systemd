@@ -391,6 +391,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
 
 
                 if (delete) {
+                        const char *status;
                         /* logging for j not k here here to provide consistent narrative */
                         log_unit_warning(j->unit,
                                          "Breaking ordering cycle by deleting job %s/%s",
@@ -399,7 +400,13 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
                                        "Job %s/%s deleted to break ordering cycle starting with %s/%s",
                                        delete->unit->id, job_type_to_string(delete->type),
                                        j->unit->id, job_type_to_string(j->type));
-                        unit_status_printf(delete->unit, ANSI_HIGHLIGHT_RED " SKIP " ANSI_NORMAL,
+
+                        if (log_get_show_color())
+                                status = ANSI_HIGHLIGHT_RED " SKIP " ANSI_NORMAL;
+                        else
+                                status = " SKIP ";
+
+                        unit_status_printf(delete->unit, status,
                                            "Ordering cycle found, skipping %s");
                         transaction_delete_unit(tr, delete->unit);
                         return -EAGAIN;
@@ -590,7 +597,7 @@ static int transaction_apply(Transaction *tr, Manager *m, JobMode mode) {
                         /* Not invalidating recursively. Avoids triggering
                          * OnFailure= actions of dependent jobs. Also avoids
                          * invalidating our iterator. */
-                        job_finish_and_invalidate(j, JOB_CANCELED, false);
+                        job_finish_and_invalidate(j, JOB_CANCELED, false, false);
                 }
         }
 
@@ -848,7 +855,7 @@ int transaction_add_job_and_dependencies(
          * This matters when jobs are spawned as part of coldplugging itself (see e. g. path_coldplug()).
          * This way, we "recursively" coldplug units, ensuring that we do not look at state of
          * not-yet-coldplugged units. */
-        if (unit->manager->n_reloading > 0)
+        if (MANAGER_IS_RELOADING(unit->manager))
                 unit_coldplug(unit);
 
         /* log_debug("Pulling in %s/%s from %s/%s", */
@@ -932,7 +939,7 @@ int transaction_add_job_and_dependencies(
                                 if (r < 0) {
                                         /* unit masked, job type not applicable and unit not found are not considered as errors. */
                                         log_unit_full(dep,
-                                                      IN_SET(r, -ESHUTDOWN, -EBADR, -ENOENT) ? LOG_DEBUG : LOG_WARNING,
+                                                      IN_SET(r, -ERFKILL, -EBADR, -ENOENT) ? LOG_DEBUG : LOG_WARNING,
                                                       r, "Cannot add dependency job, ignoring: %s",
                                                       bus_error_message(e, r));
                                         sd_bus_error_free(e);

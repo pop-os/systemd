@@ -97,16 +97,12 @@
     <filename>foo@.service</filename> must exist from which services
     are instantiated for each incoming connection.</para>
 
-    <para>Unless <varname>DefaultDependencies=</varname> is set to
-    <option>false</option>, socket units will implicitly have
-    dependencies of type <varname>Requires=</varname> and
-    <varname>After=</varname> on <filename>sysinit.target</filename>
-    as well as dependencies of type <varname>Conflicts=</varname> and
-    <varname>Before=</varname> on
-    <filename>shutdown.target</filename>. These ensure that socket
-    units pull in basic system initialization, and are terminated
-    cleanly prior to system shutdown. Only sockets involved with early
-    boot or late system shutdown should disable this option.</para>
+    <para>Unless <varname>DefaultDependencies=</varname> in the <literal>[Unit]</literal> section is set to
+    <option>false</option>, socket units will implicitly have dependencies of type <varname>Requires=</varname> and
+    <varname>After=</varname> on <filename>sysinit.target</filename> as well as dependencies of type
+    <varname>Conflicts=</varname> and <varname>Before=</varname> on <filename>shutdown.target</filename>. These ensure
+    that socket units pull in basic system initialization, and are terminated cleanly prior to system shutdown. Only
+    sockets involved with early boot or late system shutdown should disable this option.</para>
 
     <para>Socket units will have a <varname>Before=</varname>
     dependency on the service which they trigger added implicitly. No
@@ -809,6 +805,23 @@
         used, the file descriptor name defaults to the name of the
         socket unit, including its <filename>.socket</filename>
         suffix.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>TriggerLimitIntervalSec=</varname></term>
+        <term><varname>TriggerLimitBurst=</varname></term>
+
+        <listitem><para>Configures a limit on how often this socket unit my be activated within a specific time
+        interval. The <varname>TriggerLimitIntervalSec=</varname> may be used to configure the length of the time
+        interval in the usual time units <literal>us</literal>, <literal>ms</literal>, <literal>s</literal>,
+        <literal>min</literal>, <literal>h</literal>, … and defaults to 2s (See
+        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry> for details on
+        the various time units understood). The <varname>TriggerLimitBurst=</varname> setting takes a positive integer
+        value and specifies the number of permitted activations per time interval, and defaults to 200 for
+        <varname>Accept=yes</varname> sockets (thus by default permitting 200 activations per 2s), and 20 otherwise (20
+        activations per 2s). Set either to 0 to disable any form of trigger rate limiting. If the limit is hit, the
+        socket unit is placed into a failure mode, and will not be connectible anymore until restarted. Note that this
+        limit is enforced before the service activation is enqueued.</para></listitem>
       </varlistentry>
 
     </variablelist>

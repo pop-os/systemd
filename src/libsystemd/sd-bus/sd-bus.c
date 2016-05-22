@@ -313,10 +313,7 @@ _public_ int sd_bus_negotiate_creds(sd_bus *bus, int b, uint64_t mask) {
         assert_return(!IN_SET(bus->state, BUS_CLOSING, BUS_CLOSED), -EPERM);
         assert_return(!bus_pid_changed(bus), -ECHILD);
 
-        if (b)
-                bus->creds_mask |= mask;
-        else
-                bus->creds_mask &= ~mask;
+        SET_FLAG(bus->creds_mask, mask, b);
 
         /* The well knowns we need unconditionally, so that matches can work */
         bus->creds_mask |= SD_BUS_CREDS_WELL_KNOWN_NAMES|SD_BUS_CREDS_UNIQUE_NAME;
@@ -530,7 +527,7 @@ static void skip_address_key(const char **p) {
         *p += strcspn(*p, ",");
 
         if (**p == ',')
-                (*p) ++;
+                (*p)++;
 }
 
 static int parse_unix_address(sd_bus *b, const char **p, char **guid) {
@@ -695,7 +692,7 @@ static int parse_exec_address(sd_bus *b, const char **p, char **guid) {
                                 goto fail;
                         }
 
-                        (*p) ++;
+                        (*p)++;
 
                         if (ul >= n_argv) {
                                 if (!GREEDY_REALLOC0(argv, allocated, ul + 2)) {
@@ -839,7 +836,7 @@ static int parse_container_unix_address(sd_bus *b, const char **p, char **guid) 
 
         b->sockaddr.un.sun_family = AF_UNIX;
         strncpy(b->sockaddr.un.sun_path, "/var/run/dbus/system_bus_socket", sizeof(b->sockaddr.un.sun_path));
-        b->sockaddr_size = offsetof(struct sockaddr_un, sun_path) + strlen("/var/run/dbus/system_bus_socket");
+        b->sockaddr_size = SOCKADDR_UN_LEN(b->sockaddr.un);
 
         return 0;
 }
@@ -1668,7 +1665,7 @@ static int dispatch_wqueue(sd_bus *bus) {
                          * it got full, then all bets are off
                          * anyway. */
 
-                        bus->wqueue_size --;
+                        bus->wqueue_size--;
                         sd_bus_message_unref(bus->wqueue[0]);
                         memmove(bus->wqueue, bus->wqueue + 1, sizeof(sd_bus_message*) * bus->wqueue_size);
                         bus->windex = 0;
@@ -1717,7 +1714,7 @@ static int dispatch_rqueue(sd_bus *bus, bool hint_priority, int64_t priority, sd
                         /* Dispatch a queued message */
 
                         *m = bus->rqueue[0];
-                        bus->rqueue_size --;
+                        bus->rqueue_size--;
                         memmove(bus->rqueue, bus->rqueue + 1, sizeof(sd_bus_message*) * bus->rqueue_size);
                         return 1;
                 }
@@ -1781,7 +1778,7 @@ static int bus_send_internal(sd_bus *bus, sd_bus_message *_m, uint64_t *cookie, 
 
                 r = bus_write_message(bus, m, hint_sync_call, &idx);
                 if (r < 0) {
-                        if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                                 bus_enter_closing(bus);
                                 return -ECONNRESET;
                         }
@@ -1809,7 +1806,7 @@ static int bus_send_internal(sd_bus *bus, sd_bus_message *_m, uint64_t *cookie, 
                 if (!GREEDY_REALLOC(bus->wqueue, bus->wqueue_allocated, bus->wqueue_size + 1))
                         return -ENOMEM;
 
-                bus->wqueue[bus->wqueue_size ++] = sd_bus_message_ref(m);
+                bus->wqueue[bus->wqueue_size++] = sd_bus_message_ref(m);
         }
 
 finish:
@@ -2086,7 +2083,7 @@ _public_ int sd_bus_call(
 
                 r = bus_read_message(bus, false, 0);
                 if (r < 0) {
-                        if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                                 bus_enter_closing(bus);
                                 r = -ECONNRESET;
                         }
@@ -2119,7 +2116,7 @@ _public_ int sd_bus_call(
 
                 r = dispatch_wqueue(bus);
                 if (r < 0) {
-                        if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                                 bus_enter_closing(bus);
                                 r = -ECONNRESET;
                         }
@@ -2257,7 +2254,7 @@ static int process_timeout(sd_bus *bus) {
 
         slot = container_of(c, sd_bus_slot, reply_callback);
 
-        bus->iteration_counter ++;
+        bus->iteration_counter++;
 
         bus->current_message = m;
         bus->current_slot = sd_bus_slot_ref(slot);
@@ -2769,7 +2766,7 @@ static int bus_process_internal(sd_bus *bus, bool hint_priority, int64_t priorit
 
         case BUS_OPENING:
                 r = bus_socket_process_opening(bus);
-                if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                         bus_enter_closing(bus);
                         r = 1;
                 } else if (r < 0)
@@ -2780,7 +2777,7 @@ static int bus_process_internal(sd_bus *bus, bool hint_priority, int64_t priorit
 
         case BUS_AUTHENTICATING:
                 r = bus_socket_process_authenticating(bus);
-                if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                         bus_enter_closing(bus);
                         r = 1;
                 } else if (r < 0)
@@ -2794,7 +2791,7 @@ static int bus_process_internal(sd_bus *bus, bool hint_priority, int64_t priorit
         case BUS_RUNNING:
         case BUS_HELLO:
                 r = process_running(bus, hint_priority, priority, ret);
-                if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                         bus_enter_closing(bus);
                         r = 1;
 
@@ -2917,7 +2914,7 @@ _public_ int sd_bus_flush(sd_bus *bus) {
         for (;;) {
                 r = dispatch_wqueue(bus);
                 if (r < 0) {
-                        if (r == -ENOTCONN || r == -ECONNRESET || r == -EPIPE || r == -ESHUTDOWN) {
+                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
                                 bus_enter_closing(bus);
                                 return -ECONNRESET;
                         }

@@ -110,16 +110,14 @@ int path_spec_watch(PathSpec *s, sd_event_io_handler_t handler) {
                 } else {
                         exists = true;
 
-                        /* Path exists, we don't need to watch parent
-                           too closely. */
+                        /* Path exists, we don't need to watch parent too closely. */
                         if (oldslash) {
                                 char *cut2 = oldslash + (oldslash == s->path);
                                 char tmp2 = *cut2;
                                 *cut2 = '\0';
 
-                                inotify_add_watch(s->inotify_fd, s->path, IN_MOVE_SELF);
-                                /* Error is ignored, the worst can happen is
-                                   we get spurious events. */
+                                (void) inotify_add_watch(s->inotify_fd, s->path, IN_MOVE_SELF);
+                                /* Error is ignored, the worst can happen is we get spurious events. */
 
                                 *cut2 = tmp2;
                         }
@@ -320,7 +318,7 @@ static int path_add_default_dependencies(Path *p) {
         if (r < 0)
                 return r;
 
-        if (UNIT(p)->manager->running_as == MANAGER_SYSTEM) {
+        if (MANAGER_IS_SYSTEM(UNIT(p)->manager)) {
                 r = unit_add_two_dependencies_by_name(UNIT(p), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, NULL, true);
                 if (r < 0)
                         return r;
@@ -476,7 +474,7 @@ static void path_enter_running(Path *p) {
         trigger = UNIT_TRIGGER(UNIT(p));
         if (!trigger) {
                 log_unit_error(UNIT(p), "Unit to trigger vanished.");
-                path_enter_dead(p, TIMER_FAILURE_RESOURCES);
+                path_enter_dead(p, PATH_FAILURE_RESOURCES);
                 return;
         }
 
@@ -562,6 +560,7 @@ static void path_mkdir(Path *p) {
 static int path_start(Unit *u) {
         Path *p = PATH(u);
         Unit *trigger;
+        int r;
 
         assert(p);
         assert(p->state == PATH_DEAD || p->state == PATH_FAILED);
@@ -570,6 +569,12 @@ static int path_start(Unit *u) {
         if (!trigger || trigger->load_state != UNIT_LOADED) {
                 log_unit_error(u, "Refusing to start, unit to trigger not loaded.");
                 return -ENOENT;
+        }
+
+        r = unit_start_limit_test(u);
+        if (r < 0) {
+                path_enter_dead(p, PATH_FAILURE_START_LIMIT_HIT);
+                return r;
         }
 
         path_mkdir(p);
@@ -741,6 +746,7 @@ DEFINE_STRING_TABLE_LOOKUP(path_type, PathType);
 static const char* const path_result_table[_PATH_RESULT_MAX] = {
         [PATH_SUCCESS] = "success",
         [PATH_FAILURE_RESOURCES] = "resources",
+        [PATH_FAILURE_START_LIMIT_HIT] = "start-limit-hit",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(path_result, PathResult);

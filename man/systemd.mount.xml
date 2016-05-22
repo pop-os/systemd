@@ -82,14 +82,12 @@
     will refuse options that are not listed in
     <filename>/etc/fstab</filename> if it is not run as UID 0.</para>
 
-    <para>Mount units must be named after the mount point directories
-    they control. Example: the mount point
-    <filename noindex='true'>/home/lennart</filename> must be
-    configured in a unit file <filename>home-lennart.mount</filename>.
-    For details about the escaping logic used to convert a file system
-    path to a unit name, see
-    <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
-    Note that mount units cannot be templated.</para>
+    <para>Mount units must be named after the mount point directories they control. Example: the mount point <filename
+    noindex='true'>/home/lennart</filename> must be configured in a unit file <filename>home-lennart.mount</filename>.
+    For details about the escaping logic used to convert a file system path to a unit name, see
+    <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>.  Note that mount
+    units cannot be templated, nor is possible to add multiple names to a mount unit by creating additional symlinks to
+    it.</para>
 
     <para>Optionally, a mount unit may be accompanied by an automount
     unit, to allow on-demand or parallelized mounting. See
@@ -128,26 +126,17 @@
     <filename>systemd-quotacheck.service</filename> and
     <filename>quotaon.service</filename> are added.</para>
 
-    <para>For mount units with
-    <varname>DefaultDependencies=yes</varname> (the default) a couple
-    additional dependencies are added. Mount units referring to local
-    file systems automatically gain an <varname>After=</varname>
-    dependency on <filename>local-fs-pre.target</filename>. Network
-    mount units automatically acquire <varname>After=</varname>
-    dependencies on <filename>remote-fs-pre.target</filename>,
-    <filename>network.target</filename> and
-    <filename>network-online.target</filename>. Towards the latter a
-    <varname>Wants=</varname> unit is added as well. Mount units
-    referring to local and network file systems are distinguished by
-    their file system type specification. In some cases this is not
-    sufficient (for example network block device based mounts, such as
-    iSCSI), in which case <option>_netdev</option> may be added to the
-    mount option string of the unit, which forces systemd to consider the
-    mount unit a network mount. Mount units (regardless if local or
-    network) also acquire automatic <varname>Before=</varname> and
-    <varname>Conflicts=</varname> on
-    <filename>umount.target</filename> in order to be stopped
-    during shutdown.</para>
+    <para>For mount units with <varname>DefaultDependencies=yes</varname> in the <literal>[Unit]</literal> section (the
+    default) a couple additional dependencies are added. Mount units referring to local file systems automatically gain
+    an <varname>After=</varname> dependency on <filename>local-fs-pre.target</filename>. Network mount units
+    automatically acquire <varname>After=</varname> dependencies on <filename>remote-fs-pre.target</filename>,
+    <filename>network.target</filename> and <filename>network-online.target</filename>. Towards the latter a
+    <varname>Wants=</varname> unit is added as well. Mount units referring to local and network file systems are
+    distinguished by their file system type specification. In some cases this is not sufficient (for example network
+    block device based mounts, such as iSCSI), in which case <option>_netdev</option> may be added to the mount option
+    string of the unit, which forces systemd to consider the mount unit a network mount. Mount units (regardless if
+    local or network) also acquire automatic <varname>Before=</varname> and <varname>Conflicts=</varname> on
+    <filename>umount.target</filename> in order to be stopped during shutdown.</para>
 
     <para>Additional implicit dependencies may be added as result of
     execution and resource control parameters as documented in
@@ -169,6 +158,11 @@
     is the preferred approach. See
     <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
     for details about the conversion.</para>
+
+    <para>The NFS mount option <option>bg</option> for NFS background mounts
+    as documented in <citerefentry><refentrytitle>nfs</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    is not supported in <filename>/etc/fstab</filename> entries. The systemd mount option <option>nofail</option>
+    provides similar functionality and should be used instead.</para>
 
     <para>When reading <filename>/etc/fstab</filename> a few special
     mount options are understood by systemd which influence how

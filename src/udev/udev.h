@@ -1,3 +1,5 @@
+#pragma once
+
 /*
  * Copyright (C) 2003 Greg Kroah-Hartman <greg@kroah.com>
  * Copyright (C) 2003-2010 Kay Sievers <kay@vrfy.org>
@@ -16,9 +18,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
-
 #include <sys/param.h>
+#include <sys/sysmacros.h>
 #include <sys/types.h>
 
 #include "libudev.h"
@@ -71,9 +72,9 @@ struct udev_rules;
 struct udev_rules *udev_rules_new(struct udev *udev, int resolve_names);
 struct udev_rules *udev_rules_unref(struct udev_rules *rules);
 bool udev_rules_check_timestamp(struct udev_rules *rules);
-int udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event,
-                              usec_t timeout_usec, usec_t timeout_warn_usec,
-                              struct udev_list *properties_list);
+void udev_rules_apply_to_event(struct udev_rules *rules, struct udev_event *event,
+                               usec_t timeout_usec, usec_t timeout_warn_usec,
+                               struct udev_list *properties_list);
 int udev_rules_apply_static_dev_perms(struct udev_rules *rules);
 
 /* udev-event.c */

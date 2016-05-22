@@ -1,3 +1,5 @@
+#pragma once
+
 /***
   This file is part of systemd.
 
@@ -17,8 +19,6 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#pragma once
-
 typedef struct Veth Veth;
 
 #include "networkd-netdev.h"
@@ -30,4 +30,5 @@ struct Veth {
         struct ether_addr *mac_peer;
 };
 
+DEFINE_NETDEV_CAST(VETH, Veth);
 extern const NetDevVTable veth_vtable;

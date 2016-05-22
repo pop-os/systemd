@@ -198,7 +198,7 @@ static int swap_add_device_links(Swap *s) {
                 return 0;
 
         if (is_device_path(s->what))
-                return unit_add_node_link(UNIT(s), s->what, UNIT(s)->manager->running_as == MANAGER_SYSTEM, UNIT_BINDS_TO);
+                return unit_add_node_link(UNIT(s), s->what, MANAGER_IS_SYSTEM(UNIT(s)->manager), UNIT_BINDS_TO);
         else
                 /* File based swap devices need to be ordered after
                  * systemd-remount-fs.service, since they might need a
@@ -214,7 +214,7 @@ static int swap_add_default_dependencies(Swap *s) {
         if (!UNIT(s)->default_dependencies)
                 return 0;
 
-        if (UNIT(s)->manager->running_as != MANAGER_SYSTEM)
+        if (!MANAGER_IS_SYSTEM(UNIT(s)->manager))
                 return 0;
 
         if (detect_container() > 0)
@@ -609,7 +609,6 @@ static int swap_spawn(Swap *s, ExecCommand *c, pid_t *_pid) {
                 .apply_permissions = true,
                 .apply_chroot      = true,
                 .apply_tty_stdin   = true,
-                .bus_endpoint_fd   = -1,
                 .stdin_fd          = -1,
                 .stdout_fd         = -1,
                 .stderr_fd         = -1,
@@ -815,6 +814,7 @@ fail:
 
 static int swap_start(Unit *u) {
         Swap *s = SWAP(u), *other;
+        int r;
 
         assert(s);
 
@@ -842,6 +842,12 @@ static int swap_start(Unit *u) {
         LIST_FOREACH_OTHERS(same_devnode, other, s)
                 if (UNIT(other)->job && UNIT(other)->job->state == JOB_RUNNING)
                         return -EAGAIN;
+
+        r = unit_start_limit_test(u);
+        if (r < 0) {
+                swap_enter_dead(s, SWAP_FAILURE_START_LIMIT_HIT);
+                return r;
+        }
 
         s->result = SWAP_SUCCESS;
         s->reset_cpu_usage = true;
@@ -1427,6 +1433,14 @@ static bool swap_supported(void) {
         return supported;
 }
 
+static int swap_control_pid(Unit *u) {
+        Swap *s = SWAP(u);
+
+        assert(s);
+
+        return s->control_pid;
+}
+
 static const char* const swap_exec_command_table[_SWAP_EXEC_COMMAND_MAX] = {
         [SWAP_EXEC_ACTIVATE] = "ExecActivate",
         [SWAP_EXEC_DEACTIVATE] = "ExecDeactivate",
@@ -1440,7 +1454,8 @@ static const char* const swap_result_table[_SWAP_RESULT_MAX] = {
         [SWAP_FAILURE_TIMEOUT] = "timeout",
         [SWAP_FAILURE_EXIT_CODE] = "exit-code",
         [SWAP_FAILURE_SIGNAL] = "signal",
-        [SWAP_FAILURE_CORE_DUMP] = "core-dump"
+        [SWAP_FAILURE_CORE_DUMP] = "core-dump",
+        [SWAP_FAILURE_START_LIMIT_HIT] = "start-limit-hit",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(swap_result, SwapResult);
@@ -1457,9 +1472,6 @@ const UnitVTable swap_vtable = {
                 "Swap\0"
                 "Install\0",
         .private_section = "Swap",
-
-        .no_alias = true,
-        .no_instances = true,
 
         .init = swap_init,
         .load = swap_load,
@@ -1487,6 +1499,8 @@ const UnitVTable swap_vtable = {
         .sigchld_event = swap_sigchld_event,
 
         .reset_failed = swap_reset_failed,
+
+        .control_pid = swap_control_pid,
 
         .bus_vtable = bus_swap_vtable,
         .bus_set_property = bus_swap_set_property,

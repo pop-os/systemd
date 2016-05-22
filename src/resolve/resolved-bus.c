@@ -23,6 +23,7 @@
 #include "dns-domain.h"
 #include "resolved-bus.h"
 #include "resolved-def.h"
+#include "resolved-dns-synthesize.h"
 #include "resolved-link-bus.h"
 
 static int reply_query_state(DnsQuery *q) {
@@ -139,6 +140,7 @@ static int append_address(sd_bus_message *reply, DnsResourceRecord *rr, int ifin
 static void bus_method_resolve_hostname_complete(DnsQuery *q) {
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *canonical = NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_free_ char *normalized = NULL;
         DnsResourceRecord *rr;
         unsigned added = 0;
         int ifindex, r;
@@ -186,7 +188,7 @@ static void bus_method_resolve_hostname_complete(DnsQuery *q) {
                 if (!canonical)
                         canonical = dns_resource_record_ref(rr);
 
-                added ++;
+                added++;
         }
 
         if (added <= 0) {
@@ -198,11 +200,17 @@ static void bus_method_resolve_hostname_complete(DnsQuery *q) {
         if (r < 0)
                 goto finish;
 
+        /* The key names are not necessarily normalized, make sure that they are when we return them to our bus
+         * clients. */
+        r = dns_name_normalize(dns_resource_key_name(canonical->key), &normalized);
+        if (r < 0)
+                goto finish;
+
         /* Return the precise spelling and uppercasing and CNAME target reported by the server */
         assert(canonical);
         r = sd_bus_message_append(
                         reply, "st",
-                        DNS_RESOURCE_KEY_NAME(canonical->key),
+                        normalized,
                         SD_RESOLVED_FLAGS_MAKE(q->answer_protocol, q->answer_family, q->answer_authenticated));
         if (r < 0)
                 goto finish;
@@ -233,6 +241,65 @@ static int check_ifindex_flags(int ifindex, uint64_t *flags, uint64_t ok, sd_bus
         return 0;
 }
 
+static int parse_as_address(sd_bus_message *m, int ifindex, const char *hostname, int family, uint64_t flags) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_free_ char *canonical = NULL;
+        union in_addr_union parsed;
+        int r, ff;
+
+        /* Check if the hostname is actually already an IP address formatted as string. In that case just parse it,
+         * let's not attempt to look it up. */
+
+        r = in_addr_from_string_auto(hostname, &ff, &parsed);
+        if (r < 0) /* not an address */
+                return 0;
+
+        if (family != AF_UNSPEC && ff != family)
+                return sd_bus_reply_method_errorf(m, BUS_ERROR_NO_SUCH_RR, "The specified address is not of the requested family.");
+
+        r = sd_bus_message_new_method_return(m, &reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_open_container(reply, 'a', "(iiay)");
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_open_container(reply, 'r', "iiay");
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(reply, "ii", ifindex, ff);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append_array(reply, 'y', &parsed, FAMILY_ADDRESS_SIZE(ff));
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        /* When an IP address is specified we just return it as canonical name, in order to avoid a DNS
+         * look-up. However, we reformat it to make sure it's in a truly canonical form (i.e. on IPv6 the inner
+         * omissions are always done the same way). */
+        r = in_addr_to_string(ff, &parsed, &canonical);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(reply, "st", canonical,
+                                  SD_RESOLVED_FLAGS_MAKE(dns_synthesize_protocol(flags), ff, true));
+        if (r < 0)
+                return r;
+
+        return sd_bus_send(sd_bus_message_get_bus(m), reply, NULL);
+}
+
 static int bus_method_resolve_hostname(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_(dns_question_unrefp) DnsQuestion *question_idna = NULL, *question_utf8 = NULL;
         Manager *m = userdata;
@@ -254,15 +321,19 @@ static int bus_method_resolve_hostname(sd_bus_message *message, void *userdata, 
         if (!IN_SET(family, AF_INET, AF_INET6, AF_UNSPEC))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unknown address family %i", family);
 
+        r = check_ifindex_flags(ifindex, &flags, SD_RESOLVED_NO_SEARCH, error);
+        if (r < 0)
+                return r;
+
+        r = parse_as_address(message, ifindex, hostname, family, flags);
+        if (r != 0)
+                return r;
+
         r = dns_name_is_valid(hostname);
         if (r < 0)
                 return r;
         if (r == 0)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid hostname '%s'", hostname);
-
-        r = check_ifindex_flags(ifindex, &flags, SD_RESOLVED_NO_SEARCH, error);
-        if (r < 0)
-                return r;
 
         r = dns_question_new_address(&question_utf8, family, hostname, false);
         if (r < 0)
@@ -331,24 +402,31 @@ static void bus_method_resolve_address_complete(DnsQuery *q) {
         question = dns_query_question_for_protocol(q, q->answer_protocol);
 
         DNS_ANSWER_FOREACH_IFINDEX(rr, ifindex, q->answer) {
+                _cleanup_free_ char *normalized = NULL;
+
                 r = dns_question_matches_rr(question, rr, NULL);
                 if (r < 0)
                         goto finish;
                 if (r == 0)
                         continue;
 
-                r = sd_bus_message_append(reply, "(is)", ifindex, rr->ptr.name);
+                r = dns_name_normalize(rr->ptr.name, &normalized);
                 if (r < 0)
                         goto finish;
 
-                added ++;
+                r = sd_bus_message_append(reply, "(is)", ifindex, normalized);
+                if (r < 0)
+                        goto finish;
+
+                added++;
         }
 
         if (added <= 0) {
                 _cleanup_free_ char *ip = NULL;
 
-                in_addr_to_string(q->request_family, &q->request_address, &ip);
-                r = sd_bus_reply_method_errorf(q->request, BUS_ERROR_NO_SUCH_RR, "Address '%s' does not have any RR of requested type", strna(ip));
+                (void) in_addr_to_string(q->request_family, &q->request_address, &ip);
+                r = sd_bus_reply_method_errorf(q->request, BUS_ERROR_NO_SUCH_RR,
+                                               "Address '%s' does not have any RR of requested type", strnull(ip));
                 goto finish;
         }
 
@@ -510,7 +588,7 @@ static void bus_method_resolve_record_complete(DnsQuery *q) {
                 if (r < 0)
                         goto finish;
 
-                added ++;
+                added++;
         }
 
         if (added <= 0) {
@@ -607,6 +685,7 @@ fail:
 
 static int append_srv(DnsQuery *q, sd_bus_message *reply, DnsResourceRecord *rr) {
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *canonical = NULL;
+        _cleanup_free_ char *normalized = NULL;
         DnsQuery *aux;
         int r;
 
@@ -663,10 +742,14 @@ static int append_srv(DnsQuery *q, sd_bus_message *reply, DnsResourceRecord *rr)
         if (r < 0)
                 return r;
 
+        r = dns_name_normalize(rr->srv.name, &normalized);
+        if (r < 0)
+                return r;
+
         r = sd_bus_message_append(
                         reply,
                         "qqqs",
-                        rr->srv.priority, rr->srv.weight, rr->srv.port, rr->srv.name);
+                        rr->srv.priority, rr->srv.weight, rr->srv.port, normalized);
         if (r < 0)
                 return r;
 
@@ -712,9 +795,17 @@ static int append_srv(DnsQuery *q, sd_bus_message *reply, DnsResourceRecord *rr)
         if (r < 0)
                 return r;
 
+        if (canonical) {
+                normalized = mfree(normalized);
+
+                r = dns_name_normalize(dns_resource_key_name(canonical->key), &normalized);
+                if (r < 0)
+                        return r;
+        }
+
         /* Note that above we appended the hostname as encoded in the
          * SRV, and here the canonical hostname this maps to. */
-        r = sd_bus_message_append(reply, "s", canonical ? DNS_RESOURCE_KEY_NAME(canonical->key) : rr->srv.name);
+        r = sd_bus_message_append(reply, "s", normalized);
         if (r < 0)
                 return r;
 
@@ -869,7 +960,7 @@ static void resolve_service_all_complete(DnsQuery *q) {
                 goto finish;
 
         assert(canonical);
-        r = dns_service_split(DNS_RESOURCE_KEY_NAME(canonical->key), &name, &type, &domain);
+        r = dns_service_split(dns_resource_key_name(canonical->key), &name, &type, &domain);
         if (r < 0)
                 goto finish;
 
@@ -1004,9 +1095,9 @@ static void bus_method_resolve_service_complete(DnsQuery *q) {
                 }
 
                 if ((q->flags & SD_RESOLVED_NO_ADDRESS) == 0) {
-                        q->block_all_complete ++;
+                        q->block_all_complete++;
                         r = resolve_service_hostname(q, rr, ifindex);
-                        q->block_all_complete --;
+                        q->block_all_complete--;
 
                         if (r < 0)
                                 goto finish;
@@ -1047,7 +1138,6 @@ finish:
 static int bus_method_resolve_service(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_(dns_question_unrefp) DnsQuestion *question_idna = NULL, *question_utf8 = NULL;
         const char *name, *type, *domain;
-        _cleanup_free_ char *n = NULL;
         Manager *m = userdata;
         int family, ifindex;
         uint64_t flags;
@@ -1198,7 +1288,7 @@ static int bus_property_get_dns_servers(
         return sd_bus_message_close_container(reply);
 }
 
-static int bus_property_get_search_domains(
+static int bus_property_get_domains(
                 sd_bus *bus,
                 const char *path,
                 const char *interface,
@@ -1396,8 +1486,8 @@ static int bus_method_set_link_dns_servers(sd_bus_message *message, void *userda
         return call_link_method(userdata, message, bus_link_method_set_dns_servers, error);
 }
 
-static int bus_method_set_link_search_domains(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        return call_link_method(userdata, message, bus_link_method_set_search_domains, error);
+static int bus_method_set_link_domains(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return call_link_method(userdata, message, bus_link_method_set_domains, error);
 }
 
 static int bus_method_set_link_llmnr(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1449,7 +1539,7 @@ static const sd_bus_vtable resolve_vtable[] = {
         SD_BUS_VTABLE_START(0),
         SD_BUS_PROPERTY("LLMNRHostname", "s", NULL, offsetof(Manager, llmnr_hostname), 0),
         SD_BUS_PROPERTY("DNS", "a(iiay)", bus_property_get_dns_servers, 0, 0),
-        SD_BUS_PROPERTY("SearchDomains", "a(isb)", bus_property_get_search_domains, 0, 0),
+        SD_BUS_PROPERTY("Domains", "a(isb)", bus_property_get_domains, 0, 0),
         SD_BUS_PROPERTY("TransactionStatistics", "(tt)", bus_property_get_transaction_statistics, 0, 0),
         SD_BUS_PROPERTY("CacheStatistics", "(ttt)", bus_property_get_cache_statistics, 0, 0),
         SD_BUS_PROPERTY("DNSSECStatistics", "(tttt)", bus_property_get_dnssec_statistics, 0, 0),
@@ -1462,7 +1552,7 @@ static const sd_bus_vtable resolve_vtable[] = {
         SD_BUS_METHOD("ResetStatistics", NULL, NULL, bus_method_reset_statistics, 0),
         SD_BUS_METHOD("GetLink", "i", "o", bus_method_get_link, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetLinkDNS", "ia(iay)", NULL, bus_method_set_link_dns_servers, 0),
-        SD_BUS_METHOD("SetLinkDomains", "ia(sb)", NULL, bus_method_set_link_search_domains, 0),
+        SD_BUS_METHOD("SetLinkDomains", "ia(sb)", NULL, bus_method_set_link_domains, 0),
         SD_BUS_METHOD("SetLinkLLMNR", "is", NULL, bus_method_set_link_llmnr, 0),
         SD_BUS_METHOD("SetLinkMulticastDNS", "is", NULL, bus_method_set_link_mdns, 0),
         SD_BUS_METHOD("SetLinkDNSSEC", "is", NULL, bus_method_set_link_dnssec, 0),

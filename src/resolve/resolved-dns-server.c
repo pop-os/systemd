@@ -120,7 +120,7 @@ DnsServer* dns_server_ref(DnsServer *s)  {
                 return NULL;
 
         assert(s->n_ref > 0);
-        s->n_ref ++;
+        s->n_ref++;
 
         return s;
 }
@@ -130,7 +130,7 @@ DnsServer* dns_server_unref(DnsServer *s)  {
                 return NULL;
 
         assert(s->n_ref > 0);
-        s->n_ref --;
+        s->n_ref--;
 
         if (s->n_ref > 0)
                 return NULL;
@@ -157,6 +157,7 @@ void dns_server_unlink(DnsServer *s) {
                 assert(s->link);
                 assert(s->link->n_dns_servers > 0);
                 LIST_REMOVE(servers, s->link->dns_servers, s);
+                s->link->n_dns_servers--;
                 break;
 
         case DNS_SERVER_SYSTEM:
@@ -290,9 +291,9 @@ void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel le
 
         if (s->possible_feature_level == level) {
                 if (protocol == IPPROTO_UDP)
-                        s->n_failed_udp ++;
+                        s->n_failed_udp++;
                 else if (protocol == IPPROTO_TCP)
-                        s->n_failed_tcp ++;
+                        s->n_failed_tcp++;
         }
 
         if (s->resend_timeout > usec)

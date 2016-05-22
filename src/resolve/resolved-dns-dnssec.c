@@ -23,6 +23,7 @@
 
 #include "alloc-util.h"
 #include "dns-domain.h"
+#include "gcrypt-util.h"
 #include "hexdecoct.h"
 #include "resolved-dns-dnssec.h"
 #include "resolved-dns-packet.h"
@@ -125,19 +126,6 @@ int dnssec_canonicalize(const char *n, char *buffer, size_t buffer_max) {
 }
 
 #ifdef HAVE_GCRYPT
-
-static void initialize_libgcrypt(void) {
-        const char *p;
-
-        if (gcry_control(GCRYCTL_INITIALIZATION_FINISHED_P))
-                return;
-
-        p = gcry_check_version("1.4.5");
-        assert(p);
-
-        gcry_control(GCRYCTL_DISABLE_SECMEM);
-        gcry_control(GCRYCTL_INITIALIZATION_FINISHED, 0);
-}
 
 static int rr_compare(const void *a, const void *b) {
         DnsResourceRecord **x = (DnsResourceRecord**) a, **y = (DnsResourceRecord**) b;
@@ -479,7 +467,7 @@ static int dnssec_rrsig_prepare(DnsResourceRecord *rrsig) {
         if (rrsig->rrsig.inception > rrsig->rrsig.expiration)
                 return -EINVAL;
 
-        name = DNS_RESOURCE_KEY_NAME(rrsig->key);
+        name = dns_resource_key_name(rrsig->key);
 
         n_key_labels = dns_name_count_labels(name);
         if (n_key_labels < 0)
@@ -635,9 +623,9 @@ int dnssec_verify_rrset(
         assert(rrsig->key->type == DNS_TYPE_RRSIG);
         assert(dnskey->key->type == DNS_TYPE_DNSKEY);
 
-        /* Verifies the the RRSet matching the specified "key" in "a",
+        /* Verifies that the RRSet matches the specified "key" in "a",
          * using the signature "rrsig" and the key "dnskey". It's
-         * assumed the RRSIG and DNSKEY match. */
+         * assumed that RRSIG and DNSKEY match. */
 
         md_algorithm = algorithm_to_gcrypt_md(rrsig->rrsig.algorithm);
         if (md_algorithm == -EOPNOTSUPP) {
@@ -663,7 +651,7 @@ int dnssec_verify_rrset(
                 return 0;
         }
 
-        name = DNS_RESOURCE_KEY_NAME(key);
+        name = dns_resource_key_name(key);
 
         /* Some keys may only appear signed in the zone apex, and are invalid anywhere else. (SOA, NS...) */
         if (dns_type_apex_only(rrsig->rrsig.type_covered)) {
@@ -737,7 +725,7 @@ int dnssec_verify_rrset(
         qsort_safe(list, n, sizeof(DnsResourceRecord*), rr_compare);
 
         /* OK, the RRs are now in canonical order. Let's calculate the digest */
-        initialize_libgcrypt();
+        initialize_libgcrypt(false);
 
         hash_size = gcry_md_get_algo_dlen(md_algorithm);
         assert(hash_size > 0);
@@ -863,7 +851,7 @@ int dnssec_rrsig_match_dnskey(DnsResourceRecord *rrsig, DnsResourceRecord *dnske
         if (dnssec_keytag(dnskey, false) != rrsig->rrsig.key_tag)
                 return 0;
 
-        return dns_name_equal(DNS_RESOURCE_KEY_NAME(dnskey->key), rrsig->rrsig.signer);
+        return dns_name_equal(dns_resource_key_name(dnskey->key), rrsig->rrsig.signer);
 }
 
 int dnssec_key_match_rrsig(const DnsResourceKey *key, DnsResourceRecord *rrsig) {
@@ -879,7 +867,7 @@ int dnssec_key_match_rrsig(const DnsResourceKey *key, DnsResourceRecord *rrsig) 
         if (rrsig->rrsig.type_covered != key->type)
                 return 0;
 
-        return dns_name_equal(DNS_RESOURCE_KEY_NAME(rrsig->key), DNS_RESOURCE_KEY_NAME(key));
+        return dns_name_equal(dns_resource_key_name(rrsig->key), dns_resource_key_name(key));
 }
 
 int dnssec_verify_rrset_search(
@@ -1070,7 +1058,7 @@ int dnssec_verify_dnskey_by_ds(DnsResourceRecord *dnskey, DnsResourceRecord *ds,
         if (dnssec_keytag(dnskey, mask_revoke) != ds->ds.key_tag)
                 return 0;
 
-        initialize_libgcrypt();
+        initialize_libgcrypt(false);
 
         md_algorithm = digest_to_gcrypt_md(ds->ds.digest_type);
         if (md_algorithm < 0)
@@ -1082,7 +1070,7 @@ int dnssec_verify_dnskey_by_ds(DnsResourceRecord *dnskey, DnsResourceRecord *ds,
         if (ds->ds.digest_size != hash_size)
                 return 0;
 
-        r = dnssec_canonicalize(DNS_RESOURCE_KEY_NAME(dnskey->key), owner_name, sizeof(owner_name));
+        r = dnssec_canonicalize(dns_resource_key_name(dnskey->key), owner_name, sizeof(owner_name));
         if (r < 0)
                 return r;
 
@@ -1132,7 +1120,7 @@ int dnssec_verify_dnskey_by_ds_search(DnsResourceRecord *dnskey, DnsAnswer *vali
                 if (ds->key->class != dnskey->key->class)
                         continue;
 
-                r = dns_name_equal(DNS_RESOURCE_KEY_NAME(dnskey->key), DNS_RESOURCE_KEY_NAME(ds->key));
+                r = dns_name_equal(dns_resource_key_name(dnskey->key), dns_resource_key_name(ds->key));
                 if (r < 0)
                         return r;
                 if (r == 0)
@@ -1189,7 +1177,7 @@ int dnssec_nsec3_hash(DnsResourceRecord *nsec3, const char *name, void *ret) {
         if (algorithm < 0)
                 return algorithm;
 
-        initialize_libgcrypt();
+        initialize_libgcrypt(false);
 
         hash_size = gcry_md_get_algo_dlen(algorithm);
         assert(hash_size > 0);
@@ -1284,14 +1272,14 @@ static int nsec3_is_good(DnsResourceRecord *rr, DnsResourceRecord *nsec3) {
         if (memcmp(rr->nsec3.salt, nsec3->nsec3.salt, rr->nsec3.salt_size) != 0)
                 return 0;
 
-        a = DNS_RESOURCE_KEY_NAME(rr->key);
+        a = dns_resource_key_name(rr->key);
         r = dns_name_parent(&a); /* strip off hash */
         if (r < 0)
                 return r;
         if (r == 0)
                 return 0;
 
-        b = DNS_RESOURCE_KEY_NAME(nsec3->key);
+        b = dns_resource_key_name(nsec3->key);
         r = dns_name_parent(&b); /* strip off hash */
         if (r < 0)
                 return r;
@@ -1365,7 +1353,7 @@ static int dnssec_test_nsec3(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecR
          * any NSEC3 RR in the response. Any NSEC3 record will do as all NSEC3
          * records from a given zone in a response must use the same
          * parameters. */
-        zone = DNS_RESOURCE_KEY_NAME(key);
+        zone = dns_resource_key_name(key);
         for (;;) {
                 DNS_ANSWER_FOREACH_FLAGS(zone_rr, flags, answer) {
                         r = nsec3_is_good(zone_rr, NULL);
@@ -1374,7 +1362,7 @@ static int dnssec_test_nsec3(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecR
                         if (r == 0)
                                 continue;
 
-                        r = dns_name_equal_skip(DNS_RESOURCE_KEY_NAME(zone_rr->key), 1, zone);
+                        r = dns_name_equal_skip(dns_resource_key_name(zone_rr->key), 1, zone);
                         if (r < 0)
                                 return r;
                         if (r > 0)
@@ -1394,7 +1382,7 @@ static int dnssec_test_nsec3(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecR
 
 found_zone:
         /* Second step, find the closest encloser NSEC3 RR in 'answer' that matches 'key' */
-        p = DNS_RESOURCE_KEY_NAME(key);
+        p = dns_resource_key_name(key);
         for (;;) {
                 _cleanup_free_ char *hashed_domain = NULL;
 
@@ -1417,7 +1405,7 @@ found_zone:
                         if (enclosure_rr->nsec3.next_hashed_name_size != (size_t) hashed_size)
                                 continue;
 
-                        r = dns_name_equal(DNS_RESOURCE_KEY_NAME(enclosure_rr->key), hashed_domain);
+                        r = dns_name_equal(dns_resource_key_name(enclosure_rr->key), hashed_domain);
                         if (r < 0)
                                 return r;
                         if (r > 0) {
@@ -1516,7 +1504,7 @@ found_closest_encloser:
                 if (r < 0)
                         return r;
 
-                r = dns_name_between(DNS_RESOURCE_KEY_NAME(rr->key), next_closer_domain, next_hashed_domain);
+                r = dns_name_between(dns_resource_key_name(rr->key), next_closer_domain, next_hashed_domain);
                 if (r < 0)
                         return r;
                 if (r > 0) {
@@ -1528,7 +1516,7 @@ found_closest_encloser:
                         no_closer = true;
                 }
 
-                r = dns_name_equal(DNS_RESOURCE_KEY_NAME(rr->key), wildcard_domain);
+                r = dns_name_equal(dns_resource_key_name(rr->key), wildcard_domain);
                 if (r < 0)
                         return r;
                 if (r > 0) {
@@ -1537,7 +1525,7 @@ found_closest_encloser:
                         wildcard_rr = rr;
                 }
 
-                r = dns_name_between(DNS_RESOURCE_KEY_NAME(rr->key), wildcard_domain, next_hashed_domain);
+                r = dns_name_between(dns_resource_key_name(rr->key), wildcard_domain, next_hashed_domain);
                 if (r < 0)
                         return r;
                 if (r > 0) {
@@ -1616,7 +1604,7 @@ static int dnssec_nsec_wildcard_equal(DnsResourceRecord *rr, const char *name) {
         if (rr->n_skip_labels_source != 1)
                 return 0;
 
-        n = DNS_RESOURCE_KEY_NAME(rr->key);
+        n = dns_resource_key_name(rr->key);
         r = dns_label_unescape(&n, label, sizeof(label));
         if (r <= 0)
                 return r;
@@ -1655,7 +1643,7 @@ static int dnssec_nsec_in_path(DnsResourceRecord *rr, const char *name) {
                 return r;
 
         /* If the name we we are interested in is not a prefix of the common suffix of the NSEC RR's owner and next domain names, then we can't say anything either. */
-        r = dns_name_common_suffix(DNS_RESOURCE_KEY_NAME(rr->key), rr->nsec.next_domain_name, &common_suffix);
+        r = dns_name_common_suffix(dns_resource_key_name(rr->key), rr->nsec.next_domain_name, &common_suffix);
         if (r < 0)
                 return r;
 
@@ -1674,7 +1662,7 @@ static int dnssec_nsec_from_parent_zone(DnsResourceRecord *rr, const char *name)
         if (r <= 0)
                 return r;
 
-        r = dns_name_equal(name, DNS_RESOURCE_KEY_NAME(rr->key));
+        r = dns_name_equal(name, dns_resource_key_name(rr->key));
         if (r <= 0)
                 return r;
 
@@ -1697,7 +1685,7 @@ static int dnssec_nsec_covers(DnsResourceRecord *rr, const char *name) {
 
         /* Checks whether the "Next Closer" is witin the space covered by the specified RR. */
 
-        r = dns_name_common_suffix(DNS_RESOURCE_KEY_NAME(rr->key), rr->nsec.next_domain_name, &common_suffix);
+        r = dns_name_common_suffix(dns_resource_key_name(rr->key), rr->nsec.next_domain_name, &common_suffix);
         if (r < 0)
                 return r;
 
@@ -1718,7 +1706,7 @@ static int dnssec_nsec_covers(DnsResourceRecord *rr, const char *name) {
 
         /* p is now the "Next Closer". */
 
-        return dns_name_between(DNS_RESOURCE_KEY_NAME(rr->key), p, rr->nsec.next_domain_name);
+        return dns_name_between(dns_resource_key_name(rr->key), p, rr->nsec.next_domain_name);
 }
 
 static int dnssec_nsec_covers_wildcard(DnsResourceRecord *rr, const char *name) {
@@ -1737,7 +1725,7 @@ static int dnssec_nsec_covers_wildcard(DnsResourceRecord *rr, const char *name) 
          *     NSEC yyy.zzz.xoo.bar →             bar: indicates that a number of wildcards don#t exist either...
          */
 
-        r = dns_name_common_suffix(DNS_RESOURCE_KEY_NAME(rr->key), rr->nsec.next_domain_name, &common_suffix);
+        r = dns_name_common_suffix(dns_resource_key_name(rr->key), rr->nsec.next_domain_name, &common_suffix);
         if (r < 0)
                 return r;
 
@@ -1746,8 +1734,8 @@ static int dnssec_nsec_covers_wildcard(DnsResourceRecord *rr, const char *name) 
         if (r <= 0)
                 return r;
 
-        wc = strjoina("*.", common_suffix, NULL);
-        return dns_name_between(DNS_RESOURCE_KEY_NAME(rr->key), wc, rr->nsec.next_domain_name);
+        wc = strjoina("*.", common_suffix);
+        return dns_name_between(dns_resource_key_name(rr->key), wc, rr->nsec.next_domain_name);
 }
 
 int dnssec_nsec_test(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecResult *result, bool *authenticated, uint32_t *ttl) {
@@ -1762,7 +1750,7 @@ int dnssec_nsec_test(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecResult *r
 
         /* Look for any NSEC/NSEC3 RRs that say something about the specified key. */
 
-        name = DNS_RESOURCE_KEY_NAME(key);
+        name = dns_resource_key_name(key);
 
         DNS_ANSWER_FOREACH_FLAGS(rr, flags, answer) {
 
@@ -1782,7 +1770,7 @@ int dnssec_nsec_test(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecResult *r
                         continue;
 
                 /* Check if this is a direct match. If so, we have encountered a NODATA case */
-                r = dns_name_equal(DNS_RESOURCE_KEY_NAME(rr->key), name);
+                r = dns_name_equal(dns_resource_key_name(rr->key), name);
                 if (r < 0)
                         return r;
                 if (r == 0) {
@@ -1912,7 +1900,7 @@ static int dnssec_nsec_test_enclosed(DnsAnswer *answer, uint16_t type, const cha
                         if (r == 0)
                                 continue;
 
-                        r = dns_name_between(DNS_RESOURCE_KEY_NAME(rr->key), name, rr->nsec.next_domain_name);
+                        r = dns_name_between(dns_resource_key_name(rr->key), name, rr->nsec.next_domain_name);
                         if (r < 0)
                                 return r;
 
@@ -1955,7 +1943,7 @@ static int dnssec_nsec_test_enclosed(DnsAnswer *answer, uint16_t type, const cha
                         if (r < 0)
                                 return r;
 
-                        r = dns_name_between(DNS_RESOURCE_KEY_NAME(rr->key), hashed_domain, next_hashed_domain);
+                        r = dns_name_between(dns_resource_key_name(rr->key), hashed_domain, next_hashed_domain);
                         if (r < 0)
                                 return r;
 
@@ -1989,7 +1977,7 @@ static int dnssec_test_positive_wildcard_nsec3(
 
         /* Run a positive NSEC3 wildcard proof. Specifically:
          *
-         * A proof that the the "next closer" of the generating wildcard does not exist.
+         * A proof that the "next closer" of the generating wildcard does not exist.
          *
          * Note a key difference between the NSEC3 and NSEC versions of the proof. NSEC RRs don't have to exist for
          * empty non-transients. NSEC3 RRs however have to. This means it's sufficient to check if the next closer name

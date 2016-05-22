@@ -279,7 +279,7 @@ static int dispatch_rqueue(sd_netlink *rtnl, sd_netlink_message **message) {
 
         /* Dispatch a queued message */
         *message = rtnl->rqueue[0];
-        rtnl->rqueue_size --;
+        rtnl->rqueue_size--;
         memmove(rtnl->rqueue, rtnl->rqueue + 1, sizeof(sd_netlink_message*) * rtnl->rqueue_size);
 
         return 1;
@@ -774,7 +774,7 @@ static int prepare_callback(sd_event_source *s, void *userdata) {
         return 1;
 }
 
-int sd_netlink_attach_event(sd_netlink *rtnl, sd_event *event, int priority) {
+int sd_netlink_attach_event(sd_netlink *rtnl, sd_event *event, int64_t priority) {
         int r;
 
         assert_return(rtnl, -EINVAL);

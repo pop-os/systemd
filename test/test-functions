@@ -7,6 +7,9 @@ export PATH
 LOOKS_LIKE_DEBIAN=$(source /etc/os-release && [[ "$ID" = "debian" || "$ID_LIKE" = "debian" ]] && echo yes)
 KERNEL_VER=${KERNEL_VER-$(uname -r)}
 KERNEL_MODS="/lib/modules/$KERNEL_VER/"
+QEMU_TIMEOUT="${QEMU_TIMEOUT:-infinity}"
+NSPAWN_TIMEOUT="${NSPAWN_TIMEOUT:-infinity}"
+FSTYPE="${FSTYPE:-ext3}"
 
 if ! ROOTLIBDIR=$(pkg-config --variable=systemdutildir systemd); then
     echo "WARNING! Cannot determine rootlibdir from pkg-config, assuming /usr/lib/systemd" >&2
@@ -61,7 +64,6 @@ run_qemu() {
     find_qemu_bin || return 1
 
     KERNEL_APPEND="root=/dev/sda1 \
-systemd.log_level=debug \
 raid=noautodetect \
 loglevel=2 \
 init=$ROOTLIBDIR/systemd \
@@ -76,9 +78,10 @@ $KERNEL_APPEND \
 -m 512M \
 -nographic \
 -kernel $KERNEL_BIN \
+-drive format=raw,cache=unsafe,file=${TESTDIR}/rootdisk.img \
 "
 
-    if [ "$INITRD" ]; then
+    if [[ "$INITRD" && "$SKIP_INITRD" != "yes" ]]; then
         QEMU_OPTIONS="$QEMU_OPTIONS -initrd $INITRD"
     fi
 
@@ -86,13 +89,20 @@ $KERNEL_APPEND \
         QEMU_OPTIONS="$QEMU_OPTIONS -machine accel=kvm -enable-kvm -cpu host"
     fi
 
+    if [[ "$QEMU_TIMEOUT" != "infinity" ]]; then
+        QEMU_BIN="timeout --foreground $QEMU_TIMEOUT $QEMU_BIN"
+    fi
     ( set -x
-      $QEMU_BIN $QEMU_OPTIONS -append "$KERNEL_APPEND" $TESTDIR/rootdisk.img ) || return 1
+      $QEMU_BIN $QEMU_OPTIONS -append "$KERNEL_APPEND" ) || return 1
 }
 
 run_nspawn() {
+    local _nspawn_cmd="../../systemd-nspawn --register=no --kill-signal=SIGKILL --directory=$TESTDIR/nspawn-root $ROOTLIBDIR/systemd $KERNEL_APPEND"
+    if [[ "$NSPAWN_TIMEOUT" != "infinity" ]]; then
+        _nspawn_cmd="timeout --foreground $NSPAWN_TIMEOUT $_nspawn_cmd"
+    fi
     set -x
-    ../../systemd-nspawn --register=no --directory=$TESTDIR/nspawn-root $ROOTLIBDIR/systemd $KERNEL_APPEND
+    $_nspawn_cmd
 }
 
 setup_basic_environment() {
@@ -194,9 +204,23 @@ EOF
     chmod 0755 $_valgrind_wrapper
 }
 
+create_strace_wrapper() {
+    local _strace_wrapper=$initdir/$ROOTLIBDIR/systemd-under-strace
+    ddebug "Create $_strace_wrapper"
+    cat >$_strace_wrapper <<EOF
+#!/bin/bash
+
+exec strace -D -o /strace.out $ROOTLIBDIR/systemd "\$@"
+EOF
+    chmod 0755 $_strace_wrapper
+}
+
 install_fsck() {
     dracut_install /sbin/fsck*
     dracut_install -o /bin/fsck*
+
+    # fskc.reiserfs calls reiserfsck. so, install it
+    dracut_install -o reiserfsck
 }
 
 install_dmevent() {
@@ -220,6 +244,9 @@ install_systemd() {
     # we strip binaries since debug symbols increase binaries size a lot
     # and it could fill the available space
     strip_binaries
+
+    # enable debug logging in PID1
+    echo LogLevel=debug >> $initdir/etc/systemd/system.conf
 }
 
 install_missing_libraries() {
@@ -241,7 +268,13 @@ create_empty_image() {
 ,
 EOF
 
-    mkfs.ext3 -L systemd "${LOOPDEV}p1"
+    local _label="-L systemd"
+    # mkfs.reiserfs doesn't know -L. so, use --label instead
+    [[ "$FSTYPE" == "reiserfs" ]] && _label="--label systemd"
+    if ! mkfs -t "${FSTYPE}" ${_label} "${LOOPDEV}p1" -q; then
+        dfatal "Failed to mkfs -t ${FSTYPE}"
+        exit 1
+    fi
 }
 
 check_result_nspawn() {
@@ -335,7 +368,7 @@ install_config_files() {
     echo systemd-testsuite > $initdir/etc/hostname
     # fstab
     cat >$initdir/etc/fstab <<EOF
-LABEL=systemd           /       ext3    rw 0 1
+LABEL=systemd           /       ${FSTYPE}    rw 0 1
 EOF
 }
 
@@ -385,6 +418,9 @@ install_pam() {
 
     [[ "$LOOKS_LIKE_DEBIAN" ]] &&
         cp /etc/pam.d/systemd-user $initdir/etc/pam.d/
+
+    # set empty root password for easy debugging
+    sed -i 's/^root:x:/root::/' $initdir/etc/passwd
 }
 
 install_keymaps() {

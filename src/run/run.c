@@ -25,6 +25,7 @@
 
 #include "alloc-util.h"
 #include "bus-error.h"
+#include "bus-unit-util.h"
 #include "bus-util.h"
 #include "calendarspec.h"
 #include "env-util.h"
@@ -83,8 +84,8 @@ static void polkit_agent_open_if_enabled(void) {
 static void help(void) {
         printf("%s [OPTIONS...] {COMMAND} [ARGS...]\n\n"
                "Run the specified command in a transient scope or service or timer\n"
-               "unit. If timer option is specified and unit is exist which is\n"
-               "specified with --unit option then command can be omitted.\n\n"
+               "unit. If a timer option is specified and the unit specified with\n"
+               "the --unit option exists, the command can be omitted.\n\n"
                "  -h --help                       Show this help\n"
                "     --version                    Show package version\n"
                "     --no-ask-password            Do not prompt for password\n"
@@ -103,7 +104,7 @@ static void help(void) {
                "     --uid=USER                   Run as system user\n"
                "     --gid=GROUP                  Run as system group\n"
                "     --nice=NICE                  Nice level\n"
-               "     --setenv=NAME=VALUE          Set environment\n"
+               "  -E --setenv=NAME=VALUE          Set environment\n"
                "  -t --pty                        Run service on pseudo tty\n"
                "  -q --quiet                      Suppress information messages during runtime\n\n"
                "Timer options:\n\n"
@@ -125,7 +126,6 @@ static int parse_argv(int argc, char *argv[]) {
 
         enum {
                 ARG_VERSION = 0x100,
-                ARG_NO_ASK_PASSWORD,
                 ARG_USER,
                 ARG_SYSTEM,
                 ARG_SCOPE,
@@ -133,12 +133,10 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_DESCRIPTION,
                 ARG_SLICE,
                 ARG_SEND_SIGHUP,
+                ARG_SERVICE_TYPE,
                 ARG_EXEC_USER,
                 ARG_EXEC_GROUP,
-                ARG_SERVICE_TYPE,
                 ARG_NICE,
-                ARG_SETENV,
-                ARG_TTY,
                 ARG_ON_ACTIVE,
                 ARG_ON_BOOT,
                 ARG_ON_STARTUP,
@@ -147,6 +145,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_ON_CALENDAR,
                 ARG_TIMER_PROPERTY,
                 ARG_NO_BLOCK,
+                ARG_NO_ASK_PASSWORD,
         };
 
         static const struct option options[] = {
@@ -166,9 +165,10 @@ static int parse_argv(int argc, char *argv[]) {
                 { "uid",               required_argument, NULL, ARG_EXEC_USER        },
                 { "gid",               required_argument, NULL, ARG_EXEC_GROUP       },
                 { "nice",              required_argument, NULL, ARG_NICE             },
-                { "setenv",            required_argument, NULL, ARG_SETENV           },
+                { "setenv",            required_argument, NULL, 'E'                  },
                 { "property",          required_argument, NULL, 'p'                  },
-                { "tty",               no_argument,       NULL, 't'                  },
+                { "tty",               no_argument,       NULL, 't'                  }, /* deprecated */
+                { "pty",               no_argument,       NULL, 't'                  },
                 { "quiet",             no_argument,       NULL, 'q'                  },
                 { "on-active",         required_argument, NULL, ARG_ON_ACTIVE        },
                 { "on-boot",           required_argument, NULL, ARG_ON_BOOT          },
@@ -266,7 +266,7 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_nice_set = true;
                         break;
 
-                case ARG_SETENV:
+                case 'E':
                         if (strv_extend(&arg_environment, optarg) < 0)
                                 return log_oom();
 
@@ -621,6 +621,10 @@ static int transient_scope_set_properties(sd_bus_message *m) {
         if (r < 0)
                 return r;
 
+        r = transient_cgroup_set_properties(m);
+        if (r < 0)
+                return r;
+
         r = sd_bus_message_append(m, "(sv)", "PIDs", "au", 1, (uint32_t) getpid());
         if (r < 0)
                 return r;
@@ -756,6 +760,7 @@ static int start_transient_service(
 
                 } else if (arg_transport == BUS_TRANSPORT_MACHINE) {
                         _cleanup_(sd_bus_unrefp) sd_bus *system_bus = NULL;
+                        _cleanup_(sd_bus_message_unrefp) sd_bus_message *pty_reply = NULL;
                         const char *s;
 
                         r = sd_bus_default_system(&system_bus);
@@ -768,18 +773,16 @@ static int start_transient_service(
                                                "org.freedesktop.machine1.Manager",
                                                "OpenMachinePTY",
                                                &error,
-                                               &reply,
+                                               &pty_reply,
                                                "s", arg_host);
                         if (r < 0) {
                                 log_error("Failed to get machine PTY: %s", bus_error_message(&error, -r));
                                 return r;
                         }
 
-                        r = sd_bus_message_read(reply, "hs", &master, &s);
+                        r = sd_bus_message_read(pty_reply, "hs", &master, &s);
                         if (r < 0)
                                 return bus_log_parse_error(r);
-
-                        reply = sd_bus_message_unref(reply);
 
                         master = fcntl(master, F_DUPFD_CLOEXEC, 3);
                         if (master < 0)
@@ -878,7 +881,7 @@ static int start_transient_service(
                 (void) sd_event_add_signal(event, NULL, SIGTERM, NULL, NULL);
 
                 if (!arg_quiet)
-                        log_info("Running as unit %s.\nPress ^] three times within 1s to disconnect TTY.", service);
+                        log_info("Running as unit: %s\nPress ^] three times within 1s to disconnect TTY.", service);
 
                 r = pty_forward_new(event, master, PTY_FORWARD_IGNORE_INITIAL_VHANGUP, &forward);
                 if (r < 0)
@@ -896,7 +899,7 @@ static int start_transient_service(
                         fputc('\n', stdout);
 
         } else if (!arg_quiet)
-                log_info("Running as unit %s.", service);
+                log_info("Running as unit: %s", service);
 
         return 0;
 }
@@ -1038,7 +1041,7 @@ static int start_transient_scope(
                 return r;
 
         if (!arg_quiet)
-                log_info("Running scope as unit %s.", scope);
+                log_info("Running scope as unit: %s", scope);
 
         execvpe(argv[0], argv, env);
 
@@ -1189,9 +1192,9 @@ static int start_transient_timer(
         if (r < 0)
                 return r;
 
-        log_info("Running timer as unit %s.", timer);
+        log_info("Running timer as unit: %s", timer);
         if (argv[0])
-                log_info("Will run service as unit %s.", service);
+                log_info("Will run service as unit: %s", service);
 
         return 0;
 }

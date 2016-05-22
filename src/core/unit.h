@@ -95,6 +95,9 @@ struct Unit {
         usec_t source_mtime;
         usec_t dropin_mtime;
 
+        /* If this is a transient unit we are currently writing, this is where we are writing it to */
+        FILE *transient_file;
+
         /* If there is something to do with this unit, then this is the installed job for it */
         Job *job;
 
@@ -183,6 +186,7 @@ struct Unit {
         /* Counterparts in the cgroup filesystem */
         char *cgroup_path;
         CGroupMask cgroup_realized_mask;
+        CGroupMask cgroup_enabled_mask;
         CGroupMask cgroup_subtree_mask;
         CGroupMask cgroup_members_mask;
         int cgroup_inotify_wd;
@@ -387,6 +391,12 @@ struct UnitVTable {
         /* Returns the next timeout of a unit */
         int (*get_timeout)(Unit *u, usec_t *timeout);
 
+        /* Returns the main PID if there is any defined, or 0. */
+        pid_t (*main_pid)(Unit *u);
+
+        /* Returns the main PID if there is any defined, or 0. */
+        pid_t (*control_pid)(Unit *u);
+
         /* This is called for each unit type and should be used to
          * enumerate existing devices and load them. However,
          * everything that is loaded here should still stay in
@@ -406,12 +416,6 @@ struct UnitVTable {
 
         /* The strings to print in status messages */
         UnitStatusMessageFormats status_message_formats;
-
-        /* Can units of this type have multiple names? */
-        bool no_alias:1;
-
-        /* Instances make no sense for this type */
-        bool no_instances:1;
 
         /* True if transient units of this type are OK */
         bool can_transient:1;
@@ -598,12 +602,17 @@ bool unit_type_supported(UnitType t);
 
 bool unit_is_pristine(Unit *u);
 
+pid_t unit_control_pid(Unit *u);
+pid_t unit_main_pid(Unit *u);
+
 static inline bool unit_supported(Unit *u) {
         return unit_type_supported(u->type);
 }
 
 void unit_warn_if_dir_nonempty(Unit *u, const char* where);
 int unit_fail_if_symlink(Unit *u, const char* where);
+
+int unit_start_limit_test(Unit *u);
 
 /* Macros which append UNIT= or USER_UNIT= to the message */
 

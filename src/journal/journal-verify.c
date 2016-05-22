@@ -97,20 +97,20 @@ static void flush_progress(void) {
         fflush(stdout);
 }
 
-#define debug(_offset, _fmt, ...) do{                                   \
+#define debug(_offset, _fmt, ...) do {                                  \
                 flush_progress();                                       \
                 log_debug(OFSfmt": " _fmt, _offset, ##__VA_ARGS__);     \
-        } while(0)
+        } while (0)
 
-#define warning(_offset, _fmt, ...) do{                                 \
+#define warning(_offset, _fmt, ...) do {                                \
                 flush_progress();                                       \
                 log_warning(OFSfmt": " _fmt, _offset, ##__VA_ARGS__);   \
-        } while(0)
+        } while (0)
 
-#define error(_offset, _fmt, ...) do{                                   \
+#define error(_offset, _fmt, ...) do {                                  \
                 flush_progress();                                       \
                 log_error(OFSfmt": " _fmt, (uint64_t)_offset, ##__VA_ARGS__); \
-        } while(0)
+        } while (0)
 
 static int journal_file_object_verify(JournalFile *f, uint64_t offset, Object *o) {
         uint64_t i;
@@ -838,19 +838,19 @@ int journal_file_verify(
         } else if (f->seal)
                 return -ENOKEY;
 
-        data_fd = open_tmpfile("/var/tmp", O_RDWR | O_CLOEXEC);
+        data_fd = open_tmpfile_unlinkable("/var/tmp", O_RDWR | O_CLOEXEC);
         if (data_fd < 0) {
                 r = log_error_errno(data_fd, "Failed to create data file: %m");
                 goto fail;
         }
 
-        entry_fd = open_tmpfile("/var/tmp", O_RDWR | O_CLOEXEC);
+        entry_fd = open_tmpfile_unlinkable("/var/tmp", O_RDWR | O_CLOEXEC);
         if (entry_fd < 0) {
                 r = log_error_errno(entry_fd, "Failed to create entry file: %m");
                 goto fail;
         }
 
-        entry_array_fd = open_tmpfile("/var/tmp", O_RDWR | O_CLOEXEC);
+        entry_array_fd = open_tmpfile_unlinkable("/var/tmp", O_RDWR | O_CLOEXEC);
         if (entry_array_fd < 0) {
                 r = log_error_errno(entry_array_fd,
                                     "Failed to create entry array file: %m");
@@ -894,7 +894,7 @@ int journal_file_verify(
                         goto fail;
                 }
 
-                n_objects ++;
+                n_objects++;
 
                 r = journal_file_object_verify(f, p, o);
                 if (r < 0) {
@@ -991,7 +991,7 @@ int journal_file_verify(
                         entry_realtime = le64toh(o->entry.realtime);
                         entry_realtime_set = true;
 
-                        n_entries ++;
+                        n_entries++;
                         break;
 
                 case OBJECT_DATA_HASH_TABLE:
@@ -1131,11 +1131,11 @@ int journal_file_verify(
 
                         last_epoch = le64toh(o->tag.epoch);
 
-                        n_tags ++;
+                        n_tags++;
                         break;
 
                 default:
-                        n_weird ++;
+                        n_weird++;
                 }
 
                 if (p == le64toh(f->header->tail_object_offset)) {

@@ -1,3 +1,5 @@
+#pragma once
+
 /***
   This file is part of systemd.
 
@@ -17,10 +19,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#pragma once
-
 #include <stdbool.h>
 
 #include "path-lookup.h"
 
-int verify_units(char **filenames, ManagerRunningAs running_as, bool check_man);
+int verify_units(char **filenames, UnitFileScope scope, bool check_man);

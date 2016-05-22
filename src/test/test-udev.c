@@ -27,6 +27,7 @@
 #include <unistd.h>
 
 #include "fs-util.h"
+#include "log.h"
 #include "missing.h"
 #include "selinux-util.h"
 #include "signal-util.h"
@@ -39,39 +40,31 @@ static int fake_filesystems(void) {
                 const char *src;
                 const char *target;
                 const char *error;
+                bool ignore_mount_error;
         } fakefss[] = {
-                { "test/sys", "/sys",                   "failed to mount test /sys" },
-                { "test/dev", "/dev",                   "failed to mount test /dev" },
-                { "test/run", "/run",                   "failed to mount test /run" },
-                { "test/run", "/etc/udev/rules.d",      "failed to mount empty /etc/udev/rules.d" },
-                { "test/run", UDEVLIBEXECDIR "/rules.d","failed to mount empty " UDEVLIBEXECDIR "/rules.d" },
+                { "test/tmpfs/sys", "/sys",                    "failed to mount test /sys",                        false },
+                { "test/tmpfs/dev", "/dev",                    "failed to mount test /dev",                        false },
+                { "test/run",       "/run",                    "failed to mount test /run",                        false },
+                { "test/run",       "/etc/udev/rules.d",       "failed to mount empty /etc/udev/rules.d",          true },
+                { "test/run",       UDEVLIBEXECDIR "/rules.d", "failed to mount empty " UDEVLIBEXECDIR "/rules.d", true },
         };
         unsigned int i;
-        int err;
 
-        err = unshare(CLONE_NEWNS);
-        if (err < 0) {
-                err = -errno;
-                fprintf(stderr, "failed to call unshare(): %m\n");
-                goto out;
-        }
+        if (unshare(CLONE_NEWNS) < 0)
+                return log_error_errno(errno, "failed to call unshare(): %m");
 
-        if (mount(NULL, "/", NULL, MS_PRIVATE|MS_REC, NULL) < 0) {
-                err = -errno;
-                fprintf(stderr, "failed to mount / as private: %m\n");
-                goto out;
-        }
+        if (mount(NULL, "/", NULL, MS_PRIVATE|MS_REC, NULL) < 0)
+                return log_error_errno(errno, "failed to mount / as private: %m");
 
         for (i = 0; i < ELEMENTSOF(fakefss); i++) {
-                err = mount(fakefss[i].src, fakefss[i].target, NULL, MS_BIND, NULL);
-                if (err < 0) {
-                        err = -errno;
-                        fprintf(stderr, "%s %m\n", fakefss[i].error);
-                        return err;
+                if (mount(fakefss[i].src, fakefss[i].target, NULL, MS_BIND, NULL) < 0) {
+                        log_full_errno(fakefss[i].ignore_mount_error ? LOG_DEBUG : LOG_ERR, errno, "%s: %m", fakefss[i].error);
+                        if (!fakefss[i].ignore_mount_error)
+                                return -errno;
                 }
         }
-out:
-        return err;
+
+        return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -84,6 +77,9 @@ int main(int argc, char *argv[]) {
         const char *action;
         int err;
 
+        log_parse_environment();
+        log_open();
+
         err = fake_filesystems();
         if (err < 0)
                 return EXIT_FAILURE;
@@ -93,7 +89,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
 
         log_debug("version %s", VERSION);
-        mac_selinux_init("/dev");
+        mac_selinux_init();
 
         action = argv[1];
         if (action == NULL) {

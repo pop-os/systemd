@@ -312,7 +312,7 @@ static int property_get_ambient_capabilities(
         return sd_bus_message_append(reply, "t", c->capability_ambient_set);
 }
 
-static int property_get_capabilities(
+static int property_get_empty_string(
                 sd_bus *bus,
                 const char *path,
                 const char *interface,
@@ -321,23 +321,10 @@ static int property_get_capabilities(
                 void *userdata,
                 sd_bus_error *error) {
 
-        ExecContext *c = userdata;
-        _cleanup_cap_free_charp_ char *t = NULL;
-        const char *s;
-
         assert(bus);
         assert(reply);
-        assert(c);
 
-        if (c->capabilities)
-                s = t = cap_to_text(c->capabilities, NULL);
-        else
-                s = "";
-
-        if (!s)
-                return -ENOMEM;
-
-        return sd_bus_message_append(reply, "s", s);
+        return sd_bus_message_append(reply, "s", "");
 }
 
 static int property_get_syscall_filter(
@@ -700,7 +687,7 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("SyslogLevelPrefix", "b", bus_property_get_bool, offsetof(ExecContext, syslog_level_prefix), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SyslogLevel", "i", property_get_syslog_level, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SyslogFacility", "i", property_get_syslog_facility, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("Capabilities", "s", property_get_capabilities, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Capabilities", "s", property_get_empty_string, 0, SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("SecureBits", "i", bus_property_get_int, offsetof(ExecContext, secure_bits), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("CapabilityBoundingSet", "t", property_get_capability_bounding_set, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("AmbientCapabilities", "t", property_get_ambient_capabilities, 0, SD_BUS_VTABLE_PROPERTY_CONST),
@@ -850,18 +837,10 @@ int bus_exec_context_set_transient_property(
 
                 if (mode != UNIT_CHECK) {
 
-                        if (isempty(uu)) {
+                        if (isempty(uu))
                                 c->user = mfree(c->user);
-                        } else {
-                                char *t;
-
-                                t = strdup(uu);
-                                if (!t)
-                                        return -ENOMEM;
-
-                                free(c->user);
-                                c->user = t;
-                        }
+                        else if (free_and_strdup(&c->user, uu) < 0)
+                                return -ENOMEM;
 
                         unit_write_drop_in_private_format(u, mode, name, "User=%s\n", uu);
                 }
@@ -877,18 +856,10 @@ int bus_exec_context_set_transient_property(
 
                 if (mode != UNIT_CHECK) {
 
-                        if (isempty(gg)) {
+                        if (isempty(gg))
                                 c->group = mfree(c->group);
-                        } else {
-                                char *t;
-
-                                t = strdup(gg);
-                                if (!t)
-                                        return -ENOMEM;
-
-                                free(c->group);
-                                c->group = t;
-                        }
+                        else if (free_and_strdup(&c->group, gg) < 0)
+                                return -ENOMEM;
 
                         unit_write_drop_in_private_format(u, mode, name, "Group=%s\n", gg);
                 }
@@ -903,18 +874,10 @@ int bus_exec_context_set_transient_property(
 
                 if (mode != UNIT_CHECK) {
 
-                        if (isempty(id)) {
+                        if (isempty(id))
                                 c->syslog_identifier = mfree(c->syslog_identifier);
-                        } else {
-                                char *t;
-
-                                t = strdup(id);
-                                if (!t)
-                                        return -ENOMEM;
-
-                                free(c->syslog_identifier);
-                                c->syslog_identifier = t;
-                        }
+                        else if (free_and_strdup(&c->syslog_identifier, id) < 0)
+                                return -ENOMEM;
 
                         unit_write_drop_in_private_format(u, mode, name, "SyslogIdentifier=%s\n", id);
                 }
@@ -1487,6 +1450,24 @@ int bus_exec_context_set_transient_property(
 
                                 unit_write_drop_in_private_format(u, mode, name, "%s=%s\n", name, joined);
                         }
+                }
+
+                return 1;
+
+        } else if (streq(name, "SELinuxContext")) {
+                const char *s;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        if (isempty(s))
+                                c->selinux_context = mfree(c->selinux_context);
+                        else if (free_and_strdup(&c->selinux_context, s) < 0)
+                                return -ENOMEM;
+
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%s\n", name, strempty(s));
                 }
 
                 return 1;

@@ -193,7 +193,7 @@ void log_assert_failed_return(
 #ifdef LOG_TRACE
 #  define log_trace(...) log_debug(__VA_ARGS__)
 #else
-#  define log_trace(...) do {} while(0)
+#  define log_trace(...) do {} while (0)
 #endif
 
 /* Structured logging */
@@ -246,5 +246,4 @@ int log_syntax_internal(
                         log_syntax_internal(unit, _level, config_file, config_line, 0, __FILE__, __LINE__, __func__, \
                                             "String is not UTF-8 clean, ignoring assignment: %s", strna(_p)); \
                 }                                                       \
-                -EINVAL;                                                \
         })

@@ -203,7 +203,7 @@ static int open_output(Writer *w, const char* host) {
                                        O_RDWR|O_CREAT, 0640,
                                        arg_compress, arg_seal,
                                        &w->metrics,
-                                       w->mmap,
+                                       w->mmap, NULL,
                                        NULL, &w->journal);
         if (r < 0)
                 log_error_errno(r, "Failed to open output journal %s: %m",
@@ -434,7 +434,7 @@ static int add_raw_socket(RemoteServer *s, int fd) {
                 return r;
 
         fd_ = -1;
-        s->active ++;
+        s->active++;
         return 0;
 }
 
@@ -742,7 +742,7 @@ static int setup_microhttpd_server(RemoteServer *s,
                 goto error;
         }
 
-        s->active ++;
+        s->active++;
         return 0;
 
 error:
