@@ -12,6 +12,8 @@ systemd (230-1) UNRELEASED; urgency=medium
     fixed. Add appropriate versioned Breaks:.
   * debian/extra/rules/70-debian-uaccess.rules: Add some more FIDO u2f devices
     from different vendors. Thanks Atoyama Tokanawa.
+  * Remove "bootchart" autopkgtest, this upstream version does not ship
+    bootchart any more. It will be packaged separately.
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 12 May 2016 21:16:49 +0200
 
