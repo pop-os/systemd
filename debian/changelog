@@ -1,4 +1,4 @@
-systemd (230-1) UNRELEASED; urgency=medium
+systemd (230-1) unstable; urgency=medium
 
   [ Martin Pitt ]
   * New upstream release 230.
@@ -20,7 +20,7 @@ systemd (230-1) UNRELEASED; urgency=medium
   * Drop obsolete --disable-bootchart configure switch from udeb build.
   * Remove obsolete /etc/systemd/bootchart.conf conffile on upgrades.
 
- -- Martin Pitt <mpitt@debian.org>  Thu, 12 May 2016 21:16:49 +0200
+ -- Martin Pitt <mpitt@debian.org>  Mon, 23 May 2016 09:42:51 +0200
 
 systemd (229-6) unstable; urgency=medium
 
