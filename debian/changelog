@@ -1,5 +1,6 @@
 systemd (230-1) UNRELEASED; urgency=medium
 
+  [ Martin Pitt ]
   * New upstream release 230.
     - Fix rare assertion failure in hashmaps. (Closes: #816612)
     - Fix leaking scope units. (Closes: #805477)
@@ -14,6 +15,9 @@ systemd (230-1) UNRELEASED; urgency=medium
     from different vendors. Thanks Atoyama Tokanawa.
   * Remove "bootchart" autopkgtest, this upstream version does not ship
     bootchart any more. It will be packaged separately.
+
+  [ Michael Biebl ]
+  * Drop obsolete --disable-bootchart configure switch from udeb build.
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 12 May 2016 21:16:49 +0200
 

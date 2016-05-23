@@ -91,7 +91,6 @@ CONFFLAGS_udeb = \
 	--disable-smack \
 	--disable-ima \
 	--disable-binfmt \
-	--disable-bootchart \
 	--disable-quotacheck \
 	--disable-tmpfiles \
 	--disable-randomseed \
