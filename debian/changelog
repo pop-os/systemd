@@ -6,6 +6,7 @@ systemd (230-2) UNRELEASED; urgency=medium
   * boot-and-services autopkgtest: Add missing xserver-xorg and
     lightdm-greeter test dependencies, so that lightdm can start.
     (See LP #1581106)
+  * Re-disable logind's KillUserProcesses option by default. (Closes: #825394)
 
   [ Michael Biebl ]
   * Drop --disable-silent-rules from debian/rules. This is now handled by dh
