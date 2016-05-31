@@ -127,7 +127,8 @@ class ServicesTest(unittest.TestCase):
             self.assertEqual(status, 0, status_out)
             self.assertEqual(findmnt, 0)
         else:
-            self.assertEqual(status, 3, status_out)
+            # 4 is correct (since upstream commit ca473d57), accept 3 for systemd <= 230
+            self.assertIn(status, [3, 4], status_out)
             self.assertNotEqual(findmnt, 0)
 
     @unittest.skipIf('TEST_UPSTREAM' in os.environ,

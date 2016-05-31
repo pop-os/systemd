@@ -1,3 +1,10 @@
+systemd (230-3) UNRELEASED; urgency=medium
+
+  * debian/tests/boot-and-services: Adjust test_tmp_mount() for fixed
+    systemctl exit code for "unit not found" in upstream commit ca473d57.
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 13:16:21 +0200
+
 systemd (230-2) unstable; urgency=medium
 
   [ Martin Pitt ]
