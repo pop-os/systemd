@@ -10,8 +10,8 @@ if [ -d /run/systemd/system ]; then
     # Don't try to run masked services. Don't check for errors, if
     # this errors, we'll just call systemctl and possibly explode
     # there.
-    state=$(systemctl -p LoadState show $service 2>/dev/null)
-    [ "$state" = "LoadState=masked" ] && exit 0
+    state=$(systemctl -p LoadState --value show $service 2>/dev/null)
+    [ "$state" = "masked" ] && exit 0
 
     # Redirect SysV init scripts when executed by the user
     if [ $PPID -ne 1 ] && [ -z "${init:-}" ] && [ -z "${_SYSTEMCTL_SKIP_REDIRECT:-}" ]; then
@@ -20,7 +20,7 @@ if [ -d /run/systemd/system ]; then
                 _use_systemctl=1
                 # Some services can't reload through the .service file,
                 # but can through the init script.
-                if [ "$(systemctl -p CanReload show $service 2>/dev/null)" = "CanReload=no" ] && [ "${1:-}" = "reload" ]; then
+                if [ "$(systemctl -p CanReload --value show $service 2>/dev/null)" = "no" ] && [ "${1:-}" = "reload" ]; then
                     _use_systemctl=0
                 fi
                 ;;
