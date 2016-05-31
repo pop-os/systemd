@@ -1,4 +1,4 @@
-systemd (230-2) UNRELEASED; urgency=medium
+systemd (230-2) unstable; urgency=medium
 
   [ Martin Pitt ]
   * Don't add a Breaks: against usb-modeswitch when building on Ubuntu; there
@@ -12,7 +12,7 @@ systemd (230-2) UNRELEASED; urgency=medium
   * Drop --disable-silent-rules from debian/rules. This is now handled by dh
     directly depending on whether the DH_QUIET environment variable is set.
 
- -- Martin Pitt <mpitt@debian.org>  Wed, 25 May 2016 08:46:28 +0200
+ -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 12:02:14 +0200
 
 systemd (230-1) unstable; urgency=medium
 
