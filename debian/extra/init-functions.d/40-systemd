@@ -13,6 +13,10 @@ if [ -d /run/systemd/system ]; then
     state=$(systemctl -p LoadState --value show $service 2>/dev/null)
     [ "$state" = "masked" ] && exit 0
 
+    # If the state is not-found, this might be a newly installed SysV init
+    # script where systemd-sysv-generator has not been run yet.
+    [ "$state" != "not-found" ] || systemctl daemon-reload
+
     # Redirect SysV init scripts when executed by the user
     if [ $PPID -ne 1 ] && [ -z "${init:-}" ] && [ -z "${_SYSTEMCTL_SKIP_REDIRECT:-}" ]; then
         case $(readlink -f "$0") in

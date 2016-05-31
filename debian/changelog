@@ -1,7 +1,14 @@
 systemd (230-3) UNRELEASED; urgency=medium
 
+  [ Martin Pitt ]
   * debian/tests/boot-and-services: Adjust test_tmp_mount() for fixed
     systemctl exit code for "unit not found" in upstream commit ca473d57.
+
+  [ Michael Biebl ]
+  * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState
+    of a service is "not-found". This will run systemd-sysv-generator, so SysV
+    init scripts that aren't installed by the package manager should be picked
+    up automatically. (Closes: #825913)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 13:16:21 +0200
 
