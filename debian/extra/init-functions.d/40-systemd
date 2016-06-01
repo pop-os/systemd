@@ -7,10 +7,9 @@ if [ -d /run/systemd/system ]; then
     prog=${0##*/}
     service="${prog%.sh}.service"
 
-    # Don't try to run masked services. Don't check for errors, if
-    # this errors, we'll just call systemctl and possibly explode
-    # there.
-    state=$(systemctl -p LoadState --value show $service 2>/dev/null)
+    # Don't try to run masked services. systemctl <= 230 always succeeds here,
+    # but later systemctls fail on nonexisting units; be compatible with both
+    state=$(systemctl -p LoadState --value show $service 2>/dev/null) || state="not-found"
     [ "$state" = "masked" ] && exit 0
 
     # If the state is not-found, this might be a newly installed SysV init

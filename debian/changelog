@@ -5,6 +5,9 @@ systemd (230-3) UNRELEASED; urgency=medium
     systemctl exit code for "unit not found" in upstream commit ca473d57.
   * debian/tests/boot-and-services, test_no_failed(): Show journal of failed
     units.
+  * debian/extra/init-functions.d/40-systemd: Adjust to changed systemctl
+    show behaviour in 231: now this fails for nonexisting units instead of
+    succeeding with "not-found". Make the code compatible to both for now.
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState
