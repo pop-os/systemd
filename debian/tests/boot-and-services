@@ -51,7 +51,13 @@ class ServicesTest(unittest.TestCase):
         failed = [f for f in failed if 'thermald' not in f]
         # console-setup.service fails on devices without keyboard (LP: #1516591)
         failed = [f for f in failed if 'console-setup' not in f]
-        self.assertEqual(failed, [])
+        if failed:
+            for f in failed:
+                f = f.split()[0]
+                print('-------- journal for failed service %s -----------' % f)
+                sys.stdout.flush()
+                subprocess.call(['journalctl', '-b', '-u', f])
+            self.assertEqual(failed, [])
 
     def test_lightdm(self):
         out = subprocess.check_output(['ps', 'u', '-C', 'lightdm'])

@@ -3,6 +3,8 @@ systemd (230-3) UNRELEASED; urgency=medium
   [ Martin Pitt ]
   * debian/tests/boot-and-services: Adjust test_tmp_mount() for fixed
     systemctl exit code for "unit not found" in upstream commit ca473d57.
+  * debian/tests/boot-and-services, test_no_failed(): Show journal of failed
+    units.
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState
