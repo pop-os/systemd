@@ -10,6 +10,10 @@ systemd (230-3) UNRELEASED; urgency=medium
     succeeding with "not-found". Make the code compatible to both for now.
   * resolved: Disable DNSSEC by default again, until the various crashes get
     fixed. (LP: #1587727, #1587740, #1587762, #1587740)
+  * Fix networkd integration with resolvconf for domain-limited DNS servers,
+    so that these don't appear as global nameservers in resolv.conf. Thanks
+    Andy Whitcroft for the initial fix! Add corresponding test case to
+    debian/tests/networkd. (LP: #1587762)
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState

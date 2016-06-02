@@ -8,5 +8,5 @@ After=resolvconf.service
 Type=oneshot
 StartLimitBurst=20
 # we might be triggered several times in short succession during restarting networkd, so wait until we get a DNS entry
-ExecStart=/bin/sh -c 'for timeout in `seq 30`; do out=$(sed -n "/^DNS=/ { s/^DNS=/nameserver /; p}" /run/systemd/netif/state); [ -z "$out" ] || break; sleep 1; done; echo "$out" | /sbin/resolvconf -a networkd'
+ExecStart=/bin/sh -c 'for timeout in `seq 30`; do out=$(for link in /run/systemd/netif/links/*; do awk -F= '"'"'/^DNS=/ { dns=dns "nameserver " $2 "\\n" } /^ROUTE_DOMAINS=./ { route_domains=1 } END { if (route_domains != 1) { print dns } }'"'"' "$link"; done); [ -z "$out" ] || break; sleep 1; done; echo "$out" | /sbin/resolvconf -a networkd'
 
