@@ -14,6 +14,8 @@ systemd (230-3) UNRELEASED; urgency=medium
     so that these don't appear as global nameservers in resolv.conf. Thanks
     Andy Whitcroft for the initial fix! Add corresponding test case to
     debian/tests/networkd. (LP: #1587762)
+  * resolved: Fix comments in resolve.conf for search domain overflows.
+    (LP: #1588229)
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState

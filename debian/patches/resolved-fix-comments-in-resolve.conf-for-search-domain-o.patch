@@ -1,0 +1,176 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Fri, 3 Jun 2016 11:15:44 +0200
+Subject: resolved: fix comments in resolve.conf for search domain overflows
+ (#3422)
+
+Write comments about "too many search domains" and "Total length of all search
+domains is too long" just once. Also put it on a separate line, as
+resolv.conf(5) only specifies comments in a line by themselves.
+
+This is ugly to do if write_resolv_conf_search() gets called once for every
+search domain. So change it to receive the complete OrderedSet instead and do
+the iteration by itself.
+
+Add test cases to networkd-test.py.
+
+https://launchpad.net/bugs/1588229
+---
+ src/resolve/resolved-resolv-conf.c | 49 ++++++++++++--------------
+ test/networkd-test.py              | 71 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 93 insertions(+), 27 deletions(-)
+
+diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
+index ff03acc..fa89de4 100644
+--- a/src/resolve/resolved-resolv-conf.c
++++ b/src/resolve/resolved-resolv-conf.c
+@@ -164,30 +164,32 @@ static void write_resolv_conf_server(DnsServer *s, FILE *f, unsigned *count) {
+ }
+ 
+ static void write_resolv_conf_search(
+-                const char *domain,
+-                FILE *f,
+-                unsigned *count,
+-                unsigned *length) {
++                OrderedSet *domains,
++                FILE *f) {
++        unsigned length = 0, count = 0;
++        Iterator i;
++        char *domain;
+ 
+-        assert(domain);
++        assert(domains);
+         assert(f);
+-        assert(length);
+ 
+-        if (*count >= MAXDNSRCH ||
+-            *length + strlen(domain) > 256) {
+-                if (*count == MAXDNSRCH)
+-                        fputs(" # Too many search domains configured, remaining ones ignored.", f);
+-                if (*length <= 256)
+-                        fputs(" # Total length of all search domains is too long, remaining ones ignored.", f);
++        fputs("search", f);
+ 
+-                return;
++        ORDERED_SET_FOREACH(domain, domains, i) {
++                if (++count > MAXDNSRCH) {
++                        fputs("\n# Too many search domains configured, remaining ones ignored.", f);
++                        break;
++                }
++                length += strlen(domain) + 1;
++                if (length > 256) {
++                        fputs("\n# Total length of all search domains is too long, remaining ones ignored.", f);
++                        break;
++                }
++                fputc(' ', f);
++                fputs(domain, f);
+         }
+ 
+-        (*length) += strlen(domain);
+-        (*count)++;
+-
+-        fputc(' ', f);
+-        fputs(domain, f);
++        fputs("\n", f);
+ }
+ 
+ static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *domains) {
+@@ -209,15 +211,8 @@ static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *doma
+                         write_resolv_conf_server(s, f, &count);
+         }
+ 
+-        if (!ordered_set_isempty(domains)) {
+-                unsigned length = 0, count = 0;
+-                char *domain;
+-
+-                fputs("search", f);
+-                ORDERED_SET_FOREACH(domain, domains, i)
+-                        write_resolv_conf_search(domain, f, &count, &length);
+-                fputs("\n", f);
+-        }
++        if (!ordered_set_isempty(domains))
++                write_resolv_conf_search(domains, f);
+ 
+         return fflush_and_check(f);
+ }
+diff --git a/test/networkd-test.py b/test/networkd-test.py
+index d4de5ad..f94224c 100755
+--- a/test/networkd-test.py
++++ b/test/networkd-test.py
+@@ -370,6 +370,77 @@ exec $(systemctl cat systemd-networkd.service | sed -n '/^ExecStart=/ { s/^.*=//
+     def test_coldplug_dhcp_ip6(self):
+         pass
+ 
++    def test_search_domains(self):
++
++        # we don't use this interface for this test
++        self.if_router = None
++
++        with open('/run/systemd/network/test.netdev', 'w') as f:
++            f.write('''[NetDev]
++Name=dummy0
++Kind=dummy
++MACAddress=12:34:56:78:9a:bc''')
++        with open('/run/systemd/network/test.network', 'w') as f:
++            f.write('''[Match]
++Name=dummy0
++[Network]
++Address=192.168.42.100
++DNS=192.168.42.1
++Domains= one two three four five six seven eight nine ten''')
++        self.addCleanup(os.remove, '/run/systemd/network/test.netdev')
++        self.addCleanup(os.remove, '/run/systemd/network/test.network')
++
++        subprocess.check_call(['systemctl', 'start', 'systemd-networkd'])
++
++        if os.path.islink('/etc/resolv.conf'):
++            for timeout in range(50):
++                with open('/etc/resolv.conf') as f:
++                    contents = f.read()
++                if 'search one\n' in contents:
++                    break
++                time.sleep(0.1)
++            self.assertIn('search one two three four five six\n'
++                          '# Too many search domains configured, remaining ones ignored.\n',
++                          contents)
++
++    def test_search_domains_too_long(self):
++
++        # we don't use this interface for this test
++        self.if_router = None
++
++        name_prefix = 'a' * 60
++
++        with open('/run/systemd/network/test.netdev', 'w') as f:
++            f.write('''[NetDev]
++Name=dummy0
++Kind=dummy
++MACAddress=12:34:56:78:9a:bc''')
++        with open('/run/systemd/network/test.network', 'w') as f:
++            f.write('''[Match]
++Name=dummy0
++[Network]
++Address=192.168.42.100
++DNS=192.168.42.1
++Domains=''')
++            for i in range(5):
++                f.write('%s%i ' % (name_prefix, i))
++
++        self.addCleanup(os.remove, '/run/systemd/network/test.netdev')
++        self.addCleanup(os.remove, '/run/systemd/network/test.network')
++
++        subprocess.check_call(['systemctl', 'start', 'systemd-networkd'])
++
++        if os.path.islink('/etc/resolv.conf'):
++            for timeout in range(50):
++                with open('/etc/resolv.conf') as f:
++                    contents = f.read()
++                if 'search one\n' in contents:
++                    break
++                time.sleep(0.1)
++            self.assertIn('search %(p)s0 %(p)s1 %(p)s2 %(p)s3\n'
++                          '# Total length of all search domains is too long, remaining ones ignored.' % {'p': name_prefix},
++                          contents)
++
+ 
+ if __name__ == '__main__':
+     unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout,
