@@ -22,6 +22,8 @@ systemd (230-3) UNRELEASED; urgency=medium
     of a service is "not-found". This will run systemd-sysv-generator, so SysV
     init scripts that aren't installed by the package manager should be picked
     up automatically. (Closes: #825913)
+  * automount: handle expire_tokens when the mount unit changes its state.
+    (Closes: #826512)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 13:16:21 +0200
 
