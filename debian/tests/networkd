@@ -250,7 +250,10 @@ Domains= ~company''')
         if os.path.islink('/etc/resolv.conf'):
             with open('/etc/resolv.conf') as f:
                 contents = f.read()
-            self.assertIn('nameserver 192.168.5.1\n', contents)
+            # resolv.conf can have at most three nameservers; if we already
+            # have three different ones, that's also okay
+            if contents.count('nameserver ') < 3:
+                self.assertIn('nameserver 192.168.5.1\n', contents)
             self.assertNotIn('nameserver 192.168.42.1\n', contents)
 
 
