@@ -16,6 +16,13 @@ systemd (230-3) UNRELEASED; urgency=medium
     debian/tests/networkd. (LP: #1587762)
   * resolved: Fix comments in resolve.conf for search domain overflows.
     (LP: #1588229)
+  * On Ubuntu, provide an "ondemand.service" that replaces
+    /etc/init.d/ondemand. The latter does not exist any more when
+    "initscripts" falls out of the default installation. (LP: #1584124) This
+    now does not do a fixed one-minute wait but uses "Type=idle" instead. This
+    also becomes a no-op when the CPU supports "intel_pstate" (≤ 5 years old),
+    as on these the ondemand/powersave schedulers are actually detrimental.
+    (LP: #1579278)
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState
