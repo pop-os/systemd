@@ -41,7 +41,6 @@ CONFFLAGS = \
 	--without-kill-user-processes \
 	--with-default-dnssec=no \
 	--enable-split-usr \
-	--disable-compat-libs \
 	--disable-qrencode \
 	--disable-libidn \
 	--disable-vconsole \

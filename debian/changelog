@@ -32,6 +32,9 @@ systemd (230-3) UNRELEASED; urgency=medium
   * automount: handle expire_tokens when the mount unit changes its state.
     (Closes: #826512)
 
+  [ Felipe Sateler ]
+  * Drop configure option --disable-compat-libs. It no longer exists.
+
  -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 13:16:21 +0200
 
 systemd (230-2) unstable; urgency=medium
