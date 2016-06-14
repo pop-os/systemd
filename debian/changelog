@@ -25,6 +25,9 @@ systemd (230-3) UNRELEASED; urgency=medium
     (LP: #1579278)
   * debian/systemd-container.install: Drop *.busname installation, they are
     going away upstream.
+  * debian/extra/init-functions.d/40-systemd: Do not call systemctl
+    daemon-reload if the script is called as user (like reportbug does). Also
+    make sure that daemon-reload will not invoke polkit.
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState

@@ -14,7 +14,7 @@ if [ -d /run/systemd/system ]; then
 
     # If the state is not-found, this might be a newly installed SysV init
     # script where systemd-sysv-generator has not been run yet.
-    [ "$state" != "not-found" ] || systemctl daemon-reload
+    [ "$state" != "not-found" ] || [ "$(id -u)" != 0 ] || systemctl --no-ask-password daemon-reload
 
     # Redirect SysV init scripts when executed by the user
     if [ $PPID -ne 1 ] && [ -z "${init:-}" ] && [ -z "${_SYSTEMCTL_SKIP_REDIRECT:-}" ]; then
