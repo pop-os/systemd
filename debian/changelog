@@ -28,6 +28,8 @@ systemd (230-3) UNRELEASED; urgency=medium
   * debian/extra/init-functions.d/40-systemd: Do not call systemctl
     daemon-reload if the script is called as user (like reportbug does). Also
     make sure that daemon-reload will not invoke polkit.
+  * Install test-udeb from .libs, to avoid installing the automake shell
+    wrapper.
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState

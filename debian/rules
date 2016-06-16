@@ -233,7 +233,11 @@ endif
 	done
 
 	# ship test-udev, so that we have it for autopkgtests
-	install build-deb/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/
+	if [ -e build-deb/.libs/test-udev ]; then \
+		install build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/; \
+	else \
+		install build-deb/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/; \
+	fi
 
 	# Ubuntu specific files
 	if dpkg-vendor --is ubuntu; then \
