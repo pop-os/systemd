@@ -8,8 +8,6 @@ systemd (230-3) UNRELEASED; urgency=medium
   * debian/extra/init-functions.d/40-systemd: Adjust to changed systemctl
     show behaviour in 231: now this fails for nonexisting units instead of
     succeeding with "not-found". Make the code compatible to both for now.
-  * resolved: Disable DNSSEC by default again, until the various crashes get
-    fixed. (LP: #1587727, #1587740, #1587762, #1587740)
   * Fix networkd integration with resolvconf for domain-limited DNS servers,
     so that these don't appear as global nameservers in resolv.conf. Thanks
     Andy Whitcroft for the initial fix! Add corresponding test case to
@@ -30,6 +28,9 @@ systemd (230-3) UNRELEASED; urgency=medium
     make sure that daemon-reload will not invoke polkit.
   * Install test-udeb from .libs, to avoid installing the automake shell
     wrapper.
+  * Fix transaction restarting in resolved to avoid async processing of
+    free'd transactions.
+    (Closes: #817210, LP: #1587727, #1587740, #1587762, #1587740)
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState

@@ -1,5 +1,6 @@
 resolved-fix-comments-in-resolve.conf-for-search-domain-o.patch
 automount-handle-expire_tokens-when-the-mount-unit-change.patch
+resolved-when-restarting-a-transaction-make-sure-to-not-t.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
