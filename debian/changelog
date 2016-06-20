@@ -42,6 +42,8 @@ systemd (230-3) UNRELEASED; urgency=medium
 
   [ Felipe Sateler ]
   * Drop configure option --disable-compat-libs. It no longer exists.
+  * Add policykit-1 to Suggests. It is used to allow unprivileged users to
+    execute certain commands. (Closes: #827756)
 
  -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 13:16:21 +0200
 
