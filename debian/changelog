@@ -44,6 +44,10 @@ systemd (230-3) UNRELEASED; urgency=medium
     up automatically. (Closes: #825913)
   * automount: handle expire_tokens when the mount unit changes its state.
     (Closes: #826512)
+  * debian/systemd.preinst: Correctly determine whether a service is enabled.
+    Testing for the return code alone is not sufficient as we need to
+    differentiate between "generated" and "enabled" services.
+    (Closes: #825981)
 
   [ Felipe Sateler ]
   * Drop configure option --disable-compat-libs. It no longer exists.

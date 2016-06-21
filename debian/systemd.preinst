@@ -6,7 +6,7 @@ set -e
 # to be re-run in postinst. As systemctl is-enabled will use the new unit files
 # in postinst we must run it before unpacking it and remember the results.
 save_is_enabled() {
-    if systemctl --quiet is-enabled $1 2>/dev/null ; then
+    if [ "$(systemctl is-enabled $1 2>/dev/null)" = "enabled" ] ; then
         echo $1 >>/run/systemd/was-enabled
     fi
 }
