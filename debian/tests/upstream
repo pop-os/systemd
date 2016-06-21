@@ -12,11 +12,21 @@ BLACKLIST="TEST-06-SELINUX"
 # systemd-nspawn from the system.
 sed -i '/make.* install/ s%^.*$%    for p in `grep ^Package: '`pwd`'/debian/control | cut -f2 -d\\  |grep -Ev -- "-(udeb|dev)"`; do (cd /tmp; apt-get download $p \&\& dpkg-deb -x ${p}[._]*deb $initdir); done%; s_../../systemd-nspawn_systemd-nspawn_g' test/test-functions
 
+# adjust path
+sed -i 's_/usr/libexec/selinux/hll/pp_/usr/lib/selinux/hll/pp_' test/TEST-06-SELINUX/test.sh
+
 for t in test/TEST*; do
     echo "$BLACKLIST" | grep -q "$(basename $t)" && continue
     echo "========== `basename $t` =========="
     for op in clean setup run; do
-        (cd $t; TEST_BASE_DIR=../ INITRD=/initrd.img ./test.sh --$op)
+        if ! (cd $t; TEST_BASE_DIR=../ INITRD=/initrd.img ./test.sh --$op); then
+            for j in /var/tmp/systemd-test.*/journal/*/system.journal; do
+                [ -e "$j" ] || continue
+                echo "---- $j ----"
+                journalctl --file=$j
+            done
+            exit 1
+        fi
     done
     echo
 done
