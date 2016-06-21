@@ -146,9 +146,8 @@ class FsckdTest(unittest.TestCase):
     def is_active_unit(self, unit):
         '''Check that given unit is active'''
 
-        if subprocess.call(['systemctl', '-q', 'is-active', unit]) != 0:
-            return False
-        return True
+        return subprocess.call(['systemctl', 'status', unit],
+                               stdout=subprocess.PIPE) == 0
 
     def is_failed_unit(self, unit):
         '''Check that given unit failed'''
@@ -161,10 +160,8 @@ class FsckdTest(unittest.TestCase):
 
     def was_running(self, unit):
         '''Check that a given unit has been running'''
-        out = subprocess.check_output(['systemctl', 'show', '--property=ExecStart', unit])
-        if b'start_time=[n/a]' in out:
-            return False
-        return True
+        out = subprocess.check_output(['systemctl', 'show', '--property=ActiveEnterTimestampMonotonic', unit])
+        return not out.strip().endswith(b'=0')
 
     def assertFsckdStop(self):
         '''Ensure systemd-fsckd stops, which indicates no more fsck activity'''
