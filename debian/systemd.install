@@ -11,6 +11,7 @@ bin/systemd-machine-id-setup
 bin/systemd-tmpfiles
 bin/systemd-inhibit
 bin/systemd-escape
+bin/systemd-sysusers
 lib/systemd/
 lib/udev/rules.d/70-uaccess.rules
 lib/udev/rules.d/73-seat-late.rules
@@ -48,6 +49,8 @@ usr/share/systemd/language-fallback-map
 usr/lib/binfmt.d/
 usr/lib/modules-load.d/
 usr/lib/sysctl.d/
+# FIXME: ship this once we generate a proper Debianized basic.conf
+#usr/lib/sysusers.d/
 usr/lib/systemd/
 usr/lib/tmpfiles.d/
 usr/share/locale/

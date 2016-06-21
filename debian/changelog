@@ -33,6 +33,9 @@ systemd (230-3) UNRELEASED; urgency=medium
     (Closes: #817210, LP: #1587727, #1587740, #1587762, #1587740)
   * Add "upstream" autopkgtest that runs the test/TEST* upstream integration
     tests in QEMU and nspawn.
+  * Build systemd-sysusers binary, for using in rkt. Do not ship the
+    corresponding unit and sysusers.d/ files yet, as these need some
+    Debianization and an autopkgtest. (Closes: #823322)
 
   [ Michael Biebl ]
   * Add "systemctl daemon-reload" to lsb init-functions hook if the LoadState
