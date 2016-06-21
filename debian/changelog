@@ -1,4 +1,4 @@
-systemd (230-3) UNRELEASED; urgency=medium
+systemd (230-3) unstable; urgency=medium
 
   [ Martin Pitt ]
   * debian/tests/boot-and-services: Adjust test_tmp_mount() for fixed
@@ -56,7 +56,7 @@ systemd (230-3) UNRELEASED; urgency=medium
   * Add policykit-1 to Suggests. It is used to allow unprivileged users to
     execute certain commands. (Closes: #827756)
 
- -- Martin Pitt <mpitt@debian.org>  Tue, 31 May 2016 13:16:21 +0200
+ -- Martin Pitt <mpitt@debian.org>  Tue, 21 Jun 2016 23:51:07 +0200
 
 systemd (230-2) unstable; urgency=medium
 
