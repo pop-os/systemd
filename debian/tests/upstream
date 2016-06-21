@@ -1,0 +1,22 @@
+#!/bin/sh
+# run upstream system integration tests
+# Author: Martin Pitt <martin.pitt@ubuntu.com>
+set -e
+
+# even after installing policycoreutils this fails with
+# "Failed to install /usr/libexec/selinux/hll/pp"
+BLACKLIST="TEST-06-SELINUX"
+
+# modify the image build scripts to install systemd from the debs instead of
+# from a "make install" as we don't have a built tree here. Also call
+# systemd-nspawn from the system.
+sed -i '/make.* install/ s%^.*$%    for p in `grep ^Package: '`pwd`'/debian/control | cut -f2 -d\\  |grep -Ev -- "-(udeb|dev)"`; do (cd /tmp; apt-get download $p \&\& dpkg-deb -x ${p}[._]*deb $initdir); done%; s_../../systemd-nspawn_systemd-nspawn_g' test/test-functions
+
+for t in test/TEST*; do
+    echo "$BLACKLIST" | grep -q "$(basename $t)" && continue
+    echo "========== `basename $t` =========="
+    for op in clean setup run; do
+        (cd $t; TEST_BASE_DIR=../ INITRD=/initrd.img ./test.sh --$op)
+    done
+    echo
+done

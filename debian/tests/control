@@ -82,6 +82,24 @@ Depends: tree,
   xz-utils,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
+Tests: upstream
+Depends: tree,
+  libudev-dev,
+  perl,
+  xz-utils,
+  kbd,
+  cryptsetup-bin,
+  net-tools,
+  isc-dhcp-client,
+  iputils-ping,
+  strace,
+  qemu-system-x86,
+  less,
+  pkg-config,
+  systemd-journal-remote,
+  systemd-container,
+Restrictions: needs-root, allow-stderr, isolation-machine
+
 Tests: boot-smoke
 Depends: systemd-sysv,
   network-manager,
@@ -92,6 +110,17 @@ Depends: systemd-sysv,
   libudev-dev,
   perl,
   xz-utils,
+  kbd,
+  cryptsetup-bin,
+  net-tools,
+  isc-dhcp-client,
+  iputils-ping,
+  strace,
+  qemu-system-x86,
+  less,
+  pkg-config,
+  systemd-journal-remote,
+  systemd-container,
 Restrictions: needs-recommends, needs-root, isolation-machine, allow-stderr, breaks-testbed
 
 # NOUPSTREAM: Do not run these tests for upstream builds
