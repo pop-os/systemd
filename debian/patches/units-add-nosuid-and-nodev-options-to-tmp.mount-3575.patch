@@ -1,0 +1,22 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Wed, 22 Jun 2016 12:32:59 +0200
+Subject: units: add nosuid and nodev options to tmp.mount (#3575)
+
+This makes privilege escalation attacks harder by putting traps and exploits
+into /tmp.
+
+https://bugs.debian.org/826377
+---
+ units/tmp.mount.m4 | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/units/tmp.mount.m4 b/units/tmp.mount.m4
+index 1448bd2..0baecfd 100644
+--- a/units/tmp.mount.m4
++++ b/units/tmp.mount.m4
+@@ -19,4 +19,4 @@ After=swap.target
+ What=tmpfs
+ Where=/tmp
+ Type=tmpfs
+-Options=mode=1777,strictatime
++Options=mode=1777,strictatime,nosuid,nodev
