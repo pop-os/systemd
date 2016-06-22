@@ -1,7 +1,11 @@
 systemd (230-4) UNRELEASED; urgency=medium
 
+  [ Martin Pitt ]
   * tmp.mount: Add nosuid and nodev mount options. This restores compatibility
     with the original SysV int RAMTMP defaults. (Closes: #826377)
+
+  [ Laurent Bigonville ]
+  * Build with IDN support. (Closes: #814528)
 
  -- Martin Pitt <mpitt@debian.org>  Wed, 22 Jun 2016 12:49:16 +0200
 

@@ -41,7 +41,6 @@ CONFFLAGS = \
 	--without-kill-user-processes \
 	--enable-split-usr \
 	--disable-qrencode \
-	--disable-libidn \
 	--disable-vconsole \
 	--disable-firstboot \
 	--disable-xkbcommon \
@@ -64,6 +63,7 @@ CONFFLAGS_deb += \
 	--enable-coredump \
 	--enable-elfutils \
 	--enable-apparmor \
+	--enable-libidn \
 	--enable-libcurl \
 	--enable-importd \
 	--enable-microhttpd \
@@ -75,6 +75,7 @@ CONFFLAGS_deb += \
 	--disable-coredump \
 	--disable-elfutils \
 	--disable-apparmor \
+	--disable-libidn \
 	--disable-libcurl \
 	--disable-importd \
 	--disable-microhttpd \
@@ -89,6 +90,7 @@ CONFFLAGS_udeb = \
 	--disable-audit \
 	--disable-selinux \
 	--disable-apparmor \
+	--disable-libidn \
 	--disable-smack \
 	--disable-ima \
 	--disable-binfmt \
