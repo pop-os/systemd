@@ -11,6 +11,9 @@ systemd (230-4) UNRELEASED; urgency=medium
     libidn moved to /lib.
   * debian/tests/upstream: Clean up old journals before running a test, to
     avoid printing a wrong one on failure.
+  * debian/tests/upstream: Do not run the QEMU tests on i386. Nested QEMU on
+    i386 causes testbed hangs on Ubuntu's cloud infrastructure, which is the
+    only place where these actually run.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
