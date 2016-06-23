@@ -7,6 +7,12 @@ set -e
 # "Failed to install /usr/libexec/selinux/hll/pp"
 BLACKLIST="TEST-06-SELINUX"
 
+# Some tests are broken without QEMU; drop this once
+# https://github.com/systemd/systemd/pull/3587 lands
+if ! dpkg -l | grep -q '^ii.*qemu-systemx-'; then
+    BLACKLIST="$BLACKLIST TEST-08-ISSUE-2730 TEST-09-ISSUE-2691 TEST-10-ISSUE-2467 TEST-11-ISSUE-3166"
+fi
+
 # modify the image build scripts to install systemd from the debs instead of
 # from a "make install" as we don't have a built tree here. Also call
 # systemd-nspawn from the system.
@@ -26,8 +32,7 @@ for t in test/TEST*; do
                 echo "---- $j ----"
                 journalctl --file=$j
             done
-            # some test currently fail on ppc64el, only get their logs for now
-            uname -m | grep -q ppc64 || exit 1
+            exit 1
         fi
     done
     echo
