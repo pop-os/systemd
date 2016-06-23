@@ -8,6 +8,8 @@ systemd (230-4) UNRELEASED; urgency=medium
   * debian/rules: Don't run the "anything links against /usr" check for
     upstream tests, as those run on Ubuntu 16.04 LTS which does not yet have
     libidn moved to /lib.
+  * debian/tests/upstream: Clean up old journals before running a test, to
+    avoid printing a wrong one on failure.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
