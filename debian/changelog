@@ -14,6 +14,8 @@ systemd (230-4) UNRELEASED; urgency=medium
   * debian/tests/upstream: Do not run the QEMU tests on i386. Nested QEMU on
     i386 causes testbed hangs on Ubuntu's cloud infrastructure, which is the
     only place where these actually run.
+  * resolved: Fix SERVFAIL handling and introduce a new "Cache=" option to
+    disable local caching.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)

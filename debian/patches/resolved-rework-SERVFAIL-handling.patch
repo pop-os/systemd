@@ -1,0 +1,350 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 23 Jun 2016 23:24:38 +0200
+Subject: resolved: rework SERVFAIL handling
+
+There might be two reasons why we get a SERVFAIL response from our selected DNS
+server: because this DNS server itself is bad, or because the DNS server
+actually serving the zone upstream is bad. So far we immediately downgraded our
+server feature level when getting SERVFAIL, under the assumption that the first
+case is the only possible case. However, this meant we'd downgrade immediately
+even if we encountered the second case described above.
+
+With this commit handling of SERVFAIL is reworked. As soon as we get a SERVFAIL
+on a transaction we retry the transaction with a lower feature level, without
+changing the feature level tracked for the DNS server itself. If that fails
+too, we downgrade further, and so on. If during this downgrading the SERVFAIL
+goes away we assume that the DNS server we are talking to is bad, but the zone
+is fine and propagate the detected feature level to the information we track
+about the DNS server. Should the SERVFAIL not go away this way we let the
+transaction fail and accept the SERVFAIL.
+---
+ src/resolve/resolved-dns-server.c      | 80 ++++++++++++++++------------------
+ src/resolve/resolved-dns-server.h      |  3 +-
+ src/resolve/resolved-dns-transaction.c | 66 ++++++++++++++++++++++------
+ src/resolve/resolved-dns-transaction.h |  3 ++
+ 4 files changed, 95 insertions(+), 57 deletions(-)
+
+diff --git a/src/resolve/resolved-dns-server.c b/src/resolve/resolved-dns-server.c
+index 3095c04..941331f 100644
+--- a/src/resolve/resolved-dns-server.c
++++ b/src/resolve/resolved-dns-server.c
+@@ -242,6 +242,26 @@ static void dns_server_verified(DnsServer *s, DnsServerFeatureLevel level) {
+         assert_se(sd_event_now(s->manager->event, clock_boottime_or_monotonic(), &s->verified_usec) >= 0);
+ }
+ 
++static void dns_server_reset_counters(DnsServer *s) {
++        assert(s);
++
++        s->n_failed_udp = 0;
++        s->n_failed_tcp = 0;
++        s->packet_truncated = false;
++        s->verified_usec = 0;
++
++        /* Note that we do not reset s->packet_bad_opt and s->packet_rrsig_missing here. We reset them only when the
++         * grace period ends, but not when lowering the possible feature level, as a lower level feature level should
++         * not make RRSIGs appear or OPT appear, but rather make them disappear. If the reappear anyway, then that's
++         * indication for a differently broken OPT/RRSIG implementation, and we really don't want to support that
++         * either.
++         *
++         * This is particularly important to deal with certain Belkin routers which break OPT for certain lookups (A),
++         * but pass traffic through for others (AAAA). If we detect the broken behaviour on one lookup we should not
++         * reenable it for another, because we cannot validate things anyway, given that the RRSIG/OPT data will be
++         * incomplete. */
++}
++
+ void dns_server_packet_received(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t rtt, size_t size) {
+         assert(s);
+ 
+@@ -302,17 +322,6 @@ void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel le
+         s->resend_timeout = MIN(s->resend_timeout * 2, DNS_TIMEOUT_MAX_USEC);
+ }
+ 
+-void dns_server_packet_failed(DnsServer *s, DnsServerFeatureLevel level) {
+-        assert(s);
+-
+-        /* Invoked whenever we get a FORMERR, SERVFAIL or NOTIMP rcode from a server. */
+-
+-        if (s->possible_feature_level != level)
+-                return;
+-
+-        s->packet_failed = true;
+-}
+-
+ void dns_server_packet_truncated(DnsServer *s, DnsServerFeatureLevel level) {
+         assert(s);
+ 
+@@ -350,6 +359,24 @@ void dns_server_packet_bad_opt(DnsServer *s, DnsServerFeatureLevel level) {
+         s->packet_bad_opt = true;
+ }
+ 
++void dns_server_packet_rcode_downgrade(DnsServer *s, DnsServerFeatureLevel level) {
++        assert(s);
++
++        /* Invoked whenever we got a FORMERR, SERVFAIL or NOTIMP rcode from a server and downgrading the feature level
++         * for the transaction made it go away. In this case we immediately downgrade to the feature level that made
++         * things work. */
++
++        if (s->verified_feature_level > level)
++                s->verified_feature_level = level;
++
++        if (s->possible_feature_level > level) {
++                s->possible_feature_level = level;
++                dns_server_reset_counters(s);
++        }
++
++        log_debug("Downgrading transaction feature level fixed an RCODE error, downgrading server %s too.", dns_server_string(s));
++}
++
+ static bool dns_server_grace_period_expired(DnsServer *s) {
+         usec_t ts;
+ 
+@@ -369,27 +396,6 @@ static bool dns_server_grace_period_expired(DnsServer *s) {
+         return true;
+ }
+ 
+-static void dns_server_reset_counters(DnsServer *s) {
+-        assert(s);
+-
+-        s->n_failed_udp = 0;
+-        s->n_failed_tcp = 0;
+-        s->packet_failed = false;
+-        s->packet_truncated = false;
+-        s->verified_usec = 0;
+-
+-        /* Note that we do not reset s->packet_bad_opt and s->packet_rrsig_missing here. We reset them only when the
+-         * grace period ends, but not when lowering the possible feature level, as a lower level feature level should
+-         * not make RRSIGs appear or OPT appear, but rather make them disappear. If the reappear anyway, then that's
+-         * indication for a differently broken OPT/RRSIG implementation, and we really don't want to support that
+-         * either.
+-         *
+-         * This is particularly important to deal with certain Belkin routers which break OPT for certain lookups (A),
+-         * but pass traffic through for others (AAAA). If we detect the broken behaviour on one lookup we should not
+-         * reenable it for another, because we cannot validate things anyway, given that the RRSIG/OPT data will be
+-         * incomplete. */
+-}
+-
+ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
+         assert(s);
+ 
+@@ -452,16 +458,6 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
+                         log_debug("Lost too many UDP packets, downgrading feature level...");
+                         s->possible_feature_level--;
+ 
+-                } else if (s->packet_failed &&
+-                           s->possible_feature_level > DNS_SERVER_FEATURE_LEVEL_UDP) {
+-
+-                        /* We got a failure packet, and are at a feature level above UDP. Note that in this case we
+-                         * downgrade no further than UDP, under the assumption that a failure packet indicates an
+-                         * incompatible packet contents, but not a problem with the transport. */
+-
+-                        log_debug("Got server failure, downgrading feature level...");
+-                        s->possible_feature_level--;
+-
+                 } else if (s->n_failed_tcp >= DNS_SERVER_FEATURE_RETRY_ATTEMPTS &&
+                            s->packet_truncated &&
+                            s->possible_feature_level > DNS_SERVER_FEATURE_LEVEL_UDP) {
+diff --git a/src/resolve/resolved-dns-server.h b/src/resolve/resolved-dns-server.h
+index 9f4a69c..a906aad 100644
+--- a/src/resolve/resolved-dns-server.h
++++ b/src/resolve/resolved-dns-server.h
+@@ -76,7 +76,6 @@ struct DnsServer {
+         unsigned n_failed_udp;
+         unsigned n_failed_tcp;
+ 
+-        bool packet_failed:1;
+         bool packet_truncated:1;
+         bool packet_bad_opt:1;
+         bool packet_rrsig_missing:1;
+@@ -111,10 +110,10 @@ void dns_server_move_back_and_unmark(DnsServer *s);
+ 
+ void dns_server_packet_received(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t rtt, size_t size);
+ void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t usec);
+-void dns_server_packet_failed(DnsServer *s, DnsServerFeatureLevel level);
+ void dns_server_packet_truncated(DnsServer *s, DnsServerFeatureLevel level);
+ void dns_server_packet_rrsig_missing(DnsServer *s, DnsServerFeatureLevel level);
+ void dns_server_packet_bad_opt(DnsServer *s, DnsServerFeatureLevel level);
++void dns_server_packet_rcode_downgrade(DnsServer *s, DnsServerFeatureLevel level);
+ 
+ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s);
+ 
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index fec8d2c..c307926 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -207,6 +207,7 @@ int dns_transaction_new(DnsTransaction **ret, DnsScope *s, DnsResourceKey *key)
+         t->answer_nsec_ttl = (uint32_t) -1;
+         t->key = dns_resource_key_ref(key);
+         t->current_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
++        t->clamp_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
+ 
+         t->id = pick_new_id(s->manager);
+ 
+@@ -371,22 +372,38 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
+         assert(t);
+         assert(t->scope->protocol == DNS_PROTOCOL_DNS);
+ 
++        /* Pick a DNS server and a feature level for it. */
++
+         server = dns_scope_get_dns_server(t->scope);
+         if (!server)
+                 return -ESRCH;
+ 
++        /* If we changed the server invalidate the feature level clamping, as the new server might have completely
++         * different properties. */
++        if (server != t->server)
++                t->clamp_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
++
+         t->current_feature_level = dns_server_possible_feature_level(server);
+ 
++        /* Clamp the feature level if that is requested. */
++        if (t->clamp_feature_level != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
++            t->current_feature_level > t->clamp_feature_level)
++                t->current_feature_level = t->clamp_feature_level;
++
++        log_debug("Using feature level %s for transaction %u.", dns_server_feature_level_to_string(t->current_feature_level), t->id);
++
+         if (server == t->server)
+                 return 0;
+ 
+         dns_server_unref(t->server);
+         t->server = dns_server_ref(server);
+ 
++        log_debug("Using DNS server %s for transaction %u.", dns_server_string(t->server), t->id);
++
+         return 1;
+ }
+ 
+-static void dns_transaction_retry(DnsTransaction *t) {
++static void dns_transaction_retry(DnsTransaction *t, bool next_server) {
+         int r;
+ 
+         assert(t);
+@@ -394,7 +411,8 @@ static void dns_transaction_retry(DnsTransaction *t) {
+         log_debug("Retrying transaction %" PRIu16 ".", t->id);
+ 
+         /* Before we try again, switch to a new server. */
+-        dns_scope_next_dns_server(t->scope);
++        if (next_server)
++                dns_scope_next_dns_server(t->scope);
+ 
+         r = dns_transaction_go(t);
+         if (r < 0) {
+@@ -460,7 +478,7 @@ static int on_stream_complete(DnsStream *s, int error) {
+                 assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
+                 dns_server_packet_lost(t->server, IPPROTO_TCP, t->current_feature_level, usec - t->start_usec);
+ 
+-                dns_transaction_retry(t);
++                dns_transaction_retry(t, true);
+                 return 0;
+         }
+         if (error != 0) {
+@@ -883,10 +901,22 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
+                 if (IN_SET(DNS_PACKET_RCODE(p), DNS_RCODE_FORMERR, DNS_RCODE_SERVFAIL, DNS_RCODE_NOTIMP)) {
+ 
+                         /* Request failed, immediately try again with reduced features */
+-                        log_debug("Server returned error: %s", dns_rcode_to_string(DNS_PACKET_RCODE(p)));
+ 
+-                        dns_server_packet_failed(t->server, t->current_feature_level);
+-                        dns_transaction_retry(t);
++                        if (t->current_feature_level <= DNS_SERVER_FEATURE_LEVEL_WORST) {
++                                /* This was already at the lowest possible feature level? If so, we can't downgrade
++                                 * this transaction anymore, hence let's process the response, and accept the rcode. */
++                                log_debug("Server returned error: %s", dns_rcode_to_string(DNS_PACKET_RCODE(p)));
++                                break;
++                        }
++
++                        /* Reduce this feature level by one and try again. */
++                        t->clamp_feature_level = t->current_feature_level - 1;
++
++                        log_debug("Server returned error %s, retrying transaction with reduced feature level %s.",
++                                  dns_rcode_to_string(DNS_PACKET_RCODE(p)),
++                                  dns_server_feature_level_to_string(t->clamp_feature_level));
++
++                        dns_transaction_retry(t, false /* use the same server */);
+                         return;
+                 } else if (DNS_PACKET_TC(p))
+                         dns_server_packet_truncated(t->server, t->current_feature_level);
+@@ -931,7 +961,7 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
+                                 goto fail;
+ 
+                         /* On DNS, couldn't send? Try immediately again, with a new server */
+-                        dns_transaction_retry(t);
++                        dns_transaction_retry(t, true);
+                 }
+ 
+                 return;
+@@ -944,11 +974,19 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
+                 return;
+         }
+ 
+-        /* Report that the OPT RR was missing */
+         if (t->server) {
++                /* Report that we successfully received a valid packet with a good rcode after we initially got a bad
++                 * rcode and subsequently downgraded the protocol */
++
++                if (IN_SET(DNS_PACKET_RCODE(p), DNS_RCODE_SUCCESS, DNS_RCODE_NXDOMAIN) &&
++                    t->clamp_feature_level != _DNS_SERVER_FEATURE_LEVEL_INVALID)
++                        dns_server_packet_rcode_downgrade(t->server, t->clamp_feature_level);
++
++                /* Report that the OPT RR was missing */
+                 if (!p->opt)
+                         dns_server_packet_bad_opt(t->server, t->current_feature_level);
+ 
++                /* Report that we successfully received a packet */
+                 dns_server_packet_received(t->server, p->ipproto, t->current_feature_level, ts - t->start_usec, p->size);
+         }
+ 
+@@ -1035,7 +1073,7 @@ static int on_dns_packet(sd_event_source *s, int fd, uint32_t revents, void *use
+                 assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
+                 dns_server_packet_lost(t->server, IPPROTO_UDP, t->current_feature_level, usec - t->start_usec);
+ 
+-                dns_transaction_retry(t);
++                dns_transaction_retry(t, true);
+                 return 0;
+         }
+         if (r < 0) {
+@@ -1144,7 +1182,7 @@ static int on_transaction_timeout(sd_event_source *s, usec_t usec, void *userdat
+ 
+         log_debug("Timeout reached on transaction %" PRIu16 ".", t->id);
+ 
+-        dns_transaction_retry(t);
++        dns_transaction_retry(t, true);
+         return 0;
+ }
+ 
+@@ -1775,8 +1813,10 @@ static bool dns_transaction_dnssec_supported(DnsTransaction *t) {
+         if (!t->server)
+                 return true;
+ 
+-        if (t->current_feature_level < DNS_SERVER_FEATURE_LEVEL_DO)
+-                return false;
++        /* Note that we do not check the feature level actually used for the transaction but instead the feature level
++         * the server is known to support currently, as the transaction feature level might be lower than what the
++         * server actually supports, since we might have downgraded this transaction's feature level because we got a
++         * SERVFAIL earlier and wanted to check whether downgrading fixes it. */
+ 
+         return dns_server_dnssec_supported(t->server);
+ }
+@@ -2868,7 +2908,7 @@ int dns_transaction_validate_dnssec(DnsTransaction *t) {
+         if (!dns_transaction_dnssec_supported_full(t)) {
+                 /* The server does not support DNSSEC, or doesn't augment responses with RRSIGs. */
+                 t->answer_dnssec_result = DNSSEC_INCOMPATIBLE_SERVER;
+-                log_debug("Not validating response for %" PRIu16 ", server lacks DNSSEC support.", t->id);
++                log_debug("Not validating response for %" PRIu16 ", used server feature level does not support DNSSEC.", t->id);
+                 return 0;
+         }
+ 
+diff --git a/src/resolve/resolved-dns-transaction.h b/src/resolve/resolved-dns-transaction.h
+index eaece91..bc1529d 100644
+--- a/src/resolve/resolved-dns-transaction.h
++++ b/src/resolve/resolved-dns-transaction.h
+@@ -115,6 +115,9 @@ struct DnsTransaction {
+         /* The features of the DNS server at time of transaction start */
+         DnsServerFeatureLevel current_feature_level;
+ 
++        /* If we got SERVFAIL back, we retry the lookup, using a lower feature level than we used before. */
++        DnsServerFeatureLevel clamp_feature_level;
++
+         /* Query candidates this transaction is referenced by and that
+          * shall be notified about this specific transaction
+          * completing. */

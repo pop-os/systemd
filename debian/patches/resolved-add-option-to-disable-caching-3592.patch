@@ -1,0 +1,102 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Fri, 24 Jun 2016 07:54:28 +0200
+Subject: resolved: add option to disable caching (#3592)
+
+In some cases, caching DNS results locally is not desirable, a it makes DNS
+cache poisoning attacks a tad easier and also allows users on the system to
+determine whether or not a particular domain got visited by another user. Thus
+provide a new "Cache" resolved.conf option to disable it.
+---
+ man/resolved.conf.xml                  | 17 +++++++++++++++++
+ src/resolve/resolved-dns-transaction.c |  4 ++++
+ src/resolve/resolved-gperf.gperf       |  1 +
+ src/resolve/resolved-manager.c         |  1 +
+ src/resolve/resolved-manager.h         |  1 +
+ src/resolve/resolved.conf.in           |  1 +
+ 6 files changed, 25 insertions(+)
+
+diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
+index 920ce9e..024ad6a 100644
+--- a/man/resolved.conf.xml
++++ b/man/resolved.conf.xml
+@@ -202,6 +202,23 @@
+         </listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><varname>Cache=</varname></term>
++        <listitem><para>Takes a boolean argument. If "yes" (the default),
++        resolving a domain name which already got queried earlier will re-use
++        the previous result as long as that is still valid, and thus does not
++        need to do an actual network request.</para>
++
++        <para>However, local caching slightly increases the chance of a
++        successful DNS poisoning attack, and might also be a privacy problem in
++        some environments: By measuring the time it takes to resolve a
++        particular network name, a user can determine whether any other user on
++        the same machine recently visited that name. If either of these is a
++        concern, you may disable the local caching. Be aware that this comes at
++        a performance cost, which is <emphasis>very</emphasis> high with DNSSEC.
++        </para></listitem>
++      </varlistentry>
++
+     </variablelist>
+   </refsect1>
+ 
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 4aeffa6..23f4f79 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -602,6 +602,10 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
+         if (!IN_SET(t->scope->protocol, DNS_PROTOCOL_DNS, DNS_PROTOCOL_LLMNR))
+                 return;
+ 
++        /* Caching disabled? */
++        if (!t->scope->manager->enable_cache)
++                return;
++
+         /* We never cache if this packet is from the local host, under
+          * the assumption that a locally running DNS server would
+          * cache this anyway, and probably knows better when to flush
+diff --git a/src/resolve/resolved-gperf.gperf b/src/resolve/resolved-gperf.gperf
+index 82f2621..2fd56bc 100644
+--- a/src/resolve/resolved-gperf.gperf
++++ b/src/resolve/resolved-gperf.gperf
+@@ -19,3 +19,4 @@ Resolve.FallbackDNS,  config_parse_dns_servers,     DNS_SERVER_FALLBACK, 0
+ Resolve.Domains,      config_parse_search_domains,  0,                   0
+ Resolve.LLMNR,        config_parse_resolve_support, 0,                   offsetof(Manager, llmnr_support)
+ Resolve.DNSSEC,       config_parse_dnssec_mode,     0,                   offsetof(Manager, dnssec_mode)
++Resolve.Cache,        config_parse_bool,            0,                   offsetof(Manager, enable_cache)
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index b3ff46b..ce30b65 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -486,6 +486,7 @@ int manager_new(Manager **ret) {
+         m->llmnr_support = RESOLVE_SUPPORT_YES;
+         m->mdns_support = RESOLVE_SUPPORT_NO;
+         m->dnssec_mode = DEFAULT_DNSSEC_MODE;
++        m->enable_cache = true;
+         m->read_resolv_conf = true;
+         m->need_builtin_fallbacks = true;
+         m->etc_hosts_last = m->etc_hosts_mtime = USEC_INFINITY;
+diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
+index e82a824..dca0ad6 100644
+--- a/src/resolve/resolved-manager.h
++++ b/src/resolve/resolved-manager.h
+@@ -46,6 +46,7 @@ struct Manager {
+         ResolveSupport llmnr_support;
+         ResolveSupport mdns_support;
+         DnssecMode dnssec_mode;
++        bool enable_cache;
+ 
+         /* Network */
+         Hashmap *links;
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index a288588..3bd8389 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
+@@ -17,3 +17,4 @@
+ #Domains=
+ #LLMNR=yes
+ #DNSSEC=@DEFAULT_DNSSEC_MODE@
++#Cache=yes
