@@ -1,0 +1,140 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 6 Jun 2016 19:00:36 +0200
+Subject: resolved: also rewrite private /etc/resolv.conf when configuration
+ is changed via bus calls
+
+This also moves log message generation into manager_write_resolv_conf(), so
+that it is shorter to invoke the function, given that we have to invoke it at a
+couple of additional places now.
+
+Fixes: #3225
+---
+ src/resolve/resolved-link-bus.c    |  8 ++++++++
+ src/resolve/resolved-manager.c     |  4 +---
+ src/resolve/resolved-resolv-conf.c | 17 ++++++++++-------
+ src/resolve/resolved.c             |  7 ++-----
+ 4 files changed, 21 insertions(+), 15 deletions(-)
+
+diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
+index 2d5cd4a..6aff427 100644
+--- a/src/resolve/resolved-link-bus.c
++++ b/src/resolve/resolved-link-bus.c
+@@ -23,6 +23,7 @@
+ #include "resolve-util.h"
+ #include "resolved-bus.h"
+ #include "resolved-link-bus.h"
++#include "resolved-resolv-conf.h"
+ #include "strv.h"
+ 
+ static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_resolve_support, resolve_support, ResolveSupport);
+@@ -232,6 +233,8 @@ int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_
+         dns_server_unlink_marked(l->dns_servers);
+         link_allocate_scopes(l);
+ 
++        (void) manager_write_resolv_conf(l->manager);
++
+         return sd_bus_reply_method_return(message, NULL);
+ 
+ clear:
+@@ -306,6 +309,9 @@ int bus_link_method_set_domains(sd_bus_message *message, void *userdata, sd_bus_
+                 goto clear;
+ 
+         dns_search_domain_unlink_marked(l->search_domains);
++
++        (void) manager_write_resolv_conf(l->manager);
++
+         return sd_bus_reply_method_return(message, NULL);
+ 
+ clear:
+@@ -444,6 +450,8 @@ int bus_link_method_revert(sd_bus_message *message, void *userdata, sd_bus_error
+         link_allocate_scopes(l);
+         link_add_rrs(l, false);
+ 
++        (void) manager_write_resolv_conf(l->manager);
++
+         return sd_bus_reply_method_return(message, NULL);
+ }
+ 
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index fc627b4..6de7fe8 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -284,9 +284,7 @@ static int on_network_event(sd_event_source *s, int fd, uint32_t revents, void *
+                         log_warning_errno(r, "Failed to update monitor information for %i: %m", l->ifindex);
+         }
+ 
+-        r = manager_write_resolv_conf(m);
+-        if (r < 0)
+-                log_warning_errno(r, "Could not update "PRIVATE_RESOLV_CONF": %m");
++        (void) manager_write_resolv_conf(m);
+ 
+         return 0;
+ }
+diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
+index df738e3..ae17aef 100644
+--- a/src/resolve/resolved-resolv-conf.c
++++ b/src/resolve/resolved-resolv-conf.c
+@@ -225,29 +225,31 @@ int manager_write_resolv_conf(Manager *m) {
+         assert(m);
+ 
+         /* Read the system /etc/resolv.conf first */
+-        manager_read_resolv_conf(m);
++        (void) manager_read_resolv_conf(m);
+ 
+         /* Add the full list to a set, to filter out duplicates */
+         r = manager_compile_dns_servers(m, &dns);
+         if (r < 0)
+-                return r;
++                return log_warning_errno(r, "Failed to compile list of DNS servers: %m");
+ 
+         r = manager_compile_search_domains(m, &domains);
+         if (r < 0)
+-                return r;
++                return log_warning_errno(r, "Failed to compile list of search domains: %m");
+ 
+         r = fopen_temporary_label(PRIVATE_RESOLV_CONF, PRIVATE_RESOLV_CONF, &f, &temp_path);
+         if (r < 0)
+-                return r;
++                return log_warning_errno(r, "Failed to open private resolv.conf file for writing: %m");
+ 
+-        fchmod(fileno(f), 0644);
++        (void) fchmod(fileno(f), 0644);
+ 
+         r = write_resolv_conf_contents(f, dns, domains);
+-        if (r < 0)
++        if (r < 0) {
++                log_error_errno(r, "Failed to write private resolv.conf contents: %m");
+                 goto fail;
++        }
+ 
+         if (rename(temp_path, PRIVATE_RESOLV_CONF) < 0) {
+-                r = -errno;
++                r = log_error_errno(errno, "Failed to move private resolv.conf file into place: %m");
+                 goto fail;
+         }
+ 
+@@ -256,5 +258,6 @@ int manager_write_resolv_conf(Manager *m) {
+ fail:
+         (void) unlink(PRIVATE_RESOLV_CONF);
+         (void) unlink(temp_path);
++
+         return r;
+ }
+diff --git a/src/resolve/resolved.c b/src/resolve/resolved.c
+index 161ea03..6cef401 100644
+--- a/src/resolve/resolved.c
++++ b/src/resolve/resolved.c
+@@ -85,11 +85,8 @@ int main(int argc, char *argv[]) {
+                 goto finish;
+         }
+ 
+-        /* Write finish default resolv.conf to avoid a dangling
+-         * symlink */
+-        r = manager_write_resolv_conf(m);
+-        if (r < 0)
+-                log_warning_errno(r, "Could not create "PRIVATE_RESOLV_CONF": %m");
++        /* Write finish default resolv.conf to avoid a dangling symlink */
++        (void) manager_write_resolv_conf(m);
+ 
+         sd_notify(false,
+                   "READY=1\n"
