@@ -18,6 +18,8 @@ systemd (230-4) UNRELEASED; urgency=medium
     disable local caching.
   * resolved: Support IPv6 zone indices in resolv.conf. (LP: #1587489)
   * resolved: Update resolv.conf when calling SetLinkDNS().
+  * debian/tests/storage: Sync and settle udev after luksFormat, to reduce the
+    chance of seeing some half-written signatures.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)

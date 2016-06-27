@@ -70,6 +70,8 @@ class CryptsetupTest(FakeDriveTestBase):
                              stdin=subprocess.PIPE)
         p.communicate(self.password.encode())
         self.assertEqual(p.returncode, 0)
+        os.sync()
+        subprocess.check_call(['udevadm', 'settle'])
 
     def start_password_agent(self):
         '''Run password agent to answer passphrase request for crypt device'''
