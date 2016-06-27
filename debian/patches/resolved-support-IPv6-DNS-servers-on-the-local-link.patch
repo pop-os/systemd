@@ -1,0 +1,570 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 3 Jun 2016 21:29:14 +0200
+Subject: resolved: support IPv6 DNS servers on the local link
+
+Make sure we can parse DNS server addresses that use the "zone id" syntax for
+local link addresses, i.e. "fe80::c256:27ff:febb:12f%wlp3s0", when reading
+/etc/resolv.conf.
+
+Also make sure we spit this out correctly again when writing /etc/resolv.conf
+and via the bus.
+
+Fixes: #3359
+---
+ src/basic/in-addr-util.c           | 85 ++++++++++++++++++++++++++++++++++++++
+ src/basic/in-addr-util.h           |  2 +
+ src/resolve/resolved-bus.c         |  2 +-
+ src/resolve/resolved-conf.c        | 12 +++---
+ src/resolve/resolved-dns-scope.c   | 15 ++++---
+ src/resolve/resolved-dns-server.c  | 36 +++++++++++++---
+ src/resolve/resolved-dns-server.h  |  7 +++-
+ src/resolve/resolved-link-bus.c    |  4 +-
+ src/resolve/resolved-link.c        |  4 +-
+ src/resolve/resolved-manager.c     |  2 +-
+ src/resolve/resolved-resolv-conf.c |  8 ++--
+ src/test/test-socket-util.c        | 51 +++++++++++++++++++++++
+ 12 files changed, 198 insertions(+), 30 deletions(-)
+
+diff --git a/src/basic/in-addr-util.c b/src/basic/in-addr-util.c
+index 245107e..e5a9dae 100644
+--- a/src/basic/in-addr-util.c
++++ b/src/basic/in-addr-util.c
+@@ -20,12 +20,14 @@
+ #include <arpa/inet.h>
+ #include <endian.h>
+ #include <errno.h>
++#include <net/if.h>
+ #include <stdint.h>
+ #include <stdlib.h>
+ 
+ #include "alloc-util.h"
+ #include "in-addr-util.h"
+ #include "macro.h"
++#include "parse-util.h"
+ #include "util.h"
+ 
+ int in_addr_is_null(int family, const union in_addr_union *u) {
+@@ -224,6 +226,48 @@ int in_addr_to_string(int family, const union in_addr_union *u, char **ret) {
+         return 0;
+ }
+ 
++int in_addr_ifindex_to_string(int family, const union in_addr_union *u, int ifindex, char **ret) {
++        size_t l;
++        char *x;
++        int r;
++
++        assert(u);
++        assert(ret);
++
++        /* Much like in_addr_to_string(), but optionally appends the zone interface index to the address, to properly
++         * handle IPv6 link-local addresses. */
++
++        if (family != AF_INET6)
++                goto fallback;
++        if (ifindex <= 0)
++                goto fallback;
++
++        r = in_addr_is_link_local(family, u);
++        if (r < 0)
++                return r;
++        if (r == 0)
++                goto fallback;
++
++        l = INET6_ADDRSTRLEN + 1 + DECIMAL_STR_MAX(ifindex) + 1;
++        x = new(char, l);
++        if (!x)
++                return -ENOMEM;
++
++        errno = 0;
++        if (!inet_ntop(family, u, x, l)) {
++                free(x);
++                return errno > 0 ? -errno : -EINVAL;
++        }
++
++        sprintf(strchr(x, 0), "%%%i", ifindex);
++        *ret = x;
++
++        return 0;
++
++fallback:
++        return in_addr_to_string(family, u, ret);
++}
++
+ int in_addr_from_string(int family, const char *s, union in_addr_union *ret) {
+ 
+         assert(s);
+@@ -261,6 +305,47 @@ int in_addr_from_string_auto(const char *s, int *family, union in_addr_union *re
+         return -EINVAL;
+ }
+ 
++int in_addr_ifindex_from_string_auto(const char *s, int *family, union in_addr_union *ret, int *ifindex) {
++        const char *suffix;
++        int r, ifi = 0;
++
++        assert(s);
++        assert(family);
++        assert(ret);
++
++        /* Similar to in_addr_from_string_auto() but also parses an optionally appended IPv6 zone suffix ("scope id")
++         * if one is found. */
++
++        suffix = strchr(s, '%');
++        if (suffix) {
++
++                if (ifindex) {
++                        /* If we shall return the interface index, try to parse it */
++                        r = parse_ifindex(suffix + 1, &ifi);
++                        if (r < 0) {
++                                unsigned u;
++
++                                u = if_nametoindex(suffix + 1);
++                                if (u <= 0)
++                                        return -errno;
++
++                                ifi = (int) u;
++                        }
++                }
++
++                s = strndupa(s, suffix - s);
++        }
++
++        r = in_addr_from_string_auto(s, family, ret);
++        if (r < 0)
++                return r;
++
++        if (ifindex)
++                *ifindex = ifi;
++
++        return r;
++}
++
+ unsigned char in_addr_netmask_to_prefixlen(const struct in_addr *addr) {
+         assert(addr);
+ 
+diff --git a/src/basic/in-addr-util.h b/src/basic/in-addr-util.h
+index 17798ce..7fdf3a1 100644
+--- a/src/basic/in-addr-util.h
++++ b/src/basic/in-addr-util.h
+@@ -43,8 +43,10 @@ int in_addr_equal(int family, const union in_addr_union *a, const union in_addr_
+ int in_addr_prefix_intersect(int family, const union in_addr_union *a, unsigned aprefixlen, const union in_addr_union *b, unsigned bprefixlen);
+ int in_addr_prefix_next(int family, union in_addr_union *u, unsigned prefixlen);
+ int in_addr_to_string(int family, const union in_addr_union *u, char **ret);
++int in_addr_ifindex_to_string(int family, const union in_addr_union *u, int ifindex, char **ret);
+ int in_addr_from_string(int family, const char *s, union in_addr_union *ret);
+ int in_addr_from_string_auto(const char *s, int *family, union in_addr_union *ret);
++int in_addr_ifindex_from_string_auto(const char *s, int *family, union in_addr_union *ret, int *ifindex);
+ unsigned char in_addr_netmask_to_prefixlen(const struct in_addr *addr);
+ struct in_addr* in_addr_prefixlen_to_netmask(struct in_addr *addr, unsigned char prefixlen);
+ int in_addr_default_prefixlen(const struct in_addr *addr, unsigned char *prefixlen);
+diff --git a/src/resolve/resolved-bus.c b/src/resolve/resolved-bus.c
+index 33f7c61..6d4e574 100644
+--- a/src/resolve/resolved-bus.c
++++ b/src/resolve/resolved-bus.c
+@@ -1221,7 +1221,7 @@ int bus_dns_server_append(sd_bus_message *reply, DnsServer *s, bool with_ifindex
+                 return r;
+ 
+         if (with_ifindex) {
+-                r = sd_bus_message_append(reply, "i", s->link ? s->link->ifindex : 0);
++                r = sd_bus_message_append(reply, "i", dns_server_ifindex(s));
+                 if (r < 0)
+                         return r;
+         }
+diff --git a/src/resolve/resolved-conf.c b/src/resolve/resolved-conf.c
+index 990dc03..fecf7ec 100644
+--- a/src/resolve/resolved-conf.c
++++ b/src/resolve/resolved-conf.c
+@@ -27,18 +27,18 @@
+ 
+ int manager_add_dns_server_by_string(Manager *m, DnsServerType type, const char *word) {
+         union in_addr_union address;
+-        int family, r;
++        int family, r, ifindex = 0;
+         DnsServer *s;
+ 
+         assert(m);
+         assert(word);
+ 
+-        r = in_addr_from_string_auto(word, &family, &address);
++        r = in_addr_ifindex_from_string_auto(word, &family, &address, &ifindex);
+         if (r < 0)
+                 return r;
+ 
+         /* Filter out duplicates */
+-        s = dns_server_find(manager_get_first_dns_server(m, type), family, &address);
++        s = dns_server_find(manager_get_first_dns_server(m, type), family, &address, ifindex);
+         if (s) {
+                 /*
+                  * Drop the marker. This is used to find the servers
+@@ -50,7 +50,7 @@ int manager_add_dns_server_by_string(Manager *m, DnsServerType type, const char
+                 return 0;
+         }
+ 
+-        return dns_server_new(m, NULL, type, NULL, family, &address);
++        return dns_server_new(m, NULL, type, NULL, family, &address, ifindex);
+ }
+ 
+ int manager_parse_dns_server_string_and_warn(Manager *m, DnsServerType type, const char *string) {
+@@ -70,7 +70,7 @@ int manager_parse_dns_server_string_and_warn(Manager *m, DnsServerType type, con
+ 
+                 r = manager_add_dns_server_by_string(m, type, word);
+                 if (r < 0)
+-                        log_warning_errno(r, "Failed to add DNS server address '%s', ignoring.", word);
++                        log_warning_errno(r, "Failed to add DNS server address '%s', ignoring: %m", word);
+         }
+ 
+         return 0;
+@@ -125,7 +125,7 @@ int manager_parse_search_domains_and_warn(Manager *m, const char *string) {
+ 
+                 r = manager_add_search_domain_by_string(m, word);
+                 if (r < 0)
+-                        log_warning_errno(r, "Failed to add search domain '%s', ignoring.", word);
++                        log_warning_errno(r, "Failed to add search domain '%s', ignoring: %m", word);
+         }
+ 
+         return 0;
+diff --git a/src/resolve/resolved-dns-scope.c b/src/resolve/resolved-dns-scope.c
+index 66e4585..6a69d7b 100644
+--- a/src/resolve/resolved-dns-scope.c
++++ b/src/resolve/resolved-dns-scope.c
+@@ -307,7 +307,7 @@ static int dns_scope_socket(
+         union sockaddr_union sa = {};
+         socklen_t salen;
+         static const int one = 1;
+-        int ret, r;
++        int ret, r, ifindex;
+ 
+         assert(s);
+ 
+@@ -315,6 +315,8 @@ static int dns_scope_socket(
+                 assert(family == AF_UNSPEC);
+                 assert(!address);
+ 
++                ifindex = dns_server_ifindex(server);
++
+                 sa.sa.sa_family = server->family;
+                 if (server->family == AF_INET) {
+                         sa.in.sin_port = htobe16(port);
+@@ -323,7 +325,7 @@ static int dns_scope_socket(
+                 } else if (server->family == AF_INET6) {
+                         sa.in6.sin6_port = htobe16(port);
+                         sa.in6.sin6_addr = server->address.in6;
+-                        sa.in6.sin6_scope_id = s->link ? s->link->ifindex : 0;
++                        sa.in6.sin6_scope_id = ifindex;
+                         salen = sizeof(sa.in6);
+                 } else
+                         return -EAFNOSUPPORT;
+@@ -332,6 +334,7 @@ static int dns_scope_socket(
+                 assert(address);
+ 
+                 sa.sa.sa_family = family;
++                ifindex = s->link ? s->link->ifindex : 0;
+ 
+                 if (family == AF_INET) {
+                         sa.in.sin_port = htobe16(port);
+@@ -340,7 +343,7 @@ static int dns_scope_socket(
+                 } else if (family == AF_INET6) {
+                         sa.in6.sin6_port = htobe16(port);
+                         sa.in6.sin6_addr = address->in6;
+-                        sa.in6.sin6_scope_id = s->link ? s->link->ifindex : 0;
++                        sa.in6.sin6_scope_id = ifindex;
+                         salen = sizeof(sa.in6);
+                 } else
+                         return -EAFNOSUPPORT;
+@@ -357,14 +360,14 @@ static int dns_scope_socket(
+         }
+ 
+         if (s->link) {
+-                uint32_t ifindex = htobe32(s->link->ifindex);
++                be32_t ifindex_be = htobe32(ifindex);
+ 
+                 if (sa.sa.sa_family == AF_INET) {
+-                        r = setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF, &ifindex, sizeof(ifindex));
++                        r = setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF, &ifindex_be, sizeof(ifindex_be));
+                         if (r < 0)
+                                 return -errno;
+                 } else if (sa.sa.sa_family == AF_INET6) {
+-                        r = setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_IF, &ifindex, sizeof(ifindex));
++                        r = setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_IF, &ifindex_be, sizeof(ifindex_be));
+                         if (r < 0)
+                                 return -errno;
+                 }
+diff --git a/src/resolve/resolved-dns-server.c b/src/resolve/resolved-dns-server.c
+index 3095c04..5acfcb4 100644
+--- a/src/resolve/resolved-dns-server.c
++++ b/src/resolve/resolved-dns-server.c
+@@ -43,7 +43,8 @@ int dns_server_new(
+                 DnsServerType type,
+                 Link *l,
+                 int family,
+-                const union in_addr_union *in_addr) {
++                const union in_addr_union *in_addr,
++                int ifindex) {
+ 
+         DnsServer *s;
+ 
+@@ -75,6 +76,7 @@ int dns_server_new(
+         s->type = type;
+         s->family = family;
+         s->address = *in_addr;
++        s->ifindex = ifindex;
+         s->resend_timeout = DNS_TIMEOUT_MIN_USEC;
+ 
+         switch (type) {
+@@ -518,11 +520,24 @@ int dns_server_adjust_opt(DnsServer *server, DnsPacket *packet, DnsServerFeature
+         return dns_packet_append_opt(packet, packet_size, edns_do, NULL);
+ }
+ 
++int dns_server_ifindex(const DnsServer *s) {
++        assert(s);
++
++        /* The link ifindex always takes precedence */
++        if (s->link)
++                return s->link->ifindex;
++
++        if (s->ifindex > 0)
++                return s->ifindex;
++
++        return 0;
++}
++
+ const char *dns_server_string(DnsServer *server) {
+         assert(server);
+ 
+         if (!server->server_string)
+-                (void) in_addr_to_string(server->family, &server->address, &server->server_string);
++                (void) in_addr_ifindex_to_string(server->family, &server->address, dns_server_ifindex(server), &server->server_string);
+ 
+         return strna(server->server_string);
+ }
+@@ -571,17 +586,28 @@ static void dns_server_hash_func(const void *p, struct siphash *state) {
+ 
+         siphash24_compress(&s->family, sizeof(s->family), state);
+         siphash24_compress(&s->address, FAMILY_ADDRESS_SIZE(s->family), state);
++        siphash24_compress(&s->ifindex, sizeof(s->ifindex), state);
+ }
+ 
+ static int dns_server_compare_func(const void *a, const void *b) {
+         const DnsServer *x = a, *y = b;
++        int r;
+ 
+         if (x->family < y->family)
+                 return -1;
+         if (x->family > y->family)
+                 return 1;
+ 
+-        return memcmp(&x->address, &y->address, FAMILY_ADDRESS_SIZE(x->family));
++        r = memcmp(&x->address, &y->address, FAMILY_ADDRESS_SIZE(x->family));
++        if (r != 0)
++                return r;
++
++        if (x->ifindex < y->ifindex)
++                return -1;
++        if (x->ifindex > y->ifindex)
++                return 1;
++
++        return 0;
+ }
+ 
+ const struct hash_ops dns_server_hash_ops = {
+@@ -623,11 +649,11 @@ void dns_server_mark_all(DnsServer *first) {
+         dns_server_mark_all(first->servers_next);
+ }
+ 
+-DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr) {
++DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr, int ifindex) {
+         DnsServer *s;
+ 
+         LIST_FOREACH(servers, s, first)
+-                if (s->family == family && in_addr_equal(family, &s->address, in_addr) > 0)
++                if (s->family == family && in_addr_equal(family, &s->address, in_addr) > 0 && s->ifindex == ifindex)
+                         return s;
+ 
+         return NULL;
+diff --git a/src/resolve/resolved-dns-server.h b/src/resolve/resolved-dns-server.h
+index 9f4a69c..463c572 100644
+--- a/src/resolve/resolved-dns-server.h
++++ b/src/resolve/resolved-dns-server.h
+@@ -62,6 +62,7 @@ struct DnsServer {
+ 
+         int family;
+         union in_addr_union address;
++        int ifindex; /* for IPv6 link-local DNS servers */
+ 
+         char *server_string;
+ 
+@@ -101,7 +102,8 @@ int dns_server_new(
+                 DnsServerType type,
+                 Link *link,
+                 int family,
+-                const union in_addr_union *address);
++                const union in_addr_union *address,
++                int ifindex);
+ 
+ DnsServer* dns_server_ref(DnsServer *s);
+ DnsServer* dns_server_unref(DnsServer *s);
+@@ -121,12 +123,13 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s);
+ int dns_server_adjust_opt(DnsServer *server, DnsPacket *packet, DnsServerFeatureLevel level);
+ 
+ const char *dns_server_string(DnsServer *server);
++int dns_server_ifindex(const DnsServer *s);
+ 
+ bool dns_server_dnssec_supported(DnsServer *server);
+ 
+ void dns_server_warn_downgrade(DnsServer *server);
+ 
+-DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr);
++DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr, int ifindex);
+ 
+ void dns_server_unlink_all(DnsServer *first);
+ void dns_server_unlink_marked(DnsServer *first);
+diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
+index 7f21891..2d5cd4a 100644
+--- a/src/resolve/resolved-link-bus.c
++++ b/src/resolve/resolved-link-bus.c
+@@ -218,11 +218,11 @@ int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_
+         for (i = 0; i < n; i++) {
+                 DnsServer *s;
+ 
+-                s = dns_server_find(l->dns_servers, dns[i].family, &dns[i].address);
++                s = dns_server_find(l->dns_servers, dns[i].family, &dns[i].address, 0);
+                 if (s)
+                         dns_server_move_back_and_unmark(s);
+                 else {
+-                        r = dns_server_new(l->manager, NULL, DNS_SERVER_LINK, l, dns[i].family, &dns[i].address);
++                        r = dns_server_new(l->manager, NULL, DNS_SERVER_LINK, l, dns[i].family, &dns[i].address, 0);
+                         if (r < 0)
+                                 goto clear;
+                 }
+diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
+index b0dc650..b189c21 100644
+--- a/src/resolve/resolved-link.c
++++ b/src/resolve/resolved-link.c
+@@ -216,11 +216,11 @@ static int link_update_dns_servers(Link *l) {
+                 if (r < 0)
+                         goto clear;
+ 
+-                s = dns_server_find(l->dns_servers, family, &a);
++                s = dns_server_find(l->dns_servers, family, &a, 0);
+                 if (s)
+                         dns_server_move_back_and_unmark(s);
+                 else {
+-                        r = dns_server_new(l->manager, NULL, DNS_SERVER_LINK, l, family, &a);
++                        r = dns_server_new(l->manager, NULL, DNS_SERVER_LINK, l, family, &a, 0);
+                         if (r < 0)
+                                 goto clear;
+                 }
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index b3ff46b..fc627b4 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -904,7 +904,7 @@ int manager_send(Manager *m, int fd, int ifindex, int family, const union in_add
+ 
+         if (family == AF_INET)
+                 return manager_ipv4_send(m, fd, ifindex, &addr->in, port, p);
+-        else if (family == AF_INET6)
++        if (family == AF_INET6)
+                 return manager_ipv6_send(m, fd, ifindex, &addr->in6, port, p);
+ 
+         return -EAFNOSUPPORT;
+diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
+index fa89de4..df738e3 100644
+--- a/src/resolve/resolved-resolv-conf.c
++++ b/src/resolve/resolved-resolv-conf.c
+@@ -92,7 +92,7 @@ int manager_read_resolv_conf(Manager *m) {
+ 
+                 a = first_word(l, "nameserver");
+                 if (a) {
+-                        r = manager_add_dns_server_by_string(m, DNS_SERVER_SYSTEM, a);
++                        r = manager_parse_dns_server_string_and_warn(m, DNS_SERVER_SYSTEM, a);
+                         if (r < 0)
+                                 log_warning_errno(r, "Failed to parse DNS server address '%s', ignoring.", a);
+ 
+@@ -149,9 +149,7 @@ static void write_resolv_conf_server(DnsServer *s, FILE *f, unsigned *count) {
+         assert(f);
+         assert(count);
+ 
+-        (void) dns_server_string(s);
+-
+-        if (!s->server_string) {
++        if (!dns_server_string(s)) {
+                 log_warning("Our of memory, or invalid DNS address. Ignoring server.");
+                 return;
+         }
+@@ -160,7 +158,7 @@ static void write_resolv_conf_server(DnsServer *s, FILE *f, unsigned *count) {
+                 fputs("# Too many DNS servers configured, the following entries may be ignored.\n", f);
+         (*count)++;
+ 
+-        fprintf(f, "nameserver %s\n", s->server_string);
++        fprintf(f, "nameserver %s\n", dns_server_string(s));
+ }
+ 
+ static void write_resolv_conf_search(
+diff --git a/src/test/test-socket-util.c b/src/test/test-socket-util.c
+index b480fda..1a439bd 100644
+--- a/src/test/test-socket-util.c
++++ b/src/test/test-socket-util.c
+@@ -286,6 +286,55 @@ static void test_in_addr_to_string(void) {
+         test_in_addr_to_string_one(AF_INET6, "fe80::");
+ }
+ 
++static void test_in_addr_ifindex_to_string_one(int f, const char *a, int ifindex, const char *b) {
++        _cleanup_free_ char *r = NULL;
++        union in_addr_union ua, uuaa;
++        int ff, ifindex2;
++
++        assert_se(in_addr_from_string(f, a, &ua) >= 0);
++        assert_se(in_addr_ifindex_to_string(f, &ua, ifindex, &r) >= 0);
++        printf("test_in_addr_ifindex_to_string_one: %s == %s\n", b, r);
++        assert_se(streq(b, r));
++
++        assert_se(in_addr_ifindex_from_string_auto(b, &ff, &uuaa, &ifindex2) >= 0);
++        assert_se(ff == f);
++        assert_se(in_addr_equal(f, &ua, &uuaa));
++        assert_se(ifindex2 == ifindex || ifindex2 == 0);
++}
++
++static void test_in_addr_ifindex_to_string(void) {
++        test_in_addr_ifindex_to_string_one(AF_INET, "192.168.0.1", 7, "192.168.0.1");
++        test_in_addr_ifindex_to_string_one(AF_INET, "10.11.12.13", 9, "10.11.12.13");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", 10, "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "::1", 11, "::1");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "fe80::", 12, "fe80::%12");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "fe80::", 0, "fe80::");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "fe80::14", 12, "fe80::14%12");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "fe80::15", -7, "fe80::15");
++        test_in_addr_ifindex_to_string_one(AF_INET6, "fe80::16", LOOPBACK_IFINDEX, "fe80::16%1");
++}
++
++static void test_in_addr_ifindex_from_string_auto(void) {
++        int family, ifindex;
++        union in_addr_union ua;
++
++        /* Most in_addr_ifindex_from_string_auto() invocations have already been tested above, but let's test some more */
++
++        assert_se(in_addr_ifindex_from_string_auto("fe80::17", &family, &ua, &ifindex) >= 0);
++        assert_se(family == AF_INET6);
++        assert_se(ifindex == 0);
++
++        assert_se(in_addr_ifindex_from_string_auto("fe80::18%19", &family, &ua, &ifindex) >= 0);
++        assert_se(family == AF_INET6);
++        assert_se(ifindex == 19);
++
++        assert_se(in_addr_ifindex_from_string_auto("fe80::18%lo", &family, &ua, &ifindex) >= 0);
++        assert_se(family == AF_INET6);
++        assert_se(ifindex == LOOPBACK_IFINDEX);
++
++        assert_se(in_addr_ifindex_from_string_auto("fe80::19%thisinterfacecantexist", &family, &ua, &ifindex) == -ENODEV);
++}
++
+ static void *connect_thread(void *arg) {
+         union sockaddr_union *sa = arg;
+         _cleanup_close_ int fd = -1;
+@@ -398,6 +447,8 @@ int main(int argc, char *argv[]) {
+         test_in_addr_prefix_intersect();
+         test_in_addr_prefix_next();
+         test_in_addr_to_string();
++        test_in_addr_ifindex_to_string();
++        test_in_addr_ifindex_from_string_auto();
+ 
+         test_nameinfo_pretty();
+ 

@@ -25,10 +25,10 @@ transaction fail and accept the SERVFAIL.
  4 files changed, 95 insertions(+), 57 deletions(-)
 
 diff --git a/src/resolve/resolved-dns-server.c b/src/resolve/resolved-dns-server.c
-index 3095c04..941331f 100644
+index 5acfcb4..a9decf1 100644
 --- a/src/resolve/resolved-dns-server.c
 +++ b/src/resolve/resolved-dns-server.c
-@@ -242,6 +242,26 @@ static void dns_server_verified(DnsServer *s, DnsServerFeatureLevel level) {
+@@ -244,6 +244,26 @@ static void dns_server_verified(DnsServer *s, DnsServerFeatureLevel level) {
          assert_se(sd_event_now(s->manager->event, clock_boottime_or_monotonic(), &s->verified_usec) >= 0);
  }
  
@@ -55,7 +55,7 @@ index 3095c04..941331f 100644
  void dns_server_packet_received(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t rtt, size_t size) {
          assert(s);
  
-@@ -302,17 +322,6 @@ void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel le
+@@ -304,17 +324,6 @@ void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel le
          s->resend_timeout = MIN(s->resend_timeout * 2, DNS_TIMEOUT_MAX_USEC);
  }
  
@@ -73,7 +73,7 @@ index 3095c04..941331f 100644
  void dns_server_packet_truncated(DnsServer *s, DnsServerFeatureLevel level) {
          assert(s);
  
-@@ -350,6 +359,24 @@ void dns_server_packet_bad_opt(DnsServer *s, DnsServerFeatureLevel level) {
+@@ -352,6 +361,24 @@ void dns_server_packet_bad_opt(DnsServer *s, DnsServerFeatureLevel level) {
          s->packet_bad_opt = true;
  }
  
@@ -98,7 +98,7 @@ index 3095c04..941331f 100644
  static bool dns_server_grace_period_expired(DnsServer *s) {
          usec_t ts;
  
-@@ -369,27 +396,6 @@ static bool dns_server_grace_period_expired(DnsServer *s) {
+@@ -371,27 +398,6 @@ static bool dns_server_grace_period_expired(DnsServer *s) {
          return true;
  }
  
@@ -126,7 +126,7 @@ index 3095c04..941331f 100644
  DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
          assert(s);
  
-@@ -452,16 +458,6 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
+@@ -454,16 +460,6 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
                          log_debug("Lost too many UDP packets, downgrading feature level...");
                          s->possible_feature_level--;
  
@@ -144,10 +144,10 @@ index 3095c04..941331f 100644
                             s->packet_truncated &&
                             s->possible_feature_level > DNS_SERVER_FEATURE_LEVEL_UDP) {
 diff --git a/src/resolve/resolved-dns-server.h b/src/resolve/resolved-dns-server.h
-index 9f4a69c..a906aad 100644
+index 463c572..03ed85b 100644
 --- a/src/resolve/resolved-dns-server.h
 +++ b/src/resolve/resolved-dns-server.h
-@@ -76,7 +76,6 @@ struct DnsServer {
+@@ -77,7 +77,6 @@ struct DnsServer {
          unsigned n_failed_udp;
          unsigned n_failed_tcp;
  
@@ -155,7 +155,7 @@ index 9f4a69c..a906aad 100644
          bool packet_truncated:1;
          bool packet_bad_opt:1;
          bool packet_rrsig_missing:1;
-@@ -111,10 +110,10 @@ void dns_server_move_back_and_unmark(DnsServer *s);
+@@ -113,10 +112,10 @@ void dns_server_move_back_and_unmark(DnsServer *s);
  
  void dns_server_packet_received(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t rtt, size_t size);
  void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t usec);

@@ -68,7 +68,7 @@ index 82f2621..2fd56bc 100644
  Resolve.DNSSEC,       config_parse_dnssec_mode,     0,                   offsetof(Manager, dnssec_mode)
 +Resolve.Cache,        config_parse_bool,            0,                   offsetof(Manager, enable_cache)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index b3ff46b..ce30b65 100644
+index fc627b4..8237d25 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -486,6 +486,7 @@ int manager_new(Manager **ret) {

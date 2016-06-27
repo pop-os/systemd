@@ -2,6 +2,7 @@ resolved-fix-comments-in-resolve.conf-for-search-domain-o.patch
 automount-handle-expire_tokens-when-the-mount-unit-change.patch
 resolved-when-restarting-a-transaction-make-sure-to-not-t.patch
 units-add-nosuid-and-nodev-options-to-tmp.mount-3575.patch
+resolved-support-IPv6-DNS-servers-on-the-local-link.patch
 resolved-rework-SERVFAIL-handling.patch
 resolved-when-caching-replies-check-rcode-earlier.patch
 resolved-when-processing-auxiliary-DNSSEC-transactions-ac.patch
