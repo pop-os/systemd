@@ -1,0 +1,149 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 20 Jun 2016 21:39:02 +0200
+Subject: resolved: add dns_packet_add_{question,answer}() helper
+
+And make use of it at a couple of places.
+---
+ src/resolve/resolved-dns-packet.c | 31 +++++++++++++++++++++++++++++
+ src/resolve/resolved-dns-packet.h |  2 ++
+ src/resolve/resolved-dns-scope.c  | 42 +++++++++++++--------------------------
+ 3 files changed, 47 insertions(+), 28 deletions(-)
+
+diff --git a/src/resolve/resolved-dns-packet.c b/src/resolve/resolved-dns-packet.c
+index b7907bb..32978eb 100644
+--- a/src/resolve/resolved-dns-packet.c
++++ b/src/resolve/resolved-dns-packet.c
+@@ -791,6 +791,7 @@ int dns_packet_truncate_opt(DnsPacket *p) {
+ }
+ 
+ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, size_t *start, size_t *rdata_start) {
++
+         size_t saved_size, rdlength_offset, end, rdlength, rds;
+         int r;
+ 
+@@ -1134,6 +1135,36 @@ fail:
+         return r;
+ }
+ 
++int dns_packet_append_question(DnsPacket *p, DnsQuestion *q) {
++        DnsResourceKey *key;
++        int r;
++
++        assert(p);
++
++        DNS_QUESTION_FOREACH(key, q) {
++                r = dns_packet_append_key(p, key, NULL);
++                if (r < 0)
++                        return r;
++        }
++
++        return 0;
++}
++
++int dns_packet_append_answer(DnsPacket *p, DnsAnswer *a) {
++        DnsResourceRecord *rr;
++        int r;
++
++        assert(p);
++
++        DNS_ANSWER_FOREACH(rr, a) {
++                r = dns_packet_append_rr(p, rr, NULL, NULL);
++                if (r < 0)
++                        return r;
++        }
++
++        return 0;
++}
++
+ int dns_packet_read(DnsPacket *p, size_t sz, const void **ret, size_t *start) {
+         assert(p);
+ 
+diff --git a/src/resolve/resolved-dns-packet.h b/src/resolve/resolved-dns-packet.h
+index 416335d..fe2b386 100644
+--- a/src/resolve/resolved-dns-packet.h
++++ b/src/resolve/resolved-dns-packet.h
+@@ -183,6 +183,8 @@ int dns_packet_append_name(DnsPacket *p, const char *name, bool allow_compressio
+ int dns_packet_append_key(DnsPacket *p, const DnsResourceKey *key, size_t *start);
+ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, size_t *start, size_t *rdata_start);
+ int dns_packet_append_opt(DnsPacket *p, uint16_t max_udp_size, bool edns0_do, size_t *start);
++int dns_packet_append_question(DnsPacket *p, DnsQuestion *q);
++int dns_packet_append_answer(DnsPacket *p, DnsAnswer *a);
+ 
+ void dns_packet_truncate(DnsPacket *p, size_t sz);
+ int dns_packet_truncate_opt(DnsPacket *p);
+diff --git a/src/resolve/resolved-dns-scope.c b/src/resolve/resolved-dns-scope.c
+index 6a69d7b..ce2045a 100644
+--- a/src/resolve/resolved-dns-scope.c
++++ b/src/resolve/resolved-dns-scope.c
+@@ -578,6 +578,7 @@ static int dns_scope_multicast_membership(DnsScope *s, bool b, struct in_addr in
+ }
+ 
+ int dns_scope_llmnr_membership(DnsScope *s, bool b) {
++        assert(s);
+ 
+         if (s->protocol != DNS_PROTOCOL_LLMNR)
+                 return 0;
+@@ -586,6 +587,7 @@ int dns_scope_llmnr_membership(DnsScope *s, bool b) {
+ }
+ 
+ int dns_scope_mdns_membership(DnsScope *s, bool b) {
++        assert(s);
+ 
+         if (s->protocol != DNS_PROTOCOL_MDNS)
+                 return 0;
+@@ -604,7 +606,6 @@ static int dns_scope_make_reply_packet(
+                 DnsPacket **ret) {
+ 
+         _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
+-        unsigned i;
+         int r;
+ 
+         assert(s);
+@@ -631,35 +632,20 @@ static int dns_scope_make_reply_packet(
+                                                               0 /* (cd) */,
+                                                               rcode));
+ 
+-        if (q) {
+-                for (i = 0; i < q->n_keys; i++) {
+-                        r = dns_packet_append_key(p, q->keys[i], NULL);
+-                        if (r < 0)
+-                                return r;
+-                }
+-
+-                DNS_PACKET_HEADER(p)->qdcount = htobe16(q->n_keys);
+-        }
+-
+-        if (answer) {
+-                for (i = 0; i < answer->n_rrs; i++) {
+-                        r = dns_packet_append_rr(p, answer->items[i].rr, NULL, NULL);
+-                        if (r < 0)
+-                                return r;
+-                }
+-
+-                DNS_PACKET_HEADER(p)->ancount = htobe16(answer->n_rrs);
+-        }
++        r = dns_packet_append_question(p, q);
++        if (r < 0)
++                return r;
++        DNS_PACKET_HEADER(p)->qdcount = htobe16(dns_question_size(q));
+ 
+-        if (soa) {
+-                for (i = 0; i < soa->n_rrs; i++) {
+-                        r = dns_packet_append_rr(p, soa->items[i].rr, NULL, NULL);
+-                        if (r < 0)
+-                                return r;
+-                }
++        r = dns_packet_append_answer(p, answer);
++        if (r < 0)
++                return r;
++        DNS_PACKET_HEADER(p)->ancount = htobe16(dns_answer_size(answer));
+ 
+-                DNS_PACKET_HEADER(p)->arcount = htobe16(soa->n_rrs);
+-        }
++        r = dns_packet_append_answer(p, soa);
++        if (r < 0)
++                return r;
++        DNS_PACKET_HEADER(p)->arcount = htobe16(dns_answer_size(soa));
+ 
+         *ret = p;
+         p = NULL;

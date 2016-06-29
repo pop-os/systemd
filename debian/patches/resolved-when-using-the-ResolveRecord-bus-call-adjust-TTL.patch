@@ -1,0 +1,540 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 20 Jun 2016 21:24:46 +0200
+Subject: resolved: when using the ResolveRecord() bus call,
+ adjust TTL for caching time
+
+When we return the full RR wire data, let's make sure the TTL included in it is
+adjusted by the time the RR sat in the cache.
+
+As an optimization we do this only for ResolveRecord() and not for
+ResolveHostname() and friends, since adjusting the TTL means copying the RR
+object, and we don#t want to do that if there's no reason to.
+(ResolveHostname() and friends don't return the TTL hence there's no reason to
+in that case)
+---
+ src/basic/bitmap.c                     |  17 +++
+ src/basic/bitmap.h                     |   5 +-
+ src/resolve/resolved-bus.c             |   4 +
+ src/resolve/resolved-dns-cache.c       |  18 ++-
+ src/resolve/resolved-dns-cache.h       |   2 +-
+ src/resolve/resolved-dns-query.c       |   4 +-
+ src/resolve/resolved-dns-query.h       |   4 +
+ src/resolve/resolved-dns-rr.c          | 245 +++++++++++++++++++++++++++++++++
+ src/resolve/resolved-dns-rr.h          |   4 +
+ src/resolve/resolved-dns-transaction.c |   2 +-
+ src/resolve/resolved-dns-transaction.h |   2 +
+ src/resolve/test-dns-packet.c          |  17 +++
+ 12 files changed, 316 insertions(+), 8 deletions(-)
+
+diff --git a/src/basic/bitmap.c b/src/basic/bitmap.c
+index ad1fda0..f4b12fc 100644
+--- a/src/basic/bitmap.c
++++ b/src/basic/bitmap.c
+@@ -50,6 +50,23 @@ Bitmap *bitmap_new(void) {
+         return new0(Bitmap, 1);
+ }
+ 
++Bitmap *bitmap_copy(Bitmap *b) {
++        Bitmap *ret;
++
++        ret = bitmap_new();
++        if (!ret)
++                return NULL;
++
++        ret->bitmaps = newdup(uint64_t, b->bitmaps, b->n_bitmaps);
++        if (!ret->bitmaps) {
++                free(ret);
++                return NULL;
++        }
++
++        ret->n_bitmaps = ret->bitmaps_allocated = b->n_bitmaps;
++        return ret;
++}
++
+ void bitmap_free(Bitmap *b) {
+         if (!b)
+                 return;
+diff --git a/src/basic/bitmap.h b/src/basic/bitmap.h
+index f5f8f2f..63fdbe8 100644
+--- a/src/basic/bitmap.h
++++ b/src/basic/bitmap.h
+@@ -27,10 +27,9 @@
+ typedef struct Bitmap Bitmap;
+ 
+ Bitmap *bitmap_new(void);
+-
+-void bitmap_free(Bitmap *b);
+-
++Bitmap *bitmap_copy(Bitmap *b);
+ int bitmap_ensure_allocated(Bitmap **b);
++void bitmap_free(Bitmap *b);
+ 
+ int bitmap_set(Bitmap *b, unsigned n);
+ void bitmap_unset(Bitmap *b, unsigned n);
+diff --git a/src/resolve/resolved-bus.c b/src/resolve/resolved-bus.c
+index 2c69f15..030e56d 100644
+--- a/src/resolve/resolved-bus.c
++++ b/src/resolve/resolved-bus.c
+@@ -667,6 +667,10 @@ static int bus_method_resolve_record(sd_bus_message *message, void *userdata, sd
+         if (r < 0)
+                 return r;
+ 
++        /* Let's request that the TTL is fixed up for locally cached entries, after all we return it in the wire format
++         * blob */
++        q->clamp_ttl = true;
++
+         q->request = sd_bus_message_ref(message);
+         q->complete = bus_method_resolve_record_complete;
+ 
+diff --git a/src/resolve/resolved-dns-cache.c b/src/resolve/resolved-dns-cache.c
+index ba93710..87f7c21 100644
+--- a/src/resolve/resolved-dns-cache.c
++++ b/src/resolve/resolved-dns-cache.c
+@@ -790,7 +790,7 @@ static DnsCacheItem *dns_cache_get_by_key_follow_cname_dname_nsec(DnsCache *c, D
+         return NULL;
+ }
+ 
+-int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **ret, bool *authenticated) {
++int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, bool clamp_ttl, int *rcode, DnsAnswer **ret, bool *authenticated) {
+         _cleanup_(dns_answer_unrefp) DnsAnswer *answer = NULL;
+         char key_str[DNS_RESOURCE_KEY_STRING_MAX];
+         unsigned n = 0;
+@@ -798,6 +798,7 @@ int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **r
+         bool nxdomain = false;
+         DnsCacheItem *j, *first, *nsec = NULL;
+         bool have_authenticated = false, have_non_authenticated = false;
++        usec_t current;
+ 
+         assert(c);
+         assert(key);
+@@ -892,11 +893,24 @@ int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **r
+         if (!answer)
+                 return -ENOMEM;
+ 
++        if (clamp_ttl)
++                current = now(clock_boottime_or_monotonic());
++
+         LIST_FOREACH(by_key, j, first) {
++                _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *rr = NULL;
++
+                 if (!j->rr)
+                         continue;
+ 
+-                r = dns_answer_add(answer, j->rr, j->ifindex, j->authenticated ? DNS_ANSWER_AUTHENTICATED : 0);
++                if (clamp_ttl) {
++                        rr = dns_resource_record_ref(j->rr);
++
++                        r = dns_resource_record_clamp_ttl(&rr, LESS_BY(j->until, current) / USEC_PER_SEC);
++                        if (r < 0)
++                                return r;
++                }
++
++                r = dns_answer_add(answer, rr ?: j->rr, j->ifindex, j->authenticated ? DNS_ANSWER_AUTHENTICATED : 0);
+                 if (r < 0)
+                         return r;
+         }
+diff --git a/src/resolve/resolved-dns-cache.h b/src/resolve/resolved-dns-cache.h
+index 2293718..22a7c17 100644
+--- a/src/resolve/resolved-dns-cache.h
++++ b/src/resolve/resolved-dns-cache.h
+@@ -40,7 +40,7 @@ void dns_cache_flush(DnsCache *c);
+ void dns_cache_prune(DnsCache *c);
+ 
+ int dns_cache_put(DnsCache *c, DnsResourceKey *key, int rcode, DnsAnswer *answer, bool authenticated, uint32_t nsec_ttl, usec_t timestamp, int owner_family, const union in_addr_union *owner_address);
+-int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **answer, bool *authenticated);
++int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, bool clamp_ttl, int *rcode, DnsAnswer **answer, bool *authenticated);
+ 
+ int dns_cache_check_conflicts(DnsCache *cache, DnsResourceRecord *rr, int owner_family, const union in_addr_union *owner_address);
+ 
+diff --git a/src/resolve/resolved-dns-query.c b/src/resolve/resolved-dns-query.c
+index ea04e58..8578774 100644
+--- a/src/resolve/resolved-dns-query.c
++++ b/src/resolve/resolved-dns-query.c
+@@ -154,6 +154,7 @@ static int dns_query_candidate_add_transaction(DnsQueryCandidate *c, DnsResource
+                 goto gc;
+         }
+ 
++        t->clamp_ttl = c->query->clamp_ttl;
+         return 1;
+ 
+ gc:
+@@ -420,7 +421,8 @@ int dns_query_new(
+                 DnsQuery **ret,
+                 DnsQuestion *question_utf8,
+                 DnsQuestion *question_idna,
+-                int ifindex, uint64_t flags) {
++                int ifindex,
++                uint64_t flags) {
+ 
+         _cleanup_(dns_query_freep) DnsQuery *q = NULL;
+         DnsResourceKey *key;
+diff --git a/src/resolve/resolved-dns-query.h b/src/resolve/resolved-dns-query.h
+index c2ac02f..53f48d4 100644
+--- a/src/resolve/resolved-dns-query.h
++++ b/src/resolve/resolved-dns-query.h
+@@ -71,6 +71,10 @@ struct DnsQuery {
+          * family */
+         bool suppress_unroutable_family;
+ 
++
++        /* If true, the RR TTLs of the answer will be clamped by their current left validity in the cache */
++        bool clamp_ttl;
++
+         DnsTransactionState state;
+         unsigned n_cname_redirects;
+ 
+diff --git a/src/resolve/resolved-dns-rr.c b/src/resolve/resolved-dns-rr.c
+index 6a29a93..5687588 100644
+--- a/src/resolve/resolved-dns-rr.c
++++ b/src/resolve/resolved-dns-rr.c
+@@ -1532,6 +1532,232 @@ const struct hash_ops dns_resource_record_hash_ops = {
+         .compare = dns_resource_record_compare_func,
+ };
+ 
++DnsResourceRecord *dns_resource_record_copy(DnsResourceRecord *rr) {
++        _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *copy = NULL;
++        DnsResourceRecord *t;
++
++        assert(rr);
++
++        copy = dns_resource_record_new(rr->key);
++        if (!copy)
++                return NULL;
++
++        copy->ttl = rr->ttl;
++        copy->expiry = rr->expiry;
++        copy->n_skip_labels_signer = rr->n_skip_labels_signer;
++        copy->n_skip_labels_source = rr->n_skip_labels_source;
++        copy->unparseable = rr->unparseable;
++
++        switch (rr->unparseable ? _DNS_TYPE_INVALID : rr->key->type) {
++
++        case DNS_TYPE_SRV:
++                copy->srv.priority = rr->srv.priority;
++                copy->srv.weight = rr->srv.weight;
++                copy->srv.port = rr->srv.port;
++                copy->srv.name = strdup(rr->srv.name);
++                if (!copy->srv.name)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_PTR:
++        case DNS_TYPE_NS:
++        case DNS_TYPE_CNAME:
++        case DNS_TYPE_DNAME:
++                copy->ptr.name = strdup(rr->ptr.name);
++                if (!copy->ptr.name)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_HINFO:
++                copy->hinfo.cpu = strdup(rr->hinfo.cpu);
++                if (!copy->hinfo.cpu)
++                        return NULL;
++
++                copy->hinfo.os = strdup(rr->hinfo.os);
++                if(!copy->hinfo.os)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_TXT:
++        case DNS_TYPE_SPF:
++                copy->txt.items = dns_txt_item_copy(rr->txt.items);
++                if (!copy->txt.items)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_A:
++                copy->a = rr->a;
++                break;
++
++        case DNS_TYPE_AAAA:
++                copy->aaaa = rr->aaaa;
++                break;
++
++        case DNS_TYPE_SOA:
++                copy->soa.mname = strdup(rr->soa.mname);
++                if (!copy->soa.mname)
++                        return NULL;
++                copy->soa.rname = strdup(rr->soa.rname);
++                if (!copy->soa.rname)
++                        return NULL;
++                copy->soa.serial = rr->soa.serial;
++                copy->soa.refresh = rr->soa.refresh;
++                copy->soa.retry = rr->soa.retry;
++                copy->soa.expire = rr->soa.expire;
++                copy->soa.minimum = rr->soa.minimum;
++                break;
++
++        case DNS_TYPE_MX:
++                copy->mx.priority = rr->mx.priority;
++                copy->mx.exchange = strdup(rr->mx.exchange);
++                if (!copy->mx.exchange)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_LOC:
++                copy->loc = rr->loc;
++                break;
++
++        case DNS_TYPE_SSHFP:
++                copy->sshfp.algorithm = rr->sshfp.algorithm;
++                copy->sshfp.fptype = rr->sshfp.fptype;
++                copy->sshfp.fingerprint = memdup(rr->sshfp.fingerprint, rr->sshfp.fingerprint_size);
++                if (!copy->sshfp.fingerprint)
++                        return NULL;
++                copy->sshfp.fingerprint_size = rr->sshfp.fingerprint_size;
++                break;
++
++        case DNS_TYPE_DNSKEY:
++                copy->dnskey.flags = rr->dnskey.flags;
++                copy->dnskey.protocol = rr->dnskey.protocol;
++                copy->dnskey.algorithm = rr->dnskey.algorithm;
++                copy->dnskey.key = memdup(rr->dnskey.key, rr->dnskey.key_size);
++                if (!copy->dnskey.key)
++                        return NULL;
++                copy->dnskey.key_size = rr->dnskey.key_size;
++                break;
++
++        case DNS_TYPE_RRSIG:
++                copy->rrsig.type_covered = rr->rrsig.type_covered;
++                copy->rrsig.algorithm = rr->rrsig.algorithm;
++                copy->rrsig.labels = rr->rrsig.labels;
++                copy->rrsig.original_ttl = rr->rrsig.original_ttl;
++                copy->rrsig.expiration = rr->rrsig.expiration;
++                copy->rrsig.inception = rr->rrsig.inception;
++                copy->rrsig.key_tag = rr->rrsig.key_tag;
++                copy->rrsig.signer = strdup(rr->rrsig.signer);
++                if (!copy->rrsig.signer)
++                        return NULL;
++                copy->rrsig.signature = memdup(rr->rrsig.signature, rr->rrsig.signature_size);
++                if (!copy->rrsig.signature)
++                        return NULL;
++                copy->rrsig.signature_size = rr->rrsig.signature_size;
++                break;
++
++        case DNS_TYPE_NSEC:
++                copy->nsec.next_domain_name = strdup(rr->nsec.next_domain_name);
++                if (!copy->nsec.next_domain_name)
++                        return NULL;
++                copy->nsec.types = bitmap_copy(rr->nsec.types);
++                if (!copy->nsec.types)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_DS:
++                copy->ds.key_tag = rr->ds.key_tag;
++                copy->ds.algorithm = rr->ds.algorithm;
++                copy->ds.digest_type = rr->ds.digest_type;
++                copy->ds.digest = memdup(rr->ds.digest, rr->ds.digest_size);
++                if (!copy->ds.digest)
++                        return NULL;
++                copy->ds.digest_size = rr->ds.digest_size;
++                break;
++
++        case DNS_TYPE_NSEC3:
++                copy->nsec3.algorithm = rr->nsec3.algorithm;
++                copy->nsec3.flags = rr->nsec3.flags;
++                copy->nsec3.iterations = rr->nsec3.iterations;
++                copy->nsec3.salt = memdup(rr->nsec3.salt, rr->nsec3.salt_size);
++                if (!copy->nsec3.salt)
++                        return NULL;
++                copy->nsec3.salt_size = rr->nsec3.salt_size;
++                copy->nsec3.next_hashed_name = memdup(rr->nsec3.next_hashed_name, rr->nsec3.next_hashed_name_size);
++                if (!copy->nsec3.next_hashed_name_size)
++                        return NULL;
++                copy->nsec3.next_hashed_name_size = rr->nsec3.next_hashed_name_size;
++                copy->nsec3.types = bitmap_copy(rr->nsec3.types);
++                if (!copy->nsec3.types)
++                        return NULL;
++                break;
++
++        case DNS_TYPE_TLSA:
++                copy->tlsa.cert_usage = rr->tlsa.cert_usage;
++                copy->tlsa.selector = rr->tlsa.selector;
++                copy->tlsa.matching_type = rr->tlsa.matching_type;
++                copy->tlsa.data = memdup(rr->tlsa.data, rr->tlsa.data_size);
++                if (!copy->tlsa.data)
++                        return NULL;
++                copy->tlsa.data_size = rr->tlsa.data_size;
++                break;
++
++        case DNS_TYPE_CAA:
++                copy->caa.flags = rr->caa.flags;
++                copy->caa.tag = strdup(rr->caa.tag);
++                if (!copy->caa.tag)
++                        return NULL;
++                copy->caa.value = memdup(rr->caa.value, rr->caa.value_size);
++                if (!copy->caa.value)
++                        return NULL;
++                copy->caa.value_size = rr->caa.value_size;
++                break;
++
++        case DNS_TYPE_OPT:
++        default:
++                copy->generic.data = memdup(rr->generic.data, rr->generic.data_size);
++                if (!copy->generic.data)
++                        return NULL;
++                copy->generic.data_size = rr->generic.data_size;
++                break;
++        }
++
++        t = copy;
++        copy = NULL;
++
++        return t;
++}
++
++int dns_resource_record_clamp_ttl(DnsResourceRecord **rr, uint32_t max_ttl) {
++        DnsResourceRecord *old_rr, *new_rr;
++        uint32_t new_ttl;
++
++        assert(rr);
++        old_rr = *rr;
++
++        if (old_rr->key->type == DNS_TYPE_OPT)
++                return -EINVAL;
++
++        new_ttl = MIN(old_rr->ttl, max_ttl);
++        if (new_ttl == old_rr->ttl)
++                return 0;
++
++        if (old_rr->n_ref == 1) {
++                /* Patch in place */
++                old_rr->ttl = new_ttl;
++                return 1;
++        }
++
++        new_rr = dns_resource_record_copy(old_rr);
++        if (!new_rr)
++                return -ENOMEM;
++
++        new_rr->ttl = new_ttl;
++
++        dns_resource_record_unref(*rr);
++        *rr = new_rr;
++
++        return 1;
++}
++
+ DnsTxtItem *dns_txt_item_free_all(DnsTxtItem *i) {
+         DnsTxtItem *n;
+ 
+@@ -1564,6 +1790,25 @@ bool dns_txt_item_equal(DnsTxtItem *a, DnsTxtItem *b) {
+         return dns_txt_item_equal(a->items_next, b->items_next);
+ }
+ 
++DnsTxtItem *dns_txt_item_copy(DnsTxtItem *first) {
++        DnsTxtItem *i, *copy = NULL, *end = NULL;
++
++        LIST_FOREACH(items, i, first) {
++                DnsTxtItem *j;
++
++                j = memdup(i, offsetof(DnsTxtItem, data) + i->length + 1);
++                if (!j) {
++                        dns_txt_item_free_all(copy);
++                        return NULL;
++                }
++
++                LIST_INSERT_AFTER(items, copy, end, j);
++                end = j;
++        }
++
++        return copy;
++}
++
+ static const char* const dnssec_algorithm_table[_DNSSEC_ALGORITHM_MAX_DEFINED] = {
+         /* Mnemonics as listed on https://www.iana.org/assignments/dns-sec-alg-numbers/dns-sec-alg-numbers.xhtml */
+         [DNSSEC_ALGORITHM_RSAMD5]             = "RSAMD5",
+diff --git a/src/resolve/resolved-dns-rr.h b/src/resolve/resolved-dns-rr.h
+index 020a2ab..8b2d4df 100644
+--- a/src/resolve/resolved-dns-rr.h
++++ b/src/resolve/resolved-dns-rr.h
+@@ -318,6 +318,7 @@ int dns_resource_record_new_reverse(DnsResourceRecord **ret, int family, const u
+ int dns_resource_record_new_address(DnsResourceRecord **ret, int family, const union in_addr_union *address, const char *name);
+ int dns_resource_record_equal(const DnsResourceRecord *a, const DnsResourceRecord *b);
+ const char* dns_resource_record_to_string(DnsResourceRecord *rr);
++DnsResourceRecord *dns_resource_record_copy(DnsResourceRecord *rr);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(DnsResourceRecord*, dns_resource_record_unref);
+ 
+ int dns_resource_record_to_wire_format(DnsResourceRecord *rr, bool canonical);
+@@ -327,8 +328,11 @@ int dns_resource_record_source(DnsResourceRecord *rr, const char **ret);
+ int dns_resource_record_is_signer(DnsResourceRecord *rr, const char *zone);
+ int dns_resource_record_is_synthetic(DnsResourceRecord *rr);
+ 
++int dns_resource_record_clamp_ttl(DnsResourceRecord **rr, uint32_t max_ttl);
++
+ DnsTxtItem *dns_txt_item_free_all(DnsTxtItem *i);
+ bool dns_txt_item_equal(DnsTxtItem *a, DnsTxtItem *b);
++DnsTxtItem *dns_txt_item_copy(DnsTxtItem *i);
+ 
+ void dns_resource_record_hash_func(const void *i, struct siphash *state);
+ 
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 23f4f79..0fa6ec0 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -1322,7 +1322,7 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
+                 /* Let's then prune all outdated entries */
+                 dns_cache_prune(&t->scope->cache);
+ 
+-                r = dns_cache_lookup(&t->scope->cache, t->key, &t->answer_rcode, &t->answer, &t->answer_authenticated);
++                r = dns_cache_lookup(&t->scope->cache, t->key, t->clamp_ttl, &t->answer_rcode, &t->answer, &t->answer_authenticated);
+                 if (r < 0)
+                         return r;
+                 if (r > 0) {
+diff --git a/src/resolve/resolved-dns-transaction.h b/src/resolve/resolved-dns-transaction.h
+index bc1529d..96b0668 100644
+--- a/src/resolve/resolved-dns-transaction.h
++++ b/src/resolve/resolved-dns-transaction.h
+@@ -74,6 +74,8 @@ struct DnsTransaction {
+         bool initial_jitter_scheduled:1;
+         bool initial_jitter_elapsed:1;
+ 
++        bool clamp_ttl:1;
++
+         DnsPacket *sent, *received;
+ 
+         DnsAnswer *answer;
+diff --git a/src/resolve/test-dns-packet.c b/src/resolve/test-dns-packet.c
+index c232a69..099b881 100644
+--- a/src/resolve/test-dns-packet.c
++++ b/src/resolve/test-dns-packet.c
+@@ -32,6 +32,19 @@
+ 
+ #define HASH_KEY SD_ID128_MAKE(d3,1e,48,90,4b,fa,4c,fe,af,9d,d5,a1,d7,2e,8a,b1)
+ 
++static void verify_rr_copy(DnsResourceRecord *rr) {
++        _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *copy = NULL;
++        const char *a, *b;
++
++        assert_se(copy = dns_resource_record_copy(rr));
++        assert_se(dns_resource_record_equal(copy, rr) > 0);
++
++        assert_se(a = dns_resource_record_to_string(rr));
++        assert_se(b = dns_resource_record_to_string(copy));
++
++        assert_se(streq(a, b));
++}
++
+ static uint64_t hash(DnsResourceRecord *rr) {
+         struct siphash state;
+ 
+@@ -65,6 +78,8 @@ static void test_packet_from_file(const char* filename, bool canonical) {
+                 assert_se(dns_packet_append_blob(p, data + offset + 8, packet_size, NULL) >= 0);
+                 assert_se(dns_packet_read_rr(p, &rr, NULL, NULL) >= 0);
+ 
++                verify_rr_copy(rr);
++
+                 s = dns_resource_record_to_string(rr);
+                 assert_se(s);
+                 puts(s);
+@@ -77,6 +92,8 @@ static void test_packet_from_file(const char* filename, bool canonical) {
+                 assert_se(dns_packet_append_blob(p2, rr->wire_format, rr->wire_format_size, NULL) >= 0);
+                 assert_se(dns_packet_read_rr(p2, &rr2, NULL, NULL) >= 0);
+ 
++                verify_rr_copy(rr);
++
+                 s2 = dns_resource_record_to_string(rr);
+                 assert_se(s2);
+                 assert_se(streq(s, s2));

@@ -22,6 +22,9 @@ systemd (230-4) UNRELEASED; urgency=medium
     chance of seeing some half-written signatures.
   * debian/tests/networkd: Stop skipping the two DHCP6 tests, this regression
     seems to have been fixed now.
+  * resolved: respond to local resolver requests on 127.0.0.53:53. This
+    provides compatibility with clients that don't use NSS but do DNS queries
+    directly, such as Chrome.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
