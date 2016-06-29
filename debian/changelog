@@ -27,6 +27,12 @@ systemd (230-4) UNRELEASED; urgency=medium
     directly, such as Chrome.
   * resolved: Don't add route-only domains to /etc/resolv.conf.
   * systemd-resolve: Add --flush-caches and --status commands.
+  * Add debian/extra/units/systemd-resolved.service.d/resolvconf.conf to tell
+    resolvconf about resolved's builtin DNS server on 127.0.0.53. With that,
+    DNS servers picked up via networkd are respected when using resolvconf,
+    and software like Chrome that does not do NSS (libnss-resolve) still gets
+    proper DNS resolution. Drop the brittle and ugly
+    systemd-networkd-resolvconf-update.{path,service} hack instead.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
