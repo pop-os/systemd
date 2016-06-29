@@ -1,0 +1,195 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 10 Jun 2016 20:40:30 +0200
+Subject: resolved: also add a way to flush all caches via the bus
+
+And expose it in "resolve-tool --flush-caches".
+---
+ man/systemd-resolve.xml        |  6 ++++++
+ src/resolve/resolve-tool.c     | 36 ++++++++++++++++++++++++++++++++++++
+ src/resolve/resolved-bus.c     | 12 ++++++++++++
+ src/resolve/resolved-manager.c | 15 +++++++++++----
+ src/resolve/resolved-manager.h |  2 ++
+ 5 files changed, 67 insertions(+), 4 deletions(-)
+
+diff --git a/man/systemd-resolve.xml b/man/systemd-resolve.xml
+index 4b66f83..b917ac2 100644
+--- a/man/systemd-resolve.xml
++++ b/man/systemd-resolve.xml
+@@ -288,6 +288,12 @@
+         <listitem><para>Resets the statistics counters shown in <option>--statistics</option> to zero.</para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>--flush-caches</option></term>
++
++        <listitem><para>Flushes all DNS resource record caches the service maintains locally.</para></listitem>
++      </varlistentry>
++
+       <xi:include href="standard-options.xml" xpointer="help" />
+       <xi:include href="standard-options.xml" xpointer="version" />
+     </variablelist>
+diff --git a/src/resolve/resolve-tool.c b/src/resolve/resolve-tool.c
+index 14ee01c..364a6e7 100644
+--- a/src/resolve/resolve-tool.c
++++ b/src/resolve/resolve-tool.c
+@@ -66,6 +66,7 @@ static enum {
+         MODE_RESOLVE_TLSA,
+         MODE_STATISTICS,
+         MODE_RESET_STATISTICS,
++        MODE_FLUSH_CACHES,
+ } arg_mode = MODE_RESOLVE_HOST;
+ 
+ static ServiceFamily service_family_from_string(const char *s) {
+@@ -1041,6 +1042,24 @@ static int reset_statistics(sd_bus *bus) {
+         return 0;
+ }
+ 
++static int flush_caches(sd_bus *bus) {
++        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
++        int r;
++
++        r = sd_bus_call_method(bus,
++                               "org.freedesktop.resolve1",
++                               "/org/freedesktop/resolve1",
++                               "org.freedesktop.resolve1.Manager",
++                               "FlushCaches",
++                               &error,
++                               NULL,
++                               NULL);
++        if (r < 0)
++                return log_error_errno(r, "Failed to flush caches: %s", bus_error_message(&error, r));
++
++        return 0;
++}
++
+ static void help_protocol_types(void) {
+         if (arg_legend)
+                 puts("Known protocol types:");
+@@ -1101,6 +1120,7 @@ static void help(void) {
+                "     --legend=BOOL          Print headers and additional info (default: yes)\n"
+                "     --statistics           Show resolver statistics\n"
+                "     --reset-statistics     Reset resolver statistics\n"
++               "     --flush-caches         Flush all local DNS caches\n"
+                , program_invocation_short_name);
+ }
+ 
+@@ -1118,6 +1138,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 ARG_SEARCH,
+                 ARG_STATISTICS,
+                 ARG_RESET_STATISTICS,
++                ARG_FLUSH_CACHES,
+         };
+ 
+         static const struct option options[] = {
+@@ -1138,6 +1159,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 { "search",           required_argument, NULL, ARG_SEARCH           },
+                 { "statistics",       no_argument,       NULL, ARG_STATISTICS,      },
+                 { "reset-statistics", no_argument,       NULL, ARG_RESET_STATISTICS },
++                { "flush-caches",     no_argument,       NULL, ARG_FLUSH_CACHES     },
+                 {}
+         };
+ 
+@@ -1311,6 +1333,10 @@ static int parse_argv(int argc, char *argv[]) {
+                         arg_mode = MODE_RESET_STATISTICS;
+                         break;
+ 
++                case ARG_FLUSH_CACHES:
++                        arg_mode = MODE_FLUSH_CACHES;
++                        break;
++
+                 case '?':
+                         return -EINVAL;
+ 
+@@ -1477,6 +1503,16 @@ int main(int argc, char **argv) {
+ 
+                 r = reset_statistics(bus);
+                 break;
++
++        case MODE_FLUSH_CACHES:
++                if (argc > optind) {
++                        log_error("Too many arguments.");
++                        r = -EINVAL;
++                        goto finish;
++                }
++
++                r = flush_caches(bus);
++                break;
+         }
+ 
+ finish:
+diff --git a/src/resolve/resolved-bus.c b/src/resolve/resolved-bus.c
+index eb5c697..53b8cc3 100644
+--- a/src/resolve/resolved-bus.c
++++ b/src/resolve/resolved-bus.c
+@@ -1565,6 +1565,17 @@ static int bus_method_get_link(sd_bus_message *message, void *userdata, sd_bus_e
+         return sd_bus_reply_method_return(message, "o", p);
+ }
+ 
++static int bus_method_flush_caches(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Manager *m = userdata;
++
++        assert(message);
++        assert(m);
++
++        manager_flush_caches(m);
++
++        return sd_bus_reply_method_return(message, NULL);
++}
++
+ static const sd_bus_vtable resolve_vtable[] = {
+         SD_BUS_VTABLE_START(0),
+         SD_BUS_PROPERTY("LLMNRHostname", "s", NULL, offsetof(Manager, llmnr_hostname), 0),
+@@ -1581,6 +1592,7 @@ static const sd_bus_vtable resolve_vtable[] = {
+         SD_BUS_METHOD("ResolveRecord", "isqqt", "a(iqqay)t", bus_method_resolve_record, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("ResolveService", "isssit", "a(qqqsa(iiay)s)aayssst", bus_method_resolve_service, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("ResetStatistics", NULL, NULL, bus_method_reset_statistics, 0),
++        SD_BUS_METHOD("FlushCaches", NULL, NULL, bus_method_flush_caches, 0),
+         SD_BUS_METHOD("GetLink", "i", "o", bus_method_get_link, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("SetLinkDNS", "ia(iay)", NULL, bus_method_set_link_dns_servers, 0),
+         SD_BUS_METHOD("SetLinkDomains", "ia(sb)", NULL, bus_method_set_link_domains, 0),
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 56614ab..ee9a474 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -468,16 +468,14 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
+ 
+ static int manager_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+         Manager *m = userdata;
+-        DnsScope *scope;
+ 
+         assert(s);
+         assert(si);
+         assert(m);
+ 
+-        LIST_FOREACH(scopes, scope, m->dns_scopes)
+-                dns_cache_flush(&scope->cache);
+-
++        manager_flush_caches(m);
+         log_info("Flushed all caches.");
++
+         return 0;
+ }
+ 
+@@ -1252,3 +1250,12 @@ bool manager_routable(Manager *m, int family) {
+ 
+         return false;
+ }
++
++void manager_flush_caches(Manager *m) {
++        DnsScope *scope;
++
++        assert(m);
++
++        LIST_FOREACH(scopes, scope, m->dns_scopes)
++                dns_cache_flush(&scope->cache);
++}
+diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
+index 97f75ac..ef71202 100644
+--- a/src/resolve/resolved-manager.h
++++ b/src/resolve/resolved-manager.h
+@@ -170,3 +170,5 @@ bool manager_dnssec_supported(Manager *m);
+ void manager_dnssec_verdict(Manager *m, DnssecVerdict verdict, const DnsResourceKey *key);
+ 
+ bool manager_routable(Manager *m, int family);
++
++void manager_flush_caches(Manager *m);

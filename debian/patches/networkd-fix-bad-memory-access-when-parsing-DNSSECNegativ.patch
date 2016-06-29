@@ -1,0 +1,22 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 15 Jun 2016 21:36:57 +0200
+Subject: networkd: fix bad memory access when parsing
+ DNSSECNegativeTrustAnchors=
+
+---
+ src/network/networkd-network-gperf.gperf | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
+index 03e4e3b..bf64c42 100644
+--- a/src/network/networkd-network-gperf.gperf
++++ b/src/network/networkd-network-gperf.gperf
+@@ -50,7 +50,7 @@ Network.DNS,                            config_parse_strv,
+ Network.LLMNR,                          config_parse_resolve_support,                   0,                             offsetof(Network, llmnr)
+ Network.MulticastDNS,                   config_parse_resolve_support,                   0,                             offsetof(Network, mdns)
+ Network.DNSSEC,                         config_parse_dnssec_mode,                       0,                             offsetof(Network, dnssec_mode)
+-Network.DNSSECNegativeTrustAnchors,     config_parse_dnssec_negative_trust_anchors,     0,                             offsetof(Network, dnssec_negative_trust_anchors)
++Network.DNSSECNegativeTrustAnchors,     config_parse_dnssec_negative_trust_anchors,     0,                             0
+ Network.NTP,                            config_parse_strv,                              0,                             offsetof(Network, ntp)
+ Network.IPForward,                      config_parse_address_family_boolean_with_kernel,0,                             offsetof(Network, ip_forward)
+ Network.IPMasquerade,                   config_parse_bool,                              0,                             offsetof(Network, ip_masquerade)

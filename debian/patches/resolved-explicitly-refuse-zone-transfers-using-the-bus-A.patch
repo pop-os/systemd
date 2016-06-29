@@ -41,7 +41,7 @@ index 7b79d29..e675fe4 100644
  
  bool dns_class_is_pseudo(uint16_t class);
 diff --git a/src/resolve/resolved-bus.c b/src/resolve/resolved-bus.c
-index 6d4e574..2c69f15 100644
+index 53b8cc3..94fa1e1 100644
 --- a/src/resolve/resolved-bus.c
 +++ b/src/resolve/resolved-bus.c
 @@ -642,6 +642,8 @@ static int bus_method_resolve_record(sd_bus_message *message, void *userdata, sd

@@ -72,7 +72,7 @@ index f5f8f2f..63fdbe8 100644
  int bitmap_set(Bitmap *b, unsigned n);
  void bitmap_unset(Bitmap *b, unsigned n);
 diff --git a/src/resolve/resolved-bus.c b/src/resolve/resolved-bus.c
-index 2c69f15..030e56d 100644
+index 94fa1e1..8a16753 100644
 --- a/src/resolve/resolved-bus.c
 +++ b/src/resolve/resolved-bus.c
 @@ -667,6 +667,10 @@ static int bus_method_resolve_record(sd_bus_message *message, void *userdata, sd

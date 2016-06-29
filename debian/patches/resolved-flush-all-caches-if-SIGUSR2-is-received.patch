@@ -1,0 +1,77 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 10 Jun 2016 20:23:49 +0200
+Subject: resolved: flush all caches if SIGUSR2 is received
+
+---
+ src/resolve/resolved-manager.c | 17 +++++++++++++++++
+ src/resolve/resolved-manager.h |  1 +
+ src/resolve/resolved.c         |  2 +-
+ 3 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 6de7fe8..56614ab 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -466,6 +466,21 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
+         return 0;
+ }
+ 
++static int manager_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
++        Manager *m = userdata;
++        DnsScope *scope;
++
++        assert(s);
++        assert(si);
++        assert(m);
++
++        LIST_FOREACH(scopes, scope, m->dns_scopes)
++                dns_cache_flush(&scope->cache);
++
++        log_info("Flushed all caches.");
++        return 0;
++}
++
+ int manager_new(Manager **ret) {
+         _cleanup_(manager_freep) Manager *m = NULL;
+         int r;
+@@ -526,6 +541,7 @@ int manager_new(Manager **ret) {
+                 return r;
+ 
+         (void) sd_event_add_signal(m->event, &m->sigusr1_event_source, SIGUSR1, manager_sigusr1, m);
++        (void) sd_event_add_signal(m->event, &m->sigusr2_event_source, SIGUSR2, manager_sigusr2, m);
+ 
+         *ret = m;
+         m = NULL;
+@@ -584,6 +600,7 @@ Manager *manager_free(Manager *m) {
+         sd_bus_unref(m->bus);
+ 
+         sd_event_source_unref(m->sigusr1_event_source);
++        sd_event_source_unref(m->sigusr2_event_source);
+ 
+         sd_event_unref(m->event);
+ 
+diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
+index e82a824..97f75ac 100644
+--- a/src/resolve/resolved-manager.h
++++ b/src/resolve/resolved-manager.h
+@@ -120,6 +120,7 @@ struct Manager {
+         sd_bus_slot *prepare_for_sleep_slot;
+ 
+         sd_event_source *sigusr1_event_source;
++        sd_event_source *sigusr2_event_source;
+ 
+         unsigned n_transactions_total;
+         unsigned n_dnssec_verdict[_DNSSEC_VERDICT_MAX];
+diff --git a/src/resolve/resolved.c b/src/resolve/resolved.c
+index 6cef401..3a47b82 100644
+--- a/src/resolve/resolved.c
++++ b/src/resolve/resolved.c
+@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
+         if (r < 0)
+                 goto finish;
+ 
+-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGUSR1, -1) >= 0);
++        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGUSR1, SIGUSR2, -1) >= 0);
+ 
+         r = manager_new(&m);
+         if (r < 0) {

@@ -12,10 +12,10 @@ hence the domains should really not appear there.
  3 files changed, 13 insertions(+), 3 deletions(-)
 
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 7143dd2..50cddea 100644
+index 39d8ec6..7a601c9 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -1183,7 +1183,7 @@ int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
+@@ -1198,7 +1198,7 @@ int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
          return 0;
  }
  
@@ -24,7 +24,7 @@ index 7143dd2..50cddea 100644
          DnsSearchDomain *d;
          Iterator i;
          Link *l;
-@@ -1197,6 +1197,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
+@@ -1212,6 +1212,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
                  return r;
  
          LIST_FOREACH(domains, d, m->search_domains) {
@@ -36,7 +36,7 @@ index 7143dd2..50cddea 100644
                  r = ordered_set_put(*domains, d->name);
                  if (r == -EEXIST)
                          continue;
-@@ -1207,6 +1212,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
+@@ -1222,6 +1227,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
          HASHMAP_FOREACH(l, m->links, i) {
  
                  LIST_FOREACH(domains, d, l->search_domains) {
@@ -49,10 +49,10 @@ index 7143dd2..50cddea 100644
                          if (r == -EEXIST)
                                  continue;
 diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
-index 39d9098..6abf93c 100644
+index fe9094f..3920c74 100644
 --- a/src/resolve/resolved-manager.h
 +++ b/src/resolve/resolved-manager.h
-@@ -169,7 +169,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
+@@ -170,7 +170,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
  int manager_is_own_hostname(Manager *m, const char *name);
  
  int manager_compile_dns_servers(Manager *m, OrderedSet **servers);

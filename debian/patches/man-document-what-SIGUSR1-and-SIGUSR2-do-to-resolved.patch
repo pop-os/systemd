@@ -1,0 +1,41 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 10 Jun 2016 20:29:32 +0200
+Subject: man: document what SIGUSR1 and SIGUSR2 do to resolved
+
+---
+ man/systemd-resolved.service.xml | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/man/systemd-resolved.service.xml b/man/systemd-resolved.service.xml
+index 829729c..485f3e9 100644
+--- a/man/systemd-resolved.service.xml
++++ b/man/systemd-resolved.service.xml
+@@ -146,6 +146,28 @@
+   </refsect1>
+ 
+   <refsect1>
++    <title>Signals</title>
++
++    <variablelist>
++      <varlistentry>
++        <term><constant>SIGUSR1</constant></term>
++
++        <listitem><para>Upon reception of the SIGUSR1 process signal <command>systemd-resolved</command> will dump the
++        contents of all DNS resource record caches it maintains into the system logs.</para></listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><constant>SIGUSR2</constant></term>
++
++        <listitem><para>Upon reception of the SIGUSR2 process signal <command>systemd-resolved</command> will flush all
++        caches it maintains. Note that it should normally not be necessary to request this explicitly – except for
++        debugging purposes – as <command>systemd-resolved</command> flushes the caches automatically anyway any time
++        the host's network configuration changes.</para></listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++
++  <refsect1>
+     <title>See Also</title>
+     <para>
+       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,

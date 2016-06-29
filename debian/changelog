@@ -26,6 +26,7 @@ systemd (230-4) UNRELEASED; urgency=medium
     provides compatibility with clients that don't use NSS but do DNS queries
     directly, such as Chrome.
   * resolved: Don't add route-only domains to /etc/resolv.conf.
+  * systemd-resolve: Add --flush-caches and --status commands.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)

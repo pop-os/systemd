@@ -1230,10 +1230,10 @@ index 0fa6ec0..fc10e48 100644
          }
  
 diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
-index 6aff427..e307fe6 100644
+index 2e6d11a..bb9ceaa 100644
 --- a/src/resolve/resolved-link-bus.c
 +++ b/src/resolve/resolved-link-bus.c
-@@ -198,6 +198,9 @@ int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_
+@@ -214,6 +214,9 @@ int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_
                  if (sz != FAMILY_ADDRESS_SIZE(family))
                          return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid address size");
  
@@ -1315,7 +1315,7 @@ index 8b1d71a..3516af5 100644
  }
  
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 13109ab..7143dd2 100644
+index fcb0c94..39d8ec6 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -35,6 +35,7 @@
@@ -1326,7 +1326,7 @@ index 13109ab..7143dd2 100644
  #include "resolved-etc-hosts.h"
  #include "resolved-llmnr.h"
  #include "resolved-manager.h"
-@@ -479,6 +480,7 @@ int manager_new(Manager **ret) {
+@@ -492,6 +493,7 @@ int manager_new(Manager **ret) {
          m->llmnr_ipv4_udp_fd = m->llmnr_ipv6_udp_fd = -1;
          m->llmnr_ipv4_tcp_fd = m->llmnr_ipv6_tcp_fd = -1;
          m->mdns_ipv4_fd = m->mdns_ipv6_fd = -1;
@@ -1334,7 +1334,7 @@ index 13109ab..7143dd2 100644
          m->hostname_fd = -1;
  
          m->llmnr_support = RESOLVE_SUPPORT_YES;
-@@ -539,6 +541,10 @@ int manager_start(Manager *m) {
+@@ -553,6 +555,10 @@ int manager_start(Manager *m) {
  
          assert(m);
  
@@ -1345,7 +1345,7 @@ index 13109ab..7143dd2 100644
          r = manager_llmnr_start(m);
          if (r < 0)
                  return r;
-@@ -568,6 +574,11 @@ Manager *manager_free(Manager *m) {
+@@ -582,6 +588,11 @@ Manager *manager_free(Manager *m) {
  
          dns_scope_free(m->unicast_scope);
  
@@ -1357,7 +1357,7 @@ index 13109ab..7143dd2 100644
          hashmap_free(m->links);
          hashmap_free(m->dns_transactions);
  
-@@ -579,6 +590,7 @@ Manager *manager_free(Manager *m) {
+@@ -593,6 +604,7 @@ Manager *manager_free(Manager *m) {
  
          manager_llmnr_stop(m);
          manager_mdns_stop(m);
@@ -1365,7 +1365,7 @@ index 13109ab..7143dd2 100644
  
          sd_bus_slot_unref(m->prepare_for_sleep_slot);
          sd_event_source_unref(m->bus_retry_event_source);
-@@ -793,7 +805,14 @@ int manager_write(Manager *m, int fd, DnsPacket *p) {
+@@ -808,7 +820,14 @@ int manager_write(Manager *m, int fd, DnsPacket *p) {
          return 0;
  }
  
@@ -1381,7 +1381,7 @@ index 13109ab..7143dd2 100644
          union sockaddr_union sa = {
                  .in.sin_family = AF_INET,
          };
-@@ -806,14 +825,14 @@ static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_ad
+@@ -821,14 +840,14 @@ static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_ad
  
          assert(m);
          assert(fd >= 0);
@@ -1398,7 +1398,7 @@ index 13109ab..7143dd2 100644
          sa.in.sin_port = htobe16(port),
  
          mh.msg_iov = &iov;
-@@ -837,12 +856,23 @@ static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_ad
+@@ -852,12 +871,23 @@ static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_ad
  
                  pi = (struct in_pktinfo*) CMSG_DATA(cmsg);
                  pi->ipi_ifindex = ifindex;
@@ -1423,7 +1423,7 @@ index 13109ab..7143dd2 100644
          union sockaddr_union sa = {
                  .in6.sin6_family = AF_INET6,
          };
-@@ -855,14 +885,14 @@ static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_a
+@@ -870,14 +900,14 @@ static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_a
  
          assert(m);
          assert(fd >= 0);
@@ -1440,7 +1440,7 @@ index 13109ab..7143dd2 100644
          sa.in6.sin6_port = htobe16(port),
          sa.in6.sin6_scope_id = ifindex;
  
-@@ -887,24 +917,36 @@ static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_a
+@@ -902,24 +932,36 @@ static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_a
  
                  pi = (struct in6_pktinfo*) CMSG_DATA(cmsg);
                  pi->ipi6_ifindex = ifindex;
@@ -1482,10 +1482,10 @@ index 13109ab..7143dd2 100644
          return -EAFNOSUPPORT;
  }
 diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
-index dca0ad6..39d9098 100644
+index 2e20222..fe9094f 100644
 --- a/src/resolve/resolved-manager.h
 +++ b/src/resolve/resolved-manager.h
-@@ -129,6 +129,13 @@ struct Manager {
+@@ -130,6 +130,13 @@ struct Manager {
          Set* etc_hosts_by_address;
          Hashmap* etc_hosts_by_name;
          usec_t etc_hosts_last, etc_hosts_mtime;
@@ -1499,7 +1499,7 @@ index dca0ad6..39d9098 100644
  };
  
  /* Manager */
-@@ -141,7 +148,7 @@ int manager_start(Manager *m);
+@@ -142,7 +149,7 @@ int manager_start(Manager *m);
  uint32_t manager_find_mtu(Manager *m);
  
  int manager_write(Manager *m, int fd, DnsPacket *p);
@@ -1531,7 +1531,7 @@ index ae17aef..df2b5d5 100644
          if (ordered_set_isempty(dns))
                  fputs("# No DNS servers known.\n", f);
 diff --git a/src/resolve/resolved.c b/src/resolve/resolved.c
-index 6cef401..20ce4f2 100644
+index 3a47b82..deb75f9 100644
 --- a/src/resolve/resolved.c
 +++ b/src/resolve/resolved.c
 @@ -67,7 +67,11 @@ int main(int argc, char *argv[]) {

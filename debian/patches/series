@@ -4,6 +4,13 @@ resolved-when-restarting-a-transaction-make-sure-to-not-t.patch
 units-add-nosuid-and-nodev-options-to-tmp.mount-3575.patch
 resolved-support-IPv6-DNS-servers-on-the-local-link.patch
 resolved-also-rewrite-private-etc-resolv.conf-when-config.patch
+networkd-fix-bad-memory-access-when-parsing-DNSSECNegativ.patch
+resolved-export-global-NTAs-on-the-bus.patch
+resolved-export-the-effective-per-link-DNSSEC-setting-not.patch
+resolved-flush-all-caches-if-SIGUSR2-is-received.patch
+man-document-what-SIGUSR1-and-SIGUSR2-do-to-resolved.patch
+resolved-also-add-a-way-to-flush-all-caches-via-the-bus.patch
+resolve-add-systemd-resolve-status-command.patch
 resolved-rework-SERVFAIL-handling.patch
 resolved-when-caching-replies-check-rcode-earlier.patch
 resolved-when-processing-auxiliary-DNSSEC-transactions-ac.patch
