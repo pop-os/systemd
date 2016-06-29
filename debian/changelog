@@ -1,4 +1,4 @@
-systemd (230-4) UNRELEASED; urgency=medium
+systemd (230-4) unstable; urgency=medium
 
   [ Martin Pitt ]
   * tmp.mount: Add nosuid and nodev mount options. This restores compatibility
@@ -38,7 +38,7 @@ systemd (230-4) UNRELEASED; urgency=medium
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
 
- -- Martin Pitt <mpitt@debian.org>  Wed, 22 Jun 2016 12:49:16 +0200
+ -- Martin Pitt <mpitt@debian.org>  Wed, 29 Jun 2016 15:23:32 +0200
 
 systemd (230-3) unstable; urgency=medium
 
