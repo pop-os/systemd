@@ -13,6 +13,7 @@ resolved-when-using-the-ResolveRecord-bus-call-adjust-TTL.patch
 resolved-add-dns_packet_add_-question-answer-helper.patch
 resolved-extend-dns_packet_append_opt-so-that-it-can-set-.patch
 resolved-respond-to-local-resolver-requests-on-127.0.0.53.patch
+resolved-make-sure-that-route-only-domains-are-never-adde.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

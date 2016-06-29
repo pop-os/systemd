@@ -1,0 +1,76 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 15 Jun 2016 22:30:11 +0200
+Subject: resolved: make sure that route-only domains are never added to
+ /etc/resolv.conf
+
+After all, /etc/resolv.conf doesn't know the concept of "route-only domains",
+hence the domains should really not appear there.
+---
+ src/resolve/resolved-manager.c     | 12 +++++++++++-
+ src/resolve/resolved-manager.h     |  2 +-
+ src/resolve/resolved-resolv-conf.c |  2 +-
+ 3 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 7143dd2..50cddea 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -1183,7 +1183,7 @@ int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
+         return 0;
+ }
+ 
+-int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
++int manager_compile_search_domains(Manager *m, OrderedSet **domains, int filter_route) {
+         DnsSearchDomain *d;
+         Iterator i;
+         Link *l;
+@@ -1197,6 +1197,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
+                 return r;
+ 
+         LIST_FOREACH(domains, d, m->search_domains) {
++
++                if (filter_route >= 0 &&
++                    d->route_only != !!filter_route)
++                        continue;
++
+                 r = ordered_set_put(*domains, d->name);
+                 if (r == -EEXIST)
+                         continue;
+@@ -1207,6 +1212,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
+         HASHMAP_FOREACH(l, m->links, i) {
+ 
+                 LIST_FOREACH(domains, d, l->search_domains) {
++
++                        if (filter_route >= 0 &&
++                            d->route_only != !!filter_route)
++                                continue;
++
+                         r = ordered_set_put(*domains, d->name);
+                         if (r == -EEXIST)
+                                 continue;
+diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
+index 39d9098..6abf93c 100644
+--- a/src/resolve/resolved-manager.h
++++ b/src/resolve/resolved-manager.h
+@@ -169,7 +169,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
+ int manager_is_own_hostname(Manager *m, const char *name);
+ 
+ int manager_compile_dns_servers(Manager *m, OrderedSet **servers);
+-int manager_compile_search_domains(Manager *m, OrderedSet **domains);
++int manager_compile_search_domains(Manager *m, OrderedSet **domains, int filter_route);
+ 
+ DnssecMode manager_get_dnssec_mode(Manager *m);
+ bool manager_dnssec_supported(Manager *m);
+diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
+index df2b5d5..31b25ca 100644
+--- a/src/resolve/resolved-resolv-conf.c
++++ b/src/resolve/resolved-resolv-conf.c
+@@ -235,7 +235,7 @@ int manager_write_resolv_conf(Manager *m) {
+         if (r < 0)
+                 return log_warning_errno(r, "Failed to compile list of DNS servers: %m");
+ 
+-        r = manager_compile_search_domains(m, &domains);
++        r = manager_compile_search_domains(m, &domains, false);
+         if (r < 0)
+                 return log_warning_errno(r, "Failed to compile list of search domains: %m");
+ 

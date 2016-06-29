@@ -25,6 +25,7 @@ systemd (230-4) UNRELEASED; urgency=medium
   * resolved: respond to local resolver requests on 127.0.0.53:53. This
     provides compatibility with clients that don't use NSS but do DNS queries
     directly, such as Chrome.
+  * resolved: Don't add route-only domains to /etc/resolv.conf.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
