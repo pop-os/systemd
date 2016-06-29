@@ -43,7 +43,7 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
 -
 ---
  Makefile-man.am                    |  12 +
- Makefile.am                        |  14 +
+ Makefile.am                        |  12 +
  man/systemd-fsckd.service.xml      | 162 +++++++++
  po/POTFILES.in                     |   1 +
  src/fsckd/fsckd.c                  | 685 +++++++++++++++++++++++++++++++++++++
@@ -51,7 +51,7 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  units/systemd-fsck@.service.in     |   3 +-
  units/systemd-fsckd.service.in     |  17 +
  units/systemd-fsckd.socket         |  15 +
- 9 files changed, 910 insertions(+), 1 deletion(-)
+ 9 files changed, 908 insertions(+), 1 deletion(-)
  create mode 100644 man/systemd-fsckd.service.xml
  create mode 100644 src/fsckd/fsckd.c
  create mode 100644 units/systemd-fsckd.service.in
@@ -109,10 +109,10 @@ index d5b328d..6495e77 100644
  	man/systemd-getty-generator.xml \
  	man/systemd-gpt-auto-generator.xml \
 diff --git a/Makefile.am b/Makefile.am
-index 6ea6dd0..22099b6 100644
+index fbd63f9..4965144 100644
 --- a/Makefile.am
 +++ b/Makefile.am
-@@ -395,6 +395,7 @@ rootlibexec_PROGRAMS = \
+@@ -396,6 +396,7 @@ rootlibexec_PROGRAMS = \
  	systemd-remount-fs \
  	systemd-reply-password \
  	systemd-fsck \
@@ -120,7 +120,7 @@ index 6ea6dd0..22099b6 100644
  	systemd-ac-power \
  	systemd-sysctl \
  	systemd-sleep \
-@@ -496,6 +497,7 @@ dist_systemunit_DATA = \
+@@ -497,6 +498,7 @@ dist_systemunit_DATA = \
  	units/slices.target \
  	units/system.slice \
  	units/x-.slice \
@@ -128,7 +128,7 @@ index 6ea6dd0..22099b6 100644
  	units/systemd-initctl.socket \
  	units/syslog.socket \
  	units/dev-hugepages.mount \
-@@ -545,6 +547,7 @@ nodist_systemunit_DATA = \
+@@ -546,6 +548,7 @@ nodist_systemunit_DATA = \
  	units/systemd-exit.service \
  	units/systemd-fsck@.service \
  	units/systemd-fsck-root.service \
@@ -136,7 +136,7 @@ index 6ea6dd0..22099b6 100644
  	units/systemd-machine-id-commit.service \
  	units/systemd-udevd.service \
  	units/systemd-udev-trigger.service \
-@@ -598,6 +601,7 @@ EXTRA_DIST += \
+@@ -599,6 +602,7 @@ EXTRA_DIST += \
  	units/user/systemd-exit.service.in \
  	units/systemd-fsck@.service.in \
  	units/systemd-fsck-root.service.in \
@@ -144,8 +144,8 @@ index 6ea6dd0..22099b6 100644
  	units/systemd-machine-id-commit.service.in \
  	units/user@.service.m4.in \
  	units/debug-shell.service.in \
-@@ -2593,6 +2597,16 @@ systemd_fsck_LDADD = \
- 	libshared.la
+@@ -2649,6 +2653,14 @@ systemd_fsck_LDADD = \
+ 	libsystemd-shared.la
  
  # ------------------------------------------------------------------------------
 +systemd_fsckd_SOURCES = \
@@ -153,9 +153,7 @@ index 6ea6dd0..22099b6 100644
 +	$(NULL)
 +
 +systemd_fsckd_LDADD = \
-+	libsystemd-internal.la \
-+	libudev-internal.la \
-+	$(NULL)
++	libsystemd-shared.la
 +
 +# ------------------------------------------------------------------------------
  systemd_ac_power_SOURCES = \

@@ -1,5 +1,6 @@
 systemd (230-5) UNRELEASED; urgency=medium
 
+  [ Martin Pitt ]
   * Sync test/networkd-test.py with current upstream master, and remove our
     debian/tests/networkd copy. Directly run test/networkd-test.py in
     autopkgtest.
@@ -7,6 +8,10 @@ systemd (230-5) UNRELEASED; urgency=medium
     /etc/udev/rules.d/80-net-setup-link.rules is a symlink to /dev/null, to be
     consistent with the documented way to disable ifnames. (Closes: #824491,
     LP: #1593379)
+
+  [ Felipe Sateler ]
+  * Convert common code into a private shared library. This saves about 9 MB
+    of installed size in the systemd package, and some more in systemd-*.
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 30 Jun 2016 09:20:35 +0200
 
