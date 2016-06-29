@@ -33,6 +33,7 @@ systemd (230-4) UNRELEASED; urgency=medium
     and software like Chrome that does not do NSS (libnss-resolve) still gets
     proper DNS resolution. Drop the brittle and ugly
     systemd-networkd-resolvconf-update.{path,service} hack instead.
+  * debian/tests/boot-smoke: Run in containers as well.
 
   [ Laurent Bigonville ]
   * Build with IDN support. (Closes: #814528)
