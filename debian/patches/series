@@ -22,6 +22,8 @@ resolved-extend-dns_packet_append_opt-so-that-it-can-set-.patch
 resolved-respond-to-local-resolver-requests-on-127.0.0.53.patch
 resolved-make-sure-that-route-only-domains-are-never-adde.patch
 debian/Use-Debian-specific-config-files.patch
+resolved-add-test-for-route-only-domain-filtering-3609.patch
+test-check-resolved-generated-resolv.conf-in-networkd-tes.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
 debian/Start-logind-on-demand-via-libpam-systemd.patch

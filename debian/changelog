@@ -1,7 +1,8 @@
 systemd (230-5) UNRELEASED; urgency=medium
 
-  * debian/tests/networkd: Sync with upstream PR#3628 to fix tests in
-    environments with network search domains.
+  * Sync test/networkd-test.py with current upstream master, and remove our
+    debian/tests/networkd copy. Directly run test/networkd-test.py in
+    autopkgtest.
   * debian/extra/rules/73-usb-net-by-mac.rules: Disable when
     /etc/udev/rules.d/80-net-setup-link.rules is a symlink to /dev/null, to be
     consistent with the documented way to disable ifnames. (Closes: #824491,

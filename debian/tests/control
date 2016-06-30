@@ -32,7 +32,8 @@ Depends: systemd,
   cryptsetup-bin,
 Restrictions: needs-root, isolation-machine
 
-Tests: networkd
+Tests: networkd-test.py
+Tests-Directory: test
 Depends: systemd,
   libpam-systemd,
   acl,

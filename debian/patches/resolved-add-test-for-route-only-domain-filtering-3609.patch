@@ -1,0 +1,71 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Tue, 28 Jun 2016 18:18:27 +0200
+Subject: resolved: add test for route-only domain filtering (#3609)
+
+With commit 6f7da49d00 route-only domains do not get put into resolv.conf's
+"search" list any more. Add a comment about the tri-state, to clarify its
+semantics and why we are passing a bool parameter into an int type. Also add a
+test case for it.
+---
+ src/resolve/resolved-manager.c |  5 +++++
+ test/networkd-test.py          | 31 +++++++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 7a601c9..4e4e98b 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -1198,6 +1198,11 @@ int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
+         return 0;
+ }
+ 
++/* filter_route is a tri-state:
++ *   < 0: no filtering
++ *   = 0 or false: return only domains which should be used for searching
++ *   > 0 or true: return only domains which are for routing only
++ */
+ int manager_compile_search_domains(Manager *m, OrderedSet **domains, int filter_route) {
+         DnsSearchDomain *d;
+         Iterator i;
+diff --git a/test/networkd-test.py b/test/networkd-test.py
+index f94224c..7518e91 100755
+--- a/test/networkd-test.py
++++ b/test/networkd-test.py
+@@ -227,6 +227,37 @@ DHCP=%s
+     def test_hotplug_dhcp_ip6(self):
+         self.do_test(coldplug=False, ipv6=True)
+ 
++    def test_route_only_dns(self):
++        with open('/run/systemd/network/myvpn.netdev', 'w') as f:
++            f.write('''[NetDev]
++Name=dummy0
++Kind=dummy
++MACAddress=12:34:56:78:9a:bc''')
++        with open('/run/systemd/network/myvpn.network', 'w') as f:
++            f.write('''[Match]
++Name=dummy0
++[Network]
++Address=192.168.42.100
++DNS=192.168.42.1
++Domains= ~company''')
++        self.addCleanup(os.remove, '/run/systemd/network/myvpn.netdev')
++        self.addCleanup(os.remove, '/run/systemd/network/myvpn.network')
++
++        self.do_test(coldplug=True, ipv6=False,
++                     extra_opts='IPv6AcceptRouterAdvertisements=False')
++
++        if os.path.islink('/etc/resolv.conf'):
++            with open('/etc/resolv.conf') as f:
++                contents = f.read()
++
++            # ~company is not a search domain, only a routing domain
++            self.assertNotRegex(contents, 'search.*company')
++
++            # our global server should appear, unless we already have three
++            # (different) servers
++            if contents.count('nameserver ') < 3:
++                self.assertIn('nameserver 192.168.5.1\n', contents)
++
+ 
+ @unittest.skipUnless(have_dnsmasq, 'dnsmasq not installed')
+ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
