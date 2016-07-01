@@ -122,7 +122,7 @@ Depends: systemd-sysv,
   pkg-config,
   systemd-journal-remote,
   systemd-container,
-Restrictions: needs-recommends, needs-root, isolation-container, allow-stderr, breaks-testbed
+Restrictions: needs-recommends, needs-root, isolation-machine, allow-stderr, breaks-testbed
 
 # NOUPSTREAM: Do not run these tests for upstream builds
 

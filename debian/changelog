@@ -1,3 +1,10 @@
+systemd (230-6) UNRELEASED; urgency=medium
+
+  * debian/tests/boot-smoke: Stop running in containers again, too unreliable
+    on Ubuntu s390x right now.
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 01 Jul 2016 14:12:54 +0200
+
 systemd (230-5) unstable; urgency=medium
 
   [ Martin Pitt ]
