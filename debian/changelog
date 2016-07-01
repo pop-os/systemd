@@ -1,4 +1,4 @@
-systemd (230-5) UNRELEASED; urgency=medium
+systemd (230-5) unstable; urgency=medium
 
   [ Martin Pitt ]
   * Sync test/networkd-test.py with current upstream master, and remove our
@@ -17,7 +17,7 @@ systemd (230-5) UNRELEASED; urgency=medium
   * Convert common code into a private shared library. This saves about 9 MB
     of installed size in the systemd package, and some more in systemd-*.
 
- -- Martin Pitt <mpitt@debian.org>  Thu, 30 Jun 2016 09:20:35 +0200
+ -- Martin Pitt <mpitt@debian.org>  Fri, 01 Jul 2016 09:15:12 +0200
 
 systemd (230-4) unstable; urgency=medium
 
