@@ -1,7 +1,12 @@
 systemd (230-6) UNRELEASED; urgency=medium
 
+  [ Martin Pitt ]
   * debian/tests/boot-smoke: Stop running in containers again, too unreliable
     on Ubuntu s390x right now.
+
+  [ Michael Biebl ]
+  * Bump Build-Depends on debhelper to (>= 9.20160114), required for
+    --dbgsym-migration support.
 
  -- Martin Pitt <mpitt@debian.org>  Fri, 01 Jul 2016 14:12:54 +0200
 
