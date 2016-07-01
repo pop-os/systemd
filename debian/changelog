@@ -8,6 +8,10 @@ systemd (230-5) UNRELEASED; urgency=medium
     /etc/udev/rules.d/80-net-setup-link.rules is a symlink to /dev/null, to be
     consistent with the documented way to disable ifnames. (Closes: #824491,
     LP: #1593379)
+  * debian/rules: Ignore libcap-ng.so in the "does anything link against /usr"
+    check, to work around libaudit1 recently gaining a new dependency against
+    that library (#828991). We have no influence on that ourselves. This fixes
+    the FTBFS in the meantime.
 
   [ Felipe Sateler ]
   * Convert common code into a private shared library. This saves about 9 MB
