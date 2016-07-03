@@ -8,6 +8,9 @@ systemd (230-6) UNRELEASED; urgency=medium
   * Bump Build-Depends on debhelper to (>= 9.20160114), required for
     --dbgsym-migration support.
 
+  [ Felipe Sateler ]
+  * Do not install libsystemd-shared.so symlink
+
  -- Martin Pitt <mpitt@debian.org>  Fri, 01 Jul 2016 14:12:54 +0200
 
 systemd (230-5) unstable; urgency=medium
