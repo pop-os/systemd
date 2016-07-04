@@ -2,6 +2,10 @@
 set -e
 
 test_started() {
+    # ensure the *old* logind from before the upgrade isn't running
+    echo " * try-restarting systemd-logind"
+    systemctl try-restart systemd-logind
+
     echo " * daemon is started"
     # should start at boot, not with D-BUS activation
     LOGINDPID=$(pidof systemd-logind)
