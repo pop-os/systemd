@@ -10,6 +10,7 @@ systemd (230-6) UNRELEASED; urgency=medium
 
   [ Felipe Sateler ]
   * Do not install libsystemd-shared.so symlink
+  * {machine,system}ctl: always pass &changes and &n_changes (Closes: #830144)
 
  -- Martin Pitt <mpitt@debian.org>  Fri, 01 Jul 2016 14:12:54 +0200
 
