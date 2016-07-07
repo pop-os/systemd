@@ -9,6 +9,7 @@ systemd (230-6) UNRELEASED; urgency=medium
     --dbgsym-migration support.
   * Install test-udev binary into $libdir/udev/ not $libdir. Only libraries
     should be installed directly into $libdir.
+  * Exclude libsystemd-shared from dh_makeshlibs.
 
   [ Felipe Sateler ]
   * Do not install libsystemd-shared.so symlink

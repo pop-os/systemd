@@ -283,6 +283,7 @@ override_dh_shlibdeps:
 
 override_dh_makeshlibs:
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
+	dh_makeshlibs -psystemd -Xlibsystemd-shared  -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
 
 autoreconf:
