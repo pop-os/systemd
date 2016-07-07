@@ -1,4 +1,4 @@
-systemd (230-6) UNRELEASED; urgency=medium
+systemd (230-6) unstable; urgency=medium
 
   [ Martin Pitt ]
   * debian/tests/boot-smoke: Stop running in containers again, too unreliable
@@ -18,7 +18,7 @@ systemd (230-6) UNRELEASED; urgency=medium
   [ Michael Prokop ]
   * debian/tests/logind: Ensure correct version of logind is running.
 
- -- Martin Pitt <mpitt@debian.org>  Fri, 01 Jul 2016 14:12:54 +0200
+ -- Michael Biebl <biebl@debian.org>  Thu, 07 Jul 2016 15:22:16 +0200
 
 systemd (230-5) unstable; urgency=medium
 
