@@ -7,6 +7,8 @@ systemd (230-6) UNRELEASED; urgency=medium
   [ Michael Biebl ]
   * Bump Build-Depends on debhelper to (>= 9.20160114), required for
     --dbgsym-migration support.
+  * Install test-udev binary into $libdir/udev/ not $libdir. Only libraries
+    should be installed directly into $libdir.
 
   [ Felipe Sateler ]
   * Do not install libsystemd-shared.so symlink

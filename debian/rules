@@ -240,9 +240,9 @@ endif
 
 	# ship test-udev, so that we have it for autopkgtests
 	if [ -e build-deb/.libs/test-udev ]; then \
-		install build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/; \
+		install -D build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev; \
 	else \
-		install build-deb/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/; \
+		install -D build-deb/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev; \
 	fi
 
 	# Ubuntu specific files
