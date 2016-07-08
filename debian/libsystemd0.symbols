@@ -1,4 +1,5 @@
 libsystemd.so.0 libsystemd0 #MINVER#
+* Build-Depends-Package: libsystemd-dev
  LIBSYSTEMD_209@LIBSYSTEMD_209 0
  LIBSYSTEMD_211@LIBSYSTEMD_211 211
  LIBSYSTEMD_213@LIBSYSTEMD_213 213

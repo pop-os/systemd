@@ -3,6 +3,10 @@ systemd (230-7) UNRELEASED; urgency=medium
   * Tell dh_shlibdeps to look in the systemd package for libraries. Otherwise
     dpkg-shlibdeps fails to find libsystemd-shared as we no longer create a
     shlibs file for it.
+  * Add Build-Depends-Package to libudev1.symbols and libsystemd0.symbols.
+    This ensures proper dependencies when a package has a Build-Depends on a
+    higher version of libudev-dev or libsystemd-dev then what it gets from the
+    used symbols.
 
  -- Michael Biebl <biebl@debian.org>  Fri, 08 Jul 2016 11:05:53 +0200
 
