@@ -279,11 +279,11 @@ override_dh_installinit:
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
 	dh_shlibdeps -psystemd -- -dPre-Depends -edebian/systemd/bin/systemctl -dDepends
-	dh_shlibdeps --remaining-packages
+	dh_shlibdeps --remaining-packages -Lsystemd
 
 override_dh_makeshlibs:
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
-	dh_makeshlibs -psystemd -Xlibsystemd-shared  -- -c$(GENSYMBOLS_LEVEL)
+	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
 
 autoreconf:
