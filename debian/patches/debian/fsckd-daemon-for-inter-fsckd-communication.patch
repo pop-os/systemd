@@ -19,7 +19,7 @@ fsckd:<num_devices>:<progress>:<string>
 * progress corresponds to the current minimum percentage of all devices being
   checked (float, from 0 to 100)
 * string is a translated message ready to be displayed by the plymouth theme
-  displaying the information above. It can be overriden by plymouth themes
+  displaying the information above. It can be overridden by plymouth themes
   supporting i18n.
 
 Grab in fsckd plymouth watch key Control+C, and propagate this cancel request
@@ -30,7 +30,7 @@ Send a message to signal to user what key we are grabbing for fsck cancel.
 Message is: fsckd-cancel-msg:<string>
 Where string is a translated string ready to be displayed by the plymouth theme
 indicating that Control+C can be used to cancel current checks. It can be
-overriden (matching only fsckd-cancel-msg prefix) for themes supporting i18n.
+overridden (matching only fsckd-cancel-msg prefix) for themes supporting i18n.
 
 Misc:
 systemd-fsckd stops on idle when no fsck is connected.
@@ -161,7 +161,7 @@ index fbd63f9..4965144 100644
  
 diff --git a/man/systemd-fsckd.service.xml b/man/systemd-fsckd.service.xml
 new file mode 100644
-index 0000000..c976062
+index 0000000..b7ad58d
 --- /dev/null
 +++ b/man/systemd-fsckd.service.xml
 @@ -0,0 +1,162 @@
@@ -266,7 +266,7 @@ index 0000000..c976062
 +        <varlistentry>
 +          <term><literal>&lt;string&gt;</literal></term>
 +          <listitem><para>a translated message ready to be displayed
-+          by the plymouth theme displaying the data above. It can be overriden
++          by the plymouth theme displaying the data above. It can be overridden
 +          by themes supporting i18n.</para></listitem>
 +        </varlistentry>
 +      </variablelist>
@@ -279,7 +279,7 @@ index 0000000..c976062
 +          <term><literal>&lt;strings&gt;</literal></term>
 +          <listitem><para>a translated string ready to be displayed
 +          by the plymouth theme indicating that Control+C can be used to cancel
-+          current checks. It can be overriden (matching only
++          current checks. It can be overridden (matching only
 +          <literal>fsckd-cancel-msg</literal> prefix)
 +          by themes supporting i18n.</para></listitem>
 +        </varlistentry>
