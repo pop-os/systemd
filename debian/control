@@ -131,7 +131,8 @@ Section: admin
 Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         systemd
+         systemd,
+         dbus
 Recommends: btrfs-progs | btrfs-tools,
             libnss-mymachines,
 Breaks: systemd (<< 224-2)
