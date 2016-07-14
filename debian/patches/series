@@ -33,7 +33,6 @@ debian/Start-logind-on-demand-via-libpam-systemd.patch
 debian/Make-sd_login_monitor_new-work-for-logind-without-sy.patch
 debian/Add-run-initctl-support-to-SysV-compat-tools.patch
 debian/insserv.conf-generator.patch
-debian/Add-support-for-rcS.d-init-scripts-to-the-sysv-gener.patch
 debian/Add-note-to-udev.conf-that-changes-to-that-file-requ.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
