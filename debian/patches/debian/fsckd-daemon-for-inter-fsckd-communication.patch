@@ -109,7 +109,7 @@ index d5b328d..6495e77 100644
  	man/systemd-getty-generator.xml \
  	man/systemd-gpt-auto-generator.xml \
 diff --git a/Makefile.am b/Makefile.am
-index fbd63f9..4965144 100644
+index edf8323..6ba3f35 100644
 --- a/Makefile.am
 +++ b/Makefile.am
 @@ -396,6 +396,7 @@ rootlibexec_PROGRAMS = \
@@ -120,7 +120,7 @@ index fbd63f9..4965144 100644
  	systemd-ac-power \
  	systemd-sysctl \
  	systemd-sleep \
-@@ -497,6 +498,7 @@ dist_systemunit_DATA = \
+@@ -496,6 +497,7 @@ dist_systemunit_DATA = \
  	units/slices.target \
  	units/system.slice \
  	units/x-.slice \
@@ -128,7 +128,7 @@ index fbd63f9..4965144 100644
  	units/systemd-initctl.socket \
  	units/syslog.socket \
  	units/dev-hugepages.mount \
-@@ -546,6 +548,7 @@ nodist_systemunit_DATA = \
+@@ -545,6 +547,7 @@ nodist_systemunit_DATA = \
  	units/systemd-exit.service \
  	units/systemd-fsck@.service \
  	units/systemd-fsck-root.service \
@@ -136,7 +136,7 @@ index fbd63f9..4965144 100644
  	units/systemd-machine-id-commit.service \
  	units/systemd-udevd.service \
  	units/systemd-udev-trigger.service \
-@@ -599,6 +602,7 @@ EXTRA_DIST += \
+@@ -598,6 +601,7 @@ EXTRA_DIST += \
  	units/user/systemd-exit.service.in \
  	units/systemd-fsck@.service.in \
  	units/systemd-fsck-root.service.in \
@@ -144,7 +144,7 @@ index fbd63f9..4965144 100644
  	units/systemd-machine-id-commit.service.in \
  	units/user@.service.m4.in \
  	units/debug-shell.service.in \
-@@ -2649,6 +2653,14 @@ systemd_fsck_LDADD = \
+@@ -2648,6 +2652,14 @@ systemd_fsck_LDADD = \
  	libsystemd-shared.la
  
  # ------------------------------------------------------------------------------
