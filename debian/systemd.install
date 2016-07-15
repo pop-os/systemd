@@ -28,6 +28,7 @@ usr/bin/systemd-delta
 usr/bin/systemd-run
 usr/bin/systemd-path
 usr/bin/systemd-socket-activate
+usr/bin/kernel-install
 usr/bin/bootctl
 usr/bin/busctl
 usr/bin/timedatectl
@@ -53,6 +54,7 @@ usr/lib/sysctl.d/
 #usr/lib/sysusers.d/
 usr/lib/systemd/
 usr/lib/tmpfiles.d/
+usr/lib/kernel
 usr/share/locale/
 ../../extra/init-functions.d lib/lsb/
 ../../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
