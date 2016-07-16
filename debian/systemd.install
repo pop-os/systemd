@@ -61,3 +61,4 @@ usr/share/locale/
 ../../extra/systemd-sysv-install lib/systemd/
 ../../extra/units/* lib/systemd/system/
 ../../extra/dhclient-exit-hooks.d/ etc/dhcp/
+../../extra/kernel-install.d/* usr/lib/kernel/install.d
