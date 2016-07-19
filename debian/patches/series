@@ -27,6 +27,7 @@ build-sys-do-not-recompile-everything-for-libsystemd.patch
 build-sys-Add-new-libsystemd-shared-private-library.patch
 machine-system-ctl-always-pass-changes-and-n_changes-3350.patch
 kernel-install-recognize-boot-efi-mountpoint-3751.patch
+nspawn-decrease-mkdir-error-logging-in-sys-to-debug-prior.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
