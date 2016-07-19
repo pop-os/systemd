@@ -1,0 +1,45 @@
+From: Harald Hoyer <harald@redhat.com>
+Date: Tue, 19 Jul 2016 12:10:09 +0200
+Subject: kernel-install: recognize /boot/efi mountpoint (#3751)
+
+install everything in /boot/efi, if this is a mountpoint
+---
+ src/kernel-install/90-loaderentry.install |  3 ++-
+ src/kernel-install/kernel-install         | 10 +++++++++-
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/kernel-install/90-loaderentry.install b/src/kernel-install/90-loaderentry.install
+index 4c9b1f0..a0bca05 100644
+--- a/src/kernel-install/90-loaderentry.install
++++ b/src/kernel-install/90-loaderentry.install
+@@ -16,7 +16,8 @@ if ! [[ $MACHINE_ID ]]; then
+ fi
+ 
+ BOOT_DIR="/$MACHINE_ID/$KERNEL_VERSION"
+-LOADER_ENTRY="/boot/loader/entries/$MACHINE_ID-$KERNEL_VERSION.conf"
++BOOT_ROOT=${BOOT_DIR_ABS%$BOOT_DIR}
++LOADER_ENTRY="$BOOT_ROOT/loader/entries/$MACHINE_ID-$KERNEL_VERSION.conf"
+ 
+ if [[ $COMMAND == remove ]]; then
+     exec rm -f "$LOADER_ENTRY"
+diff --git a/src/kernel-install/kernel-install b/src/kernel-install/kernel-install
+index 3ae1d77..1159dc3 100644
+--- a/src/kernel-install/kernel-install
++++ b/src/kernel-install/kernel-install
+@@ -86,7 +86,15 @@ if [[ ! $COMMAND ]] || [[ ! $KERNEL_VERSION ]]; then
+     exit 1
+ fi
+ 
+-BOOT_DIR_ABS="/boot/$MACHINE_ID/$KERNEL_VERSION"
++if [[ -d /boot/loader/entries ]] || [[ -d /boot/$MACHINE_ID ]]; then
++    BOOT_DIR_ABS="/boot/$MACHINE_ID/$KERNEL_VERSION"
++elif [[ -d /boot/efi/loader/entries ]] || [[ -d /boot/efi/$MACHINE_ID ]] \
++         || mountpoint -q /boot/efi; then
++    BOOT_DIR_ABS="/boot/efi/$MACHINE_ID/$KERNEL_VERSION"
++else
++    BOOT_DIR_ABS="/boot/$MACHINE_ID/$KERNEL_VERSION"
++fi
++
+ ret=0
+ 
+ readarray -t PLUGINS < <(
