@@ -1,0 +1,108 @@
+From: Alexander Kurtz <alexander@kurtz.be>
+Date: Thu, 21 Jul 2016 02:29:54 +0200
+Subject: bootctl: Always use upper case for "/EFI/BOOT" and
+ "/EFI/BOOT/BOOT*.EFI".
+
+If the ESP is not mounted with "iocharset=ascii", but with "iocharset=utf8"
+(which is for example the default in Debian), the file system becomes case
+sensitive. This means that a file created as "FooBarBaz" cannot be accessed as
+"foobarbaz" since those are then considered different files.
+
+Moreover, a file created as "FooBar" can then also not be accessed as "foobar",
+and it also prevents such a file from being created, as both would use the same
+8.3 short name "FOOBAR".
+
+Even though the UEFI specification [0] does give the canonical spelling for
+the files mentioned above, not all implementations completely conform to that,
+so it's possible that those files would already exist, but with a different
+spelling, causing subtle bugs when scanning or modifying the ESP.
+
+While the proper fix would of course be that everybody conformed to the
+standard, we can work around this problem by just referencing the files by
+their 8.3 short names, i.e. using upper case.
+
+Fixes: #3740
+
+[0] <http://www.uefi.org/specifications>, version 2.6, section 3.5.1.1
+---
+ man/bootctl.xml              | 4 ++--
+ src/boot/bootctl.c           | 8 ++++----
+ test/test-efi-create-disk.sh | 4 ++--
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/man/bootctl.xml b/man/bootctl.xml
+index ebd5875..6e835c0 100644
+--- a/man/bootctl.xml
++++ b/man/bootctl.xml
+@@ -74,14 +74,14 @@
+     <para><command>bootctl update</command> updates all installed
+     versions of systemd-boot, if the current version is newer than the
+     version installed in the EFI system partition. This also includes
+-    the EFI default/fallback loader at /EFI/Boot/boot*.efi. A
++    the EFI default/fallback loader at /EFI/BOOT/BOOT*.EFI. A
+     systemd-boot entry in the EFI boot variables is created if there
+     is no current entry. The created entry will be added to the end of
+     the boot order list.</para>
+ 
+     <para><command>bootctl install</command> installs systemd-boot into
+     the EFI system partition. A copy of systemd-boot will be stored as
+-    the EFI default/fallback loader at /EFI/Boot/boot*.efi. A systemd-boot
++    the EFI default/fallback loader at /EFI/BOOT/BOOT*.EFI. A systemd-boot
+     entry in the EFI boot variables is created and added to the top
+     of the boot order list.</para>
+ 
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index d0af414..5807b83 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -288,7 +288,7 @@ static int status_binaries(const char *esp_path, sd_id128_t partition) {
+         else if (r < 0)
+                 return r;
+ 
+-        r = enumerate_binaries(esp_path, "EFI/Boot", "boot");
++        r = enumerate_binaries(esp_path, "EFI/BOOT", "boot");
+         if (r == 0)
+                 log_error("No default/fallback boot loader installed in ESP.");
+         else if (r < 0)
+@@ -548,7 +548,7 @@ static int mkdir_one(const char *prefix, const char *suffix) {
+ static const char *efi_subdirs[] = {
+         "EFI",
+         "EFI/systemd",
+-        "EFI/Boot",
++        "EFI/BOOT",
+         "loader",
+         "loader/entries"
+ };
+@@ -579,7 +579,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
+                 char *v;
+ 
+                 /* Create the EFI default boot loader name (specified for removable devices) */
+-                v = strjoina(esp_path, "/EFI/Boot/BOOT", name + strlen("systemd-boot"));
++                v = strjoina(esp_path, "/EFI/BOOT/BOOT", name + strlen("systemd-boot"));
+                 strupper(strrchr(v, '/') + 1);
+ 
+                 k = copy_file(p, v, force);
+@@ -781,7 +781,7 @@ static int remove_boot_efi(const char *esp_path) {
+         struct dirent *de;
+         int r, c = 0;
+ 
+-        p = strjoina(esp_path, "/EFI/Boot");
++        p = strjoina(esp_path, "/EFI/BOOT");
+         d = opendir(p);
+         if (!d) {
+                 if (errno == ENOENT)
+diff --git a/test/test-efi-create-disk.sh b/test/test-efi-create-disk.sh
+index 56dd09a..cd4699d 100755
+--- a/test/test-efi-create-disk.sh
++++ b/test/test-efi-create-disk.sh
+@@ -11,8 +11,8 @@ mkfs.vfat -F32 ${LOOP}p1
+ mkdir -p mnt
+ mount ${LOOP}p1 mnt
+ 
+-mkdir -p mnt/EFI/{Boot,systemd}
+-cp systemd-bootx64.efi mnt/EFI/Boot/bootx64.efi
++mkdir -p mnt/EFI/{BOOT,systemd}
++cp systemd-bootx64.efi mnt/EFI/BOOT/BOOTX64.efi
+ 
+ [ -e /boot/shellx64.efi ] && cp /boot/shellx64.efi mnt/
+ 
