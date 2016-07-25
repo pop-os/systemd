@@ -1,7 +1,52 @@
-systemd (230-8) UNRELEASED; urgency=medium
+systemd (231-1) UNRELEASED; urgency=medium
 
+  [ Martin Pitt ]
+  * New upstream release 231:
+    - Fix "Failed to create directory /str/sys/fs/selinux: Read-only file system"
+      warning. (Closes: #830693)
   * systemd.postinst: Remove systemd-networkd-resolvconf-update.path removal
     leftover. (Closes: #830778)
+  * Drop support for rcS.d SysV init scripts.
+    These are prone to cause dependency loops, and almost all packages with rcS
+    scripts now ship a native systemd service.
+  * networkd: Handle router advertisements in userspace again.
+    Drop Revert-Revert-networkd-ndisc-revert-to-letting-the-k.patch.
+    Bug #814566/#815586 got fixed in 230, and #815884 and #815884 and #815793
+    are unreproducible and need more reporter feedback.
+  * debian/gbp.conf: Enable dch options "full" and "multimaint-merge"
+  * systemd-sysv: Add Conflicts: systemd-shim.
+    To avoid shim trying to claim the D-Bus interfaces.
+
+  [ Michael Biebl ]
+  * Restrict Conflicts: openrc to << 0.20.4-2.1.
+    Newer versions of openrc no longer ship conflicting implementations of
+    update-rc.d/invoke-rc.d.
+  * Add Depends: dbus to systemd-container.
+    This is required for systemd-machined and systemd-nspawn to work
+    properly. (Closes: #830575)
+  * Drop insserv.conf generator.
+    We no longer parse /etc/insserv.conf and /etc/insserv.conf.d/* and
+    augment services with that dependency information via runtime drop-in
+    files. Services which want to provide certain system facilities need to
+    pull in the corresponding targets themselves. Either directly in the
+    native service unit or by shipping a drop-in snippet for SysV init
+    scripts. (Closes: #825858)
+  * getty-static.service: Only start if we have a working VC subsystem.
+    Use ConditionPathExists=/dev/tty0, the same check as in getty@.service,
+    to determine whether we have a functional VC subsystem and we should
+    start any gettys. (Closes: #824779)
+  * nspawn: Decrease mkdir error logging in /sys to debug priority.
+    Patch cherry-picked from upstream git. (Closes: #830693)
+  * Stop mentioning snapshot and restore in the package description.
+    Support for the .snapshot unit type has been removed upstream.
+  * Drop sigpwr-container-shutdown.service.
+    This is no longer necessary as lxc-stop has been fixed to use SIGRTMIN+3
+    to shut down systemd based LXC containers.
+    https://github.com/lxc/lxc/pull/1086
+    https://www.freedesktop.org/wiki/Software/systemd/ContainerInterface/
+
+  [ Felipe Sateler ]
+  * Add versioned breaks for packages shipping rcS init scripts
 
  -- Martin Pitt <mpitt@debian.org>  Mon, 11 Jul 2016 16:28:44 +0200
 
