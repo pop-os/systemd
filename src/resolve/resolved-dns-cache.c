@@ -624,6 +624,12 @@ int dns_cache_put(
 
         dns_cache_remove_previous(c, key, answer);
 
+        /* We only care for positive replies and NXDOMAINs, on all
+         * other replies we will simply flush the respective entries,
+         * and that's it */
+        if (!IN_SET(rcode, DNS_RCODE_SUCCESS, DNS_RCODE_NXDOMAIN))
+                return 0;
+
         if (dns_answer_size(answer) <= 0) {
                 char key_str[DNS_RESOURCE_KEY_STRING_MAX];
 
@@ -631,12 +637,6 @@ int dns_cache_put(
                           dns_resource_key_to_string(key, key_str, sizeof key_str));
                 return 0;
         }
-
-        /* We only care for positive replies and NXDOMAINs, on all
-         * other replies we will simply flush the respective entries,
-         * and that's it */
-        if (!IN_SET(rcode, DNS_RCODE_SUCCESS, DNS_RCODE_NXDOMAIN))
-                return 0;
 
         cache_keys = dns_answer_size(answer);
         if (key)
@@ -691,7 +691,7 @@ int dns_cache_put(
                 return 0;
 
         /* See https://tools.ietf.org/html/rfc2308, which say that a
-         * matching SOA record in the packet is used to to enable
+         * matching SOA record in the packet is used to enable
          * negative caching. */
         r = dns_answer_find_soa(answer, key, &soa, &flags);
         if (r < 0)
@@ -790,7 +790,7 @@ static DnsCacheItem *dns_cache_get_by_key_follow_cname_dname_nsec(DnsCache *c, D
         return NULL;
 }
 
-int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **ret, bool *authenticated) {
+int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, bool clamp_ttl, int *rcode, DnsAnswer **ret, bool *authenticated) {
         _cleanup_(dns_answer_unrefp) DnsAnswer *answer = NULL;
         char key_str[DNS_RESOURCE_KEY_STRING_MAX];
         unsigned n = 0;
@@ -798,6 +798,7 @@ int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **r
         bool nxdomain = false;
         DnsCacheItem *j, *first, *nsec = NULL;
         bool have_authenticated = false, have_non_authenticated = false;
+        usec_t current;
 
         assert(c);
         assert(key);
@@ -892,11 +893,24 @@ int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, int *rcode, DnsAnswer **r
         if (!answer)
                 return -ENOMEM;
 
+        if (clamp_ttl)
+                current = now(clock_boottime_or_monotonic());
+
         LIST_FOREACH(by_key, j, first) {
+                _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *rr = NULL;
+
                 if (!j->rr)
                         continue;
 
-                r = dns_answer_add(answer, j->rr, j->ifindex, j->authenticated ? DNS_ANSWER_AUTHENTICATED : 0);
+                if (clamp_ttl) {
+                        rr = dns_resource_record_ref(j->rr);
+
+                        r = dns_resource_record_clamp_ttl(&rr, LESS_BY(j->until, current) / USEC_PER_SEC);
+                        if (r < 0)
+                                return r;
+                }
+
+                r = dns_answer_add(answer, rr ?: j->rr, j->ifindex, j->authenticated ? DNS_ANSWER_AUTHENTICATED : 0);
                 if (r < 0)
                         return r;
         }

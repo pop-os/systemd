@@ -70,6 +70,7 @@
 #include "parse-util.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
+#include "raw-clone.h"
 #include "rlimit-util.h"
 #include "selinux-setup.h"
 #include "selinux-util.h"
@@ -126,7 +127,7 @@ static bool arg_default_io_accounting = false;
 static bool arg_default_blockio_accounting = false;
 static bool arg_default_memory_accounting = false;
 static bool arg_default_tasks_accounting = true;
-static uint64_t arg_default_tasks_max = UINT64_C(512);
+static uint64_t arg_default_tasks_max = UINT64_MAX;
 static sd_id128_t arg_machine_id = {};
 
 noreturn static void freeze_or_reboot(void) {
@@ -162,7 +163,7 @@ noreturn static void crash(int sig) {
                 /* We want to wait for the core process, hence let's enable SIGCHLD */
                 (void) sigaction(SIGCHLD, &sa, NULL);
 
-                pid = raw_clone(SIGCHLD, NULL);
+                pid = raw_clone(SIGCHLD);
                 if (pid < 0)
                         log_emergency_errno(errno, "Caught <%s>, cannot fork for core dump: %m", signal_to_string(sig));
                 else if (pid == 0) {
@@ -221,7 +222,7 @@ noreturn static void crash(int sig) {
                 log_notice("Executing crash shell in 10s...");
                 (void) sleep(10);
 
-                pid = raw_clone(SIGCHLD, NULL);
+                pid = raw_clone(SIGCHLD);
                 if (pid < 0)
                         log_emergency_errno(errno, "Failed to fork off crash shell: %m");
                 else if (pid == 0) {
@@ -290,14 +291,16 @@ static int parse_crash_chvt(const char *value) {
 }
 
 static int set_machine_id(const char *m) {
+        sd_id128_t t;
         assert(m);
 
-        if (sd_id128_from_string(m, &arg_machine_id) < 0)
+        if (sd_id128_from_string(m, &t) < 0)
                 return -EINVAL;
 
-        if (sd_id128_is_null(arg_machine_id))
+        if (sd_id128_is_null(t))
                 return -EINVAL;
 
+        arg_machine_id = t;
         return 0;
 }
 
@@ -408,7 +411,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value) {
                 if (detect_container() > 0)
                         log_set_target(LOG_TARGET_CONSOLE);
 
-        } else if (!in_initrd() && !value) {
+        } else if (!value) {
                 const char *target;
 
                 /* SysV compatibility */
@@ -1293,6 +1296,40 @@ static int bump_unix_max_dgram_qlen(void) {
         return 1;
 }
 
+static int fixup_environment(void) {
+        _cleanup_free_ char *term = NULL;
+        int r;
+
+        /* We expect the environment to be set correctly
+         * if run inside a container. */
+        if (detect_container() > 0)
+                return 0;
+
+        /* When started as PID1, the kernel uses /dev/console
+         * for our stdios and uses TERM=linux whatever the
+         * backend device used by the console. We try to make
+         * a better guess here since some consoles might not
+         * have support for color mode for example.
+         *
+         * However if TERM was configured through the kernel
+         * command line then leave it alone. */
+
+        r = get_proc_cmdline_key("TERM=", &term);
+        if (r < 0)
+                return r;
+
+        if (r == 0) {
+                term = strdup(default_term_for_tty("/dev/console") + 5);
+                if (!term)
+                        return -ENOMEM;
+        }
+
+        if (setenv("TERM", term, 1) < 0)
+                return -errno;
+
+        return 0;
+}
+
 int main(int argc, char *argv[]) {
         Manager *m = NULL;
         int r, retval = EXIT_FAILURE;
@@ -1352,7 +1389,6 @@ int main(int argc, char *argv[]) {
         saved_argv = argv;
         saved_argc = argc;
 
-        log_show_color(colors_enabled());
         log_set_upgrade_syslog_to_journal(true);
 
         /* Disable the umask logic */
@@ -1363,7 +1399,6 @@ int main(int argc, char *argv[]) {
 
                 /* Running outside of a container as PID 1 */
                 arg_system = true;
-                make_null_stdio();
                 log_set_target(LOG_TARGET_KMSG);
                 log_open();
 
@@ -1416,7 +1451,7 @@ int main(int argc, char *argv[]) {
                                 /*
                                  * Do a dummy very first call to seal the kernel's time warp magic.
                                  *
-                                 * Do not call this this from inside the initrd. The initrd might not
+                                 * Do not call this from inside the initrd. The initrd might not
                                  * carry /etc/adjtime with LOCAL, but the real system could be set up
                                  * that way. In such case, we need to delay the time-warp or the sealing
                                  * until we reach the real system.
@@ -1479,6 +1514,19 @@ int main(int argc, char *argv[]) {
                         (void) write_string_file("/proc/sys/kernel/core_pattern", "|/bin/false", 0);
         }
 
+        if (arg_system) {
+                if (fixup_environment() < 0) {
+                        error_message = "Failed to fix up PID1 environment";
+                        goto finish;
+                }
+
+                /* Try to figure out if we can use colors with the console. No
+                 * need to do that for user instances since they never log
+                 * into the console. */
+                log_show_color(colors_enabled());
+                make_null_stdio();
+        }
+
         /* Initialize default unit */
         r = free_and_strdup(&arg_default_unit, SPECIAL_DEFAULT_TARGET);
         if (r < 0) {
@@ -1511,6 +1559,8 @@ int main(int argc, char *argv[]) {
         /* Reset all signal handlers. */
         (void) reset_all_signal_handlers();
         (void) ignore_signals(SIGNALS_IGNORE, -1);
+
+        arg_default_tasks_max = system_tasks_max_scale(15U, 100U); /* 15% the system PIDs equals 4915 by default. */
 
         if (parse_config_file() < 0) {
                 error_message = "Failed to parse config file";
@@ -1673,7 +1723,7 @@ int main(int argc, char *argv[]) {
                         status_welcome();
 
                 hostname_setup();
-                machine_id_setup(NULL, arg_machine_id);
+                machine_id_setup(NULL, arg_machine_id, NULL);
                 loopback_setup();
                 bump_unix_max_dgram_qlen();
 
@@ -1966,6 +2016,9 @@ finish:
                                 log_error_errno(r, "Failed to switch root, trying to continue: %m");
                 }
 
+                /* Reopen the console */
+                (void) make_console_stdio();
+
                 args_size = MAX(6, argc+1);
                 args = newa(const char*, args_size);
 
@@ -1991,10 +2044,6 @@ finish:
                         args[i++] = sfd;
                         args[i++] = NULL;
 
-                        /* do not pass along the environment we inherit from the kernel or initrd */
-                        if (switch_root_dir)
-                                (void) clearenv();
-
                         assert(i <= args_size);
 
                         /*
@@ -2016,9 +2065,6 @@ finish:
 
                 arg_serialization = safe_fclose(arg_serialization);
                 fds = fdset_free(fds);
-
-                /* Reopen the console */
-                (void) make_console_stdio();
 
                 for (j = 1, i = 1; j < (unsigned) argc; j++)
                         args[i++] = argv[j];

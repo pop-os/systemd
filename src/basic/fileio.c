@@ -1067,7 +1067,7 @@ int fflush_and_check(FILE *f) {
         return 0;
 }
 
-/* This is much like like mkostemp() but is subject to umask(). */
+/* This is much like mkostemp() but is subject to umask(). */
 int mkostemp_safe(char *pattern, int flags) {
         _cleanup_umask_ mode_t u = 0;
         int fd;
@@ -1259,7 +1259,8 @@ int open_tmpfile_unlinkable(const char *directory, int flags) {
         char *p;
         int fd;
 
-        assert(directory);
+        if (!directory)
+                directory = "/tmp";
 
         /* Returns an unlinked temporary file that cannot be linked into the file system anymore */
 
@@ -1351,6 +1352,47 @@ int link_tmpfile(int fd, const char *path, const char *target) {
                 if (linkat(AT_FDCWD, proc_fd_path, AT_FDCWD, target, AT_SYMLINK_FOLLOW) < 0)
                         return -errno;
         }
+
+        return 0;
+}
+
+int read_nul_string(FILE *f, char **ret) {
+        _cleanup_free_ char *x = NULL;
+        size_t allocated = 0, n = 0;
+
+        assert(f);
+        assert(ret);
+
+        /* Reads a NUL-terminated string from the specified file. */
+
+        for (;;) {
+                int c;
+
+                if (!GREEDY_REALLOC(x, allocated, n+2))
+                        return -ENOMEM;
+
+                c = fgetc(f);
+                if (c == 0) /* Terminate at NUL byte */
+                        break;
+                if (c == EOF) {
+                        if (ferror(f))
+                                return -errno;
+                        break; /* Terminate at EOF */
+                }
+
+                x[n++] = (char) c;
+        }
+
+        if (x)
+                x[n] = 0;
+        else {
+                x = new0(char, 1);
+                if (!x)
+                        return -ENOMEM;
+        }
+
+        *ret = x;
+        x = NULL;
 
         return 0;
 }

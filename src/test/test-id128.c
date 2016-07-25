@@ -23,6 +23,9 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "fd-util.h"
+#include "fileio.h"
+#include "id128-util.h"
 #include "macro.h"
 #include "string-util.h"
 #include "util.h"
@@ -33,8 +36,9 @@
 
 int main(int argc, char *argv[]) {
         sd_id128_t id, id2;
-        char t[33];
+        char t[33], q[37];
         _cleanup_free_ char *b = NULL;
+        _cleanup_close_ int fd = -1;
 
         assert_se(sd_id128_randomize(&id) == 0);
         printf("random: %s\n", sd_id128_to_string(id, t));
@@ -57,6 +61,17 @@ int main(int argc, char *argv[]) {
         printf("waldi2: %s\n", b);
         assert_se(streq(t, b));
 
+        printf("waldi3: %s\n", id128_to_uuid_string(ID128_WALDI, q));
+        assert_se(streq(q, UUID_WALDI));
+
+        b = mfree(b);
+        assert_se(asprintf(&b, ID128_UUID_FORMAT_STR, SD_ID128_FORMAT_VAL(ID128_WALDI)) == 36);
+        printf("waldi4: %s\n", b);
+        assert_se(streq(q, b));
+
+        assert_se(sd_id128_from_string(STR_WALDI, &id) >= 0);
+        assert_se(sd_id128_equal(id, ID128_WALDI));
+
         assert_se(sd_id128_from_string(UUID_WALDI, &id) >= 0);
         assert_se(sd_id128_equal(id, ID128_WALDI));
 
@@ -73,6 +88,70 @@ int main(int argc, char *argv[]) {
         assert_se(!id128_is_valid("01020304-0506-0708-090a-0b0c0d0e0f10-"));
         assert_se(!id128_is_valid("01020304-0506-0708-090a0b0c0d0e0f10"));
         assert_se(!id128_is_valid("010203040506-0708-090a-0b0c0d0e0f10"));
+
+        fd = open_tmpfile_unlinkable(NULL, O_RDWR|O_CLOEXEC);
+        assert_se(fd >= 0);
+
+        /* First, write as UUID */
+        assert_se(sd_id128_randomize(&id) >= 0);
+        assert_se(id128_write_fd(fd, ID128_UUID, id, false) >= 0);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) == -EINVAL);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_UUID, &id2) >= 0);
+        assert_se(sd_id128_equal(id, id2));
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_ANY, &id2) >= 0);
+        assert_se(sd_id128_equal(id, id2));
+
+        /* Second, write as plain */
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(ftruncate(fd, 0) >= 0);
+
+        assert_se(sd_id128_randomize(&id) >= 0);
+        assert_se(id128_write_fd(fd, ID128_PLAIN, id, false) >= 0);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_UUID, &id2) == -EINVAL);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) >= 0);
+        assert_se(sd_id128_equal(id, id2));
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_ANY, &id2) >= 0);
+        assert_se(sd_id128_equal(id, id2));
+
+        /* Third, write plain without trailing newline */
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(ftruncate(fd, 0) >= 0);
+
+        assert_se(sd_id128_randomize(&id) >= 0);
+        assert_se(write(fd, sd_id128_to_string(id, t), 32) == 32);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_UUID, &id2) == -EINVAL);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) >= 0);
+        assert_se(sd_id128_equal(id, id2));
+
+        /* Third, write UUID without trailing newline */
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(ftruncate(fd, 0) >= 0);
+
+        assert_se(sd_id128_randomize(&id) >= 0);
+        assert_se(write(fd, id128_to_uuid_string(id, t), 36) == 36);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) == -EINVAL);
+
+        assert_se(lseek(fd, 0, SEEK_SET) == 0);
+        assert_se(id128_read_fd(fd, ID128_UUID, &id2) >= 0);
+        assert_se(sd_id128_equal(id, id2));
 
         return 0;
 }

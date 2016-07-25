@@ -1048,7 +1048,7 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_
 
         case SD_BUS_TYPE_BOOLEAN: {
                 unsigned b;
-                bool *p = userdata;
+                int *p = userdata;
 
                 r = sd_bus_message_read_basic(m, type, &b);
                 if (r < 0)
@@ -1081,6 +1081,19 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_
                         break;
 
                 *p = t;
+
+                break;
+        }
+
+        case SD_BUS_TYPE_DOUBLE: {
+                double d;
+                double *p = userdata;
+
+                r = sd_bus_message_read_basic(m, type, &d);
+                if (r < 0)
+                        break;
+
+                *p = d;
 
                 break;
         }
@@ -1490,40 +1503,6 @@ int bus_path_decode_unique(const char *path, const char *prefix, char **ret_send
         *ret_sender = sender;
         *ret_external = external;
         return 1;
-}
-
-bool is_kdbus_wanted(void) {
-        _cleanup_free_ char *value = NULL;
-#ifdef ENABLE_KDBUS
-        const bool configured = true;
-#else
-        const bool configured = false;
-#endif
-
-        int r;
-
-        if (get_proc_cmdline_key("kdbus", NULL) > 0)
-                return true;
-
-        r = get_proc_cmdline_key("kdbus=", &value);
-        if (r <= 0)
-                return configured;
-
-        return parse_boolean(value) == 1;
-}
-
-bool is_kdbus_available(void) {
-        _cleanup_close_ int fd = -1;
-        struct kdbus_cmd cmd = { .size = sizeof(cmd), .flags = KDBUS_FLAG_NEGOTIATE };
-
-        if (!is_kdbus_wanted())
-                return false;
-
-        fd = open("/sys/fs/kdbus/control", O_RDWR | O_CLOEXEC | O_NONBLOCK | O_NOCTTY);
-        if (fd < 0)
-                return false;
-
-        return ioctl(fd, KDBUS_CMD_BUS_MAKE, &cmd) >= 0;
 }
 
 int bus_property_get_rlimit(

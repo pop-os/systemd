@@ -100,6 +100,7 @@ Unit *unit_new(Manager *m, size_t size) {
         u->on_failure_job_mode = JOB_REPLACE;
         u->cgroup_inotify_wd = -1;
         u->job_timeout = USEC_INFINITY;
+        u->sigchldgen = 0;
 
         RATELIMIT_INIT(u->start_limit, m->default_start_limit_interval, m->default_start_limit_burst);
         RATELIMIT_INIT(u->auto_stop_ratelimit, 10 * USEC_PER_SEC, 16);
@@ -1682,7 +1683,7 @@ static void unit_check_unneeded(Unit *u) {
                         if (unit_active_or_pending(other))
                                 return;
 
-        /* If stopping a unit fails continously we might enter a stop
+        /* If stopping a unit fails continuously we might enter a stop
          * loop here, hence stop acting on the service being
          * unnecessary after a while. */
         if (!ratelimit_test(&u->auto_stop_ratelimit)) {
@@ -1727,7 +1728,7 @@ static void unit_check_binds_to(Unit *u) {
         if (!stop)
                 return;
 
-        /* If stopping a unit fails continously we might enter a stop
+        /* If stopping a unit fails continuously we might enter a stop
          * loop here, hence stop acting on the service being
          * unnecessary after a while. */
         if (!ratelimit_test(&u->auto_stop_ratelimit)) {
@@ -3143,7 +3144,7 @@ int unit_kill_common(
                 if (!pid_set)
                         return -ENOMEM;
 
-                q = cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, signo, false, false, false, pid_set);
+                q = cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, signo, 0, pid_set, NULL, NULL);
                 if (q < 0 && q != -EAGAIN && q != -ESRCH && q != -ENOENT)
                         r = q;
                 else
@@ -3355,7 +3356,7 @@ static const char* unit_drop_in_dir(Unit *u, UnitSetPropertiesMode mode) {
 
 int unit_write_drop_in(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *data) {
         _cleanup_free_ char *p = NULL, *q = NULL;
-        const char *dir, *prefixed;
+        const char *dir, *wrapped;
         int r;
 
         assert(u);
@@ -3364,6 +3365,7 @@ int unit_write_drop_in(Unit *u, UnitSetPropertiesMode mode, const char *name, co
                 /* When this is a transient unit file in creation, then let's not create a new drop-in but instead
                  * write to the transient unit file. */
                 fputs(data, u->transient_file);
+                fputc('\n', u->transient_file);
                 return 0;
         }
 
@@ -3374,15 +3376,17 @@ int unit_write_drop_in(Unit *u, UnitSetPropertiesMode mode, const char *name, co
         if (!dir)
                 return -EINVAL;
 
-        prefixed = strjoina("# This is a drop-in unit file extension, created via \"systemctl set-property\" or an equivalent operation. Do not edit.\n",
-                            data);
+        wrapped = strjoina("# This is a drop-in unit file extension, created via \"systemctl set-property\"\n"
+                           "# or an equivalent operation. Do not edit.\n",
+                           data,
+                           "\n");
 
         r = drop_in_file(dir, u->id, 50, name, &p, &q);
         if (r < 0)
                 return r;
 
         (void) mkdir_p(p, 0755);
-        r = write_string_file_atomic_label(q, prefixed);
+        r = write_string_file_atomic_label(q, wrapped);
         if (r < 0)
                 return r;
 
@@ -3501,12 +3505,48 @@ int unit_make_transient(Unit *u) {
 
         unit_add_to_dbus_queue(u);
         unit_add_to_gc_queue(u);
-        unit_add_to_load_queue(u);
 
         fputs("# This is a transient unit file, created programmatically via the systemd API. Do not edit.\n",
               u->transient_file);
 
         return 0;
+}
+
+static void log_kill(pid_t pid, int sig, void *userdata) {
+        _cleanup_free_ char *comm = NULL;
+
+        (void) get_process_comm(pid, &comm);
+
+        /* Don't log about processes marked with brackets, under the assumption that these are temporary processes
+           only, like for example systemd's own PAM stub process. */
+        if (comm && comm[0] == '(')
+                return;
+
+        log_unit_notice(userdata,
+                        "Killing process " PID_FMT " (%s) with signal SIG%s.",
+                        pid,
+                        strna(comm),
+                        signal_to_string(sig));
+}
+
+static int operation_to_signal(KillContext *c, KillOperation k) {
+        assert(c);
+
+        switch (k) {
+
+        case KILL_TERMINATE:
+        case KILL_TERMINATE_AND_LOG:
+                return c->kill_signal;
+
+        case KILL_KILL:
+                return SIGKILL;
+
+        case KILL_ABORT:
+                return SIGABRT;
+
+        default:
+                assert_not_reached("KillOperation unknown");
+        }
 }
 
 int unit_kill_context(
@@ -3517,58 +3557,63 @@ int unit_kill_context(
                 pid_t control_pid,
                 bool main_pid_alien) {
 
-        bool wait_for_exit = false;
+        bool wait_for_exit = false, send_sighup;
+        cg_kill_log_func_t log_func;
         int sig, r;
 
         assert(u);
         assert(c);
 
+        /* Kill the processes belonging to this unit, in preparation for shutting the unit down. Returns > 0 if we
+         * killed something worth waiting for, 0 otherwise. */
+
         if (c->kill_mode == KILL_NONE)
                 return 0;
 
-        switch (k) {
-        case KILL_KILL:
-                sig = SIGKILL;
-                break;
-        case KILL_ABORT:
-                sig = SIGABRT;
-                break;
-        case KILL_TERMINATE:
-                sig = c->kill_signal;
-                break;
-        default:
-                assert_not_reached("KillOperation unknown");
-        }
+        sig = operation_to_signal(c, k);
+
+        send_sighup =
+                c->send_sighup &&
+                IN_SET(k, KILL_TERMINATE, KILL_TERMINATE_AND_LOG) &&
+                sig != SIGHUP;
+
+        log_func =
+                k != KILL_TERMINATE ||
+                IN_SET(sig, SIGKILL, SIGABRT) ? log_kill : NULL;
 
         if (main_pid > 0) {
-                r = kill_and_sigcont(main_pid, sig);
+                if (log_func)
+                        log_func(main_pid, sig, u);
 
+                r = kill_and_sigcont(main_pid, sig);
                 if (r < 0 && r != -ESRCH) {
                         _cleanup_free_ char *comm = NULL;
-                        get_process_comm(main_pid, &comm);
+                        (void) get_process_comm(main_pid, &comm);
 
                         log_unit_warning_errno(u, r, "Failed to kill main process " PID_FMT " (%s), ignoring: %m", main_pid, strna(comm));
                 } else {
                         if (!main_pid_alien)
                                 wait_for_exit = true;
 
-                        if (c->send_sighup && k == KILL_TERMINATE)
+                        if (r != -ESRCH && send_sighup)
                                 (void) kill(main_pid, SIGHUP);
                 }
         }
 
         if (control_pid > 0) {
-                r = kill_and_sigcont(control_pid, sig);
+                if (log_func)
+                        log_func(control_pid, sig, u);
 
+                r = kill_and_sigcont(control_pid, sig);
                 if (r < 0 && r != -ESRCH) {
                         _cleanup_free_ char *comm = NULL;
-                        get_process_comm(control_pid, &comm);
+                        (void) get_process_comm(control_pid, &comm);
 
                         log_unit_warning_errno(u, r, "Failed to kill control process " PID_FMT " (%s), ignoring: %m", control_pid, strna(comm));
                 } else {
                         wait_for_exit = true;
 
-                        if (c->send_sighup && k == KILL_TERMINATE)
+                        if (r != -ESRCH && send_sighup)
                                 (void) kill(control_pid, SIGHUP);
                 }
         }
@@ -3582,7 +3627,11 @@ int unit_kill_context(
                 if (!pid_set)
                         return -ENOMEM;
 
-                r = cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, sig, true, k != KILL_TERMINATE, false, pid_set);
+                r = cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path,
+                                      sig,
+                                      CGROUP_SIGCONT|CGROUP_IGNORE_SELF,
+                                      pid_set,
+                                      log_func, u);
                 if (r < 0) {
                         if (r != -EAGAIN && r != -ESRCH && r != -ENOENT)
                                 log_unit_warning_errno(u, r, "Failed to kill control group %s, ignoring: %m", u->cgroup_path);
@@ -3607,14 +3656,18 @@ int unit_kill_context(
                              (detect_container() == 0 && !unit_cgroup_delegate(u)))
                                 wait_for_exit = true;
 
-                        if (c->send_sighup && k != KILL_KILL) {
+                        if (send_sighup) {
                                 set_free(pid_set);
 
                                 pid_set = unit_pid_set(main_pid, control_pid);
                                 if (!pid_set)
                                         return -ENOMEM;
 
-                                cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, SIGHUP, false, true, false, pid_set);
+                                cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path,
+                                                  SIGHUP,
+                                                  CGROUP_IGNORE_SELF,
+                                                  pid_set,
+                                                  NULL, NULL);
                         }
                 }
         }
@@ -3787,7 +3840,7 @@ bool unit_is_pristine(Unit *u) {
         /* Check if the unit already exists or is already around,
          * in a number of different ways. Note that to cater for unit
          * types such as slice, we are generally fine with units that
-         * are marked UNIT_LOADED even even though nothing was
+         * are marked UNIT_LOADED even though nothing was
          * actually loaded, as those unit types don't require a file
          * on disk to validly load. */
 

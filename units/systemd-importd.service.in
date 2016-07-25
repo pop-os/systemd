@@ -17,3 +17,5 @@ CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_MKNOD CAP_SETFCAP CAP_
 NoNewPrivileges=yes
 WatchdogSec=3min
 KillMode=mixed
+MemoryDenyWriteExecute=yes
+SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io

@@ -185,7 +185,7 @@ int dns_answer_add_extend(DnsAnswer **a, DnsResourceRecord *rr, int ifindex, Dns
         return dns_answer_add(*a, rr, ifindex, flags);
 }
 
-int dns_answer_add_soa(DnsAnswer *a, const char *name, uint32_t ttl) {
+int dns_answer_add_soa(DnsAnswer *a, const char *name, uint32_t ttl, int ifindex) {
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *soa = NULL;
 
         soa = dns_resource_record_new_full(DNS_CLASS_IN, DNS_TYPE_SOA, name);
@@ -208,7 +208,7 @@ int dns_answer_add_soa(DnsAnswer *a, const char *name, uint32_t ttl) {
         soa->soa.expire = 1;
         soa->soa.minimum = ttl;
 
-        return dns_answer_add(a, soa, 0, DNS_ANSWER_AUTHENTICATED);
+        return dns_answer_add(a, soa, ifindex, DNS_ANSWER_AUTHENTICATED);
 }
 
 int dns_answer_match_key(DnsAnswer *a, const DnsResourceKey *key, DnsAnswerFlags *ret_flags) {
@@ -702,7 +702,7 @@ void dns_answer_order_by_scope(DnsAnswer *a, bool prefer_link_local) {
                 if (a->items[i].rr->key->class == DNS_CLASS_IN &&
                     ((a->items[i].rr->key->type == DNS_TYPE_A && in_addr_is_link_local(AF_INET, (union in_addr_union*) &a->items[i].rr->a.in_addr) != prefer_link_local) ||
                      (a->items[i].rr->key->type == DNS_TYPE_AAAA && in_addr_is_link_local(AF_INET6, (union in_addr_union*) &a->items[i].rr->aaaa.in6_addr) != prefer_link_local)))
-                        /* Order address records that are are not preferred to the end of the array */
+                        /* Order address records that are not preferred to the end of the array */
                         items[end--] = a->items[i];
                 else
                         /* Order all other records to the beginning of the array */

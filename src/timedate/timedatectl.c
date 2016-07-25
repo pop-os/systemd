@@ -57,11 +57,11 @@ typedef struct StatusInfo {
         char *timezone;
 
         usec_t rtc_time;
-        bool rtc_local;
+        int rtc_local;
 
-        bool ntp_enabled;
-        bool ntp_capable;
-        bool ntp_synced;
+        int ntp_enabled;
+        int ntp_capable;
+        int ntp_synced;
 } StatusInfo;
 
 static void status_info_clear(StatusInfo *info) {
@@ -144,13 +144,13 @@ static void print_status_info(const StatusInfo *i) {
                yes_no(i->rtc_local));
 
         if (i->rtc_local)
-                fputs("\n" ANSI_HIGHLIGHT
-                      "Warning: The system is configured to read the RTC time in the local time zone.\n"
-                      "         This mode can not be fully supported. It will create various problems\n"
-                      "         with time zone changes and daylight saving time adjustments. The RTC\n"
-                      "         time is never updated, it relies on external facilities to maintain it.\n"
-                      "         If at all possible, use RTC in UTC by calling\n"
-                      "         'timedatectl set-local-rtc 0'." ANSI_NORMAL "\n", stdout);
+                printf("\n%s"
+                       "Warning: The system is configured to read the RTC time in the local time zone.\n"
+                       "         This mode can not be fully supported. It will create various problems\n"
+                       "         with time zone changes and daylight saving time adjustments. The RTC\n"
+                       "         time is never updated, it relies on external facilities to maintain it.\n"
+                       "         If at all possible, use RTC in UTC by calling\n"
+                       "         'timedatectl set-local-rtc 0'.%s\n", ansi_highlight(), ansi_normal());
 }
 
 static int show_status(sd_bus *bus, char **args, unsigned n) {
@@ -480,7 +480,7 @@ static int timedatectl_main(sd_bus *bus, int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -500,6 +500,7 @@ int main(int argc, char *argv[]) {
         r = timedatectl_main(bus, argc, argv);
 
 finish:
+        sd_bus_flush_close_unref(bus);
         pager_close();
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;

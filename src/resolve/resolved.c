@@ -67,11 +67,15 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        r = drop_privileges(uid, gid, 0);
+        /* Drop privileges, but keep three caps. Note that we drop those too, later on (see below) */
+        r = drop_privileges(uid, gid,
+                            (UINT64_C(1) << CAP_NET_RAW)|          /* needed for SO_BINDTODEVICE */
+                            (UINT64_C(1) << CAP_NET_BIND_SERVICE)| /* needed to bind on port 53 */
+                            (UINT64_C(1) << CAP_SETPCAP)           /* needed in order to drop the caps later */);
         if (r < 0)
                 goto finish;
 
-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGUSR1, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, SIGUSR1, SIGUSR2, -1) >= 0);
 
         r = manager_new(&m);
         if (r < 0) {
@@ -85,11 +89,15 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        /* Write finish default resolv.conf to avoid a dangling
-         * symlink */
-        r = manager_write_resolv_conf(m);
-        if (r < 0)
-                log_warning_errno(r, "Could not create "PRIVATE_RESOLV_CONF": %m");
+        /* Write finish default resolv.conf to avoid a dangling symlink */
+        (void) manager_write_resolv_conf(m);
+
+        /* Let's drop the remaining caps now */
+        r = capability_bounding_set_drop(0, true);
+        if (r < 0) {
+                log_error_errno(r, "Failed to drop remaining caps: %m");
+                goto finish;
+        }
 
         sd_notify(false,
                   "READY=1\n"

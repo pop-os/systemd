@@ -228,6 +228,9 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_PROPERTY("BlockIOReadBandwidth", "a(st)", property_get_blockio_device_bandwidths, 0, 0),
         SD_BUS_PROPERTY("BlockIOWriteBandwidth", "a(st)", property_get_blockio_device_bandwidths, 0, 0),
         SD_BUS_PROPERTY("MemoryAccounting", "b", bus_property_get_bool, offsetof(CGroupContext, memory_accounting), 0),
+        SD_BUS_PROPERTY("MemoryLow", "t", NULL, offsetof(CGroupContext, memory_low), 0),
+        SD_BUS_PROPERTY("MemoryHigh", "t", NULL, offsetof(CGroupContext, memory_high), 0),
+        SD_BUS_PROPERTY("MemoryMax", "t", NULL, offsetof(CGroupContext, memory_max), 0),
         SD_BUS_PROPERTY("MemoryLimit", "t", NULL, offsetof(CGroupContext, memory_limit), 0),
         SD_BUS_PROPERTY("DevicePolicy", "s", property_get_cgroup_device_policy, offsetof(CGroupContext, device_policy), 0),
         SD_BUS_PROPERTY("DeviceAllow", "a(ss)", property_get_device_allow, 0, 0),
@@ -623,7 +626,7 @@ int bus_cgroup_set_property(
                 if (r < 0)
                         return r;
 
-                if (CGROUP_BLKIO_WEIGHT_IS_OK(weight))
+                if (!CGROUP_BLKIO_WEIGHT_IS_OK(weight))
                         return sd_bus_error_set_errnof(error, EINVAL, "StartupBlockIOWeight value out of range");
 
                 if (mode != UNIT_CHECK) {
@@ -638,7 +641,7 @@ int bus_cgroup_set_property(
 
                 return 1;
 
-        } else if (streq(name, "BlockIOReadBandwidth") || streq(name, "BlockIOWriteBandwidth")) {
+        } else if (STR_IN_SET(name, "BlockIOReadBandwidth", "BlockIOWriteBandwidth")) {
                 const char *path;
                 bool read = true;
                 unsigned n = 0;
@@ -826,12 +829,74 @@ int bus_cgroup_set_property(
 
                 return 1;
 
+        } else if (STR_IN_SET(name, "MemoryLow", "MemoryHigh", "MemoryMax")) {
+                uint64_t v;
+
+                r = sd_bus_message_read(message, "t", &v);
+                if (r < 0)
+                        return r;
+                if (v <= 0)
+                        return sd_bus_error_set_errnof(error, EINVAL, "%s= is too small", name);
+
+                if (mode != UNIT_CHECK) {
+                        if (streq(name, "MemoryLow"))
+                                c->memory_low = v;
+                        else if (streq(name, "MemoryHigh"))
+                                c->memory_high = v;
+                        else
+                                c->memory_max = v;
+
+                        unit_invalidate_cgroup(u, CGROUP_MASK_MEMORY);
+
+                        if (v == CGROUP_LIMIT_MAX)
+                                unit_write_drop_in_private_format(u, mode, name, "%s=infinity", name);
+                        else
+                                unit_write_drop_in_private_format(u, mode, name, "%s=%" PRIu64, name, v);
+                }
+
+                return 1;
+
+        } else if (STR_IN_SET(name, "MemoryLowScale", "MemoryHighScale", "MemoryMaxScale")) {
+                uint32_t raw;
+                uint64_t v;
+
+                r = sd_bus_message_read(message, "u", &raw);
+                if (r < 0)
+                        return r;
+
+                v = physical_memory_scale(raw, UINT32_MAX);
+                if (v <= 0 || v == UINT64_MAX)
+                        return sd_bus_error_set_errnof(error, EINVAL, "%s= is out of range", name);
+
+                if (mode != UNIT_CHECK) {
+                        const char *e;
+
+                        /* Chop off suffix */
+                        assert_se(e = endswith(name, "Scale"));
+                        name = strndupa(name, e - name);
+
+                        if (streq(name, "MemoryLow"))
+                                c->memory_low = v;
+                        else if (streq(name, "MemoryHigh"))
+                                c->memory_high = v;
+                        else
+                                c->memory_max = v;
+
+                        unit_invalidate_cgroup(u, CGROUP_MASK_MEMORY);
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%" PRIu32 "%%", name,
+                                                          (uint32_t) (DIV_ROUND_UP((uint64_t) raw * 100U, (uint64_t) UINT32_MAX)));
+                }
+
+                return 1;
+
         } else if (streq(name, "MemoryLimit")) {
                 uint64_t limit;
 
                 r = sd_bus_message_read(message, "t", &limit);
                 if (r < 0)
                         return r;
+                if (limit <= 0)
+                        return sd_bus_error_set_errnof(error, EINVAL, "%s= is too small", name);
 
                 if (mode != UNIT_CHECK) {
                         c->memory_limit = limit;
@@ -841,6 +906,27 @@ int bus_cgroup_set_property(
                                 unit_write_drop_in_private(u, mode, name, "MemoryLimit=infinity");
                         else
                                 unit_write_drop_in_private_format(u, mode, name, "MemoryLimit=%" PRIu64, limit);
+                }
+
+                return 1;
+
+        } else if (streq(name, "MemoryLimitScale")) {
+                uint64_t limit;
+                uint32_t raw;
+
+                r = sd_bus_message_read(message, "u", &raw);
+                if (r < 0)
+                        return r;
+
+                limit = physical_memory_scale(raw, UINT32_MAX);
+                if (limit <= 0 || limit == UINT64_MAX)
+                        return sd_bus_error_set_errnof(error, EINVAL, "%s= is out of range", name);
+
+                if (mode != UNIT_CHECK) {
+                        c->memory_limit = limit;
+                        unit_invalidate_cgroup(u, CGROUP_MASK_MEMORY);
+                        unit_write_drop_in_private_format(u, mode, "MemoryLimit", "MemoryLimit=%" PRIu32 "%%",
+                                                          (uint32_t) (DIV_ROUND_UP((uint64_t) raw * 100U, (uint64_t) UINT32_MAX)));
                 }
 
                 return 1;
@@ -858,13 +944,9 @@ int bus_cgroup_set_property(
                         return -EINVAL;
 
                 if (mode != UNIT_CHECK) {
-                        char *buf;
-
                         c->device_policy = p;
                         unit_invalidate_cgroup(u, CGROUP_MASK_DEVICES);
-
-                        buf = strjoina("DevicePolicy=", policy);
-                        unit_write_drop_in_private(u, mode, name, buf);
+                        unit_write_drop_in_private_format(u, mode, name, "DevicePolicy=%s", policy);
                 }
 
                 return 1;
@@ -880,6 +962,7 @@ int bus_cgroup_set_property(
                 while ((r = sd_bus_message_read(message, "(ss)", &path, &rwm)) > 0) {
 
                         if ((!startswith(path, "/dev/") &&
+                             !startswith(path, "/run/systemd/inaccessible/") &&
                              !startswith(path, "block-") &&
                              !startswith(path, "char-")) ||
                             strpbrk(path, WHITESPACE))
@@ -979,6 +1062,8 @@ int bus_cgroup_set_property(
                 r = sd_bus_message_read(message, "t", &limit);
                 if (r < 0)
                         return r;
+                if (limit <= 0)
+                        return sd_bus_error_set_errnof(error, EINVAL, "%s= is too small", name);
 
                 if (mode != UNIT_CHECK) {
                         c->tasks_max = limit;
@@ -988,6 +1073,26 @@ int bus_cgroup_set_property(
                                 unit_write_drop_in_private(u, mode, name, "TasksMax=infinity");
                         else
                                 unit_write_drop_in_private_format(u, mode, name, "TasksMax=%" PRIu64, limit);
+                }
+
+                return 1;
+        } else if (streq(name, "TasksMaxScale")) {
+                uint64_t limit;
+                uint32_t raw;
+
+                r = sd_bus_message_read(message, "u", &raw);
+                if (r < 0)
+                        return r;
+
+                limit = system_tasks_max_scale(raw, UINT32_MAX);
+                if (limit <= 0 || limit >= UINT64_MAX)
+                        return sd_bus_error_set_errnof(error, EINVAL, "%s= is out of range", name);
+
+                if (mode != UNIT_CHECK) {
+                        c->tasks_max = limit;
+                        unit_invalidate_cgroup(u, CGROUP_MASK_PIDS);
+                        unit_write_drop_in_private_format(u, mode, name, "TasksMax=%" PRIu32 "%%",
+                                                          (uint32_t) (DIV_ROUND_UP((uint64_t) raw * 100U, (uint64_t) UINT32_MAX)));
                 }
 
                 return 1;

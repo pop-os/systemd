@@ -368,7 +368,6 @@ static void worker_spawn(Manager *manager, struct event *event) {
                 manager->monitor = udev_monitor_unref(manager->monitor);
                 manager->ctrl_conn_blocking = udev_ctrl_connection_unref(manager->ctrl_conn_blocking);
                 manager->ctrl = udev_ctrl_unref(manager->ctrl);
-                manager->ctrl_conn_blocking = udev_ctrl_connection_unref(manager->ctrl_conn_blocking);
                 manager->worker_watch[READ_END] = safe_close(manager->worker_watch[READ_END]);
 
                 manager->ctrl_event = sd_event_source_unref(manager->ctrl_event);
@@ -1257,7 +1256,7 @@ static int on_post(sd_event_source *s, void *userdata) {
                                         return r;
                         } else if (manager->cgroup)
                                 /* cleanup possible left-over processes in our cgroup */
-                                cg_kill(SYSTEMD_CGROUP_CONTROLLER, manager->cgroup, SIGKILL, false, true, NULL);
+                                cg_kill(SYSTEMD_CGROUP_CONTROLLER, manager->cgroup, SIGKILL, CGROUP_IGNORE_SELF, NULL, NULL, NULL);
                 }
         }
 

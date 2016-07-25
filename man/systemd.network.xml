@@ -240,7 +240,7 @@
             By enabling DHCPv6 support explicitly, the DHCPv6 client will
             be started regardless of the presence of routers on the link,
             or what flags the routers pass. See
-            <literal>IPv6AcceptRouterAdvertisements=</literal>.</para>
+            <literal>IPv6AcceptRA=</literal>.</para>
 
             <para>Furthermore, note that by default the domain name
             specified through DHCP is not used for name resolution.
@@ -527,24 +527,20 @@
           <literal>no</literal>.</para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><varname>IPv6AcceptRouterAdvertisements=</varname></term>
-          <listitem><para>Force the setting of the <filename>accept_ra</filename>
-          (router advertisements) setting for the interface.
-          When unset, the kernel default is used, and router
-          advertisements are accepted only when local forwarding
-          is disabled for that interface.
-          When router advertisements are accepted, they will
-          trigger the start of the DHCPv6 client if the relevant
-          flags are passed, or if no routers are found on the link.
-          Takes a boolean. If true, router advertisements are
-          accepted, when false, router advertisements are ignored,
-          independently of the local forwarding state.</para>
+          <term><varname>IPv6AcceptRA=</varname></term>
+          <listitem><para>Enable or disable IPv6 Router Advertisement (RA) reception support for the interface.  Takes
+          a boolean parameter. If true, RAs are accepted; if false, RAs are ignored, independently of the local
+          forwarding state. When not set, the kernel default is used, and RAs are accepted only when local forwarding
+          is disabled for that interface.  When RAs are accepted, they may trigger the start of the DHCPv6 client if
+          the relevant flags are set in the RA data, or if no routers are found on the link.</para>
 
-          <para>See
-          <ulink url="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt">ip-sysctl.txt</ulink>
-          in the kernel documentation, but note that systemd's
-          setting of <constant>1</constant> corresponds to
-          kernel's setting of <constant>2</constant>.</para>
+          <para>Further settings for the IPv6 RA support may be configured in the
+          <literal>[IPv6AcceptRA]</literal> section, see below.</para>
+
+          <para>Also see <ulink
+          url="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt">ip-sysctl.txt</ulink> in the kernel
+          documentation regarding <literal>accept_ra</literal>, but note that systemd's setting of
+          <constant>1</constant> (i.e. true) corresponds to kernel's setting of <constant>2</constant>.</para>
         </listitem>
         </varlistentry>
         <varlistentry>
@@ -580,6 +576,12 @@
           <term><varname>Bond=</varname></term>
           <listitem>
             <para>The name of the bond to add the link to.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>VRF=</varname></term>
+          <listitem>
+            <para>The name of the VRF to add the link to.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -799,7 +801,7 @@
             false.</para>
 
             <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
-            of all host names, in particular to single-label names. It is generally safer to use the supplied domain
+            of all host names, in particular of single-label names. It is generally safer to use the supplied domain
             only as routing domain, rather than as search domain, in order to not have it affect local resolution of
             single-label names.</para>
 
@@ -839,7 +841,7 @@
           <term><varname>ClientIdentifier=</varname></term>
           <listitem>
             <para>The DHCPv4 client identifier to use. Either <literal>mac</literal> to use the MAC address of the link
-            or <literal>duid</literal> (the default, see below) to use a RFC4361-compliant Client ID.</para>
+            or <literal>duid</literal> (the default, see below) to use an RFC4361-compliant Client ID.</para>
           </listitem>
         </varlistentry>
 
@@ -897,6 +899,47 @@
         </varlistentry>
       </variablelist>
     </refsect1>
+
+  <refsect1>
+    <title>[IPv6AcceptRA] Section Options</title>
+      <para>The <literal>[IPv6AcceptRA]</literal> section configures the IPv6 Router Advertisement
+      (RA) client, if it is enabled with the <varname>IPv6AcceptRA=</varname> setting described
+      above:</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>UseDNS=</varname></term>
+          <listitem>
+            <para>When true (the default), the DNS servers received in the Router Advertisement will be used and take
+            precedence over any statically configured ones.</para>
+
+            <para>This corresponds to the <option>nameserver</option> option in <citerefentry
+            project='man-pages'><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>UseDomains=</varname></term>
+          <listitem>
+            <para>Takes a boolean argument, or the special value <literal>route</literal>. When true, the domain name
+            received via IPv6 Router Advertisement (RA) will be used as DNS search domain over this link, similar to
+            the effect of the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name
+            received via IPv6 RA will be used for routing DNS queries only, but not for searching, similar to the
+            effect of the <option>Domains=</option> setting when the argument is prefixed with
+            <literal>~</literal>. Defaults to false.</para>
+
+            <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
+            of all host names, in particular of single-label names. It is generally safer to use the supplied domain
+            only as routing domain, rather than as search domain, in order to not have it affect local resolution of
+            single-label names.</para>
+
+            <para>When set to true, this setting corresponds to the <option>domain</option> option in <citerefentry
+            project='man-pages'><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
+
 
   <refsect1>
     <title>[DHCPServer] Section Options</title>
@@ -1093,6 +1136,39 @@
         </varlistentry>
       </variablelist>
   </refsect1>
+  <refsect1>
+    <title>[BridgeVLAN] Section Options</title>
+      <para>The <literal>[BridgeVLAN]</literal> section manages the VLAN ID configuration of a bridge port and accepts
+      the following keys. Specify several <literal>[BridgeVLAN]</literal> sections to configure several VLAN entries.
+      The <varname>VLANFiltering=</varname> option has to be enabled, see <literal>[Bridge]</literal> section in
+      <citerefentry><refentrytitle>systemd.netdev</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>VLAN=</varname></term>
+          <listitem>
+            <para>The VLAN ID allowed on the port. This can be either a single ID or a range M-N. VLAN IDs are valid
+            from 1 to 4094.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>EgressUntagged=</varname></term>
+          <listitem>
+            <para>The VLAN ID specified here will be used to untag frames on egress. Configuring
+            <varname>EgressUntagged=</varname> implicates the use of <varname>VLAN=</varname> above and will enable the
+            VLAN ID for ingress as well. This can be either a single ID or a range M-N.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>PVID=</varname></term>
+          <listitem>
+            <para>The Port VLAN ID specified here is assigned to all untagged frames at ingress.
+            <varname>PVID=</varname> can be used only once. Configuring <varname>PVID=</varname> implicates the use of
+            <varname>VLAN=</varname> above and will enable the VLAN ID for ingress as well.</para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
 
   <refsect1>
     <title>Example</title>
@@ -1137,6 +1213,26 @@ Name=enp2s0
 
 [Network]
 Bridge=bridge0</programlisting>
+    </example>
+    <example>
+      <title>/etc/systemd/network/25-bridge-slave-interface-vlan.network</title>
+
+      <programlisting>[Match]
+Name=enp2s0
+
+[Network]
+Bridge=bridge0
+
+[BridgeVLAN]
+VLAN=1-32
+PVID=42
+EgressUntagged=42
+
+[BridgeVLAN]
+VLAN=100-200
+
+[BridgeVLAN]
+EgressUntagged=300-400</programlisting>
     </example>
     <example>
       <title>/etc/systemd/network/25-ipip.network</title>
@@ -1186,6 +1282,17 @@ Name=bond1
 
 [Network]
 DHCP=yes
+</programlisting>
+    </example>
+
+    <example>
+      <title>/etc/systemd/network/25-vrf.network</title>
+      <para>Add the bond1 interface to the VRF master interface vrf-test. This will redirect routes generated on this interface to be within the routing table defined during VRF creation. Traffic won't be redirected towards the VRFs routing table unless specific ip-rules are added.</para>
+      <programlisting>[Match]
+Name=bond1
+
+[Network]
+VRF=vrf-test
 </programlisting>
     </example>
 

@@ -3,6 +3,7 @@
 #include "conf-parser.h"
 #include "network-internal.h"
 #include "networkd-netdev-bond.h"
+#include "networkd-netdev-bridge.h"
 #include "networkd-netdev-ipvlan.h"
 #include "networkd-netdev-macvlan.h"
 #include "networkd-netdev-tunnel.h"
@@ -10,8 +11,9 @@
 #include "networkd-netdev-veth.h"
 #include "networkd-netdev-vlan.h"
 #include "networkd-netdev-vxlan.h"
-#include "networkd-netdev-bridge.h"
+#include "networkd-netdev-vrf.h"
 #include "networkd-netdev.h"
+#include "vlan-util.h"
 %}
 struct ConfigPerfItem;
 %null_strings
@@ -33,7 +35,7 @@ NetDev.Name,                 config_parse_ifname,                0,             
 NetDev.Kind,                 config_parse_netdev_kind,           0,                             offsetof(NetDev, kind)
 NetDev.MTUBytes,             config_parse_iec_size,              0,                             offsetof(NetDev, mtu)
 NetDev.MACAddress,           config_parse_hwaddr,                0,                             offsetof(NetDev, mac)
-VLAN.Id,                     config_parse_uint64,                0,                             offsetof(VLan, id)
+VLAN.Id,                     config_parse_vlanid,                0,                             offsetof(VLan, id)
 MACVLAN.Mode,                config_parse_macvlan_mode,          0,                             offsetof(MacVlan, mode)
 MACVTAP.Mode,                config_parse_macvlan_mode,          0,                             offsetof(MacVlan, mode)
 IPVLAN.Mode,                 config_parse_ipvlan_mode,           0,                             offsetof(IPVlan, mode)
@@ -41,6 +43,9 @@ Tunnel.Local,                config_parse_tunnel_address,        0,             
 Tunnel.Remote,               config_parse_tunnel_address,        0,                             offsetof(Tunnel, remote)
 Tunnel.TOS,                  config_parse_unsigned,              0,                             offsetof(Tunnel, tos)
 Tunnel.TTL,                  config_parse_unsigned,              0,                             offsetof(Tunnel, ttl)
+Tunnel.Key,                  config_parse_tunnel_key,            0,                             offsetof(Tunnel, key)
+Tunnel.InputKey,             config_parse_tunnel_key,            0,                             offsetof(Tunnel, ikey)
+Tunnel.OutputKey,            config_parse_tunnel_key,            0,                             offsetof(Tunnel, okey)
 Tunnel.DiscoverPathMTU,      config_parse_bool,                  0,                             offsetof(Tunnel, pmtudisc)
 Tunnel.Mode,                 config_parse_ip6tnl_mode,           0,                             offsetof(Tunnel, ip6tnl_mode)
 Tunnel.IPv6FlowLabel,        config_parse_ipv6_flowlabel,        0,                             offsetof(Tunnel, ipv6_flowlabel)
@@ -100,3 +105,5 @@ Bridge.MaxAgeSec,            config_parse_sec,                   0,             
 Bridge.ForwardDelaySec,      config_parse_sec,                   0,                             offsetof(Bridge, forward_delay)
 Bridge.MulticastQuerier,     config_parse_tristate,              0,                             offsetof(Bridge, mcast_querier)
 Bridge.MulticastSnooping,    config_parse_tristate,              0,                             offsetof(Bridge, mcast_snooping)
+Bridge.VLANFiltering,        config_parse_tristate,              0,                             offsetof(Bridge, vlan_filtering)
+VRF.TableId,                 config_parse_uint32,                0,                             offsetof(Vrf, table_id)

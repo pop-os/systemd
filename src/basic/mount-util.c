@@ -104,7 +104,7 @@ int fd_is_mount_point(int fd, const char *filename, int flags) {
          *
          * As last fallback we do traditional fstat() based st_dev
          * comparisons. This is how things were traditionally done,
-         * but unionfs breaks breaks this since it exposes file
+         * but unionfs breaks this since it exposes file
          * systems with a variety of st_dev reported. Also, btrfs
          * subvolumes have different st_dev, even though they aren't
          * real mounts of their own. */
@@ -448,21 +448,21 @@ int bind_remount_recursive(const char *prefix, bool ro) {
                         if (r < 0)
                                 return r;
 
-                        /* Try to reuse the original flag set, but
-                         * don't care for errors, in case of
-                         * obstructed mounts */
+                        /* Deal with mount points that are obstructed by a
+                         * later mount */
+                        r = path_is_mount_point(x, 0);
+                        if (r == -ENOENT || r == 0)
+                                continue;
+                        if (r < 0)
+                                return r;
+
+                        /* Try to reuse the original flag set */
                         orig_flags = 0;
                         (void) get_mount_flags(x, &orig_flags);
                         orig_flags &= ~MS_RDONLY;
 
-                        if (mount(NULL, x, NULL, orig_flags|MS_BIND|MS_REMOUNT|(ro ? MS_RDONLY : 0), NULL) < 0) {
-
-                                /* Deal with mount points that are
-                                 * obstructed by a later mount */
-
-                                if (errno != ENOENT)
-                                        return -errno;
-                        }
+                        if (mount(NULL, x, NULL, orig_flags|MS_BIND|MS_REMOUNT|(ro ? MS_RDONLY : 0), NULL) < 0)
+                                return -errno;
 
                 }
         }
@@ -500,6 +500,7 @@ bool fstype_is_network(const char *fstype) {
                 "gfs2\0"
                 "glusterfs\0"
                 "pvfs2\0" /* OrangeFS */
+                "ocfs2\0"
                 ;
 
         const char *x;
@@ -530,4 +531,29 @@ int repeat_unmount(const char *path, int flags) {
 
                 done = true;
         }
+}
+
+const char* mode_to_inaccessible_node(mode_t mode) {
+        /* This function maps a node type to the correspondent inaccessible node type.
+         * Character and block inaccessible devices may not be created (because major=0 and minor=0),
+         * in such case we map character and block devices to the inaccessible node type socket. */
+        switch(mode & S_IFMT) {
+                case S_IFREG:
+                        return "/run/systemd/inaccessible/reg";
+                case S_IFDIR:
+                        return "/run/systemd/inaccessible/dir";
+                case S_IFCHR:
+                        if (access("/run/systemd/inaccessible/chr", F_OK) == 0)
+                                return "/run/systemd/inaccessible/chr";
+                        return "/run/systemd/inaccessible/sock";
+                case S_IFBLK:
+                        if (access("/run/systemd/inaccessible/blk", F_OK) == 0)
+                                return "/run/systemd/inaccessible/blk";
+                        return "/run/systemd/inaccessible/sock";
+                case S_IFIFO:
+                        return "/run/systemd/inaccessible/fifo";
+                case S_IFSOCK:
+                        return "/run/systemd/inaccessible/sock";
+        }
+        return NULL;
 }

@@ -60,7 +60,14 @@ static void dns_transaction_flush_dnssec_transactions(DnsTransaction *t) {
 static void dns_transaction_close_connection(DnsTransaction *t) {
         assert(t);
 
-        t->stream = dns_stream_free(t->stream);
+        if (t->stream) {
+                /* Let's detach the stream from our transaction, in case something else keeps a reference to it. */
+                t->stream->complete = NULL;
+                t->stream->on_packet = NULL;
+                t->stream->transaction = NULL;
+                t->stream = dns_stream_unref(t->stream);
+        }
+
         t->dns_udp_event_source = sd_event_source_unref(t->dns_udp_event_source);
         t->dns_udp_fd = safe_close(t->dns_udp_fd);
 }
@@ -207,6 +214,7 @@ int dns_transaction_new(DnsTransaction **ret, DnsScope *s, DnsResourceKey *key) 
         t->answer_nsec_ttl = (uint32_t) -1;
         t->key = dns_resource_key_ref(key);
         t->current_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
+        t->clamp_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
 
         t->id = pick_new_id(s->manager);
 
@@ -371,11 +379,25 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
         assert(t);
         assert(t->scope->protocol == DNS_PROTOCOL_DNS);
 
+        /* Pick a DNS server and a feature level for it. */
+
         server = dns_scope_get_dns_server(t->scope);
         if (!server)
                 return -ESRCH;
 
+        /* If we changed the server invalidate the feature level clamping, as the new server might have completely
+         * different properties. */
+        if (server != t->server)
+                t->clamp_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
+
         t->current_feature_level = dns_server_possible_feature_level(server);
+
+        /* Clamp the feature level if that is requested. */
+        if (t->clamp_feature_level != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
+            t->current_feature_level > t->clamp_feature_level)
+                t->current_feature_level = t->clamp_feature_level;
+
+        log_debug("Using feature level %s for transaction %u.", dns_server_feature_level_to_string(t->current_feature_level), t->id);
 
         if (server == t->server)
                 return 0;
@@ -383,10 +405,12 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
         dns_server_unref(t->server);
         t->server = dns_server_ref(server);
 
+        log_debug("Using DNS server %s for transaction %u.", dns_server_string(t->server), t->id);
+
         return 1;
 }
 
-static void dns_transaction_retry(DnsTransaction *t) {
+static void dns_transaction_retry(DnsTransaction *t, bool next_server) {
         int r;
 
         assert(t);
@@ -394,7 +418,8 @@ static void dns_transaction_retry(DnsTransaction *t) {
         log_debug("Retrying transaction %" PRIu16 ".", t->id);
 
         /* Before we try again, switch to a new server. */
-        dns_scope_next_dns_server(t->scope);
+        if (next_server)
+                dns_scope_next_dns_server(t->scope);
 
         r = dns_transaction_go(t);
         if (r < 0) {
@@ -404,7 +429,11 @@ static void dns_transaction_retry(DnsTransaction *t) {
 }
 
 static int dns_transaction_maybe_restart(DnsTransaction *t) {
+        int r;
+
         assert(t);
+
+        /* Returns > 0 if the transaction was restarted, 0 if not */
 
         if (!t->server)
                 return 0;
@@ -420,7 +449,12 @@ static int dns_transaction_maybe_restart(DnsTransaction *t) {
 
         log_debug("Server feature level is now lower than when we began our transaction. Restarting with new ID.");
         dns_transaction_shuffle_id(t);
-        return dns_transaction_go(t);
+
+        r = dns_transaction_go(t);
+        if (r < 0)
+                return r;
+
+        return 1;
 }
 
 static int on_stream_complete(DnsStream *s, int error) {
@@ -435,7 +469,7 @@ static int on_stream_complete(DnsStream *s, int error) {
         t = s->transaction;
         p = dns_packet_ref(s->read_packet);
 
-        t->stream = dns_stream_free(t->stream);
+        dns_transaction_close_connection(t);
 
         if (ERRNO_IS_DISCONNECT(error)) {
                 usec_t usec;
@@ -451,7 +485,7 @@ static int on_stream_complete(DnsStream *s, int error) {
                 assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
                 dns_server_packet_lost(t->server, IPPROTO_TCP, t->current_feature_level, usec - t->start_usec);
 
-                dns_transaction_retry(t);
+                dns_transaction_retry(t, true);
                 return 0;
         }
         if (error != 0) {
@@ -547,7 +581,7 @@ static int dns_transaction_open_tcp(DnsTransaction *t) {
 
         r = dns_stream_write_packet(t->stream, t->sent);
         if (r < 0) {
-                t->stream = dns_stream_free(t->stream);
+                t->stream = dns_stream_unref(t->stream);
                 return r;
         }
 
@@ -557,8 +591,7 @@ static int dns_transaction_open_tcp(DnsTransaction *t) {
         /* The interface index is difficult to determine if we are
          * connecting to the local host, hence fill this in right away
          * instead of determining it from the socket */
-        if (t->scope->link)
-                t->stream->ifindex = t->scope->link->ifindex;
+        t->stream->ifindex = dns_scope_ifindex(t->scope);
 
         dns_transaction_reset_answer(t);
 
@@ -573,6 +606,10 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
         /* For mDNS we cache whenever we get the packet, rather than
          * in each transaction. */
         if (!IN_SET(t->scope->protocol, DNS_PROTOCOL_DNS, DNS_PROTOCOL_LLMNR))
+                return;
+
+        /* Caching disabled? */
+        if (!t->scope->manager->enable_cache)
                 return;
 
         /* We never cache if this packet is from the local host, under
@@ -626,14 +663,15 @@ static int dns_transaction_dnssec_ready(DnsTransaction *t) {
                         return 0;
 
                 case DNS_TRANSACTION_RCODE_FAILURE:
-                        if (dt->answer_rcode != DNS_RCODE_NXDOMAIN) {
+                        if (!IN_SET(dt->answer_rcode, DNS_RCODE_NXDOMAIN, DNS_RCODE_SERVFAIL)) {
                                 log_debug("Auxiliary DNSSEC RR query failed with rcode=%s.", dns_rcode_to_string(dt->answer_rcode));
                                 goto fail;
                         }
 
-                        /* Fall-through: NXDOMAIN is good enough for us. This is because some DNS servers erronously
-                         * return NXDOMAIN for empty non-terminals (Akamai...), and we need to handle that nicely, when
-                         * asking for parent SOA or similar RRs to make unsigned proofs. */
+                        /* Fall-through: NXDOMAIN/SERVFAIL is good enough for us. This is because some DNS servers
+                         * erronously return NXDOMAIN/SERVFAIL for empty non-terminals (Akamai...) or missing DS
+                         * records (Facebook), and we need to handle that nicely, when asking for parent SOA or similar
+                         * RRs to make unsigned proofs. */
 
                 case DNS_TRANSACTION_SUCCESS:
                         /* All good. */
@@ -798,12 +836,9 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
         switch (t->scope->protocol) {
 
         case DNS_PROTOCOL_LLMNR:
-                assert(t->scope->link);
+                /* For LLMNR we will not accept any packets from other interfaces */
 
-                /* For LLMNR we will not accept any packets from other
-                 * interfaces */
-
-                if (p->ifindex != t->scope->link->ifindex)
+                if (p->ifindex != dns_scope_ifindex(t->scope))
                         return;
 
                 if (p->family != t->scope->family)
@@ -820,10 +855,9 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                 break;
 
         case DNS_PROTOCOL_MDNS:
-                assert(t->scope->link);
-
                 /* For mDNS we will not accept any packets from other interfaces */
-                if (p->ifindex != t->scope->link->ifindex)
+
+                if (p->ifindex != dns_scope_ifindex(t->scope))
                         return;
 
                 if (p->family != t->scope->family)
@@ -874,10 +908,22 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                 if (IN_SET(DNS_PACKET_RCODE(p), DNS_RCODE_FORMERR, DNS_RCODE_SERVFAIL, DNS_RCODE_NOTIMP)) {
 
                         /* Request failed, immediately try again with reduced features */
-                        log_debug("Server returned error: %s", dns_rcode_to_string(DNS_PACKET_RCODE(p)));
 
-                        dns_server_packet_failed(t->server, t->current_feature_level);
-                        dns_transaction_retry(t);
+                        if (t->current_feature_level <= DNS_SERVER_FEATURE_LEVEL_WORST) {
+                                /* This was already at the lowest possible feature level? If so, we can't downgrade
+                                 * this transaction anymore, hence let's process the response, and accept the rcode. */
+                                log_debug("Server returned error: %s", dns_rcode_to_string(DNS_PACKET_RCODE(p)));
+                                break;
+                        }
+
+                        /* Reduce this feature level by one and try again. */
+                        t->clamp_feature_level = t->current_feature_level - 1;
+
+                        log_debug("Server returned error %s, retrying transaction with reduced feature level %s.",
+                                  dns_rcode_to_string(DNS_PACKET_RCODE(p)),
+                                  dns_server_feature_level_to_string(t->clamp_feature_level));
+
+                        dns_transaction_retry(t, false /* use the same server */);
                         return;
                 } else if (DNS_PACKET_TC(p))
                         dns_server_packet_truncated(t->server, t->current_feature_level);
@@ -922,7 +968,7 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                                 goto fail;
 
                         /* On DNS, couldn't send? Try immediately again, with a new server */
-                        dns_transaction_retry(t);
+                        dns_transaction_retry(t, true);
                 }
 
                 return;
@@ -935,11 +981,19 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                 return;
         }
 
-        /* Report that the OPT RR was missing */
         if (t->server) {
+                /* Report that we successfully received a valid packet with a good rcode after we initially got a bad
+                 * rcode and subsequently downgraded the protocol */
+
+                if (IN_SET(DNS_PACKET_RCODE(p), DNS_RCODE_SUCCESS, DNS_RCODE_NXDOMAIN) &&
+                    t->clamp_feature_level != _DNS_SERVER_FEATURE_LEVEL_INVALID)
+                        dns_server_packet_rcode_downgrade(t->server, t->clamp_feature_level);
+
+                /* Report that the OPT RR was missing */
                 if (!p->opt)
                         dns_server_packet_bad_opt(t->server, t->current_feature_level);
 
+                /* Report that we successfully received a packet */
                 dns_server_packet_received(t->server, p->ipproto, t->current_feature_level, ts - t->start_usec, p->size);
         }
 
@@ -1026,7 +1080,7 @@ static int on_dns_packet(sd_event_source *s, int fd, uint32_t revents, void *use
                 assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
                 dns_server_packet_lost(t->server, IPPROTO_UDP, t->current_feature_level, usec - t->start_usec);
 
-                dns_transaction_retry(t);
+                dns_transaction_retry(t, true);
                 return 0;
         }
         if (r < 0) {
@@ -1135,7 +1189,7 @@ static int on_transaction_timeout(sd_event_source *s, usec_t usec, void *userdat
 
         log_debug("Timeout reached on transaction %" PRIu16 ".", t->id);
 
-        dns_transaction_retry(t);
+        dns_transaction_retry(t, true);
         return 0;
 }
 
@@ -1246,7 +1300,7 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
          * for probing or verifying a zone item. */
         if (set_isempty(t->notify_zone_items)) {
 
-                r = dns_zone_lookup(&t->scope->zone, t->key, &t->answer, NULL, NULL);
+                r = dns_zone_lookup(&t->scope->zone, t->key, dns_scope_ifindex(t->scope), &t->answer, NULL, NULL);
                 if (r < 0)
                         return r;
                 if (r > 0) {
@@ -1270,7 +1324,7 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
                 /* Let's then prune all outdated entries */
                 dns_cache_prune(&t->scope->cache);
 
-                r = dns_cache_lookup(&t->scope->cache, t->key, &t->answer_rcode, &t->answer, &t->answer_authenticated);
+                r = dns_cache_lookup(&t->scope->cache, t->key, t->clamp_ttl, &t->answer_rcode, &t->answer, &t->answer_authenticated);
                 if (r < 0)
                         return r;
                 if (r > 0) {
@@ -1425,6 +1479,9 @@ int dns_transaction_go(DnsTransaction *t) {
         char key_str[DNS_RESOURCE_KEY_STRING_MAX];
 
         assert(t);
+
+        /* Returns > 0 if the transaction is now pending, returns 0 if could be processed immediately and has finished
+         * now. */
 
         assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &ts) >= 0);
 
@@ -1763,8 +1820,10 @@ static bool dns_transaction_dnssec_supported(DnsTransaction *t) {
         if (!t->server)
                 return true;
 
-        if (t->current_feature_level < DNS_SERVER_FEATURE_LEVEL_DO)
-                return false;
+        /* Note that we do not check the feature level actually used for the transaction but instead the feature level
+         * the server is known to support currently, as the transaction feature level might be lower than what the
+         * server actually supports, since we might have downgraded this transaction's feature level because we got a
+         * SERVFAIL earlier and wanted to check whether downgrading fixes it. */
 
         return dns_server_dnssec_supported(t->server);
 }
@@ -2856,7 +2915,7 @@ int dns_transaction_validate_dnssec(DnsTransaction *t) {
         if (!dns_transaction_dnssec_supported_full(t)) {
                 /* The server does not support DNSSEC, or doesn't augment responses with RRSIGs. */
                 t->answer_dnssec_result = DNSSEC_INCOMPATIBLE_SERVER;
-                log_debug("Not validating response for %" PRIu16 ", server lacks DNSSEC support.", t->id);
+                log_debug("Not validating response for %" PRIu16 ", used server feature level does not support DNSSEC.", t->id);
                 return 0;
         }
 

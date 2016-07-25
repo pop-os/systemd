@@ -51,8 +51,8 @@ static int network_load_one(Manager *manager, const char *filename) {
         if (!file) {
                 if (errno == ENOENT)
                         return 0;
-                else
-                        return -errno;
+
+                return -errno;
         }
 
         if (null_or_empty_fd(fileno(file))) {
@@ -134,6 +134,7 @@ static int network_load_one(Manager *manager, const char *filename) {
         network->ipv6_hop_limit = -1;
         network->duid.type = _DUID_TYPE_INVALID;
         network->proxy_arp = -1;
+        network->ipv6_accept_ra_use_dns = true;
 
         r = config_parse(NULL, filename, file,
                          "Match\0"
@@ -144,8 +145,10 @@ static int network_load_one(Manager *manager, const char *filename) {
                          "DHCP\0"
                          "DHCPv4\0" /* compat */
                          "DHCPServer\0"
+                         "IPv6AcceptRA\0"
                          "Bridge\0"
-                         "BridgeFDB\0",
+                         "BridgeFDB\0"
+                         "BridgeVLAN\0",
                          config_item_perf_lookup, network_network_gperf_lookup,
                          false, false, true, network);
         if (r < 0)
@@ -241,8 +244,8 @@ void network_free(Network *network) {
         strv_free(network->bind_carrier);
 
         netdev_unref(network->bridge);
-
         netdev_unref(network->bond);
+        netdev_unref(network->vrf);
 
         HASHMAP_FOREACH(netdev, network->stacked_netdevs, i) {
                 hashmap_remove(network->stacked_netdevs, netdev->ifname);
@@ -466,6 +469,10 @@ int config_parse_netdev(const char *unit,
                 break;
         case NETDEV_KIND_BOND:
                 network->bond = netdev;
+
+                break;
+        case NETDEV_KIND_VRF:
+                network->vrf = netdev;
 
                 break;
         case NETDEV_KIND_VLAN:

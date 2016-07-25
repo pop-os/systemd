@@ -20,7 +20,7 @@
 AC_PREREQ([2.64])
 
 AC_INIT([systemd],
-        [230],
+        [231],
         [http://github.com/systemd/systemd/issues],
         [systemd],
         [http://www.freedesktop.org/wiki/Software/systemd])
@@ -249,6 +249,7 @@ AC_CHECK_SIZEOF(uid_t)
 AC_CHECK_SIZEOF(gid_t)
 AC_CHECK_SIZEOF(time_t)
 AC_CHECK_SIZEOF(dev_t)
+AC_CHECK_SIZEOF(ino_t)
 AC_CHECK_SIZEOF(rlim_t,,[
        #include <sys/time.h>
        #include <sys/resource.h>
@@ -324,6 +325,8 @@ AC_CHECK_TYPES([char16_t, char32_t, key_serial_t],
 ]])
 
 AC_CHECK_DECLS([IFLA_INET6_ADDR_GEN_MODE,
+                IN6_ADDR_GEN_MODE_STABLE_PRIVACY,
+                IFLA_VRF_TABLE,
                 IFLA_MACVLAN_FLAGS,
                 IFLA_IPVLAN_MODE,
                 IFLA_VTI_REMOTE,
@@ -547,6 +550,14 @@ AC_ARG_WITH([certificate-root],
         [CERTIFICATEROOT="/etc/ssl"])
 
 AC_SUBST(CERTIFICATEROOT)
+
+AC_ARG_WITH([support-url],
+        AS_HELP_STRING([--with-support-url=URL],
+                [Specify the supoport URL to show in catalog entries included in systemd]),
+        [SUPPORT_URL="$withval"],
+        [SUPPORT_URL=http://lists.freedesktop.org/mailman/listinfo/systemd-devel])
+
+AC_SUBST(SUPPORT_URL)
 
 # ------------------------------------------------------------------------------
 have_xz=no
@@ -1277,16 +1288,6 @@ AC_ARG_WITH(tpm-pcrindex,
 AC_DEFINE_UNQUOTED(SD_TPM_PCR, [$SD_TPM_PCR], [TPM PCR register number to use])
 
 # ------------------------------------------------------------------------------
-have_kdbus=no
-AC_ARG_ENABLE(kdbus, AS_HELP_STRING([--disable-kdbus], [do not connect to kdbus by default]))
-if test "x$enable_kdbus" != "xno"; then
-        AC_DEFINE(ENABLE_KDBUS, 1, [Define if kdbus is to be connected to by default])
-        have_kdbus=yes
-        M4_DEFINES="$M4_DEFINES -DENABLE_KDBUS"
-fi
-AM_CONDITIONAL(ENABLE_KDBUS, [test "$have_kdbus" = "yes"])
-
-# ------------------------------------------------------------------------------
 AC_ARG_WITH(rc-local-script-path-start,
         AS_HELP_STRING([--with-rc-local-script-path-start=PATH],
                 [Path to /etc/rc.local]),
@@ -1672,6 +1673,7 @@ AC_MSG_RESULT([
         Maximum System UID:                ${SYSTEM_UID_MAX}
         Maximum System GID:                ${SYSTEM_GID_MAX}
         Certificate root:                  ${CERTIFICATEROOT}
+        Support URL:                       ${SUPPORT_URL}
 
         CFLAGS:   ${OUR_CFLAGS} ${CFLAGS}
         CPPFLAGS: ${OUR_CPPFLAGS} ${CPPFLAGS}

@@ -647,7 +647,9 @@ static void test_strv_extend_n(void) {
 static void test_strv_make_nulstr_one(char **l) {
         _cleanup_free_ char *b = NULL, *c = NULL;
         _cleanup_strv_free_ char **q = NULL;
+        const char *s = NULL;
         size_t n, m;
+        unsigned i = 0;
 
         assert_se(strv_make_nulstr(l, &b, &n) >= 0);
         assert_se(q = strv_parse_nulstr(b, n));
@@ -656,6 +658,10 @@ static void test_strv_make_nulstr_one(char **l) {
         assert_se(strv_make_nulstr(q, &c, &m) >= 0);
         assert_se(m == n);
         assert_se(memcmp(b, c, m) == 0);
+
+        NULSTR_FOREACH(s, b)
+                assert_se(streq(s, l[i++]));
+        assert_se(i == strv_length(l));
 }
 
 static void test_strv_make_nulstr(void) {
@@ -683,6 +689,16 @@ static void test_foreach_string(void) {
 
         FOREACH_STRING(x, "zzz")
                 assert_se(streq(x, "zzz"));
+}
+
+static void test_strv_fnmatch(void) {
+        _cleanup_strv_free_ char **v = NULL;
+
+        assert_se(!strv_fnmatch(STRV_MAKE_EMPTY, "a", 0));
+
+        v = strv_new("*\\*", NULL);
+        assert_se(!strv_fnmatch(v, "\\", 0));
+        assert_se(strv_fnmatch(v, "\\", FNM_NOESCAPE));
 }
 
 int main(int argc, char *argv[]) {
@@ -750,6 +766,7 @@ int main(int argc, char *argv[]) {
         test_strv_make_nulstr();
 
         test_foreach_string();
+        test_strv_fnmatch();
 
         return 0;
 }

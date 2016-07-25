@@ -55,10 +55,14 @@ m4_ifdef(`HAVE_SECCOMP',
 `$1.SystemCallFilter,            config_parse_syscall_filter,        0,                             offsetof($1, exec_context)
 $1.SystemCallArchitectures,      config_parse_syscall_archs,         0,                             offsetof($1, exec_context.syscall_archs)
 $1.SystemCallErrorNumber,        config_parse_syscall_errno,         0,                             offsetof($1, exec_context)
+$1.MemoryDenyWriteExecute,       config_parse_bool,                  0,                             offsetof($1, exec_context.memory_deny_write_execute)
+$1.RestrictRealtime,             config_parse_bool,                  0,                             offsetof($1, exec_context.restrict_realtime)
 $1.RestrictAddressFamilies,      config_parse_address_families,      0,                             offsetof($1, exec_context)',
 `$1.SystemCallFilter,            config_parse_warn_compat,           DISABLED_CONFIGURATION,        0
 $1.SystemCallArchitectures,      config_parse_warn_compat,           DISABLED_CONFIGURATION,        0
 $1.SystemCallErrorNumber,        config_parse_warn_compat,           DISABLED_CONFIGURATION,        0
+$1.MemoryDenyWriteExecute,       config_parse_warn_compat,           DISABLED_CONFIGURATION,        0
+$1.RestrictRealtime,             config_parse_warn_compat,           DISABLED_CONFIGURATION,        0
 $1.RestrictAddressFamilies,      config_parse_warn_compat,           DISABLED_CONFIGURATION,        0')
 $1.LimitCPU,                     config_parse_limit,                 RLIMIT_CPU,                    offsetof($1, exec_context.rlimit)
 $1.LimitFSIZE,                   config_parse_limit,                 RLIMIT_FSIZE,                  offsetof($1, exec_context.rlimit)
@@ -76,9 +80,12 @@ $1.LimitMSGQUEUE,                config_parse_limit,                 RLIMIT_MSGQ
 $1.LimitNICE,                    config_parse_limit,                 RLIMIT_NICE,                   offsetof($1, exec_context.rlimit)
 $1.LimitRTPRIO,                  config_parse_limit,                 RLIMIT_RTPRIO,                 offsetof($1, exec_context.rlimit)
 $1.LimitRTTIME,                  config_parse_limit,                 RLIMIT_RTTIME,                 offsetof($1, exec_context.rlimit)
-$1.ReadWriteDirectories,         config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.read_write_dirs)
-$1.ReadOnlyDirectories,          config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.read_only_dirs)
-$1.InaccessibleDirectories,      config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.inaccessible_dirs)
+$1.ReadWriteDirectories,         config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.read_write_paths)
+$1.ReadOnlyDirectories,          config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.read_only_paths)
+$1.InaccessibleDirectories,      config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.inaccessible_paths)
+$1.ReadWritePaths,               config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.read_write_paths)
+$1.ReadOnlyPaths,                config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.read_only_paths)
+$1.InaccessiblePaths,            config_parse_namespace_path_strv,   0,                             offsetof($1, exec_context.inaccessible_paths)
 $1.PrivateTmp,                   config_parse_bool,                  0,                             offsetof($1, exec_context.private_tmp)
 $1.PrivateNetwork,               config_parse_bool,                  0,                             offsetof($1, exec_context.private_network)
 $1.PrivateDevices,               config_parse_bool,                  0,                             offsetof($1, exec_context.private_devices)
@@ -117,6 +124,9 @@ $1.CPUShares,                    config_parse_cpu_shares,            0,         
 $1.StartupCPUShares,             config_parse_cpu_shares,            0,                             offsetof($1, cgroup_context.startup_cpu_shares)
 $1.CPUQuota,                     config_parse_cpu_quota,             0,                             offsetof($1, cgroup_context)
 $1.MemoryAccounting,             config_parse_bool,                  0,                             offsetof($1, cgroup_context.memory_accounting)
+$1.MemoryLow,                    config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
+$1.MemoryHigh,                   config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
+$1.MemoryMax,                    config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
 $1.MemoryLimit,                  config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
 $1.DeviceAllow,                  config_parse_device_allow,          0,                             offsetof($1, cgroup_context)
 $1.DevicePolicy,                 config_parse_device_policy,         0,                             offsetof($1, cgroup_context.device_policy)

@@ -94,6 +94,10 @@ struct CGroupContext {
         LIST_HEAD(CGroupIODeviceWeight, io_device_weights);
         LIST_HEAD(CGroupIODeviceLimit, io_device_limits);
 
+        uint64_t memory_low;
+        uint64_t memory_high;
+        uint64_t memory_max;
+
         /* For legacy hierarchies */
         uint64_t cpu_shares;
         uint64_t startup_cpu_shares;
@@ -115,13 +119,11 @@ struct CGroupContext {
         bool delegate;
 };
 
-#include "cgroup-util.h"
 #include "unit.h"
 
 void cgroup_context_init(CGroupContext *c);
 void cgroup_context_done(CGroupContext *c);
 void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix);
-void cgroup_context_apply(CGroupContext *c, CGroupMask mask, const char *path, ManagerState state);
 
 CGroupMask cgroup_context_get_mask(CGroupContext *c);
 

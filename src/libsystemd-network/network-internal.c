@@ -27,7 +27,7 @@
 #include "condition.h"
 #include "conf-parser.h"
 #include "dhcp-lease-internal.h"
-#include "ether-addr-util.c"
+#include "ether-addr-util.h"
 #include "hexdecoct.h"
 #include "log.h"
 #include "network-internal.h"
@@ -102,16 +102,16 @@ bool net_match_config(const struct ether_addr *match_mac,
                       const char *dev_type,
                       const char *dev_name) {
 
-        if (match_host && !condition_test(match_host))
+        if (match_host && condition_test(match_host) <= 0)
                 return false;
 
-        if (match_virt && !condition_test(match_virt))
+        if (match_virt && condition_test(match_virt) <= 0)
                 return false;
 
-        if (match_kernel && !condition_test(match_kernel))
+        if (match_kernel && condition_test(match_kernel) <= 0)
                 return false;
 
-        if (match_arch && !condition_test(match_arch))
+        if (match_arch && condition_test(match_arch) <= 0)
                 return false;
 
         if (match_mac && (!dev_mac || memcmp(match_mac, dev_mac, ETH_ALEN)))
@@ -380,18 +380,21 @@ int deserialize_in_addrs(struct in_addr **ret, const char *string) {
         return size;
 }
 
-void serialize_in6_addrs(FILE *f, const struct in6_addr *addresses,
-                         size_t size) {
+void serialize_in6_addrs(FILE *f, const struct in6_addr *addresses, size_t size) {
         unsigned i;
 
         assert(f);
         assert(addresses);
         assert(size);
 
-        for (i = 0; i < size; i++)
-                fprintf(f, SD_NDISC_ADDRESS_FORMAT_STR"%s",
-                        SD_NDISC_ADDRESS_FORMAT_VAL(addresses[i]),
-                        (i < (size - 1)) ? " ": "");
+        for (i = 0; i < size; i++) {
+                char buffer[INET6_ADDRSTRLEN];
+
+                fputs(inet_ntop(AF_INET6, addresses+i, buffer, sizeof(buffer)), f);
+
+                if (i < size - 1)
+                        fputc(' ', f);
+        }
 }
 
 int deserialize_in6_addrs(struct in6_addr **ret, const char *string) {

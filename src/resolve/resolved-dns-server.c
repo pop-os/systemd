@@ -21,6 +21,7 @@
 
 #include "alloc-util.h"
 #include "resolved-dns-server.h"
+#include "resolved-dns-stub.h"
 #include "resolved-resolv-conf.h"
 #include "siphash24.h"
 #include "string-table.h"
@@ -43,7 +44,8 @@ int dns_server_new(
                 DnsServerType type,
                 Link *l,
                 int family,
-                const union in_addr_union *in_addr) {
+                const union in_addr_union *in_addr,
+                int ifindex) {
 
         DnsServer *s;
 
@@ -75,6 +77,7 @@ int dns_server_new(
         s->type = type;
         s->family = family;
         s->address = *in_addr;
+        s->ifindex = ifindex;
         s->resend_timeout = DNS_TIMEOUT_MIN_USEC;
 
         switch (type) {
@@ -242,6 +245,26 @@ static void dns_server_verified(DnsServer *s, DnsServerFeatureLevel level) {
         assert_se(sd_event_now(s->manager->event, clock_boottime_or_monotonic(), &s->verified_usec) >= 0);
 }
 
+static void dns_server_reset_counters(DnsServer *s) {
+        assert(s);
+
+        s->n_failed_udp = 0;
+        s->n_failed_tcp = 0;
+        s->packet_truncated = false;
+        s->verified_usec = 0;
+
+        /* Note that we do not reset s->packet_bad_opt and s->packet_rrsig_missing here. We reset them only when the
+         * grace period ends, but not when lowering the possible feature level, as a lower level feature level should
+         * not make RRSIGs appear or OPT appear, but rather make them disappear. If the reappear anyway, then that's
+         * indication for a differently broken OPT/RRSIG implementation, and we really don't want to support that
+         * either.
+         *
+         * This is particularly important to deal with certain Belkin routers which break OPT for certain lookups (A),
+         * but pass traffic through for others (AAAA). If we detect the broken behaviour on one lookup we should not
+         * reenable it for another, because we cannot validate things anyway, given that the RRSIG/OPT data will be
+         * incomplete. */
+}
+
 void dns_server_packet_received(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t rtt, size_t size) {
         assert(s);
 
@@ -302,17 +325,6 @@ void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel le
         s->resend_timeout = MIN(s->resend_timeout * 2, DNS_TIMEOUT_MAX_USEC);
 }
 
-void dns_server_packet_failed(DnsServer *s, DnsServerFeatureLevel level) {
-        assert(s);
-
-        /* Invoked whenever we get a FORMERR, SERVFAIL or NOTIMP rcode from a server. */
-
-        if (s->possible_feature_level != level)
-                return;
-
-        s->packet_failed = true;
-}
-
 void dns_server_packet_truncated(DnsServer *s, DnsServerFeatureLevel level) {
         assert(s);
 
@@ -350,6 +362,24 @@ void dns_server_packet_bad_opt(DnsServer *s, DnsServerFeatureLevel level) {
         s->packet_bad_opt = true;
 }
 
+void dns_server_packet_rcode_downgrade(DnsServer *s, DnsServerFeatureLevel level) {
+        assert(s);
+
+        /* Invoked whenever we got a FORMERR, SERVFAIL or NOTIMP rcode from a server and downgrading the feature level
+         * for the transaction made it go away. In this case we immediately downgrade to the feature level that made
+         * things work. */
+
+        if (s->verified_feature_level > level)
+                s->verified_feature_level = level;
+
+        if (s->possible_feature_level > level) {
+                s->possible_feature_level = level;
+                dns_server_reset_counters(s);
+        }
+
+        log_debug("Downgrading transaction feature level fixed an RCODE error, downgrading server %s too.", dns_server_string(s));
+}
+
 static bool dns_server_grace_period_expired(DnsServer *s) {
         usec_t ts;
 
@@ -367,27 +397,6 @@ static bool dns_server_grace_period_expired(DnsServer *s) {
         s->features_grace_period_usec = MIN(s->features_grace_period_usec * 2, DNS_SERVER_FEATURE_GRACE_PERIOD_MAX_USEC);
 
         return true;
-}
-
-static void dns_server_reset_counters(DnsServer *s) {
-        assert(s);
-
-        s->n_failed_udp = 0;
-        s->n_failed_tcp = 0;
-        s->packet_failed = false;
-        s->packet_truncated = false;
-        s->verified_usec = 0;
-
-        /* Note that we do not reset s->packet_bad_opt and s->packet_rrsig_missing here. We reset them only when the
-         * grace period ends, but not when lowering the possible feature level, as a lower level feature level should
-         * not make RRSIGs appear or OPT appear, but rather make them disappear. If the reappear anyway, then that's
-         * indication for a differently broken OPT/RRSIG implementation, and we really don't want to support that
-         * either.
-         *
-         * This is particularly important to deal with certain Belkin routers which break OPT for certain lookups (A),
-         * but pass traffic through for others (AAAA). If we detect the broken behaviour on one lookup we should not
-         * reenable it for another, because we cannot validate things anyway, given that the RRSIG/OPT data will be
-         * incomplete. */
 }
 
 DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
@@ -452,16 +461,6 @@ DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s) {
                         log_debug("Lost too many UDP packets, downgrading feature level...");
                         s->possible_feature_level--;
 
-                } else if (s->packet_failed &&
-                           s->possible_feature_level > DNS_SERVER_FEATURE_LEVEL_UDP) {
-
-                        /* We got a failure packet, and are at a feature level above UDP. Note that in this case we
-                         * downgrade no further than UDP, under the assumption that a failure packet indicates an
-                         * incompatible packet contents, but not a problem with the transport. */
-
-                        log_debug("Got server failure, downgrading feature level...");
-                        s->possible_feature_level--;
-
                 } else if (s->n_failed_tcp >= DNS_SERVER_FEATURE_RETRY_ATTEMPTS &&
                            s->packet_truncated &&
                            s->possible_feature_level > DNS_SERVER_FEATURE_LEVEL_UDP) {
@@ -515,14 +514,27 @@ int dns_server_adjust_opt(DnsServer *server, DnsPacket *packet, DnsServerFeature
         else
                 packet_size = server->received_udp_packet_max;
 
-        return dns_packet_append_opt(packet, packet_size, edns_do, NULL);
+        return dns_packet_append_opt(packet, packet_size, edns_do, 0, NULL);
+}
+
+int dns_server_ifindex(const DnsServer *s) {
+        assert(s);
+
+        /* The link ifindex always takes precedence */
+        if (s->link)
+                return s->link->ifindex;
+
+        if (s->ifindex > 0)
+                return s->ifindex;
+
+        return 0;
 }
 
 const char *dns_server_string(DnsServer *server) {
         assert(server);
 
         if (!server->server_string)
-                (void) in_addr_to_string(server->family, &server->address, &server->server_string);
+                (void) in_addr_ifindex_to_string(server->family, &server->address, dns_server_ifindex(server), &server->server_string);
 
         return strna(server->server_string);
 }
@@ -571,17 +583,28 @@ static void dns_server_hash_func(const void *p, struct siphash *state) {
 
         siphash24_compress(&s->family, sizeof(s->family), state);
         siphash24_compress(&s->address, FAMILY_ADDRESS_SIZE(s->family), state);
+        siphash24_compress(&s->ifindex, sizeof(s->ifindex), state);
 }
 
 static int dns_server_compare_func(const void *a, const void *b) {
         const DnsServer *x = a, *y = b;
+        int r;
 
         if (x->family < y->family)
                 return -1;
         if (x->family > y->family)
                 return 1;
 
-        return memcmp(&x->address, &y->address, FAMILY_ADDRESS_SIZE(x->family));
+        r = memcmp(&x->address, &y->address, FAMILY_ADDRESS_SIZE(x->family));
+        if (r != 0)
+                return r;
+
+        if (x->ifindex < y->ifindex)
+                return -1;
+        if (x->ifindex > y->ifindex)
+                return 1;
+
+        return 0;
 }
 
 const struct hash_ops dns_server_hash_ops = {
@@ -623,11 +646,11 @@ void dns_server_mark_all(DnsServer *first) {
         dns_server_mark_all(first->servers_next);
 }
 
-DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr) {
+DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr, int ifindex) {
         DnsServer *s;
 
         LIST_FOREACH(servers, s, first)
-                if (s->family == family && in_addr_equal(family, &s->address, in_addr) > 0)
+                if (s->family == family && in_addr_equal(family, &s->address, in_addr) > 0 && s->ifindex == ifindex)
                         return s;
 
         return NULL;
@@ -722,6 +745,19 @@ void manager_next_dns_server(Manager *m) {
                 manager_set_dns_server(m, m->fallback_dns_servers);
         else
                 manager_set_dns_server(m, m->dns_servers);
+}
+
+bool dns_server_address_valid(int family, const union in_addr_union *sa) {
+
+        /* Refuses the 0 IP addresses as well as 127.0.0.53 (which is our own DNS stub) */
+
+        if (in_addr_is_null(family, sa))
+                return false;
+
+        if (family == AF_INET && sa->in.s_addr == htobe32(INADDR_DNS_STUB))
+                return false;
+
+        return true;
 }
 
 static const char* const dns_server_type_table[_DNS_SERVER_TYPE_MAX] = {
