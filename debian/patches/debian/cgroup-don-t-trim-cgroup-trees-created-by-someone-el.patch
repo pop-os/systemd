@@ -14,10 +14,10 @@ Bug-Debian: https://bugs.debian.org/777601
  2 files changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
-index 7cdc97e..e2e9acd 100644
+index 472e24b..c733536 100644
 --- a/src/basic/cgroup-util.c
 +++ b/src/basic/cgroup-util.c
-@@ -1893,8 +1893,6 @@ int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path
+@@ -1920,8 +1920,6 @@ int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path
  
                  if (mask & bit)
                          (void) cg_create(n, path);
@@ -27,15 +27,15 @@ index 7cdc97e..e2e9acd 100644
  
          return 0;
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 0fb63b1..96824c9 100644
+index c19e43f..8581b19 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
-@@ -1322,7 +1322,7 @@ void unit_prune_cgroup(Unit *u) {
+@@ -1418,7 +1418,7 @@ void unit_prune_cgroup(Unit *u) {
  
          is_root_slice = unit_has_name(u, SPECIAL_ROOT_SLICE);
  
 -        r = cg_trim_everywhere(u->manager->cgroup_supported, u->cgroup_path, !is_root_slice);
 +        r = cg_trim_everywhere(u->cgroup_realized_mask, u->cgroup_path, !is_root_slice);
          if (r < 0) {
-                 log_debug_errno(r, "Failed to destroy cgroup %s, ignoring: %m", u->cgroup_path);
+                 log_unit_debug_errno(u, r, "Failed to destroy cgroup %s, ignoring: %m", u->cgroup_path);
                  return;

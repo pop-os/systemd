@@ -19,10 +19,10 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 12 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 6397aad..5f6d96a 100644
+index f2adca7..a19b61d 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1468,17 +1468,6 @@ int main(int argc, char *argv[]) {
+@@ -1503,17 +1503,6 @@ int main(int argc, char *argv[]) {
                  kernel_timestamp = DUAL_TIMESTAMP_NULL;
          }
  
@@ -37,9 +37,9 @@ index 6397aad..5f6d96a 100644
 -                        (void) write_string_file("/proc/sys/kernel/core_pattern", "|/bin/false", 0);
 -        }
 -
-         /* Initialize default unit */
-         r = free_and_strdup(&arg_default_unit, SPECIAL_DEFAULT_TARGET);
-         if (r < 0) {
+         if (arg_system) {
+                 if (fixup_environment() < 0) {
+                         error_message = "Failed to fix up PID1 environment";
 diff --git a/sysctl.d/50-coredump.conf.in b/sysctl.d/50-coredump.conf.in
 index 5a25de4..1e54fed 100644
 --- a/sysctl.d/50-coredump.conf.in

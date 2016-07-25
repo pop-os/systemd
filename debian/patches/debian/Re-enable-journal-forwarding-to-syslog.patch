@@ -17,10 +17,10 @@ conf.d snippet.
  3 files changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index 3964cd6..0e095e6 100644
+index fef4fde..d9e126f 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -315,7 +315,7 @@
+@@ -316,7 +316,7 @@
          These options take boolean arguments. If forwarding to syslog
          is enabled but nothing reads messages from the socket,
          forwarding to syslog has no effect. By default, only
@@ -30,7 +30,7 @@ index 3964cd6..0e095e6 100644
          <literal>systemd.journald.forward_to_syslog=</literal>,
          <literal>systemd.journald.forward_to_kmsg=</literal>,
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index 8f82d2a..bc25dd4 100644
+index 587c343..a612e52 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
 @@ -1738,6 +1738,7 @@ int server_init(Server *s) {

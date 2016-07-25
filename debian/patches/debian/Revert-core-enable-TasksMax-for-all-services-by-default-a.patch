@@ -9,10 +9,10 @@ Introducing a default limit on number of threads broke a lot of software which
 regularly needs more, such as MySQL and RabbitMQ, or services that spawn off an
 indefinite number of subtasks that are not in a scope, like LXC or cron.
 
-512 is way too much for most "simple" services, and it's way too little for
-others such as the ones mentioned above. There is also no particular rationale
-about "512", so even if we'd bump it to 1024 we'd just make the limit even less
-useful while still breaking software.
+15% is way too much for most "simple" services, and it's too little for others
+such as the ones mentioned above. There is also no particular rationale about
+any particular global limit, so even if we'd bump it higher we'd just make the
+limit even less useful while still breaking software.
 
 It is both much safer and also much more effective in terms of guarding against
 berserk programs/bugs/unintended fork bombs etc. to set limits in units
@@ -23,76 +23,33 @@ Bug: https://github.com/systemd/systemd/issues/3211
 Bug-Debian: https://bugs.debian.org/823530
 Bug-Ubuntu: https://launchpad.net/bugs/1578080
 ---
- man/systemd-system.conf.xml | 6 ++----
- src/core/main.c             | 4 ++--
- src/core/manager.c          | 3 +--
- src/core/system.conf        | 4 ++--
- 4 files changed, 7 insertions(+), 10 deletions(-)
+ man/systemd-system.conf.xml | 3 +--
+ src/core/system.conf        | 2 +-
+ 2 files changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd-system.conf.xml b/man/systemd-system.conf.xml
-index 8833e73..9b2324c 100644
+index 1bb40fd..7315531 100644
 --- a/man/systemd-system.conf.xml
 +++ b/man/systemd-system.conf.xml
-@@ -317,9 +317,7 @@
-         <varname>MemoryAccounting=</varname> and
-         <varname>TasksAccounting=</varname>. See
+@@ -328,8 +328,7 @@
+         <listitem><para>Configure the default value for the per-unit <varname>TasksMax=</varname> setting. See
          <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
--        for details on the per-unit
--        settings. <varname>DefaulTasksAccounting=</varname> defaults
--        to on, the other three settings to off.</para></listitem>
-+        for details on the per-unit settings.</para></listitem>
+         for details. This setting applies to all unit types that support resource control settings, with the exception
+-        of slice units. Defaults to 15%, which equals 4915 with the kernel's defaults on the host, but might be smaller
+-        in OS containers.</para></listitem>
++        of slice units.</para></listitem>
        </varlistentry>
  
        <varlistentry>
-@@ -330,7 +328,7 @@
-         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-         for details. This setting applies to all unit types that
-         support resource control settings, with the exception of slice
--        units. Defaults to 512.</para></listitem>
-+        units.</para></listitem>
-       </varlistentry>
- 
-       <varlistentry>
-diff --git a/src/core/main.c b/src/core/main.c
-index 5f6d96a..75172d5 100644
---- a/src/core/main.c
-+++ b/src/core/main.c
-@@ -125,8 +125,8 @@ static bool arg_default_cpu_accounting = false;
- static bool arg_default_io_accounting = false;
- static bool arg_default_blockio_accounting = false;
- static bool arg_default_memory_accounting = false;
--static bool arg_default_tasks_accounting = true;
--static uint64_t arg_default_tasks_max = UINT64_C(512);
-+static bool arg_default_tasks_accounting = false;
-+static uint64_t arg_default_tasks_max = (uint64_t) -1;
- static sd_id128_t arg_machine_id = {};
- 
- noreturn static void freeze_or_reboot(void) {
-diff --git a/src/core/manager.c b/src/core/manager.c
-index 7838f56..7339652 100644
---- a/src/core/manager.c
-+++ b/src/core/manager.c
-@@ -564,8 +564,7 @@ int manager_new(UnitFileScope scope, bool test_run, Manager **_m) {
-         m->unit_file_scope = scope;
-         m->exit_code = _MANAGER_EXIT_CODE_INVALID;
-         m->default_timer_accuracy_usec = USEC_PER_MINUTE;
--        m->default_tasks_accounting = true;
--        m->default_tasks_max = UINT64_C(512);
-+        m->default_tasks_max = (uint64_t) -1;
- 
- #ifdef ENABLE_EFI
-         if (MANAGER_IS_SYSTEM(m) && detect_container() <= 0)
 diff --git a/src/core/system.conf b/src/core/system.conf
-index db8b7ac..fd9b60e 100644
+index c6bb050..0a0abb0 100644
 --- a/src/core/system.conf
 +++ b/src/core/system.conf
-@@ -41,8 +41,8 @@
- #DefaultIOAccounting=no
+@@ -42,7 +42,7 @@
  #DefaultBlockIOAccounting=no
  #DefaultMemoryAccounting=no
--#DefaultTasksAccounting=yes
--#DefaultTasksMax=512
-+#DefaultTasksAccounting=no
+ #DefaultTasksAccounting=yes
+-#DefaultTasksMax=15%
 +#DefaultTasksMax=
  #DefaultLimitCPU=
  #DefaultLimitFSIZE=

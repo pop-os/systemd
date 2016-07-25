@@ -14,6 +14,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_227@LIBSYSTEMD_227 227
  LIBSYSTEMD_229@LIBSYSTEMD_229 229
  LIBSYSTEMD_230@LIBSYSTEMD_230 230
+ LIBSYSTEMD_231@LIBSYSTEMD_231 231
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -268,6 +269,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_exit@LIBSYSTEMD_221 221
  sd_event_get_exit_code@LIBSYSTEMD_221 221
  sd_event_get_fd@LIBSYSTEMD_221 221
+ sd_event_get_iteration@LIBSYSTEMD_231 231
  sd_event_get_state@LIBSYSTEMD_221 221
  sd_event_get_tid@LIBSYSTEMD_221 221
  sd_event_get_watchdog@LIBSYSTEMD_221 221
