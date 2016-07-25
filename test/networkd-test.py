@@ -42,6 +42,8 @@ networkd_active = subprocess.call(['systemctl', 'is-active', '--quiet',
                                    'systemd-networkd']) == 0
 have_dnsmasq = shutil.which('dnsmasq')
 
+RESOLV_CONF = '/run/systemd/resolve/resolv.conf'
+
 
 @unittest.skipIf(networkd_active,
                  'networkd is already active')
@@ -104,6 +106,7 @@ class ClientTestBase:
 
     def do_test(self, coldplug=True, ipv6=False, extra_opts='',
                 online_timeout=10, dhcp_mode='yes'):
+        subprocess.check_call(['systemctl', 'start', 'systemd-resolved'])
         with open(self.config, 'w') as f:
             f.write('''[Match]
 Name=%s
@@ -179,20 +182,14 @@ DHCP=%s
             self.print_server_log()
             raise
 
-        # verify resolv.conf if it gets dynamically managed
-        if os.path.islink('/etc/resolv.conf'):
-            for timeout in range(50):
-                with open('/etc/resolv.conf') as f:
-                    contents = f.read()
-                if 'nameserver 192.168.5.1\n' in contents:
-                    break
-                # resolv.conf can have at most three nameservers; if we already
-                # have three different ones, that's also okay
-                if contents.count('nameserver ') >= 3:
-                    break
-                time.sleep(0.1)
-            else:
-                self.fail('nameserver 192.168.5.1 not found in /etc/resolv.conf')
+        for timeout in range(50):
+            with open(RESOLV_CONF) as f:
+                contents = f.read()
+            if 'nameserver 192.168.5.1\n' in contents:
+                break
+            time.sleep(0.1)
+        else:
+            self.fail('nameserver 192.168.5.1 not found in ' + RESOLV_CONF)
 
         if not coldplug:
             # check post-down.d hook
@@ -205,7 +202,7 @@ DHCP=%s
     def test_coldplug_dhcp_yes_ip4_no_ra(self):
         # with disabling RA explicitly things should be fast
         self.do_test(coldplug=True, ipv6=False,
-                     extra_opts='IPv6AcceptRouterAdvertisements=False')
+                     extra_opts='IPv6AcceptRA=False')
 
     def test_coldplug_dhcp_ip4_only(self):
         # we have a 12s timeout on RA, so we need to wait longer
@@ -215,7 +212,7 @@ DHCP=%s
     def test_coldplug_dhcp_ip4_only_no_ra(self):
         # with disabling RA explicitly things should be fast
         self.do_test(coldplug=True, ipv6=False, dhcp_mode='ipv4',
-                     extra_opts='IPv6AcceptRouterAdvertisements=False')
+                     extra_opts='IPv6AcceptRA=False')
 
     def test_coldplug_dhcp_ip6(self):
         self.do_test(coldplug=True, ipv6=True)
@@ -226,6 +223,32 @@ DHCP=%s
 
     def test_hotplug_dhcp_ip6(self):
         self.do_test(coldplug=False, ipv6=True)
+
+    def test_route_only_dns(self):
+        with open('/run/systemd/network/myvpn.netdev', 'w') as f:
+            f.write('''[NetDev]
+Name=dummy0
+Kind=dummy
+MACAddress=12:34:56:78:9a:bc''')
+        with open('/run/systemd/network/myvpn.network', 'w') as f:
+            f.write('''[Match]
+Name=dummy0
+[Network]
+Address=192.168.42.100
+DNS=192.168.42.1
+Domains= ~company''')
+        self.addCleanup(os.remove, '/run/systemd/network/myvpn.netdev')
+        self.addCleanup(os.remove, '/run/systemd/network/myvpn.network')
+
+        self.do_test(coldplug=True, ipv6=False,
+                     extra_opts='IPv6AcceptRouterAdvertisements=False')
+
+        with open(RESOLV_CONF) as f:
+            contents = f.read()
+            # ~company is not a search domain, only a routing domain
+            self.assertNotRegex(contents, 'search.*company')
+            # our global server should appear
+            self.assertIn('nameserver 192.168.5.1\n', contents)
 
 
 @unittest.skipUnless(have_dnsmasq, 'dnsmasq not installed')
@@ -369,6 +392,74 @@ exec $(systemctl cat systemd-networkd.service | sed -n '/^ExecStart=/ { s/^.*=//
     @unittest.skip('networkd does not have DHCPv6 server support')
     def test_coldplug_dhcp_ip6(self):
         pass
+
+    def test_search_domains(self):
+
+        # we don't use this interface for this test
+        self.if_router = None
+
+        with open('/run/systemd/network/test.netdev', 'w') as f:
+            f.write('''[NetDev]
+Name=dummy0
+Kind=dummy
+MACAddress=12:34:56:78:9a:bc''')
+        with open('/run/systemd/network/test.network', 'w') as f:
+            f.write('''[Match]
+Name=dummy0
+[Network]
+Address=192.168.42.100
+DNS=192.168.42.1
+Domains= one two three four five six seven eight nine ten''')
+        self.addCleanup(os.remove, '/run/systemd/network/test.netdev')
+        self.addCleanup(os.remove, '/run/systemd/network/test.network')
+
+        subprocess.check_call(['systemctl', 'start', 'systemd-networkd'])
+
+        for timeout in range(50):
+            with open(RESOLV_CONF) as f:
+                contents = f.read()
+            if ' one' in contents:
+                break
+            time.sleep(0.1)
+        self.assertRegex(contents, 'search .*one two three four')
+        self.assertNotIn('seven\n', contents)
+        self.assertIn('# Too many search domains configured, remaining ones ignored.\n', contents)
+
+    def test_search_domains_too_long(self):
+
+        # we don't use this interface for this test
+        self.if_router = None
+
+        name_prefix = 'a' * 60
+
+        with open('/run/systemd/network/test.netdev', 'w') as f:
+            f.write('''[NetDev]
+Name=dummy0
+Kind=dummy
+MACAddress=12:34:56:78:9a:bc''')
+        with open('/run/systemd/network/test.network', 'w') as f:
+            f.write('''[Match]
+Name=dummy0
+[Network]
+Address=192.168.42.100
+DNS=192.168.42.1
+Domains=''')
+            for i in range(5):
+                f.write('%s%i ' % (name_prefix, i))
+
+        self.addCleanup(os.remove, '/run/systemd/network/test.netdev')
+        self.addCleanup(os.remove, '/run/systemd/network/test.network')
+
+        subprocess.check_call(['systemctl', 'start', 'systemd-networkd'])
+
+        for timeout in range(50):
+            with open(RESOLV_CONF) as f:
+                contents = f.read()
+            if ' one' in contents:
+                break
+            time.sleep(0.1)
+        self.assertRegex(contents, 'search .*%(p)s0 %(p)s1 %(p)s2' % {'p': name_prefix})
+        self.assertIn('# Total length of all search domains is too long, remaining ones ignored.', contents)
 
 
 if __name__ == '__main__':

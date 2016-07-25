@@ -92,16 +92,14 @@
   <refsect1>
     <title>Automatic Dependencies</title>
 
-    <para>Units with the <varname>Slice=</varname> setting set get
-    automatic <varname>Requires=</varname> and
-    <varname>After=</varname> dependencies on the specified slice
-    unit.</para>
+    <para>Units with the <varname>Slice=</varname> setting set automatically acquire <varname>Requires=</varname> and
+    <varname>After=</varname> dependencies on the specified slice unit.</para>
   </refsect1>
 
   <refsect1>
     <title>Unified and Legacy Control Group Hierarchies</title>
 
-    <para>Unified control group hierarchy is the new version of kernel control group interface. Depending on the
+    <para>The unified control group hierarchy is the new version of kernel control group interface. Depending on the
     resource type, there are differences in resource control capabilities.  Also, because of interface changes, some
     resource types have a separate set of options on the unified hierarchy.</para>
 
@@ -112,6 +110,13 @@
           <listitem>
             <para><varname>IO</varname> prefixed settings are superset of and replace <varname>BlockIO</varname>
             prefixed ones. On unified hierarchy, IO resource control also applies to buffered writes.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>Memory</option></term>
+          <listitem>
+            <para><varname>MemoryMax=</varname> replaces <varname>MemoryLimit=</varname>. <varname>MemoryLow=</varname>
+            and <varname>MemoryHigh=</varname> are effective only on unified hierarchy.</para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -213,23 +218,89 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>MemoryLow=<replaceable>bytes</replaceable></varname></term>
+
+        <listitem>
+          <para>Specify the best-effort memory usage protection of the executed processes in this unit. If the memory
+          usages of this unit and all its ancestors are below their low boundaries, this unit's memory won't be
+          reclaimed as long as memory can be reclaimed from unprotected units.</para>
+
+          <para>Takes a memory size in bytes. If the value is suffixed with K, M, G or T, the specified memory size is
+          parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. Alternatively, a
+          percentage value may be specified, which is taken relative to the installed physical memory on the
+          system. This controls the <literal>memory.low</literal> control group attribute. For details about this
+          control group attribute, see <ulink
+          url="https://www.kernel.org/doc/Documentation/cgroup-v2.txt">cgroup-v2.txt</ulink>.</para>
+
+          <para>Implies <literal>MemoryAccounting=true</literal>.</para>
+
+          <para>This setting is supported only if the unified control group hierarchy is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemoryHigh=<replaceable>bytes</replaceable></varname></term>
+
+        <listitem>
+          <para>Specify the high limit on memory usage of the executed processes in this unit. Memory usage may go
+          above the limit if unavoidable, but the processes are heavily slowed down and memory is taken away
+          aggressively in such cases. This is the main mechanism to control memory usage of a unit.</para>
+
+          <para>Takes a memory size in bytes. If the value is suffixed with K, M, G or T, the specified memory size is
+          parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. Alternatively, a
+          percentage value may be specified, which is taken relative to the installed physical memory on the
+          system. If assigned the
+          special value <literal>infinity</literal>, no memory limit is applied. This controls the
+          <literal>memory.high</literal> control group attribute. For details about this control group attribute, see
+          <ulink url="https://www.kernel.org/doc/Documentation/cgroup-v2.txt">cgroup-v2.txt</ulink>.</para>
+
+          <para>Implies <literal>MemoryAccounting=true</literal>.</para>
+
+          <para>This setting is supported only if the unified control group hierarchy is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MemoryMax=<replaceable>bytes</replaceable></varname></term>
+
+        <listitem>
+          <para>Specify the absolute limit on memory usage of the executed processes in this unit. If memory usage
+          cannot be contained under the limit, out-of-memory killer is invoked inside the unit. It is recommended to
+          use <varname>MemoryHigh=</varname> as the main control mechanism and use <varname>MemoryMax=</varname> as the
+          last line of defense.</para>
+
+          <para>Takes a memory size in bytes. If the value is suffixed with K, M, G or T, the specified memory size is
+          parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. Alternatively, a
+          percentage value may be specified, which is taken relative to the installed physical memory on the system. If
+          assigned the special value <literal>infinity</literal>, no memory limit is applied. This controls the
+          <literal>memory.max</literal> control group attribute. For details about this control group attribute, see
+          <ulink url="https://www.kernel.org/doc/Documentation/cgroup-v2.txt">cgroup-v2.txt</ulink>.</para>
+
+          <para>Implies <literal>MemoryAccounting=true</literal>.</para>
+
+          <para>This setting is supported only if the unified control group hierarchy is used. Use
+          <varname>MemoryLimit=</varname> on systems using the legacy control group hierarchy.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>MemoryLimit=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
-          <para>Specify the limit on maximum memory usage of the
-          executed processes. The limit specifies how much process and
-          kernel memory can be used by tasks in this unit. Takes a
-          memory size in bytes. If the value is suffixed with K, M, G
-          or T, the specified memory size is parsed as Kilobytes,
-          Megabytes, Gigabytes, or Terabytes (with the base 1024),
-          respectively. If assigned the special value
-          <literal>infinity</literal>, no memory limit is applied. This
-          controls the <literal>memory.limit_in_bytes</literal>
-          control group attribute. For details about this control
-          group attribute, see <ulink
+          <para>Specify the limit on maximum memory usage of the executed processes. The limit specifies how much
+          process and kernel memory can be used by tasks in this unit. Takes a memory size in bytes. If the value is
+          suffixed with K, M, G or T, the specified memory size is parsed as Kilobytes, Megabytes, Gigabytes, or
+          Terabytes (with the base 1024), respectively. Alternatively, a percentage value may be specified, which is
+          taken relative to the installed physical memory on the system. If assigned the special value
+          <literal>infinity</literal>, no memory limit is applied. This controls the
+          <literal>memory.limit_in_bytes</literal> control group attribute. For details about this control group
+          attribute, see <ulink
           url="https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt">memory.txt</ulink>.</para>
 
           <para>Implies <literal>MemoryAccounting=true</literal>.</para>
+
+          <para>This setting is supported only if the legacy control group hierarchy is used. Use
+          <varname>MemoryMax=</varname> on systems using the unified control group hierarchy.</para>
         </listitem>
       </varlistentry>
 
@@ -256,15 +327,12 @@
         <term><varname>TasksMax=<replaceable>N</replaceable></varname></term>
 
         <listitem>
-          <para>Specify the maximum number of tasks that may be
-          created in the unit. This ensures that the number of tasks
-          accounted for the unit (see above) stays below a specific
-          limit. If assigned the special value
-          <literal>infinity</literal>, no tasks limit is applied. This
-          controls the <literal>pids.max</literal> control group
-          attribute. For details about this control group attribute,
-          see <ulink
-          url="https://www.kernel.org/doc/Documentation/cgroup-v1/pids.txt">pids.txt</ulink>.</para>
+          <para>Specify the maximum number of tasks that may be created in the unit. This ensures that the number of
+          tasks accounted for the unit (see above) stays below a specific limit. This either takes an absolute number
+          of tasks or a percentage value that is taken relative to the configured maximum number of tasks on the
+          system.  If assigned the special value <literal>infinity</literal>, no tasks limit is applied. This controls
+          the <literal>pids.max</literal> control group attribute. For details about this control group attribute, see
+          <ulink url="https://www.kernel.org/doc/Documentation/cgroup-v1/pids.txt">pids.txt</ulink>.</para>
 
           <para>Implies <literal>TasksAccounting=true</literal>. The
           system default for this setting may be controlled with

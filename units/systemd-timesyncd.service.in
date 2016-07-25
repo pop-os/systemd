@@ -28,6 +28,8 @@ PrivateDevices=yes
 ProtectSystem=full
 ProtectHome=yes
 WatchdogSec=3min
+MemoryDenyWriteExecute=yes
+SystemCallFilter=~@cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
 
 [Install]
 WantedBy=sysinit.target

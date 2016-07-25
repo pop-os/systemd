@@ -139,11 +139,7 @@ static int add_to_keyring(const char *keyname, AskPasswordFlags flags, char **pa
         if (r < 0)
                 return r;
 
-        /* Truncate trailing NUL */
-        assert(n > 0);
-        assert(p[n-1] == 0);
-
-        serial = add_key("user", keyname, p, n-1, KEY_SPEC_USER_KEYRING);
+        serial = add_key("user", keyname, p, n, KEY_SPEC_USER_KEYRING);
         memory_erase(p, n);
         if (serial == -1)
                 return -errno;
@@ -253,10 +249,12 @@ int ask_password_tty(
                         goto finish;
                 }
 
-                loop_write(ttyfd, ANSI_HIGHLIGHT, strlen(ANSI_HIGHLIGHT), false);
+                if (colors_enabled())
+                        loop_write(ttyfd, ANSI_HIGHLIGHT, strlen(ANSI_HIGHLIGHT), false);
                 loop_write(ttyfd, message, strlen(message), false);
                 loop_write(ttyfd, " ", 1, false);
-                loop_write(ttyfd, ANSI_NORMAL, strlen(ANSI_NORMAL), false);
+                if (colors_enabled())
+                        loop_write(ttyfd, ANSI_NORMAL, strlen(ANSI_NORMAL), false);
 
                 new_termios = old_termios;
                 new_termios.c_lflag &= ~(ICANON|ECHO);

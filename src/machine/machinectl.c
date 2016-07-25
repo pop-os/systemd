@@ -32,6 +32,7 @@
 #include "sd-bus.h"
 
 #include "alloc-util.h"
+#include "bus-common-errors.h"
 #include "bus-error.h"
 #include "bus-unit-util.h"
 #include "bus-util.h"
@@ -527,7 +528,7 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
 
         fputs(strna(i->name), stdout);
 
-        if (!sd_id128_equal(i->id, SD_ID128_NULL))
+        if (!sd_id128_is_null(i->id))
                 printf("(" SD_ID128_FORMAT_STR ")\n", SD_ID128_FORMAT_VAL(i->id));
         else
                 putchar('\n');
@@ -1523,8 +1524,33 @@ static int read_only_image(int argc, char *argv[], void *userdata) {
         return 0;
 }
 
+static int image_exists(sd_bus *bus, const char *name) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        int r;
+
+        assert(bus);
+        assert(name);
+
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.machine1",
+                        "/org/freedesktop/machine1",
+                        "org.freedesktop.machine1.Manager",
+                        "GetImage",
+                        &error,
+                        NULL,
+                        "s", name);
+        if (r < 0) {
+                if (sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_IMAGE))
+                        return 0;
+
+                return log_error_errno(r, "Failed to check whether image %s exists: %s", name, bus_error_message(&error, -r));
+        }
+
+        return 1;
+}
+
 static int make_service_name(const char *name, char **ret) {
-        _cleanup_free_ char *e = NULL;
         int r;
 
         assert(name);
@@ -1535,11 +1561,7 @@ static int make_service_name(const char *name, char **ret) {
                 return -EINVAL;
         }
 
-        e = unit_name_escape(name);
-        if (!e)
-                return log_oom();
-
-        r = unit_name_build("systemd-nspawn", e, ".service", ret);
+        r = unit_name_build("systemd-nspawn", name, ".service", ret);
         if (r < 0)
                 return log_error_errno(r, "Failed to build unit name: %m");
 
@@ -1568,6 +1590,14 @@ static int start_machine(int argc, char *argv[], void *userdata) {
                 r = make_service_name(argv[i], &unit);
                 if (r < 0)
                         return r;
+
+                r = image_exists(bus, argv[i]);
+                if (r < 0)
+                        return r;
+                if (r == 0) {
+                        log_error("Machine image '%s' does not exist.", argv[1]);
+                        return -ENXIO;
+                }
 
                 r = sd_bus_call_method(
                                 bus,
@@ -1602,6 +1632,8 @@ static int start_machine(int argc, char *argv[], void *userdata) {
 static int enable_machine(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
         int carries_install_info = 0;
         const char *method = NULL;
         sd_bus *bus = userdata;
@@ -1634,6 +1666,14 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return r;
 
+                r = image_exists(bus, argv[i]);
+                if (r < 0)
+                        return r;
+                if (r == 0) {
+                        log_error("Machine image '%s' does not exist.", argv[1]);
+                        return -ENXIO;
+                }
+
                 r = sd_bus_message_append(m, "s", unit);
                 if (r < 0)
                         return bus_log_create_error(r);
@@ -1662,9 +1702,9 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
                         return bus_log_parse_error(r);
         }
 
-        r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, NULL, NULL);
+        r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
         if (r < 0)
-                return r;
+                goto finish;
 
         r = sd_bus_call_method(
                         bus,
@@ -1677,10 +1717,15 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
                         NULL);
         if (r < 0) {
                 log_error("Failed to reload daemon: %s", bus_error_message(&error, -r));
-                return r;
+                goto finish;
         }
 
-        return 0;
+        r = 0;
+
+finish:
+        unit_file_changes_free(changes, n_changes);
+
+        return r;
 }
 
 static int match_log_message(sd_bus_message *m, void *userdata, sd_bus_error *error) {
@@ -2372,7 +2417,7 @@ static int set_limit(int argc, char *argv[], void *userdata) {
 }
 
 static int clean_images(int argc, char *argv[], void *userdata) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         uint64_t usage, total = 0;
         char fb[FORMAT_BYTES_MAX];
@@ -2381,15 +2426,22 @@ static int clean_images(int argc, char *argv[], void *userdata) {
         unsigned c = 0;
         int r;
 
-        r = sd_bus_call_method(
+        r = sd_bus_message_new_method_call(
                         bus,
+                        &m,
                         "org.freedesktop.machine1",
                         "/org/freedesktop/machine1",
                         "org.freedesktop.machine1.Manager",
-                        "CleanPool",
-                        &error,
-                        &reply,
-                        "s", arg_all ? "all" : "hidden");
+                        "CleanPool");
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        r = sd_bus_message_append(m, "s", arg_all ? "all" : "hidden");
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        /* This is a slow operation, hence permit a longer time for completion. */
+        r = sd_bus_call(bus, m, USEC_INFINITY, &error, &reply);
         if (r < 0)
                 return log_error_errno(r, "Could not clean pool: %s", bus_error_message(&error, r));
 
@@ -2533,35 +2585,65 @@ static int parse_argv(int argc, char *argv[]) {
         };
 
         bool reorder = false;
-        int c, r;
+        int c, r, shell = -1;
 
         assert(argc >= 0);
         assert(argv);
 
         for (;;) {
-                const char * const option_string = "+hp:als:H:M:qn:o:";
+                static const char option_string[] = "-hp:als:H:M:qn:o:";
 
                 c = getopt_long(argc, argv, option_string + reorder, options, NULL);
-                if (c < 0) {
+                if (c < 0)
+                        break;
+
+                switch (c) {
+
+                case 1: /* getopt_long() returns 1 if "-" was the first character of the option string, and a
+                         * non-option argument was discovered. */
+
+                        assert(!reorder);
+
                         /* We generally are fine with the fact that getopt_long() reorders the command line, and looks
                          * for switches after the main verb. However, for "shell" we really don't want that, since we
-                         * want that switches passed after that are passed to the program to execute, and not processed
-                         * by us. To make this possible, we'll first invoke getopt_long() with reordering disabled
-                         * (i.e. with the "+" prefix in the option string), and as soon as we hit the end (i.e. the
-                         * verb) we check if that's "shell". If it is, we exit the loop, since we don't want any
-                         * further options processed. However, if it is anything else, we process the same argument
-                         * again, but this time allow reordering. */
+                         * want that switches specified after the machine name are passed to the program to execute,
+                         * and not processed by us. To make this possible, we'll first invoke getopt_long() with
+                         * reordering disabled (i.e. with the "-" prefix in the option string), looking for the first
+                         * non-option parameter. If it's the verb "shell" we remember its position and continue
+                         * processing options. In this case, as soon as we hit the next non-option argument we found
+                         * the machine name, and stop further processing. If the first non-option argument is any other
+                         * verb than "shell" we switch to normal reordering mode and continue processing arguments
+                         * normally. */
 
-                        if (!reorder && optind < argc && !streq(argv[optind], "shell")) {
+                        if (shell >= 0) {
+                                /* If we already found the "shell" verb on the command line, and now found the next
+                                 * non-option argument, then this is the machine name and we should stop processing
+                                 * further arguments.  */
+                                optind --; /* don't process this argument, go one step back */
+                                goto done;
+                        }
+                        if (streq(optarg, "shell"))
+                                /* Remember the position of the "shell" verb, and continue processing normally. */
+                                shell = optind - 1;
+                        else {
+                                int saved_optind;
+
+                                /* OK, this is some other verb. In this case, turn on reordering again, and continue
+                                 * processing normally. */
                                 reorder = true;
-                                optind--;
-                                continue;
+
+                                /* We changed the option string. getopt_long() only looks at it again if we invoke it
+                                 * at least once with a reset option index. Hence, let's reset the option index here,
+                                 * then invoke getopt_long() again (ignoring what it has to say, after all we most
+                                 * likely already processed it), and the bump the option index so that we read the
+                                 * intended argument again. */
+                                saved_optind = optind;
+                                optind = 0;
+                                (void) getopt_long(argc, argv, option_string + reorder, options, NULL);
+                                optind = saved_optind - 1; /* go one step back, process this argument again */
                         }
 
                         break;
-                }
-
-                switch (c) {
 
                 case 'h':
                         return help(0, NULL, NULL);
@@ -2697,6 +2779,22 @@ static int parse_argv(int argc, char *argv[]) {
                 }
         }
 
+done:
+        if (shell >= 0) {
+                char *t;
+                int i;
+
+                /* We found the "shell" verb while processing the argument list. Since we turned off reordering of the
+                 * argument list initially let's readjust it now, and move the "shell" verb to the back. */
+
+                optind -= 1; /* place the option index where the "shell" verb will be placed */
+
+                t = argv[shell];
+                for (i = shell; i < optind; i++)
+                        argv[i] = argv[i+1];
+                argv[optind] = t;
+        }
+
         return 1;
 }
 
@@ -2713,6 +2811,7 @@ static int machinectl_main(int argc, char *argv[], sd_bus *bus) {
                 { "terminate",       2,        VERB_ANY, 0,            terminate_machine },
                 { "reboot",          2,        VERB_ANY, 0,            reboot_machine    },
                 { "poweroff",        2,        VERB_ANY, 0,            poweroff_machine  },
+                { "stop",            2,        VERB_ANY, 0,            poweroff_machine  }, /* Convenience alias */
                 { "kill",            2,        VERB_ANY, 0,            kill_machine      },
                 { "login",           VERB_ANY, 2,        0,            login_machine     },
                 { "shell",           VERB_ANY, VERB_ANY, 0,            shell_machine     },
@@ -2743,7 +2842,7 @@ static int machinectl_main(int argc, char *argv[], sd_bus *bus) {
 }
 
 int main(int argc, char*argv[]) {
-        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -2765,6 +2864,7 @@ int main(int argc, char*argv[]) {
         r = machinectl_main(argc, argv, bus);
 
 finish:
+        sd_bus_flush_close_unref(bus);
         pager_close();
         polkit_agent_close();
 

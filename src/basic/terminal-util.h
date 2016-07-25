@@ -62,6 +62,7 @@ int ask_string(char **ret, const char *text, ...) _printf_(2, 3);
 int vt_disallocate(const char *name);
 
 char *resolve_dev_console(char **active);
+int get_kernel_consoles(char ***consoles);
 bool tty_is_vc(const char *tty);
 bool tty_is_vc_resolve(const char *tty);
 bool tty_is_console(const char *tty) _pure_;
@@ -79,6 +80,7 @@ unsigned lines(void);
 void columns_lines_cache_reset(int _unused_ signum);
 
 bool on_tty(void);
+bool terminal_is_dumb(void);
 bool colors_enabled(void);
 
 static inline const char *ansi_underline(void) {

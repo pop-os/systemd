@@ -68,6 +68,7 @@ typedef struct Link {
 
         int ifindex;
         char *ifname;
+        char *kind;
         unsigned short iftype;
         char *state_file;
         struct ether_addr mac;
@@ -98,6 +99,7 @@ typedef struct Link {
         unsigned dhcp4_messages;
         bool dhcp4_configured;
         bool dhcp6_configured;
+
         unsigned ndisc_messages;
         bool ndisc_configured;
 
@@ -111,7 +113,10 @@ typedef struct Link {
 
         sd_dhcp_server *dhcp_server;
 
-        sd_ndisc *ndisc_router_discovery;
+        sd_ndisc *ndisc;
+        Set *ndisc_rdnss;
+        Set *ndisc_dnssl;
+
         sd_dhcp6_client *dhcp6_client;
         bool rtnl_extended_attrs;
 
@@ -160,8 +165,7 @@ int link_set_timezone(Link *link, const char *timezone);
 int ipv4ll_configure(Link *link);
 int dhcp4_configure(Link *link);
 int dhcp6_configure(Link *link);
-int dhcp6_request_address(Link *link);
-int ndisc_configure(Link *link);
+int dhcp6_request_address(Link *link, int ir);
 
 const char* link_state_to_string(LinkState s) _const_;
 LinkState link_state_from_string(const char *s) _pure_;

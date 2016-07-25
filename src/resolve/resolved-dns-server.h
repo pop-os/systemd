@@ -62,6 +62,7 @@ struct DnsServer {
 
         int family;
         union in_addr_union address;
+        int ifindex; /* for IPv6 link-local DNS servers */
 
         char *server_string;
 
@@ -76,7 +77,6 @@ struct DnsServer {
         unsigned n_failed_udp;
         unsigned n_failed_tcp;
 
-        bool packet_failed:1;
         bool packet_truncated:1;
         bool packet_bad_opt:1;
         bool packet_rrsig_missing:1;
@@ -101,7 +101,8 @@ int dns_server_new(
                 DnsServerType type,
                 Link *link,
                 int family,
-                const union in_addr_union *address);
+                const union in_addr_union *address,
+                int ifindex);
 
 DnsServer* dns_server_ref(DnsServer *s);
 DnsServer* dns_server_unref(DnsServer *s);
@@ -111,22 +112,23 @@ void dns_server_move_back_and_unmark(DnsServer *s);
 
 void dns_server_packet_received(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t rtt, size_t size);
 void dns_server_packet_lost(DnsServer *s, int protocol, DnsServerFeatureLevel level, usec_t usec);
-void dns_server_packet_failed(DnsServer *s, DnsServerFeatureLevel level);
 void dns_server_packet_truncated(DnsServer *s, DnsServerFeatureLevel level);
 void dns_server_packet_rrsig_missing(DnsServer *s, DnsServerFeatureLevel level);
 void dns_server_packet_bad_opt(DnsServer *s, DnsServerFeatureLevel level);
+void dns_server_packet_rcode_downgrade(DnsServer *s, DnsServerFeatureLevel level);
 
 DnsServerFeatureLevel dns_server_possible_feature_level(DnsServer *s);
 
 int dns_server_adjust_opt(DnsServer *server, DnsPacket *packet, DnsServerFeatureLevel level);
 
 const char *dns_server_string(DnsServer *server);
+int dns_server_ifindex(const DnsServer *s);
 
 bool dns_server_dnssec_supported(DnsServer *server);
 
 void dns_server_warn_downgrade(DnsServer *server);
 
-DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr);
+DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr, int ifindex);
 
 void dns_server_unlink_all(DnsServer *first);
 void dns_server_unlink_marked(DnsServer *first);
@@ -137,6 +139,8 @@ DnsServer *manager_get_first_dns_server(Manager *m, DnsServerType t);
 DnsServer *manager_set_dns_server(Manager *m, DnsServer *s);
 DnsServer *manager_get_dns_server(Manager *m);
 void manager_next_dns_server(Manager *m);
+
+bool dns_server_address_valid(int family, const union in_addr_union *sa);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsServer*, dns_server_unref);
 

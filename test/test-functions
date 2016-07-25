@@ -9,7 +9,9 @@ KERNEL_VER=${KERNEL_VER-$(uname -r)}
 KERNEL_MODS="/lib/modules/$KERNEL_VER/"
 QEMU_TIMEOUT="${QEMU_TIMEOUT:-infinity}"
 NSPAWN_TIMEOUT="${NSPAWN_TIMEOUT:-infinity}"
+TIMED_OUT=  # will be 1 after run_* if *_TIMEOUT is set and test timed out
 FSTYPE="${FSTYPE:-ext3}"
+UNIFIED_CGROUP_HIERARCHY="${UNIFIED_CGROUP_HIERARCHY:-no}"
 
 if ! ROOTLIBDIR=$(pkg-config --variable=systemdutildir systemd); then
     echo "WARNING! Cannot determine rootlibdir from pkg-config, assuming /usr/lib/systemd" >&2
@@ -45,6 +47,8 @@ function find_qemu_bin() {
     fi
 }
 
+# Return 0 if QEMU did run (then you must check the result state/logs for actual
+# success), or 1 if QEMU is not available.
 run_qemu() {
     if [ -f /etc/machine-id ]; then
         read MACHINE_ID < /etc/machine-id
@@ -70,6 +74,7 @@ init=$ROOTLIBDIR/systemd \
 ro \
 console=ttyS0 \
 selinux=0 \
+systemd.unified_cgroup_hierarchy=$UNIFIED_CGROUP_HIERARCHY \
 $KERNEL_APPEND \
 "
 
@@ -92,17 +97,38 @@ $KERNEL_APPEND \
     if [[ "$QEMU_TIMEOUT" != "infinity" ]]; then
         QEMU_BIN="timeout --foreground $QEMU_TIMEOUT $QEMU_BIN"
     fi
-    ( set -x
-      $QEMU_BIN $QEMU_OPTIONS -append "$KERNEL_APPEND" ) || return 1
+    (set -x; $QEMU_BIN $QEMU_OPTIONS -append "$KERNEL_APPEND")
+    rc=$?
+    if [ "$rc" = 124 ] && [ "$QEMU_TIMEOUT" != "infinity" ]; then
+        derror "test timed out after $QEMU_TIMEOUT s"
+        TIMED_OUT=1
+    else
+        [ "$rc" != 0 ] && derror "QEMU failed with exit code $rc"
+    fi
+    return 0
 }
 
+# Return 0 if nspawn did run (then you must check the result state/logs for actual
+# success), or 1 if nspawn is not available.
 run_nspawn() {
+    [[ -d /run/systemd/system ]] || return 1
+
     local _nspawn_cmd="../../systemd-nspawn --register=no --kill-signal=SIGKILL --directory=$TESTDIR/nspawn-root $ROOTLIBDIR/systemd $KERNEL_APPEND"
     if [[ "$NSPAWN_TIMEOUT" != "infinity" ]]; then
         _nspawn_cmd="timeout --foreground $NSPAWN_TIMEOUT $_nspawn_cmd"
     fi
-    set -x
-    $_nspawn_cmd
+
+    _nspawn_cmd="env UNIFIED_CGROUP_HIERARCHY=$UNIFIED_CGROUP_HIERARCHY $_nspawn_cmd"
+
+    (set -x; $_nspawn_cmd)
+    rc=$?
+    if [ "$rc" = 124 ] && [ "$NSPAWN_TIMEOUT" != "infinity" ]; then
+        derror "test timed out after $NSPAWN_TIMEOUT s"
+        TIMED_OUT=1
+    else
+        [ "$rc" != 0 ] && derror "nspawn failed with exit code $rc"
+    fi
+    return 0
 }
 
 setup_basic_environment() {
@@ -249,10 +275,15 @@ install_systemd() {
     echo LogLevel=debug >> $initdir/etc/systemd/system.conf
 }
 
+get_ldpath() {
+    local _bin="$1"
+    objdump -p "$_bin" 2>/dev/null | awk "/R(UN)?PATH/ { print \"$initdir\" \$2 }" | paste -sd :
+}
+
 install_missing_libraries() {
     # install possible missing libraries
-    for i in $initdir/{sbin,bin}/* $initdir/lib/systemd/*; do
-        inst_libs $i
+    for i in $initdir{,/usr}/{sbin,bin}/* $initdir{,/usr}/lib/systemd/*; do
+        LD_LIBRARY_PATH=$(get_ldpath $i) inst_libs $i
     done
 }
 
@@ -285,6 +316,7 @@ check_result_nspawn() {
     [[ -f $TESTDIR/failed ]] && cat $TESTDIR/failed
     ls -l $TESTDIR/journal/*/*.journal
     test -s $TESTDIR/failed && ret=$(($ret+1))
+    [ -n "$TIMED_OUT" ] && ret=$(($ret+1))
     return $ret
 }
 
@@ -1260,11 +1292,6 @@ inst_libdir_file() {
         done
     fi
 }
-
-check_nspawn() {
-    [[ -d /run/systemd/system ]]
-}
-
 
 do_test() {
     if [[ $UID != "0" ]]; then

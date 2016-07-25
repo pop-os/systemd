@@ -596,7 +596,7 @@ int config_parse_exec(
         p = rvalue;
         do {
                 _cleanup_free_ char *path = NULL, *firstword = NULL;
-                bool separate_argv0 = false, ignore = false;
+                bool separate_argv0 = false, ignore = false, privileged = false;
                 _cleanup_free_ ExecCommand *nce = NULL;
                 _cleanup_strv_free_ char **n = NULL;
                 size_t nlen = 0, nbufsize = 0;
@@ -610,14 +610,18 @@ int config_parse_exec(
                         return 0;
 
                 f = firstword;
-                for (i = 0; i < 2; i++) {
-                        /* We accept an absolute path as first argument, or
-                         * alternatively an absolute prefixed with @ to allow
-                         * overriding of argv[0]. */
+                for (i = 0; i < 3; i++) {
+                        /* We accept an absolute path as first argument.
+                         * If it's prefixed with - and the path doesn't exist,
+                         * we ignore it instead of erroring out;
+                         * if it's prefixed with @, we allow overriding of argv[0];
+                         * and if it's prefixed with !, it will be run with full privileges */
                         if (*f == '-' && !ignore)
                                 ignore = true;
                         else if (*f == '@' && !separate_argv0)
                                 separate_argv0 = true;
+                        else if (*f == '+' && !privileged)
+                                privileged = true;
                         else
                                 break;
                         f++;
@@ -715,6 +719,7 @@ int config_parse_exec(
                 nce->argv = n;
                 nce->path = path;
                 nce->ignore = ignore;
+                nce->privileged = privileged;
 
                 exec_command_append_list(e, nce);
 
@@ -2396,6 +2401,55 @@ int config_parse_documentation(const char *unit,
 }
 
 #ifdef HAVE_SECCOMP
+static int syscall_filter_parse_one(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                ExecContext *c,
+                bool invert,
+                const char *t,
+                bool warn) {
+        int r;
+
+        if (*t == '@') {
+                const SystemCallFilterSet *set;
+
+                for (set = syscall_filter_sets; set->set_name; set++)
+                        if (streq(set->set_name, t)) {
+                                const char *sys;
+
+                                NULSTR_FOREACH(sys, set->value) {
+                                        r = syscall_filter_parse_one(unit, filename, line, c, invert, sys, false);
+                                        if (r < 0)
+                                                return r;
+                                }
+                                break;
+                        }
+        } else {
+                int id;
+
+                id = seccomp_syscall_resolve_name(t);
+                if (id == __NR_SCMP_ERROR)  {
+                        if (warn)
+                                log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse system call, ignoring: %s", t);
+                        return 0;
+                }
+
+                /* If we previously wanted to forbid a syscall and now
+                 * we want to allow it, then remove it from the list
+                 */
+                if (!invert == c->syscall_whitelist) {
+                        r = set_put(c->syscall_filter, INT_TO_PTR(id + 1));
+                        if (r == 0)
+                                return 0;
+                        if (r < 0)
+                                return log_oom();
+                } else
+                        set_remove(c->syscall_filter, INT_TO_PTR(id + 1));
+        }
+        return 0;
+}
+
 int config_parse_syscall_filter(
                 const char *unit,
                 const char *filename,
@@ -2407,13 +2461,6 @@ int config_parse_syscall_filter(
                 const char *rvalue,
                 void *data,
                 void *userdata) {
-
-        static const char default_syscalls[] =
-                "execve\0"
-                "exit\0"
-                "exit_group\0"
-                "rt_sigreturn\0"
-                "sigreturn\0";
 
         ExecContext *c = data;
         Unit *u = userdata;
@@ -2448,53 +2495,26 @@ int config_parse_syscall_filter(
                         /* Allow everything but the ones listed */
                         c->syscall_whitelist = false;
                 else {
-                        const char *i;
-
                         /* Allow nothing but the ones listed */
                         c->syscall_whitelist = true;
 
                         /* Accept default syscalls if we are on a whitelist */
-                        NULSTR_FOREACH(i, default_syscalls)  {
-                                int id;
-
-                                id = seccomp_syscall_resolve_name(i);
-                                if (id < 0)
-                                        continue;
-
-                                r = set_put(c->syscall_filter, INT_TO_PTR(id + 1));
-                                if (r == 0)
-                                        continue;
-                                if (r < 0)
-                                        return log_oom();
-                        }
+                        r = syscall_filter_parse_one(unit, filename, line, c, false, "@default", false);
+                        if (r < 0)
+                                return r;
                 }
         }
 
         FOREACH_WORD_QUOTED(word, l, rvalue, state) {
                 _cleanup_free_ char *t = NULL;
-                int id;
 
                 t = strndup(word, l);
                 if (!t)
                         return log_oom();
 
-                id = seccomp_syscall_resolve_name(t);
-                if (id < 0)  {
-                        log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse system call, ignoring: %s", t);
-                        continue;
-                }
-
-                /* If we previously wanted to forbid a syscall and now
-                 * we want to allow it, then remove it from the list
-                 */
-                if (!invert == c->syscall_whitelist)  {
-                        r = set_put(c->syscall_filter, INT_TO_PTR(id + 1));
-                        if (r == 0)
-                                continue;
-                        if (r < 0)
-                                return log_oom();
-                } else
-                        set_remove(c->syscall_filter, INT_TO_PTR(id + 1));
+                r = syscall_filter_parse_one(unit, filename, line, c, invert, t, true);
+                if (r < 0)
+                        return r;
         }
         if (!isempty(state))
                 log_syntax(unit, LOG_ERR, filename, line, 0, "Trailing garbage, ignoring.");
@@ -2754,7 +2774,7 @@ int config_parse_cpu_quota(
                 void *userdata) {
 
         CGroupContext *c = data;
-        double percent;
+        int r;
 
         assert(filename);
         assert(lvalue);
@@ -2765,18 +2785,13 @@ int config_parse_cpu_quota(
                 return 0;
         }
 
-        if (!endswith(rvalue, "%")) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "CPU quota '%s' not ending in '%%'. Ignoring.", rvalue);
+        r = parse_percent(rvalue);
+        if (r <= 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r, "CPU quota '%s' invalid. Ignoring.", rvalue);
                 return 0;
         }
 
-        if (sscanf(rvalue, "%lf%%", &percent) != 1 || percent <= 0) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "CPU quota '%s' invalid. Ignoring.", rvalue);
-                return 0;
-        }
-
-        c->cpu_quota_per_sec_usec = (usec_t) (percent * USEC_PER_SEC / 100);
-
+        c->cpu_quota_per_sec_usec = ((usec_t) r * USEC_PER_SEC) / 100U;
         return 0;
 }
 
@@ -2793,21 +2808,36 @@ int config_parse_memory_limit(
                 void *userdata) {
 
         CGroupContext *c = data;
-        uint64_t bytes;
+        uint64_t bytes = CGROUP_LIMIT_MAX;
         int r;
 
-        if (isempty(rvalue) || streq(rvalue, "infinity")) {
-                c->memory_limit = (uint64_t) -1;
-                return 0;
+        if (!isempty(rvalue) && !streq(rvalue, "infinity")) {
+
+                r = parse_percent(rvalue);
+                if (r < 0) {
+                        r = parse_size(rvalue, 1024, &bytes);
+                        if (r < 0) {
+                                log_syntax(unit, LOG_ERR, filename, line, r, "Memory limit '%s' invalid. Ignoring.", rvalue);
+                                return 0;
+                        }
+                } else
+                        bytes = physical_memory_scale(r, 100U);
+
+                if (bytes <= 0 || bytes >= UINT64_MAX) {
+                        log_syntax(unit, LOG_ERR, filename, line, 0, "Memory limit '%s' out of range. Ignoring.", rvalue);
+                        return 0;
+                }
         }
 
-        r = parse_size(rvalue, 1024, &bytes);
-        if (r < 0 || bytes < 1) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Memory limit '%s' invalid. Ignoring.", rvalue);
-                return 0;
-        }
+        if (streq(lvalue, "MemoryLow"))
+                c->memory_low = bytes;
+        else if (streq(lvalue, "MemoryHigh"))
+                c->memory_high = bytes;
+        else if (streq(lvalue, "MemoryMax"))
+                c->memory_max = bytes;
+        else
+                c->memory_limit = bytes;
 
-        c->memory_limit = bytes;
         return 0;
 }
 
@@ -2831,9 +2861,18 @@ int config_parse_tasks_max(
                 return 0;
         }
 
-        r = safe_atou64(rvalue, &u);
-        if (r < 0 || u < 1) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Maximum tasks value '%s' invalid. Ignoring.", rvalue);
+        r = parse_percent(rvalue);
+        if (r < 0) {
+                r = safe_atou64(rvalue, &u);
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Maximum tasks value '%s' invalid. Ignoring.", rvalue);
+                        return 0;
+                }
+        } else
+                u = system_tasks_max_scale(r, 100U);
+
+        if (u <= 0 || u >= UINT64_MAX) {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Maximum tasks value '%s' out of range. Ignoring.", rvalue);
                 return 0;
         }
 
@@ -3060,7 +3099,7 @@ int config_parse_io_limit(
                 return 0;
         }
 
-        if (streq("max", limit)) {
+        if (streq("infinity", limit)) {
                 num = CGROUP_LIMIT_MAX;
         } else {
                 r = parse_size(limit, 1000, &num);
@@ -3564,7 +3603,7 @@ int config_parse_protect_home(
         assert(data);
 
         /* Our enum shall be a superset of booleans, hence first try
-         * to parse as as boolean, and then as enum */
+         * to parse as boolean, and then as enum */
 
         k = parse_boolean(rvalue);
         if (k > 0)
@@ -3607,7 +3646,7 @@ int config_parse_protect_system(
         assert(data);
 
         /* Our enum shall be a superset of booleans, hence first try
-         * to parse as as boolean, and then as enum */
+         * to parse as boolean, and then as enum */
 
         k = parse_boolean(rvalue);
         if (k > 0)
@@ -3723,7 +3762,7 @@ static int merge_by_names(Unit **u, Set *names, const char *id) {
 
                         /* If the symlink name we are looking at is unit template, then
                            we must search for instance of this template */
-                        if (unit_name_is_valid(k, UNIT_NAME_TEMPLATE)) {
+                        if (unit_name_is_valid(k, UNIT_NAME_TEMPLATE) && (*u)->instance) {
                                 _cleanup_free_ char *instance = NULL;
 
                                 r = unit_name_replace_instance(k, (*u)->instance, &instance);
@@ -3805,7 +3844,15 @@ static int load_from_path(Unit *u, const char *path) {
                         if (r >= 0)
                                 break;
                         filename = mfree(filename);
-                        if (r != -ENOENT)
+
+                        /* ENOENT means that the file is missing or is a dangling symlink.
+                         * ENOTDIR means that one of paths we expect to be is a directory
+                         * is not a directory, we should just ignore that.
+                         * EACCES means that the directory or file permissions are wrong.
+                         */
+                        if (r == -EACCES)
+                                log_debug_errno(r, "Cannot access \"%s\": %m", filename);
+                        else if (!IN_SET(r, -ENOENT, -ENOTDIR))
                                 return r;
 
                         /* Empty the symlink names for the next run */

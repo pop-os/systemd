@@ -23,12 +23,10 @@ typedef struct VLan VLan;
 
 #include "networkd-netdev.h"
 
-#define VLANID_MAX 4094
-
 struct VLan {
         NetDev meta;
 
-        uint64_t id;
+        uint16_t id;
 };
 
 DEFINE_NETDEV_CAST(VLAN, VLan);

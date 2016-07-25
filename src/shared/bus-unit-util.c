@@ -83,18 +83,14 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
 
                 if (isempty(eq))
                         r = sd_bus_message_append(m, "sv", "CPUQuotaPerSecUSec", "t", USEC_INFINITY);
-                else if (endswith(eq, "%")) {
-                        double percent;
-
-                        if (sscanf(eq, "%lf%%", &percent) != 1 || percent <= 0) {
-                                log_error("CPU quota '%s' invalid.", eq);
+                else {
+                        r = parse_percent(eq);
+                        if (r <= 0) {
+                                log_error_errno(r, "CPU quota '%s' invalid.", eq);
                                 return -EINVAL;
                         }
 
-                        r = sd_bus_message_append(m, "sv", "CPUQuotaPerSecUSec", "t", (usec_t) percent * USEC_PER_SEC / 100);
-                } else {
-                        log_error("CPU quota needs to be in percent.");
-                        return -EINVAL;
+                        r = sd_bus_message_append(m, "sv", "CPUQuotaPerSecUSec", "t", (usec_t) r * USEC_PER_SEC / 100U);
                 }
 
                 goto finish;
@@ -110,6 +106,7 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 char *n;
                 usec_t t;
                 size_t l;
+
                 r = parse_sec(eq, &t);
                 if (r < 0)
                         return log_error_errno(r, "Failed to parse %s= parameter: %s", field, eq);
@@ -122,6 +119,54 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 /* Change suffix Sec → USec */
                 strcpy(mempcpy(n, field, l - 3), "USec");
                 r = sd_bus_message_append(m, "sv", n, "t", t);
+                goto finish;
+
+        } else if (STR_IN_SET(field, "MemoryLow", "MemoryHigh", "MemoryMax", "MemoryLimit")) {
+                uint64_t bytes;
+
+                if (isempty(eq) || streq(eq, "infinity"))
+                        bytes = CGROUP_LIMIT_MAX;
+                else {
+                        r = parse_percent(eq);
+                        if (r >= 0) {
+                                char *n;
+
+                                /* When this is a percentage we'll convert this into a relative value in the range
+                                 * 0…UINT32_MAX and pass it in the MemoryLowScale property (and related
+                                 * ones). This way the physical memory size can be determined server-side */
+
+                                n = strjoina(field, "Scale");
+                                r = sd_bus_message_append(m, "sv", n, "u", (uint32_t) (((uint64_t) UINT32_MAX * r) / 100U));
+                                goto finish;
+
+                        } else {
+                                r = parse_size(eq, 1024, &bytes);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to parse bytes specification %s", assignment);
+                        }
+                }
+
+                r = sd_bus_message_append(m, "sv", field, "t", bytes);
+                goto finish;
+        } else if (streq(field, "TasksMax")) {
+                uint64_t t;
+
+                if (isempty(eq) || streq(eq, "infinity"))
+                        t = (uint64_t) -1;
+                else {
+                        r = parse_percent(eq);
+                        if (r >= 0) {
+                                r = sd_bus_message_append(m, "sv", "TasksMaxScale", "u", (uint32_t) (((uint64_t) UINT32_MAX * r) / 100U));
+                                goto finish;
+                        } else {
+                                r = safe_atou64(eq, &t);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to parse maximum tasks specification %s", assignment);
+                        }
+
+                }
+
+                r = sd_bus_message_append(m, "sv", "TasksMax", "t", t);
                 goto finish;
         }
 
@@ -158,43 +203,13 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                        "SendSIGHUP", "SendSIGKILL", "WakeSystem", "DefaultDependencies",
                        "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "RemainAfterExit",
                        "PrivateTmp", "PrivateDevices", "PrivateNetwork", "NoNewPrivileges",
-                       "SyslogLevelPrefix", "Delegate", "RemainAfterElapse")) {
+                       "SyslogLevelPrefix", "Delegate", "RemainAfterElapse", "MemoryDenyWriteExecute")) {
 
                 r = parse_boolean(eq);
                 if (r < 0)
                         return log_error_errno(r, "Failed to parse boolean assignment %s.", assignment);
 
                 r = sd_bus_message_append(m, "v", "b", r);
-
-        } else if (streq(field, "MemoryLimit")) {
-                uint64_t bytes;
-
-                if (isempty(eq) || streq(eq, "infinity"))
-                        bytes = (uint64_t) -1;
-                else {
-                        r = parse_size(eq, 1024, &bytes);
-                        if (r < 0) {
-                                log_error("Failed to parse bytes specification %s", assignment);
-                                return -EINVAL;
-                        }
-                }
-
-                r = sd_bus_message_append(m, "v", "t", bytes);
-
-        } else if (streq(field, "TasksMax")) {
-                uint64_t n;
-
-                if (isempty(eq) || streq(eq, "infinity"))
-                        n = (uint64_t) -1;
-                else {
-                        r = safe_atou64(eq, &n);
-                        if (r < 0) {
-                                log_error("Failed to parse maximum tasks specification %s", assignment);
-                                return -EINVAL;
-                        }
-                }
-
-                r = sd_bus_message_append(m, "v", "t", n);
 
         } else if (STR_IN_SET(field, "CPUShares", "StartupCPUShares")) {
                 uint64_t u;
@@ -306,7 +321,7 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                                 return -EINVAL;
                         }
 
-                        if (streq(bandwidth, "max")) {
+                        if (streq(bandwidth, "infinity")) {
                                 bytes = CGROUP_LIMIT_MAX;
                         } else {
                                 r = parse_size(bandwidth, 1000, &bytes);
@@ -443,7 +458,8 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 }
 
                 r = sd_bus_message_append(m, "v", "i", oa);
-        } else if (STR_IN_SET(field, "ReadWriteDirectories", "ReadOnlyDirectories", "InaccessibleDirectories")) {
+        } else if (STR_IN_SET(field, "ReadWriteDirectories", "ReadOnlyDirectories", "InaccessibleDirectories",
+                              "ReadWritePaths", "ReadOnlyPaths", "InaccessiblePaths")) {
                 const char *p;
 
                 r = sd_bus_message_open_container(m, 'v', "as");
@@ -865,6 +881,11 @@ int bus_deserialize_and_dump_unit_file_changes(sd_bus_message *m, bool quiet, Un
         const char *type, *path, *source;
         int r;
 
+        /* changes is dereferenced when calling unit_file_dump_changes() later,
+         * so we have to make sure this is not NULL. */
+        assert(changes);
+        assert(n_changes);
+
         r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(sss)");
         if (r < 0)
                 return bus_log_parse_error(r);
@@ -1108,7 +1129,8 @@ static int dump_processes(
                 assert(n == cg->n_children);
                 qsort_safe(children, n, sizeof(struct CGroupInfo*), cgroup_info_compare_func);
 
-                n_columns = MAX(LESS_BY(n_columns, 2U), 20U);
+                if (n_columns != 0)
+                        n_columns = MAX(LESS_BY(n_columns, 2U), 20U);
 
                 for (i = 0; i < n; i++) {
                         _cleanup_free_ char *pp = NULL;

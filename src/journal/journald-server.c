@@ -727,7 +727,7 @@ static void dispatch_message_real(
                                 *((char*) mempcpy(stpcpy(x, "_SELINUX_CONTEXT="), label, label_len)) = 0;
                                 IOVEC_SET_STRING(iovec[n++], x);
                         } else {
-                                security_context_t con;
+                                char *con;
 
                                 if (getpidcon(ucred->pid, &con) >= 0) {
                                         x = strjoina("_SELINUX_CONTEXT=", con);
@@ -877,7 +877,7 @@ void server_driver_message(Server *s, sd_id128_t message_id, const char *format,
         assert_cc(6 == LOG_INFO);
         IOVEC_SET_STRING(iovec[n++], "PRIORITY=6");
 
-        if (!sd_id128_equal(message_id, SD_ID128_NULL)) {
+        if (!sd_id128_is_null(message_id)) {
                 snprintf(mid, sizeof(mid), LOG_MESSAGE_ID(message_id));
                 IOVEC_SET_STRING(iovec[n++], mid);
         }
@@ -1607,7 +1607,7 @@ static int dispatch_notify_event(sd_event_source *es, int fd, uint32_t revents, 
                 /* Dispatch one stream notification event */
                 stdout_stream_send_notify(s->stdout_streams_notify_queue);
 
-        /* Leave us enabled if there's still more to to do. */
+        /* Leave us enabled if there's still more to do. */
         if (s->send_watchdog || s->stdout_streams_notify_queue)
                 return 0;
 

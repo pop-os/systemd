@@ -28,6 +28,7 @@
 #include "resolve-util.h"
 
 #include "networkd-address.h"
+#include "networkd-brvlan.h"
 #include "networkd-fdb.h"
 #include "networkd-lldp-tx.h"
 #include "networkd-netdev.h"
@@ -36,6 +37,9 @@
 
 #define DHCP_ROUTE_METRIC 1024
 #define IPV4LL_ROUTE_METRIC 2048
+
+#define BRIDGE_VLAN_BITMAP_MAX 4096
+#define BRIDGE_VLAN_BITMAP_LEN (BRIDGE_VLAN_BITMAP_MAX / 32)
 
 typedef enum DCHPClientIdentifier {
         DHCP_CLIENT_ID_MAC,
@@ -100,6 +104,7 @@ struct Network {
 
         NetDev *bridge;
         NetDev *bond;
+        NetDev *vrf;
         Hashmap *stacked_netdevs;
 
         /* DHCP Client Support */
@@ -146,6 +151,10 @@ struct Network {
         bool unicast_flood;
         unsigned cost;
 
+        uint16_t pvid;
+        uint32_t br_vid_bitmap[BRIDGE_VLAN_BITMAP_LEN];
+        uint32_t br_untagged_bitmap[BRIDGE_VLAN_BITMAP_LEN];
+
         AddressFamilyBoolean ip_forward;
         bool ip_masquerade;
 
@@ -153,6 +162,9 @@ struct Network {
         int ipv6_dad_transmits;
         int ipv6_hop_limit;
         int proxy_arp;
+
+        bool ipv6_accept_ra_use_dns;
+        DHCPUseDomains ipv6_accept_ra_use_domains;
 
         union in_addr_union ipv6_token;
         IPv6PrivacyExtensions ipv6_privacy_extensions;
@@ -168,6 +180,10 @@ struct Network {
         LIST_HEAD(Address, static_addresses);
         LIST_HEAD(Route, static_routes);
         LIST_HEAD(FdbEntry, static_fdb_entries);
+
+        unsigned n_static_addresses;
+        unsigned n_static_routes;
+        unsigned n_static_fdb_entries;
 
         Hashmap *addresses_by_section;
         Hashmap *routes_by_section;

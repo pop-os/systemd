@@ -70,6 +70,7 @@
 #include "process-util.h"
 #include "rlimit-util.h"
 #include "set.h"
+#include "sigbus.h"
 #include "signal-util.h"
 #include "socket-util.h"
 #include "spawn-ask-password-agent.h"
@@ -84,6 +85,25 @@
 #include "utmp-wtmp.h"
 #include "verbs.h"
 #include "virt.h"
+
+/* The init script exit status codes
+   0       program is running or service is OK
+   1       program is dead and /var/run pid file exists
+   2       program is dead and /var/lock lock file exists
+   3       program is not running
+   4       program or service status is unknown
+   5-99    reserved for future LSB use
+   100-149 reserved for distribution use
+   150-199 reserved for application use
+   200-254 reserved
+*/
+enum {
+        EXIT_PROGRAM_RUNNING_OR_SERVICE_OK        = 0,
+        EXIT_PROGRAM_DEAD_AND_PID_EXISTS          = 1,
+        EXIT_PROGRAM_DEAD_AND_LOCK_FILE_EXISTS    = 2,
+        EXIT_PROGRAM_NOT_RUNNING                  = 3,
+        EXIT_PROGRAM_OR_SERVICES_STATUS_UNKNOWN   = 4,
+};
 
 static char **arg_types = NULL;
 static char **arg_states = NULL;
@@ -154,6 +174,7 @@ static bool arg_firmware_setup = false;
 static bool arg_now = false;
 
 static int daemon_reload(int argc, char *argv[], void* userdata);
+static int trivial_method(int argc, char *argv[], void *userdata);
 static int halt_now(enum action a);
 static int get_state_one_unit(sd_bus *bus, const char *name, UnitActiveState *active_state);
 
@@ -201,6 +222,21 @@ static void release_busses(void) {
 
         for (w = 0; w < _BUS_FOCUS_MAX; w++)
                 busses[w] = sd_bus_flush_close_unref(busses[w]);
+}
+
+static int map_string_no_copy(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata) {
+        char *s;
+        const char **p = userdata;
+        int r;
+
+        r = sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &s);
+        if (r < 0)
+                return r;
+
+        if (!isempty(s))
+                *p = s;
+
+        return 0;
 }
 
 static void ask_password_agent_open_if_enabled(void) {
@@ -567,7 +603,8 @@ static int get_unit_list(
                 return bus_log_create_error(r);
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
-        if (r < 0 && sd_bus_error_has_name(&error, SD_BUS_ERROR_UNKNOWN_METHOD)) {
+        if (r < 0 && (sd_bus_error_has_name(&error, SD_BUS_ERROR_UNKNOWN_METHOD) ||
+                      sd_bus_error_has_name(&error, SD_BUS_ERROR_ACCESS_DENIED))) {
                 /* Fallback to legacy ListUnitsFiltered method */
                 fallback = true;
                 log_debug_errno(r, "Failed to list units: %s Falling back to ListUnitsFiltered method.", bus_error_message(&error, r));
@@ -713,11 +750,11 @@ static int list_units(int argc, char *argv[], void *userdata) {
         sd_bus *bus;
         int r;
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        pager_open(arg_no_pager, false);
 
         r = get_unit_list_recursive(bus, strv_skip(argv, 1), &unit_infos, &replies, &machines);
         if (r < 0)
@@ -925,11 +962,11 @@ static int list_sockets(int argc, char *argv[], void *userdata) {
         int r = 0, n;
         sd_bus *bus;
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        pager_open(arg_no_pager, false);
 
         n = get_unit_list_recursive(bus, strv_skip(argv, 1), &unit_infos, &replies, &machines);
         if (n < 0)
@@ -1232,11 +1269,11 @@ static int list_timers(int argc, char *argv[], void *userdata) {
         sd_bus *bus;
         int r = 0;
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        pager_open(arg_no_pager, false);
 
         n = get_unit_list_recursive(bus, strv_skip(argv, 1), &unit_infos, &replies, &machines);
         if (n < 0)
@@ -1403,8 +1440,6 @@ static int list_unit_files(int argc, char *argv[], void *userdata) {
         int r;
         bool fallback = false;
 
-        pager_open(arg_no_pager, false);
-
         if (install_client_side()) {
                 Hashmap *h;
                 UnitFileList *u;
@@ -1439,6 +1474,8 @@ static int list_unit_files(int argc, char *argv[], void *userdata) {
 
                 assert(c <= n_units);
                 hashmap_free(h);
+
+                r = 0;
         } else {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -1516,6 +1553,8 @@ static int list_unit_files(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return bus_log_parse_error(r);
         }
+
+        pager_open(arg_no_pager, false);
 
         qsort_safe(units, c, sizeof(UnitFileList), compare_unit_file_list);
         output_unit_file_list(units, c);
@@ -1765,11 +1804,11 @@ static int list_dependencies(int argc, char *argv[], void *userdata) {
         } else
                 u = SPECIAL_DEFAULT_TARGET;
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        pager_open(arg_no_pager, false);
 
         puts(u);
 
@@ -1796,12 +1835,12 @@ static const struct bus_properties_map machine_info_property_map[] = {
 };
 
 static void machine_info_clear(struct machine_info *info) {
-        if (info) {
-                free(info->name);
-                free(info->state);
-                free(info->control_group);
-                zero(*info);
-        }
+        assert(info);
+
+        free(info->name);
+        free(info->state);
+        free(info->control_group);
+        zero(*info);
 }
 
 static void free_machines_list(struct machine_info *machine_infos, int n) {
@@ -1996,8 +2035,6 @@ static int list_machines(int argc, char *argv[], void *userdata) {
                 return -EPERM;
         }
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
@@ -2005,6 +2042,8 @@ static int list_machines(int argc, char *argv[], void *userdata) {
         r = get_machine_list(bus, &machine_infos, strv_skip(argv, 1));
         if (r < 0)
                 return r;
+
+        pager_open(arg_no_pager, false);
 
         qsort_safe(machine_infos, r, sizeof(struct machine_info), compare_machine_info);
         output_machines_list(machine_infos, r);
@@ -2025,6 +2064,7 @@ static int get_default(int argc, char *argv[], void *userdata) {
                         return log_error_errno(r, "Failed to get default target: %m");
                 path = _path;
 
+                r = 0;
         } else {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 sd_bus *bus;
@@ -2058,6 +2098,8 @@ static int get_default(int argc, char *argv[], void *userdata) {
 
 static int set_default(int argc, char *argv[], void *userdata) {
         _cleanup_free_ char *unit = NULL;
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
         int r;
 
         assert(argc >= 2);
@@ -2068,13 +2110,11 @@ static int set_default(int argc, char *argv[], void *userdata) {
                 return log_error_errno(r, "Failed to mangle unit name: %m");
 
         if (install_client_side()) {
-                UnitFileChange *changes = NULL;
-                unsigned n_changes = 0;
-
                 r = unit_file_set_default(arg_scope, arg_root, unit, true, &changes, &n_changes);
                 unit_file_dump_changes(r, "set default", changes, n_changes, arg_quiet);
-                unit_file_changes_free(changes, n_changes);
-                return r;
+
+                if (r > 0)
+                        r = 0;
         } else {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
@@ -2098,9 +2138,9 @@ static int set_default(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to set default target: %s", bus_error_message(&error, r));
 
-                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, NULL, NULL);
+                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
                 if (r < 0)
-                        return r;
+                        goto finish;
 
                 /* Try to reload if enabled */
                 if (!arg_no_reload)
@@ -2108,6 +2148,9 @@ static int set_default(int argc, char *argv[], void *userdata) {
                 else
                         r = 0;
         }
+
+finish:
+        unit_file_changes_free(changes, n_changes);
 
         return r;
 }
@@ -2205,8 +2248,6 @@ static int list_jobs(int argc, char *argv[], void *userdata) {
         int r;
         bool skipped = false;
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
@@ -2247,6 +2288,8 @@ static int list_jobs(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
+        pager_open(arg_no_pager, false);
+
         output_jobs_list(jobs, c, skipped);
         return 0;
 }
@@ -2257,13 +2300,13 @@ static int cancel_job(int argc, char *argv[], void *userdata) {
         int r = 0;
 
         if (argc <= 1)
-                return daemon_reload(argc, argv, userdata);
-
-        polkit_agent_open_if_enabled();
+                return trivial_method(argc, argv, userdata);
 
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        polkit_agent_open_if_enabled();
 
         STRV_FOREACH(name, strv_skip(argv, 1)) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -2471,7 +2514,7 @@ static int unit_find_paths(
                 r = 1;
         }
 
-        if (r == 0)
+        if (r == 0 && !arg_force)
                 log_error("No files found for %s.", unit_name);
 
         return r;
@@ -2667,10 +2710,9 @@ static int start_unit_one(
         if (r < 0) {
                 const char *verb;
 
-                if (r == -ENOENT && arg_action != ACTION_SYSTEMCTL)
-                        /* There's always a fallback possible for
-                         * legacy actions. */
-                        return -EADDRNOTAVAIL;
+                /* There's always a fallback possible for legacy actions. */
+                if (arg_action != ACTION_SYSTEMCTL)
+                        return r;
 
                 verb = method_to_verb(method);
 
@@ -2801,12 +2843,12 @@ static int start_unit(int argc, char *argv[], void *userdata) {
         char **name;
         int r = 0;
 
-        ask_password_agent_open_if_enabled();
-        polkit_agent_open_if_enabled();
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        ask_password_agent_open_if_enabled();
+        polkit_agent_open_if_enabled();
 
         if (arg_action == ACTION_SYSTEMCTL) {
                 enum action action;
@@ -2927,9 +2969,6 @@ static int logind_reboot(enum action a) {
         sd_bus *bus;
         int r;
 
-        polkit_agent_open_if_enabled();
-        (void) logind_set_wall_message();
-
         r = acquire_bus(BUS_FULL, &bus);
         if (r < 0)
                 return r;
@@ -2964,6 +3003,9 @@ static int logind_reboot(enum action a) {
         default:
                 return -EINVAL;
         }
+
+        polkit_agent_open_if_enabled();
+        (void) logind_set_wall_message();
 
         r = sd_bus_call_method(
                         bus,
@@ -3004,6 +3046,9 @@ static int logind_check_inhibitors(enum action a) {
                 return 0;
 
         if (!on_tty())
+                return 0;
+
+        if (arg_transport != BUS_TRANSPORT_LOCAL)
                 return 0;
 
         r = acquire_bus(BUS_FULL, &bus);
@@ -3226,7 +3271,7 @@ static int start_special(int argc, char *argv[], void *userdata) {
                    ACTION_REBOOT,
                    ACTION_KEXEC,
                    ACTION_EXIT))
-                return daemon_reload(argc, argv, userdata);
+                return trivial_method(argc, argv, userdata);
 
         /* First try logind, to allow authentication with polkit */
         if (IN_SET(a,
@@ -3246,6 +3291,18 @@ static int start_special(int argc, char *argv[], void *userdata) {
         }
 
         return start_unit(argc, argv, userdata);
+}
+
+static int start_system_special(int argc, char *argv[], void *userdata) {
+        /* Like start_special above, but raises an error when running in user mode */
+
+        if (arg_scope != UNIT_FILE_SYSTEM) {
+                log_error("Bad action for %s mode.",
+                          arg_scope == UNIT_FILE_GLOBAL ? "--global" : "--user");
+                return -EINVAL;
+        }
+
+        return start_special(argc, argv, userdata);
 }
 
 static int check_unit_generic(int code, const UnitActiveState good_states[], int nb_states, char **args) {
@@ -3285,12 +3342,12 @@ static int check_unit_generic(int code, const UnitActiveState good_states[], int
 static int check_unit_active(int argc, char *argv[], void *userdata) {
         const UnitActiveState states[] = { UNIT_ACTIVE, UNIT_RELOADING };
         /* According to LSB: 3, "program is not running" */
-        return check_unit_generic(3, states, ELEMENTSOF(states), strv_skip(argv, 1));
+        return check_unit_generic(EXIT_PROGRAM_NOT_RUNNING, states, ELEMENTSOF(states), strv_skip(argv, 1));
 }
 
 static int check_unit_failed(int argc, char *argv[], void *userdata) {
         const UnitActiveState states[] = { UNIT_FAILED };
-        return check_unit_generic(1, states, ELEMENTSOF(states), strv_skip(argv, 1));
+        return check_unit_generic(EXIT_PROGRAM_DEAD_AND_PID_EXISTS, states, ELEMENTSOF(states), strv_skip(argv, 1));
 }
 
 static int kill_unit(int argc, char *argv[], void *userdata) {
@@ -3299,11 +3356,11 @@ static int kill_unit(int argc, char *argv[], void *userdata) {
         sd_bus *bus;
         int r, q;
 
-        polkit_agent_open_if_enabled();
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        polkit_agent_open_if_enabled();
 
         if (!arg_kill_who)
                 arg_kill_who = "all";
@@ -3416,6 +3473,27 @@ static int exec_status_info_deserialize(sd_bus_message *m, ExecStatusInfo *i) {
         return 1;
 }
 
+typedef struct UnitCondition {
+        char *name;
+        char *param;
+        bool trigger;
+        bool negate;
+        int tristate;
+
+        LIST_FIELDS(struct UnitCondition, conditions);
+} UnitCondition;
+
+static void unit_condition_free(UnitCondition *c) {
+        if (!c)
+                return;
+
+        free(c->name);
+        free(c->param);
+        free(c);
+}
+
+DEFINE_TRIVIAL_CLEANUP_FUNC(UnitCondition*, unit_condition_free);
+
 typedef struct UnitStatusInfo {
         const char *id;
         const char *load_state;
@@ -3462,10 +3540,7 @@ typedef struct UnitStatusInfo {
 
         usec_t condition_timestamp;
         bool condition_result;
-        bool failed_condition_trigger;
-        bool failed_condition_negate;
-        const char *failed_condition;
-        const char *failed_condition_parameter;
+        LIST_HEAD(UnitCondition, conditions);
 
         usec_t assert_timestamp;
         bool assert_result;
@@ -3493,6 +3568,9 @@ typedef struct UnitStatusInfo {
 
         /* CGroup */
         uint64_t memory_current;
+        uint64_t memory_low;
+        uint64_t memory_high;
+        uint64_t memory_max;
         uint64_t memory_limit;
         uint64_t cpu_usage_nsec;
         uint64_t tasks_current;
@@ -3500,6 +3578,25 @@ typedef struct UnitStatusInfo {
 
         LIST_HEAD(ExecStatusInfo, exec);
 } UnitStatusInfo;
+
+static void unit_status_info_free(UnitStatusInfo *info) {
+        ExecStatusInfo *p;
+        UnitCondition *c;
+
+        strv_free(info->documentation);
+        strv_free(info->dropin_paths);
+        strv_free(info->listen);
+
+        while ((c = info->conditions)) {
+                LIST_REMOVE(conditions, info->conditions, c);
+                unit_condition_free(c);
+        }
+
+        while ((p = info->exec)) {
+                LIST_REMOVE(exec, info->exec, p);
+                exec_status_info_free(p);
+        }
+}
 
 static void print_status_info(
                 sd_bus *bus,
@@ -3622,19 +3719,28 @@ static void print_status_info(
                 printf("\n");
 
         if (!i->condition_result && i->condition_timestamp > 0) {
+                UnitCondition *c;
+                int n = 0;
+
                 s1 = format_timestamp_relative(since1, sizeof(since1), i->condition_timestamp);
                 s2 = format_timestamp(since2, sizeof(since2), i->condition_timestamp);
 
                 printf("Condition: start %scondition failed%s at %s%s%s\n",
                        ansi_highlight_yellow(), ansi_normal(),
                        s2, s1 ? "; " : "", strempty(s1));
-                if (i->failed_condition_trigger)
-                        printf("           none of the trigger conditions were met\n");
-                else if (i->failed_condition)
-                        printf("           %s=%s%s was not met\n",
-                               i->failed_condition,
-                               i->failed_condition_negate ? "!" : "",
-                               i->failed_condition_parameter);
+
+                LIST_FOREACH(conditions, c, i->conditions)
+                        if (c->tristate < 0)
+                                n++;
+
+                LIST_FOREACH(conditions, c, i->conditions)
+                        if (c->tristate < 0)
+                                printf("           %s %s=%s%s%s was not met\n",
+                                       --n ? special_glyph(TREE_BRANCH) : special_glyph(TREE_RIGHT),
+                                       c->name,
+                                       c->trigger ? "|" : "",
+                                       c->negate ? "!" : "",
+                                       c->param);
         }
 
         if (!i->assert_result && i->assert_timestamp > 0) {
@@ -3719,7 +3825,7 @@ static void print_status_info(
 
                         if (i->running) {
                                 _cleanup_free_ char *comm = NULL;
-                                get_process_comm(i->main_pid, &comm);
+                                (void) get_process_comm(i->main_pid, &comm);
                                 if (comm)
                                         printf(" (%s)", comm);
                         } else if (i->exit_code > 0) {
@@ -3738,17 +3844,19 @@ static void print_status_info(
                                         printf("signal=%s", signal_to_string(i->exit_status));
                                 printf(")");
                         }
-
-                        if (i->control_pid > 0)
-                                printf(";");
                 }
 
                 if (i->control_pid > 0) {
                         _cleanup_free_ char *c = NULL;
 
-                        printf(" %8s: "PID_FMT, i->main_pid ? "" : " Control", i->control_pid);
+                        if (i->main_pid > 0)
+                                fputs("; Control PID: ", stdout);
+                        else
+                                fputs("Cntrl PID: ", stdout); /* if first in column, abbreviated so it fits alignment */
 
-                        get_process_comm(i->control_pid, &c);
+                        printf(PID_FMT, i->control_pid);
+
+                        (void) get_process_comm(i->control_pid, &c);
                         if (c)
                                 printf(" (%s)", c);
                 }
@@ -3765,7 +3873,7 @@ static void print_status_info(
                 printf("    Tasks: %" PRIu64, i->tasks_current);
 
                 if (i->tasks_max != (uint64_t) -1)
-                        printf(" (limit: %" PRIi64 ")\n", i->tasks_max);
+                        printf(" (limit: %" PRIu64 ")\n", i->tasks_max);
                 else
                         printf("\n");
         }
@@ -3775,10 +3883,30 @@ static void print_status_info(
 
                 printf("   Memory: %s", format_bytes(buf, sizeof(buf), i->memory_current));
 
-                if (i->memory_limit != (uint64_t) -1)
-                        printf(" (limit: %s)\n", format_bytes(buf, sizeof(buf), i->memory_limit));
-                else
-                        printf("\n");
+                if (i->memory_low > 0 || i->memory_high != CGROUP_LIMIT_MAX || i->memory_max != CGROUP_LIMIT_MAX ||
+                    i->memory_limit != CGROUP_LIMIT_MAX) {
+                        const char *prefix = "";
+
+                        printf(" (");
+                        if (i->memory_low > 0) {
+                                printf("%slow: %s", prefix, format_bytes(buf, sizeof(buf), i->memory_low));
+                                prefix = " ";
+                        }
+                        if (i->memory_high != CGROUP_LIMIT_MAX) {
+                                printf("%shigh: %s", prefix, format_bytes(buf, sizeof(buf), i->memory_high));
+                                prefix = " ";
+                        }
+                        if (i->memory_max != CGROUP_LIMIT_MAX) {
+                                printf("%smax: %s", prefix, format_bytes(buf, sizeof(buf), i->memory_max));
+                                prefix = " ";
+                        }
+                        if (i->memory_limit != CGROUP_LIMIT_MAX) {
+                                printf("%slimit: %s", prefix, format_bytes(buf, sizeof(buf), i->memory_limit));
+                                prefix = " ";
+                        }
+                        printf(")");
+                }
+                printf("\n");
         }
 
         if (i->cpu_usage_nsec != (uint64_t) -1) {
@@ -3786,13 +3914,12 @@ static void print_status_info(
                 printf("      CPU: %s\n", format_timespan(buf, sizeof(buf), i->cpu_usage_nsec / NSEC_PER_USEC, USEC_PER_MSEC));
         }
 
-        if (i->control_group)
-                printf("   CGroup: %s\n", i->control_group);
-
-        {
+        if (i->control_group) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 static const char prefix[] = "           ";
                 unsigned c;
+
+                printf("   CGroup: %s\n", i->control_group);
 
                 c = columns();
                 if (c > sizeof(prefix) - 1)
@@ -4007,6 +4134,12 @@ static int status_property(const char *name, sd_bus_message *m, UnitStatusInfo *
                         i->assert_timestamp = (usec_t) u;
                 else if (streq(name, "MemoryCurrent"))
                         i->memory_current = u;
+                else if (streq(name, "MemoryLow"))
+                        i->memory_low = u;
+                else if (streq(name, "MemoryHigh"))
+                        i->memory_high = u;
+                else if (streq(name, "MemoryMax"))
+                        i->memory_max = u;
                 else if (streq(name, "MemoryLimit"))
                         i->memory_limit = u;
                 else if (streq(name, "TasksCurrent"))
@@ -4102,13 +4235,25 @@ static int status_property(const char *name, sd_bus_message *m, UnitStatusInfo *
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(sbbsi)", &cond, &trigger, &negate, &param, &state)) > 0) {
-                                log_debug("%s %d %d %s %d", cond, trigger, negate, param, state);
-                                if (state < 0 && (!trigger || !i->failed_condition)) {
-                                        i->failed_condition = cond;
-                                        i->failed_condition_trigger = trigger;
-                                        i->failed_condition_negate = negate;
-                                        i->failed_condition_parameter = param;
-                                }
+                                _cleanup_(unit_condition_freep) UnitCondition *c = NULL;
+
+                                log_debug("%s trigger=%d negate=%d %s →%d", cond, trigger, negate, param, state);
+
+                                c = new0(UnitCondition, 1);
+                                if (!c)
+                                        return log_oom();
+
+                                c->name = strdup(cond);
+                                c->param = strdup(param);
+                                if (!c->name || !c->param)
+                                        return log_oom();
+
+                                c->trigger = trigger;
+                                c->negate = negate;
+                                c->tristate = state;
+
+                                LIST_PREPEND(conditions, i->conditions, c);
+                                c = NULL;
                         }
                         if (r < 0)
                                 return bus_log_parse_error(r);
@@ -4300,7 +4445,7 @@ static int print_property(const char *name, sd_bus_message *m, const char *conte
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(sb)", &path, &ignore)) > 0)
-                                print_prop("EnvironmentFile", "%s (ignore_errors=%s)\n", path, yes_no(ignore));
+                                print_prop("EnvironmentFile", "%s (ignore_errors=%s)", path, yes_no(ignore));
 
                         if (r < 0)
                                 return bus_log_parse_error(r);
@@ -4492,20 +4637,29 @@ static int show_one(
                 const char *verb,
                 sd_bus *bus,
                 const char *path,
+                const char *unit,
                 bool show_properties,
                 bool *new_line,
                 bool *ellipsized) {
 
+        static const struct bus_properties_map property_map[] = {
+                { "LoadState",   "s", map_string_no_copy, offsetof(UnitStatusInfo, load_state)   },
+                { "ActiveState", "s", map_string_no_copy, offsetof(UnitStatusInfo, active_state) },
+                {}
+        };
+
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        UnitStatusInfo info = {
+        _cleanup_set_free_ Set *found_properties = NULL;
+        _cleanup_(unit_status_info_free) UnitStatusInfo info = {
                 .memory_current = (uint64_t) -1,
+                .memory_high = CGROUP_LIMIT_MAX,
+                .memory_max = CGROUP_LIMIT_MAX,
                 .memory_limit = (uint64_t) -1,
                 .cpu_usage_nsec = (uint64_t) -1,
                 .tasks_current = (uint64_t) -1,
                 .tasks_max = (uint64_t) -1,
         };
-        ExecStatusInfo *p;
         int r;
 
         assert(path);
@@ -4524,6 +4678,25 @@ static int show_one(
                         "s", "");
         if (r < 0)
                 return log_error_errno(r, "Failed to get properties: %s", bus_error_message(&error, r));
+
+        if (unit) {
+                r = bus_message_map_all_properties(reply, property_map, &info);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to map properties: %s", bus_error_message(&error, r));
+
+                if (streq_ptr(info.load_state, "not-found") && streq_ptr(info.active_state, "inactive")) {
+                        log_error("Unit %s could not be found.", unit);
+
+                        if (streq(verb, "status"))
+                                return EXIT_PROGRAM_OR_SERVICES_STATUS_UNKNOWN;
+
+                        return -ENOENT;
+                }
+
+                r = sd_bus_message_rewind(reply, true);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to rewind: %s", bus_error_message(&error, r));
+        }
 
         r = sd_bus_message_enter_container(reply, SD_BUS_TYPE_ARRAY, "{sv}");
         if (r < 0)
@@ -4549,9 +4722,17 @@ static int show_one(
                 if (r < 0)
                         return bus_log_parse_error(r);
 
-                if (show_properties)
+                if (show_properties) {
+                        r = set_ensure_allocated(&found_properties, &string_hash_ops);
+                        if (r < 0)
+                                return log_oom();
+
+                        r = set_put(found_properties, name);
+                        if (r < 0 && r != EEXIST)
+                                return log_oom();
+
                         r = print_property(name, reply, contents);
-                else
+                } else
                         r = status_property(name, reply, &info, contents);
                 if (r < 0)
                         return r;
@@ -4572,37 +4753,24 @@ static int show_one(
                 return bus_log_parse_error(r);
 
         r = 0;
+        if (show_properties) {
+                char **pp;
 
-        if (!show_properties) {
-                if (streq(verb, "help"))
-                        show_unit_help(&info);
+                STRV_FOREACH(pp, arg_properties)
+                        if (!set_contains(found_properties, *pp)) {
+                                log_warning("Property %s does not exist.", *pp);
+                                r = -ENXIO;
+                        }
+
+        } else if (streq(verb, "help"))
+                show_unit_help(&info);
+        else if (streq(verb, "status")) {
+                print_status_info(bus, &info, ellipsized);
+
+                if (info.active_state && STR_IN_SET(info.active_state, "inactive", "failed"))
+                        r = EXIT_PROGRAM_NOT_RUNNING;
                 else
-                        print_status_info(bus, &info, ellipsized);
-        }
-
-        strv_free(info.documentation);
-        strv_free(info.dropin_paths);
-        strv_free(info.listen);
-
-        if (!streq_ptr(info.active_state, "active") &&
-            !streq_ptr(info.active_state, "reloading") &&
-            streq(verb, "status")) {
-                /* According to LSB: "program not running" */
-                /* 0: program is running or service is OK
-                 * 1: program is dead and /run PID file exists
-                 * 2: program is dead and /run/lock lock file exists
-                 * 3: program is not running
-                 * 4: program or service status is unknown
-                 */
-                if (info.pid_file && access(info.pid_file, F_OK) == 0)
-                        r = 1;
-                else
-                        r = 3;
-        }
-
-        while ((p = info.exec)) {
-                LIST_REMOVE(exec, info.exec, p);
-                exec_status_info_free(p);
+                        r = EXIT_PROGRAM_RUNNING_OR_SERVICE_OK;
         }
 
         return r;
@@ -4672,7 +4840,7 @@ static int show_all(
                 if (!p)
                         return log_oom();
 
-                r = show_one(verb, bus, p, show_properties, new_line, ellipsized);
+                r = show_one(verb, bus, p, u->id, show_properties, new_line, ellipsized);
                 if (r < 0)
                         return r;
                 else if (r > 0 && ret == 0)
@@ -4754,6 +4922,10 @@ static int show(int argc, char *argv[], void *userdata) {
                 return -EINVAL;
         }
 
+        r = acquire_bus(BUS_MANAGER, &bus);
+        if (r < 0)
+                return r;
+
         pager_open(arg_no_pager, false);
 
         if (show_status)
@@ -4762,17 +4934,12 @@ static int show(int argc, char *argv[], void *userdata) {
                  * be split up into many files. */
                 setrlimit_closest(RLIMIT_NOFILE, &RLIMIT_MAKE_CONST(16384));
 
-        r = acquire_bus(BUS_MANAGER, &bus);
-        if (r < 0)
-                return r;
-
         /* If no argument is specified inspect the manager itself */
         if (show_properties && argc <= 1)
-                return show_one(argv[0], bus, "/org/freedesktop/systemd1", show_properties, &new_line, &ellipsized);
+                return show_one(argv[0], bus, "/org/freedesktop/systemd1", NULL, show_properties, &new_line, &ellipsized);
 
         if (show_status && argc <= 1) {
 
-                pager_open(arg_no_pager, false);
                 show_system_status(bus);
                 new_line = true;
 
@@ -4783,7 +4950,7 @@ static int show(int argc, char *argv[], void *userdata) {
                 char **name;
 
                 STRV_FOREACH(name, strv_skip(argv, 1)) {
-                        _cleanup_free_ char *unit = NULL;
+                        _cleanup_free_ char *path = NULL, *unit = NULL;
                         uint32_t id;
 
                         if (safe_atou32(*name, &id) < 0) {
@@ -4793,19 +4960,23 @@ static int show(int argc, char *argv[], void *userdata) {
                                 continue;
                         } else if (show_properties) {
                                 /* Interpret as job id */
-                                if (asprintf(&unit, "/org/freedesktop/systemd1/job/%u", id) < 0)
+                                if (asprintf(&path, "/org/freedesktop/systemd1/job/%u", id) < 0)
                                         return log_oom();
 
                         } else {
                                 /* Interpret as PID */
-                                r = get_unit_dbus_path_by_pid(bus, id, &unit);
+                                r = get_unit_dbus_path_by_pid(bus, id, &path);
                                 if (r < 0) {
                                         ret = r;
                                         continue;
                                 }
+
+                                r = unit_name_from_dbus_path(path, &unit);
+                                if (r < 0)
+                                        return log_oom();
                         }
 
-                        r = show_one(argv[0], bus, unit, show_properties, &new_line, &ellipsized);
+                        r = show_one(argv[0], bus, path, unit, show_properties, &new_line, &ellipsized);
                         if (r < 0)
                                 return r;
                         else if (r > 0 && ret == 0)
@@ -4820,16 +4991,16 @@ static int show(int argc, char *argv[], void *userdata) {
                                 return log_error_errno(r, "Failed to expand names: %m");
 
                         STRV_FOREACH(name, names) {
-                                _cleanup_free_ char *unit;
+                                _cleanup_free_ char *path;
 
-                                unit = unit_dbus_path_from_name(*name);
-                                if (!unit)
+                                path = unit_dbus_path_from_name(*name);
+                                if (!path)
                                         return log_oom();
 
-                                r = show_one(argv[0], bus, unit, show_properties, &new_line, &ellipsized);
+                                r = show_one(argv[0], bus, path, *name, show_properties, &new_line, &ellipsized);
                                 if (r < 0)
                                         return r;
-                                else if (r > 0 && ret == 0)
+                                if (r > 0 && ret == 0)
                                         ret = r;
                         }
                 }
@@ -4925,11 +5096,11 @@ static int set_property(int argc, char *argv[], void *userdata) {
         char **i;
         int r;
 
-        polkit_agent_open_if_enabled();
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        polkit_agent_open_if_enabled();
 
         r = sd_bus_message_new_method_call(
                         bus,
@@ -4972,35 +5143,86 @@ static int set_property(int argc, char *argv[], void *userdata) {
 
 static int daemon_reload(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         const char *method;
         sd_bus *bus;
         int r;
-
-        polkit_agent_open_if_enabled();
 
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
 
-        if (arg_action == ACTION_RELOAD)
-                method = "Reload";
-        else if (arg_action == ACTION_REEXEC)
-                method = "Reexecute";
-        else {
-                assert(arg_action == ACTION_SYSTEMCTL);
+        polkit_agent_open_if_enabled();
 
-                method =
-                        streq(argv[0], "clear-jobs")    ||
-                        streq(argv[0], "cancel")        ? "ClearJobs" :
-                        streq(argv[0], "daemon-reexec") ? "Reexecute" :
-                        streq(argv[0], "reset-failed")  ? "ResetFailed" :
-                        streq(argv[0], "halt")          ? "Halt" :
-                        streq(argv[0], "poweroff")      ? "PowerOff" :
-                        streq(argv[0], "reboot")        ? "Reboot" :
-                        streq(argv[0], "kexec")         ? "KExec" :
-                        streq(argv[0], "exit")          ? "Exit" :
-                                    /* "daemon-reload" */ "Reload";
+        switch (arg_action) {
+
+        case ACTION_RELOAD:
+                method = "Reload";
+                break;
+
+        case ACTION_REEXEC:
+                method = "Reexecute";
+                break;
+
+        case ACTION_SYSTEMCTL:
+                method = streq(argv[0], "daemon-reexec") ? "Reexecute" :
+                                     /* "daemon-reload" */ "Reload";
+                break;
+
+        default:
+                assert_not_reached("Unexpected action");
         }
+
+        r = sd_bus_message_new_method_call(
+                        bus,
+                        &m,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        method);
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        /* Note we use an extra-long timeout here. This is because a reload or reexec means generators are rerun which
+         * are timed out after DEFAULT_TIMEOUT_USEC. Let's use twice that time here, so that the generators can have
+         * their timeout, and for everything else there's the same time budget in place. */
+
+        r = sd_bus_call(bus, m, DEFAULT_TIMEOUT_USEC * 2, &error, NULL);
+
+        /* On reexecution, we expect a disconnect, not a reply */
+        if (IN_SET(r, -ETIMEDOUT, -ECONNRESET) && streq(method, "Reexecute"))
+                r = 0;
+
+        if (r < 0 && arg_action == ACTION_SYSTEMCTL)
+                return log_error_errno(r, "Failed to reload daemon: %s", bus_error_message(&error, r));
+
+        /* Note that for the legacy commands (i.e. those with action != ACTION_SYSTEMCTL) we support fallbacks to the
+         * old ways of doing things, hence don't log any error in that case here. */
+
+        return r < 0 ? r : 0;
+}
+
+static int trivial_method(int argc, char *argv[], void *userdata) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        const char *method;
+        sd_bus *bus;
+        int r;
+
+        r = acquire_bus(BUS_MANAGER, &bus);
+        if (r < 0)
+                return r;
+
+        polkit_agent_open_if_enabled();
+
+        method =
+                streq(argv[0], "clear-jobs")    ||
+                streq(argv[0], "cancel")        ? "ClearJobs" :
+                streq(argv[0], "reset-failed")  ? "ResetFailed" :
+                streq(argv[0], "halt")          ? "Halt" :
+                streq(argv[0], "reboot")        ? "Reboot" :
+                streq(argv[0], "kexec")         ? "KExec" :
+                streq(argv[0], "exit")          ? "Exit" :
+                             /* poweroff */       "PowerOff";
 
         r = sd_bus_call_method(
                         bus,
@@ -5011,16 +5233,11 @@ static int daemon_reload(int argc, char *argv[], void *userdata) {
                         &error,
                         NULL,
                         NULL);
-        if (r == -ENOENT && arg_action != ACTION_SYSTEMCTL)
-                /* There's always a fallback possible for
-                 * legacy actions. */
-                r = -EADDRNOTAVAIL;
-        else if ((r == -ETIMEDOUT || r == -ECONNRESET) && streq(method, "Reexecute"))
-                /* On reexecution, we expect a disconnect, not a
-                 * reply */
-                r = 0;
-        else if (r < 0)
-                return log_error_errno(r, "Failed to reload daemon: %s", bus_error_message(&error, r));
+        if (r < 0 && arg_action == ACTION_SYSTEMCTL)
+                return log_error_errno(r, "Failed to execute operation: %s", bus_error_message(&error, r));
+
+        /* Note that for the legacy commands (i.e. those with action != ACTION_SYSTEMCTL) we support fallbacks to the
+         * old ways of doing things, hence don't log any error in that case here. */
 
         return r < 0 ? r : 0;
 }
@@ -5032,13 +5249,13 @@ static int reset_failed(int argc, char *argv[], void *userdata) {
         int r, q;
 
         if (argc <= 1)
-                return daemon_reload(argc, argv, userdata);
-
-        polkit_agent_open_if_enabled();
+                return trivial_method(argc, argv, userdata);
 
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        polkit_agent_open_if_enabled();
 
         r = expand_names(bus, strv_skip(argv, 1), NULL, &names);
         if (r < 0)
@@ -5073,11 +5290,11 @@ static int show_environment(int argc, char *argv[], void *userdata) {
         sd_bus *bus;
         int r;
 
-        pager_open(arg_no_pager, false);
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        pager_open(arg_no_pager, false);
 
         r = sd_bus_get_property(
                         bus,
@@ -5138,9 +5355,7 @@ static int switch_root(int argc, char *argv[], void *userdata) {
                 init = cmdline_init;
         }
 
-        if (isempty(init))
-                init = NULL;
-
+        init = empty_to_null(init);
         if (init) {
                 const char *root_systemd_path = NULL, *root_init_path = NULL;
 
@@ -5184,11 +5399,11 @@ static int set_environment(int argc, char *argv[], void *userdata) {
         assert(argc > 1);
         assert(argv);
 
-        polkit_agent_open_if_enabled();
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        polkit_agent_open_if_enabled();
 
         method = streq(argv[0], "set-environment")
                 ? "SetEnvironment"
@@ -5221,11 +5436,11 @@ static int import_environment(int argc, char *argv[], void *userdata) {
         sd_bus *bus;
         int r;
 
-        polkit_agent_open_if_enabled();
-
         r = acquire_bus(BUS_MANAGER, &bus);
         if (r < 0)
                 return r;
+
+        polkit_agent_open_if_enabled();
 
         r = sd_bus_message_new_method_call(
                         bus,
@@ -5384,10 +5599,8 @@ static int enable_sysv_units(const char *verb, char **args) {
                 }
 
                 j = wait_for_terminate(pid, &status);
-                if (j < 0) {
-                        log_error_errno(j, "Failed to wait for child: %m");
-                        return j;
-                }
+                if (j < 0)
+                        return log_error_errno(j, "Failed to wait for child: %m");
 
                 if (status.si_code == CLD_EXITED) {
                         if (streq(verb, "is-enabled")) {
@@ -5457,6 +5670,46 @@ static int mangle_names(char **original_names, char ***mangled_names) {
         return 0;
 }
 
+static int unit_exists(const char *unit) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_free_ char *path = NULL;
+        static const struct bus_properties_map property_map[] = {
+                { "LoadState",   "s", map_string_no_copy, offsetof(UnitStatusInfo, load_state)  },
+                { "ActiveState", "s", map_string_no_copy, offsetof(UnitStatusInfo, active_state)},
+                {},
+        };
+        UnitStatusInfo info = {};
+        sd_bus *bus;
+        int r;
+
+        path = unit_dbus_path_from_name(unit);
+        if (!path)
+                return log_oom();
+
+        r = acquire_bus(BUS_MANAGER, &bus);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.systemd1",
+                        path,
+                        "org.freedesktop.DBus.Properties",
+                        "GetAll",
+                        &error,
+                        &reply,
+                        "s", "");
+        if (r < 0)
+                return log_error_errno(r, "Failed to get properties: %s", bus_error_message(&error, r));
+
+        r = bus_message_map_all_properties(reply, property_map, &info);
+        if (r < 0)
+                return log_error_errno(r, "Failed to map properties: %s", bus_error_message(&error, r));
+
+        return !streq_ptr(info.load_state, "not-found") || !streq_ptr(info.active_state, "inactive");
+}
+
 static int enable_unit(int argc, char *argv[], void *userdata) {
         _cleanup_strv_free_ char **names = NULL;
         const char *verb = argv[0];
@@ -5508,7 +5761,7 @@ static int enable_unit(int argc, char *argv[], void *userdata) {
 
                 unit_file_dump_changes(r, verb, changes, n_changes, arg_quiet);
                 if (r < 0)
-                        return r;
+                        goto finish;
                 r = 0;
         } else {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL, *m = NULL;
@@ -5518,11 +5771,19 @@ static int enable_unit(int argc, char *argv[], void *userdata) {
                 const char *method;
                 sd_bus *bus;
 
-                polkit_agent_open_if_enabled();
+                if (STR_IN_SET(verb, "mask", "unmask")) {
+                        r = unit_exists(*names);
+                        if (r < 0)
+                                return r;
+                        if (r == 0)
+                                log_notice("Unit %s does not exist, proceeding anyway.", *names);
+                }
 
                 r = acquire_bus(BUS_MANAGER, &bus);
                 if (r < 0)
                         return r;
+
+                polkit_agent_open_if_enabled();
 
                 if (streq(verb, "enable")) {
                         method = "EnableUnitFiles";
@@ -5600,7 +5861,7 @@ static int enable_unit(int argc, char *argv[], void *userdata) {
 
                 r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
                 if (r < 0)
-                        return r;
+                        goto finish;
 
                 /* Try to reload if enabled */
                 if (!arg_no_reload)
@@ -5650,6 +5911,8 @@ static int add_dependency(int argc, char *argv[], void *userdata) {
         _cleanup_strv_free_ char **names = NULL;
         _cleanup_free_ char *target = NULL;
         const char *verb = argv[0];
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
         UnitDependency dep;
         int r = 0;
 
@@ -5672,23 +5935,21 @@ static int add_dependency(int argc, char *argv[], void *userdata) {
                 assert_not_reached("Unknown verb");
 
         if (install_client_side()) {
-                UnitFileChange *changes = NULL;
-                unsigned n_changes = 0;
-
                 r = unit_file_add_dependency(arg_scope, arg_runtime, arg_root, names, target, dep, arg_force, &changes, &n_changes);
                 unit_file_dump_changes(r, "add dependency on", changes, n_changes, arg_quiet);
-                unit_file_changes_free(changes, n_changes);
-                return r;
+
+                if (r > 0)
+                        r = 0;
         } else {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL, *m = NULL;
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 sd_bus *bus;
 
-                polkit_agent_open_if_enabled();
-
                 r = acquire_bus(BUS_MANAGER, &bus);
                 if (r < 0)
                         return r;
+
+                polkit_agent_open_if_enabled();
 
                 r = sd_bus_message_new_method_call(
                                 bus,
@@ -5712,37 +5973,45 @@ static int add_dependency(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to add dependency: %s", bus_error_message(&error, r));
 
-                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, NULL, NULL);
+                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
                 if (r < 0)
-                        return r;
+                        goto finish;
 
-                if (arg_no_reload)
-                        return 0;
-                return daemon_reload(argc, argv, userdata);
+                if (arg_no_reload) {
+                        r = 0;
+                        goto finish;
+                }
+
+                r = daemon_reload(argc, argv, userdata);
         }
+
+finish:
+        unit_file_changes_free(changes, n_changes);
+
+        return r;
 }
 
 static int preset_all(int argc, char *argv[], void *userdata) {
+        UnitFileChange *changes = NULL;
+        unsigned n_changes = 0;
         int r;
 
         if (install_client_side()) {
-                UnitFileChange *changes = NULL;
-                unsigned n_changes = 0;
-
                 r = unit_file_preset_all(arg_scope, arg_runtime, arg_root, arg_preset_mode, arg_force, &changes, &n_changes);
                 unit_file_dump_changes(r, "preset", changes, n_changes, arg_quiet);
-                unit_file_changes_free(changes, n_changes);
-                return r;
+
+                if (r > 0)
+                        r = 0;
         } else {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
                 sd_bus *bus;
 
-                polkit_agent_open_if_enabled();
-
                 r = acquire_bus(BUS_MANAGER, &bus);
                 if (r < 0)
                         return r;
+
+                polkit_agent_open_if_enabled();
 
                 r = sd_bus_call_method(
                                 bus,
@@ -5759,14 +6028,22 @@ static int preset_all(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to preset all units: %s", bus_error_message(&error, r));
 
-                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, NULL, NULL);
+                r = bus_deserialize_and_dump_unit_file_changes(reply, arg_quiet, &changes, &n_changes);
                 if (r < 0)
-                        return r;
+                        goto finish;
 
-                if (arg_no_reload)
-                        return 0;
-                return daemon_reload(argc, argv, userdata);
+                if (arg_no_reload) {
+                        r = 0;
+                        goto finish;
+                }
+
+                r = daemon_reload(argc, argv, userdata);
         }
+
+finish:
+        unit_file_changes_free(changes, n_changes);
+
+        return r;
 }
 
 static int unit_is_enabled(int argc, char *argv[], void *userdata) {
@@ -5807,6 +6084,7 @@ static int unit_is_enabled(int argc, char *argv[], void *userdata) {
                                 puts(unit_file_state_to_string(state));
                 }
 
+                r = 0;
         } else {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 sd_bus *bus;
@@ -5905,7 +6183,7 @@ static int create_edit_temp_file(const char *new_path, const char *original_path
                         return log_error_errno(r, "Failed to create temporary file \"%s\": %m", t);
 
         } else if (r < 0)
-                return log_error_errno(r, "Failed to copy \"%s\" to \"%s\": %m", original_path, t);
+                return log_error_errno(r, "Failed to create temporary file for \"%s\": %m", new_path);
 
         *ret_tmp_fn = t;
         t = NULL;
@@ -5928,7 +6206,7 @@ static int get_file_to_edit(
                 return log_oom();
 
         if (arg_runtime) {
-                run = strjoin(paths->runtime_config, name, NULL);
+                run = strjoin(paths->runtime_config, "/", name, NULL);
                 if (!run)
                         return log_oom();
         }
@@ -5949,9 +6227,10 @@ static int get_file_to_edit(
         return 0;
 }
 
-static int unit_file_create_dropin(
+static int unit_file_create_new(
                 const LookupPaths *paths,
                 const char *unit_name,
+                const char *suffix,
                 char **ret_new_path,
                 char **ret_tmp_path) {
 
@@ -5962,7 +6241,7 @@ static int unit_file_create_dropin(
         assert(ret_new_path);
         assert(ret_tmp_path);
 
-        ending = strjoina(unit_name, ".d/override.conf");
+        ending = strjoina(unit_name, suffix);
         r = get_file_to_edit(paths, ending, &tmp_new_path);
         if (r < 0)
                 return r;
@@ -6009,13 +6288,12 @@ static int unit_file_create_copy(
                 if (response != 'y') {
                         log_warning("%s ignored", unit_name);
                         free(tmp_new_path);
-                        return -1;
+                        return -EKEYREJECTED;
                 }
         }
 
         r = create_edit_temp_file(tmp_new_path, fragment_path, &tmp_tmp_path);
         if (r < 0) {
-                log_error_errno(r, "Failed to create temporary file for \"%s\": %m", tmp_new_path);
                 free(tmp_new_path);
                 return r;
         }
@@ -6126,18 +6404,24 @@ static int find_paths_to_edit(sd_bus *bus, char **names, char ***paths) {
                 r = unit_find_paths(bus, *name, &lp, &path, NULL);
                 if (r < 0)
                         return r;
-                else if (r == 0)
-                        return -ENOENT;
-                else if (!path) {
-                        // FIXME: support units with path==NULL (no FragmentPath)
-                        log_error("No fragment exists for %s.", *name);
-                        return -ENOENT;
+                else if (!arg_force) {
+                        if (r == 0) {
+                                log_error("Run 'systemctl edit --force %s' to create a new unit.", *name);
+                                return -ENOENT;
+                        } else if (!path) {
+                                // FIXME: support units with path==NULL (no FragmentPath)
+                                log_error("No fragment exists for %s.", *name);
+                                return -ENOENT;
+                        }
                 }
 
-                if (arg_full)
-                        r = unit_file_create_copy(&lp, *name, path, &new_path, &tmp_path);
-                else
-                        r = unit_file_create_dropin(&lp, *name, &new_path, &tmp_path);
+                if (path) {
+                        if (arg_full)
+                                r = unit_file_create_copy(&lp, *name, path, &new_path, &tmp_path);
+                        else
+                                r = unit_file_create_new(&lp, *name, ".d/override.conf", &new_path, &tmp_path);
+                } else
+                        r = unit_file_create_new(&lp, *name, NULL, &new_path, &tmp_path);
                 if (r < 0)
                         return r;
 
@@ -6311,7 +6595,7 @@ static void systemctl_help(void) {
                "                                  unit is required or wanted\n\n"
                "Unit File Commands:\n"
                "  list-unit-files [PATTERN...]    List installed unit files\n"
-               "  enable NAME...                  Enable one or more unit files\n"
+               "  enable [NAME...|PATH...]        Enable one or more unit files\n"
                "  disable NAME...                 Disable one or more unit files\n"
                "  reenable NAME...                Reenable one or more unit files\n"
                "  preset NAME...                  Enable/disable one or more unit files\n"
@@ -7397,71 +7681,71 @@ static int systemctl_main(int argc, char *argv[]) {
 
         static const Verb verbs[] = {
                 { "list-units",            VERB_ANY, VERB_ANY, VERB_DEFAULT|VERB_NOCHROOT, list_units },
-                { "list-unit-files",       VERB_ANY, VERB_ANY, 0,             list_unit_files   },
-                { "list-sockets",          VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_sockets      },
-                { "list-timers",           VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_timers       },
-                { "list-jobs",             VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_jobs         },
-                { "list-machines",         VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_machines     },
-                { "clear-jobs",            VERB_ANY, 1,        VERB_NOCHROOT, daemon_reload     },
-                { "cancel",                VERB_ANY, VERB_ANY, VERB_NOCHROOT, cancel_job        },
-                { "start",                 2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "stop",                  2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "condstop",              2,        VERB_ANY, VERB_NOCHROOT, start_unit        }, /* For compatibility with ALTLinux */
-                { "reload",                2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "restart",               2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "try-restart",           2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "reload-or-restart",     2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "reload-or-try-restart", 2,        VERB_ANY, VERB_NOCHROOT, start_unit        }, /* For compatbility with old systemctl <= 228 */
-                { "try-reload-or-restart", 2,        VERB_ANY, VERB_NOCHROOT, start_unit        },
-                { "force-reload",          2,        VERB_ANY, VERB_NOCHROOT, start_unit        }, /* For compatibility with SysV */
-                { "condreload",            2,        VERB_ANY, VERB_NOCHROOT, start_unit        }, /* For compatibility with ALTLinux */
-                { "condrestart",           2,        VERB_ANY, VERB_NOCHROOT, start_unit        }, /* For compatibility with RH */
-                { "isolate",               2,        2,        VERB_NOCHROOT, start_unit        },
-                { "kill",                  2,        VERB_ANY, VERB_NOCHROOT, kill_unit         },
-                { "is-active",             2,        VERB_ANY, VERB_NOCHROOT, check_unit_active },
-                { "check",                 2,        VERB_ANY, VERB_NOCHROOT, check_unit_active },
-                { "is-failed",             2,        VERB_ANY, VERB_NOCHROOT, check_unit_failed },
-                { "show",                  VERB_ANY, VERB_ANY, VERB_NOCHROOT, show              },
-                { "cat",                   2,        VERB_ANY, VERB_NOCHROOT, cat               },
-                { "status",                VERB_ANY, VERB_ANY, VERB_NOCHROOT, show              },
-                { "help",                  VERB_ANY, VERB_ANY, VERB_NOCHROOT, show              },
-                { "daemon-reload",         VERB_ANY, 1,        VERB_NOCHROOT, daemon_reload     },
-                { "daemon-reexec",         VERB_ANY, 1,        VERB_NOCHROOT, daemon_reload     },
-                { "show-environment",      VERB_ANY, 1,        VERB_NOCHROOT, show_environment  },
-                { "set-environment",       2,        VERB_ANY, VERB_NOCHROOT, set_environment   },
-                { "unset-environment",     2,        VERB_ANY, VERB_NOCHROOT, set_environment   },
-                { "import-environment",    VERB_ANY, VERB_ANY, VERB_NOCHROOT, import_environment},
-                { "halt",                  VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "poweroff",              VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "reboot",                VERB_ANY, 2,        VERB_NOCHROOT, start_special     },
-                { "kexec",                 VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "suspend",               VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "hibernate",             VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "hybrid-sleep",          VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "default",               VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "rescue",                VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "emergency",             VERB_ANY, 1,        VERB_NOCHROOT, start_special     },
-                { "exit",                  VERB_ANY, 2,        VERB_NOCHROOT, start_special     },
-                { "reset-failed",          VERB_ANY, VERB_ANY, VERB_NOCHROOT, reset_failed      },
-                { "enable",                2,        VERB_ANY, 0,             enable_unit       },
-                { "disable",               2,        VERB_ANY, 0,             enable_unit       },
-                { "is-enabled",            2,        VERB_ANY, 0,             unit_is_enabled   },
-                { "reenable",              2,        VERB_ANY, 0,             enable_unit       },
-                { "preset",                2,        VERB_ANY, 0,             enable_unit       },
-                { "preset-all",            VERB_ANY, 1,        0,             preset_all        },
-                { "mask",                  2,        VERB_ANY, 0,             enable_unit       },
-                { "unmask",                2,        VERB_ANY, 0,             enable_unit       },
-                { "link",                  2,        VERB_ANY, 0,             enable_unit       },
-                { "revert",                2,        VERB_ANY, 0,             enable_unit       },
-                { "switch-root",           2,        VERB_ANY, VERB_NOCHROOT, switch_root       },
-                { "list-dependencies",     VERB_ANY, 2,        VERB_NOCHROOT, list_dependencies },
-                { "set-default",           2,        2,        0,             set_default       },
-                { "get-default",           VERB_ANY, 1,        0,             get_default,      },
-                { "set-property",          3,        VERB_ANY, VERB_NOCHROOT, set_property      },
-                { "is-system-running",     VERB_ANY, 1,        0,             is_system_running },
-                { "add-wants",             3,        VERB_ANY, 0,             add_dependency    },
-                { "add-requires",          3,        VERB_ANY, 0,             add_dependency    },
-                { "edit",                  2,        VERB_ANY, VERB_NOCHROOT, edit              },
+                { "list-unit-files",       VERB_ANY, VERB_ANY, 0,             list_unit_files      },
+                { "list-sockets",          VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_sockets         },
+                { "list-timers",           VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_timers          },
+                { "list-jobs",             VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_jobs            },
+                { "list-machines",         VERB_ANY, VERB_ANY, VERB_NOCHROOT, list_machines        },
+                { "clear-jobs",            VERB_ANY, 1,        VERB_NOCHROOT, trivial_method       },
+                { "cancel",                VERB_ANY, VERB_ANY, VERB_NOCHROOT, cancel_job           },
+                { "start",                 2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "stop",                  2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "condstop",              2,        VERB_ANY, VERB_NOCHROOT, start_unit           }, /* For compatibility with ALTLinux */
+                { "reload",                2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "restart",               2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "try-restart",           2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "reload-or-restart",     2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "reload-or-try-restart", 2,        VERB_ANY, VERB_NOCHROOT, start_unit           }, /* For compatbility with old systemctl <= 228 */
+                { "try-reload-or-restart", 2,        VERB_ANY, VERB_NOCHROOT, start_unit           },
+                { "force-reload",          2,        VERB_ANY, VERB_NOCHROOT, start_unit           }, /* For compatibility with SysV */
+                { "condreload",            2,        VERB_ANY, VERB_NOCHROOT, start_unit           }, /* For compatibility with ALTLinux */
+                { "condrestart",           2,        VERB_ANY, VERB_NOCHROOT, start_unit           }, /* For compatibility with RH */
+                { "isolate",               2,        2,        VERB_NOCHROOT, start_unit           },
+                { "kill",                  2,        VERB_ANY, VERB_NOCHROOT, kill_unit            },
+                { "is-active",             2,        VERB_ANY, VERB_NOCHROOT, check_unit_active    },
+                { "check",                 2,        VERB_ANY, VERB_NOCHROOT, check_unit_active    },
+                { "is-failed",             2,        VERB_ANY, VERB_NOCHROOT, check_unit_failed    },
+                { "show",                  VERB_ANY, VERB_ANY, VERB_NOCHROOT, show                 },
+                { "cat",                   2,        VERB_ANY, VERB_NOCHROOT, cat                  },
+                { "status",                VERB_ANY, VERB_ANY, VERB_NOCHROOT, show                 },
+                { "help",                  VERB_ANY, VERB_ANY, VERB_NOCHROOT, show                 },
+                { "daemon-reload",         VERB_ANY, 1,        VERB_NOCHROOT, daemon_reload        },
+                { "daemon-reexec",         VERB_ANY, 1,        VERB_NOCHROOT, daemon_reload        },
+                { "show-environment",      VERB_ANY, 1,        VERB_NOCHROOT, show_environment     },
+                { "set-environment",       2,        VERB_ANY, VERB_NOCHROOT, set_environment      },
+                { "unset-environment",     2,        VERB_ANY, VERB_NOCHROOT, set_environment      },
+                { "import-environment",    VERB_ANY, VERB_ANY, VERB_NOCHROOT, import_environment   },
+                { "halt",                  VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "poweroff",              VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "reboot",                VERB_ANY, 2,        VERB_NOCHROOT, start_system_special },
+                { "kexec",                 VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "suspend",               VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "hibernate",             VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "hybrid-sleep",          VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "default",               VERB_ANY, 1,        VERB_NOCHROOT, start_special        },
+                { "rescue",                VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "emergency",             VERB_ANY, 1,        VERB_NOCHROOT, start_system_special },
+                { "exit",                  VERB_ANY, 2,        VERB_NOCHROOT, start_special        },
+                { "reset-failed",          VERB_ANY, VERB_ANY, VERB_NOCHROOT, reset_failed         },
+                { "enable",                2,        VERB_ANY, 0,             enable_unit          },
+                { "disable",               2,        VERB_ANY, 0,             enable_unit          },
+                { "is-enabled",            2,        VERB_ANY, 0,             unit_is_enabled      },
+                { "reenable",              2,        VERB_ANY, 0,             enable_unit          },
+                { "preset",                2,        VERB_ANY, 0,             enable_unit          },
+                { "preset-all",            VERB_ANY, 1,        0,             preset_all           },
+                { "mask",                  2,        VERB_ANY, 0,             enable_unit          },
+                { "unmask",                2,        VERB_ANY, 0,             enable_unit          },
+                { "link",                  2,        VERB_ANY, 0,             enable_unit          },
+                { "revert",                2,        VERB_ANY, 0,             enable_unit          },
+                { "switch-root",           2,        VERB_ANY, VERB_NOCHROOT, switch_root          },
+                { "list-dependencies",     VERB_ANY, 2,        VERB_NOCHROOT, list_dependencies    },
+                { "set-default",           2,        2,        0,             set_default          },
+                { "get-default",           VERB_ANY, 1,        0,             get_default          },
+                { "set-property",          3,        VERB_ANY, VERB_NOCHROOT, set_property         },
+                { "is-system-running",     VERB_ANY, 1,        0,             is_system_running    },
+                { "add-wants",             3,        VERB_ANY, 0,             add_dependency       },
+                { "add-requires",          3,        VERB_ANY, 0,             add_dependency       },
+                { "edit",                  2,        VERB_ANY, VERB_NOCHROOT, edit                 },
                 {}
         };
 
@@ -7475,7 +7759,7 @@ static int reload_with_fallback(void) {
                 return 0;
 
         /* Nothing else worked, so let's try signals */
-        assert(arg_action == ACTION_RELOAD || arg_action == ACTION_REEXEC);
+        assert(IN_SET(arg_action, ACTION_RELOAD, ACTION_REEXEC));
 
         if (kill(1, arg_action == ACTION_RELOAD ? SIGHUP : SIGTERM) < 0)
                 return log_error_errno(errno, "kill() failed: %m");
@@ -7489,8 +7773,7 @@ static int start_with_fallback(void) {
         if (start_unit(0, NULL, NULL) >= 0)
                 return 0;
 
-        /* Nothing else worked, so let's try
-         * /dev/initctl */
+        /* Nothing else worked, so let's try /dev/initctl */
         if (talk_initctl() > 0)
                 return 0;
 
@@ -7556,8 +7839,6 @@ static int logind_schedule_shutdown(void) {
         sd_bus *bus;
         int r;
 
-        (void) logind_set_wall_message();
-
         r = acquire_bus(BUS_FULL, &bus);
         if (r < 0)
                 return r;
@@ -7583,6 +7864,8 @@ static int logind_schedule_shutdown(void) {
 
         if (arg_dry)
                 action = strjoina("dry-", action);
+
+        (void) logind_set_wall_message();
 
         r = sd_bus_call_method(
                         bus,
@@ -7712,6 +7995,7 @@ int main(int argc, char*argv[]) {
         setlocale(LC_ALL, "");
         log_parse_environment();
         log_open();
+        sigbus_install();
 
         /* Explicitly not on_tty() to avoid setting cached value.
          * This becomes relevant for piping output which might be
@@ -7773,6 +8057,8 @@ int main(int argc, char*argv[]) {
         }
 
 finish:
+        release_busses();
+
         pager_close();
         ask_password_agent_close();
         polkit_agent_close();
@@ -7784,9 +8070,6 @@ finish:
         strv_free(arg_wall);
         free(arg_root);
 
-        release_busses();
-
         /* Note that we return r here, not EXIT_SUCCESS, so that we can implement the LSB-like return codes */
-
         return r < 0 ? EXIT_FAILURE : r;
 }

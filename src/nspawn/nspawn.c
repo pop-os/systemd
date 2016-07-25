@@ -26,9 +26,6 @@
 #include <linux/loop.h>
 #include <pwd.h>
 #include <sched.h>
-#ifdef HAVE_SECCOMP
-#include <seccomp.h>
-#endif
 #ifdef HAVE_SELINUX
 #include <selinux/selinux.h>
 #endif
@@ -64,9 +61,9 @@
 #include "fs-util.h"
 #include "gpt.h"
 #include "hostname-util.h"
+#include "id128-util.h"
 #include "log.h"
 #include "loopback-setup.h"
-#include "machine-id-setup.h"
 #include "machine-image.h"
 #include "macro.h"
 #include "missing.h"
@@ -79,6 +76,7 @@
 #include "nspawn-network.h"
 #include "nspawn-patch-uid.h"
 #include "nspawn-register.h"
+#include "nspawn-seccomp.h"
 #include "nspawn-settings.h"
 #include "nspawn-setuid.h"
 #include "nspawn-stub-pid1.h"
@@ -87,10 +85,8 @@
 #include "process-util.h"
 #include "ptyfwd.h"
 #include "random-util.h"
+#include "raw-clone.h"
 #include "rm-rf.h"
-#ifdef HAVE_SECCOMP
-#include "seccomp-util.h"
-#endif
 #include "selinux-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
@@ -105,9 +101,15 @@
 #include "util.h"
 
 /* Note that devpts's gid= parameter parses GIDs as signed values, hence we stay away from the upper half of the 32bit
- * UID range here */
+ * UID range here. We leave a bit of room at the lower end and a lot of room at the upper end, so that other subsystems
+ * may have their own allocation ranges too. */
 #define UID_SHIFT_PICK_MIN ((uid_t) UINT32_C(0x00080000))
 #define UID_SHIFT_PICK_MAX ((uid_t) UINT32_C(0x6FFF0000))
+
+/* nspawn is listening on the socket at the path in the constant nspawn_notify_socket_path
+ * nspawn_notify_socket_path is relative to the container
+ * the init process in the container pid can send messages to nspawn following the sd_notify(3) protocol */
+#define NSPAWN_NOTIFY_SOCKET_PATH "/run/systemd/nspawn/notify"
 
 typedef enum ContainerStatus {
         CONTAINER_TERMINATED,
@@ -136,7 +138,9 @@ static StartMode arg_start_mode = START_PID1;
 static bool arg_ephemeral = false;
 static LinkJournal arg_link_journal = LINK_AUTO;
 static bool arg_link_journal_try = false;
-static uint64_t arg_retain =
+static uint64_t arg_caps_retain =
+        (1ULL << CAP_AUDIT_CONTROL) |
+        (1ULL << CAP_AUDIT_WRITE) |
         (1ULL << CAP_CHOWN) |
         (1ULL << CAP_DAC_OVERRIDE) |
         (1ULL << CAP_DAC_READ_SEARCH) |
@@ -146,23 +150,21 @@ static uint64_t arg_retain =
         (1ULL << CAP_KILL) |
         (1ULL << CAP_LEASE) |
         (1ULL << CAP_LINUX_IMMUTABLE) |
+        (1ULL << CAP_MKNOD) |
         (1ULL << CAP_NET_BIND_SERVICE) |
         (1ULL << CAP_NET_BROADCAST) |
         (1ULL << CAP_NET_RAW) |
-        (1ULL << CAP_SETGID) |
         (1ULL << CAP_SETFCAP) |
+        (1ULL << CAP_SETGID) |
         (1ULL << CAP_SETPCAP) |
         (1ULL << CAP_SETUID) |
         (1ULL << CAP_SYS_ADMIN) |
+        (1ULL << CAP_SYS_BOOT) |
         (1ULL << CAP_SYS_CHROOT) |
         (1ULL << CAP_SYS_NICE) |
         (1ULL << CAP_SYS_PTRACE) |
-        (1ULL << CAP_SYS_TTY_CONFIG) |
         (1ULL << CAP_SYS_RESOURCE) |
-        (1ULL << CAP_SYS_BOOT) |
-        (1ULL << CAP_AUDIT_WRITE) |
-        (1ULL << CAP_AUDIT_CONTROL) |
-        (1ULL << CAP_MKNOD);
+        (1ULL << CAP_SYS_TTY_CONFIG);
 static CustomMount *arg_custom_mounts = NULL;
 static unsigned arg_n_custom_mounts = 0;
 static char **arg_setenv = NULL;
@@ -191,6 +193,7 @@ static SettingsMask arg_settings_mask = 0;
 static int arg_settings_trusted = -1;
 static char **arg_parameters = NULL;
 static const char *arg_container_service_name = "systemd-nspawn";
+static bool arg_notify_ready = false;
 
 static void help(void) {
         printf("%s [OPTIONS...] [PATH] [ARGUMENTS...]\n\n"
@@ -271,9 +274,10 @@ static void help(void) {
                "                            the service unit nspawn is running in\n"
                "     --volatile[=MODE]      Run the system in volatile mode\n"
                "     --settings=BOOLEAN     Load additional settings from .nspawn file\n"
+               "     --notify-ready=BOOLEAN Receive notifications from the container's init process,\n"
+               "                            accepted values: yes and no\n"
                , program_invocation_short_name);
 }
-
 
 static int custom_mounts_prepare(void) {
         unsigned i;
@@ -371,6 +375,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_SETTINGS,
                 ARG_CHDIR,
                 ARG_PRIVATE_USERS_CHOWN,
+                ARG_NOTIFY_READY,
         };
 
         static const struct option options[] = {
@@ -419,6 +424,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "kill-signal",           required_argument, NULL, ARG_KILL_SIGNAL       },
                 { "settings",              required_argument, NULL, ARG_SETTINGS          },
                 { "chdir",                 required_argument, NULL, ARG_CHDIR             },
+                { "notify-ready",          required_argument, NULL, ARG_NOTIFY_READY      },
                 {}
         };
 
@@ -588,9 +594,12 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_UUID:
                         r = sd_id128_from_string(optarg, &arg_uuid);
-                        if (r < 0) {
-                                log_error("Invalid UUID: %s", optarg);
-                                return r;
+                        if (r < 0)
+                                return log_error_errno(r, "Invalid UUID: %s", optarg);
+
+                        if (sd_id128_is_null(arg_uuid)) {
+                                log_error("Machine UUID may not be all zeroes.");
+                                return -EINVAL;
                         }
 
                         arg_settings_mask |= SETTING_MACHINE_ID;
@@ -991,6 +1000,16 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_settings_mask |= SETTING_WORKING_DIRECTORY;
                         break;
 
+                case ARG_NOTIFY_READY:
+                        r = parse_boolean(optarg);
+                        if (r < 0) {
+                                log_error("%s is not a valid notify mode. Valid modes are: yes, no, and ready.", optarg);
+                                return -EINVAL;
+                        }
+                        arg_notify_ready = r;
+                        arg_settings_mask |= SETTING_NOTIFY_READY;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -1075,7 +1094,7 @@ static int parse_argv(int argc, char *argv[]) {
         if (mask_all_settings)
                 arg_settings_mask = _SETTINGS_MASK_ALL;
 
-        arg_retain = (arg_retain | plus | (arg_private_network ? 1ULL << CAP_NET_ADMIN : 0)) & ~minus;
+        arg_caps_retain = (arg_caps_retain | plus | (arg_private_network ? 1ULL << CAP_NET_ADMIN : 0)) & ~minus;
 
         r = detect_unified_cgroup_hierarchy();
         if (r < 0)
@@ -1250,20 +1269,9 @@ static int setup_resolv_conf(const char *dest) {
         return 0;
 }
 
-static char* id128_format_as_uuid(sd_id128_t id, char s[37]) {
-        assert(s);
-
-        snprintf(s, 37,
-                 "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                 SD_ID128_FORMAT_VAL(id));
-
-        return s;
-}
-
 static int setup_boot_id(const char *dest) {
+        sd_id128_t rnd = SD_ID128_NULL;
         const char *from, *to;
-        sd_id128_t rnd = {};
-        char as_uuid[37];
         int r;
 
         if (arg_share_system)
@@ -1279,18 +1287,16 @@ static int setup_boot_id(const char *dest) {
         if (r < 0)
                 return log_error_errno(r, "Failed to generate random boot id: %m");
 
-        id128_format_as_uuid(rnd, as_uuid);
-
-        r = write_string_file(from, as_uuid, WRITE_STRING_FILE_CREATE);
+        r = id128_write(from, ID128_UUID, rnd, false);
         if (r < 0)
                 return log_error_errno(r, "Failed to write boot id: %m");
 
         if (mount(from, to, NULL, MS_BIND, NULL) < 0)
                 r = log_error_errno(errno, "Failed to bind mount boot id: %m");
         else if (mount(NULL, to, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NODEV, NULL) < 0)
-                log_warning_errno(errno, "Failed to make boot id read-only: %m");
+                log_warning_errno(errno, "Failed to make boot id read-only, ignoring: %m");
 
-        unlink(from);
+        (void) unlink(from);
         return r;
 }
 
@@ -1632,7 +1638,7 @@ static int setup_journal(const char *directory) {
 }
 
 static int drop_capabilities(void) {
-        return capability_bounding_set_drop(arg_retain, false);
+        return capability_bounding_set_drop(arg_caps_retain, false);
 }
 
 static int reset_audit_loginuid(void) {
@@ -1667,99 +1673,6 @@ static int reset_audit_loginuid(void) {
         return 0;
 }
 
-static int setup_seccomp(void) {
-
-#ifdef HAVE_SECCOMP
-        static const struct {
-                uint64_t capability;
-                int syscall_num;
-        } blacklist[] = {
-                { CAP_SYS_RAWIO,  SCMP_SYS(iopl)              },
-                { CAP_SYS_RAWIO,  SCMP_SYS(ioperm)            },
-                { CAP_SYS_BOOT,   SCMP_SYS(kexec_load)        },
-                { CAP_SYS_ADMIN,  SCMP_SYS(swapon)            },
-                { CAP_SYS_ADMIN,  SCMP_SYS(swapoff)           },
-                { CAP_SYS_ADMIN,  SCMP_SYS(open_by_handle_at) },
-                { CAP_SYS_MODULE, SCMP_SYS(init_module)       },
-                { CAP_SYS_MODULE, SCMP_SYS(finit_module)      },
-                { CAP_SYS_MODULE, SCMP_SYS(delete_module)     },
-                { CAP_SYSLOG,     SCMP_SYS(syslog)            },
-        };
-
-        scmp_filter_ctx seccomp;
-        unsigned i;
-        int r;
-
-        seccomp = seccomp_init(SCMP_ACT_ALLOW);
-        if (!seccomp)
-                return log_oom();
-
-        r = seccomp_add_secondary_archs(seccomp);
-        if (r < 0) {
-                log_error_errno(r, "Failed to add secondary archs to seccomp filter: %m");
-                goto finish;
-        }
-
-        for (i = 0; i < ELEMENTSOF(blacklist); i++) {
-                if (arg_retain & (1ULL << blacklist[i].capability))
-                        continue;
-
-                r = seccomp_rule_add(seccomp, SCMP_ACT_ERRNO(EPERM), blacklist[i].syscall_num, 0);
-                if (r == -EFAULT)
-                        continue; /* unknown syscall */
-                if (r < 0) {
-                        log_error_errno(r, "Failed to block syscall: %m");
-                        goto finish;
-                }
-        }
-
-        /*
-           Audit is broken in containers, much of the userspace audit
-           hookup will fail if running inside a container. We don't
-           care and just turn off creation of audit sockets.
-
-           This will make socket(AF_NETLINK, *, NETLINK_AUDIT) fail
-           with EAFNOSUPPORT which audit userspace uses as indication
-           that audit is disabled in the kernel.
-         */
-
-        r = seccomp_rule_add(
-                        seccomp,
-                        SCMP_ACT_ERRNO(EAFNOSUPPORT),
-                        SCMP_SYS(socket),
-                        2,
-                        SCMP_A0(SCMP_CMP_EQ, AF_NETLINK),
-                        SCMP_A2(SCMP_CMP_EQ, NETLINK_AUDIT));
-        if (r < 0) {
-                log_error_errno(r, "Failed to add audit seccomp rule: %m");
-                goto finish;
-        }
-
-        r = seccomp_attr_set(seccomp, SCMP_FLTATR_CTL_NNP, 0);
-        if (r < 0) {
-                log_error_errno(r, "Failed to unset NO_NEW_PRIVS: %m");
-                goto finish;
-        }
-
-        r = seccomp_load(seccomp);
-        if (r == -EINVAL) {
-                log_debug_errno(r, "Kernel is probably not configured with CONFIG_SECCOMP. Disabling seccomp audit filter: %m");
-                r = 0;
-                goto finish;
-        }
-        if (r < 0) {
-                log_error_errno(r, "Failed to install seccomp audit filter: %m");
-                goto finish;
-        }
-
-finish:
-        seccomp_release(seccomp);
-        return r;
-#else
-        return 0;
-#endif
-
-}
 
 static int setup_propagate(const char *root) {
         const char *p, *q;
@@ -2309,33 +2222,37 @@ static int mount_device(const char *what, const char *where, const char *directo
 }
 
 static int setup_machine_id(const char *directory) {
+        const char *etc_machine_id;
+        sd_id128_t id;
         int r;
-        const char *etc_machine_id, *t;
-        _cleanup_free_ char *s = NULL;
+
+        /* If the UUID in the container is already set, then that's what counts, and we use. If it isn't set, and the
+         * caller passed --uuid=, then we'll pass it in the $container_uuid env var to PID 1 of the container. The
+         * assumption is that PID 1 will then write it to /etc/machine-id to make it persistent. If --uuid= is not
+         * passed we generate a random UUID, and pass it via $container_uuid. In effect this means that /etc/machine-id
+         * in the container and our idea of the container UUID will always be in sync (at least if PID 1 in the
+         * container behaves nicely). */
 
         etc_machine_id = prefix_roota(directory, "/etc/machine-id");
 
-        r = read_one_line_file(etc_machine_id, &s);
-        if (r < 0)
-                return log_error_errno(r, "Failed to read machine ID from %s: %m", etc_machine_id);
+        r = id128_read(etc_machine_id, ID128_PLAIN, &id);
+        if (r < 0) {
+                if (!IN_SET(r, -ENOENT, -ENOMEDIUM)) /* If the file is missing or empty, we don't mind */
+                        return log_error_errno(r, "Failed to read machine ID from container image: %m");
 
-        t = strstrip(s);
-
-        if (!isempty(t)) {
-                r = sd_id128_from_string(t, &arg_uuid);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to parse machine ID from %s: %m", etc_machine_id);
-        } else {
                 if (sd_id128_is_null(arg_uuid)) {
                         r = sd_id128_randomize(&arg_uuid);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to generate random machine ID: %m");
+                                return log_error_errno(r, "Failed to acquire randomized machine UUID: %m");
                 }
-        }
+        } else {
+                if (sd_id128_is_null(id)) {
+                        log_error("Machine ID in container image is zero, refusing.");
+                        return -EINVAL;
+                }
 
-        r = machine_id_setup(directory, arg_uuid);
-        if (r < 0)
-                return log_error_errno(r, "Failed to setup machine ID: %m");
+                arg_uuid = id;
+        }
 
         return 0;
 }
@@ -2446,10 +2363,9 @@ static int wait_for_container(pid_t pid, ContainerStatus *container) {
         switch (status.si_code) {
 
         case CLD_EXITED:
-                if (status.si_status == 0) {
+                if (status.si_status == 0)
                         log_full(arg_quiet ? LOG_DEBUG : LOG_INFO, "Container %s exited successfully.", arg_machine);
-
-                } else
+                else
                         log_full(arg_quiet ? LOG_DEBUG : LOG_INFO, "Container %s failed with error code %i.", arg_machine, status.si_status);
 
                 *container = CONTAINER_TERMINATED;
@@ -2457,13 +2373,11 @@ static int wait_for_container(pid_t pid, ContainerStatus *container) {
 
         case CLD_KILLED:
                 if (status.si_status == SIGINT) {
-
                         log_full(arg_quiet ? LOG_DEBUG : LOG_INFO, "Container %s has been shut down.", arg_machine);
                         *container = CONTAINER_TERMINATED;
                         return 0;
 
                 } else if (status.si_status == SIGHUP) {
-
                         log_full(arg_quiet ? LOG_DEBUG : LOG_INFO, "Container %s is being rebooted.", arg_machine);
                         *container = CONTAINER_REBOOTED;
                         return 0;
@@ -2479,8 +2393,6 @@ static int wait_for_container(pid_t pid, ContainerStatus *container) {
                 log_error("Container %s failed due to unknown reason.", arg_machine);
                 return -EIO;
         }
-
-        return r;
 }
 
 static int on_orderly_shutdown(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
@@ -2631,6 +2543,7 @@ static int inner_child(
                 NULL, /* container_uuid */
                 NULL, /* LISTEN_FDS */
                 NULL, /* LISTEN_PID */
+                NULL, /* NOTIFY_SOCKET */
                 NULL
         };
 
@@ -2724,7 +2637,7 @@ static int inner_child(
 
 #ifdef HAVE_SELINUX
         if (arg_selinux_context)
-                if (setexeccon((security_context_t) arg_selinux_context) < 0)
+                if (setexeccon(arg_selinux_context) < 0)
                         return log_error_errno(errno, "setexeccon(\"%s\") failed: %m", arg_selinux_context);
 #endif
 
@@ -2744,9 +2657,9 @@ static int inner_child(
             (asprintf((char**)(envp + n_env++), "LOGNAME=%s", arg_user ? arg_user : "root") < 0))
                 return log_oom();
 
-        assert(!sd_id128_equal(arg_uuid, SD_ID128_NULL));
+        assert(!sd_id128_is_null(arg_uuid));
 
-        if (asprintf((char**)(envp + n_env++), "container_uuid=%s", id128_format_as_uuid(arg_uuid, as_uuid)) < 0)
+        if (asprintf((char**)(envp + n_env++), "container_uuid=%s", id128_to_uuid_string(arg_uuid, as_uuid)) < 0)
                 return log_oom();
 
         if (fdset_size(fds) > 0) {
@@ -2758,6 +2671,8 @@ static int inner_child(
                     (asprintf((char **)(envp + n_env++), "LISTEN_PID=1") < 0))
                         return log_oom();
         }
+        if (asprintf((char **)(envp + n_env++), "NOTIFY_SOCKET=%s", NSPAWN_NOTIFY_SOCKET_PATH) < 0)
+                return log_oom();
 
         env_use = strv_env_merge(2, envp, arg_setenv);
         if (!env_use)
@@ -2827,6 +2742,37 @@ static int inner_child(
         return log_error_errno(r, "execv() failed: %m");
 }
 
+static int setup_sd_notify_child(void) {
+        static const int one = 1;
+        int fd = -1;
+        union sockaddr_union sa = {
+                .sa.sa_family = AF_UNIX,
+        };
+        int r;
+
+        fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
+        if (fd < 0)
+                return log_error_errno(errno, "Failed to allocate notification socket: %m");
+
+        (void) mkdir_parents(NSPAWN_NOTIFY_SOCKET_PATH, 0755);
+        (void) unlink(NSPAWN_NOTIFY_SOCKET_PATH);
+
+        strncpy(sa.un.sun_path, NSPAWN_NOTIFY_SOCKET_PATH, sizeof(sa.un.sun_path)-1);
+        r = bind(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
+        if (r < 0) {
+                safe_close(fd);
+                return log_error_errno(errno, "bind(%s) failed: %m", sa.un.sun_path);
+        }
+
+        r = setsockopt(fd, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one));
+        if (r < 0) {
+                safe_close(fd);
+                return log_error_errno(errno, "SO_PASSCRED failed: %m");
+        }
+
+        return fd;
+}
+
 static int outer_child(
                 Barrier *barrier,
                 const char *directory,
@@ -2838,6 +2784,7 @@ static int outer_child(
                 bool secondary,
                 int pid_socket,
                 int uuid_socket,
+                int notify_socket,
                 int kmsg_socket,
                 int rtnl_socket,
                 int uid_shift_socket,
@@ -2846,12 +2793,14 @@ static int outer_child(
         pid_t pid;
         ssize_t l;
         int r;
+        _cleanup_close_ int fd = -1;
 
         assert(barrier);
         assert(directory);
         assert(console);
         assert(pid_socket >= 0);
         assert(uuid_socket >= 0);
+        assert(notify_socket >= 0);
         assert(kmsg_socket >= 0);
 
         cg_unified_flush();
@@ -2919,7 +2868,7 @@ static int outer_child(
                         if (l < 0)
                                 return log_error_errno(errno, "Failed to recv UID shift: %m");
                         if (l != sizeof(arg_uid_shift)) {
-                                log_error("Short read while recieving UID shift.");
+                                log_error("Short read while receiving UID shift.");
                                 return -EIO;
                         }
                 }
@@ -2993,7 +2942,7 @@ static int outer_child(
         if (r < 0)
                 return r;
 
-        r = setup_seccomp();
+        r = setup_seccomp(arg_caps_retain);
         if (r < 0)
                 return r;
 
@@ -3038,16 +2987,20 @@ static int outer_child(
         if (r < 0)
                 return log_error_errno(r, "Failed to move root directory: %m");
 
+        fd = setup_sd_notify_child();
+        if (fd < 0)
+                return fd;
+
         pid = raw_clone(SIGCHLD|CLONE_NEWNS|
                         (arg_share_system ? 0 : CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS) |
                         (arg_private_network ? CLONE_NEWNET : 0) |
-                        (arg_userns_mode != USER_NAMESPACE_NO ? CLONE_NEWUSER : 0),
-                        NULL);
+                        (arg_userns_mode != USER_NAMESPACE_NO ? CLONE_NEWUSER : 0));
         if (pid < 0)
                 return log_error_errno(errno, "Failed to fork inner child: %m");
         if (pid == 0) {
                 pid_socket = safe_close(pid_socket);
                 uuid_socket = safe_close(uuid_socket);
+                notify_socket = safe_close(notify_socket);
                 uid_shift_socket = safe_close(uid_shift_socket);
 
                 /* The inner child has all namespaces that are
@@ -3077,8 +3030,13 @@ static int outer_child(
                 return -EIO;
         }
 
+        l = send_one_fd(notify_socket, fd, 0);
+        if (l < 0)
+                return log_error_errno(errno, "Failed to send notify fd: %m");
+
         pid_socket = safe_close(pid_socket);
         uuid_socket = safe_close(uuid_socket);
+        notify_socket = safe_close(notify_socket);
         kmsg_socket = safe_close(kmsg_socket);
         rtnl_socket = safe_close(rtnl_socket);
 
@@ -3157,6 +3115,95 @@ static int setup_uid_map(pid_t pid) {
         r = write_string_file(uid_map, line, 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to write GID map: %m");
+
+        return 0;
+}
+
+static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
+        char buf[NOTIFY_BUFFER_MAX+1];
+        char *p = NULL;
+        struct iovec iovec = {
+                .iov_base = buf,
+                .iov_len = sizeof(buf)-1,
+        };
+        union {
+                struct cmsghdr cmsghdr;
+                uint8_t buf[CMSG_SPACE(sizeof(struct ucred)) +
+                            CMSG_SPACE(sizeof(int) * NOTIFY_FD_MAX)];
+        } control = {};
+        struct msghdr msghdr = {
+                .msg_iov = &iovec,
+                .msg_iovlen = 1,
+                .msg_control = &control,
+                .msg_controllen = sizeof(control),
+        };
+        struct cmsghdr *cmsg;
+        struct ucred *ucred = NULL;
+        ssize_t n;
+        pid_t inner_child_pid;
+        _cleanup_strv_free_ char **tags = NULL;
+
+        assert(userdata);
+
+        inner_child_pid = PTR_TO_PID(userdata);
+
+        if (revents != EPOLLIN) {
+                log_warning("Got unexpected poll event for notify fd.");
+                return 0;
+        }
+
+        n = recvmsg(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
+        if (n < 0) {
+                if (errno == EAGAIN || errno == EINTR)
+                        return 0;
+
+                return log_warning_errno(errno, "Couldn't read notification socket: %m");
+        }
+        cmsg_close_all(&msghdr);
+
+        CMSG_FOREACH(cmsg, &msghdr) {
+                if (cmsg->cmsg_level == SOL_SOCKET &&
+                           cmsg->cmsg_type == SCM_CREDENTIALS &&
+                           cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred))) {
+
+                        ucred = (struct ucred*) CMSG_DATA(cmsg);
+                }
+        }
+
+        if (!ucred || ucred->pid != inner_child_pid) {
+                log_warning("Received notify message without valid credentials. Ignoring.");
+                return 0;
+        }
+
+        if ((size_t) n >= sizeof(buf)) {
+                log_warning("Received notify message exceeded maximum size. Ignoring.");
+                return 0;
+        }
+
+        buf[n] = 0;
+        tags = strv_split(buf, "\n\r");
+        if (!tags)
+                return log_oom();
+
+        if (strv_find(tags, "READY=1"))
+                sd_notifyf(false, "READY=1\n");
+
+        p = strv_find_startswith(tags, "STATUS=");
+        if (p)
+                sd_notifyf(false, "STATUS=Container running: %s", p);
+
+        return 0;
+}
+
+static int setup_sd_notify_parent(sd_event *event, int fd, pid_t *inner_child_pid) {
+        int r;
+        sd_event_source *notify_event_source;
+
+        r = sd_event_add_io(event, &notify_event_source, fd, EPOLLIN, nspawn_dispatch_notify_fd, inner_child_pid);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate notify event source: %m");
+
+        (void) sd_event_source_set_description(notify_event_source, "nspawn-notify");
 
         return 0;
 }
@@ -3277,9 +3324,9 @@ static int load_settings(void) {
                         if (settings->capability != 0)
                                 log_warning("Ignoring Capability= setting, file %s is not trusted.", p);
                 } else
-                        arg_retain |= plus;
+                        arg_caps_retain |= plus;
 
-                arg_retain &= ~settings->drop_capability;
+                arg_caps_retain &= ~settings->drop_capability;
         }
 
         if ((arg_settings_mask & SETTING_KILL_SIGNAL) == 0 &&
@@ -3388,6 +3435,9 @@ static int load_settings(void) {
                         arg_userns_chown = settings->userns_chown;
                 }
         }
+
+        if ((arg_settings_mask & SETTING_NOTIFY_READY) == 0)
+                arg_notify_ready = settings->notify_ready;
 
         return 0;
 }
@@ -3503,7 +3553,7 @@ int main(int argc, char *argv[]) {
                         }
                         if (r < 0) {
                                 log_error_errno(r, "Failed to lock %s: %m", arg_directory);
-                                return r;
+                                goto finish;
                         }
 
                         if (arg_template) {
@@ -3639,7 +3689,9 @@ int main(int argc, char *argv[]) {
                         rtnl_socket_pair[2] = { -1, -1 },
                         pid_socket_pair[2] = { -1, -1 },
                         uuid_socket_pair[2] = { -1, -1 },
+                        notify_socket_pair[2] = { -1, -1 },
                         uid_shift_socket_pair[2] = { -1, -1 };
+                _cleanup_close_ int notify_socket= -1;
                 _cleanup_(barrier_destroy) Barrier barrier = BARRIER_NULL;
                 _cleanup_(sd_event_unrefp) sd_event *event = NULL;
                 _cleanup_(pty_forward_freep) PTYForward *forward = NULL;
@@ -3690,6 +3742,11 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
+                if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, notify_socket_pair) < 0) {
+                        r = log_error_errno(errno, "Failed to create notify socket pair: %m");
+                        goto finish;
+                }
+
                 if (arg_userns_mode != USER_NAMESPACE_NO)
                         if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, uid_shift_socket_pair) < 0) {
                                 r = log_error_errno(errno, "Failed to create uid shift socket pair: %m");
@@ -3711,7 +3768,7 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
-                pid = raw_clone(SIGCHLD|CLONE_NEWNS, NULL);
+                pid = raw_clone(SIGCHLD|CLONE_NEWNS);
                 if (pid < 0) {
                         if (errno == EINVAL)
                                 r = log_error_errno(errno, "clone() failed, do you have namespace support enabled in your kernel? (You need UTS, IPC, PID and NET namespacing built in): %m");
@@ -3731,6 +3788,7 @@ int main(int argc, char *argv[]) {
                         rtnl_socket_pair[0] = safe_close(rtnl_socket_pair[0]);
                         pid_socket_pair[0] = safe_close(pid_socket_pair[0]);
                         uuid_socket_pair[0] = safe_close(uuid_socket_pair[0]);
+                        notify_socket_pair[0] = safe_close(notify_socket_pair[0]);
                         uid_shift_socket_pair[0] = safe_close(uid_shift_socket_pair[0]);
 
                         (void) reset_all_signal_handlers();
@@ -3746,6 +3804,7 @@ int main(int argc, char *argv[]) {
                                         secondary,
                                         pid_socket_pair[1],
                                         uuid_socket_pair[1],
+                                        notify_socket_pair[1],
                                         kmsg_socket_pair[1],
                                         rtnl_socket_pair[1],
                                         uid_shift_socket_pair[1],
@@ -3764,6 +3823,7 @@ int main(int argc, char *argv[]) {
                 rtnl_socket_pair[1] = safe_close(rtnl_socket_pair[1]);
                 pid_socket_pair[1] = safe_close(pid_socket_pair[1]);
                 uuid_socket_pair[1] = safe_close(uuid_socket_pair[1]);
+                notify_socket_pair[1] = safe_close(notify_socket_pair[1]);
                 uid_shift_socket_pair[1] = safe_close(uid_shift_socket_pair[1]);
 
                 if (arg_userns_mode != USER_NAMESPACE_NO) {
@@ -3834,6 +3894,13 @@ int main(int argc, char *argv[]) {
                 if (l != sizeof(arg_uuid)) {
                         log_error("Short read while reading container machined ID.");
                         r = EIO;
+                        goto finish;
+                }
+
+                /* We also retrieve the socket used for notifications generated by outer child */
+                notify_socket = receive_one_fd(notify_socket_pair[0], 0);
+                if (notify_socket < 0) {
+                        r = log_error_errno(errno, "Failed to receive notification socket from the outer child: %m");
                         goto finish;
                 }
 
@@ -3951,6 +4018,16 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
+                r = sd_event_new(&event);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to get default event source: %m");
+                        goto finish;
+                }
+
+                r = setup_sd_notify_parent(event, notify_socket, PID_TO_PTR(pid));
+                if (r < 0)
+                        goto finish;
+
                 /* Let the child know that we are ready and wait that the child is completely ready now. */
                 if (!barrier_place_and_sync(&barrier)) { /* #4 */
                         log_error("Child died too early.");
@@ -3963,15 +4040,10 @@ int main(int argc, char *argv[]) {
                 etc_passwd_lock = safe_close(etc_passwd_lock);
 
                 sd_notifyf(false,
-                           "READY=1\n"
                            "STATUS=Container running.\n"
                            "X_NSPAWN_LEADER_PID=" PID_FMT, pid);
-
-                r = sd_event_new(&event);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to get default event source: %m");
-                        goto finish;
-                }
+                if (!arg_notify_ready)
+                        sd_notify(false, "READY=1\n");
 
                 if (arg_kill_signal > 0) {
                         /* Try to kill the init system on SIGINT or SIGTERM */

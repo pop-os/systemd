@@ -18,3 +18,5 @@ WatchdogSec=3min
 PrivateTmp=yes
 ProtectSystem=yes
 ProtectHome=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=~@cpu-emulation @debug @keyring @module @mount @obsolete @raw-io

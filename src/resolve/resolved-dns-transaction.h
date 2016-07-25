@@ -74,6 +74,8 @@ struct DnsTransaction {
         bool initial_jitter_scheduled:1;
         bool initial_jitter_elapsed:1;
 
+        bool clamp_ttl:1;
+
         DnsPacket *sent, *received;
 
         DnsAnswer *answer;
@@ -114,6 +116,9 @@ struct DnsTransaction {
 
         /* The features of the DNS server at time of transaction start */
         DnsServerFeatureLevel current_feature_level;
+
+        /* If we got SERVFAIL back, we retry the lookup, using a lower feature level than we used before. */
+        DnsServerFeatureLevel clamp_feature_level;
 
         /* Query candidates this transaction is referenced by and that
          * shall be notified about this specific transaction

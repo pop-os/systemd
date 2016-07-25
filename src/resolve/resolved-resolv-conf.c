@@ -92,7 +92,7 @@ int manager_read_resolv_conf(Manager *m) {
 
                 a = first_word(l, "nameserver");
                 if (a) {
-                        r = manager_add_dns_server_by_string(m, DNS_SERVER_SYSTEM, a);
+                        r = manager_parse_dns_server_string_and_warn(m, DNS_SERVER_SYSTEM, a);
                         if (r < 0)
                                 log_warning_errno(r, "Failed to parse DNS server address '%s', ignoring.", a);
 
@@ -149,9 +149,7 @@ static void write_resolv_conf_server(DnsServer *s, FILE *f, unsigned *count) {
         assert(f);
         assert(count);
 
-        (void) dns_server_string(s);
-
-        if (!s->server_string) {
+        if (!dns_server_string(s)) {
                 log_warning("Our of memory, or invalid DNS address. Ignoring server.");
                 return;
         }
@@ -160,44 +158,49 @@ static void write_resolv_conf_server(DnsServer *s, FILE *f, unsigned *count) {
                 fputs("# Too many DNS servers configured, the following entries may be ignored.\n", f);
         (*count)++;
 
-        fprintf(f, "nameserver %s\n", s->server_string);
+        fprintf(f, "nameserver %s\n", dns_server_string(s));
 }
 
 static void write_resolv_conf_search(
-                const char *domain,
-                FILE *f,
-                unsigned *count,
-                unsigned *length) {
+                OrderedSet *domains,
+                FILE *f) {
+        unsigned length = 0, count = 0;
+        Iterator i;
+        char *domain;
 
-        assert(domain);
+        assert(domains);
         assert(f);
-        assert(length);
 
-        if (*count >= MAXDNSRCH ||
-            *length + strlen(domain) > 256) {
-                if (*count == MAXDNSRCH)
-                        fputs(" # Too many search domains configured, remaining ones ignored.", f);
-                if (*length <= 256)
-                        fputs(" # Total length of all search domains is too long, remaining ones ignored.", f);
+        fputs("search", f);
 
-                return;
+        ORDERED_SET_FOREACH(domain, domains, i) {
+                if (++count > MAXDNSRCH) {
+                        fputs("\n# Too many search domains configured, remaining ones ignored.", f);
+                        break;
+                }
+                length += strlen(domain) + 1;
+                if (length > 256) {
+                        fputs("\n# Total length of all search domains is too long, remaining ones ignored.", f);
+                        break;
+                }
+                fputc(' ', f);
+                fputs(domain, f);
         }
 
-        (*length) += strlen(domain);
-        (*count)++;
-
-        fputc(' ', f);
-        fputs(domain, f);
+        fputs("\n", f);
 }
 
 static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *domains) {
         Iterator i;
 
         fputs("# This file is managed by systemd-resolved(8). Do not edit.\n#\n"
-              "# Third party programs must not access this file directly, but\n"
-              "# only through the symlink at /etc/resolv.conf. To manage\n"
-              "# resolv.conf(5) in a different way, replace the symlink by a\n"
-              "# static file or a different symlink.\n\n", f);
+              "# This is a dynamic resolv.conf file for connecting local clients directly to\n"
+              "# all known DNS servers.\n#\n"
+              "# Third party programs must not access this file directly, but only through the\n"
+              "# symlink at /etc/resolv.conf. To manage resolv.conf(5) in a different way,\n"
+              "# replace this symlink by a static file or a different symlink.\n#\n"
+              "# See systemd-resolved.service(8) for details about the supported modes of\n"
+              "# operation for /etc/resolv.conf.\n\n", f);
 
         if (ordered_set_isempty(dns))
                 fputs("# No DNS servers known.\n", f);
@@ -209,15 +212,8 @@ static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *doma
                         write_resolv_conf_server(s, f, &count);
         }
 
-        if (!ordered_set_isempty(domains)) {
-                unsigned length = 0, count = 0;
-                char *domain;
-
-                fputs("search", f);
-                ORDERED_SET_FOREACH(domain, domains, i)
-                        write_resolv_conf_search(domain, f, &count, &length);
-                fputs("\n", f);
-        }
+        if (!ordered_set_isempty(domains))
+                write_resolv_conf_search(domains, f);
 
         return fflush_and_check(f);
 }
@@ -232,29 +228,31 @@ int manager_write_resolv_conf(Manager *m) {
         assert(m);
 
         /* Read the system /etc/resolv.conf first */
-        manager_read_resolv_conf(m);
+        (void) manager_read_resolv_conf(m);
 
         /* Add the full list to a set, to filter out duplicates */
         r = manager_compile_dns_servers(m, &dns);
         if (r < 0)
-                return r;
+                return log_warning_errno(r, "Failed to compile list of DNS servers: %m");
 
-        r = manager_compile_search_domains(m, &domains);
+        r = manager_compile_search_domains(m, &domains, false);
         if (r < 0)
-                return r;
+                return log_warning_errno(r, "Failed to compile list of search domains: %m");
 
         r = fopen_temporary_label(PRIVATE_RESOLV_CONF, PRIVATE_RESOLV_CONF, &f, &temp_path);
         if (r < 0)
-                return r;
+                return log_warning_errno(r, "Failed to open private resolv.conf file for writing: %m");
 
-        fchmod(fileno(f), 0644);
+        (void) fchmod(fileno(f), 0644);
 
         r = write_resolv_conf_contents(f, dns, domains);
-        if (r < 0)
+        if (r < 0) {
+                log_error_errno(r, "Failed to write private resolv.conf contents: %m");
                 goto fail;
+        }
 
         if (rename(temp_path, PRIVATE_RESOLV_CONF) < 0) {
-                r = -errno;
+                r = log_error_errno(errno, "Failed to move private resolv.conf file into place: %m");
                 goto fail;
         }
 
@@ -263,5 +261,6 @@ int manager_write_resolv_conf(Manager *m) {
 fail:
         (void) unlink(PRIVATE_RESOLV_CONF);
         (void) unlink(temp_path);
+
         return r;
 }

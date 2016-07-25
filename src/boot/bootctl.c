@@ -101,7 +101,7 @@ static int verify_esp(const char *p, uint32_t *part, uint64_t *pstart, uint64_t 
         errno = 0;
         r = blkid_do_safeprobe(b);
         if (r == -2) {
-                log_error("File system \"%s\" is ambigious.", p);
+                log_error("File system \"%s\" is ambiguous.", p);
                 return -ENODEV;
         } else if (r == 1) {
                 log_error("File system \"%s\" does not contain a label.", p);
@@ -288,7 +288,7 @@ static int status_binaries(const char *esp_path, sd_id128_t partition) {
         else if (r < 0)
                 return r;
 
-        r = enumerate_binaries(esp_path, "EFI/Boot", "boot");
+        r = enumerate_binaries(esp_path, "EFI/BOOT", "boot");
         if (r == 0)
                 log_error("No default/fallback boot loader installed in ESP.");
         else if (r < 0)
@@ -311,7 +311,7 @@ static int print_efi_option(uint16_t id, bool in_order) {
                 return r;
 
         /* print only configured entries with partition information */
-        if (!path || sd_id128_equal(partition, SD_ID128_NULL))
+        if (!path || sd_id128_is_null(partition))
                 return 0;
 
         efi_tilt_backslashes(path);
@@ -548,7 +548,7 @@ static int mkdir_one(const char *prefix, const char *suffix) {
 static const char *efi_subdirs[] = {
         "EFI",
         "EFI/systemd",
-        "EFI/Boot",
+        "EFI/BOOT",
         "loader",
         "loader/entries"
 };
@@ -579,7 +579,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
                 char *v;
 
                 /* Create the EFI default boot loader name (specified for removable devices) */
-                v = strjoina(esp_path, "/EFI/Boot/BOOT", name + strlen("systemd-boot"));
+                v = strjoina(esp_path, "/EFI/BOOT/BOOT", name + strlen("systemd-boot"));
                 strupper(strrchr(v, '/') + 1);
 
                 k = copy_file(p, v, force);
@@ -781,7 +781,7 @@ static int remove_boot_efi(const char *esp_path) {
         struct dirent *de;
         int r, c = 0;
 
-        p = strjoina(esp_path, "/EFI/Boot");
+        p = strjoina(esp_path, "/EFI/BOOT");
         d = opendir(p);
         if (!d) {
                 if (errno == ENOENT)
@@ -797,7 +797,7 @@ static int remove_boot_efi(const char *esp_path) {
                 if (!endswith_no_case(de->d_name, ".efi"))
                         continue;
 
-                if (!startswith_no_case(de->d_name, "Boot"))
+                if (!startswith_no_case(de->d_name, "boot"))
                         continue;
 
                 fd = openat(dirfd(d), de->d_name, O_RDONLY|O_CLOEXEC);
@@ -1072,7 +1072,7 @@ static int bootctl_main(int argc, char*argv[]) {
 
                         printf("Loader:\n");
                         printf("      Product: %s\n", strna(loader));
-                        if (!sd_id128_equal(loader_part_uuid, SD_ID128_NULL))
+                        if (!sd_id128_is_null(loader_part_uuid))
                                 printf("    Partition: /dev/disk/by-partuuid/%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
                                        SD_ID128_FORMAT_VAL(loader_part_uuid));
                         else

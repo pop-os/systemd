@@ -26,6 +26,7 @@
 #include "compress.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "fs-util.h"
 #include "journal-authenticate.h"
 #include "journal-def.h"
 #include "journal-file.h"
@@ -54,7 +55,9 @@ static void draw_progress(uint64_t p, usec_t *last_usec) {
         j = (n * (unsigned) p) / 65535ULL;
         k = n - j;
 
-        fputs("\r\x1B[?25l" ANSI_HIGHLIGHT_GREEN, stdout);
+        fputs("\r", stdout);
+        if (colors_enabled())
+                fputs("\x1B[?25l" ANSI_HIGHLIGHT_GREEN, stdout);
 
         for (i = 0; i < j; i++)
                 fputs("\xe2\x96\x88", stdout);
@@ -66,7 +69,10 @@ static void draw_progress(uint64_t p, usec_t *last_usec) {
 
         printf(" %3"PRIu64"%%", 100U * p / 65535U);
 
-        fputs("\r\x1B[?25h", stdout);
+        fputs("\r", stdout);
+        if (colors_enabled())
+                fputs("\x1B[?25h", stdout);
+
         fflush(stdout);
 }
 
@@ -820,6 +826,8 @@ int journal_file_verify(
         int data_fd = -1, entry_fd = -1, entry_array_fd = -1;
         unsigned i;
         bool found_last = false;
+        _cleanup_free_ char *tmp_dir = NULL;
+
 #ifdef HAVE_GCRYPT
         uint64_t last_tag = 0;
 #endif
@@ -838,19 +846,25 @@ int journal_file_verify(
         } else if (f->seal)
                 return -ENOKEY;
 
-        data_fd = open_tmpfile_unlinkable("/var/tmp", O_RDWR | O_CLOEXEC);
+        r = var_tmp(&tmp_dir);
+        if (r < 0) {
+                log_error_errno(r, "Failed to determine temporary directory: %m");
+                goto fail;
+        }
+
+        data_fd = open_tmpfile_unlinkable(tmp_dir, O_RDWR | O_CLOEXEC);
         if (data_fd < 0) {
                 r = log_error_errno(data_fd, "Failed to create data file: %m");
                 goto fail;
         }
 
-        entry_fd = open_tmpfile_unlinkable("/var/tmp", O_RDWR | O_CLOEXEC);
+        entry_fd = open_tmpfile_unlinkable(tmp_dir, O_RDWR | O_CLOEXEC);
         if (entry_fd < 0) {
                 r = log_error_errno(entry_fd, "Failed to create entry file: %m");
                 goto fail;
         }
 
-        entry_array_fd = open_tmpfile_unlinkable("/var/tmp", O_RDWR | O_CLOEXEC);
+        entry_array_fd = open_tmpfile_unlinkable(tmp_dir, O_RDWR | O_CLOEXEC);
         if (entry_array_fd < 0) {
                 r = log_error_errno(entry_array_fd,
                                     "Failed to create entry array file: %m");

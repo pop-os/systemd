@@ -23,6 +23,7 @@
 
 #include "af-list.h"
 #include "alloc-util.h"
+#include "dirent-util.h"
 #include "dns-domain.h"
 #include "fd-util.h"
 #include "fileio-label.h"
@@ -35,6 +36,7 @@
 #include "random-util.h"
 #include "resolved-bus.h"
 #include "resolved-conf.h"
+#include "resolved-dns-stub.h"
 #include "resolved-etc-hosts.h"
 #include "resolved-llmnr.h"
 #include "resolved-manager.h"
@@ -78,11 +80,11 @@ static int manager_process_link(sd_netlink *rtnl, sd_netlink_message *mm, void *
                                 goto fail;
                 }
 
-                r = link_update_rtnl(l, mm);
+                r = link_process_rtnl(l, mm);
                 if (r < 0)
                         goto fail;
 
-                r = link_update_monitor(l);
+                r = link_update(l);
                 if (r < 0)
                         goto fail;
 
@@ -95,6 +97,7 @@ static int manager_process_link(sd_netlink *rtnl, sd_netlink_message *mm, void *
         case RTM_DELLINK:
                 if (l) {
                         log_debug("Removing link %i/%s", l->ifindex, l->name);
+                        link_remove_user(l);
                         link_free(l);
                 }
 
@@ -279,14 +282,12 @@ static int on_network_event(sd_event_source *s, int fd, uint32_t revents, void *
         sd_network_monitor_flush(m->network_monitor);
 
         HASHMAP_FOREACH(l, m->links, i) {
-                r = link_update_monitor(l);
+                r = link_update(l);
                 if (r < 0)
                         log_warning_errno(r, "Failed to update monitor information for %i: %m", l->ifindex);
         }
 
-        r = manager_write_resolv_conf(m);
-        if (r < 0)
-                log_warning_errno(r, "Could not update "PRIVATE_RESOLV_CONF": %m");
+        (void) manager_write_resolv_conf(m);
 
         return 0;
 }
@@ -468,6 +469,18 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
         return 0;
 }
 
+static int manager_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+        Manager *m = userdata;
+
+        assert(s);
+        assert(si);
+        assert(m);
+
+        manager_flush_caches(m);
+
+        return 0;
+}
+
 int manager_new(Manager **ret) {
         _cleanup_(manager_freep) Manager *m = NULL;
         int r;
@@ -481,11 +494,13 @@ int manager_new(Manager **ret) {
         m->llmnr_ipv4_udp_fd = m->llmnr_ipv6_udp_fd = -1;
         m->llmnr_ipv4_tcp_fd = m->llmnr_ipv6_tcp_fd = -1;
         m->mdns_ipv4_fd = m->mdns_ipv6_fd = -1;
+        m->dns_stub_udp_fd = m->dns_stub_tcp_fd = -1;
         m->hostname_fd = -1;
 
         m->llmnr_support = RESOLVE_SUPPORT_YES;
         m->mdns_support = RESOLVE_SUPPORT_NO;
         m->dnssec_mode = DEFAULT_DNSSEC_MODE;
+        m->enable_cache = true;
         m->read_resolv_conf = true;
         m->need_builtin_fallbacks = true;
         m->etc_hosts_last = m->etc_hosts_mtime = USEC_INFINITY;
@@ -528,6 +543,9 @@ int manager_new(Manager **ret) {
                 return r;
 
         (void) sd_event_add_signal(m->event, &m->sigusr1_event_source, SIGUSR1, manager_sigusr1, m);
+        (void) sd_event_add_signal(m->event, &m->sigusr2_event_source, SIGUSR2, manager_sigusr2, m);
+
+        manager_cleanup_saved_user(m);
 
         *ret = m;
         m = NULL;
@@ -539,6 +557,10 @@ int manager_start(Manager *m) {
         int r;
 
         assert(m);
+
+        r = manager_dns_stub_start(m);
+        if (r < 0)
+                return r;
 
         r = manager_llmnr_start(m);
         if (r < 0)
@@ -569,6 +591,11 @@ Manager *manager_free(Manager *m) {
 
         dns_scope_free(m->unicast_scope);
 
+        /* At this point only orphaned streams should remain. All others should have been freed already by their
+         * owners */
+        while (m->dns_streams)
+                dns_stream_unref(m->dns_streams);
+
         hashmap_free(m->links);
         hashmap_free(m->dns_transactions);
 
@@ -580,12 +607,14 @@ Manager *manager_free(Manager *m) {
 
         manager_llmnr_stop(m);
         manager_mdns_stop(m);
+        manager_dns_stub_stop(m);
 
         sd_bus_slot_unref(m->prepare_for_sleep_slot);
         sd_event_source_unref(m->bus_retry_event_source);
         sd_bus_unref(m->bus);
 
         sd_event_source_unref(m->sigusr1_event_source);
+        sd_event_source_unref(m->sigusr2_event_source);
 
         sd_event_unref(m->event);
 
@@ -643,15 +672,14 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         mh.msg_controllen = sizeof(control);
 
         l = recvmsg(fd, &mh, 0);
+        if (l == 0)
+                return 0;
         if (l < 0) {
                 if (errno == EAGAIN || errno == EINTR)
                         return 0;
 
                 return -errno;
         }
-
-        if (l <= 0)
-                return -EIO;
 
         assert(!(mh.msg_flags & MSG_CTRUNC));
         assert(!(mh.msg_flags & MSG_TRUNC));
@@ -794,7 +822,14 @@ int manager_write(Manager *m, int fd, DnsPacket *p) {
         return 0;
 }
 
-static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_addr *addr, uint16_t port, DnsPacket *p) {
+static int manager_ipv4_send(
+                Manager *m,
+                int fd,
+                int ifindex,
+                const struct in_addr *destination,
+                uint16_t port,
+                const struct in_addr *source,
+                DnsPacket *p) {
         union sockaddr_union sa = {
                 .in.sin_family = AF_INET,
         };
@@ -807,14 +842,14 @@ static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_ad
 
         assert(m);
         assert(fd >= 0);
-        assert(addr);
+        assert(destination);
         assert(port > 0);
         assert(p);
 
         iov.iov_base = DNS_PACKET_DATA(p);
         iov.iov_len = p->size;
 
-        sa.in.sin_addr = *addr;
+        sa.in.sin_addr = *destination;
         sa.in.sin_port = htobe16(port),
 
         mh.msg_iov = &iov;
@@ -838,12 +873,23 @@ static int manager_ipv4_send(Manager *m, int fd, int ifindex, const struct in_ad
 
                 pi = (struct in_pktinfo*) CMSG_DATA(cmsg);
                 pi->ipi_ifindex = ifindex;
+
+                if (source)
+                        pi->ipi_spec_dst = *source;
         }
 
         return sendmsg_loop(fd, &mh, 0);
 }
 
-static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_addr *addr, uint16_t port, DnsPacket *p) {
+static int manager_ipv6_send(
+                Manager *m,
+                int fd,
+                int ifindex,
+                const struct in6_addr *destination,
+                uint16_t port,
+                const struct in6_addr *source,
+                DnsPacket *p) {
+
         union sockaddr_union sa = {
                 .in6.sin6_family = AF_INET6,
         };
@@ -856,14 +902,14 @@ static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_a
 
         assert(m);
         assert(fd >= 0);
-        assert(addr);
+        assert(destination);
         assert(port > 0);
         assert(p);
 
         iov.iov_base = DNS_PACKET_DATA(p);
         iov.iov_len = p->size;
 
-        sa.in6.sin6_addr = *addr;
+        sa.in6.sin6_addr = *destination;
         sa.in6.sin6_port = htobe16(port),
         sa.in6.sin6_scope_id = ifindex;
 
@@ -888,24 +934,36 @@ static int manager_ipv6_send(Manager *m, int fd, int ifindex, const struct in6_a
 
                 pi = (struct in6_pktinfo*) CMSG_DATA(cmsg);
                 pi->ipi6_ifindex = ifindex;
+
+                if (source)
+                        pi->ipi6_addr = *source;
         }
 
         return sendmsg_loop(fd, &mh, 0);
 }
 
-int manager_send(Manager *m, int fd, int ifindex, int family, const union in_addr_union *addr, uint16_t port, DnsPacket *p) {
+int manager_send(
+                Manager *m,
+                int fd,
+                int ifindex,
+                int family,
+                const union in_addr_union *destination,
+                uint16_t port,
+                const union in_addr_union *source,
+                DnsPacket *p) {
+
         assert(m);
         assert(fd >= 0);
-        assert(addr);
+        assert(destination);
         assert(port > 0);
         assert(p);
 
         log_debug("Sending %s packet with id %" PRIu16 " on interface %i/%s.", DNS_PACKET_QR(p) ? "response" : "query", DNS_PACKET_ID(p), ifindex, af_to_name(family));
 
         if (family == AF_INET)
-                return manager_ipv4_send(m, fd, ifindex, &addr->in, port, p);
-        else if (family == AF_INET6)
-                return manager_ipv6_send(m, fd, ifindex, &addr->in6, port, p);
+                return manager_ipv4_send(m, fd, ifindex, &destination->in, port, &source->in, p);
+        if (family == AF_INET6)
+                return manager_ipv6_send(m, fd, ifindex, &destination->in6, port, &source->in6, p);
 
         return -EAFNOSUPPORT;
 }
@@ -1142,7 +1200,12 @@ int manager_compile_dns_servers(Manager *m, OrderedSet **dns) {
         return 0;
 }
 
-int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
+/* filter_route is a tri-state:
+ *   < 0: no filtering
+ *   = 0 or false: return only domains which should be used for searching
+ *   > 0 or true: return only domains which are for routing only
+ */
+int manager_compile_search_domains(Manager *m, OrderedSet **domains, int filter_route) {
         DnsSearchDomain *d;
         Iterator i;
         Link *l;
@@ -1156,6 +1219,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
                 return r;
 
         LIST_FOREACH(domains, d, m->search_domains) {
+
+                if (filter_route >= 0 &&
+                    d->route_only != !!filter_route)
+                        continue;
+
                 r = ordered_set_put(*domains, d->name);
                 if (r == -EEXIST)
                         continue;
@@ -1166,6 +1234,11 @@ int manager_compile_search_domains(Manager *m, OrderedSet **domains) {
         HASHMAP_FOREACH(l, m->links, i) {
 
                 LIST_FOREACH(domains, d, l->search_domains) {
+
+                        if (filter_route >= 0 &&
+                            d->route_only != !!filter_route)
+                                continue;
+
                         r = ordered_set_put(*domains, d->name);
                         if (r == -EEXIST)
                                 continue;
@@ -1236,4 +1309,70 @@ bool manager_routable(Manager *m, int family) {
                         return true;
 
         return false;
+}
+
+void manager_flush_caches(Manager *m) {
+        DnsScope *scope;
+
+        assert(m);
+
+        LIST_FOREACH(scopes, scope, m->dns_scopes)
+                dns_cache_flush(&scope->cache);
+
+        log_info("Flushed all caches.");
+}
+
+void manager_cleanup_saved_user(Manager *m) {
+        _cleanup_closedir_ DIR *d = NULL;
+        struct dirent *de;
+        int r;
+
+        assert(m);
+
+        /* Clean up all saved per-link files in /run/systemd/resolve/netif/ that don't have a matching interface
+         * anymore. These files are created to persist settings pushed in by the user via the bus, so that resolved can
+         * be restarted without losing this data. */
+
+        d = opendir("/run/systemd/resolve/netif/");
+        if (!d) {
+                if (errno == ENOENT)
+                        return;
+
+                log_warning_errno(errno, "Failed to open interface directory: %m");
+                return;
+        }
+
+        FOREACH_DIRENT_ALL(de, d, log_error_errno(errno, "Failed to read interface directory: %m")) {
+                _cleanup_free_ char *p = NULL;
+                int ifindex;
+                Link *l;
+
+                if (!IN_SET(de->d_type, DT_UNKNOWN, DT_REG))
+                        continue;
+
+                if (STR_IN_SET(de->d_name, ".", ".."))
+                        continue;
+
+                r = parse_ifindex(de->d_name, &ifindex);
+                if (r < 0) /* Probably some temporary file from a previous run. Delete it */
+                        goto rm;
+
+                l = hashmap_get(m->links, INT_TO_PTR(ifindex));
+                if (!l) /* link vanished */
+                        goto rm;
+
+                if (l->is_managed) /* now managed by networkd, hence the bus settings are useless */
+                        goto rm;
+
+                continue;
+
+        rm:
+                p = strappend("/run/systemd/resolve/netif/", de->d_name);
+                if (!p) {
+                        log_oom();
+                        return;
+                }
+
+                (void) unlink(p);
+        }
 }

@@ -64,7 +64,6 @@
 #include "manager.h"
 #include "missing.h"
 #include "mkdir.h"
-#include "mkdir.h"
 #include "parse-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
@@ -136,23 +135,28 @@ static void draw_cylon(char buffer[], size_t buflen, unsigned width, unsigned po
         if (pos > 1) {
                 if (pos > 2)
                         p = mempset(p, ' ', pos-2);
-                p = stpcpy(p, ANSI_RED);
+                if (log_get_show_color())
+                        p = stpcpy(p, ANSI_RED);
                 *p++ = '*';
         }
 
         if (pos > 0 && pos <= width) {
-                p = stpcpy(p, ANSI_HIGHLIGHT_RED);
+                if (log_get_show_color())
+                        p = stpcpy(p, ANSI_HIGHLIGHT_RED);
                 *p++ = '*';
         }
 
-        p = stpcpy(p, ANSI_NORMAL);
+        if (log_get_show_color())
+                p = stpcpy(p, ANSI_NORMAL);
 
         if (pos < width) {
-                p = stpcpy(p, ANSI_RED);
+                if (log_get_show_color())
+                        p = stpcpy(p, ANSI_RED);
                 *p++ = '*';
                 if (pos < width-1)
                         p = mempset(p, ' ', width-1-pos);
-                strcpy(p, ANSI_NORMAL);
+                if (log_get_show_color())
+                        strcpy(p, ANSI_NORMAL);
         }
 }
 
@@ -565,7 +569,7 @@ int manager_new(UnitFileScope scope, bool test_run, Manager **_m) {
         m->exit_code = _MANAGER_EXIT_CODE_INVALID;
         m->default_timer_accuracy_usec = USEC_PER_MINUTE;
         m->default_tasks_accounting = true;
-        m->default_tasks_max = UINT64_C(512);
+        m->default_tasks_max = UINT64_MAX;
 
 #ifdef ENABLE_EFI
         if (MANAGER_IS_SYSTEM(m) && detect_container() <= 0)
@@ -809,28 +813,6 @@ static int manager_setup_cgroups_agent(Manager *m) {
         return 0;
 }
 
-static int manager_setup_kdbus(Manager *m) {
-        _cleanup_free_ char *p = NULL;
-
-        assert(m);
-
-        if (m->test_run || m->kdbus_fd >= 0)
-                return 0;
-        if (!is_kdbus_available())
-                return -ESOCKTNOSUPPORT;
-
-        m->kdbus_fd = bus_kernel_create_bus(
-                        MANAGER_IS_SYSTEM(m) ? "system" : "user",
-                        MANAGER_IS_SYSTEM(m), &p);
-
-        if (m->kdbus_fd < 0)
-                return log_debug_errno(m->kdbus_fd, "Failed to set up kdbus: %m");
-
-        log_debug("Successfully set up kdbus on %s", p);
-
-        return 0;
-}
-
 static int manager_connect_bus(Manager *m, bool reexecuting) {
         bool try_bus_connect;
 
@@ -872,6 +854,19 @@ enum {
         _GC_OFFSET_MAX
 };
 
+static void unit_gc_mark_good(Unit *u, unsigned gc_marker)
+{
+        Iterator i;
+        Unit *other;
+
+        u->gc_marker = gc_marker + GC_OFFSET_GOOD;
+
+        /* Recursively mark referenced units as GOOD as well */
+        SET_FOREACH(other, u->dependencies[UNIT_REFERENCES], i)
+                if (other->gc_marker == gc_marker + GC_OFFSET_UNSURE)
+                        unit_gc_mark_good(other, gc_marker);
+}
+
 static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
         Iterator i;
         Unit *other;
@@ -881,6 +876,7 @@ static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
 
         if (u->gc_marker == gc_marker + GC_OFFSET_GOOD ||
             u->gc_marker == gc_marker + GC_OFFSET_BAD ||
+            u->gc_marker == gc_marker + GC_OFFSET_UNSURE ||
             u->gc_marker == gc_marker + GC_OFFSET_IN_PATH)
                 return;
 
@@ -921,7 +917,7 @@ bad:
         return;
 
 good:
-        u->gc_marker = gc_marker + GC_OFFSET_GOOD;
+        unit_gc_mark_good(u, gc_marker);
 }
 
 static unsigned manager_dispatch_gc_queue(Manager *m) {
@@ -1225,7 +1221,6 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
 
         /* We might have deserialized the kdbus control fd, but if we
          * didn't, then let's create the bus now. */
-        manager_setup_kdbus(m);
         manager_connect_bus(m, !!serialization);
         bus_track_coldplug(m, &m->subscribed, &m->deserialized_subscribed);
 
@@ -1610,9 +1605,9 @@ static void manager_invoke_notify_message(Manager *m, Unit *u, pid_t pid, const 
 }
 
 static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
+
         _cleanup_fdset_free_ FDSet *fds = NULL;
         Manager *m = userdata;
-
         char buf[NOTIFY_BUFFER_MAX+1];
         struct iovec iovec = {
                 .iov_base = buf,
@@ -1720,16 +1715,28 @@ static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t 
 }
 
 static void invoke_sigchld_event(Manager *m, Unit *u, const siginfo_t *si) {
+        uint64_t iteration;
+
         assert(m);
         assert(u);
         assert(si);
+
+        sd_event_get_iteration(m->event, &iteration);
 
         log_unit_debug(u, "Child "PID_FMT" belongs to %s", si->si_pid, u->id);
 
         unit_unwatch_pid(u, si->si_pid);
 
-        if (UNIT_VTABLE(u)->sigchld_event)
-                UNIT_VTABLE(u)->sigchld_event(u, si->si_pid, si->si_code, si->si_status);
+        if (UNIT_VTABLE(u)->sigchld_event) {
+                if (set_size(u->pids) <= 1 ||
+                    iteration != u->sigchldgen ||
+                    unit_main_pid(u) == si->si_pid ||
+                    unit_control_pid(u) == si->si_pid) {
+                        UNIT_VTABLE(u)->sigchld_event(u, si->si_pid, si->si_code, si->si_status);
+                        u->sigchldgen = iteration;
+                } else
+                        log_debug("%s already issued a sigchld this iteration %" PRIu64 ", skipping. Pids still being watched %d", u->id, iteration, set_size(u->pids));
+         }
 }
 
 static int manager_dispatch_sigchld(Manager *m) {

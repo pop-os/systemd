@@ -26,6 +26,8 @@
 #include "def.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "parse-util.h"
+#include "raw-clone.h"
 #include "rm-rf.h"
 #include "string-util.h"
 #include "util.h"
@@ -244,7 +246,7 @@ static void test_raw_clone(void) {
         log_info("before clone: getpid()→"PID_FMT, parent);
         assert_se(raw_getpid() == parent);
 
-        pid = raw_clone(0, NULL);
+        pid = raw_clone(0);
         assert_se(pid >= 0);
 
         pid2 = raw_getpid();
@@ -262,6 +264,89 @@ static void test_raw_clone(void) {
         }
 }
 
+static void test_physical_memory(void) {
+        uint64_t p;
+        char buf[FORMAT_BYTES_MAX];
+
+        p = physical_memory();
+        assert_se(p > 0);
+        assert_se(p < UINT64_MAX);
+        assert_se(p % page_size() == 0);
+
+        log_info("Memory: %s (%" PRIu64 ")", format_bytes(buf, sizeof(buf), p), p);
+}
+
+static void test_physical_memory_scale(void) {
+        uint64_t p;
+
+        p = physical_memory();
+
+        assert_se(physical_memory_scale(0, 100) == 0);
+        assert_se(physical_memory_scale(100, 100) == p);
+
+        log_info("Memory original: %" PRIu64, physical_memory());
+        log_info("Memory scaled by 50%%: %" PRIu64, physical_memory_scale(50, 100));
+        log_info("Memory divided by 2: %" PRIu64, physical_memory() / 2);
+        log_info("Page size: %zu", page_size());
+
+        /* There might be an uneven number of pages, hence permit these calculations to be half a page off... */
+        assert_se(page_size()/2 + physical_memory_scale(50, 100) - p/2 <= page_size());
+        assert_se(physical_memory_scale(200, 100) == p*2);
+
+        assert_se(physical_memory_scale(0, 1) == 0);
+        assert_se(physical_memory_scale(1, 1) == p);
+        assert_se(physical_memory_scale(2, 1) == p*2);
+
+        assert_se(physical_memory_scale(0, 2) == 0);
+
+        assert_se(page_size()/2 + physical_memory_scale(1, 2) - p/2 <= page_size());
+        assert_se(physical_memory_scale(2, 2) == p);
+        assert_se(physical_memory_scale(4, 2) == p*2);
+
+        assert_se(physical_memory_scale(0, UINT32_MAX) == 0);
+        assert_se(physical_memory_scale(UINT32_MAX, UINT32_MAX) == p);
+
+        /* overflow */
+        assert_se(physical_memory_scale(UINT64_MAX/4, UINT64_MAX) == UINT64_MAX);
+}
+
+static void test_system_tasks_max(void) {
+        uint64_t t;
+
+        t = system_tasks_max();
+        assert_se(t > 0);
+        assert_se(t < UINT64_MAX);
+
+        log_info("Max tasks: %" PRIu64, t);
+}
+
+static void test_system_tasks_max_scale(void) {
+        uint64_t t;
+
+        t = system_tasks_max();
+
+        assert_se(system_tasks_max_scale(0, 100) == 0);
+        assert_se(system_tasks_max_scale(100, 100) == t);
+
+        assert_se(system_tasks_max_scale(0, 1) == 0);
+        assert_se(system_tasks_max_scale(1, 1) == t);
+        assert_se(system_tasks_max_scale(2, 1) == 2*t);
+
+        assert_se(system_tasks_max_scale(0, 2) == 0);
+        assert_se(system_tasks_max_scale(1, 2) == t/2);
+        assert_se(system_tasks_max_scale(2, 2) == t);
+        assert_se(system_tasks_max_scale(3, 2) == (3*t)/2);
+        assert_se(system_tasks_max_scale(4, 2) == t*2);
+
+        assert_se(system_tasks_max_scale(0, UINT32_MAX) == 0);
+        assert_se(system_tasks_max_scale((UINT32_MAX-1)/2, UINT32_MAX-1) == t/2);
+        assert_se(system_tasks_max_scale(UINT32_MAX, UINT32_MAX) == t);
+
+        /* overflow */
+
+        assert_se(system_tasks_max_scale(UINT64_MAX/4, UINT64_MAX) == UINT64_MAX);
+}
+
 int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
@@ -276,6 +361,10 @@ int main(int argc, char *argv[]) {
         test_log2i();
         test_execute_directory();
         test_raw_clone();
+        test_physical_memory();
+        test_physical_memory_scale();
+        test_system_tasks_max();
+        test_system_tasks_max_scale();
 
         return 0;
 }

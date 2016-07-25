@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "def.h"
 #include "fd-util.h"
 #include "formats-util.h"
 #include "killall.h"
@@ -32,8 +33,6 @@
 #include "string-util.h"
 #include "terminal-util.h"
 #include "util.h"
-
-#define TIMEOUT_USEC (10 * USEC_PER_SEC)
 
 static bool ignore_proc(pid_t pid, bool warn_rootfs) {
         _cleanup_fclose_ FILE *f = NULL;
@@ -80,7 +79,7 @@ static bool ignore_proc(pid_t pid, bool warn_rootfs) {
                 get_process_comm(pid, &comm);
 
                 if (r)
-                        log_notice("Process " PID_FMT " (%s) has been been marked to be excluded from killing. It is "
+                        log_notice("Process " PID_FMT " (%s) has been marked to be excluded from killing. It is "
                                    "running from the root file system, and thus likely to block re-mounting of the "
                                    "root file system to read-only. Please consider moving it into an initrd file "
                                    "system instead.", pid, strna(comm));
@@ -99,7 +98,7 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
         if (set_isempty(pids))
                 return;
 
-        until = now(CLOCK_MONOTONIC) + TIMEOUT_USEC;
+        until = now(CLOCK_MONOTONIC) + DEFAULT_TIMEOUT_USEC;
         for (;;) {
                 struct timespec ts;
                 int k;

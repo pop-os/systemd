@@ -26,15 +26,21 @@
 #include "networkd-fdb.h"
 #include "networkd.h"
 #include "util.h"
+#include "vlan-util.h"
+
+#define STATIC_FDB_ENTRIES_PER_NETWORK_MAX 1024U
 
 /* create a new FDB entry or get an existing one. */
-int fdb_entry_new_static(Network *const network,
-                         const unsigned section,
-                         FdbEntry **ret) {
+int fdb_entry_new_static(
+                Network *network,
+                unsigned section,
+                FdbEntry **ret) {
+
         _cleanup_fdbentry_free_ FdbEntry *fdb_entry = NULL;
         struct ether_addr *mac_addr = NULL;
 
         assert(network);
+        assert(ret);
 
         /* search entry in hashmap first. */
         if (section) {
@@ -47,6 +53,9 @@ int fdb_entry_new_static(Network *const network,
                 }
         }
 
+        if (network->n_static_fdb_entries >= STATIC_FDB_ENTRIES_PER_NETWORK_MAX)
+                return -E2BIG;
+
         /* allocate space for MAC address. */
         mac_addr = new0(struct ether_addr, 1);
         if (!mac_addr)
@@ -54,7 +63,6 @@ int fdb_entry_new_static(Network *const network,
 
         /* allocate space for and FDB entry. */
         fdb_entry = new0(FdbEntry, 1);
-
         if (!fdb_entry) {
                 /* free previously allocated space for mac_addr. */
                 free(mac_addr);
@@ -66,6 +74,7 @@ int fdb_entry_new_static(Network *const network,
         fdb_entry->mac_addr = mac_addr;
 
         LIST_PREPEND(static_fdb_entries, network->static_fdb_entries, fdb_entry);
+        network->n_static_fdb_entries++;
 
         if (section) {
                 fdb_entry->section = section;
@@ -94,7 +103,7 @@ static int set_fdb_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userda
 }
 
 /* send a request to the kernel to add a FDB entry in its static MAC table. */
-int fdb_entry_configure(Link *const link, FdbEntry *const fdb_entry) {
+int fdb_entry_configure(Link *link, FdbEntry *fdb_entry) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
         sd_netlink *rtnl;
         int r;
@@ -145,12 +154,13 @@ void fdb_entry_free(FdbEntry *fdb_entry) {
                 return;
 
         if (fdb_entry->network) {
-                LIST_REMOVE(static_fdb_entries, fdb_entry->network->static_fdb_entries,
-                            fdb_entry);
+                LIST_REMOVE(static_fdb_entries, fdb_entry->network->static_fdb_entries, fdb_entry);
+
+                assert(fdb_entry->network->n_static_fdb_entries > 0);
+                fdb_entry->network->n_static_fdb_entries--;
 
                 if (fdb_entry->section)
-                        hashmap_remove(fdb_entry->network->fdb_entries_by_section,
-                                       UINT_TO_PTR(fdb_entry->section));
+                        hashmap_remove(fdb_entry->network->fdb_entries_by_section, UINT_TO_PTR(fdb_entry->section));
         }
 
         free(fdb_entry->mac_addr);
@@ -231,9 +241,9 @@ int config_parse_fdb_vlan_id(
         if (r < 0)
                 return log_oom();
 
-        r = config_parse_unsigned(unit, filename, line, section,
-                                  section_line, lvalue, ltype,
-                                  rvalue, &fdb_entry->vlan_id, userdata);
+        r = config_parse_vlanid(unit, filename, line, section,
+                                section_line, lvalue, ltype,
+                                rvalue, &fdb_entry->vlan_id, userdata);
         if (r < 0)
                 return r;
 

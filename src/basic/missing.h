@@ -453,6 +453,18 @@ struct btrfs_ioctl_quota_ctl_args {
 #define MQUEUE_MAGIC 0x19800202
 #endif
 
+#ifndef SECURITYFS_MAGIC
+#define SECURITYFS_MAGIC 0x73636673
+#endif
+
+#ifndef TRACEFS_MAGIC
+#define TRACEFS_MAGIC 0x74726163
+#endif
+
+#ifndef BPF_FS_MAGIC
+#define BPF_FS_MAGIC 0xcafe4a11
+#endif
+
 #ifndef MS_MOVE
 #define MS_MOVE 8192
 #endif
@@ -565,6 +577,10 @@ struct btrfs_ioctl_quota_ctl_args {
 
 #define IN6_ADDR_GEN_MODE_EUI64 0
 #define IN6_ADDR_GEN_MODE_NONE 1
+#endif
+
+#if !HAVE_DECL_IN6_ADDR_GEN_MODE_STABLE_PRIVACY
+#define IN6_ADDR_GEN_MODE_STABLE_PRIVACY 2
 #endif
 
 #if !HAVE_DECL_IFLA_MACVLAN_FLAGS
@@ -746,6 +762,14 @@ struct btrfs_ioctl_quota_ctl_args {
 #define IFLA_BRIDGE_MAX (__IFLA_BRIDGE_MAX - 1)
 #endif
 
+#ifndef BRIDGE_VLAN_INFO_RANGE_BEGIN
+#define BRIDGE_VLAN_INFO_RANGE_BEGIN (1<<3) /* VLAN is start of vlan range */
+#endif
+
+#ifndef BRIDGE_VLAN_INFO_RANGE_END
+#define BRIDGE_VLAN_INFO_RANGE_END (1<<4) /* VLAN is end of vlan range */
+#endif
+
 #if !HAVE_DECL_IFLA_BR_VLAN_DEFAULT_PVID
 #define IFLA_BR_UNSPEC 0
 #define IFLA_BR_FORWARD_DELAY 1
@@ -811,6 +835,10 @@ struct btrfs_ioctl_quota_ctl_args {
 
 #if !HAVE_DECL_IFLA_BRPORT_PROXYARP
 #define IFLA_BRPORT_PROXYARP 10
+#endif
+
+#if !HAVE_DECL_IFLA_VRF_TABLE
+#define IFLA_VRF_TABLE 1
 #endif
 
 #if !HAVE_DECL_NDA_IFINDEX

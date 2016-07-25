@@ -138,7 +138,7 @@ static int ipv4ll_address_claimed(sd_ipv4ll *ll, Link *link) {
         ll_addr->family = AF_INET;
         ll_addr->in_addr.in = address;
         ll_addr->prefixlen = 16;
-        ll_addr->broadcast.s_addr = ll_addr->in_addr.in.s_addr | htonl(0xfffffffflu >> ll_addr->prefixlen);
+        ll_addr->broadcast.s_addr = ll_addr->in_addr.in.s_addr | htobe32(0xfffffffflu >> ll_addr->prefixlen);
         ll_addr->scope = RT_SCOPE_LINK;
 
         r = address_configure(ll_addr, link, ipv4ll_address_handler, false);
@@ -215,9 +215,7 @@ int ipv4ll_configure(Link *link) {
         if (link->udev_device) {
                 r = net_get_unique_predictable_data(link->udev_device, &seed);
                 if (r >= 0) {
-                        assert_cc(sizeof(unsigned) <= 8);
-
-                        r = sd_ipv4ll_set_address_seed(link->ipv4ll, (unsigned)seed);
+                        r = sd_ipv4ll_set_address_seed(link->ipv4ll, seed);
                         if (r < 0)
                                 return r;
                 }
@@ -231,7 +229,7 @@ int ipv4ll_configure(Link *link) {
         if (r < 0)
                 return r;
 
-        r = sd_ipv4ll_set_index(link->ipv4ll, link->ifindex);
+        r = sd_ipv4ll_set_ifindex(link->ipv4ll, link->ifindex);
         if (r < 0)
                 return r;
 
