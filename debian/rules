@@ -4,7 +4,7 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
-UPSTREAM_VERSION = $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]\+$$//')
+UPSTREAM_VERSION = $(shell dpkg-parsechangelog -SVersion | sed 's/[+-].*$$//')
 
 ifeq ($(shell dpkg-vendor --query vendor),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
