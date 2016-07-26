@@ -1,0 +1,116 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Mon, 25 Jul 2016 22:01:35 +0200
+Subject: units: add graphical-session.target user unit (#3678)
+
+This unit acts as a dynamic "alias" target for any concrete graphical user
+session like gnome-session.target; these should declare
+"BindsTo=graphical-session.target" so that both targets stop and start at the
+same time.
+
+This allows services that run in a particular graphical user session (e. g.
+gnome-settings-daemon.service) to declare "PartOf=graphical-session.target"
+without having to know or get updated for all/new session types. This will
+ensure that stopping the graphical session will stop all services which are
+associated to it.
+---
+ Makefile.am                         |  3 ++-
+ man/systemd.special.xml             | 51 +++++++++++++++++++++++++++++++++++++
+ units/user/graphical-session.target | 13 ++++++++++
+ 3 files changed, 66 insertions(+), 1 deletion(-)
+ create mode 100644 units/user/graphical-session.target
+
+diff --git a/Makefile.am b/Makefile.am
+index 0c27f81..c1e1c63 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -573,7 +573,8 @@ endif
+ dist_userunit_DATA = \
+ 	units/user/basic.target \
+ 	units/user/default.target \
+-	units/user/exit.target
++	units/user/exit.target \
++	units/user/graphical-session.target
+ 
+ nodist_userunit_DATA = \
+ 	units/user/systemd-exit.service
+diff --git a/man/systemd.special.xml b/man/systemd.special.xml
+index 18ad8f9..1814259 100644
+--- a/man/systemd.special.xml
++++ b/man/systemd.special.xml
+@@ -879,6 +879,57 @@
+   </refsect1>
+ 
+   <refsect1>
++    <title>Special Passive User Units</title>
++
++    <refsect2>
++      <title>graphical-session.target</title>
++
++      <para>This target is active whenever any graphical session is running. It
++      is used to stop user services which only apply to a graphical (X,
++      Wayland, etc.) session when the session is terminated. Such services
++      should have <literal>PartOf=graphical-session.target</literal> in their
++      <literal>[Unit]</literal> section. A target for a particular session
++      (e. g.  <filename>gnome-session.target</filename>) starts and stops
++      <literal>graphical-session.target</literal> with
++      <literal>BindsTo=graphical-session.target</literal>.</para>
++
++      <para>Which services are started by a session target is determined by the
++      <literal>Wants=</literal> and <literal>Requires=</literal> dependencies.
++      For services that can be enabled independently, symlinks in
++      <literal>.wants/</literal> and <literal>.requires/</literal> should be
++      used, see
++      <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
++      Those symlinks should either be shipped in packages, or should be added
++      dynamically after installation, for example using <literal>systemctl add-wants</literal>, see
++      <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
++      </para>
++
++      <example>
++        <title>Nautilus as part of a GNOME session</title>
++
++        <para><literal>gnome-session.target</literal> pulls in Nautilus as
++        top-level service:</para>
++
++        <programlisting>[Unit]
++Description=User systemd services for GNOME graphical session
++Wants=nautilus.service
++BindsTo=graphical-session.target
++        </programlisting>
++
++        <para><literal>nautilus.service</literal> gets stopped when the session stops:</para>
++
++        <programlisting>[Unit]
++Description=Render the desktop icons with Nautilus
++PartOf=graphical-session.target
++
++[Service]
++...
++        </programlisting>
++      </example>
++    </refsect2>
++  </refsect1>
++
++  <refsect1>
+     <title>Special Slice Units</title>
+ 
+     <para>There are four <literal>.slice</literal> units which form
+diff --git a/units/user/graphical-session.target b/units/user/graphical-session.target
+new file mode 100644
+index 0000000..00d1623
+--- /dev/null
++++ b/units/user/graphical-session.target
+@@ -0,0 +1,13 @@
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=Current graphical user session
++Documentation=man:systemd.special(7)
++Requires=basic.target
++RefuseManualStart=yes
++StopWhenUnneeded=yes
