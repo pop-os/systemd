@@ -16,6 +16,13 @@ systemd (231-1) UNRELEASED; urgency=medium
   * debian/gbp.conf: Enable dch options "full" and "multimaint-merge"
   * systemd-sysv: Add Conflicts: systemd-shim.
     To avoid shim trying to claim the D-Bus interfaces.
+  * Add graphical-session.target user unit.
+  * Add graphical-session-pre.target user unit
+  * Add debian/extra/units-ubuntu/user@.service.d/timeout.conf.
+    This avoids long hangs during shutdown if user services fail/hang due to X.org
+    going away too early. This is mostly a workaround, so only install for
+    Ubuntu for now.
+  * Dynamically add upstream version to debian/shlibs.local
 
   [ Michael Biebl ]
   * Restrict Conflicts: openrc to << 0.20.4-2.1.
@@ -35,8 +42,6 @@ systemd (231-1) UNRELEASED; urgency=medium
     Use ConditionPathExists=/dev/tty0, the same check as in getty@.service,
     to determine whether we have a functional VC subsystem and we should
     start any gettys. (Closes: #824779)
-  * nspawn: Decrease mkdir error logging in /sys to debug priority.
-    Patch cherry-picked from upstream git. (Closes: #830693)
   * Stop mentioning snapshot and restore in the package description.
     Support for the .snapshot unit type has been removed upstream.
   * Drop sigpwr-container-shutdown.service.
