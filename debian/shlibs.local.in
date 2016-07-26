@@ -1,3 +1,3 @@
 udeb: libudev 1 libudev1-udeb
 libsystemd 0 libsystemd0 (= ${binary:Version})
-libsystemd-shared 231 systemd (= ${binary:Version})
+libsystemd-shared UPSTREAM_VERSION systemd (= ${binary:Version})

@@ -4,7 +4,7 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
-VERSION = $(shell dpkg-parsechangelog | sed -n -e '/^Version:/s/.*: //p')
+UPSTREAM_VERSION = $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]\+$$//')
 
 ifeq ($(shell dpkg-vendor --query vendor),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
@@ -217,7 +217,7 @@ endif
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_auto_clean --builddirectory=build-udeb
 endif
-	rm -rf debian/install/
+	rm -rf debian/install/ debian/shlibs.local
 	# remove Python byte code files
 	rm -rf tools/__pycache__/
 
@@ -336,6 +336,7 @@ override_dh_shlibdeps:
 	dh_shlibdeps --remaining-packages -Lsystemd
 
 override_dh_makeshlibs:
+	sed 's/UPSTREAM_VERSION/$(UPSTREAM_VERSION)/' debian/shlibs.local.in > debian/shlibs.local
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
