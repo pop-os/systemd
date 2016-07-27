@@ -103,7 +103,6 @@ CONFFLAGS = \
 	--disable-vconsole \
 	--disable-firstboot \
 	--disable-xkbcommon \
-	--disable-libiptc \
 	--with-ntp-servers="$(DEFAULT_NTP_SERVERS)"  \
 	--with-system-uid-max=999 \
 	--with-system-gid-max=999
@@ -123,6 +122,7 @@ CONFFLAGS_deb += \
 	--enable-elfutils \
 	--enable-apparmor \
 	--enable-libidn \
+	--enable-libiptc \
 	--enable-libcurl \
 	--enable-importd \
 	--enable-microhttpd \
@@ -135,6 +135,7 @@ CONFFLAGS_deb += \
 	--disable-elfutils \
 	--disable-apparmor \
 	--disable-libidn \
+	--disable-libiptc \
 	--disable-libcurl \
 	--disable-importd \
 	--disable-microhttpd \
@@ -150,6 +151,7 @@ CONFFLAGS_udeb = \
 	--disable-selinux \
 	--disable-apparmor \
 	--disable-libidn \
+	--disable-libiptc \
 	--disable-smack \
 	--disable-ima \
 	--disable-binfmt \
