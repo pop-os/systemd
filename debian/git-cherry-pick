@@ -1,0 +1,52 @@
+#!/bin/bash
+
+set -e
+
+if [ -z "$*" ] ; then
+	echo "Usage: $0 [commit [commit ..]]"
+	exit 1
+fi
+
+
+curbranch=$(git rev-parse --abbrev-ref HEAD)
+
+# assert we got a branch
+[ -n "$curbranch" ]
+
+if [ $curbranch = HEAD ] ; then
+	echo "You are not currently on a branch, cannot cherry-pick"
+	exit 1
+fi
+
+case $curbranch in
+	patch-queue/*)
+		debbranch=${curbranch/patch-queue\/}
+		pqbranch=$curbranch
+		;;
+	*)
+		debbranch=$curbranch
+		pqbranch=patch-queue/$curbranch
+		;;
+esac
+
+commits=$(git rev-parse "$@")
+
+if ! git rev-parse $pqbranch &>/dev/null ; then
+	gbp pq import
+fi
+
+git checkout $pqbranch
+
+echo "Cherry-picking the following commits:"
+echo "$commits"
+
+picks=$(echo "$commits" | sed -e 's/^/pick /' -e 's/$/\\n/' | tr --delete '\n' )
+
+# find the first debian commit
+firstdebian=$(git log -i --grep "topic.*debian" --pretty=%h --reverse $debbranch..$pqbranch | head -1)
+
+sedexpr="/$firstdebian/i$picks"
+
+GIT_EDITOR="sed -i -e '$sedexpr'" git rebase --interactive --no-autosquash $debbranch
+
+
