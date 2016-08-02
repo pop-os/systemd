@@ -1,3 +1,0 @@
-[Unit]
-Description=Session services which should run before the graphical session is brought up
-StopWhenUnneeded=yes

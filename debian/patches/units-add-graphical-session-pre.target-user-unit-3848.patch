@@ -1,0 +1,72 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Tue, 2 Aug 2016 14:56:45 +0200
+Subject: units: add graphical-session-pre.target user unit (#3848)
+
+This complements graphical-session.target for services which set up the
+environment (e. g. dbus-update-activation-environment) and need to run before
+the actual graphical session.
+---
+ Makefile.am                             |  3 ++-
+ man/systemd.special.xml                 | 13 +++++++++++++
+ units/user/graphical-session-pre.target | 14 ++++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+ create mode 100644 units/user/graphical-session-pre.target
+
+diff --git a/Makefile.am b/Makefile.am
+index c1e1c63..6aebca4 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -574,7 +574,8 @@ dist_userunit_DATA = \
+ 	units/user/basic.target \
+ 	units/user/default.target \
+ 	units/user/exit.target \
+-	units/user/graphical-session.target
++	units/user/graphical-session.target \
++	units/user/graphical-session-pre.target
+ 
+ nodist_userunit_DATA = \
+ 	units/user/systemd-exit.service
+diff --git a/man/systemd.special.xml b/man/systemd.special.xml
+index 1814259..d977298 100644
+--- a/man/systemd.special.xml
++++ b/man/systemd.special.xml
+@@ -927,6 +927,19 @@ PartOf=graphical-session.target
+         </programlisting>
+       </example>
+     </refsect2>
++
++    <refsect2>
++      <title>graphical-session-pre.target</title>
++
++      <para>This target contains services which set up the environment or
++      global configuration of a graphical session, such as SSH/GPG agents
++      (which need to export an environment variable into all desktop processes)
++      or migration of obsolete d-conf keys after an OS upgrade (which needs to
++      happen before starting any process that might use them). This target must
++      be started before starting a graphical session
++      like <filename>gnome-session.target</filename>.</para>
++    </refsect2>
++
+   </refsect1>
+ 
+   <refsect1>
+diff --git a/units/user/graphical-session-pre.target b/units/user/graphical-session-pre.target
+new file mode 100644
+index 0000000..86d15af
+--- /dev/null
++++ b/units/user/graphical-session-pre.target
+@@ -0,0 +1,14 @@
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=Session services which should run early before the graphical session is brought up
++Documentation=man:systemd.special(7)
++Requires=basic.target
++Before=graphical-session.target
++RefuseManualStart=yes
++StopWhenUnneeded=yes
