@@ -5,6 +5,13 @@ set -e
 
 ORIG_KBD=`cat /etc/default/keyboard`
 
+cleanup() {
+    # reset locale to original
+    echo "$ORIG_KBD" > /etc/default/keyboard
+    rm -f /etc/X11/xorg.conf.d/00-keyboard.conf
+}
+trap cleanup EXIT INT QUIT PIPE
+
 # should activate daemon and work
 STATUS=`localectl`
 assert_in "X11 Layout:" "`localectl --no-pager`"
@@ -28,6 +35,3 @@ fi
 STATUS=`localectl --no-pager`
 assert_in "X11 Layout: et" "$STATUS"
 assert_in "X11 Model: pc101" "$STATUS"
-
-# reset locale to original
-echo "$ORIG_KBD" > /etc/default/keyboard
