@@ -1,0 +1,132 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Sun, 14 Aug 2016 09:30:40 +0200
+Subject: Revert "units: add a basic SystemCallFilter (#3471)"
+
+This causes fatal failures on kernels that don't have seccomp enabled. This can
+be reactivated once https://github.com/systemd/systemd/issues/3882 is fixed.
+
+This reverts upstream commit 40093ce5.
+
+Bug-Debian: https://bugs.debian.org/832713
+Bug-Debian: https://bugs.debian.org/832893
+---
+ units/systemd-hostnamed.service.in   | 1 -
+ units/systemd-importd.service.in     | 1 -
+ units/systemd-journald.service.in    | 1 -
+ units/systemd-localed.service.in     | 1 -
+ units/systemd-logind.service.in      | 1 -
+ units/systemd-machined.service.in    | 1 -
+ units/systemd-networkd.service.m4.in | 1 -
+ units/systemd-resolved.service.m4.in | 1 -
+ units/systemd-timedated.service.in   | 1 -
+ units/systemd-timesyncd.service.in   | 1 -
+ 10 files changed, 10 deletions(-)
+
+diff --git a/units/systemd-hostnamed.service.in b/units/systemd-hostnamed.service.in
+index 0b03a58..fc43b2c 100644
+--- a/units/systemd-hostnamed.service.in
++++ b/units/systemd-hostnamed.service.in
+@@ -21,4 +21,3 @@ PrivateNetwork=yes
+ ProtectSystem=yes
+ ProtectHome=yes
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+diff --git a/units/systemd-importd.service.in b/units/systemd-importd.service.in
+index 0f5489e..2f8138e 100644
+--- a/units/systemd-importd.service.in
++++ b/units/systemd-importd.service.in
+@@ -18,4 +18,3 @@ NoNewPrivileges=yes
+ WatchdogSec=3min
+ KillMode=mixed
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
+index 08ace8a..06abe04 100644
+--- a/units/systemd-journald.service.in
++++ b/units/systemd-journald.service.in
+@@ -25,7 +25,6 @@ CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_SYS_PTRACE CAP_SYSLOG C
+ WatchdogSec=3min
+ FileDescriptorStoreMax=1024
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+ 
+ # Increase the default a bit in order to allow many simultaneous
+ # services being run since we keep one fd open per service. Also, when
+diff --git a/units/systemd-localed.service.in b/units/systemd-localed.service.in
+index 1f3151c..7432214 100644
+--- a/units/systemd-localed.service.in
++++ b/units/systemd-localed.service.in
+@@ -21,4 +21,3 @@ PrivateNetwork=yes
+ ProtectSystem=yes
+ ProtectHome=yes
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+diff --git a/units/systemd-logind.service.in b/units/systemd-logind.service.in
+index 6ea133e..327ef58 100644
+--- a/units/systemd-logind.service.in
++++ b/units/systemd-logind.service.in
+@@ -27,7 +27,6 @@ BusName=org.freedesktop.login1
+ CapabilityBoundingSet=CAP_SYS_ADMIN CAP_MAC_ADMIN CAP_AUDIT_CONTROL CAP_CHOWN CAP_KILL CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_TTY_CONFIG
+ WatchdogSec=3min
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @obsolete @raw-io
+ 
+ # Increase the default a bit in order to allow many simultaneous
+ # logins since we keep one fd open per session.
+diff --git a/units/systemd-machined.service.in b/units/systemd-machined.service.in
+index dcf9f34..1517068 100644
+--- a/units/systemd-machined.service.in
++++ b/units/systemd-machined.service.in
+@@ -18,7 +18,6 @@ BusName=org.freedesktop.machine1
+ CapabilityBoundingSet=CAP_KILL CAP_SYS_PTRACE CAP_SYS_ADMIN CAP_SETGID CAP_SYS_CHROOT CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_MKNOD
+ WatchdogSec=3min
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @obsolete @raw-io
+ 
+ # Note that machined cannot be placed in a mount namespace, since it
+ # needs access to the host's mount namespace in order to implement the
+diff --git a/units/systemd-networkd.service.m4.in b/units/systemd-networkd.service.m4.in
+index 38d967d..3c9970f 100644
+--- a/units/systemd-networkd.service.m4.in
++++ b/units/systemd-networkd.service.m4.in
+@@ -32,7 +32,6 @@ ProtectSystem=full
+ ProtectHome=yes
+ WatchdogSec=3min
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+ 
+ [Install]
+ WantedBy=multi-user.target
+diff --git a/units/systemd-resolved.service.m4.in b/units/systemd-resolved.service.m4.in
+index 15ab56a..16b881b 100644
+--- a/units/systemd-resolved.service.m4.in
++++ b/units/systemd-resolved.service.m4.in
+@@ -28,7 +28,6 @@ ProtectSystem=full
+ ProtectHome=yes
+ WatchdogSec=3min
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+ 
+ [Install]
+ WantedBy=multi-user.target
+diff --git a/units/systemd-timedated.service.in b/units/systemd-timedated.service.in
+index bc1795d..3636091 100644
+--- a/units/systemd-timedated.service.in
++++ b/units/systemd-timedated.service.in
+@@ -19,4 +19,3 @@ PrivateTmp=yes
+ ProtectSystem=yes
+ ProtectHome=yes
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+diff --git a/units/systemd-timesyncd.service.in b/units/systemd-timesyncd.service.in
+index df1e339..caf1dc1 100644
+--- a/units/systemd-timesyncd.service.in
++++ b/units/systemd-timesyncd.service.in
+@@ -29,7 +29,6 @@ ProtectSystem=full
+ ProtectHome=yes
+ WatchdogSec=3min
+ MemoryDenyWriteExecute=yes
+-SystemCallFilter=~@cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+ 
+ [Install]
+ WantedBy=sysinit.target
