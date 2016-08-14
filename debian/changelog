@@ -1,3 +1,26 @@
+systemd (231-2) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/rules: Fix UPSTREAM_VERSION for upstream master builds
+  * Limit "link against /usr" check to some critical binaries only and add generators
+  * debian/rules: Put back cleanup of *.busname (Closes: #833487)
+  * debian/tests/localed-x11-keymap: Robustify cleanup
+  * debian/tests/localed-x11-keymap: Check that localed works without /etc/default/keyboard.
+    This reproduces #833849.
+  * Revert "units: add a basic SystemCallFilter (#3471)"
+    This causes fatal failures on kernels that don't have seccomp enabled. This can
+    be reactivated once https://github.com/systemd/systemd/issues/3882 is fixed.
+    (Closes: #832713, #832893)
+
+  [ Simon McVittie ]
+  * localed: tolerate absence of /etc/default/keyboard.
+    The debian-specific patch to read Debian config files was not tolerating
+    the absence of /etc/default/keyboard. This causes systemd-localed to
+    fail to start on systems where that file isn't populated (like embedded
+    systems without keyboards). (Closes: #833849)
+
+ -- Martin Pitt <mpitt@debian.org>  Sun, 14 Aug 2016 10:54:57 +0200
+
 systemd (231-1) unstable; urgency=low
 
   [ Martin Pitt ]
