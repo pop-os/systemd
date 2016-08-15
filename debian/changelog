@@ -1,3 +1,13 @@
+systemd (231-3) unstable; urgency=medium
+
+  * resolved resolvconf integration: Run resolvconf without privilege restrictions.
+    On some architectures (at least ppc64el), running resolvconf does not work with
+    MemoryDenyWriteExecute=yes. (LP: #1609740)
+  * Revert unit usage of MemoryDenyWriteExecute=yes. This is implemented
+    through seccomp as well. (Closes: #832713)
+
+ -- Martin Pitt <mpitt@debian.org>  Mon, 15 Aug 2016 09:58:09 +0200
+
 systemd (231-2) unstable; urgency=medium
 
   [ Martin Pitt ]
