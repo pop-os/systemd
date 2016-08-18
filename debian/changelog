@@ -1,3 +1,10 @@
+systemd (231-4) unstable; urgency=medium
+
+  * Revert "pid1: reconnect to the console before being re-executed"
+    This unbreaks consoles after "daemon-reexec". (Closes: #834367)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 18 Aug 2016 07:03:13 +0200
+
 systemd (231-3) unstable; urgency=medium
 
   * resolved resolvconf integration: Run resolvconf without privilege restrictions.
