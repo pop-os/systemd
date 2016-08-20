@@ -1,5 +1,6 @@
 units-add-graphical-session.target-user-unit-3678.patch
 units-add-graphical-session-pre.target-user-unit-3848.patch
+Revert-pid1-reconnect-to-the-console-before-being-re-exec.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
@@ -24,4 +25,3 @@ debian/Revert-core-one-step-back-again-for-nspawn-we-actual.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 debian/Revert-units-add-a-basic-SystemCallFilter-3471.patch
-debian/Revert-pid1-reconnect-to-the-console-before-being-re-exec.patch

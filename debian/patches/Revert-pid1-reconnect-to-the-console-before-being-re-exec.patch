@@ -1,20 +1,25 @@
-From: Martin Pitt <martin.pitt@ubuntu.com>
-Date: Tue, 16 Aug 2016 20:47:11 +0200
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 18 Aug 2016 21:39:39 -0400
 Subject: Revert "pid1: reconnect to the console before being re-executed"
 
 This reverts commit affd7ed1a923b0df8479cff1bd9eafb625fdaa66.
 
-Bug: https://github.com/systemd/systemd/issues/3842
-Bug-Debian: https://bugs.debian.org/834367
+> So it looks like make_console_stdio() has bad side effect. More specifically it
+> does a TIOCSCTTY ioctl (via acquire_terminal()) which sees to disturb the
+> process which was using/owning the console.
+
+Fixes #3842.
+https://bugs.debian.org/834367
+https://bugzilla.redhat.com/show_bug.cgi?id=1367766
 ---
  src/core/main.c | 6 +++---
  1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index a19b61d..2277e38 100644
+index f2adca7..f59a55f 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -2005,9 +2005,6 @@ finish:
+@@ -2016,9 +2016,6 @@ finish:
                                  log_error_errno(r, "Failed to switch root, trying to continue: %m");
                  }
  
@@ -24,7 +29,7 @@ index a19b61d..2277e38 100644
                  args_size = MAX(6, argc+1);
                  args = newa(const char*, args_size);
  
-@@ -2055,6 +2052,9 @@ finish:
+@@ -2066,6 +2063,9 @@ finish:
                  arg_serialization = safe_fclose(arg_serialization);
                  fds = fdset_free(fds);
  
