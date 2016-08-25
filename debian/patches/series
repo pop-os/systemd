@@ -2,6 +2,9 @@ units-add-graphical-session.target-user-unit-3678.patch
 units-add-graphical-session-pre.target-user-unit-3848.patch
 Revert-pid1-reconnect-to-the-console-before-being-re-exec.patch
 core-do-not-fail-at-step-SECCOMP-if-there-is-no-kernel-su.patch
+bootctl-minor-coding-style-improvements.patch
+bootctl-fix-error-message-check.patch
+bootctl-rework-to-use-common-verbs-parsing-and-add-search.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

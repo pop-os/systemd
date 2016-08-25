@@ -1,0 +1,21 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 19 Jul 2016 18:40:03 +0200
+Subject: bootctl: fix error message check
+
+---
+ src/boot/bootctl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index 95bcc5d..4d027b9 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -1049,7 +1049,7 @@ static int bootctl_main(int argc, char*argv[]) {
+                         if (loader_path)
+                                 efi_tilt_backslashes(loader_path);
+                         r = efi_loader_get_device_part_uuid(&loader_part_uuid);
+-                        if (r < 0 && r == -ENOENT)
++                        if (r < 0 && r != -ENOENT)
+                                 log_warning_errno(r, "Failed to read EFI variable LoaderDevicePartUUID: %m");
+ 
+                         printf("System:\n");
