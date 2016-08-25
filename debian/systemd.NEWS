@@ -3,8 +3,9 @@ systemd (231-1) unstable; urgency=low
   This version drops support for running /etc/rcS.d SysV init scripts.
   These are prone to cause dependency loops, and almost all Debian packages
   with rcS scripts now ship a native systemd service. If you have custom or
-  third-party rcS scripts you need to convert them; see this page for
-  details: <https://wiki.debian.org/Teams/pkg-systemd/rcSMigration>.
+  third-party rcS scripts you need to convert them or change them to run
+  in rc2.d/ - rc5.d/; see this page for details:
+  <https://wiki.debian.org/Teams/pkg-systemd/rcSMigration>.
 
  -- Martin Pitt <mpitt@debian.org>  Thu, 14 Jul 2016 12:54:34 +0200
 
