@@ -5,6 +5,8 @@ core-do-not-fail-at-step-SECCOMP-if-there-is-no-kernel-su.patch
 bootctl-minor-coding-style-improvements.patch
 bootctl-fix-error-message-check.patch
 bootctl-rework-to-use-common-verbs-parsing-and-add-search.patch
+Revert-logind-really-handle-KeyIgnoreInhibited-options-in.patch
+man-explain-that-KeyIgnoreInhibited-only-apply-to-a-subse.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
