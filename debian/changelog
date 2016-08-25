@@ -7,9 +7,9 @@ systemd (231-4) unstable; urgency=medium
 
 systemd (231-3) unstable; urgency=medium
 
-  * resolved resolvconf integration: Run resolvconf without privilege restrictions.
-    On some architectures (at least ppc64el), running resolvconf does not work with
-    MemoryDenyWriteExecute=yes. (LP: #1609740)
+  * resolved resolvconf integration: Run resolvconf without privilege
+    restrictions. On some architectures (at least ppc64el), running resolvconf
+    does not work with MemoryDenyWriteExecute=yes. (LP: #1609740)
   * Revert unit usage of MemoryDenyWriteExecute=yes. This is implemented
     through seccomp as well. (Closes: #832713)
 
@@ -19,14 +19,16 @@ systemd (231-2) unstable; urgency=medium
 
   [ Martin Pitt ]
   * debian/rules: Fix UPSTREAM_VERSION for upstream master builds
-  * Limit "link against /usr" check to some critical binaries only and add generators
+  * Limit "link against /usr" check to some critical binaries only and add
+    generators
   * debian/rules: Put back cleanup of *.busname (Closes: #833487)
   * debian/tests/localed-x11-keymap: Robustify cleanup
-  * debian/tests/localed-x11-keymap: Check that localed works without /etc/default/keyboard.
-    This reproduces #833849.
+  * debian/tests/localed-x11-keymap: Check that localed works without
+    /etc/default/keyboard. This reproduces #833849.
   * Revert "units: add a basic SystemCallFilter (#3471)"
-    This causes fatal failures on kernels that don't have seccomp enabled. This can
-    be reactivated once https://github.com/systemd/systemd/issues/3882 is fixed.
+    This causes fatal failures on kernels that don't have seccomp enabled.
+    This can be reactivated once
+    https://github.com/systemd/systemd/issues/3882 is fixed.
     (Closes: #832713, #832893)
 
   [ Simon McVittie ]
