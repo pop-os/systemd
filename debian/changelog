@@ -1,3 +1,42 @@
+systemd (231-5) unstable; urgency=medium
+
+  [ Iain Lane ]
+  * Let graphical-session-pre.target be manually started (LP: #1615341)
+
+  [ Felipe Sateler ]
+  * Add basic version of git-cherry-pick
+  * Replace Revert-units-add-a-basic-SystemCallFilter-3471.patch with upstream
+    patch
+  * sysv-generator: better error reporting. (Closes: #830257)
+
+  [ Martin Pitt ]
+  * 73-usb-net-by-mac.rules: Test for disabling 80-net-setup-link.rules more
+    efficiently. Stop calling readlink at all and just test if
+    /etc/udev/rules.d/80-net-setup-link.rules exists -- a common way to
+    disable an udev rule is to just "touch" it in /etc/udev/rule.d/ (i. e.
+    empty file), and if the rule is customized we cannot really predict anyway
+    if the user wants MAC-based USB net names or not. (LP: #1615021)
+  * Ship kernel-install (Closes: #744301)
+  * Add debian/extra/kernel-install.d/60-initrd.install.
+    This kernel-install drop-in copies the initrd of the selected kernel to
+    the EFI partition.
+  * bootctl: Automatically detect ESP partition.
+    This makes bootctl work with Debian's /boot/efi/ mountpoint without having
+    to explicitly specify --path.
+    Patches cherry-picked from upstream master.
+  * systemd.NEWS: Point out that alternatively rcS scripts can be moved to
+    rc[2-5]. Thanks to Petter Reinholdtsen for the suggestion!
+
+  [ Michael Biebl ]
+  * Enable iptables support (Closes: #787480)
+  * Revert "logind: really handle *KeyIgnoreInhibited options in logind.conf"
+    The special 'key handling' inhibitors should always work regardless of
+    any *IgnoreInhibited settings – otherwise they're nearly useless.
+    Update man pages to clarify that *KeyIgnoreInhibited only apply to a
+    subset of locks (Closes: #834148)
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 26 Aug 2016 10:58:07 +0200
+
 systemd (231-4) unstable; urgency=medium
 
   * Revert "pid1: reconnect to the console before being re-executed"
