@@ -31,11 +31,14 @@ esac
 
 commits=$(git rev-parse "$@")
 
-if ! git rev-parse $pqbranch &>/dev/null ; then
-	gbp pq import
+if git rev-parse $pqbranch &>/dev/null ; then
+	echo
+	echo "Will recreate patch-queue branch $pqbranch"
+	echo "It was pointing to" $(git rev-parse $pqbranch)
+	echo
 fi
 
-git checkout $pqbranch
+gbp pq import --force
 
 echo "Cherry-picking the following commits:"
 echo "$commits"
