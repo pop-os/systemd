@@ -8,6 +8,8 @@ bootctl-rework-to-use-common-verbs-parsing-and-add-search.patch
 Revert-logind-really-handle-KeyIgnoreInhibited-options-in.patch
 man-explain-that-KeyIgnoreInhibited-only-apply-to-a-subse.patch
 sysv-generator-better-error-reporting-3977.patch
+seccomp-also-detect-if-seccomp-filtering-is-enabled.patch
+nspawn-detect-SECCOMP-availability-skip-audit-filter-if-u.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

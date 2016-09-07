@@ -1,0 +1,37 @@
+From: Felipe Sateler <fsateler@gmail.com>
+Date: Tue, 6 Sep 2016 20:25:22 -0300
+Subject: nspawn: detect SECCOMP availability, skip audit filter if unavailable
+
+Fail hard if SECCOMP was detected but could not be installed
+---
+ src/nspawn/nspawn-seccomp.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/nspawn/nspawn-seccomp.c b/src/nspawn/nspawn-seccomp.c
+index 3ab7160..44a0b39 100644
+--- a/src/nspawn/nspawn-seccomp.c
++++ b/src/nspawn/nspawn-seccomp.c
+@@ -130,6 +130,11 @@ int setup_seccomp(uint64_t cap_list_retain) {
+         scmp_filter_ctx seccomp;
+         int r;
+ 
++        if (!is_seccomp_available()) {
++                log_debug("SECCOMP features not detected in the kernel, disabling SECCOMP audit filter");
++                return 0;
++        }
++
+         seccomp = seccomp_init(SCMP_ACT_ALLOW);
+         if (!seccomp)
+                 return log_oom();
+@@ -173,11 +178,6 @@ int setup_seccomp(uint64_t cap_list_retain) {
+         }
+ 
+         r = seccomp_load(seccomp);
+-        if (r == -EINVAL) {
+-                log_debug_errno(r, "Kernel is probably not configured with CONFIG_SECCOMP. Disabling seccomp audit filter: %m");
+-                r = 0;
+-                goto finish;
+-        }
+         if (r < 0) {
+                 log_error_errno(r, "Failed to install seccomp audit filter: %m");
+                 goto finish;

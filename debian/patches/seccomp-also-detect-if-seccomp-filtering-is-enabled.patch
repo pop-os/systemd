@@ -1,0 +1,77 @@
+From: Felipe Sateler <fsateler@debian.org>
+Date: Wed, 31 Aug 2016 10:00:35 -0300
+Subject: seccomp: also detect if seccomp filtering is enabled
+
+In https://github.com/systemd/systemd/pull/4004 , a runtime detection
+method for seccomp was added. However, it does not detect the case
+where CONFIG_SECCOMP=y but CONFIG_SECCOMP_FILTER=n. This is possible
+if the architecture does not support filtering yet.
+Add a check for that case too.
+
+While at it, change get_proc_field usage to use PR_GET_SECCOMP prctl,
+as that should save a few system calls and (unnecessary) allocations.
+Previously, reading of /proc/self/stat was done as recommended by
+prctl(2) as safer. However, given that we need to do the prctl call
+anyway, lets skip opening, reading and parsing the file.
+
+Code for checking inspired by
+https://outflux.net/teach-seccomp/autodetect.html
+---
+ src/core/execute.c        |  2 +-
+ src/shared/seccomp-util.c | 19 +++++++++++++++----
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/execute.c b/src/core/execute.c
+index 14342c5..22baace 100644
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -1058,7 +1058,7 @@ static void rename_process_from_path(const char *path) {
+ static bool skip_seccomp_unavailable(const Unit* u, const char* msg) {
+         if (!is_seccomp_available()) {
+                 log_open();
+-                log_unit_debug(u, "SECCOMP not detected in the kernel, skipping %s", msg);
++                log_unit_debug(u, "SECCOMP features not detected in the kernel, skipping %s", msg);
+                 log_close();
+                 return true;
+         }
+diff --git a/src/shared/seccomp-util.c b/src/shared/seccomp-util.c
+index 4667f50..9b7a79f 100644
+--- a/src/shared/seccomp-util.c
++++ b/src/shared/seccomp-util.c
+@@ -20,9 +20,9 @@
+ #include <errno.h>
+ #include <seccomp.h>
+ #include <stddef.h>
++#include <sys/prctl.h>
++#include <linux/seccomp.h>
+ 
+-#include "alloc-util.h"
+-#include "fileio.h"
+ #include "macro.h"
+ #include "seccomp-util.h"
+ #include "string-util.h"
+@@ -91,11 +91,22 @@ int seccomp_add_secondary_archs(scmp_filter_ctx *c) {
+ 
+ }
+ 
++static bool is_basic_seccomp_available(void) {
++        int r;
++        r = prctl(PR_GET_SECCOMP, 0, 0, 0, 0);
++        return r >= 0;
++}
++
++static bool is_seccomp_filter_available(void) {
++        int r;
++        r = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, NULL, 0, 0);
++        return r < 0 && errno == EFAULT;
++}
++
+ bool is_seccomp_available(void) {
+-        _cleanup_free_ char* field = NULL;
+         static int cached_enabled = -1;
+         if (cached_enabled < 0)
+-                cached_enabled = get_proc_field("/proc/self/status", "Seccomp", "\n", &field) == 0;
++                cached_enabled = is_basic_seccomp_available() && is_seccomp_filter_available();
+         return cached_enabled;
+ }
+ 
