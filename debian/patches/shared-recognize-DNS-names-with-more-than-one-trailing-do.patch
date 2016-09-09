@@ -1,0 +1,57 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Fri, 9 Sep 2016 17:11:54 +0200
+Subject: shared: recognize DNS names with more than one trailing dot as
+ invalid (#4111)
+
+One trailing dot is valid, but more than one isn't. This also fixes glibc's
+posix/tst-getaddrinfo5 test.
+
+Fixes #3978.
+---
+ src/shared/dns-domain.c    | 4 ++++
+ src/test/test-dns-domain.c | 3 +++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/src/shared/dns-domain.c b/src/shared/dns-domain.c
+index 835557c..892f0aa 100644
+--- a/src/shared/dns-domain.c
++++ b/src/shared/dns-domain.c
+@@ -131,6 +131,10 @@ int dns_label_unescape(const char **name, char *dest, size_t sz) {
+         if (r == 0 && *n)
+                 return -EINVAL;
+ 
++        /* More than one trailing dot? */
++        if (*n == '.')
++                return -EINVAL;
++
+         if (sz >= 1 && d)
+                 *d = 0;
+ 
+diff --git a/src/test/test-dns-domain.c b/src/test/test-dns-domain.c
+index a9d09f5..e2f097c 100644
+--- a/src/test/test-dns-domain.c
++++ b/src/test/test-dns-domain.c
+@@ -48,6 +48,7 @@ static void test_dns_label_unescape(void) {
+         test_dns_label_unescape_one("..", "", 20, -EINVAL);
+         test_dns_label_unescape_one(".foobar", "", 20, -EINVAL);
+         test_dns_label_unescape_one("foobar.", "foobar", 20, 6);
++        test_dns_label_unescape_one("foobar..", "foobar", 20, -EINVAL);
+ }
+ 
+ static void test_dns_name_to_wire_format_one(const char *what, const char *expect, size_t buffer_sz, int ret) {
+@@ -359,6 +360,7 @@ static void test_dns_name_is_valid_one(const char *s, int ret) {
+ static void test_dns_name_is_valid(void) {
+         test_dns_name_is_valid_one("foo", 1);
+         test_dns_name_is_valid_one("foo.", 1);
++        test_dns_name_is_valid_one("foo..", 0);
+         test_dns_name_is_valid_one("Foo", 1);
+         test_dns_name_is_valid_one("foo.bar", 1);
+         test_dns_name_is_valid_one("foo.bar.baz", 1);
+@@ -366,6 +368,7 @@ static void test_dns_name_is_valid(void) {
+         test_dns_name_is_valid_one("foo..bar", 0);
+         test_dns_name_is_valid_one(".foo.bar", 0);
+         test_dns_name_is_valid_one("foo.bar.", 1);
++        test_dns_name_is_valid_one("foo.bar..", 0);
+         test_dns_name_is_valid_one("\\zbar", 0);
+         test_dns_name_is_valid_one("ä", 1);
+         test_dns_name_is_valid_one("\n", 0);
