@@ -3,10 +3,9 @@
 #export DH_VERBOSE = 1
 #export DEB_BUILD_OPTIONS = nostrip
 
-DEB_HOST_MULTIARCH ?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
-UPSTREAM_VERSION = $(shell dpkg-parsechangelog -SVersion | sed 's/[+-].*$$//')
+include /usr/share/dpkg/default.mk
 
-ifeq ($(shell dpkg-vendor --query vendor),Ubuntu)
+ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
     BREAKS_USB_MODESWITCH =
     SUPPORT_URL = http://www.ubuntu.com/support
@@ -300,14 +299,14 @@ endif
 	fi
 
 	# Ubuntu specific files
-	if dpkg-vendor --is ubuntu; then \
-		install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py; \
-		install -D --mode=644 debian/extra/systemd.py debian/systemd/usr/share/apport/package-hooks/systemd.py; \
-		install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/; \
-		cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/; \
-		install --mode=755 debian/extra/set-cpufreq debian/systemd/lib/systemd/; \
-		ln -s ../ondemand.service debian/systemd/lib/systemd/system/multi-user.target.wants/ondemand.service; \
-	fi
+ifeq ($(DEB_VENDOR),Ubuntu)
+	install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py
+	install -D --mode=644 debian/extra/systemd.py debian/systemd/usr/share/apport/package-hooks/systemd.py
+	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/
+	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
+	install --mode=755 debian/extra/set-cpufreq debian/systemd/lib/systemd/
+	ln -s ../ondemand.service debian/systemd/lib/systemd/system/multi-user.target.wants/ondemand.service
+endif
 
 ifeq ($(TEST_UPSTREAM),)
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
@@ -338,7 +337,7 @@ override_dh_shlibdeps:
 	dh_shlibdeps --remaining-packages -Lsystemd
 
 override_dh_makeshlibs:
-	sed 's/UPSTREAM_VERSION/$(UPSTREAM_VERSION)/' debian/shlibs.local.in > debian/shlibs.local
+	sed 's/DEB_VERSION_UPSTREAM/$(DEB_VERSION_UPSTREAM)/' debian/shlibs.local.in > debian/shlibs.local
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
