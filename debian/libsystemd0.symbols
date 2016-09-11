@@ -15,6 +15,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_229@LIBSYSTEMD_229 229
  LIBSYSTEMD_230@LIBSYSTEMD_230 230
  LIBSYSTEMD_231@LIBSYSTEMD_231 231
+ LIBSYSTEMD_232@LIBSYSTEMD_232 231-6~
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -244,14 +245,18 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_track_add_sender@LIBSYSTEMD_221 221
  sd_bus_track_contains@LIBSYSTEMD_221 221
  sd_bus_track_count@LIBSYSTEMD_221 221
+ sd_bus_track_count_name@LIBSYSTEMD_232 231-6~
+ sd_bus_track_count_sender@LIBSYSTEMD_232 231-6~
  sd_bus_track_first@LIBSYSTEMD_221 221
  sd_bus_track_get_bus@LIBSYSTEMD_221 221
+ sd_bus_track_get_recursive@LIBSYSTEMD_232 231-6~
  sd_bus_track_get_userdata@LIBSYSTEMD_221 221
  sd_bus_track_new@LIBSYSTEMD_221 221
  sd_bus_track_next@LIBSYSTEMD_221 221
  sd_bus_track_ref@LIBSYSTEMD_221 221
  sd_bus_track_remove_name@LIBSYSTEMD_221 221
  sd_bus_track_remove_sender@LIBSYSTEMD_221 221
+ sd_bus_track_set_recursive@LIBSYSTEMD_232 231-6~
  sd_bus_track_set_userdata@LIBSYSTEMD_221 221
  sd_bus_track_unref@LIBSYSTEMD_221 221
  sd_bus_try_close@LIBSYSTEMD_221 221

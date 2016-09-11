@@ -14,10 +14,10 @@ Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
  1 file changed, 1 insertion(+), 18 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 4934a0e..44728ce 100644
+index 4733b95..4762118 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -3637,24 +3637,7 @@ int unit_kill_context(
+@@ -3665,24 +3665,7 @@ int unit_kill_context(
                                  log_unit_warning_errno(u, r, "Failed to kill control group %s, ignoring: %m", u->cgroup_path);
  
                  } else if (r > 0) {

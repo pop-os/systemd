@@ -1,0 +1,824 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 15 Aug 2016 18:12:01 +0200
+Subject: core: add Ref()/Unref() bus calls for units
+
+This adds two (privileged) bus calls Ref() and Unref() to the Unit interface.
+The two calls may be used by clients to pin a unit into memory, so that various
+runtime properties aren't flushed out by the automatic GC. This is necessary
+to permit clients to race-freely acquire runtime results (such as process exit
+status/code or accumulated CPU time) on successful service termination.
+
+Ref() and Unref() are fully recursive, hence act like the usual reference
+counting concept in C. Taking a reference is a privileged operation, as this
+allows pinning units into memory which consumes resources.
+
+Transient units may also gain a reference at the time of creation, via the new
+AddRef property (that is only defined for transient units at the time of
+creation).
+---
+ man/systemctl.xml                         |  12 +--
+ src/core/dbus-manager.c                   |  57 +++++++++++
+ src/core/dbus-unit.c                      | 155 +++++++++++++++++++++++++++++-
+ src/core/dbus-unit.h                      |   8 +-
+ src/core/dbus.c                           |  71 +++++++-------
+ src/core/dbus.h                           |   5 +-
+ src/core/job.c                            |  17 ++--
+ src/core/job.h                            |   4 +-
+ src/core/manager.c                        |  26 ++---
+ src/core/org.freedesktop.systemd1.conf    |   8 ++
+ src/core/unit.c                           |  54 ++++++++---
+ src/core/unit.h                           |   7 ++
+ src/libsystemd/sd-bus/bus-common-errors.c |   1 +
+ src/libsystemd/sd-bus/bus-common-errors.h |   1 +
+ 14 files changed, 343 insertions(+), 83 deletions(-)
+
+diff --git a/man/systemctl.xml b/man/systemctl.xml
+index e7880d2..55287f4 100644
+--- a/man/systemctl.xml
++++ b/man/systemctl.xml
+@@ -638,13 +638,13 @@
+           <term><command>list-units <optional><replaceable>PATTERN</replaceable>...</optional></command></term>
+ 
+           <listitem>
+-            <para>List units that <command>systemd</command> has loaded. This includes units that
+-            are either referenced directly or through a dependency, or units that were active in the
+-            past and have failed. By default only units which are active, have pending jobs, or have
++            <para>List units that <command>systemd</command> has loaded. This includes units that are either referenced
++            directly or through a dependency, units that are pinned by applications programmatically, or units that
++            were active in the past and have failed. By default only units which are active, have pending jobs, or have
+             failed are shown; this can be changed with option <option>--all</option>. If one or more
+-            <replaceable>PATTERN</replaceable>s are specified, only units matching one of them are
+-            shown. The units that are shown are additionally filtered by <option>--type=</option>
+-            and <option>--state=</option> if those options are specified.</para>
++            <replaceable>PATTERN</replaceable>s are specified, only units matching one of them are shown. The units
++            that are shown are additionally filtered by <option>--type=</option> and <option>--state=</option> if those
++            options are specified.</para>
+ 
+             <para>This is the default command.</para>
+           </listitem>
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index d05968b..3f4ad05 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -642,6 +642,54 @@ static int method_set_unit_properties(sd_bus_message *message, void *userdata, s
+         return bus_unit_method_set_properties(message, u, error);
+ }
+ 
++static int method_ref_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Manager *m = userdata;
++        const char *name;
++        Unit *u;
++        int r;
++
++        assert(message);
++        assert(m);
++
++        r = sd_bus_message_read(message, "s", &name);
++        if (r < 0)
++                return r;
++
++        r = manager_load_unit(m, name, NULL, error, &u);
++        if (r < 0)
++                return r;
++
++        r = bus_unit_check_load_state(u, error);
++        if (r < 0)
++                return r;
++
++        return bus_unit_method_ref(message, u, error);
++}
++
++static int method_unref_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Manager *m = userdata;
++        const char *name;
++        Unit *u;
++        int r;
++
++        assert(message);
++        assert(m);
++
++        r = sd_bus_message_read(message, "s", &name);
++        if (r < 0)
++                return r;
++
++        r = manager_load_unit(m, name, NULL, error, &u);
++        if (r < 0)
++                return r;
++
++        r = bus_unit_check_load_state(u, error);
++        if (r < 0)
++                return r;
++
++        return bus_unit_method_unref(message, u, error);
++}
++
+ static int reply_unit_info(sd_bus_message *reply, Unit *u) {
+         _cleanup_free_ char *unit_path = NULL, *job_path = NULL;
+         Unit *following;
+@@ -780,6 +828,13 @@ static int transient_unit_from_message(
+         if (r < 0)
+                 return r;
+ 
++        /* If the client asked for it, automatically add a reference to this unit. */
++        if (u->bus_track_add) {
++                r = bus_unit_track_add_sender(u, message);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to watch sender: %m");
++        }
++
+         /* Now load the missing bits of the unit we just created */
+         unit_add_to_load_queue(u);
+         manager_dispatch_load_queue(m);
+@@ -2155,6 +2210,8 @@ const sd_bus_vtable bus_manager_vtable[] = {
+         SD_BUS_METHOD("KillUnit", "ssi", NULL, method_kill_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("ResetFailedUnit", "s", NULL, method_reset_failed_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("SetUnitProperties", "sba(sv)", NULL, method_set_unit_properties, SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD("RefUnit", "s", NULL, method_ref_unit, SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD("UnrefUnit", "s", NULL, method_unref_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("StartTransientUnit", "ssa(sv)a(sa(sv))", "o", method_start_transient_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("GetUnitProcesses", "s", "a(sus)", method_get_unit_processes, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("GetJob", "u", "o", method_get_job, SD_BUS_VTABLE_UNPRIVILEGED),
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index b55d2cf..590677b 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -418,6 +418,7 @@ static int bus_verify_manage_units_async_full(
+                 const char *verb,
+                 int capability,
+                 const char *polkit_message,
++                bool interactive,
+                 sd_bus_message *call,
+                 sd_bus_error *error) {
+ 
+@@ -433,7 +434,15 @@ static int bus_verify_manage_units_async_full(
+                 details[7] = GETTEXT_PACKAGE;
+         }
+ 
+-        return bus_verify_polkit_async(call, capability, "org.freedesktop.systemd1.manage-units", details, false, UID_INVALID, &u->manager->polkit_registry, error);
++        return bus_verify_polkit_async(
++                        call,
++                        capability,
++                        "org.freedesktop.systemd1.manage-units",
++                        details,
++                        interactive,
++                        UID_INVALID,
++                        &u->manager->polkit_registry,
++                        error);
+ }
+ 
+ int bus_unit_method_start_generic(
+@@ -486,6 +495,7 @@ int bus_unit_method_start_generic(
+                         verb,
+                         CAP_SYS_ADMIN,
+                         job_type < _JOB_TYPE_MAX ? polkit_message_for_job[job_type] : NULL,
++                        true,
+                         message,
+                         error);
+         if (r < 0)
+@@ -558,6 +568,7 @@ int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *
+                         "kill",
+                         CAP_KILL,
+                         N_("Authentication is required to kill '$(unit)'."),
++                        true,
+                         message,
+                         error);
+         if (r < 0)
+@@ -588,6 +599,7 @@ int bus_unit_method_reset_failed(sd_bus_message *message, void *userdata, sd_bus
+                         "reset-failed",
+                         CAP_SYS_ADMIN,
+                         N_("Authentication is required to reset the \"failed\" state of '$(unit)'."),
++                        true,
+                         message,
+                         error);
+         if (r < 0)
+@@ -620,6 +632,7 @@ int bus_unit_method_set_properties(sd_bus_message *message, void *userdata, sd_b
+                         "set-property",
+                         CAP_SYS_ADMIN,
+                         N_("Authentication is required to set properties on '$(unit)'."),
++                        true,
+                         message,
+                         error);
+         if (r < 0)
+@@ -634,6 +647,53 @@ int bus_unit_method_set_properties(sd_bus_message *message, void *userdata, sd_b
+         return sd_bus_reply_method_return(message, NULL);
+ }
+ 
++int bus_unit_method_ref(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Unit *u = userdata;
++        int r;
++
++        assert(message);
++        assert(u);
++
++        r = mac_selinux_unit_access_check(u, message, "start", error);
++        if (r < 0)
++                return r;
++
++        r = bus_verify_manage_units_async_full(
++                        u,
++                        "ref",
++                        CAP_SYS_ADMIN,
++                        NULL,
++                        false,
++                        message,
++                        error);
++        if (r < 0)
++                return r;
++        if (r == 0)
++                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
++
++        r = bus_unit_track_add_sender(u, message);
++        if (r < 0)
++                return r;
++
++        return sd_bus_reply_method_return(message, NULL);
++}
++
++int bus_unit_method_unref(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Unit *u = userdata;
++        int r;
++
++        assert(message);
++        assert(u);
++
++        r = bus_unit_track_remove_sender(u, message);
++        if (r == -EUNATCH)
++                return sd_bus_error_setf(error, BUS_ERROR_NOT_REFERENCED, "Unit has not been referenced yet.");
++        if (r < 0)
++                return r;
++
++        return sd_bus_reply_method_return(message, NULL);
++}
++
+ const sd_bus_vtable bus_unit_vtable[] = {
+         SD_BUS_VTABLE_START(0),
+ 
+@@ -720,6 +780,8 @@ const sd_bus_vtable bus_unit_vtable[] = {
+         SD_BUS_METHOD("Kill", "si", NULL, bus_unit_method_kill, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("ResetFailed", NULL, NULL, bus_unit_method_reset_failed, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("SetProperties", "ba(sv)", NULL, bus_unit_method_set_properties, SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD("Ref", NULL, NULL, bus_unit_method_ref, SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD("Unref", NULL, NULL, bus_unit_method_unref, SD_BUS_VTABLE_UNPRIVILEGED),
+ 
+         SD_BUS_VTABLE_END
+ };
+@@ -1317,6 +1379,29 @@ static int bus_unit_set_transient_property(
+                         return r;
+ 
+                 return 1;
++
++        } else if (streq(name, "AddRef")) {
++
++                int b;
++
++                /* Why is this called "AddRef" rather than just "Ref", or "Reference"? There's already a "Ref()" method
++                 * on the Unit interface, and it's probably not a good idea to expose a property and a method on the
++                 * same interface (well, strictly speaking AddRef isn't exposed as full property, we just read it for
++                 * transient units, but still). And "References" and "ReferencedBy" is already used as unit reference
++                 * dependency type, hence let's not confuse things with that.
++                 *
++                 * Note that we don't acually add the reference to the bus track. We do that only after the setup of
++                 * the transient unit is complete, so that setting this property multiple times in the same transient
++                 * unit creation call doesn't count as individual references. */
++
++                r = sd_bus_message_read(message, "b", &b);
++                if (r < 0)
++                        return r;
++
++                if (mode != UNIT_CHECK)
++                        u->bus_track_add = b;
++
++                return 1;
+         }
+ 
+         return 0;
+@@ -1421,3 +1506,71 @@ int bus_unit_check_load_state(Unit *u, sd_bus_error *error) {
+ 
+         return sd_bus_error_set_errnof(error, u->load_error, "Unit %s is not loaded properly: %m.", u->id);
+ }
++
++static int bus_track_handler(sd_bus_track *t, void *userdata) {
++        Unit *u = userdata;
++
++        assert(t);
++        assert(u);
++
++        u->bus_track = sd_bus_track_unref(u->bus_track); /* make sure we aren't called again */
++
++        unit_add_to_gc_queue(u);
++        return 0;
++}
++
++static int allocate_bus_track(Unit *u) {
++        int r;
++
++        assert(u);
++
++        if (u->bus_track)
++                return 0;
++
++        r = sd_bus_track_new(u->manager->api_bus, &u->bus_track, bus_track_handler, u);
++        if (r < 0)
++                return r;
++
++        r = sd_bus_track_set_recursive(u->bus_track, true);
++        if (r < 0) {
++                u->bus_track = sd_bus_track_unref(u->bus_track);
++                return r;
++        }
++
++        return 0;
++}
++
++int bus_unit_track_add_name(Unit *u, const char *name) {
++        int r;
++
++        assert(u);
++
++        r = allocate_bus_track(u);
++        if (r < 0)
++                return r;
++
++        return sd_bus_track_add_name(u->bus_track, name);
++}
++
++int bus_unit_track_add_sender(Unit *u, sd_bus_message *m) {
++        int r;
++
++        assert(u);
++
++        r = allocate_bus_track(u);
++        if (r < 0)
++                return r;
++
++        return sd_bus_track_add_sender(u->bus_track, m);
++}
++
++int bus_unit_track_remove_sender(Unit *u, sd_bus_message *m) {
++        assert(u);
++
++        /* If we haven't allocated the bus track object yet, then there's definitely no reference taken yet, return an
++         * error */
++        if (!u->bus_track)
++                return -EUNATCH;
++
++        return sd_bus_track_remove_sender(u->bus_track, m);
++}
+diff --git a/src/core/dbus-unit.h b/src/core/dbus-unit.h
+index 4db88db..b280de7 100644
+--- a/src/core/dbus-unit.h
++++ b/src/core/dbus-unit.h
+@@ -33,9 +33,15 @@ int bus_unit_method_start_generic(sd_bus_message *message, Unit *u, JobType job_
+ int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *error);
+ int bus_unit_method_reset_failed(sd_bus_message *message, void *userdata, sd_bus_error *error);
+ 
+-int bus_unit_queue_job(sd_bus_message *message, Unit *u, JobType type, JobMode mode, bool reload_if_possible, sd_bus_error *error);
+ int bus_unit_set_properties(Unit *u, sd_bus_message *message, UnitSetPropertiesMode mode, bool commit, sd_bus_error *error);
+ int bus_unit_method_set_properties(sd_bus_message *message, void *userdata, sd_bus_error *error);
+ int bus_unit_method_get_processes(sd_bus_message *message, void *userdata, sd_bus_error *error);
++int bus_unit_method_ref(sd_bus_message *message, void *userdata, sd_bus_error *error);
++int bus_unit_method_unref(sd_bus_message *message, void *userdata, sd_bus_error *error);
+ 
++int bus_unit_queue_job(sd_bus_message *message, Unit *u, JobType type, JobMode mode, bool reload_if_possible, sd_bus_error *error);
+ int bus_unit_check_load_state(Unit *u, sd_bus_error *error);
++
++int bus_unit_track_add_name(Unit *u, const char *name);
++int bus_unit_track_add_sender(Unit *u, sd_bus_message *m);
++int bus_unit_track_remove_sender(Unit *u, sd_bus_message *m);
+diff --git a/src/core/dbus.c b/src/core/dbus.c
+index 3422a02..1e41a42 100644
+--- a/src/core/dbus.c
++++ b/src/core/dbus.c
+@@ -1168,60 +1168,57 @@ int bus_foreach_bus(
+         return ret;
+ }
+ 
+-void bus_track_serialize(sd_bus_track *t, FILE *f) {
++void bus_track_serialize(sd_bus_track *t, FILE *f, const char *prefix) {
+         const char *n;
+ 
+         assert(f);
++        assert(prefix);
+ 
+-        for (n = sd_bus_track_first(t); n; n = sd_bus_track_next(t))
+-                fprintf(f, "subscribed=%s\n", n);
+-}
+-
+-int bus_track_deserialize_item(char ***l, const char *line) {
+-        const char *e;
+-        int r;
+-
+-        assert(l);
+-        assert(line);
+-
+-        e = startswith(line, "subscribed=");
+-        if (!e)
+-                return 0;
++        for (n = sd_bus_track_first(t); n; n = sd_bus_track_next(t)) {
++                int c, j;
+ 
+-        r = strv_extend(l, e);
+-        if (r < 0)
+-                return r;
++                c = sd_bus_track_count_name(t, n);
+ 
+-        return 1;
++                for (j = 0; j < c; j++) {
++                        fputs(prefix, f);
++                        fputc('=', f);
++                        fputs(n, f);
++                        fputc('\n', f);
++                }
++        }
+ }
+ 
+-int bus_track_coldplug(Manager *m, sd_bus_track **t, char ***l) {
++int bus_track_coldplug(Manager *m, sd_bus_track **t, bool recursive, char **l) {
++        char **i;
+         int r = 0;
+ 
+         assert(m);
+         assert(t);
+-        assert(l);
+-
+-        if (!strv_isempty(*l) && m->api_bus) {
+-                char **i;
+ 
+-                if (!*t) {
+-                        r = sd_bus_track_new(m->api_bus, t, NULL, NULL);
+-                        if (r < 0)
+-                                return r;
+-                }
++        if (strv_isempty(l))
++                return 0;
+ 
+-                r = 0;
+-                STRV_FOREACH(i, *l) {
+-                        int k;
++        if (!m->api_bus)
++                return 0;
+ 
+-                        k = sd_bus_track_add_name(*t, *i);
+-                        if (k < 0)
+-                                r = k;
+-                }
++        if (!*t) {
++                r = sd_bus_track_new(m->api_bus, t, NULL, NULL);
++                if (r < 0)
++                        return r;
+         }
+ 
+-        *l = strv_free(*l);
++        r = sd_bus_track_set_recursive(*t, recursive);
++        if (r < 0)
++                return r;
++
++        r = 0;
++        STRV_FOREACH(i, l) {
++                int k;
++
++                k = sd_bus_track_add_name(*t, *i);
++                if (k < 0)
++                        r = k;
++        }
+ 
+         return r;
+ }
+diff --git a/src/core/dbus.h b/src/core/dbus.h
+index 6baaffb..a092ed9 100644
+--- a/src/core/dbus.h
++++ b/src/core/dbus.h
+@@ -28,9 +28,8 @@ void bus_done(Manager *m);
+ 
+ int bus_fdset_add_all(Manager *m, FDSet *fds);
+ 
+-void bus_track_serialize(sd_bus_track *t, FILE *f);
+-int bus_track_deserialize_item(char ***l, const char *line);
+-int bus_track_coldplug(Manager *m, sd_bus_track **t, char ***l);
++void bus_track_serialize(sd_bus_track *t, FILE *f, const char *prefix);
++int bus_track_coldplug(Manager *m, sd_bus_track **t, bool recursive, char **l);
+ 
+ int manager_sync_bus_names(Manager *m, sd_bus *bus);
+ 
+diff --git a/src/core/job.c b/src/core/job.c
+index 7557874..7faf2ef 100644
+--- a/src/core/job.c
++++ b/src/core/job.c
+@@ -997,7 +997,10 @@ char *job_dbus_path(Job *j) {
+         return p;
+ }
+ 
+-int job_serialize(Job *j, FILE *f, FDSet *fds) {
++int job_serialize(Job *j, FILE *f) {
++        assert(j);
++        assert(f);
++
+         fprintf(f, "job-id=%u\n", j->id);
+         fprintf(f, "job-type=%s\n", job_type_to_string(j->type));
+         fprintf(f, "job-state=%s\n", job_state_to_string(j->state));
+@@ -1008,15 +1011,16 @@ int job_serialize(Job *j, FILE *f, FDSet *fds) {
+         if (j->begin_usec > 0)
+                 fprintf(f, "job-begin="USEC_FMT"\n", j->begin_usec);
+ 
+-        bus_track_serialize(j->clients, f);
++        bus_track_serialize(j->clients, f, "subscribed");
+ 
+         /* End marker */
+         fputc('\n', f);
+         return 0;
+ }
+ 
+-int job_deserialize(Job *j, FILE *f, FDSet *fds) {
++int job_deserialize(Job *j, FILE *f) {
+         assert(j);
++        assert(f);
+ 
+         for (;;) {
+                 char line[LINE_MAX], *l, *v;
+@@ -1106,7 +1110,7 @@ int job_deserialize(Job *j, FILE *f, FDSet *fds) {
+                 } else if (streq(l, "subscribed")) {
+ 
+                         if (strv_extend(&j->deserialized_clients, v) < 0)
+-                                return log_oom();
++                                log_oom();
+                 }
+         }
+ }
+@@ -1118,9 +1122,8 @@ int job_coldplug(Job *j) {
+ 
+         /* After deserialization is complete and the bus connection
+          * set up again, let's start watching our subscribers again */
+-        r = bus_track_coldplug(j->manager, &j->clients, &j->deserialized_clients);
+-        if (r < 0)
+-                return r;
++        (void) bus_track_coldplug(j->manager, &j->clients, false, j->deserialized_clients);
++        j->deserialized_clients = strv_free(j->deserialized_clients);
+ 
+         if (j->state == JOB_WAITING)
+                 job_add_to_run_queue(j);
+diff --git a/src/core/job.h b/src/core/job.h
+index d359e8b..85368f0 100644
+--- a/src/core/job.h
++++ b/src/core/job.h
+@@ -177,8 +177,8 @@ Job* job_install(Job *j);
+ int job_install_deserialized(Job *j);
+ void job_uninstall(Job *j);
+ void job_dump(Job *j, FILE*f, const char *prefix);
+-int job_serialize(Job *j, FILE *f, FDSet *fds);
+-int job_deserialize(Job *j, FILE *f, FDSet *fds);
++int job_serialize(Job *j, FILE *f);
++int job_deserialize(Job *j, FILE *f);
+ int job_coldplug(Job *j);
+ 
+ JobDependency* job_dependency_new(Job *subject, Job *object, bool matters, bool conflicts);
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 4d84a0b..0bacc45 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1219,10 +1219,11 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
+         if (q < 0 && r == 0)
+                 r = q;
+ 
+-        /* We might have deserialized the kdbus control fd, but if we
+-         * didn't, then let's create the bus now. */
+-        manager_connect_bus(m, !!serialization);
+-        bus_track_coldplug(m, &m->subscribed, &m->deserialized_subscribed);
++        /* We might have deserialized the kdbus control fd, but if we didn't, then let's create the bus now. */
++        (void) manager_connect_bus(m, !!serialization);
++
++        (void) bus_track_coldplug(m, &m->subscribed, false, m->deserialized_subscribed);
++        m->deserialized_subscribed = strv_free(m->deserialized_subscribed);
+ 
+         /* Third, fire things up! */
+         manager_coldplug(m);
+@@ -2401,7 +2402,7 @@ int manager_serialize(Manager *m, FILE *f, FDSet *fds, bool switching_root) {
+                 fprintf(f, "kdbus-fd=%i\n", copy);
+         }
+ 
+-        bus_track_serialize(m->subscribed, f);
++        bus_track_serialize(m->subscribed, f, "subscribed");
+ 
+         fputc('\n', f);
+ 
+@@ -2579,15 +2580,14 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
+                                 m->kdbus_fd = fdset_remove(fds, fd);
+                         }
+ 
+-                } else {
+-                        int k;
++                } else if (startswith(l, "subscribed=")) {
++
++                        if (strv_extend(&m->deserialized_subscribed, l+11) < 0)
++                                log_oom();
++
++                } else
++                        log_debug("Unknown serialization item '%s'", l);
+ 
+-                        k = bus_track_deserialize_item(&m->deserialized_subscribed, l);
+-                        if (k < 0)
+-                                log_debug_errno(k, "Failed to deserialize bus tracker object: %m");
+-                        else if (k == 0)
+-                                log_debug("Unknown serialization item '%s'", l);
+-                }
+         }
+ 
+         for (;;) {
+diff --git a/src/core/org.freedesktop.systemd1.conf b/src/core/org.freedesktop.systemd1.conf
+index 3c64f20..d41b46c 100644
+--- a/src/core/org.freedesktop.systemd1.conf
++++ b/src/core/org.freedesktop.systemd1.conf
+@@ -176,6 +176,14 @@
+ 
+                 <allow send_destination="org.freedesktop.systemd1"
+                        send_interface="org.freedesktop.systemd1.Manager"
++                       send_member="RefUnit"/>
++
++                <allow send_destination="org.freedesktop.systemd1"
++                       send_interface="org.freedesktop.systemd1.Manager"
++                       send_member="UnrefUnit"/>
++
++                <allow send_destination="org.freedesktop.systemd1"
++                       send_interface="org.freedesktop.systemd1.Manager"
+                        send_member="EnableUnitFiles"/>
+ 
+                 <allow send_destination="org.freedesktop.systemd1"
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 4934a0e..4733b95 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -328,6 +328,9 @@ bool unit_check_gc(Unit *u) {
+         if (u->refs)
+                 return true;
+ 
++        if (sd_bus_track_count(u->bus_track) > 0)
++                return true;
++
+         if (UNIT_VTABLE(u)->check_gc)
+                 if (UNIT_VTABLE(u)->check_gc(u))
+                         return true;
+@@ -508,6 +511,9 @@ void unit_free(Unit *u) {
+ 
+         sd_bus_slot_unref(u->match_bus_slot);
+ 
++        sd_bus_track_unref(u->bus_track);
++        u->deserialized_refs = strv_free(u->deserialized_refs);
++
+         unit_free_requires_mounts_for(u);
+ 
+         SET_FOREACH(t, u->names, i)
+@@ -894,6 +900,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
+         Unit *following;
+         _cleanup_set_free_ Set *following_set = NULL;
+         int r;
++        const char *n;
+ 
+         assert(u);
+         assert(u->type >= 0);
+@@ -1035,6 +1042,8 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
+         else if (u->load_state == UNIT_ERROR)
+                 fprintf(f, "%s\tLoad Error Code: %s\n", prefix, strerror(-u->load_error));
+ 
++        for (n = sd_bus_track_first(u->bus_track); n; n = sd_bus_track_next(u->bus_track))
++                fprintf(f, "%s\tBus Ref: %s\n", prefix, n);
+ 
+         if (u->job)
+                 job_dump(u->job, f, prefix2);
+@@ -2614,15 +2623,17 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
+                 unit_serialize_item(u, f, "cgroup", u->cgroup_path);
+         unit_serialize_item(u, f, "cgroup-realized", yes_no(u->cgroup_realized));
+ 
++        bus_track_serialize(u->bus_track, f, "ref");
++
+         if (serialize_jobs) {
+                 if (u->job) {
+                         fprintf(f, "job\n");
+-                        job_serialize(u->job, f, fds);
++                        job_serialize(u->job, f);
+                 }
+ 
+                 if (u->nop_job) {
+                         fprintf(f, "job\n");
+-                        job_serialize(u->nop_job, f, fds);
++                        job_serialize(u->nop_job, f);
+                 }
+         }
+ 
+@@ -2752,7 +2763,7 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
+                                 if (!j)
+                                         return log_oom();
+ 
+-                                r = job_deserialize(j, f, fds);
++                                r = job_deserialize(j, f);
+                                 if (r < 0) {
+                                         job_free(j);
+                                         return r;
+@@ -2851,6 +2862,14 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
+                                 u->cgroup_realized = b;
+ 
+                         continue;
++
++                } else if (streq(l, "ref")) {
++
++                        r = strv_extend(&u->deserialized_refs, v);
++                        if (r < 0)
++                                log_oom();
++
++                        continue;
+                 }
+ 
+                 if (unit_can_serialize(u)) {
+@@ -2925,7 +2944,8 @@ int unit_add_node_link(Unit *u, const char *what, bool wants, UnitDependency dep
+ }
+ 
+ int unit_coldplug(Unit *u) {
+-        int r = 0, q = 0;
++        int r = 0, q;
++        char **i;
+ 
+         assert(u);
+ 
+@@ -2936,18 +2956,26 @@ int unit_coldplug(Unit *u) {
+ 
+         u->coldplugged = true;
+ 
+-        if (UNIT_VTABLE(u)->coldplug)
+-                r = UNIT_VTABLE(u)->coldplug(u);
++        STRV_FOREACH(i, u->deserialized_refs) {
++                q = bus_unit_track_add_name(u, *i);
++                if (q < 0 && r >= 0)
++                        r = q;
++        }
++        u->deserialized_refs = strv_free(u->deserialized_refs);
+ 
+-        if (u->job)
+-                q = job_coldplug(u->job);
++        if (UNIT_VTABLE(u)->coldplug) {
++                q = UNIT_VTABLE(u)->coldplug(u);
++                if (q < 0 && r >= 0)
++                        r = q;
++        }
+ 
+-        if (r < 0)
+-                return r;
+-        if (q < 0)
+-                return q;
++        if (u->job) {
++                q = job_coldplug(u->job);
++                if (q < 0 && r >= 0)
++                        r = q;
++        }
+ 
+-        return 0;
++        return r;
+ }
+ 
+ static bool fragment_mtime_newer(const char *path, usec_t mtime) {
+diff --git a/src/core/unit.h b/src/core/unit.h
+index 1eabfa5..f3a75ed 100644
+--- a/src/core/unit.h
++++ b/src/core/unit.h
+@@ -108,6 +108,10 @@ struct Unit {
+         /* The slot used for watching NameOwnerChanged signals */
+         sd_bus_slot *match_bus_slot;
+ 
++        /* References to this unit from clients */
++        sd_bus_track *bus_track;
++        char **deserialized_refs;
++
+         /* Job timeout and action to take */
+         usec_t job_timeout;
+         FailureAction job_timeout_action;
+@@ -245,6 +249,9 @@ struct Unit {
+ 
+         /* Did we already invoke unit_coldplug() for this unit? */
+         bool coldplugged:1;
++
++        /* For transient units: whether to add a bus track reference after creating the unit */
++        bool bus_track_add:1;
+ };
+ 
+ struct UnitStatusMessageFormats {
+diff --git a/src/libsystemd/sd-bus/bus-common-errors.c b/src/libsystemd/sd-bus/bus-common-errors.c
+index 02e3bf9..7433e9b 100644
+--- a/src/libsystemd/sd-bus/bus-common-errors.c
++++ b/src/libsystemd/sd-bus/bus-common-errors.c
+@@ -44,6 +44,7 @@ BUS_ERROR_MAP_ELF_REGISTER const sd_bus_error_map bus_common_errors[] = {
+         SD_BUS_ERROR_MAP(BUS_ERROR_NO_ISOLATION,                 EPERM),
+         SD_BUS_ERROR_MAP(BUS_ERROR_SHUTTING_DOWN,                ECANCELED),
+         SD_BUS_ERROR_MAP(BUS_ERROR_SCOPE_NOT_RUNNING,            EHOSTDOWN),
++        SD_BUS_ERROR_MAP(BUS_ERROR_NOT_REFERENCED,               EUNATCH),
+ 
+         SD_BUS_ERROR_MAP(BUS_ERROR_NO_SUCH_MACHINE,              ENXIO),
+         SD_BUS_ERROR_MAP(BUS_ERROR_NO_SUCH_IMAGE,                ENOENT),
+diff --git a/src/libsystemd/sd-bus/bus-common-errors.h b/src/libsystemd/sd-bus/bus-common-errors.h
+index c8f369c..5120fab 100644
+--- a/src/libsystemd/sd-bus/bus-common-errors.h
++++ b/src/libsystemd/sd-bus/bus-common-errors.h
+@@ -40,6 +40,7 @@
+ #define BUS_ERROR_NO_ISOLATION "org.freedesktop.systemd1.NoIsolation"
+ #define BUS_ERROR_SHUTTING_DOWN "org.freedesktop.systemd1.ShuttingDown"
+ #define BUS_ERROR_SCOPE_NOT_RUNNING "org.freedesktop.systemd1.ScopeNotRunning"
++#define BUS_ERROR_NOT_REFERENCED "org.freedesktop.systemd1.NotReferenced"
+ 
+ #define BUS_ERROR_NO_SUCH_MACHINE "org.freedesktop.machine1.NoSuchMachine"
+ #define BUS_ERROR_NO_SUCH_IMAGE "org.freedesktop.machine1.NoSuchImage"
