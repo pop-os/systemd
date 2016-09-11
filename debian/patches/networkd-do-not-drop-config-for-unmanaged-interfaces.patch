@@ -1,0 +1,32 @@
+From: =?utf-8?q?Mantas_Mikul=C4=97nas?= <grawity@gmail.com>
+Date: Wed, 24 Aug 2016 18:26:48 +0300
+Subject: networkd: do not drop config for unmanaged interfaces
+
+Flushing foreign configuration for unmanaged interfaces is outright
+evil, especially when it's a regular occurence with Wi-Fi.
+
+Fixes: 3104883ddc24 "networkd: remove route if carrier is lost"
+Ref: #3831
+---
+ src/network/networkd-link.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 0eaa25e..2a8bdd0 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -2897,9 +2897,11 @@ static int link_carrier_lost(Link *link) {
+         if (r < 0)
+                 return r;
+ 
+-        r = link_drop_foreign_config(link);
+-        if (r < 0)
+-                return r;
++        if (link->state != LINK_STATE_UNMANAGED) {
++                r = link_drop_foreign_config(link);
++                if (r < 0)
++                        return r;
++        }
+ 
+         r = link_handle_bound_by_list(link);
+         if (r < 0)
