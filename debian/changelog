@@ -1,3 +1,27 @@
+systemd (231-6) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Add alternative iptables-dev build dependencies
+    libiptc-dev is very new and not yet present in stable Debian/Ubuntu releases.
+    Add it as a fallback build dependency for backports and upstream tests.
+  * Detect if seccomp is enabled but seccomp filtering is disabled
+    (Closes: #832713)
+  * resolved: recognize DNS names with more than one trailing dot as invalid
+    (LP: #1600000)
+  * debian/tests/smoke: Store udev db dump artifact on failure
+  * networkd: limit the number of routes to the kernel limit
+  * systemctl: consider service running only when it is in active or reloading state
+  * networkd: remove route if carrier is lost
+  * Add Ref()/Unref() bus calls for units
+
+  [ Felipe Sateler ]
+  * git-cherry-pick: always recreate the patch-queue branch.
+
+  [ Dimitri John Ledkov ]
+  * Use idiomatic variables from dpkg include.
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 11 Sep 2016 15:00:55 +0200
+
 systemd (231-5) unstable; urgency=medium
 
   [ Iain Lane ]
