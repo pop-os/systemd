@@ -11,6 +11,7 @@ sysv-generator-better-error-reporting-3977.patch
 seccomp-also-detect-if-seccomp-filtering-is-enabled.patch
 nspawn-detect-SECCOMP-availability-skip-audit-filter-if-u.patch
 shared-recognize-DNS-names-with-more-than-one-trailing-do.patch
+networkd-limit-the-number-of-routes-to-the-kernel-limit-4.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
