@@ -572,7 +572,7 @@ index d359e8b..85368f0 100644
  
  JobDependency* job_dependency_new(Job *subject, Job *object, bool matters, bool conflicts);
 diff --git a/src/core/manager.c b/src/core/manager.c
-index 4d84a0b..0bacc45 100644
+index 4d84a0b..02e8681 100644
 --- a/src/core/manager.c
 +++ b/src/core/manager.c
 @@ -1219,10 +1219,11 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
