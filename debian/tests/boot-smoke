@@ -57,7 +57,7 @@ else
     fi
 fi
 
-if [ "$ADT_REBOOT_MARK" -ge 20 ]; then
+if [ "$ADT_REBOOT_MARK" -ge 5 ]; then
     exit 0
 fi
 
