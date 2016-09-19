@@ -1,6 +1,5 @@
 #! /bin/sh
-# Set the CPU Frequency Scaling governor to "ondemand"/"powersave" on old
-# machines which don't support intel_pstate yet.
+# Set the CPU Frequency Scaling governor to "ondemand"/"powersave" where available
 set -eu
 
 FIRSTCPU=`cut -f1 -d- /sys/devices/system/cpu/online`
@@ -8,13 +7,6 @@ AVAILABLE="/sys/devices/system/cpu/cpu$FIRSTCPU/cpufreq/scaling_available_govern
 DOWN_FACTOR="/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor"
 
 [ -f $AVAILABLE ] || exit 0
-
-# more modern processors that support intel_pstate behave worse with
-# ondemand/powersave and should use performance
-if [ `cat /sys/devices/system/cpu/cpu$FIRSTCPU/cpufreq/scaling_driver` = intel_pstate ]; then
-    echo 'CPU supports intel_pstate, keeping "performance"'
-    exit 0
-fi
 
 read governors < $AVAILABLE
 case $governors in
