@@ -41,6 +41,11 @@ if dpkg --compare-versions "$2" lt "218-11~"; then
     systemctl enable systemd-timesyncd.service || true
 fi
 
+# Enable ondemand by default on new installs installs and upgrades
+if [ -e /lib/systemd/system/ondemand.service ] && dpkg --compare-versions "$2" lt "231-7~"; then
+    systemctl enable ondemand.service || true
+fi
+
 # Do a one-time migration of the local time setting
 if dpkg --compare-versions "$2" lt "33-1"; then
     if [ -f /etc/default/rcS ]; then
