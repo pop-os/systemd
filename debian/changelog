@@ -1,3 +1,34 @@
+systemd (231-7) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * fsckd: Do not exit on idle timeout if there are still clients connected
+    (Closes: #788050, LP: #1547844)
+
+  [ Martin Pitt ]
+  * 73-usb-net-by-mac.rules: Split kernel command line import line.
+    Reportedly this makes the rule actually work on some platforms. Thanks Alp
+    Toker! (LP: #1593379)
+  * debian/tests/boot-smoke: Only run 5 iterations
+  * systemd.postinst: Drop obsolete setcap call for systemd-detect-virt.
+    Drop corresponding libcap2-bin dependency.
+  * debian/tests/systemd-fsckd: Robustify check for "unit was running"
+    (LP: #1624406)
+  * debian/extra/set-cpufreq: Use powersave with intel_pstate.
+    This is what we did on xenial, and apparently powersave is still actually
+    better than performance. Thanks to Doug Smythies for the measurements!
+    (LP: #1579278)
+  * Ubuntu: Move ondemand.service from static to runtime enablement.
+    This makes it easier to keep performance, by disabling ondemand.service.
+    Side issue in LP: #1579278
+  * Revert "networkd: remove route if carrier is lost"
+    This causes networkd to drop addresses from unmanaged interfaces in some
+    cases. (Closes: #837759)
+  * debian/tests/storage: Avoid stderr output of stopping systemd-cryptsetup@.service
+  * libnss-*.prerm: Remove possible [key=value] options from NSS modules as well.
+    (LP: #1625584)
+
+ -- Martin Pitt <mpitt@debian.org>  Tue, 20 Sep 2016 15:03:06 +0200
+
 systemd (231-6) unstable; urgency=medium
 
   [ Martin Pitt ]
@@ -20,7 +51,7 @@ systemd (231-6) unstable; urgency=medium
   [ Dimitri John Ledkov ]
   * Use idiomatic variables from dpkg include.
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 11 Sep 2016 15:00:55 +0200
+ -- Martin Pitt <mpitt@debian.org>  Sun, 11 Sep 2016 15:00:55 +0200
 
 systemd (231-5) unstable; urgency=medium
 
