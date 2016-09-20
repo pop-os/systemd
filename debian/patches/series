@@ -13,8 +13,6 @@ nspawn-detect-SECCOMP-availability-skip-audit-filter-if-u.patch
 shared-recognize-DNS-names-with-more-than-one-trailing-do.patch
 networkd-limit-the-number-of-routes-to-the-kernel-limit-4.patch
 systemctl-consider-service-running-only-when-it-is-in-act.patch
-networkd-remove-route-if-carrier-is-lost-3831.patch
-networkd-do-not-drop-config-for-unmanaged-interfaces.patch
 sd-bus-add-a-recursive-mode-to-sd_bus_track.patch
 core-add-Ref-Unref-bus-calls-for-units.patch
 debian/Use-Debian-specific-config-files.patch
