@@ -55,7 +55,8 @@ class CryptsetupTest(FakeDriveTestBase):
             os.waitpid(self.password_agent, 0)
             self.password_agent = None
         subprocess.call(['umount', self.plaintext_dev], stderr=subprocess.DEVNULL)
-        subprocess.call(['systemctl', 'stop', 'systemd-cryptsetup@%s.service' % self.plaintext_name])
+        subprocess.call(['systemctl', 'stop', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
+                        stderr=subprocess.STDOUT)
         if os.path.exists('/etc/crypttab'):
             os.unlink('/etc/crypttab')
         if os.path.exists('/etc/crypttab.systemdtest'):
