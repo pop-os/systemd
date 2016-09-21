@@ -16,7 +16,7 @@ def add_info(report):
         return
 
     # Add details about all failed units, if any
-    out = apport.hookutils.command_output(['systemctl', '--failed', '--full',
+    out = apport.hookutils.command_output(['systemctl', '--state=failed', '--full',
                                            '--no-legend']).strip()
     if out:
         failed = ''
