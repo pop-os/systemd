@@ -7,12 +7,6 @@ set -e
 # "Failed to install /usr/libexec/selinux/hll/pp"
 BLACKLIST="TEST-06-SELINUX"
 
-# Some tests are broken without QEMU; drop this once
-# https://github.com/systemd/systemd/pull/3587 lands
-if ! dpkg -l | grep -q '^ii.*qemu-system-'; then
-    BLACKLIST="$BLACKLIST TEST-08-ISSUE-2730 TEST-09-ISSUE-2691 TEST-10-ISSUE-2467 TEST-11-ISSUE-3166"
-fi
-
 # modify the image build scripts to install systemd from the debs instead of
 # from a "make install" as we don't have a built tree here. Also call
 # systemd-nspawn from the system.
