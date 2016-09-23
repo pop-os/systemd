@@ -15,7 +15,8 @@ from glob import glob
 @unittest.skipIf(os.path.isdir('/sys/module/scsi_debug'),
                  'The scsi_debug module is already loaded')
 class FakeDriveTestBase(unittest.TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpClass(klass):
         # create a fake SCSI hard drive
         subprocess.check_call(['modprobe', 'scsi_debug'])
         # wait until drive got created
@@ -26,13 +27,19 @@ class FakeDriveTestBase(unittest.TestCase):
         assert len(sys_dirs) == 1
         devs = os.listdir(sys_dirs[0])
         assert len(devs) == 1
-        self.device = '/dev/' + devs[0]
+        klass.device = '/dev/' + devs[0]
 
     def tearDown(self):
+        # clear drive
+        with open(self.device, 'wb') as f:
+            block = b'0' * 1048576
+            try:
+                while True:
+                    f.write(block)
+            except OSError:
+                pass
+        subprocess.check_call(['udevadm', 'settle'])
         subprocess.check_call(['systemctl', 'daemon-reload'])
-        subprocess.check_call(['rmmod', 'scsi_debug'])
-        while glob('/sys/bus/pseudo/drivers/scsi_debug/adapter*/host*/target*/*:*/block'):
-            time.sleep(0.1)
 
 
 class CryptsetupTest(FakeDriveTestBase):
