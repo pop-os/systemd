@@ -15,6 +15,8 @@ networkd-limit-the-number-of-routes-to-the-kernel-limit-4.patch
 systemctl-consider-service-running-only-when-it-is-in-act.patch
 sd-bus-add-a-recursive-mode-to-sd_bus_track.patch
 core-add-Ref-Unref-bus-calls-for-units.patch
+nss-install-nss-modules-to-rootlibdir.patch
+build-sys-get-rid-of-move-to-rootlibdir.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

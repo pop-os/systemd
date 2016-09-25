@@ -254,8 +254,6 @@ override_dh_install:
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
-	# fix location of NSS modules
-	cd debian/install/deb/; for f in usr/lib/*/libnss_*; do mv $$f $${f#usr/}; done
 
 	dh_install --remaining-packages --sourcedir=debian/install/deb $(DH_INSTALL_MISSING)
 
