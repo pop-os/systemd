@@ -1,3 +1,28 @@
+systemd (231-8) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Replace remaining systemctl --failed with --state=failed
+    "--failed" is deprecated in favor of --state.
+  * debian/shlibs.local.in: More precisely define version of internal shared
+    lib.
+  * debian/tests/upstream: Drop blacklisting
+    These tests now work fine without qemu.
+  * debian/tests/storage: Avoid rmmod scsi_debug (LP: #1626737)
+  * upstream build system: Install libudev, libsystemd, and nss modules to
+    ${rootlibdir}. Drop downstream workaround from debian/rules.
+  * Ubuntu: Disable resolved's DNSSEC for the final 16.10 release.
+    Resolved's DNSSEC support is still not mature enough, and upstream
+    recommends to disable it in stable distro releases still.
+  * Fix abort/DoS on zero-length notify message triggers (LP: #1628687)
+  * resolved: don't query domain-limited DNS servers for other domains
+    (LP: #1588230)
+
+  [ Antonio Ospite ]
+  * Update systemd-user pam config to require pam_limits.so.
+    (Closes: #838191)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 29 Sep 2016 13:40:21 +0200
+
 systemd (231-7) unstable; urgency=medium
 
   [ Michael Biebl ]
