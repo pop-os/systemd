@@ -1,3 +1,14 @@
+systemd (231-9) unstable; urgency=medium
+
+  * pid1: process zero-length notification messages again.
+    Just remove the assertion, the "n" value was not used anyway. This fixes
+    a local DoS due to unprocessed/unclosed fds which got introduced by the
+    previous fix. (Closes: #839171) (LP: #1628687)
+  * pid1: Robustify manager_dispatch_notify_fd()
+  * test/networkd-test.py: Add missing writeConfig() helper function.
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 29 Sep 2016 23:39:24 +0200
+
 systemd (231-8) unstable; urgency=medium
 
   [ Martin Pitt ]
