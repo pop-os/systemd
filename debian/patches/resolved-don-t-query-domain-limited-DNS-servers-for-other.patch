@@ -142,10 +142,10 @@ index 31b25ca..801014c 100644
                  fputs("# Too many DNS servers configured, the following entries may be ignored.\n", f);
          (*count)++;
 diff --git a/test/networkd-test.py b/test/networkd-test.py
-index bfa1bf3..5e8c997 100755
+index 57f4c04..f462e73 100755
 --- a/test/networkd-test.py
 +++ b/test/networkd-test.py
-@@ -249,6 +249,38 @@ Domains= ~company''')
+@@ -250,6 +250,38 @@ Domains= ~company''')
              self.assertNotRegex(contents, 'search.*company')
              # our global server should appear
              self.assertIn('nameserver 192.168.5.1\n', contents)
@@ -184,7 +184,7 @@ index bfa1bf3..5e8c997 100755
  
  
  @unittest.skipUnless(have_dnsmasq, 'dnsmasq not installed')
-@@ -259,7 +291,7 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
+@@ -260,7 +292,7 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
          super().setUp()
          self.dnsmasq = None
  
@@ -193,7 +193,7 @@ index bfa1bf3..5e8c997 100755
          '''Create test interface with DHCP server behind it'''
  
          # add veth pair
-@@ -280,6 +312,8 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
+@@ -281,6 +313,8 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
              extra_opts = ['--enable-ra', '--dhcp-range=2600::10,2600::20']
          else:
              extra_opts = []
@@ -202,7 +202,7 @@ index bfa1bf3..5e8c997 100755
          self.dnsmasq = subprocess.Popen(
              ['dnsmasq', '--keep-in-foreground', '--log-queries',
               '--log-facility=' + self.dnsmasq_log, '--conf-file=/dev/null',
-@@ -304,6 +338,80 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
+@@ -305,6 +339,80 @@ class DnsmasqClientTest(ClientTestBase, unittest.TestCase):
          with open(self.dnsmasq_log) as f:
              sys.stdout.write('\n\n---- dnsmasq log ----\n%s\n------\n\n' % f.read())
  
