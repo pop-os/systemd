@@ -17,6 +17,7 @@ sd-bus-add-a-recursive-mode-to-sd_bus_track.patch
 core-add-Ref-Unref-bus-calls-for-units.patch
 nss-install-nss-modules-to-rootlibdir.patch
 build-sys-get-rid-of-move-to-rootlibdir.patch
+If-the-notification-message-length-is-0-ignore-the-messag.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
