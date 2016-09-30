@@ -1,6 +1,7 @@
 From: Martin Pitt <martin.pitt@ubuntu.com>
-Date: Mon, 27 Jun 2016 13:03:14 +0200
+Date: Fri, 30 Sep 2016 09:30:08 +0200
 Subject: resolved: don't query domain-limited DNS servers for other domains
+ (#3621)
 
 DNS servers which have route-only domains should only be used for
 the specified domains. Routing queries about other domains there is a privacy
