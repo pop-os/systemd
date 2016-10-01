@@ -25,7 +25,7 @@ insert_nss_entry() {
             }
             # add resolve before dns
             return join " ", map {
-	        $_ eq "dns" ? ("resolve", "$_") : $_
+                $_ eq "dns" ? ("resolve [!UNAVAIL=return]", "$_") : $_
             } @bits;
         }
         s/^(hosts:\s+)(.*)/$1.insert($2)/e;
@@ -41,6 +41,14 @@ if [ "$1" = configure ] && [ -z "$2" ]; then
     systemctl enable systemd-resolved.service
     if [ -d /run/systemd/system ]; then
         deb-systemd-invoke start systemd-resolved.service || true
+    fi
+fi
+
+# Fix nsswitch action on upgrades
+if [ "$1" = configure ] && dpkg --compare-versions "$2" lt-nl "231-10"; then
+    if ! grep -q '^hosts:.*resolve[[:space:]]*\[' /etc/nsswitch.conf; then
+        echo "Adjusting 'resolv' entry in /etc/nsswitch.conf.."
+        sed -i '/^hosts:/ { s/resolve/& [!UNAVAIL=return]/}' /etc/nsswitch.conf
     fi
 fi
 
