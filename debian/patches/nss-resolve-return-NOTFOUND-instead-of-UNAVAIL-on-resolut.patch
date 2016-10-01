@@ -1,0 +1,80 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Fri, 16 Sep 2016 08:27:39 +0200
+Subject: nss-resolve: return NOTFOUND instead of UNAVAIL on resolution errors
+
+It needs to be possible to tell apart "the nss-resolve module does not exist"
+(which can happen when running foreign-architecture programs) from "the queried
+DNS name failed DNSSEC validation" or other errors. So return NOTFOUND for these
+cases too, and only keep UNAVAIL for the cases where we cannot handle the given
+address family.
+
+This makes it possible to configure a fallback to "dns" without breaking
+DNSSEC, with "resolve [!UNAVAIL=return] dns". Add this to the manpage.
+
+This does not change behaviour if resolved is not running, as that already
+falls back to the "dns" glibc module.
+
+Fixes #4157
+---
+ man/nss-resolve.xml           | 4 +++-
+ src/nss-resolve/nss-resolve.c | 9 ++++++---
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/man/nss-resolve.xml b/man/nss-resolve.xml
+index c5ce19b..2bc208a 100644
+--- a/man/nss-resolve.xml
++++ b/man/nss-resolve.xml
+@@ -85,7 +85,7 @@
+ group:          compat mymachines
+ shadow:         compat
+ 
+-hosts:          files mymachines <command>resolve</command>
++hosts:          files mymachines <command>resolve [!UNAVAIL=return]</command> dns
+ networks:       files
+ 
+ protocols:      db files
+@@ -95,6 +95,8 @@ rpc:            db files
+ 
+ netgroup:       nis</programlisting>
+ 
++    <para>This keeps the <command>dns</command> module as a fallback for cases where the <command>nss-resolve</command>
++    module is not installed.</para>
+   </refsect1>
+ 
+   <refsect1>
+diff --git a/src/nss-resolve/nss-resolve.c b/src/nss-resolve/nss-resolve.c
+index 5db83e5..eea91e3 100644
+--- a/src/nss-resolve/nss-resolve.c
++++ b/src/nss-resolve/nss-resolve.c
+@@ -279,9 +279,12 @@ fallback:
+         }
+ 
+ fail:
++        /* When we arrive here, resolved runs and has answered (fallback to
++         * "dns" is handled earlier). So we have a definitive "no" answer and
++         * should not fall back to subsequent NSS modules via "UNAVAIL". */
+         *errnop = -r;
+         *h_errnop = NO_RECOVERY;
+-        return NSS_STATUS_UNAVAIL;
++        return NSS_STATUS_NOTFOUND;
+ }
+ 
+ enum nss_status _nss_resolve_gethostbyname3_r(
+@@ -476,7 +479,7 @@ fallback:
+ fail:
+         *errnop = -r;
+         *h_errnop = NO_RECOVERY;
+-        return NSS_STATUS_UNAVAIL;
++        return NSS_STATUS_NOTFOUND;
+ }
+ 
+ enum nss_status _nss_resolve_gethostbyaddr2_r(
+@@ -666,7 +669,7 @@ fallback:
+ fail:
+         *errnop = -r;
+         *h_errnop = NO_RECOVERY;
+-        return NSS_STATUS_UNAVAIL;
++        return NSS_STATUS_NOTFOUND;
+ }
+ 
+ NSS_GETHOSTBYNAME_FALLBACKS(resolve);
