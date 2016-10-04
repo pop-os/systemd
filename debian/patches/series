@@ -37,7 +37,6 @@ debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/Revert-udev-network-device-renaming-immediately-give.patch
 debian/Use-different-default-paths-for-various-binaries.patch
-debian/Adjust-systemd-user-pam-config-file-for-Debian.patch
 debian/Add-support-for-TuxOnIce-hibernation.patch
 debian/Include-additional-directories-in-ProtectSystem.patch
 debian/Re-enable-journal-forwarding-to-syslog.patch

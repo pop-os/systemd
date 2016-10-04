@@ -62,3 +62,4 @@ usr/share/locale/
 ../../extra/units/* lib/systemd/system/
 ../../extra/dhclient-exit-hooks.d/ etc/dhcp/
 ../../extra/kernel-install.d/* usr/lib/kernel/install.d
+../../extra/pam.d etc/
