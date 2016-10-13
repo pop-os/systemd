@@ -26,6 +26,7 @@ systemctl-Add-wait-option-to-wait-until-started-units-ter.patch
 nss-resolve-simplify-error-handling.patch
 man-drop-myhostname-from-recommended-nsswitch-host-config.patch
 nss-resolve-return-NOTFOUND-instead-of-UNAVAIL-on-resolut.patch
+unit-sent-change-signal-before-removing-the-unit-if-neces.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

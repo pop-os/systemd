@@ -1,0 +1,25 @@
+From: Michael Olbrich <m.olbrich@pengutronix.de>
+Date: Fri, 9 Sep 2016 17:05:06 +0200
+Subject: unit: sent change signal before removing the unit if necessary
+ (#4106)
+
+If the unit is in the dbus queue when it is removed then the last change
+signal is never sent. Fix this by checking the dbus queue and explicitly
+send the change signal before sending the remove signal.
+---
+ src/core/dbus-unit.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index 590677b..2e8e5e5 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -1166,7 +1166,7 @@ void bus_unit_send_removed_signal(Unit *u) {
+         int r;
+         assert(u);
+ 
+-        if (!u->sent_dbus_new_signal)
++        if (!u->sent_dbus_new_signal || u->in_dbus_queue)
+                 bus_unit_send_change_signal(u);
+ 
+         if (!u->id)
