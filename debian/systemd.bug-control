@@ -1,1 +1,1 @@
-package-status: udev
+package-status: udev dracut initramfs-tools
