@@ -97,6 +97,7 @@ CONFFLAGS = \
 	--with-telinit=/lib/sysvinit/telinit \
 	--with-support-url=$(SUPPORT_URL) \
 	--without-kill-user-processes \
+	--with-pamconfdir=no \
 	--enable-split-usr \
 	--disable-qrencode \
 	--disable-vconsole \
