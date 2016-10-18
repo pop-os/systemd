@@ -20,7 +20,7 @@ for t in test/TEST*; do
     echo "========== `basename $t` =========="
     rm -rf /var/tmp/systemd-test.*
     for op in clean setup run; do
-        if ! (cd $t; TEST_BASE_DIR=../ INITRD=/initrd.img ./test.sh --$op); then
+        if ! (cd $t; TEST_BASE_DIR=../ ./test.sh --$op); then
             for j in /var/tmp/systemd-test.*/journal/*/system.journal; do
                 [ -e "$j" ] || continue
                 echo "---- $j ----"
