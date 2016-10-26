@@ -1,3 +1,33 @@
+systemd (231-10) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * systemctl: Add --wait option to wait until started units terminate again.
+  * nss-resolve: return NOTFOUND instead of UNAVAIL on resolution errors.
+    This makes it possible to configure a fallback to "dns" without breaking
+    DNSSEC, with "resolve [!UNAVAIL=return] dns".
+  * libnss-resolve.postinst: Skip dns fallback if resolve is present.
+    Only fall back to "dns" if nss-resolve is not installed (for the
+    architecture of the calling program). Once it is, we never want to fall
+    back to "dns" as that breaks enforcing DNSSEC verification and also
+    pointlessly retries NXDOMAIN failures. (LP: #1624071)
+  * unit: sent change signal before removing the unit if necessary
+    (LP: #1632964)
+  * networkd: Fix assertion crash on adding VTI with IPv6 addresses
+    (LP: #1633274)
+  * debian/tests/upstream: Stop specifying initrd, it is autodetected now.
+  * debian/tests/upstream: Add gcc/libc-dev/make test dependencies,
+    so that the tests can build helper binaries.
+
+  [ Felipe Sateler ]
+  * Explicitly disable installing the upstream-provided PAM configuration.
+  * Register interest in the status of dracut and initramfs-tools in reportbug
+    template
+
+  [ Michael Biebl ]
+  * Stop creating systemd-update-utmp-runlevel.service symlinks manually
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 26 Oct 2016 13:24:37 +0200
+
 systemd (231-9) unstable; urgency=medium
 
   * pid1: process zero-length notification messages again.
