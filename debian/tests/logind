@@ -49,8 +49,8 @@ test_suspend_on_lid() {
     KILL_PID="$KILL_PID $!"
 
     # create fake suspend
-    U=$(systemctl cat systemd-suspend.service | sed '/^ExecStart=/ s_=.*$_=/bin/touch /run/suspend.flag_')
-    echo "$U" > /run/systemd/system/systemd-suspend.service
+    UNIT=$(systemctl show -pFragmentPath --value systemd-suspend.service)
+    sed '/^ExecStart=/ s_=.*$_=/bin/touch /run/suspend.flag_' $UNIT > /run/systemd/system/systemd-suspend.service
     sync
     systemctl daemon-reload
 
