@@ -2,6 +2,8 @@
 etc/systemd/journal-upload.conf
 lib/systemd/systemd-journal-upload
 lib/systemd/system/systemd-journal-upload.service
+usr/share/man/man5/journal-upload.conf.d.5
+usr/share/man/man5/journal-upload.conf.5
 
 # systemd-journal-remote
 etc/systemd/journal-remote.conf
