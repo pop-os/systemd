@@ -28,6 +28,7 @@ usr/bin/systemd-delta
 usr/bin/systemd-run
 usr/bin/systemd-path
 usr/bin/systemd-socket-activate
+usr/bin/systemd-mount
 usr/bin/kernel-install
 usr/bin/bootctl
 usr/bin/busctl
