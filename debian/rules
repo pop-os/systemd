@@ -256,6 +256,8 @@ override_dh_install:
 	# FIXME: generate proper sysusers.d/basic.conf for Debian, and add autopkgtest
 	rm -rf debian/install/*/usr/lib/sysusers.d/*
 	rm -f debian/install/*/lib/systemd/system/*sysusers*.service debian/install/*/lib/systemd/system/*/*sysusers*.service
+	# FIXME: package nss-systemd
+	rm -f debian/install/*/lib/*/libnss_systemd.so*
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
