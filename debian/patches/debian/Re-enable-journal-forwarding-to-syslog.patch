@@ -17,23 +17,23 @@ conf.d snippet.
  3 files changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index fef4fde..d9e126f 100644
+index 9daa964..e829d63 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -316,7 +316,7 @@
-         These options take boolean arguments. If forwarding to syslog
-         is enabled but nothing reads messages from the socket,
-         forwarding to syslog has no effect. By default, only
--        forwarding to wall is enabled. These settings may be
-+        forwarding to syslog and wall is enabled. These settings may be
-         overridden at boot time with the kernel command line options
-         <literal>systemd.journald.forward_to_syslog=</literal>,
-         <literal>systemd.journald.forward_to_kmsg=</literal>,
+@@ -306,7 +306,7 @@
+         the system console, or sent as wall messages to all logged-in users.  These
+         options take boolean arguments. If forwarding to syslog is enabled but nothing
+         reads messages from the socket, forwarding to syslog has no effect. By default,
+-        only forwarding to wall is enabled. These settings may be overridden at boot time
++        only forwarding to syslog and wall is enabled. These settings may be overridden at boot time
+         with the kernel command line options
+         <literal>systemd.journald.forward_to_syslog</literal>,
+         <literal>systemd.journald.forward_to_kmsg</literal>,
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index 587c343..a612e52 100644
+index 908c7b8..05217e6 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
-@@ -1738,6 +1738,7 @@ int server_init(Server *s) {
+@@ -1884,6 +1884,7 @@ int server_init(Server *s) {
          s->rate_limit_interval = DEFAULT_RATE_LIMIT_INTERVAL;
          s->rate_limit_burst = DEFAULT_RATE_LIMIT_BURST;
  

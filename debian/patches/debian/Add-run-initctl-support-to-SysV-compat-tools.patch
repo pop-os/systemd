@@ -11,10 +11,10 @@ as PID 1.
  1 file changed, 10 insertions(+), 5 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index 17fe10d..797a954 100644
+index dd3b931..15200ef 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
-@@ -7821,17 +7821,22 @@ static int talk_initctl(void) {
+@@ -7991,17 +7991,22 @@ static int talk_initctl(void) {
  
          request.runlevel = rl;
  

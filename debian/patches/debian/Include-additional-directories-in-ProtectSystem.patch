@@ -3,43 +3,32 @@ Date: Thu, 24 Jul 2014 19:38:07 +0200
 Subject: Include additional directories in ProtectSystem
 
 ---
- src/core/namespace.c | 12 +++++++++---
- 1 file changed, 9 insertions(+), 3 deletions(-)
+ src/core/namespace.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
 
 diff --git a/src/core/namespace.c b/src/core/namespace.c
-index 52a2505..d6f18a3 100644
+index 1195e9a..a8f4dc4 100644
 --- a/src/core/namespace.c
 +++ b/src/core/namespace.c
-@@ -386,7 +386,7 @@ int setup_namespace(
-                 strv_length(inaccessible_paths) +
-                 private_dev +
-                 (protect_home != PROTECT_HOME_NO ? 3 : 0) +
--                (protect_system != PROTECT_SYSTEM_NO ? 2 : 0) +
-+                (protect_system != PROTECT_SYSTEM_NO ? 6 : 0) +
-                 (protect_system == PROTECT_SYSTEM_FULL ? 1 : 0);
- 
-         if (n > 0) {
-@@ -439,15 +439,21 @@ int setup_namespace(
- 
-                 if (protect_system != PROTECT_SYSTEM_NO) {
-                         const char *usr_dir, *boot_dir, *etc_dir;
-+                        const char *bin_dir, *sbin_dir, *lib_dir, *lib64_dir;
- 
-                         usr_dir = prefix_roota(root_directory, "/usr");
-                         boot_dir = prefix_roota(root_directory, "/boot");
-                         boot_dir = strjoina("-", boot_dir);
-                         etc_dir = prefix_roota(root_directory, "/etc");
-+                        bin_dir = prefix_roota(root_directory, "/bin");
-+                        sbin_dir = prefix_roota(root_directory, "/sbin");
-+                        lib_dir = prefix_roota(root_directory, "/lib");
-+                        lib64_dir = prefix_roota(root_directory, "/lib64");
-+                        lib64_dir = strjoina("-", lib64_dir);
- 
-                         r = append_mounts(&m, protect_system == PROTECT_SYSTEM_FULL
--                                ? STRV_MAKE(usr_dir, boot_dir, etc_dir)
--                                : STRV_MAKE(usr_dir, boot_dir), READONLY);
-+                                ? STRV_MAKE(usr_dir, boot_dir, etc_dir, bin_dir, sbin_dir, lib_dir, lib64_dir)
-+                                : STRV_MAKE(usr_dir, boot_dir, bin_dir, sbin_dir, lib_dir, lib64_dir), READONLY);
-                         if (r < 0)
-                                 return r;
-                 }
+@@ -125,6 +125,10 @@ static const TargetMount protect_home_yes_table[] = {
+ /* ProtectSystem=yes table */
+ static const TargetMount protect_system_yes_table[] = {
+         { "/usr",       READONLY,       false },
++        { "/lib",       READONLY,       true },
++        { "/lib64",     READONLY,       true },
++        { "/bin",       READONLY,       true },
++        { "/sbin",      READONLY,       true },
+         { "/boot",      READONLY,       true  },
+         { "/efi",       READONLY,       true  },
+ };
+@@ -132,6 +136,10 @@ static const TargetMount protect_system_yes_table[] = {
+ /* ProtectSystem=full includes ProtectSystem=yes */
+ static const TargetMount protect_system_full_table[] = {
+         { "/usr",       READONLY,       false },
++        { "/lib",       READONLY,       true },
++        { "/lib64",     READONLY,       true },
++        { "/bin",       READONLY,       true },
++        { "/sbin",      READONLY,       true },
+         { "/boot",      READONLY,       true  },
+         { "/efi",       READONLY,       true  },
+         { "/etc",       READONLY,       false },

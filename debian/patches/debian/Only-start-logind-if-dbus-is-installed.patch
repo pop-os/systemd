@@ -11,7 +11,7 @@ Part of #772700
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-logind.service.in b/units/systemd-logind.service.in
-index bee08d0..6ea133e 100644
+index 0b6de35..d6adb34 100644
 --- a/units/systemd-logind.service.in
 +++ b/units/systemd-logind.service.in
 @@ -12,6 +12,7 @@ Documentation=http://www.freedesktop.org/wiki/Software/systemd/logind

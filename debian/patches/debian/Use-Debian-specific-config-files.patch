@@ -16,10 +16,10 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 158 insertions(+), 98 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 24e681b..983a87d 100644
+index fedff13..1946a4c 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1186,8 +1186,25 @@ int get_timezone(char **tz) {
+@@ -1284,8 +1284,25 @@ int get_timezone(char **tz) {
          int r;
  
          r = readlink_malloc("/etc/localtime", &t);
@@ -356,7 +356,7 @@ index a6bcd1a..50ab05e 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index ffec609..387d245 100644
+index 490929e..773239c 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -86,6 +86,7 @@ static int context_read_data(Context *c) {

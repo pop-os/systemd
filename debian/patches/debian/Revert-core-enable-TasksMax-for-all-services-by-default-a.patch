@@ -28,10 +28,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1578080
  2 files changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd-system.conf.xml b/man/systemd-system.conf.xml
-index 1bb40fd..7315531 100644
+index e4e81f7..9a27b8e 100644
 --- a/man/systemd-system.conf.xml
 +++ b/man/systemd-system.conf.xml
-@@ -328,8 +328,7 @@
+@@ -340,8 +340,7 @@
          <listitem><para>Configure the default value for the per-unit <varname>TasksMax=</varname> setting. See
          <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
          for details. This setting applies to all unit types that support resource control settings, with the exception
@@ -42,10 +42,10 @@ index 1bb40fd..7315531 100644
  
        <varlistentry>
 diff --git a/src/core/system.conf b/src/core/system.conf
-index c6bb050..0a0abb0 100644
+index 746572b..9662487 100644
 --- a/src/core/system.conf
 +++ b/src/core/system.conf
-@@ -42,7 +42,7 @@
+@@ -43,7 +43,7 @@
  #DefaultBlockIOAccounting=no
  #DefaultMemoryAccounting=no
  #DefaultTasksAccounting=yes
