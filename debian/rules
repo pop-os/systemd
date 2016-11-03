@@ -258,6 +258,8 @@ override_dh_install:
 	rm -f debian/install/*/lib/systemd/system/*sysusers*.service debian/install/*/lib/systemd/system/*/*sysusers*.service
 	# FIXME: package nss-systemd
 	rm -f debian/install/*/lib/*/libnss_systemd.so*
+	rm -f debian/install/*/usr/share/man/man8/libnss_systemd.so.2.8
+	rm -f debian/install/*/usr/share/man/man8/nss-systemd.8
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
