@@ -444,7 +444,9 @@ static int method_register_machine_internal(sd_bus_message *message, bool read_n
 
         r = cg_pid_get_unit(m->leader, &m->unit);
         if (r < 0) {
-                r = sd_bus_error_set_errnof(error, r, "Failed to determine unit of process "PID_FMT" : %s", m->leader, strerror(-r));
+                r = sd_bus_error_set_errnof(error, r,
+                                            "Failed to determine unit of process "PID_FMT" : %m",
+                                            m->leader);
                 goto fail;
         }
 
@@ -954,7 +956,7 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
         /* Create a temporary file we can dump information about deleted images into. We use a temporary file for this
          * instead of a pipe or so, since this might grow quit large in theory and we don't want to process this
          * continuously */
-        result_fd = open_tmpfile_unlinkable("/tmp/", O_RDWR|O_CLOEXEC);
+        result_fd = open_tmpfile_unlinkable(NULL, O_RDWR|O_CLOEXEC);
         if (result_fd < 0)
                 return -errno;
 

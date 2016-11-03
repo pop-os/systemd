@@ -121,8 +121,8 @@
         <replaceable>ADDRESS</replaceable>. This URL should refer to the
         root of a remote
         <citerefentry><refentrytitle>systemd-journal-gatewayd</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        instance (e.g. <ulink>http://some.host:19531/</ulink> or
-        <ulink>https://some.host:19531/</ulink>).</para></listitem>
+        instance, e.g. http://some.host:19531/ or
+        https://some.host:19531/.</para></listitem>
       </varlistentry>
     </variablelist>
 
@@ -250,20 +250,19 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--compress</option></term>
-        <term><option>--no-compress</option></term>
+        <term><option>--compress</option> [<replaceable>BOOL</replaceable>]</term>
 
-        <listitem><para>Compress or not, respectively, the data in the
-        journal using XZ.</para></listitem>
+        <listitem><para>If this is set to <literal>yes</literal> then compress
+        the data in the journal using XZ. The default is <literal>yes</literal>.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><option>--seal</option></term>
-        <term><option>--no-seal</option></term>
+        <term><option>--seal</option> [<replaceable>BOOL</replaceable>]</term>
 
-        <listitem><para>Periodically sign or not, respectively, the
-        data in the journal using Forward Secure Sealing.
-        </para></listitem>
+        <listitem><para>If this is set to <literal>yes</literal> then
+        periodically sign the data in the journal using Forward Secure Sealing.
+        The default is <literal>no</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>

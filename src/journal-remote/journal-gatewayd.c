@@ -19,9 +19,6 @@
 
 #include <fcntl.h>
 #include <getopt.h>
-#ifdef HAVE_GNUTLS
-#include <gnutls/gnutls.h>
-#endif
 #include <microhttpd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +45,7 @@
 static char *arg_key_pem = NULL;
 static char *arg_cert_pem = NULL;
 static char *arg_trust_pem = NULL;
+static char *arg_directory = NULL;
 
 typedef struct RequestMeta {
         sd_journal *journal;
@@ -118,7 +116,10 @@ static int open_journal(RequestMeta *m) {
         if (m->journal)
                 return 0;
 
-        return sd_journal_open(&m->journal, SD_JOURNAL_LOCAL_ONLY|SD_JOURNAL_SYSTEM);
+        if (arg_directory)
+                return sd_journal_open_directory(&m->journal, arg_directory, 0);
+        else
+                return sd_journal_open(&m->journal, SD_JOURNAL_LOCAL_ONLY|SD_JOURNAL_SYSTEM);
 }
 
 static int request_meta_ensure_tmp(RequestMeta *m) {
@@ -238,6 +239,9 @@ static ssize_t request_reader_entries(
 
                 m->size = (uint64_t) sz;
         }
+
+        if (m->tmp == NULL && m->follow)
+                return 0;
 
         if (fseeko(m->tmp, pos, SEEK_SET) < 0) {
                 log_error_errno(errno, "Failed to seek to position: %m");
@@ -471,20 +475,20 @@ static int request_handler_entries(
 
         r = open_journal(m);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to open journal: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to open journal: %m");
 
         if (request_parse_accept(m, connection) < 0)
-                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse Accept header.\n");
+                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse Accept header.");
 
         if (request_parse_range(m, connection) < 0)
-                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse Range header.\n");
+                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse Range header.");
 
         if (request_parse_arguments(m, connection) < 0)
-                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse URL arguments.\n");
+                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse URL arguments.");
 
         if (m->discrete) {
                 if (!m->cursor)
-                        return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Discrete seeks require a cursor specification.\n");
+                        return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Discrete seeks require a cursor specification.");
 
                 m->n_entries = 1;
                 m->n_entries_set = true;
@@ -497,7 +501,7 @@ static int request_handler_entries(
         else if (m->n_skip < 0)
                 r = sd_journal_seek_tail(m->journal);
         if (r < 0)
-                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to seek in journal.\n");
+                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to seek in journal.");
 
         response = MHD_create_response_from_callback(MHD_SIZE_UNKNOWN, 4*1024, request_reader_entries, m, NULL);
         if (!response)
@@ -629,14 +633,14 @@ static int request_handler_fields(
 
         r = open_journal(m);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to open journal: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to open journal: %m");
 
         if (request_parse_accept(m, connection) < 0)
-                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse Accept header.\n");
+                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to parse Accept header.");
 
         r = sd_journal_query_unique(m->journal, field);
         if (r < 0)
-                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to query unique fields.\n");
+                return mhd_respond(connection, MHD_HTTP_BAD_REQUEST, "Failed to query unique fields.");
 
         response = MHD_create_response_from_callback(MHD_SIZE_UNKNOWN, 4*1024, request_reader_fields, m, NULL);
         if (!response)
@@ -695,10 +699,10 @@ static int request_handler_file(
 
         fd = open(path, O_RDONLY|O_CLOEXEC);
         if (fd < 0)
-                return mhd_respondf(connection, MHD_HTTP_NOT_FOUND, "Failed to open file %s: %m\n", path);
+                return mhd_respondf(connection, errno, MHD_HTTP_NOT_FOUND, "Failed to open file %s: %m", path);
 
         if (fstat(fd, &st) < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to stat file: %m\n");
+                return mhd_respondf(connection, errno, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to stat file: %m");
 
         response = MHD_create_response_from_fd_at_offset64(st.st_size, fd, 0);
         if (!response)
@@ -762,15 +766,15 @@ static int request_handler_machine(
 
         r = open_journal(m);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to open journal: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to open journal: %m");
 
         r = sd_id128_get_machine(&mid);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine machine ID: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine machine ID: %m");
 
         r = sd_id128_get_boot(&bid);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine boot ID: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine boot ID: %m");
 
         hostname = gethostname_malloc();
         if (!hostname)
@@ -778,11 +782,11 @@ static int request_handler_machine(
 
         r = sd_journal_get_usage(m->journal, &usage);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %m");
 
         r = sd_journal_get_cutoff_realtime_usec(m->journal, &cutoff_from, &cutoff_to);
         if (r < 0)
-                return mhd_respondf(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %s\n", strerror(-r));
+                return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %m");
 
         if (parse_env_file("/etc/os-release", NEWLINE, "PRETTY_NAME", &os_name, NULL) == -ENOENT)
                 (void) parse_env_file("/usr/lib/os-release", NEWLINE, "PRETTY_NAME", &os_name, NULL);
@@ -840,8 +844,7 @@ static int request_handler(
         assert(method);
 
         if (!streq(method, "GET"))
-                return mhd_respond(connection, MHD_HTTP_NOT_ACCEPTABLE,
-                                   "Unsupported method.\n");
+                return mhd_respond(connection, MHD_HTTP_NOT_ACCEPTABLE, "Unsupported method.");
 
 
         if (!*connection_cls) {
@@ -871,7 +874,7 @@ static int request_handler(
         if (streq(url, "/machine"))
                 return request_handler_machine(connection, *connection_cls);
 
-        return mhd_respond(connection, MHD_HTTP_NOT_FOUND, "Not found.\n");
+        return mhd_respond(connection, MHD_HTTP_NOT_FOUND, "Not found.");
 }
 
 static void help(void) {
@@ -881,7 +884,8 @@ static void help(void) {
                "     --version        Show package version\n"
                "     --cert=CERT.PEM  Server certificate in PEM format\n"
                "     --key=KEY.PEM    Server key in PEM format\n"
-               "     --trust=CERT.PEM Certificat authority certificate in PEM format\n",
+               "     --trust=CERT.PEM Certificate authority certificate in PEM format\n"
+               "  -D --directory=PATH Serve journal files in directory\n",
                program_invocation_short_name);
 }
 
@@ -896,11 +900,12 @@ static int parse_argv(int argc, char *argv[]) {
         int r, c;
 
         static const struct option options[] = {
-                { "help",    no_argument,       NULL, 'h'         },
-                { "version", no_argument,       NULL, ARG_VERSION },
-                { "key",     required_argument, NULL, ARG_KEY     },
-                { "cert",    required_argument, NULL, ARG_CERT    },
-                { "trust",   required_argument, NULL, ARG_TRUST   },
+                { "help",      no_argument,       NULL, 'h'           },
+                { "version",   no_argument,       NULL, ARG_VERSION   },
+                { "key",       required_argument, NULL, ARG_KEY       },
+                { "cert",      required_argument, NULL, ARG_CERT      },
+                { "trust",     required_argument, NULL, ARG_TRUST     },
+                { "directory", required_argument, NULL, 'D' },
                 {}
         };
 
@@ -954,6 +959,9 @@ static int parse_argv(int argc, char *argv[]) {
 #else
                         log_error("Option --trust is not available.");
 #endif
+                case 'D':
+                        arg_directory = optarg;
+                        break;
 
                 case '?':
                         return -EINVAL;

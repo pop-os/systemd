@@ -156,6 +156,10 @@
 
           <para>To list all units installed in the file system, use the
           <command>list-unit-files</command> command instead.</para>
+
+          <para>When listing units with <command>list-dependencies</command>, recursively show
+          dependencies of all dependent units (by default only dependencies of target units are
+          shown).</para>
         </listitem>
       </varlistentry>
 
@@ -229,6 +233,8 @@
           of <command>status</command>, <command>list-units</command>,
           <command>list-jobs</command>, and
           <command>list-timers</command>.</para>
+          <para>Also, show installation targets in the output of
+          <command>is-enabled</command>.</para>
         </listitem>
       </varlistentry>
 
@@ -302,7 +308,7 @@
         <para><literal>ignore-requirements</literal> is similar to
         <literal>ignore-dependencies</literal>, but only causes the
         requirement dependencies to be ignored, the ordering
-        dependencies will still be honoured.</para>
+        dependencies will still be honored.</para>
         </listitem>
 
       </varlistentry>
@@ -359,7 +365,20 @@
           to finish. If this is not specified, the job will be
           verified, enqueued and <command>systemctl</command> will
           wait until the unit's start-up is completed. By passing this
-          argument, it is only verified and enqueued.</para>
+          argument, it is only verified and enqueued. This option may not be
+          combined with <option>--wait</option>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--wait</option></term>
+
+        <listitem>
+          <para>Synchronously wait for started units to terminate again.
+          This option may not be combined with <option>--no-block</option>.
+          Note that this will wait forever if any given unit never terminates
+          (by itself or by getting stopped explicitly); particularly services
+          which use <literal>RemainAfterExit=yes</literal>.</para>
         </listitem>
       </varlistentry>
 
@@ -527,8 +546,10 @@
         <listitem>
           <para>When used with
           <command>enable</command>/<command>disable</command>/<command>is-enabled</command>
-          (and related commands), use an alternate root path when
-          looking for unit files.</para>
+          (and related commands), use the specified root path when looking for unit
+          files. If this option is present, <command>systemctl</command> will operate on
+          the file system directly, instead of communicating with the <command>systemd</command>
+          daemon to carry out changes.</para>
         </listitem>
 
       </varlistentry>
@@ -609,7 +630,7 @@
 
         <listitem>
           <para>When used with <command>list-dependencies</command>,
-          <command>list-units</command> or <command>list-machines</command>, the
+          <command>list-units</command> or <command>list-machines</command>,
           the output is printed as a list instead of a tree, and the bullet
           circles are omitted.</para>
         </listitem>
@@ -638,13 +659,13 @@
           <term><command>list-units <optional><replaceable>PATTERN</replaceable>...</optional></command></term>
 
           <listitem>
-            <para>List units that <command>systemd</command> has loaded. This includes units that
-            are either referenced directly or through a dependency, or units that were active in the
-            past and have failed. By default only units which are active, have pending jobs, or have
-            failed are shown; this can be changed with option <option>--all</option>. If one or more
-            <replaceable>PATTERN</replaceable>s are specified, only units matching one of them are
-            shown. The units that are shown are additionally filtered by <option>--type=</option>
-            and <option>--state=</option> if those options are specified.</para>
+            <para>List units that <command>systemd</command> currently has in memory. This includes units that are
+            either referenced directly or through a dependency, units that are pinned by applications programmatically,
+            or units that were active in the past and have failed. By default only units which are active, have pending
+            jobs, or have failed are shown; this can be changed with option <option>--all</option>. If one or more
+            <replaceable>PATTERN</replaceable>s are specified, only units matching one of them are shown. The units
+            that are shown are additionally filtered by <option>--type=</option> and <option>--state=</option> if those
+            options are specified.</para>
 
             <para>This is the default command.</para>
           </listitem>
@@ -654,9 +675,8 @@
           <term><command>list-sockets <optional><replaceable>PATTERN</replaceable>...</optional></command></term>
 
           <listitem>
-            <para>List socket units ordered by listening address.
-            If one or more <replaceable>PATTERN</replaceable>s are
-            specified, only socket units matching one of them are
+            <para>List socket units currently in memory, ordered by listening address.  If one or more
+            <replaceable>PATTERN</replaceable>s are specified, only socket units matching one of them are
             shown. Produces output similar to
             <programlisting>
 LISTEN           UNIT                        ACTIVATES
@@ -670,8 +690,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             is not suitable for programmatic consumption.
             </para>
 
-            <para>See also the options <option>--show-types</option>,
-            <option>--all</option>, and <option>--state=</option>.</para>
+            <para>Also see <option>--show-types</option>, <option>--all</option>, and <option>--state=</option>.</para>
           </listitem>
         </varlistentry>
 
@@ -679,13 +698,11 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           <term><command>list-timers <optional><replaceable>PATTERN</replaceable>...</optional></command></term>
 
           <listitem>
-            <para>List timer units ordered by the time they elapse
-            next. If one or more <replaceable>PATTERN</replaceable>s
-            are specified, only units matching one of them are shown.
+            <para>List timer units currently in memory, ordered by the time they elapse next. If one or more
+            <replaceable>PATTERN</replaceable>s are specified, only units matching one of them are shown.
             </para>
 
-            <para>See also the options <option>--all</option> and
-            <option>--state=</option>.</para>
+            <para>Also see <option>--all</option> and <option>--state=</option>.</para>
           </listitem>
         </varlistentry>
 
@@ -696,8 +713,8 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <para>Start (activate) one or more units specified on the
             command line.</para>
 
-            <para>Note that glob patterns operate on the set of primary names of currently loaded units. Units which
-            are not active and are not in a failed state usually are not loaded, and will not be matched by any
+            <para>Note that glob patterns operate on the set of primary names of units currently in memory. Units which
+            are not active and are not in a failed state usually are not in memory, and will not be matched by any
             pattern. In addition, in case of instantiated units, systemd is often unaware of the instance name until
             the instance has been started. Therefore, using glob patterns with <command>start</command> has limited
             usefulness. Also, secondary alias names of units are not considered.</para>
@@ -860,8 +877,8 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <para>Show properties of one or more units, jobs, or the
             manager itself. If no argument is specified, properties of
             the manager will be shown. If a unit name is specified,
-            properties of the unit is shown, and if a job ID is
-            specified, properties of the job is shown. By default, empty
+            properties of the unit are shown, and if a job ID is
+            specified, properties of the job are shown. By default, empty
             properties are suppressed. Use <option>--all</option> to
             show those too. To select specific properties to show, use
             <option>--property=</option>. This command is intended to be
@@ -877,7 +894,11 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <para>Show backing files of one or more units. Prints the
             "fragment" and "drop-ins" (source files) of units. Each
             file is preceded by a comment which includes the file
-            name.</para>
+            name. Note that this shows the contents of the backing files
+            on disk, which may not match the system manager's
+            understanding of these units if any unit files were
+            updated on disk and the <command>daemon-reload</command>
+            command wasn't issued since.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -993,7 +1014,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             desired, combine this command with the <option>--now</option> switch, or invoke <command>start</command>
             with appropriate arguments later. Note that in case of unit instance enablement (i.e. enablement of units of
             the form <filename>foo@bar.service</filename>), symlinks named the same as instances are created in the
-            unit configuration diectory, however they point to the single template unit file they are instantiated
+            unit configuration directory, however they point to the single template unit file they are instantiated
             from.</para>
 
             <para>This command expects either valid unit names (in which case various unit file directories are
@@ -1069,8 +1090,8 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           <listitem>
             <para>Reenable one or more units, as specified on the command line. This is a combination of
             <command>disable</command> and <command>enable</command> and is useful to reset the symlinks a unit file is
-            enabled with to the defaults configured in its <literal>[Install]</literal> section. This commands expects
-            a unit uname only, it does not accept paths to unit files.</para>
+            enabled with to the defaults configured in its <literal>[Install]</literal> section. This command expects
+            a unit name only, it does not accept paths to unit files.</para>
           </listitem>
         </varlistentry>
 
@@ -1088,7 +1109,8 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             enabled and disabled, or only enabled, or only disabled.</para>
 
             <para>If the unit carries no install information, it will be silently ignored
-            by this command.</para>
+            by this command. <replaceable>NAME</replaceable> must be the real unit name,
+            any alias names are ignored silently.</para>
 
             <para>For more information on the preset policy format, see
             <citerefentry><refentrytitle>systemd.preset</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
@@ -1120,6 +1142,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             exit code of 0 if at least one is enabled, non-zero
             otherwise. Prints the current enable status (see table).
             To suppress this output, use <option>--quiet</option>.
+            To show installation targets, use <option>--full</option>.
             </para>
 
             <table>
@@ -1242,7 +1265,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
             <literal>foo.service.d/</literal> with all their contained files are removed, both below the persistent and
             runtime configuration directories (i.e. below <filename>/etc/systemd/system</filename> and
             <filename>/run/systemd/system</filename>); if the unit file has a vendor-supplied version (i.e. a unit file
-            located below <filename>/usr</filename>) any matching peristent or runtime unit file that overrides it is
+            located below <filename>/usr</filename>) any matching persistent or runtime unit file that overrides it is
             removed, too. Note that if a unit file has no vendor-supplied version (i.e. is only defined below
             <filename>/etc/systemd/system</filename> or <filename>/run/systemd/system</filename>, but not in a unit
             file stored below <filename>/usr</filename>), then it is not removed. Also, if a unit is masked, it is
@@ -1676,20 +1699,15 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
           <term><command>switch-root <replaceable>ROOT</replaceable> <optional><replaceable>INIT</replaceable></optional></command></term>
 
           <listitem>
-            <para>Switches to a different root directory and executes a
-            new system manager process below it. This is intended for
-            usage in initial RAM disks ("initrd"), and will transition
-            from the initrd's system manager process (a.k.a. "init"
-            process) to the main system manager process. This call takes two
-            arguments: the directory that is to become the new root directory, and
-            the path to the new system manager binary below it to
-            execute as PID 1. If the latter is omitted or the empty
-            string, a systemd binary will automatically be searched for
-            and used as init. If the system manager path is omitted or
-            equal to the empty string, the state of the initrd's system
-            manager process is passed to the main system manager, which
-            allows later introspection of the state of the services
-            involved in the initrd boot.</para>
+            <para>Switches to a different root directory and executes a new system manager process below it. This is
+            intended for usage in initial RAM disks ("initrd"), and will transition from the initrd's system manager
+            process (a.k.a. "init" process) to the main system manager process which is loaded from the actual host
+            volume. This call takes two arguments: the directory that is to become the new root directory, and the path
+            to the new system manager binary below it to execute as PID 1. If the latter is omitted or the empty
+            string, a systemd binary will automatically be searched for and used as init. If the system manager path is
+            omitted, equal to the empty string or identical to the path to the systemd binary, the state of the
+            initrd's system manager process is passed to the main system manager, which allows later introspection of
+            the state of the services involved in the initrd boot phase.</para>
           </listitem>
         </varlistentry>
 
@@ -1746,7 +1764,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
       are equivalent to:
       <programlisting># systemctl status dev-sda.device
 # systemctl status home.mount</programlisting>
-      In the second case, shell-style globs will be matched against the primary names of all currently loaded units;
+      In the second case, shell-style globs will be matched against the primary names of all units currently in memory;
       literal unit names, with or without a suffix, will be treated as in the first case. This means that literal unit
       names always refer to exactly one unit, but globs may match zero units and this is not considered an
       error.</para>
@@ -1758,11 +1776,11 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
       <literal>[]</literal> may be used. See
       <citerefentry project='man-pages'><refentrytitle>glob</refentrytitle><manvolnum>7</manvolnum></citerefentry>
       for more details. The patterns are matched against the primary names of
-      currently loaded units, and patterns which do not match anything
+      units currently in memory, and patterns which do not match anything
       are silently skipped. For example:
       <programlisting># systemctl stop sshd@*.service</programlisting>
       will stop all <filename>sshd@.service</filename> instances. Note that alias names of units, and units that aren't
-      loaded are not considered for glob expansion.
+      in memory are not considered for glob expansion.
       </para>
 
       <para>For unit file commands, the specified <replaceable>NAME</replaceable> should be the name of the unit file
@@ -1804,6 +1822,7 @@ kobject-uevent 1 systemd-udevd-kernel.socket systemd-udevd.service
     </variablelist>
     <xi:include href="less-variables.xml" xpointer="pager"/>
     <xi:include href="less-variables.xml" xpointer="less"/>
+    <xi:include href="less-variables.xml" xpointer="lesscharset"/>
   </refsect1>
 
   <refsect1>

@@ -29,7 +29,7 @@ typedef struct UnitRef UnitRef;
 typedef struct UnitStatusMessageFormats UnitStatusMessageFormats;
 
 #include "condition.h"
-#include "failure-action.h"
+#include "emergency-action.h"
 #include "install.h"
 #include "list.h"
 #include "unit-name.h"
@@ -108,9 +108,13 @@ struct Unit {
         /* The slot used for watching NameOwnerChanged signals */
         sd_bus_slot *match_bus_slot;
 
+        /* References to this unit from clients */
+        sd_bus_track *bus_track;
+        char **deserialized_refs;
+
         /* Job timeout and action to take */
         usec_t job_timeout;
-        FailureAction job_timeout_action;
+        EmergencyAction job_timeout_action;
         char *job_timeout_reboot_arg;
 
         /* References to this */
@@ -174,18 +178,23 @@ struct Unit {
 
         /* Put a ratelimit on unit starting */
         RateLimit start_limit;
-        FailureAction start_limit_action;
+        EmergencyAction start_limit_action;
         char *reboot_arg;
 
         /* Make sure we never enter endless loops with the check unneeded logic, or the BindsTo= logic */
         RateLimit auto_stop_ratelimit;
 
+        /* Reference to a specific UID/GID */
+        uid_t ref_uid;
+        gid_t ref_gid;
+
         /* Cached unit file state and preset */
         UnitFileState unit_file_state;
         int unit_file_preset;
 
-        /* Where the cpuacct.usage cgroup counter was at the time the unit was started */
-        nsec_t cpuacct_usage_base;
+        /* Where the cpu.stat or cpuacct.usage was at the time the unit was started */
+        nsec_t cpu_usage_base;
+        nsec_t cpu_usage_last; /* the most recently read value */
 
         /* Counterparts in the cgroup filesystem */
         char *cgroup_path;
@@ -195,10 +204,12 @@ struct Unit {
         CGroupMask cgroup_members_mask;
         int cgroup_inotify_wd;
 
-        uint32_t cgroup_netclass_id;
-
         /* How to start OnFailure units */
         JobMode on_failure_job_mode;
+
+        /* The current invocation ID */
+        sd_id128_t invocation_id;
+        char invocation_id_string[SD_ID128_STRING_MAX]; /* useful when logging */
 
         /* Garbage collect us we nobody wants or requires us anymore */
         bool stop_when_unneeded;
@@ -225,6 +236,9 @@ struct Unit {
         /* Is this a transient unit? */
         bool transient;
 
+        /* Is this a unit that is always running and cannot be stopped? */
+        bool perpetual;
+
         bool in_load_queue:1;
         bool in_dbus_queue:1;
         bool in_cleanup_queue:1;
@@ -232,8 +246,6 @@ struct Unit {
         bool in_cgroup_queue:1;
 
         bool sent_dbus_new_signal:1;
-
-        bool no_gc:1;
 
         bool in_audit:1;
 
@@ -245,6 +257,9 @@ struct Unit {
 
         /* Did we already invoke unit_coldplug() for this unit? */
         bool coldplugged:1;
+
+        /* For transient units: whether to add a bus track reference after creating the unit */
+        bool bus_track_add:1;
 };
 
 struct UnitStatusMessageFormats {
@@ -290,6 +305,10 @@ struct UnitVTable {
          * pointer to ExecRuntime is found, if the unit type has
          * that */
         size_t exec_runtime_offset;
+
+        /* If greater than 0, the offset into the object where the pointer to DynamicCreds is found, if the unit type
+         * has that. */
+        size_t dynamic_creds_offset;
 
         /* The name of the configuration file section with the private settings of this unit */
         const char *private_section;
@@ -354,7 +373,7 @@ struct UnitVTable {
 
         /* When the unit is not running and no job for it queued we
          * shall release its runtime resources */
-        void (*release_resources)(Unit *u);
+        void (*release_resources)(Unit *u, bool inactive);
 
         /* Invoked on every child that died */
         void (*sigchld_event)(Unit *u, pid_t pid, int code, int status);
@@ -369,8 +388,7 @@ struct UnitVTable {
         /* Called whenever a process of this unit sends us a message */
         void (*notify_message)(Unit *u, pid_t pid, char **tags, FDSet *fds);
 
-        /* Called whenever a name this Unit registered for comes or
-         * goes away. */
+        /* Called whenever a name this Unit registered for comes or goes away. */
         void (*bus_name_owner_change)(Unit *u, const char *name, const char *old_owner, const char *new_owner);
 
         /* Called for each property that is being set */
@@ -463,6 +481,7 @@ DEFINE_CAST(SCOPE, Scope);
 Unit *unit_new(Manager *m, size_t size);
 void unit_free(Unit *u);
 
+int unit_new_for_name(Manager *m, size_t size, const char *name, Unit **ret);
 int unit_add_name(Unit *u, const char *name);
 
 int unit_add_dependency(Unit *u, UnitDependency d, Unit *other, bool add_reference);
@@ -507,6 +526,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix);
 
 bool unit_can_reload(Unit *u) _pure_;
 bool unit_can_start(Unit *u) _pure_;
+bool unit_can_stop(Unit *u) _pure_;
 bool unit_can_isolate(Unit *u) _pure_;
 
 int unit_start(Unit *u);
@@ -533,6 +553,7 @@ bool unit_job_is_applicable(Unit *u, JobType j);
 int set_unit_path(const char *p);
 
 char *unit_dbus_path(Unit *u);
+char *unit_dbus_path_invocation_id(Unit *u);
 
 int unit_load_related_unit(Unit *u, const char *type, Unit **_found);
 
@@ -589,6 +610,7 @@ CGroupContext *unit_get_cgroup_context(Unit *u) _pure_;
 ExecRuntime *unit_get_exec_runtime(Unit *u) _pure_;
 
 int unit_setup_exec_runtime(Unit *u);
+int unit_setup_dynamic_creds(Unit *u);
 
 int unit_write_drop_in(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *data);
 int unit_write_drop_in_format(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *format, ...) _printf_(4,5);
@@ -618,12 +640,26 @@ int unit_fail_if_symlink(Unit *u, const char* where);
 
 int unit_start_limit_test(Unit *u);
 
+void unit_unref_uid(Unit *u, bool destroy_now);
+int unit_ref_uid(Unit *u, uid_t uid, bool clean_ipc);
+
+void unit_unref_gid(Unit *u, bool destroy_now);
+int unit_ref_gid(Unit *u, gid_t gid, bool clean_ipc);
+
+int unit_ref_uid_gid(Unit *u, uid_t uid, gid_t gid);
+void unit_unref_uid_gid(Unit *u, bool destroy_now);
+
+void unit_notify_user_lookup(Unit *u, uid_t uid, gid_t gid);
+
+int unit_set_invocation_id(Unit *u, sd_id128_t id);
+int unit_acquire_invocation_id(Unit *u);
+
 /* Macros which append UNIT= or USER_UNIT= to the message */
 
 #define log_unit_full(unit, level, error, ...)                          \
         ({                                                              \
-                Unit *_u = (unit);                                      \
-                _u ? log_object_internal(level, error, __FILE__, __LINE__, __func__, _u->manager->unit_log_field, _u->id, ##__VA_ARGS__) : \
+                const Unit *_u = (unit);                                \
+                _u ? log_object_internal(level, error, __FILE__, __LINE__, __func__, _u->manager->unit_log_field, _u->id, _u->manager->invocation_log_field, _u->invocation_id_string, ##__VA_ARGS__) : \
                         log_internal(level, error, __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
         })
 

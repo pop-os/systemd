@@ -81,6 +81,7 @@ struct Manager {
 
         /* Active jobs and units */
         Hashmap *units;  /* name string => Unit object n:1 */
+        Hashmap *units_by_invocation_id;
         Hashmap *jobs;   /* job id => Job object 1:1 */
 
         /* To make it easy to iterate through the units of a specific
@@ -142,6 +143,9 @@ struct Manager {
         sd_event_source *time_change_event_source;
 
         sd_event_source *jobs_in_progress_event_source;
+
+        int user_lookup_fds[2];
+        sd_event_source *user_lookup_event_source;
 
         UnitFileScope unit_file_scope;
         LookupPaths lookup_paths;
@@ -234,7 +238,6 @@ struct Manager {
         bool dispatching_dbus_queue:1;
 
         bool taint_usr:1;
-
         bool test_run:1;
 
         /* If non-zero, exit with the following value when the systemd
@@ -292,17 +295,25 @@ struct Manager {
          * value where Unit objects are contained. */
         Hashmap *units_requiring_mounts_for;
 
-        /* Reference to the kdbus bus control fd */
-        int kdbus_fd;
-
         /* Used for processing polkit authorization responses */
         Hashmap *polkit_registry;
 
-        /* When the user hits C-A-D more than 7 times per 2s, reboot immediately... */
+        /* Dynamic users/groups, indexed by their name */
+        Hashmap *dynamic_users;
+
+        /* Keep track of all UIDs and GIDs any of our services currently use. This is useful for the RemoveIPC= logic. */
+        Hashmap *uid_refs;
+        Hashmap *gid_refs;
+
+        /* When the user hits C-A-D more than 7 times per 2s, do something immediately... */
         RateLimit ctrl_alt_del_ratelimit;
+        EmergencyAction cad_burst_action;
 
         const char *unit_log_field;
         const char *unit_log_format_string;
+
+        const char *invocation_log_field;
+        const char *invocation_log_format_string;
 
         int first_boot; /* tri-state */
 };
@@ -374,6 +385,21 @@ const char *manager_get_runtime_prefix(Manager *m);
 ManagerState manager_state(Manager *m);
 
 int manager_update_failed_units(Manager *m, Unit *u, bool failed);
+
+void manager_unref_uid(Manager *m, uid_t uid, bool destroy_now);
+int manager_ref_uid(Manager *m, uid_t uid, bool clean_ipc);
+
+void manager_unref_gid(Manager *m, gid_t gid, bool destroy_now);
+int manager_ref_gid(Manager *m, gid_t gid, bool destroy_now);
+
+void manager_vacuum_uid_refs(Manager *m);
+void manager_vacuum_gid_refs(Manager *m);
+
+void manager_serialize_uid_refs(Manager *m, FILE *f);
+void manager_deserialize_uid_refs_one(Manager *m, const char *value);
+
+void manager_serialize_gid_refs(Manager *m, FILE *f);
+void manager_deserialize_gid_refs_one(Manager *m, const char *value);
 
 const char *manager_state_to_string(ManagerState m) _const_;
 ManagerState manager_state_from_string(const char *s) _pure_;

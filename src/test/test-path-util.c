@@ -114,7 +114,8 @@ static void test_find_binary(const char *self) {
 
         assert_se(find_binary(self, &p) == 0);
         puts(p);
-        assert_se(endswith(p, "/lt-test-path-util"));
+        /* libtool might prefix the binary name with "lt-" */
+        assert_se(endswith(p, "/lt-test-path-util") || endswith(p, "/test-path-util"));
         assert_se(path_is_absolute(p));
         free(p);
 
@@ -262,16 +263,37 @@ static void test_strv_resolve(void) {
 }
 
 static void test_path_startswith(void) {
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo/"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "////"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo//bar/////barfoo///"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo/bar/barfoo////"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo/bar///barfoo/"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo////bar/barfoo/"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "////foo/bar/barfoo/"));
-        assert_se(path_startswith("/foo/bar/barfoo/", "/foo/bar/barfoo"));
+        const char *p;
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo");
+        assert_se(streq_ptr(p, "bar/barfoo/"));
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo/");
+        assert_se(streq_ptr(p, "bar/barfoo/"));
+
+        p = path_startswith("/foo/bar/barfoo/", "/");
+        assert_se(streq_ptr(p, "foo/bar/barfoo/"));
+
+        p = path_startswith("/foo/bar/barfoo/", "////");
+        assert_se(streq_ptr(p, "foo/bar/barfoo/"));
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo//bar/////barfoo///");
+        assert_se(streq_ptr(p, ""));
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo/bar/barfoo////");
+        assert_se(streq_ptr(p, ""));
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo/bar///barfoo/");
+        assert_se(streq_ptr(p, ""));
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo////bar/barfoo/");
+        assert_se(streq_ptr(p, ""));
+
+        p = path_startswith("/foo/bar/barfoo/", "////foo/bar/barfoo/");
+        assert_se(streq_ptr(p, ""));
+
+        p = path_startswith("/foo/bar/barfoo/", "/foo/bar/barfoo");
+        assert_se(streq_ptr(p, ""));
 
         assert_se(!path_startswith("/foo/bar/barfoo/", "/foo/bar/barfooa/"));
         assert_se(!path_startswith("/foo/bar/barfoo/", "/foo/bar/barfooa"));
@@ -510,7 +532,24 @@ static void test_hidden_or_backup_file(void) {
         assert_se(!hidden_or_backup_file("test.dpkg-old.foo"));
 }
 
+static void test_systemd_installation_has_version(const char *path) {
+        int r;
+        const unsigned versions[] = {0, 231, atoi(PACKAGE_VERSION), 999};
+        unsigned i;
+
+        for (i = 0; i < ELEMENTSOF(versions); i++) {
+                r = systemd_installation_has_version(path, versions[i]);
+                assert_se(r >= 0);
+                log_info("%s has systemd >= %u: %s",
+                         path ?: "Current installation", versions[i], yes_no(r));
+        }
+}
+
 int main(int argc, char **argv) {
+        log_set_max_level(LOG_DEBUG);
+        log_parse_environment();
+        log_open();
+
         test_path();
         test_find_binary(argv[0]);
         test_prefixes();
@@ -524,6 +563,8 @@ int main(int argc, char **argv) {
         test_file_in_same_dir();
         test_filename_is_valid();
         test_hidden_or_backup_file();
+
+        test_systemd_installation_has_version(argv[1]); /* NULL is OK */
 
         return 0;
 }

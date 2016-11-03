@@ -23,6 +23,7 @@
 
 #define BUS_ERROR_NO_SUCH_UNIT "org.freedesktop.systemd1.NoSuchUnit"
 #define BUS_ERROR_NO_UNIT_FOR_PID "org.freedesktop.systemd1.NoUnitForPID"
+#define BUS_ERROR_NO_UNIT_FOR_INVOCATION_ID "org.freedesktop.systemd1.NoUnitForInvocationID"
 #define BUS_ERROR_UNIT_EXISTS "org.freedesktop.systemd1.UnitExists"
 #define BUS_ERROR_LOAD_FAILED "org.freedesktop.systemd1.LoadFailed"
 #define BUS_ERROR_JOB_FAILED "org.freedesktop.systemd1.JobFailed"
@@ -40,6 +41,8 @@
 #define BUS_ERROR_NO_ISOLATION "org.freedesktop.systemd1.NoIsolation"
 #define BUS_ERROR_SHUTTING_DOWN "org.freedesktop.systemd1.ShuttingDown"
 #define BUS_ERROR_SCOPE_NOT_RUNNING "org.freedesktop.systemd1.ScopeNotRunning"
+#define BUS_ERROR_NO_SUCH_DYNAMIC_USER "org.freedesktop.systemd1.NoSuchDynamicUser"
+#define BUS_ERROR_NOT_REFERENCED "org.freedesktop.systemd1.NotReferenced"
 
 #define BUS_ERROR_NO_SUCH_MACHINE "org.freedesktop.machine1.NoSuchMachine"
 #define BUS_ERROR_NO_SUCH_IMAGE "org.freedesktop.machine1.NoSuchImage"

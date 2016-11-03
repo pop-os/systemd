@@ -144,61 +144,69 @@
     <option>false</option> and <option>off</option> are
     equivalent.</para>
 
-    <para>Time span values encoded in unit files can be written in
-    various formats. A stand-alone number specifies a time in seconds.
-    If suffixed with a time unit, the unit is honored. A concatenation
-    of multiple values with units is supported, in which case the
-    values are added up. Example: "50" refers to 50 seconds; "2min
-    200ms" refers to 2 minutes plus 200 milliseconds, i.e. 120200ms.
-    The following time units are understood: s, min, h, d, w, ms, us.
-    For details see
+    <para>Time span values encoded in unit files can be written in various formats. A stand-alone
+    number specifies a time in seconds.  If suffixed with a time unit, the unit is honored. A
+    concatenation of multiple values with units is supported, in which case the values are added
+    up. Example: <literal>50</literal> refers to 50 seconds; <literal>2min 200ms</literal> refers to
+    2 minutes and 200 milliseconds, i.e. 120200 ms.  The following time units are understood:
+    <literal>s</literal>, <literal>min</literal>, <literal>h</literal>, <literal>d</literal>,
+    <literal>w</literal>, <literal>ms</literal>, <literal>us</literal>.  For details see
     <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>.</para>
 
-    <para>Empty lines and lines starting with # or ; are
-    ignored. This may be used for commenting. Lines ending
-    in a backslash are concatenated with the following
-    line while reading and the backslash is replaced by a
-    space character. This may be used to wrap long lines.</para>
+    <para>Empty lines and lines starting with <literal>#</literal> or <literal>;</literal> are
+    ignored. This may be used for commenting. Lines ending in a backslash are concatenated with the
+    following line while reading and the backslash is replaced by a space character. This may be
+    used to wrap long lines.</para>
 
-    <para>Along with a unit file <filename>foo.service</filename>, the
-    directory <filename>foo.service.wants/</filename> may exist. All
-    unit files symlinked from such a directory are implicitly added as
-    dependencies of type <varname>Wants=</varname> to the unit. This
-    is useful to hook units into the start-up of other units, without
-    having to modify their unit files. For details about the semantics
-    of <varname>Wants=</varname>, see below. The preferred way to
-    create symlinks in the <filename>.wants/</filename> directory of a
-    unit file is with the <command>enable</command> command of the
+    <para>Units can be aliased (have an alternative name), by creating a symlink from the new name
+    to the existing name in one of the unit search paths. For example,
+    <filename>systemd-networkd.service</filename> has the alias
+    <filename>dbus-org.freedesktop.network1.service</filename>, created during installation as the
+    symlink <filename>/usr/lib/systemd/system/dbus-org.freedesktop.network1.service</filename>. In
+    addition, unit files may specify aliases through the <varname>Alias=</varname> directive in the
+    [Install] section; those aliases are only effective when the unit is enabled. When the unit is
+    enabled, symlinks will be created for those names, and removed when the unit is disabled. For
+    example, <filename>reboot.target</filename> specifies
+    <varname>Alias=ctrl-alt-del.target</varname>, so when enabled it will be invoked whenever
+    CTRL+ALT+DEL is pressed. Alias names may be used in commands like <command>enable</command>,
+    <command>disable</command>, <command>start</command>, <command>stop</command>,
+    <command>status</command>, …, and in unit dependency directives <varname>Wants=</varname>,
+    <varname>Requires=</varname>, <varname>Before=</varname>, <varname>After=</varname>, …, with the
+    limitation that aliases specified through <varname>Alias=</varname> are only effective when the
+    unit is enabled. Aliases cannot be used with the <command>preset</command> command.</para>
+
+    <para>Along with a unit file <filename>foo.service</filename>, the directory
+    <filename>foo.service.wants/</filename> may exist. All unit files symlinked from such a
+    directory are implicitly added as dependencies of type <varname>Wants=</varname> to the unit.
+    This is useful to hook units into the start-up of other units, without having to modify their
+    unit files. For details about the semantics of <varname>Wants=</varname>, see below. The
+    preferred way to create symlinks in the <filename>.wants/</filename> directory of a unit file is
+    with the <command>enable</command> command of the
     <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
-    tool which reads information from the [Install] section of unit
-    files (see below). A similar functionality exists for
-    <varname>Requires=</varname> type dependencies as well, the
-    directory suffix is <filename>.requires/</filename> in this
-    case.</para>
+    tool which reads information from the [Install] section of unit files (see below). A similar
+    functionality exists for <varname>Requires=</varname> type dependencies as well, the directory
+    suffix is <filename>.requires/</filename> in this case.</para>
 
     <para>Along with a unit file <filename>foo.service</filename>, a "drop-in" directory
-    <filename>foo.service.d/</filename> may exist. All files with the suffix <literal>.conf</literal> from this
-    directory will be parsed after the file itself is parsed. This is useful to alter or add configuration settings for
-    a unit, without having to modify unit files. Each drop-in file must have appropriate section headers. Note that for
-    instantiated units, this logic will first look for the instance <literal>.d/</literal> subdirectory and read its
-    <literal>.conf</literal> files, followed by the template <literal>.d/</literal> subdirectory and the
-    <literal>.conf</literal> files there. Also note that settings from the <literal>[Install]</literal> section are not
-    honoured in drop-in unit files, and have no effect.</para>
+    <filename>foo.service.d/</filename> may exist. All files with the suffix
+    <literal>.conf</literal> from this directory will be parsed after the file itself is
+    parsed. This is useful to alter or add configuration settings for a unit, without having to
+    modify unit files. Each drop-in file must have appropriate section headers. Note that for
+    instantiated units, this logic will first look for the instance <literal>.d/</literal>
+    subdirectory and read its <literal>.conf</literal> files, followed by the template
+    <literal>.d/</literal> subdirectory and the <literal>.conf</literal> files there. Also note that
+    settings from the <literal>[Install]</literal> section are not honored in drop-in unit files,
+    and have no effect.</para>
 
-    <para>In addition to <filename>/etc/systemd/system</filename>,
-    the drop-in <literal>.conf</literal> files for system services
-    can be placed in <filename>/usr/lib/systemd/system</filename> or
-    <filename>/run/systemd/system</filename> directories. Drop-in
-    files in <filename>/etc</filename> take precedence over those in
-    <filename>/run</filename> which in turn take precedence over
-    those in <filename>/usr/lib</filename>. Drop-in files under any of
-    these directories take precedence over unit files wherever located.
-    (Of course, since <filename>/run</filename> is temporary and
-    <filename>/usr/lib</filename> is for vendors, it is unlikely
-    drop-ins should be used in either of those places.)</para>
-    <!-- Note that we do not document .include here, as we
-         consider it mostly obsolete, and want people to
-         use .d/ drop-ins instead. -->
+    <para>In addition to <filename>/etc/systemd/system</filename>, the drop-in <literal>.d</literal>
+    directories for system services can be placed in <filename>/usr/lib/systemd/system</filename> or
+    <filename>/run/systemd/system</filename> directories. Drop-in files in <filename>/etc</filename>
+    take precedence over those in <filename>/run</filename> which in turn take precedence over those
+    in <filename>/usr/lib</filename>. Drop-in files under any of these directories take precedence
+    over unit files wherever located.</para>
+
+    <!-- Note that we do not document .include here, as we consider it mostly obsolete, and want
+         people to use .d/ drop-ins instead. -->
 
     <para>Some unit names reflect paths existing in the file system
     namespace. Example: a device unit
@@ -900,7 +908,8 @@
         <varname>systemd-nspawn</varname>,
         <varname>docker</varname>,
         <varname>rkt</varname> to test
-        against a specific implementation. See
+        against a specific implementation, or
+        <varname>private-users</varname> to check whether we are running in a user namespace. See
         <citerefentry><refentrytitle>systemd-detect-virt</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         for a full list of known virtualization technologies and their
         identifiers. If multiple virtualization technologies are
@@ -1244,7 +1253,7 @@
           <row>
       <entry><literal>%r</literal></entry>
       <entry>Control group path of the slice the unit is placed in</entry>
-      <entry>This usually maps to the parent cgroup path of <literal>%c</literal>.</entry>
+      <entry>This usually maps to the parent control group path of <literal>%c</literal>.</entry>
           </row>
           <row>
       <entry><literal>%R</literal></entry>

@@ -33,6 +33,7 @@
 #include "formats-util.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "process-util.h"
 #include "ptyfwd.h"
 #include "signal-util.h"
 #include "spawn-polkit-agent.h"
@@ -45,6 +46,7 @@ static bool arg_ask_password = true;
 static bool arg_scope = false;
 static bool arg_remain_after_exit = false;
 static bool arg_no_block = false;
+static bool arg_wait = false;
 static const char *arg_unit = NULL;
 static const char *arg_description = NULL;
 static const char *arg_slice = NULL;
@@ -83,9 +85,7 @@ static void polkit_agent_open_if_enabled(void) {
 
 static void help(void) {
         printf("%s [OPTIONS...] {COMMAND} [ARGS...]\n\n"
-               "Run the specified command in a transient scope or service or timer\n"
-               "unit. If a timer option is specified and the unit specified with\n"
-               "the --unit option exists, the command can be omitted.\n\n"
+               "Run the specified command in a transient scope or service.\n\n"
                "  -h --help                       Show this help\n"
                "     --version                    Show package version\n"
                "     --no-ask-password            Do not prompt for password\n"
@@ -94,11 +94,12 @@ static void help(void) {
                "  -M --machine=CONTAINER          Operate on local container\n"
                "     --scope                      Run this as scope rather than service\n"
                "     --unit=UNIT                  Run under the specified unit name\n"
-               "  -p --property=NAME=VALUE        Set unit property\n"
+               "  -p --property=NAME=VALUE        Set service or scope unit property\n"
                "     --description=TEXT           Description for unit\n"
                "     --slice=SLICE                Run in the specified slice\n"
                "     --no-block                   Do not wait until operation finished\n"
                "  -r --remain-after-exit          Leave service around until explicitly stopped\n"
+               "     --wait                       Wait until service stopped again\n"
                "     --send-sighup                Send SIGHUP when terminating\n"
                "     --service-type=TYPE          Service type\n"
                "     --uid=USER                   Run as system user\n"
@@ -107,15 +108,15 @@ static void help(void) {
                "  -E --setenv=NAME=VALUE          Set environment\n"
                "  -t --pty                        Run service on pseudo tty\n"
                "  -q --quiet                      Suppress information messages during runtime\n\n"
-               "Timer options:\n\n"
+               "Timer options:\n"
                "     --on-active=SECONDS          Run after SECONDS delay\n"
                "     --on-boot=SECONDS            Run SECONDS after machine was booted up\n"
                "     --on-startup=SECONDS         Run SECONDS after systemd activation\n"
                "     --on-unit-active=SECONDS     Run SECONDS after the last activation\n"
                "     --on-unit-inactive=SECONDS   Run SECONDS after the last deactivation\n"
                "     --on-calendar=SPEC           Realtime timer\n"
-               "     --timer-property=NAME=VALUE  Set timer unit property\n",
-               program_invocation_short_name);
+               "     --timer-property=NAME=VALUE  Set timer unit property\n"
+               , program_invocation_short_name);
 }
 
 static bool with_timer(void) {
@@ -146,6 +147,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_TIMER_PROPERTY,
                 ARG_NO_BLOCK,
                 ARG_NO_ASK_PASSWORD,
+                ARG_WAIT,
         };
 
         static const struct option options[] = {
@@ -162,6 +164,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "host",              required_argument, NULL, 'H'                  },
                 { "machine",           required_argument, NULL, 'M'                  },
                 { "service-type",      required_argument, NULL, ARG_SERVICE_TYPE     },
+                { "wait",              no_argument,       NULL, ARG_WAIT             },
                 { "uid",               required_argument, NULL, ARG_EXEC_USER        },
                 { "gid",               required_argument, NULL, ARG_EXEC_GROUP       },
                 { "nice",              required_argument, NULL, ARG_NICE             },
@@ -178,7 +181,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "on-calendar",       required_argument, NULL, ARG_ON_CALENDAR      },
                 { "timer-property",    required_argument, NULL, ARG_TIMER_PROPERTY   },
                 { "no-block",          no_argument,       NULL, ARG_NO_BLOCK         },
-                { "no-ask-password",   no_argument,       NULL, ARG_NO_ASK_PASSWORD },
+                { "no-ask-password",   no_argument,       NULL, ARG_NO_ASK_PASSWORD  },
                 {},
         };
 
@@ -195,12 +198,12 @@ static int parse_argv(int argc, char *argv[]) {
                         help();
                         return 0;
 
+                case ARG_VERSION:
+                        return version();
+
                 case ARG_NO_ASK_PASSWORD:
                         arg_ask_password = false;
                         break;
-
-                case ARG_VERSION:
-                        return version();
 
                 case ARG_USER:
                         arg_user = true;
@@ -257,11 +260,9 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_NICE:
-                        r = safe_atoi(optarg, &arg_nice);
-                        if (r < 0 || arg_nice < PRIO_MIN || arg_nice >= PRIO_MAX) {
-                                log_error("Failed to parse nice value");
-                                return -EINVAL;
-                        }
+                        r = parse_nice(optarg, &arg_nice);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse nice value: %s", optarg);
 
                         arg_nice_set = true;
                         break;
@@ -361,6 +362,10 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_no_block = true;
                         break;
 
+                case ARG_WAIT:
+                        arg_wait = true;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -408,22 +413,36 @@ static int parse_argv(int argc, char *argv[]) {
                 return -EINVAL;
         }
 
+        if (arg_wait) {
+                if (arg_no_block) {
+                        log_error("--wait may not be combined with --no-block.");
+                        return -EINVAL;
+                }
+
+                if (with_timer()) {
+                        log_error("--wait may not be combined with timer operations.");
+                        return -EINVAL;
+                }
+
+                if (arg_scope) {
+                        log_error("--wait may not be combined with --scope.");
+                        return -EINVAL;
+                }
+        }
+
         return 1;
 }
 
 static int transient_unit_set_properties(sd_bus_message *m, char **properties) {
-        char **i;
         int r;
 
         r = sd_bus_message_append(m, "(sv)", "Description", "s", arg_description);
         if (r < 0)
                 return r;
 
-        STRV_FOREACH(i, properties) {
-                r = bus_append_unit_property_assignment(m, *i);
-                if (r < 0)
-                        return r;
-        }
+        r = bus_append_unit_property_assignment_many(m, properties);
+        if (r < 0)
+                return r;
 
         return 0;
 }
@@ -472,6 +491,12 @@ static int transient_service_set_properties(sd_bus_message *m, char **argv, cons
         r = transient_cgroup_set_properties(m);
         if (r < 0)
                 return r;
+
+        if (arg_wait) {
+                r = sd_bus_message_append(m, "(sv)", "AddRef", "b", 1);
+                if (r < 0)
+                        return r;
+        }
 
         if (arg_remain_after_exit) {
                 r = sd_bus_message_append(m, "(sv)", "RemainAfterExit", "b", arg_remain_after_exit);
@@ -730,9 +755,97 @@ static int make_unit_name(sd_bus *bus, UnitType t, char **ret) {
         return 0;
 }
 
+typedef struct RunContext {
+        sd_bus *bus;
+        sd_event *event;
+        PTYForward *forward;
+        sd_bus_slot *match;
+
+        /* The exit data of the unit */
+        char *active_state;
+        uint64_t inactive_exit_usec;
+        uint64_t inactive_enter_usec;
+        char *result;
+        uint64_t cpu_usage_nsec;
+        uint32_t exit_code;
+        uint32_t exit_status;
+} RunContext;
+
+static void run_context_free(RunContext *c) {
+        assert(c);
+
+        c->forward = pty_forward_free(c->forward);
+        c->match = sd_bus_slot_unref(c->match);
+        c->bus = sd_bus_unref(c->bus);
+        c->event = sd_event_unref(c->event);
+
+        free(c->active_state);
+        free(c->result);
+}
+
+static void run_context_check_done(RunContext *c) {
+        bool done = true;
+
+        assert(c);
+
+        if (c->match)
+                done = done && (c->active_state && STR_IN_SET(c->active_state, "inactive", "failed"));
+
+        if (c->forward)
+                done = done && pty_forward_is_done(c->forward);
+
+        if (done)
+                sd_event_exit(c->event, EXIT_SUCCESS);
+}
+
+static int on_properties_changed(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+
+        static const struct bus_properties_map map[] = {
+                { "ActiveState",                      "s", NULL, offsetof(RunContext, active_state)        },
+                { "InactiveExitTimestampMonotonic",   "t", NULL, offsetof(RunContext, inactive_exit_usec)  },
+                { "InactiveEnterTimestampMonotonic",  "t", NULL, offsetof(RunContext, inactive_enter_usec) },
+                { "Result",                           "s", NULL, offsetof(RunContext, result)              },
+                { "ExecMainCode",                     "i", NULL, offsetof(RunContext, exit_code)           },
+                { "ExecMainStatus",                   "i", NULL, offsetof(RunContext, exit_status)         },
+                { "CPUUsageNSec",                     "t", NULL, offsetof(RunContext, cpu_usage_nsec)      },
+                {}
+        };
+
+        RunContext *c = userdata;
+        int r;
+
+        r = bus_map_all_properties(c->bus,
+                                   "org.freedesktop.systemd1",
+                                   sd_bus_message_get_path(m),
+                                   map,
+                                   c);
+        if (r < 0) {
+                sd_event_exit(c->event, EXIT_FAILURE);
+                return log_error_errno(r, "Failed to query unit state: %m");
+        }
+
+        run_context_check_done(c);
+        return 0;
+}
+
+static int pty_forward_handler(PTYForward *f, int rcode, void *userdata) {
+        RunContext *c = userdata;
+
+        assert(f);
+
+        if (rcode < 0) {
+                sd_event_exit(c->event, EXIT_FAILURE);
+                return log_error_errno(rcode, "Error on PTY forwarding logic: %m");
+        }
+
+        run_context_check_done(c);
+        return 0;
+}
+
 static int start_transient_service(
                 sd_bus *bus,
-                char **argv) {
+                char **argv,
+                int *retval) {
 
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -743,6 +856,7 @@ static int start_transient_service(
 
         assert(bus);
         assert(argv);
+        assert(retval);
 
         if (arg_pty) {
 
@@ -866,40 +980,95 @@ static int start_transient_service(
                         return r;
         }
 
-        if (master >= 0) {
-                _cleanup_(pty_forward_freep) PTYForward *forward = NULL;
-                _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-                char last_char = 0;
+        if (!arg_quiet)
+                log_info("Running as unit: %s", service);
 
-                r = sd_event_default(&event);
+        if (arg_wait || master >= 0) {
+                _cleanup_(run_context_free) RunContext c = {};
+
+                c.bus = sd_bus_ref(bus);
+
+                r = sd_event_default(&c.event);
                 if (r < 0)
                         return log_error_errno(r, "Failed to get event loop: %m");
 
-                assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGWINCH, SIGTERM, SIGINT, -1) >= 0);
+                if (master >= 0) {
+                        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGWINCH, SIGTERM, SIGINT, -1) >= 0);
+                        (void) sd_event_add_signal(c.event, NULL, SIGINT, NULL, NULL);
+                        (void) sd_event_add_signal(c.event, NULL, SIGTERM, NULL, NULL);
 
-                (void) sd_event_add_signal(event, NULL, SIGINT, NULL, NULL);
-                (void) sd_event_add_signal(event, NULL, SIGTERM, NULL, NULL);
+                        if (!arg_quiet)
+                                log_info("Press ^] three times within 1s to disconnect TTY.");
 
-                if (!arg_quiet)
-                        log_info("Running as unit: %s\nPress ^] three times within 1s to disconnect TTY.", service);
+                        r = pty_forward_new(c.event, master, PTY_FORWARD_IGNORE_INITIAL_VHANGUP, &c.forward);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to create PTY forwarder: %m");
 
-                r = pty_forward_new(event, master, PTY_FORWARD_IGNORE_INITIAL_VHANGUP, &forward);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to create PTY forwarder: %m");
+                        pty_forward_set_handler(c.forward, pty_forward_handler, &c);
+                }
 
-                r = sd_event_loop(event);
+                if (arg_wait) {
+                        _cleanup_free_ char *path = NULL;
+                        const char *mt;
+
+                        path = unit_dbus_path_from_name(service);
+                        if (!path)
+                                return log_oom();
+
+                        mt = strjoina("type='signal',"
+                                      "sender='org.freedesktop.systemd1',"
+                                      "path='", path, "',"
+                                      "interface='org.freedesktop.DBus.Properties',"
+                                      "member='PropertiesChanged'");
+                        r = sd_bus_add_match(bus, &c.match, mt, on_properties_changed, &c);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to add properties changed signal.");
+
+                        r = sd_bus_attach_event(bus, c.event, 0);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to attach bus to event loop.");
+                }
+
+                r = sd_event_loop(c.event);
                 if (r < 0)
                         return log_error_errno(r, "Failed to run event loop: %m");
 
-                pty_forward_get_last_char(forward, &last_char);
+                if (c.forward) {
+                        char last_char = 0;
 
-                forward = pty_forward_free(forward);
+                        r = pty_forward_get_last_char(c.forward, &last_char);
+                        if (r >= 0 && !arg_quiet && last_char != '\n')
+                                fputc('\n', stdout);
+                }
 
-                if (!arg_quiet && last_char != '\n')
-                        fputc('\n', stdout);
+                if (!arg_quiet) {
+                        if (!isempty(c.result))
+                                log_info("Finished with result: %s", strna(c.result));
 
-        } else if (!arg_quiet)
-                log_info("Running as unit: %s", service);
+                        if (c.exit_code == CLD_EXITED)
+                                log_info("Main processes terminated with: code=%s/status=%i", sigchld_code_to_string(c.exit_code), c.exit_status);
+                        else if (c.exit_code > 0)
+                                log_info("Main processes terminated with: code=%s/status=%s", sigchld_code_to_string(c.exit_code), signal_to_string(c.exit_status));
+
+                        if (c.inactive_enter_usec > 0 && c.inactive_enter_usec != USEC_INFINITY &&
+                            c.inactive_exit_usec > 0 && c.inactive_exit_usec != USEC_INFINITY &&
+                            c.inactive_enter_usec > c.inactive_exit_usec) {
+                                char ts[FORMAT_TIMESPAN_MAX];
+                                log_info("Service runtime: %s", format_timespan(ts, sizeof(ts), c.inactive_enter_usec - c.inactive_exit_usec, USEC_PER_MSEC));
+                        }
+
+                        if (c.cpu_usage_nsec > 0 && c.cpu_usage_nsec != NSEC_INFINITY) {
+                                char ts[FORMAT_TIMESPAN_MAX];
+                                log_info("CPU time consumed: %s", format_timespan(ts, sizeof(ts), (c.cpu_usage_nsec + NSEC_PER_USEC - 1) / NSEC_PER_USEC, USEC_PER_MSEC));
+                        }
+                }
+
+                /* Try to propagate the service's return value */
+                if (c.result && STR_IN_SET(c.result, "success", "exit-code") && c.exit_code == CLD_EXITED)
+                        *retval = c.exit_status;
+                else
+                        *retval = EXIT_FAILURE;
+        }
 
         return 0;
 }
@@ -999,17 +1168,21 @@ static int start_transient_scope(
                 uid_t uid;
                 gid_t gid;
 
-                r = get_user_creds(&arg_exec_user, &uid, &gid, &home, &shell);
+                r = get_user_creds_clean(&arg_exec_user, &uid, &gid, &home, &shell);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve user %s: %m", arg_exec_user);
 
-                r = strv_extendf(&user_env, "HOME=%s", home);
-                if (r < 0)
-                        return log_oom();
+                if (home) {
+                        r = strv_extendf(&user_env, "HOME=%s", home);
+                        if (r < 0)
+                                return log_oom();
+                }
 
-                r = strv_extendf(&user_env, "SHELL=%s", shell);
-                if (r < 0)
-                        return log_oom();
+                if (shell) {
+                        r = strv_extendf(&user_env, "SHELL=%s", shell);
+                        if (r < 0)
+                                return log_oom();
+                }
 
                 r = strv_extendf(&user_env, "USER=%s", arg_exec_user);
                 if (r < 0)
@@ -1146,7 +1319,7 @@ static int start_transient_timer(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        if (argv[0]) {
+        if (!strv_isempty(argv)) {
                 r = sd_bus_message_open_container(m, 'r', "sa(sv)");
                 if (r < 0)
                         return bus_log_create_error(r);
@@ -1192,9 +1365,11 @@ static int start_transient_timer(
         if (r < 0)
                 return r;
 
-        log_info("Running timer as unit: %s", timer);
-        if (argv[0])
-                log_info("Will run service as unit: %s", service);
+        if (!arg_quiet) {
+                log_info("Running timer as unit: %s", timer);
+                if (argv[0])
+                        log_info("Will run service as unit: %s", service);
+        }
 
         return 0;
 }
@@ -1202,7 +1377,7 @@ static int start_transient_timer(
 int main(int argc, char* argv[]) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_free_ char *description = NULL, *command = NULL;
-        int r;
+        int r, retval = EXIT_SUCCESS;
 
         log_parse_environment();
         log_open();
@@ -1239,7 +1414,12 @@ int main(int argc, char* argv[]) {
                 arg_description = description;
         }
 
-        r = bus_connect_transport_systemd(arg_transport, arg_host, arg_user, &bus);
+        /* If --wait is used connect via the bus, unconditionally, as ref/unref is not supported via the limited direct
+         * connection */
+        if (arg_wait)
+                r = bus_connect_transport(arg_transport, arg_host, arg_user, &bus);
+        else
+                r = bus_connect_transport_systemd(arg_transport, arg_host, arg_user, &bus);
         if (r < 0) {
                 log_error_errno(r, "Failed to create bus connection: %m");
                 goto finish;
@@ -1250,12 +1430,12 @@ int main(int argc, char* argv[]) {
         else if (with_timer())
                 r = start_transient_timer(bus, argv + optind);
         else
-                r = start_transient_service(bus, argv + optind);
+                r = start_transient_service(bus, argv + optind, &retval);
 
 finish:
         strv_free(arg_environment);
         strv_free(arg_property);
         strv_free(arg_timer_property);
 
-        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+        return r < 0 ? EXIT_FAILURE : retval;
 }

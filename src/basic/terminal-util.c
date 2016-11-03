@@ -39,6 +39,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -345,12 +346,7 @@ int open_terminal(const char *name, int mode) {
         }
 
         r = isatty(fd);
-        if (r < 0) {
-                safe_close(fd);
-                return -errno;
-        }
-
-        if (!r) {
+        if (r == 0) {
                 safe_close(fd);
                 return -ENOTTY;
         }
@@ -785,7 +781,7 @@ bool tty_is_vc_resolve(const char *tty) {
 }
 
 const char *default_term_for_tty(const char *tty) {
-        return tty && tty_is_vc_resolve(tty) ? "TERM=linux" : "TERM=vt220";
+        return tty && tty_is_vc_resolve(tty) ? "linux" : "vt220";
 }
 
 int fd_columns(int fd) {
@@ -1191,11 +1187,8 @@ int open_terminal_in_namespace(pid_t pid, const char *name, int mode) {
         return receive_one_fd(pair[0], 0);
 }
 
-bool terminal_is_dumb(void) {
+static bool getenv_terminal_is_dumb(void) {
         const char *e;
-
-        if (!on_tty())
-                return true;
 
         e = getenv("TERM");
         if (!e)
@@ -1204,15 +1197,25 @@ bool terminal_is_dumb(void) {
         return streq(e, "dumb");
 }
 
+bool terminal_is_dumb(void) {
+        if (!on_tty())
+                return true;
+
+        return getenv_terminal_is_dumb();
+}
+
 bool colors_enabled(void) {
         static int enabled = -1;
 
         if (_unlikely_(enabled < 0)) {
-                const char *colors;
+                int val;
 
-                colors = getenv("SYSTEMD_COLORS");
-                if (colors)
-                        enabled = parse_boolean(colors) != 0;
+                val = getenv_bool("SYSTEMD_COLORS");
+                if (val >= 0)
+                        enabled = val;
+                else if (getpid() == 1)
+                        /* PID1 outputs to the console without holding it open all the time */
+                        enabled = !getenv_terminal_is_dumb();
                 else
                         enabled = !terminal_is_dumb();
         }

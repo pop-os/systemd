@@ -23,7 +23,7 @@ _list_fields() {
 _journal_none() {
     local -a _commands _files _jrnl_none
     # Setting use-cache will slow this down considerably
-    _commands=( ${"$(_call_program commands "$service" -F _EXE 2>/dev/null)"} )
+    _commands=( ${"$(_call_program commands "$service $_sys_service_mgr -F _EXE" 2>/dev/null)"} )
     _jrnl_none='yes'
     _alternative : \
         'files:/dev files:_files -W /dev -P /dev/' \
@@ -33,7 +33,7 @@ _journal_none() {
 
 _journal_fields() {
     local -a _fields cmd
-    cmd=("journalctl" "-F ${@[-1]}" "2>/dev/null" )
+    cmd=("journalctl $_sys_service_mgr" "-F ${@[-1]}" "2>/dev/null" )
     _fields=$(_call_program fields $cmd[@])
     _fields=${_fields//'\'/'\\'}
     _fields=${_fields//':'/'\:'}
@@ -51,6 +51,31 @@ _journal_boots() {
     "bootid:boot ids:compadd -a _bootid"
 }
 
+# Build arguments for "journalctl" to be used in completion.
+# Use both --user and --system modes, they are not exclusive.
+local -a _modes; _modes=(--user --system)
+local -a _modes_with_arg; _modes_with_arg=(--directory -D --file -M --machine --root)
+typeset -a _sys_service_mgr
+local w k v i=0 n=$#words
+while (( i++ < n )); do
+    w=$words[$i]
+    if (( $_modes[(I)$w] )); then
+        _sys_service_mgr+=($w)
+    else
+        # Handle options with arguments. "--key=value" and "--key value".
+        k=${w%%=*}
+        if (( ${_modes_with_arg[(I)$k]} )); then
+            v=${w#*=}
+            if [[ "$k" != "$w" ]]; then
+                # "--key=value" style.
+                _sys_service_mgr+=($w)
+            else
+                # "--key value" style.
+                _sys_service_mgr+=($w ${words[((++i))]})
+            fi
+        fi
+    fi
+done
 _arguments -s \
     {-h,--help}'[Show this help]' \
     '--version[Show package version]' \
@@ -80,10 +105,10 @@ _arguments -s \
     {-F,--field=}'[List all values a certain field takes]:Fields:_list_fields' \
     '--system[Show system and kernel messages]' \
     '--user[Show messages from user services]' \
-    {-M+,--machine=}'[Operate on local container]:machines:_sd_machines' \
-    {-D+,--directory=}'[Show journal files from directory]:directories:_directories' \
-    '--file=[Operate on specified journal files]:file:_files' \
-    '--root=[Operate on catalog hierarchy under specified directory]:directories:_directories' \
+    '(--directory -D -M --machine --root --file)'{-M+,--machine=}'[Operate on local container]:machines:_sd_machines' \
+    '(--directory -D -M --machine --root --file)'{-D+,--directory=}'[Show journal files from directory]:directories:_directories' \
+    '(--directory -D -M --machine --root --file)''--root=[Operate on catalog hierarchy under specified directory]:directories:_directories' \
+    '(--directory -D -M --machine --root)--file=[Operate on specified journal files]:file:_files' \
     '--new-id128[Generate a new 128 Bit ID]' \
     '--header[Show journal header information]' \
     '--disk-usage[Show total disk usage]' \

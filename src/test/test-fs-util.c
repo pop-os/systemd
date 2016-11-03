@@ -20,21 +20,114 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
-#include "fileio.h"
 #include "fd-util.h"
+#include "fileio.h"
 #include "fs-util.h"
 #include "macro.h"
 #include "mkdir.h"
+#include "path-util.h"
 #include "rm-rf.h"
 #include "string-util.h"
 #include "strv.h"
 #include "util.h"
 
+static void test_chase_symlinks(void) {
+        _cleanup_free_ char *result = NULL;
+        char temp[] = "/tmp/test-chase.XXXXXX";
+        const char *top, *p, *q;
+        int r;
+
+        assert_se(mkdtemp(temp));
+
+        top = strjoina(temp, "/top");
+        assert_se(mkdir(top, 0700) >= 0);
+
+        p = strjoina(top, "/dot");
+        assert_se(symlink(".", p) >= 0);
+
+        p = strjoina(top, "/dotdot");
+        assert_se(symlink("..", p) >= 0);
+
+        p = strjoina(top, "/dotdota");
+        assert_se(symlink("../a", p) >= 0);
+
+        p = strjoina(temp, "/a");
+        assert_se(symlink("b", p) >= 0);
+
+        p = strjoina(temp, "/b");
+        assert_se(symlink("/usr", p) >= 0);
+
+        p = strjoina(temp, "/start");
+        assert_se(symlink("top/dot/dotdota", p) >= 0);
+
+        r = chase_symlinks(p, NULL, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, "/usr"));
+
+        result = mfree(result);
+        r = chase_symlinks(p, temp, &result);
+        assert_se(r == -ENOENT);
+
+        q = strjoina(temp, "/usr");
+        assert_se(mkdir(q, 0700) >= 0);
+
+        r = chase_symlinks(p, temp, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, q));
+
+        p = strjoina(temp, "/slash");
+        assert_se(symlink("/", p) >= 0);
+
+        result = mfree(result);
+        r = chase_symlinks(p, NULL, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, "/"));
+
+        result = mfree(result);
+        r = chase_symlinks(p, temp, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, temp));
+
+        p = strjoina(temp, "/slashslash");
+        assert_se(symlink("///usr///", p) >= 0);
+
+        result = mfree(result);
+        r = chase_symlinks(p, NULL, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, "/usr"));
+
+        result = mfree(result);
+        r = chase_symlinks(p, temp, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, q));
+
+        result = mfree(result);
+        r = chase_symlinks("/etc/./.././", NULL, &result);
+        assert_se(r >= 0);
+        assert_se(path_equal(result, "/"));
+
+        result = mfree(result);
+        r = chase_symlinks("/etc/./.././", "/etc", &result);
+        assert_se(r == -EINVAL);
+
+        result = mfree(result);
+        r = chase_symlinks("/etc/machine-id/foo", NULL, &result);
+        assert_se(r == -ENOTDIR);
+
+        result = mfree(result);
+        p = strjoina(temp, "/recursive-symlink");
+        assert_se(symlink("recursive-symlink", p) >= 0);
+        r = chase_symlinks(p, NULL, &result);
+        assert_se(r == -ELOOP);
+
+        assert_se(rm_rf(temp, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
+}
+
 static void test_unlink_noerrno(void) {
         char name[] = "/tmp/test-close_nointr.XXXXXX";
         int fd;
 
-        fd = mkostemp_safe(name, O_RDWR|O_CLOEXEC);
+        fd = mkostemp_safe(name);
         assert_se(fd >= 0);
         assert_se(close_nointr(fd) >= 0);
 
@@ -83,47 +176,59 @@ static void test_get_files_in_directory(void) {
 }
 
 static void test_var_tmp(void) {
-        char *tmp_dir = NULL;
-        char *tmpdir_backup = NULL;
-        const char *default_var_tmp = NULL;
-        const char *var_name;
-        bool do_overwrite = true;
+        _cleanup_free_ char *tmpdir_backup = NULL, *temp_backup = NULL, *tmp_backup = NULL;
+        const char *tmp_dir = NULL, *t;
 
-        default_var_tmp = "/var/tmp";
-        var_name = "TMPDIR";
-
-        if (getenv(var_name) != NULL) {
-                tmpdir_backup = strdup(getenv(var_name));
-                assert_se(tmpdir_backup != NULL);
+        t = getenv("TMPDIR");
+        if (t) {
+                tmpdir_backup = strdup(t);
+                assert_se(tmpdir_backup);
         }
 
-        unsetenv(var_name);
+        t = getenv("TEMP");
+        if (t) {
+                temp_backup = strdup(t);
+                assert_se(temp_backup);
+        }
 
-        var_tmp(&tmp_dir);
-        assert_se(!strcmp(tmp_dir, default_var_tmp));
+        t = getenv("TMP");
+        if (t) {
+                tmp_backup = strdup(t);
+                assert_se(tmp_backup);
+        }
 
-        free(tmp_dir);
+        assert(unsetenv("TMPDIR") >= 0);
+        assert(unsetenv("TEMP") >= 0);
+        assert(unsetenv("TMP") >= 0);
 
-        setenv(var_name, "/tmp", do_overwrite);
-        assert_se(!strcmp(getenv(var_name), "/tmp"));
+        assert_se(var_tmp_dir(&tmp_dir) >= 0);
+        assert_se(streq(tmp_dir, "/var/tmp"));
 
-        var_tmp(&tmp_dir);
-        assert_se(!strcmp(tmp_dir, "/tmp"));
+        assert_se(setenv("TMPDIR", "/tmp", true) >= 0);
+        assert_se(streq(getenv("TMPDIR"), "/tmp"));
 
-        free(tmp_dir);
+        assert_se(var_tmp_dir(&tmp_dir) >= 0);
+        assert_se(streq(tmp_dir, "/tmp"));
 
-        setenv(var_name, "/88_does_not_exist_88", do_overwrite);
-        assert_se(!strcmp(getenv(var_name), "/88_does_not_exist_88"));
+        assert_se(setenv("TMPDIR", "/88_does_not_exist_88", true) >= 0);
+        assert_se(streq(getenv("TMPDIR"), "/88_does_not_exist_88"));
 
-        var_tmp(&tmp_dir);
-        assert_se(!strcmp(tmp_dir, default_var_tmp));
+        assert_se(var_tmp_dir(&tmp_dir) >= 0);
+        assert_se(streq(tmp_dir, "/var/tmp"));
 
-        free(tmp_dir);
+        if (tmpdir_backup)  {
+                assert_se(setenv("TMPDIR", tmpdir_backup, true) >= 0);
+                assert_se(streq(getenv("TMPDIR"), tmpdir_backup));
+        }
 
-        if (tmpdir_backup != NULL)  {
-                setenv(var_name, tmpdir_backup, do_overwrite);
-                assert_se(!strcmp(getenv(var_name), tmpdir_backup));
-                free(tmpdir_backup);
+        if (temp_backup)  {
+                assert_se(setenv("TEMP", temp_backup, true) >= 0);
+                assert_se(streq(getenv("TEMP"), temp_backup));
+        }
+
+        if (tmp_backup)  {
+                assert_se(setenv("TMP", tmp_backup, true) >= 0);
+                assert_se(streq(getenv("TMP"), tmp_backup));
         }
 }
 
@@ -132,6 +237,7 @@ int main(int argc, char *argv[]) {
         test_readlink_and_make_absolute();
         test_get_files_in_directory();
         test_var_tmp();
+        test_chase_symlinks();
 
         return 0;
 }

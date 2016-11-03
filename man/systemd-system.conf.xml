@@ -106,6 +106,18 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>CtrlAltDelBurstAction=</varname></term>
+
+        <listitem><para>Defines what action will be performed
+        if user presses Ctrl-Alt-Delete more than 7 times in 2s.
+        Can be set to <literal>reboot-force</literal>, <literal>poweroff-force</literal>,
+        <literal>reboot-immediate</literal>, <literal>poweroff-immediate</literal>
+        or disabled with <literal>none</literal>. Defaults to
+        <literal>reboot-force</literal>.
+        </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>CPUAffinity=</varname></term>
 
         <listitem><para>Configures the initial CPU affinity for the
@@ -318,7 +330,7 @@
         <varname>TasksAccounting=</varname>. See
         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for details on the per-unit
-        settings. <varname>DefaulTasksAccounting=</varname> defaults
+        settings. <varname>DefaultTasksAccounting=</varname> defaults
         to on, the other three settings to off.</para></listitem>
       </varlistentry>
 

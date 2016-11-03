@@ -37,7 +37,7 @@ my $EXIT_TEST_SKIP      = 77;
 
 my $rules_10k_tags      = "";
 for (my $i = 1; $i <= 10000; ++$i) {
-    $rules_10k_tags .= 'KERNEL=="sda", TAG+="test' . $i . "\"\n";
+        $rules_10k_tags .= 'KERNEL=="sda", TAG+="test' . $i . "\"\n";
 }
 
 my @tests = (
@@ -1535,11 +1535,18 @@ if (!($<==0)) {
         exit($EXIT_TEST_SKIP);
 }
 
+# skip the test when running in a chroot
+system("systemd-detect-virt", "-r", "-q");
+if ($? >> 8 == 0) {
+        print "Running in a chroot, skipping the test.\n";
+        exit($EXIT_TEST_SKIP);
+}
+
 # skip the test when running in a container
 system("systemd-detect-virt", "-c", "-q");
 if ($? >> 8 == 0) {
-    print "Running in a container, skipping the test.\n";
-    exit($EXIT_TEST_SKIP);
+        print "Running in a container, skipping the test.\n";
+        exit($EXIT_TEST_SKIP);
 }
 
 udev_setup();
@@ -1589,6 +1596,6 @@ system("umount", "$udev_tmpfs");
 rmdir($udev_tmpfs);
 
 if ($error > 0) {
-    exit(1);
+        exit(1);
 }
 exit(0);

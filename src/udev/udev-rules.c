@@ -1583,8 +1583,7 @@ struct udev_rules *udev_rules_unref(struct udev_rules *rules) {
         strbuf_cleanup(rules->strbuf);
         free(rules->uids);
         free(rules->gids);
-        free(rules);
-        return NULL;
+        return mfree(rules);
 }
 
 bool udev_rules_check_timestamp(struct udev_rules *rules) {
@@ -2219,10 +2218,16 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                                   rule->rule.filename_line);
                         break;
                 case TK_A_SECLABEL: {
+                        char label_str[UTIL_LINE_SIZE] = {};
                         const char *name, *label;
 
                         name = rules_str(rules, cur->key.attr_off);
-                        label = rules_str(rules, cur->key.value_off);
+                        udev_event_apply_format(event, rules_str(rules, cur->key.value_off), label_str, sizeof(label_str));
+                        if (label_str[0] != '\0')
+                                label = label_str;
+                        else
+                                label = rules_str(rules, cur->key.value_off);
+
                         if (cur->key.op == OP_ASSIGN || cur->key.op == OP_ASSIGN_FINAL)
                                 udev_list_cleanup(&event->seclabel_list);
                         udev_list_entry_add(&event->seclabel_list, name, label);

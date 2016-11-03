@@ -297,9 +297,9 @@ static void help(void) {
                "  -n --lines[=INTEGER]     Number of journal entries to show\n"
                "     --no-tail             Show all lines, even in follow mode\n"
                "  -r --reverse             Show the newest entries first\n"
-               "  -o --output=STRING       Change journal output mode (short, short-iso,\n"
-               "                                   short-precise, short-monotonic, verbose,\n"
-               "                                   export, json, json-pretty, json-sse, cat)\n"
+               "  -o --output=STRING       Change journal output mode (short, short-precise,\n"
+               "                             short-iso, short-full, short-monotonic, short-unix,\n"
+               "                             verbose, export, json, json-pretty, json-sse, cat)\n"
                "     --utc                 Express time in Coordinated Universal Time (UTC)\n"
                "  -x --catalog             Add message explanations where available\n"
                "     --no-full             Ellipsize fields\n"
@@ -310,7 +310,7 @@ static void help(void) {
                "  -m --merge               Show entries from all available journals\n"
                "  -D --directory=PATH      Show journal files from directory\n"
                "     --file=PATH           Show journal file\n"
-               "     --root=ROOT           Operate on catalog files below a root directory\n"
+               "     --root=ROOT           Operate on files below a root directory\n"
 #ifdef HAVE_GCRYPT
                "     --interval=TIME       Time interval for changing the FSS sealing key\n"
                "     --verify-key=KEY      Specify FSS verification key\n"
@@ -848,8 +848,8 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_follow && !arg_no_tail && !arg_since && arg_lines == ARG_LINES_DEFAULT)
                 arg_lines = 10;
 
-        if (!!arg_directory + !!arg_file + !!arg_machine > 1) {
-                log_error("Please specify either -D/--directory= or --file= or -M/--machine=, not more than one.");
+        if (!!arg_directory + !!arg_file + !!arg_machine + !!arg_root > 1) {
+                log_error("Please specify at most one of -D/--directory=, --file=, -M/--machine=, --root.");
                 return -EINVAL;
         }
 
@@ -1091,8 +1091,10 @@ static int discover_next_boot(sd_journal *j,
                 r = sd_journal_previous(j);
         if (r < 0)
                 return r;
-        else if (r == 0)
+        else if (r == 0) {
+                log_debug("Whoopsie! We found a boot ID but can't read its last entry.");
                 return -ENODATA; /* This shouldn't happen. We just came from this very boot ID. */
+        }
 
         r = sd_journal_get_realtime_usec(j, &next_boot->last);
         if (r < 0)
@@ -1112,7 +1114,7 @@ static int get_boots(
 
         bool skip_once;
         int r, count = 0;
-        BootId *head = NULL, *tail = NULL;
+        BootId *head = NULL, *tail = NULL, *id;
         const bool advance_older = boot_id && offset <= 0;
         sd_id128_t previous_boot_id;
 
@@ -1203,6 +1205,13 @@ static int get_boots(
                                 break;
                         }
                 } else {
+                        LIST_FOREACH(boot_list, id, head) {
+                                if (sd_id128_equal(id->id, current->id)) {
+                                        /* boot id already stored, something wrong with the journal files */
+                                        /* exiting as otherwise this problem would cause forever loop */
+                                        goto finish;
+                                }
+                        }
                         LIST_INSERT_AFTER(boot_list, head, tail, current);
                         tail = current;
                         current = NULL;
@@ -1267,7 +1276,7 @@ static int add_boot(sd_journal *j) {
          * We can do this only when we logs are coming from the current machine,
          * so take the slow path if log location is specified. */
         if (arg_boot_offset == 0 && sd_id128_is_null(arg_boot_id) &&
-            !arg_directory && !arg_file)
+            !arg_directory && !arg_file && !arg_root)
 
                 return add_match_this_boot(j, arg_machine);
 
@@ -1632,7 +1641,7 @@ static int setup_keys(void) {
         n /= arg_interval;
 
         safe_close(fd);
-        fd = mkostemp_safe(k, O_WRONLY|O_CLOEXEC);
+        fd = mkostemp_safe(k);
         if (fd < 0) {
                 r = log_error_errno(fd, "Failed to open %s: %m", k);
                 goto finish;
@@ -1684,9 +1693,9 @@ static int setup_keys(void) {
                         "at a safe location and should not be saved locally on disk.\n"
                         "\n\t%s",
                         ansi_highlight(), ansi_normal(),
+                        p,
                         ansi_highlight(), ansi_normal(),
-                        ansi_highlight_red(),
-                        p);
+                        ansi_highlight_red());
                 fflush(stderr);
         }
         for (i = 0; i < seed_size; i++) {
@@ -2161,6 +2170,8 @@ int main(int argc, char *argv[]) {
 
         if (arg_directory)
                 r = sd_journal_open_directory(&j, arg_directory, arg_journal_type);
+        else if (arg_root)
+                r = sd_journal_open_directory(&j, arg_root, arg_journal_type | SD_JOURNAL_OS_ROOT);
         else if (arg_file_stdin) {
                 int ifd = STDIN_FILENO;
                 r = sd_journal_open_files_fd(&j, &ifd, 1, 0);
@@ -2255,7 +2266,7 @@ int main(int argc, char *argv[]) {
                 if (r < 0)
                         goto finish;
 
-                printf("Archived and active journals take up %s on disk.\n",
+                printf("Archived and active journals take up %s in the file system.\n",
                        format_bytes(sbytes, sizeof(sbytes), bytes));
                 goto finish;
         }

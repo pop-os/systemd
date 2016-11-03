@@ -527,9 +527,7 @@ static int perform_upload(Uploader *u) {
                 log_debug("Upload finished successfully with code %ld: %s",
                           status, strna(u->answer));
 
-        free(u->last_cursor);
-        u->last_cursor = u->current_cursor;
-        u->current_cursor = NULL;
+        free_and_replace(u->last_cursor, u->current_cursor);
 
         return update_cursor_state(u);
 }
@@ -542,7 +540,7 @@ static int parse_config(void) {
                 { "Upload",  "TrustedCertificateFile", config_parse_path,   0, &arg_trust  },
                 {}};
 
-        return config_parse_many(PKGSYSCONFDIR "/journal-upload.conf",
+        return config_parse_many_nulstr(PKGSYSCONFDIR "/journal-upload.conf",
                                  CONF_PATHS_NULSTR("systemd/journal-upload.conf.d"),
                                  "Upload\0", config_item_table_lookup, items,
                                  false, NULL);

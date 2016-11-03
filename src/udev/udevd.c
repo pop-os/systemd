@@ -776,9 +776,9 @@ static void manager_reload(Manager *manager) {
         manager->rules = udev_rules_unref(manager->rules);
         udev_builtin_exit(manager->udev);
 
-        sd_notify(false,
-                  "READY=1\n"
-                  "STATUS=Processing...");
+        sd_notifyf(false,
+                   "READY=1\n"
+                   "STATUS=Processing with %u children at max", arg_children_max);
 }
 
 static void event_queue_start(Manager *manager) {
@@ -1000,6 +1000,10 @@ static int on_ctrl_msg(sd_event_source *s, int fd, uint32_t revents, void *userd
         if (i >= 0) {
                 log_debug("udevd message (SET_MAX_CHILDREN) received, children_max=%i", i);
                 arg_children_max = i;
+
+                (void) sd_notifyf(false,
+                                  "READY=1\n"
+                                  "STATUS=Processing with %u children at max", arg_children_max);
         }
 
         if (udev_ctrl_get_ping(ctrl_msg) > 0)
@@ -1358,49 +1362,33 @@ static int listen_fds(int *rctrl, int *rnetlink) {
  *   udev.exec-delay=<number of seconds>       delay execution of every executed program
  *   udev.event-timeout=<number of seconds>    seconds to wait before terminating an event
  */
-static int parse_proc_cmdline_item(const char *key, const char *value) {
-        const char *full_key = key;
-        int r;
+static int parse_proc_cmdline_item(const char *key, const char *value, void *data) {
+        int r = 0;
 
         assert(key);
 
         if (!value)
                 return 0;
 
-        if (startswith(key, "rd."))
-                key += strlen("rd.");
-
-        if (startswith(key, "udev."))
-                key += strlen("udev.");
-        else
-                return 0;
-
-        if (streq(key, "log-priority")) {
-                int prio;
-
-                prio = util_log_priority(value);
-                if (prio < 0)
-                        goto invalid;
-                log_set_max_level(prio);
-        } else if (streq(key, "children-max")) {
-                r = safe_atou(value, &arg_children_max);
-                if (r < 0)
-                        goto invalid;
-        } else if (streq(key, "exec-delay")) {
-                r = safe_atoi(value, &arg_exec_delay);
-                if (r < 0)
-                        goto invalid;
-        } else if (streq(key, "event-timeout")) {
+        if (streq(key, "udev.log-priority") && value) {
+                r = util_log_priority(value);
+                if (r >= 0)
+                        log_set_max_level(r);
+        } else if (streq(key, "udev.event-timeout") && value) {
                 r = safe_atou64(value, &arg_event_timeout_usec);
-                if (r < 0)
-                        goto invalid;
-                arg_event_timeout_usec *= USEC_PER_SEC;
-                arg_event_timeout_warn_usec = (arg_event_timeout_usec / 3) ? : 1;
-        }
+                if (r >= 0) {
+                        arg_event_timeout_usec *= USEC_PER_SEC;
+                        arg_event_timeout_warn_usec = (arg_event_timeout_usec / 3) ? : 1;
+                }
+        } else if (streq(key, "udev.children-max") && value)
+                r = safe_atou(value, &arg_children_max);
+        else if (streq(key, "udev.exec-delay") && value)
+                r = safe_atoi(value, &arg_exec_delay);
+        else if (startswith(key, "udev."))
+                log_warning("Unknown udev kernel command line option \"%s\"", key);
 
-        return 0;
-invalid:
-        log_warning("invalid %s ignored: %s", full_key, value);
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse \"%s=%s\", ignoring: %m", key, value);
         return 0;
 }
 
@@ -1627,9 +1615,9 @@ static int run(int fd_ctrl, int fd_uevent, const char *cgroup) {
         if (r < 0)
                 log_error_errno(r, "failed to apply permissions on static device nodes: %m");
 
-        (void) sd_notify(false,
-                         "READY=1\n"
-                         "STATUS=Processing...");
+        (void) sd_notifyf(false,
+                          "READY=1\n"
+                          "STATUS=Processing with %u children at max", arg_children_max);
 
         r = sd_event_loop(manager->event);
         if (r < 0) {
@@ -1661,7 +1649,7 @@ int main(int argc, char *argv[]) {
         if (r <= 0)
                 goto exit;
 
-        r = parse_proc_cmdline(parse_proc_cmdline_item);
+        r = parse_proc_cmdline(parse_proc_cmdline_item, NULL, true);
         if (r < 0)
                 log_warning_errno(r, "failed to parse kernel command line, ignoring: %m");
 
@@ -1734,8 +1722,13 @@ int main(int argc, char *argv[]) {
                 log_info("starting version " VERSION);
 
                 /* connect /dev/null to stdin, stdout, stderr */
-                if (log_get_max_level() < LOG_DEBUG)
-                        (void) make_null_stdio();
+                if (log_get_max_level() < LOG_DEBUG) {
+                        r = make_null_stdio();
+                        if (r < 0)
+                                log_warning_errno(r, "Failed to redirect standard streams to /dev/null: %m");
+                }
+
+
 
                 pid = fork();
                 switch (pid) {

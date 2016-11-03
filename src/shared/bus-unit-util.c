@@ -84,7 +84,7 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 if (isempty(eq))
                         r = sd_bus_message_append(m, "sv", "CPUQuotaPerSecUSec", "t", USEC_INFINITY);
                 else {
-                        r = parse_percent(eq);
+                        r = parse_percent_unbounded(eq);
                         if (r <= 0) {
                                 log_error_errno(r, "CPU quota '%s' invalid.", eq);
                                 return -EINVAL;
@@ -199,17 +199,30 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 r = sd_bus_message_append(m, "sv", sn, "t", l.rlim_cur);
 
         } else if (STR_IN_SET(field,
-                       "CPUAccounting", "MemoryAccounting", "IOAccounting", "BlockIOAccounting", "TasksAccounting",
-                       "SendSIGHUP", "SendSIGKILL", "WakeSystem", "DefaultDependencies",
-                       "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "RemainAfterExit",
-                       "PrivateTmp", "PrivateDevices", "PrivateNetwork", "NoNewPrivileges",
-                       "SyslogLevelPrefix", "Delegate", "RemainAfterElapse", "MemoryDenyWriteExecute")) {
+                              "CPUAccounting", "MemoryAccounting", "IOAccounting", "BlockIOAccounting", "TasksAccounting",
+                              "SendSIGHUP", "SendSIGKILL", "WakeSystem", "DefaultDependencies",
+                              "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "RemainAfterExit",
+                              "PrivateTmp", "PrivateDevices", "PrivateNetwork", "PrivateUsers", "NoNewPrivileges",
+                              "SyslogLevelPrefix", "Delegate", "RemainAfterElapse", "MemoryDenyWriteExecute",
+                              "RestrictRealtime", "DynamicUser", "RemoveIPC", "ProtectKernelTunables",
+                              "ProtectKernelModules", "ProtectControlGroups")) {
 
                 r = parse_boolean(eq);
                 if (r < 0)
                         return log_error_errno(r, "Failed to parse boolean assignment %s.", assignment);
 
                 r = sd_bus_message_append(m, "v", "b", r);
+
+        } else if (STR_IN_SET(field, "CPUWeight", "StartupCPUWeight")) {
+                uint64_t u;
+
+                r = cg_weight_parse(eq, &u);
+                if (r < 0) {
+                        log_error("Failed to parse %s value %s.", field, eq);
+                        return -EINVAL;
+                }
+
+                r = sd_bus_message_append(m, "v", "t", u);
 
         } else if (STR_IN_SET(field, "CPUShares", "StartupCPUShares")) {
                 uint64_t u;
@@ -291,7 +304,7 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                                 rwm = "";
                         }
 
-                        if (!path_startswith(path, "/dev")) {
+                        if (!is_deviceallow_pattern(path)) {
                                 log_error("%s is not a device file in /dev.", path);
                                 return -EINVAL;
                         }
@@ -365,15 +378,13 @@ int bus_append_unit_property_assignment(sd_bus_message *m, const char *assignmen
                 }
 
         } else if (streq(field, "Nice")) {
-                int32_t i;
+                int n;
 
-                r = safe_atoi32(eq, &i);
-                if (r < 0) {
-                        log_error("Failed to parse %s value %s.", field, eq);
-                        return -EINVAL;
-                }
+                r = parse_nice(eq, &n);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse nice value: %s", eq);
 
-                r = sd_bus_message_append(m, "v", "i", i);
+                r = sd_bus_message_append(m, "v", "i", (int32_t) n);
 
         } else if (STR_IN_SET(field, "Environment", "PassEnvironment")) {
                 const char *p;
@@ -554,6 +565,21 @@ finish:
         r = sd_bus_message_close_container(m);
         if (r < 0)
                 return bus_log_create_error(r);
+
+        return 0;
+}
+
+int bus_append_unit_property_assignment_many(sd_bus_message *m, char **l) {
+        char **i;
+        int r;
+
+        assert(m);
+
+        STRV_FOREACH(i, l) {
+                r = bus_append_unit_property_assignment(m, *i);
+                if (r < 0)
+                        return r;
+        }
 
         return 0;
 }

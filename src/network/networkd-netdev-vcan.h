@@ -3,8 +3,7 @@
 /***
   This file is part of systemd.
 
-  Copyright 2014 Lennart Poettering
-  Copyright 2012 Michael Olbrich
+  Copyright 2016 Susant Sahani
 
   systemd is free software; you can redistribute it and/or modify it
   under the terms of the GNU Lesser General Public License as published by
@@ -20,22 +19,16 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-typedef enum FailureAction {
-        FAILURE_ACTION_NONE,
-        FAILURE_ACTION_REBOOT,
-        FAILURE_ACTION_REBOOT_FORCE,
-        FAILURE_ACTION_REBOOT_IMMEDIATE,
-        FAILURE_ACTION_POWEROFF,
-        FAILURE_ACTION_POWEROFF_FORCE,
-        FAILURE_ACTION_POWEROFF_IMMEDIATE,
-        _FAILURE_ACTION_MAX,
-        _FAILURE_ACTION_INVALID = -1
-} FailureAction;
+typedef struct VCan VCan;
 
-#include "macro.h"
-#include "manager.h"
+#include <linux/can/netlink.h>
 
-int failure_action(Manager *m, FailureAction action, const char *reboot_arg);
+#include "networkd-netdev.h"
 
-const char* failure_action_to_string(FailureAction i) _const_;
-FailureAction failure_action_from_string(const char *s) _pure_;
+struct VCan {
+        NetDev meta;
+};
+
+DEFINE_NETDEV_CAST(VCAN, VCan);
+
+extern const NetDevVTable vcan_vtable;

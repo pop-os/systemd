@@ -34,6 +34,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "import-common.h"
+#include "missing.h"
 #include "ratelimit.h"
 #include "string-util.h"
 #include "util.h"
@@ -86,9 +87,7 @@ RawExport *raw_export_unref(RawExport *e) {
 
         free(e->buffer);
         free(e->path);
-        free(e);
-
-        return NULL;
+        return mfree(e);
 }
 
 int raw_export_new(

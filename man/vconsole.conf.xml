@@ -55,8 +55,9 @@
 
     <para>The <filename>/etc/vconsole.conf</filename> file configures
     the virtual console, i.e. keyboard mapping and console font. It is
-    applied at boot by
-    <citerefentry><refentrytitle>systemd-vconsole-setup.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+    applied at boot by udev using <filename>90-vconsole.rules</filename> file.
+    You can safely mask this file if you want to avoid this kind of initialization.
+    </para>
 
     <para>The basic file format of the
     <filename>vconsole.conf</filename> is a newline-separated list of
@@ -68,10 +69,10 @@
 
     <para>Note that the kernel command line options
     <varname>vconsole.keymap=</varname>,
-    <varname>vconsole.keymap.toggle=</varname>,
+    <varname>vconsole.keymap_toggle=</varname>,
     <varname>vconsole.font=</varname>,
-    <varname>vconsole.font.map=</varname>,
-    <varname>vconsole.font.unimap=</varname> may be used
+    <varname>vconsole.font_map=</varname>,
+    <varname>vconsole.font_unimap=</varname> may be used
     to override the console settings at boot.</para>
 
     <para>Depending on the operating system other configuration files
@@ -90,12 +91,10 @@
         <term><varname>KEYMAP=</varname></term>
         <term><varname>KEYMAP_TOGGLE=</varname></term>
 
-        <listitem><para>Configures the key mapping table for the
-        keyboard. <varname>KEYMAP=</varname> defaults to
-        <literal>us</literal> if not set. The
-        <varname>KEYMAP_TOGGLE=</varname> can be used to configure a
-        second toggle keymap and is by default
-        unset.</para></listitem>
+        <listitem><para>Configures the key mapping table for the keyboard.
+        <varname>KEYMAP=</varname> defaults to <literal>us</literal> if not set. The
+        <varname>KEYMAP_TOGGLE=</varname> can be used to configure a second toggle keymap and is by
+        default unset.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -107,6 +106,32 @@
         and the unicode font map.</para></listitem>
       </varlistentry>
 
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>Kernel Command Line</title>
+
+    <para>A few configuration parameters from <filename>vconsole.conf</filename> may be overridden
+    on the kernel command line:</para>
+
+    <variablelist class='kernel-commandline-options'>
+      <varlistentry>
+        <term><varname>vconsole.keymap=</varname></term>
+        <term><varname>vconsole.keymap_toggle=</varname></term>
+
+        <listitem><para>Overrides <varname>KEYMAP=</varname> and <varname>KEYMAP_TOGGLE=</varname>.
+        </para></listitem>
+      </varlistentry>
+      <varlistentry>
+
+        <term><varname>vconsole.font=</varname></term>
+        <term><varname>vconsole.font_map=</varname></term>
+        <term><varname>vconsole.font_unimap=</varname></term>
+
+        <listitem><para>Overrides <varname>FONT=</varname>, <varname>FONT_MAP=</varname>, and
+        <varname>FONT_UNIMAP=</varname>.</para></listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 

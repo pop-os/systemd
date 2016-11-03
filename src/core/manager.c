@@ -45,6 +45,7 @@
 #include "bus-error.h"
 #include "bus-kernel.h"
 #include "bus-util.h"
+#include "clean-ipc.h"
 #include "dbus-job.h"
 #include "dbus-manager.h"
 #include "dbus-unit.h"
@@ -81,6 +82,7 @@
 #include "transaction.h"
 #include "umask-util.h"
 #include "unit-name.h"
+#include "user-util.h"
 #include "util.h"
 #include "virt.h"
 #include "watchdog.h"
@@ -98,6 +100,7 @@ static int manager_dispatch_cgroups_agent_fd(sd_event_source *source, int fd, ui
 static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata);
 static int manager_dispatch_time_change_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata);
 static int manager_dispatch_idle_pipe_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata);
+static int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata);
 static int manager_dispatch_jobs_in_progress(sd_event_source *source, usec_t usec, void *userdata);
 static int manager_dispatch_run_queue(sd_event_source *source, void *userdata);
 static int manager_run_generators(Manager *m);
@@ -519,6 +522,7 @@ static void manager_clean_environment(Manager *m) {
                         "LISTEN_FDNAMES",
                         "WATCHDOG_PID",
                         "WATCHDOG_USEC",
+                        "INVOCATION_ID",
                         NULL);
 }
 
@@ -553,7 +557,6 @@ static int manager_default_environment(Manager *m) {
         return 0;
 }
 
-
 int manager_new(UnitFileScope scope, bool test_run, Manager **_m) {
         Manager *m;
         int r;
@@ -580,16 +583,24 @@ int manager_new(UnitFileScope scope, bool test_run, Manager **_m) {
         if (MANAGER_IS_SYSTEM(m)) {
                 m->unit_log_field = "UNIT=";
                 m->unit_log_format_string = "UNIT=%s";
+
+                m->invocation_log_field = "INVOCATION_ID=";
+                m->invocation_log_format_string = "INVOCATION_ID=" SD_ID128_FORMAT_STR;
         } else {
                 m->unit_log_field = "USER_UNIT=";
                 m->unit_log_format_string = "USER_UNIT=%s";
+
+                m->invocation_log_field = "USER_INVOCATION_ID=";
+                m->invocation_log_format_string = "USER_INVOCATION_ID=" SD_ID128_FORMAT_STR;
         }
 
         m->idle_pipe[0] = m->idle_pipe[1] = m->idle_pipe[2] = m->idle_pipe[3] = -1;
 
         m->pin_cgroupfs_fd = m->notify_fd = m->cgroups_agent_fd = m->signal_fd = m->time_change_fd =
-                m->dev_autofs_fd = m->private_listen_fd = m->kdbus_fd = m->cgroup_inotify_fd =
+                m->dev_autofs_fd = m->private_listen_fd = m->cgroup_inotify_fd =
                 m->ask_password_inotify_fd = -1;
+
+        m->user_lookup_fds[0] = m->user_lookup_fds[1] = -1;
 
         m->current_job_id = 1; /* start as id #1, so that we can leave #0 around as "null-like" value */
 
@@ -657,9 +668,8 @@ int manager_new(UnitFileScope scope, bool test_run, Manager **_m) {
                 goto fail;
         }
 
-        /* Note that we set up neither kdbus, nor the notify fd
-         * here. We do that after deserialization, since they might
-         * have gotten serialized across the reexec. */
+        /* Note that we do not set up the notify fd here. We do that after deserialization,
+         * since they might have gotten serialized across the reexec. */
 
         m->taint_usr = dir_is_empty("/usr") > 0;
 
@@ -767,7 +777,7 @@ static int manager_setup_cgroups_agent(Manager *m) {
         if (!MANAGER_IS_SYSTEM(m))
                 return 0;
 
-        if (cg_unified() > 0) /* We don't need this anymore on the unified hierarchy */
+        if (cg_unified(SYSTEMD_CGROUP_CONTROLLER) > 0) /* We don't need this anymore on the unified hierarchy */
                 return 0;
 
         if (m->cgroups_agent_fd < 0) {
@@ -813,6 +823,59 @@ static int manager_setup_cgroups_agent(Manager *m) {
         return 0;
 }
 
+static int manager_setup_user_lookup_fd(Manager *m) {
+        int r;
+
+        assert(m);
+
+        /* Set up the socket pair used for passing UID/GID resolution results from forked off processes to PID
+         * 1. Background: we can't do name lookups (NSS) from PID 1, since it might involve IPC and thus activation,
+         * and we might hence deadlock on ourselves. Hence we do all user/group lookups asynchronously from the forked
+         * off processes right before executing the binaries to start. In order to be able to clean up any IPC objects
+         * created by a unit (see RemoveIPC=) we need to know in PID 1 the used UID/GID of the executed processes,
+         * hence we establish this communication channel so that forked off processes can pass their UID/GID
+         * information back to PID 1. The forked off processes send their resolved UID/GID to PID 1 in a simple
+         * datagram, along with their unit name, so that we can share one communication socket pair among all units for
+         * this purpose.
+         *
+         * You might wonder why we need a communication channel for this that is independent of the usual notification
+         * socket scheme (i.e. $NOTIFY_SOCKET). The primary difference is about trust: data sent via the $NOTIFY_SOCKET
+         * channel is only accepted if it originates from the right unit and if reception was enabled for it. The user
+         * lookup socket OTOH is only accessible by PID 1 and its children until they exec(), and always available.
+         *
+         * Note that this function is called under two circumstances: when we first initialize (in which case we
+         * allocate both the socket pair and the event source to listen on it), and when we deserialize after a reload
+         * (in which case the socket pair already exists but we still need to allocate the event source for it). */
+
+        if (m->user_lookup_fds[0] < 0) {
+
+                /* Free all secondary fields */
+                safe_close_pair(m->user_lookup_fds);
+                m->user_lookup_event_source = sd_event_source_unref(m->user_lookup_event_source);
+
+                if (socketpair(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC, 0, m->user_lookup_fds) < 0)
+                        return log_error_errno(errno, "Failed to allocate user lookup socket: %m");
+
+                (void) fd_inc_rcvbuf(m->user_lookup_fds[0], NOTIFY_RCVBUF_SIZE);
+        }
+
+        if (!m->user_lookup_event_source) {
+                r = sd_event_add_io(m->event, &m->user_lookup_event_source, m->user_lookup_fds[0], EPOLLIN, manager_dispatch_user_lookup_fd, m);
+                if (r < 0)
+                        return log_error_errno(errno, "Failed to allocate user lookup event source: %m");
+
+                /* Process even earlier than the notify event source, so that we always know first about valid UID/GID
+                 * resolutions */
+                r = sd_event_source_set_priority(m->user_lookup_event_source, SD_EVENT_PRIORITY_NORMAL-8);
+                if (r < 0)
+                        return log_error_errno(errno, "Failed to set priority ot user lookup event source: %m");
+
+                (void) sd_event_source_set_description(m->user_lookup_event_source, "user-lookup");
+        }
+
+        return 0;
+}
+
 static int manager_connect_bus(Manager *m, bool reexecuting) {
         bool try_bus_connect;
 
@@ -822,7 +885,6 @@ static int manager_connect_bus(Manager *m, bool reexecuting) {
                 return 0;
 
         try_bus_connect =
-                m->kdbus_fd >= 0 ||
                 reexecuting ||
                 (MANAGER_IS_USER(m) && getenv("DBUS_SESSION_BUS_ADDRESS"));
 
@@ -854,8 +916,7 @@ enum {
         _GC_OFFSET_MAX
 };
 
-static void unit_gc_mark_good(Unit *u, unsigned gc_marker)
-{
+static void unit_gc_mark_good(Unit *u, unsigned gc_marker) {
         Iterator i;
         Unit *other;
 
@@ -1004,7 +1065,11 @@ Manager* manager_free(Manager *m) {
 
         bus_done(m);
 
+        dynamic_user_vacuum(m, false);
+        hashmap_free(m->dynamic_users);
+
         hashmap_free(m->units);
+        hashmap_free(m->units_by_invocation_id);
         hashmap_free(m->jobs);
         hashmap_free(m->watch_pids1);
         hashmap_free(m->watch_pids2);
@@ -1019,12 +1084,13 @@ Manager* manager_free(Manager *m) {
         sd_event_source_unref(m->time_change_event_source);
         sd_event_source_unref(m->jobs_in_progress_event_source);
         sd_event_source_unref(m->run_queue_event_source);
+        sd_event_source_unref(m->user_lookup_event_source);
 
         safe_close(m->signal_fd);
         safe_close(m->notify_fd);
         safe_close(m->cgroups_agent_fd);
         safe_close(m->time_change_fd);
-        safe_close(m->kdbus_fd);
+        safe_close_pair(m->user_lookup_fds);
 
         manager_close_ask_password(m);
 
@@ -1050,8 +1116,10 @@ Manager* manager_free(Manager *m) {
         assert(hashmap_isempty(m->units_requiring_mounts_for));
         hashmap_free(m->units_requiring_mounts_for);
 
-        free(m);
-        return NULL;
+        hashmap_free(m->uid_refs);
+        hashmap_free(m->gid_refs);
+
+        return mfree(m);
 }
 
 void manager_enumerate(Manager *m) {
@@ -1175,9 +1243,11 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
                 return r;
 
         /* Make sure the transient directory always exists, so that it remains in the search path */
-        r = mkdir_p_label(m->lookup_paths.transient, 0755);
-        if (r < 0)
-                return r;
+        if (!m->test_run) {
+                r = mkdir_p_label(m->lookup_paths.transient, 0755);
+                if (r < 0)
+                        return r;
+        }
 
         dual_timestamp_get(&m->generators_start_timestamp);
         r = manager_run_generators(m);
@@ -1219,13 +1289,25 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
         if (q < 0 && r == 0)
                 r = q;
 
-        /* We might have deserialized the kdbus control fd, but if we
-         * didn't, then let's create the bus now. */
-        manager_connect_bus(m, !!serialization);
-        bus_track_coldplug(m, &m->subscribed, &m->deserialized_subscribed);
+        q = manager_setup_user_lookup_fd(m);
+        if (q < 0 && r == 0)
+                r = q;
+
+        /* Let's connect to the bus now. */
+        (void) manager_connect_bus(m, !!serialization);
+
+        (void) bus_track_coldplug(m, &m->subscribed, false, m->deserialized_subscribed);
+        m->deserialized_subscribed = strv_free(m->deserialized_subscribed);
 
         /* Third, fire things up! */
         manager_coldplug(m);
+
+        /* Release any dynamic users no longer referenced */
+        dynamic_user_vacuum(m, true);
+
+        /* Release any references to UIDs/GIDs no longer referenced, and destroy any IPC owned by them */
+        manager_vacuum_uid_refs(m);
+        manager_vacuum_gid_refs(m);
 
         if (serialization) {
                 assert(m->n_reloading > 0);
@@ -1584,13 +1666,12 @@ static int manager_dispatch_cgroups_agent_fd(sd_event_source *source, int fd, ui
         return 0;
 }
 
-static void manager_invoke_notify_message(Manager *m, Unit *u, pid_t pid, const char *buf, size_t n, FDSet *fds) {
+static void manager_invoke_notify_message(Manager *m, Unit *u, pid_t pid, const char *buf, FDSet *fds) {
         _cleanup_strv_free_ char **tags = NULL;
 
         assert(m);
         assert(u);
         assert(buf);
-        assert(n > 0);
 
         tags = strv_split(buf, "\n\r");
         if (!tags) {
@@ -1600,8 +1681,14 @@ static void manager_invoke_notify_message(Manager *m, Unit *u, pid_t pid, const 
 
         if (UNIT_VTABLE(u)->notify_message)
                 UNIT_VTABLE(u)->notify_message(u, pid, tags, fds);
-        else
-                log_unit_debug(u, "Got notification message for unit. Ignoring.");
+        else if (_unlikely_(log_get_max_level() >= LOG_DEBUG)) {
+                _cleanup_free_ char *x = NULL, *y = NULL;
+
+                x = cescape(buf);
+                if (x)
+                        y = ellipsize(x, 20, 90);
+                log_unit_debug(u, "Got notification message \"%s\", ignoring.", strnull(y));
+        }
 }
 
 static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
@@ -1627,7 +1714,6 @@ static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t 
 
         struct cmsghdr *cmsg;
         struct ucred *ucred = NULL;
-        bool found = false;
         Unit *u1, *u2, *u3;
         int r, *fd_array = NULL;
         unsigned n_fds = 0;
@@ -1641,12 +1727,15 @@ static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t 
                 return 0;
         }
 
-        n = recvmsg(m->notify_fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
+        n = recvmsg(m->notify_fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC|MSG_TRUNC);
         if (n < 0) {
-                if (errno == EAGAIN || errno == EINTR)
-                        return 0;
+                if (IN_SET(errno, EAGAIN, EINTR))
+                        return 0; /* Spurious wakeup, try again */
 
-                return -errno;
+                /* If this is any other, real error, then let's stop processing this socket. This of course means we
+                 * won't take notification messages anymore, but that's still better than busy looping around this:
+                 * being woken up over and over again but being unable to actually read the message off the socket. */
+                return log_error_errno(errno, "Failed to receive notification message: %m");
         }
 
         CMSG_FOREACH(cmsg, &msghdr) {
@@ -1669,7 +1758,8 @@ static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t 
                 r = fdset_new_array(&fds, fd_array, n_fds);
                 if (r < 0) {
                         close_many(fd_array, n_fds);
-                        return log_oom();
+                        log_oom();
+                        return 0;
                 }
         }
 
@@ -1678,38 +1768,40 @@ static int manager_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t 
                 return 0;
         }
 
-        if ((size_t) n >= sizeof(buf)) {
+        if ((size_t) n >= sizeof(buf) || (msghdr.msg_flags & MSG_TRUNC)) {
                 log_warning("Received notify message exceeded maximum size. Ignoring.");
                 return 0;
         }
 
+        /* As extra safety check, let's make sure the string we get doesn't contain embedded NUL bytes. We permit one
+         * trailing NUL byte in the message, but don't expect it. */
+        if (n > 1 && memchr(buf, 0, n-1)) {
+                log_warning("Received notify message with embedded NUL bytes. Ignoring.");
+                return 0;
+        }
+
+        /* Make sure it's NUL-terminated. */
         buf[n] = 0;
 
         /* Notify every unit that might be interested, but try
          * to avoid notifying the same one multiple times. */
         u1 = manager_get_unit_by_pid_cgroup(m, ucred->pid);
-        if (u1) {
-                manager_invoke_notify_message(m, u1, ucred->pid, buf, n, fds);
-                found = true;
-        }
+        if (u1)
+                manager_invoke_notify_message(m, u1, ucred->pid, buf, fds);
 
         u2 = hashmap_get(m->watch_pids1, PID_TO_PTR(ucred->pid));
-        if (u2 && u2 != u1) {
-                manager_invoke_notify_message(m, u2, ucred->pid, buf, n, fds);
-                found = true;
-        }
+        if (u2 && u2 != u1)
+                manager_invoke_notify_message(m, u2, ucred->pid, buf, fds);
 
         u3 = hashmap_get(m->watch_pids2, PID_TO_PTR(ucred->pid));
-        if (u3 && u3 != u2 && u3 != u1) {
-                manager_invoke_notify_message(m, u3, ucred->pid, buf, n, fds);
-                found = true;
-        }
+        if (u3 && u3 != u2 && u3 != u1)
+                manager_invoke_notify_message(m, u3, ucred->pid, buf, fds);
 
-        if (!found)
+        if (!u1 && !u2 && !u3)
                 log_warning("Cannot find unit for notify message of PID "PID_FMT".", ucred->pid);
 
         if (fdset_size(fds) > 0)
-                log_warning("Got auxiliary fds with notification message, closing all.");
+                log_warning("Got extra auxiliary fds with notification message, closing them.");
 
         return 0;
 }
@@ -1814,6 +1906,18 @@ static int manager_start_target(Manager *m, const char *name, JobMode mode) {
         return r;
 }
 
+static void manager_handle_ctrl_alt_del(Manager *m) {
+        /* If the user presses C-A-D more than
+         * 7 times within 2s, we reboot/shutdown immediately,
+         * unless it was disabled in system.conf */
+
+        if (ratelimit_test(&m->ctrl_alt_del_ratelimit) || m->cad_burst_action == EMERGENCY_ACTION_NONE)
+                manager_start_target(m, SPECIAL_CTRL_ALT_DEL_TARGET, JOB_REPLACE_IRREVERSIBLY);
+        else
+                emergency_action(m, m->cad_burst_action, NULL,
+                                "Ctrl-Alt-Del was pressed more than 7 times within 2s");
+}
+
 static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
         Manager *m = userdata;
         ssize_t n;
@@ -1832,14 +1936,17 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t 
         for (;;) {
                 n = read(m->signal_fd, &sfsi, sizeof(sfsi));
                 if (n != sizeof(sfsi)) {
+                        if (n >= 0) {
+                                log_warning("Truncated read from signal fd (%zu bytes)!", n);
+                                return 0;
+                        }
 
-                        if (n >= 0)
-                                return -EIO;
-
-                        if (errno == EINTR || errno == EAGAIN)
+                        if (IN_SET(errno, EINTR, EAGAIN))
                                 break;
 
-                        return -errno;
+                        /* We return an error here, which will kill this handler,
+                         * to avoid a busy loop on read error. */
+                        return log_error_errno(errno, "Reading from signal fd failed: %m");
                 }
 
                 log_received_signal(sfsi.ssi_signo == SIGCHLD ||
@@ -1865,19 +1972,7 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t 
 
                 case SIGINT:
                         if (MANAGER_IS_SYSTEM(m)) {
-
-                                /* If the user presses C-A-D more than
-                                 * 7 times within 2s, we reboot
-                                 * immediately. */
-
-                                if (ratelimit_test(&m->ctrl_alt_del_ratelimit))
-                                        manager_start_target(m, SPECIAL_CTRL_ALT_DEL_TARGET, JOB_REPLACE_IRREVERSIBLY);
-                                else {
-                                        log_notice("Ctrl-Alt-Del was pressed more than 7 times within 2s, rebooting immediately.");
-                                        status_printf(NULL, true, false, "Ctrl-Alt-Del was pressed more than 7 times within 2s, rebooting immediately.");
-                                        m->exit_code = MANAGER_REBOOT;
-                                }
-
+                                manager_handle_ctrl_alt_del(m);
                                 break;
                         }
 
@@ -2163,6 +2258,7 @@ int manager_loop(Manager *m) {
 
 int manager_load_unit_from_dbus_path(Manager *m, const char *s, sd_bus_error *e, Unit **_u) {
         _cleanup_free_ char *n = NULL;
+        sd_id128_t invocation_id;
         Unit *u;
         int r;
 
@@ -2174,12 +2270,25 @@ int manager_load_unit_from_dbus_path(Manager *m, const char *s, sd_bus_error *e,
         if (r < 0)
                 return r;
 
+        /* Permit addressing units by invocation ID: if the passed bus path is suffixed by a 128bit ID then we use it
+         * as invocation ID. */
+        r = sd_id128_from_string(n, &invocation_id);
+        if (r >= 0) {
+                u = hashmap_get(m->units_by_invocation_id, &invocation_id);
+                if (u) {
+                        *_u = u;
+                        return 0;
+                }
+
+                return sd_bus_error_setf(e, BUS_ERROR_NO_UNIT_FOR_INVOCATION_ID, "No unit with the specified invocation ID " SD_ID128_FORMAT_STR " known.", SD_ID128_FORMAT_VAL(invocation_id));
+        }
+
+        /* If this didn't work, we use the suffix as unit name. */
         r = manager_load_unit(m, n, NULL, e, &u);
         if (r < 0)
                 return r;
 
         *_u = u;
-
         return 0;
 }
 
@@ -2391,17 +2500,28 @@ int manager_serialize(Manager *m, FILE *f, FDSet *fds, bool switching_root) {
                 fprintf(f, "cgroups-agent-fd=%i\n", copy);
         }
 
-        if (m->kdbus_fd >= 0) {
-                int copy;
+        if (m->user_lookup_fds[0] >= 0) {
+                int copy0, copy1;
 
-                copy = fdset_put_dup(fds, m->kdbus_fd);
-                if (copy < 0)
-                        return copy;
+                copy0 = fdset_put_dup(fds, m->user_lookup_fds[0]);
+                if (copy0 < 0)
+                        return copy0;
 
-                fprintf(f, "kdbus-fd=%i\n", copy);
+                copy1 = fdset_put_dup(fds, m->user_lookup_fds[1]);
+                if (copy1 < 0)
+                        return copy1;
+
+                fprintf(f, "user-lookup=%i %i\n", copy0, copy1);
         }
 
-        bus_track_serialize(m->subscribed, f);
+        bus_track_serialize(m->subscribed, f, "subscribed");
+
+        r = dynamic_user_serialize(m, f, fds);
+        if (r < 0)
+                return r;
+
+        manager_serialize_uid_refs(m, f);
+        manager_serialize_gid_refs(m, f);
 
         fputc('\n', f);
 
@@ -2569,25 +2689,31 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                                 m->cgroups_agent_fd = fdset_remove(fds, fd);
                         }
 
-                } else if (startswith(l, "kdbus-fd=")) {
-                        int fd;
+                } else if (startswith(l, "user-lookup=")) {
+                        int fd0, fd1;
 
-                        if (safe_atoi(l + 9, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
-                                log_debug("Failed to parse kdbus fd: %s", l + 9);
+                        if (sscanf(l + 12, "%i %i", &fd0, &fd1) != 2 || fd0 < 0 || fd1 < 0 || fd0 == fd1 || !fdset_contains(fds, fd0) || !fdset_contains(fds, fd1))
+                                log_debug("Failed to parse user lookup fd: %s", l + 12);
                         else {
-                                safe_close(m->kdbus_fd);
-                                m->kdbus_fd = fdset_remove(fds, fd);
+                                m->user_lookup_event_source = sd_event_source_unref(m->user_lookup_event_source);
+                                safe_close_pair(m->user_lookup_fds);
+                                m->user_lookup_fds[0] = fdset_remove(fds, fd0);
+                                m->user_lookup_fds[1] = fdset_remove(fds, fd1);
                         }
 
-                } else {
-                        int k;
+                } else if (startswith(l, "dynamic-user="))
+                        dynamic_user_deserialize_one(m, l + 13, fds);
+                else if (startswith(l, "destroy-ipc-uid="))
+                        manager_deserialize_uid_refs_one(m, l + 16);
+                else if (startswith(l, "destroy-ipc-gid="))
+                        manager_deserialize_gid_refs_one(m, l + 16);
+                else if (startswith(l, "subscribed=")) {
 
-                        k = bus_track_deserialize_item(&m->deserialized_subscribed, l);
-                        if (k < 0)
-                                log_debug_errno(k, "Failed to deserialize bus tracker object: %m");
-                        else if (k == 0)
-                                log_debug("Unknown serialization item '%s'", l);
-                }
+                        if (strv_extend(&m->deserialized_subscribed, l+11) < 0)
+                                log_oom();
+
+                } else if (!startswith(l, "kdbus-fd=")) /* ignore this one */
+                        log_debug("Unknown serialization item '%s'", l);
         }
 
         for (;;) {
@@ -2660,6 +2786,9 @@ int manager_reload(Manager *m) {
         manager_clear_jobs_and_units(m);
         lookup_paths_flush_generator(&m->lookup_paths);
         lookup_paths_free(&m->lookup_paths);
+        dynamic_user_vacuum(m, false);
+        m->uid_refs = hashmap_free(m->uid_refs);
+        m->gid_refs = hashmap_free(m->gid_refs);
 
         q = lookup_paths_init(&m->lookup_paths, m->unit_file_scope, 0, NULL);
         if (q < 0 && r >= 0)
@@ -2693,8 +2822,19 @@ int manager_reload(Manager *m) {
         if (q < 0 && r >= 0)
                 r = q;
 
+        q = manager_setup_user_lookup_fd(m);
+        if (q < 0 && r >= 0)
+                r = q;
+
         /* Third, fire things up! */
         manager_coldplug(m);
+
+        /* Release any dynamic users no longer referenced */
+        dynamic_user_vacuum(m, true);
+
+        /* Release any references to UIDs/GIDs no longer referenced, and destroy any IPC owned by them */
+        manager_vacuum_uid_refs(m);
+        manager_vacuum_gid_refs(m);
 
         /* Sync current state of bus names with our set of listening units */
         if (m->api_bus)
@@ -2941,7 +3081,7 @@ int manager_set_default_rlimits(Manager *m, struct rlimit **default_rlimit) {
 
                 m->rlimit[i] = newdup(struct rlimit, default_rlimit[i], 1);
                 if (!m->rlimit[i])
-                        return -ENOMEM;
+                        return log_oom();
         }
 
         return 0;
@@ -3127,6 +3267,300 @@ ManagerState manager_state(Manager *m) {
                 return MANAGER_DEGRADED;
 
         return MANAGER_RUNNING;
+}
+
+#define DESTROY_IPC_FLAG (UINT32_C(1) << 31)
+
+static void manager_unref_uid_internal(
+                Manager *m,
+                Hashmap **uid_refs,
+                uid_t uid,
+                bool destroy_now,
+                int (*_clean_ipc)(uid_t uid)) {
+
+        uint32_t c, n;
+
+        assert(m);
+        assert(uid_refs);
+        assert(uid_is_valid(uid));
+        assert(_clean_ipc);
+
+        /* A generic implementation, covering both manager_unref_uid() and manager_unref_gid(), under the assumption
+         * that uid_t and gid_t are actually defined the same way, with the same validity rules.
+         *
+         * We store a hashmap where the UID/GID is they key and the value is a 32bit reference counter, whose highest
+         * bit is used as flag for marking UIDs/GIDs whose IPC objects to remove when the last reference to the UID/GID
+         * is dropped. The flag is set to on, once at least one reference from a unit where RemoveIPC= is set is added
+         * on a UID/GID. It is reset when the UID's/GID's reference counter drops to 0 again. */
+
+        assert_cc(sizeof(uid_t) == sizeof(gid_t));
+        assert_cc(UID_INVALID == (uid_t) GID_INVALID);
+
+        if (uid == 0) /* We don't keep track of root, and will never destroy it */
+                return;
+
+        c = PTR_TO_UINT32(hashmap_get(*uid_refs, UID_TO_PTR(uid)));
+
+        n = c & ~DESTROY_IPC_FLAG;
+        assert(n > 0);
+        n--;
+
+        if (destroy_now && n == 0) {
+                hashmap_remove(*uid_refs, UID_TO_PTR(uid));
+
+                if (c & DESTROY_IPC_FLAG) {
+                        log_debug("%s " UID_FMT " is no longer referenced, cleaning up its IPC.",
+                                  _clean_ipc == clean_ipc_by_uid ? "UID" : "GID",
+                                  uid);
+                        (void) _clean_ipc(uid);
+                }
+        } else {
+                c = n | (c & DESTROY_IPC_FLAG);
+                assert_se(hashmap_update(*uid_refs, UID_TO_PTR(uid), UINT32_TO_PTR(c)) >= 0);
+        }
+}
+
+void manager_unref_uid(Manager *m, uid_t uid, bool destroy_now) {
+        manager_unref_uid_internal(m, &m->uid_refs, uid, destroy_now, clean_ipc_by_uid);
+}
+
+void manager_unref_gid(Manager *m, gid_t gid, bool destroy_now) {
+        manager_unref_uid_internal(m, &m->gid_refs, (uid_t) gid, destroy_now, clean_ipc_by_gid);
+}
+
+static int manager_ref_uid_internal(
+                Manager *m,
+                Hashmap **uid_refs,
+                uid_t uid,
+                bool clean_ipc) {
+
+        uint32_t c, n;
+        int r;
+
+        assert(m);
+        assert(uid_refs);
+        assert(uid_is_valid(uid));
+
+        /* A generic implementation, covering both manager_ref_uid() and manager_ref_gid(), under the assumption
+         * that uid_t and gid_t are actually defined the same way, with the same validity rules. */
+
+        assert_cc(sizeof(uid_t) == sizeof(gid_t));
+        assert_cc(UID_INVALID == (uid_t) GID_INVALID);
+
+        if (uid == 0) /* We don't keep track of root, and will never destroy it */
+                return 0;
+
+        r = hashmap_ensure_allocated(uid_refs, &trivial_hash_ops);
+        if (r < 0)
+                return r;
+
+        c = PTR_TO_UINT32(hashmap_get(*uid_refs, UID_TO_PTR(uid)));
+
+        n = c & ~DESTROY_IPC_FLAG;
+        n++;
+
+        if (n & DESTROY_IPC_FLAG) /* check for overflow */
+                return -EOVERFLOW;
+
+        c = n | (c & DESTROY_IPC_FLAG) | (clean_ipc ? DESTROY_IPC_FLAG : 0);
+
+        return hashmap_replace(*uid_refs, UID_TO_PTR(uid), UINT32_TO_PTR(c));
+}
+
+int manager_ref_uid(Manager *m, uid_t uid, bool clean_ipc) {
+        return manager_ref_uid_internal(m, &m->uid_refs, uid, clean_ipc);
+}
+
+int manager_ref_gid(Manager *m, gid_t gid, bool clean_ipc) {
+        return manager_ref_uid_internal(m, &m->gid_refs, (uid_t) gid, clean_ipc);
+}
+
+static void manager_vacuum_uid_refs_internal(
+                Manager *m,
+                Hashmap **uid_refs,
+                int (*_clean_ipc)(uid_t uid)) {
+
+        Iterator i;
+        void *p, *k;
+
+        assert(m);
+        assert(uid_refs);
+        assert(_clean_ipc);
+
+        HASHMAP_FOREACH_KEY(p, k, *uid_refs, i) {
+                uint32_t c, n;
+                uid_t uid;
+
+                uid = PTR_TO_UID(k);
+                c = PTR_TO_UINT32(p);
+
+                n = c & ~DESTROY_IPC_FLAG;
+                if (n > 0)
+                        continue;
+
+                if (c & DESTROY_IPC_FLAG) {
+                        log_debug("Found unreferenced %s " UID_FMT " after reload/reexec. Cleaning up.",
+                                  _clean_ipc == clean_ipc_by_uid ? "UID" : "GID",
+                                  uid);
+                        (void) _clean_ipc(uid);
+                }
+
+                assert_se(hashmap_remove(*uid_refs, k) == p);
+        }
+}
+
+void manager_vacuum_uid_refs(Manager *m) {
+        manager_vacuum_uid_refs_internal(m, &m->uid_refs, clean_ipc_by_uid);
+}
+
+void manager_vacuum_gid_refs(Manager *m) {
+        manager_vacuum_uid_refs_internal(m, &m->gid_refs, clean_ipc_by_gid);
+}
+
+static void manager_serialize_uid_refs_internal(
+                Manager *m,
+                FILE *f,
+                Hashmap **uid_refs,
+                const char *field_name) {
+
+        Iterator i;
+        void *p, *k;
+
+        assert(m);
+        assert(f);
+        assert(uid_refs);
+        assert(field_name);
+
+        /* Serialize the UID reference table. Or actually, just the IPC destruction flag of it, as the actual counter
+         * of it is better rebuild after a reload/reexec. */
+
+        HASHMAP_FOREACH_KEY(p, k, *uid_refs, i) {
+                uint32_t c;
+                uid_t uid;
+
+                uid = PTR_TO_UID(k);
+                c = PTR_TO_UINT32(p);
+
+                if (!(c & DESTROY_IPC_FLAG))
+                        continue;
+
+                fprintf(f, "%s=" UID_FMT "\n", field_name, uid);
+        }
+}
+
+void manager_serialize_uid_refs(Manager *m, FILE *f) {
+        manager_serialize_uid_refs_internal(m, f, &m->uid_refs, "destroy-ipc-uid");
+}
+
+void manager_serialize_gid_refs(Manager *m, FILE *f) {
+        manager_serialize_uid_refs_internal(m, f, &m->gid_refs, "destroy-ipc-gid");
+}
+
+static void manager_deserialize_uid_refs_one_internal(
+                Manager *m,
+                Hashmap** uid_refs,
+                const char *value) {
+
+        uid_t uid;
+        uint32_t c;
+        int r;
+
+        assert(m);
+        assert(uid_refs);
+        assert(value);
+
+        r = parse_uid(value, &uid);
+        if (r < 0 || uid == 0) {
+                log_debug("Unable to parse UID reference serialization");
+                return;
+        }
+
+        r = hashmap_ensure_allocated(uid_refs, &trivial_hash_ops);
+        if (r < 0) {
+                log_oom();
+                return;
+        }
+
+        c = PTR_TO_UINT32(hashmap_get(*uid_refs, UID_TO_PTR(uid)));
+        if (c & DESTROY_IPC_FLAG)
+                return;
+
+        c |= DESTROY_IPC_FLAG;
+
+        r = hashmap_replace(*uid_refs, UID_TO_PTR(uid), UINT32_TO_PTR(c));
+        if (r < 0) {
+                log_debug("Failed to add UID reference entry");
+                return;
+        }
+}
+
+void manager_deserialize_uid_refs_one(Manager *m, const char *value) {
+        manager_deserialize_uid_refs_one_internal(m, &m->uid_refs, value);
+}
+
+void manager_deserialize_gid_refs_one(Manager *m, const char *value) {
+        manager_deserialize_uid_refs_one_internal(m, &m->gid_refs, value);
+}
+
+int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
+        struct buffer {
+                uid_t uid;
+                gid_t gid;
+                char unit_name[UNIT_NAME_MAX+1];
+        } _packed_ buffer;
+
+        Manager *m = userdata;
+        ssize_t l;
+        size_t n;
+        Unit *u;
+
+        assert_se(source);
+        assert_se(m);
+
+        /* Invoked whenever a child process succeeded resolving its user/group to use and sent us the resulting UID/GID
+         * in a datagram. We parse the datagram here and pass it off to the unit, so that it can add a reference to the
+         * UID/GID so that it can destroy the UID/GID's IPC objects when the reference counter drops to 0. */
+
+        l = recv(fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
+        if (l < 0) {
+                if (errno == EINTR || errno == EAGAIN)
+                        return 0;
+
+                return log_error_errno(errno, "Failed to read from user lookup fd: %m");
+        }
+
+        if ((size_t) l <= offsetof(struct buffer, unit_name)) {
+                log_warning("Received too short user lookup message, ignoring.");
+                return 0;
+        }
+
+        if ((size_t) l > offsetof(struct buffer, unit_name) + UNIT_NAME_MAX) {
+                log_warning("Received too long user lookup message, ignoring.");
+                return 0;
+        }
+
+        if (!uid_is_valid(buffer.uid) && !gid_is_valid(buffer.gid)) {
+                log_warning("Got user lookup message with invalid UID/GID pair, ignoring.");
+                return 0;
+        }
+
+        n = (size_t) l - offsetof(struct buffer, unit_name);
+        if (memchr(buffer.unit_name, 0, n)) {
+                log_warning("Received lookup message with embedded NUL character, ignoring.");
+                return 0;
+        }
+
+        buffer.unit_name[n] = 0;
+        u = manager_get_unit(m, buffer.unit_name);
+        if (!u) {
+                log_debug("Got user lookup message but unit doesn't exist, ignoring.");
+                return 0;
+        }
+
+        log_unit_debug(u, "User lookup succeeded: uid=" UID_FMT " gid=" GID_FMT, buffer.uid, buffer.gid);
+
+        unit_notify_user_lookup(u, buffer.uid, buffer.gid);
+        return 0;
 }
 
 static const char *const manager_state_table[_MANAGER_STATE_MAX] = {

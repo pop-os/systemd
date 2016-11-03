@@ -57,6 +57,8 @@ static void ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         unsigned preference;
         usec_t time_now;
         int r;
+        Address *address;
+        Iterator i;
 
         assert(link);
         assert(rt);
@@ -73,6 +75,32 @@ static void ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         if (r < 0) {
                 log_link_warning_errno(link, r, "Failed to get gateway address from RA: %m");
                 return;
+        }
+
+        SET_FOREACH(address, link->addresses, i) {
+                if (!memcmp(&gateway, &address->in_addr.in6,
+                            sizeof(address->in_addr.in6))) {
+                        char buffer[INET6_ADDRSTRLEN];
+
+                        log_link_debug(link, "No NDisc route added, gateway %s matches local address",
+                                       inet_ntop(AF_INET6,
+                                                 &address->in_addr.in6,
+                                                 buffer, sizeof(buffer)));
+                        return;
+                }
+        }
+
+        SET_FOREACH(address, link->addresses_foreign, i) {
+                if (!memcmp(&gateway, &address->in_addr.in6,
+                            sizeof(address->in_addr.in6))) {
+                        char buffer[INET6_ADDRSTRLEN];
+
+                        log_link_debug(link, "No NDisc route added, gateway %s matches local address",
+                                       inet_ntop(AF_INET6,
+                                                 &address->in_addr.in6,
+                                                 buffer, sizeof(buffer)));
+                        return;
+                }
         }
 
         r = sd_ndisc_router_get_preference(rt, &preference);
@@ -94,7 +122,7 @@ static void ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         }
 
         route->family = AF_INET6;
-        route->table = RT_TABLE_MAIN;
+        route->table = link->network->ipv6_accept_ra_route_table;
         route->protocol = RTPROT_RA;
         route->pref = preference;
         route->gw.in6 = gateway;
@@ -214,7 +242,7 @@ static void ndisc_router_process_onlink_prefix(Link *link, sd_ndisc_router *rt) 
         }
 
         route->family = AF_INET6;
-        route->table = RT_TABLE_MAIN;
+        route->table = link->network->ipv6_accept_ra_route_table;
         route->protocol = RTPROT_RA;
         route->flags = RTM_F_PREFIX;
         route->dst_prefixlen = prefixlen;
@@ -285,7 +313,7 @@ static void ndisc_router_process_route(Link *link, sd_ndisc_router *rt) {
         }
 
         route->family = AF_INET6;
-        route->table = RT_TABLE_MAIN;
+        route->table = link->network->ipv6_accept_ra_route_table;
         route->protocol = RTPROT_RA;
         route->pref = preference;
         route->gw.in6 = gateway;
@@ -652,13 +680,22 @@ void ndisc_vacuum(Link *link) {
 
         SET_FOREACH(r, link->ndisc_rdnss, i)
                 if (r->valid_until < time_now) {
-                        (void) set_remove(link->ndisc_rdnss, r);
+                        free(set_remove(link->ndisc_rdnss, r));
                         link_dirty(link);
                 }
 
         SET_FOREACH(d, link->ndisc_dnssl, i)
                 if (d->valid_until < time_now) {
-                        (void) set_remove(link->ndisc_dnssl, d);
+                        free(set_remove(link->ndisc_dnssl, d));
                         link_dirty(link);
                 }
+}
+
+void ndisc_flush(Link *link) {
+        assert(link);
+
+        /* Removes all RDNSS and DNSSL entries, without exception */
+
+        link->ndisc_rdnss = set_free_free(link->ndisc_rdnss);
+        link->ndisc_dnssl = set_free_free(link->ndisc_dnssl);
 }

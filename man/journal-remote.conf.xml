@@ -45,22 +45,21 @@
   <refnamediv>
     <refname>journal-remote.conf</refname>
     <refname>journal-remote.conf.d</refname>
-    <refpurpose>Journal remote service configuration files</refpurpose>
+    <refpurpose>Configuration files for the service accepting remote journal uploads</refpurpose>
   </refnamediv>
 
   <refsynopsisdiv>
     <para><filename>/etc/systemd/journal-remote.conf</filename></para>
-    <para><filename>/etc/systemd/journald.conf.d/*.conf</filename></para>
-    <para><filename>/run/systemd/journald.conf.d/*.conf</filename></para>
-    <para><filename>/usr/lib/systemd/journald.conf.d/*.conf</filename></para>
+    <para><filename>/etc/systemd/journal-remote.conf.d/*.conf</filename></para>
+    <para><filename>/run/systemd/journal-remote.conf.d/*.conf</filename></para>
+    <para><filename>/usr/lib/systemd/journal-remote.conf.d/*.conf</filename></para>
   </refsynopsisdiv>
 
   <refsect1>
     <title>Description</title>
 
-    <para>These files configure various parameters of the systemd-remote-journal
-    application,
-    <citerefentry><refentrytitle>systemd-journal-remote</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+    <para>These files configure various parameters of
+    <citerefentry><refentrytitle>systemd-journal-remote.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
   </refsect1>
 
   <xi:include href="standard-conf.xml" xpointer="main-conf" />

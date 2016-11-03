@@ -26,13 +26,18 @@
 int main(int argc, char *argv[]) {
         const char * const writable[] = {
                 "/home",
+                "-/home/lennart/projects/foobar", /* this should be masked automatically */
                 NULL
         };
 
         const char * const readonly[] = {
-                "/",
-                "/usr",
+                /* "/", */
+                /* "/usr", */
                 "/boot",
+                "/lib",
+                "/usr/lib",
+                "-/lib64",
+                "-/usr/lib64",
                 NULL
         };
 
@@ -40,12 +45,21 @@ int main(int argc, char *argv[]) {
                 "/home/lennart/projects",
                 NULL
         };
+
+        static const NameSpaceInfo ns_info = {
+                .private_dev = true,
+                .protect_control_groups = true,
+                .protect_kernel_tunables = true,
+                .protect_kernel_modules = true,
+        };
+
         char *root_directory;
         char *projects_directory;
-
         int r;
         char tmp_dir[] = "/tmp/systemd-private-XXXXXX",
              var_tmp_dir[] = "/var/tmp/systemd-private-XXXXXX";
+
+        log_set_max_level(LOG_DEBUG);
 
         assert_se(mkdtemp(tmp_dir));
         assert_se(mkdtemp(var_tmp_dir));
@@ -63,12 +77,12 @@ int main(int argc, char *argv[]) {
                 log_info("Not chrooted");
 
         r = setup_namespace(root_directory,
+                            &ns_info,
                             (char **) writable,
                             (char **) readonly,
                             (char **) inaccessible,
                             tmp_dir,
                             var_tmp_dir,
-                            true,
                             PROTECT_HOME_NO,
                             PROTECT_SYSTEM_NO,
                             0);

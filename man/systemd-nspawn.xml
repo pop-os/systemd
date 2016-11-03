@@ -274,8 +274,7 @@
         signals. It is recommended to use this mode to invoke arbitrary commands in containers, unless they have been
         modified to run correctly as PID 1. Or in other words: this switch should be used for pretty much all commands,
         except when the command refers to an init or shell implementation, as these are generally capable of running
-        correctly as PID 1. This option may not be combined with <option>--boot</option> or
-        <option>--share-system</option>.</para>
+        correctly as PID 1. This option may not be combined with <option>--boot</option>.</para>
         </listitem>
       </varlistentry>
 
@@ -285,8 +284,7 @@
 
         <listitem><para>Automatically search for an init binary and invoke it as PID 1, instead of a shell or a user
         supplied program. If this option is used, arguments specified on the command line are used as arguments for the
-        init binary. This option may not be combined with <option>--as-pid2</option> or
-        <option>--share-system</option>.</para>
+        init binary. This option may not be combined with <option>--as-pid2</option>.</para>
 
         <para>The following table explains the different modes of invocation and relationship to
         <option>--as-pid2</option> (see above):</para>
@@ -407,41 +405,42 @@
         purposes (usually in the range beyond the host's UID/GID 65536). The parameter may be specified as follows:</para>
 
         <orderedlist>
-          <listitem><para>The value <literal>no</literal> turns off user namespacing. This is the default.</para></listitem>
+          <listitem><para>If one or two colon-separated numbers are specified, user namespacing is turned on. The first
+          parameter specifies the first host UID/GID to assign to the container, the second parameter specifies the
+          number of host UIDs/GIDs to assign to the container. If the second parameter is omitted, 65536 UIDs/GIDs are
+          assigned.</para></listitem>
 
-          <listitem><para>The value <literal>yes</literal> (or the omission of a parameter) turns on user
-          namespacing. The UID/GID range to use is determined automatically from the file ownership of the root
-          directory of the container's directory tree. To use this option, make sure to prepare the directory tree in
-          advance, and ensure that all files and directories in it are owned by UIDs/GIDs in the range you'd like to
-          use. Also, make sure that used file ACLs exclusively reference UIDs/GIDs in the appropriate range. If this
-          mode is used the number of UIDs/GIDs assigned to the container for use is 65536, and the UID/GID of the
-          root directory must be a multiple of 65536.</para></listitem>
+          <listitem><para>If the parameter is omitted, or true, user namespacing is turned on. The UID/GID range to
+          use is determined automatically from the file ownership of the root directory of the container's directory
+          tree. To use this option, make sure to prepare the directory tree in advance, and ensure that all files and
+          directories in it are owned by UIDs/GIDs in the range you'd like to use. Also, make sure that used file ACLs
+          exclusively reference UIDs/GIDs in the appropriate range. If this mode is used the number of UIDs/GIDs
+          assigned to the container for use is 65536, and the UID/GID of the root directory must be a multiple of
+          65536.</para></listitem>
 
-          <listitem><para>The value "pick" turns on user namespacing. In this case the UID/GID range is automatically
-          chosen. As first step, the file owner of the root directory of the container's directory tree is read, and it
-          is checked that it is currently not used by the system otherwise (in particular, that no other container is
-          using it). If this check is successful, the UID/GID range determined this way is used, similar to the
-          behaviour if "yes" is specified. If the check is not successful (and thus the UID/GID range indicated in the
-          root directory's file owner is already used elsewhere) a new – currently unused – UID/GID range of 65536
-          UIDs/GIDs is randomly chosen between the host UID/GIDs of 524288 and 1878982656, always starting at a
-          multiple of 65536. This setting implies <option>--private-users-chown</option> (see below), which has the
-          effect that the files and directories in the container's directory tree will be owned by the appropriate
-          users of the range picked. Using this option makes user namespace behaviour fully automatic. Note that the
-          first invocation of a previously unused container image might result in picking a new UID/GID range for it,
-          and thus in the (possibly expensive) file ownership adjustment operation. However, subsequent invocations of
-          the container will be cheap (unless of course the picked UID/GID range is assigned to a different use by
-          then).</para></listitem>
+          <listitem><para>If the parameter is false, user namespacing is turned off. This is the default.</para>
+          </listitem>
 
-          <listitem><para>Finally if one or two colon-separated numeric parameters are specified, user namespacing is
-          turned on, too. The first parameter specifies the first host UID/GID to assign to the container, the second
-          parameter specifies the number of host UIDs/GIDs to assign to the container. If the second parameter is
-          omitted, 65536 UIDs/GIDs are assigned.</para></listitem>
+          <listitem><para>The special value <literal>pick</literal> turns on user namespacing. In this case the UID/GID
+          range is automatically chosen. As first step, the file owner of the root directory of the container's
+          directory tree is read, and it is checked that it is currently not used by the system otherwise (in
+          particular, that no other container is using it). If this check is successful, the UID/GID range determined
+          this way is used, similar to the behavior if "yes" is specified. If the check is not successful (and thus
+          the UID/GID range indicated in the root directory's file owner is already used elsewhere) a new – currently
+          unused – UID/GID range of 65536 UIDs/GIDs is randomly chosen between the host UID/GIDs of 524288 and
+          1878982656, always starting at a multiple of 65536. This setting implies
+          <option>--private-users-chown</option> (see below), which has the effect that the files and directories in
+          the container's directory tree will be owned by the appropriate users of the range picked. Using this option
+          makes user namespace behavior fully automatic. Note that the first invocation of a previously unused
+          container image might result in picking a new UID/GID range for it, and thus in the (possibly expensive) file
+          ownership adjustment operation. However, subsequent invocations of the container will be cheap (unless of
+          course the picked UID/GID range is assigned to a different use by then).</para></listitem>
         </orderedlist>
 
         <para>It is recommended to assign at least 65536 UIDs/GIDs to each container, so that the usable UID/GID range in the
         container covers 16 bit. For best security, do not assign overlapping UID/GID ranges to multiple containers. It is
         hence a good idea to use the upper 16 bit of the host 32-bit UIDs/GIDs as container identifier, while the lower 16
-        bit encode the container UID/GID used. This is in fact the behaviour enforced by the
+        bit encode the container UID/GID used. This is in fact the behavior enforced by the
         <option>--private-users=pick</option> option.</para>
 
         <para>When user namespaces are used, the GID range assigned to each container is always chosen identical to the
@@ -456,17 +455,6 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>-U</option></term>
-
-        <listitem><para>If the kernel supports the user namespaces feature, equivalent to
-        <option>--private-users=pick</option>, otherwise equivalent to
-        <option>--private-users=no</option>.</para>
-
-        <para>Note that <option>-U</option> is the default if the <filename>systemd-nspawn@.service</filename> template unit
-        file is used.</para></listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><option>--private-users-chown</option></term>
 
         <listitem><para>If specified, all files and directories in the container's directory tree will adjusted so that
@@ -476,6 +464,23 @@
 
         <para>This option is implied if <option>--private-users=pick</option> is used. This option has no effect if
         user namespacing is not used.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-U</option></term>
+
+        <listitem><para>If the kernel supports the user namespaces feature, equivalent to
+        <option>--private-users=pick --private-users-chown</option>, otherwise equivalent to
+        <option>--private-users=no</option>.</para>
+
+        <para>Note that <option>-U</option> is the default if the
+        <filename>systemd-nspawn@.service</filename> template unit file is used.</para>
+
+        <para>Note: it is possible to undo the effect of <option>--private-users-chown</option> (or
+        <option>-U</option>) on the file system by redoing the operation with the first UID of 0:</para>
+
+        <programlisting>systemd-nspawn … --private-users=0 --private-users-chown</programlisting>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -717,7 +722,7 @@
         and the subdirectory is symlinked into the host at the same
         location. <literal>try-host</literal> and
         <literal>try-guest</literal> do the same but do not fail if
-        the host does not have persistent journalling enabled. If
+        the host does not have persistent journaling enabled. If
         <literal>auto</literal> (the default), and the right
         subdirectory of <filename>/var/log/journal</filename> exists,
         it will be bind mounted into the container. If the
@@ -847,23 +852,6 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>--share-system</option></term>
-
-        <listitem><para>Allows the container to share certain system
-        facilities with the host. More specifically, this turns off
-        PID namespacing, UTS namespacing and IPC namespacing, and thus
-        allows the guest to see and interact more easily with
-        processes outside of the container. Note that using this
-        option makes it impossible to start up a full Operating System
-        in the container, as an init system cannot operate in this
-        mode. It is only useful to run specific programs or
-        applications this way, without involving an init system in the
-        container. This option implies <option>--register=no</option>.
-        This option may not be combined with
-        <option>--boot</option>.</para></listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><option>--register=</option></term>
 
         <listitem><para>Controls whether the container is registered
@@ -877,9 +865,7 @@
         and shown by tools such as
         <citerefentry project='man-pages'><refentrytitle>ps</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
         If the container does not run an init system, it is
-        recommended to set this option to <literal>no</literal>. Note
-        that <option>--share-system</option> implies
-        <option>--register=no</option>. </para></listitem>
+        recommended to set this option to <literal>no</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1028,8 +1014,8 @@
     <example>
       <title>Download a Fedora image and start a shell in it</title>
 
-      <programlisting># machinectl pull-raw --verify=no http://ftp.halifax.rwth-aachen.de/fedora/linux/releases/21/Cloud/Images/x86_64/Fedora-Cloud-Base-20141203-21.x86_64.raw.xz
-# systemd-nspawn -M Fedora-Cloud-Base-20141203-21</programlisting>
+      <programlisting># machinectl pull-raw --verify=no http://ftp.halifax.rwth-aachen.de/fedora/linux/releases/24/CloudImages/x86_64/images/Fedora-Cloud-Base-24-1.2.x86_64.raw.xz
+# systemd-nspawn -M Fedora-Cloud-Base-24-1.2.x86_64.raw</programlisting>
 
       <para>This downloads an image using
       <citerefentry><refentrytitle>machinectl</refentrytitle><manvolnum>1</manvolnum></citerefentry>

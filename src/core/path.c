@@ -454,7 +454,7 @@ static int path_coldplug(Unit *u) {
 static void path_enter_dead(Path *p, PathResult f) {
         assert(p);
 
-        if (f != PATH_SUCCESS)
+        if (p->result == PATH_SUCCESS)
                 p->result = f;
 
         path_set_state(p, p->result != PATH_SUCCESS ? PATH_FAILED : PATH_DEAD);
@@ -576,6 +576,10 @@ static int path_start(Unit *u) {
                 path_enter_dead(p, PATH_FAILURE_START_LIMIT_HIT);
                 return r;
         }
+
+        r = unit_acquire_invocation_id(u);
+        if (r < 0)
+                return r;
 
         path_mkdir(p);
 

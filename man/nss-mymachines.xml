@@ -82,11 +82,11 @@
     <para>Here is an example <filename>/etc/nsswitch.conf</filename> file that enables
     <command>nss-mymachines</command> correctly:</para>
 
-    <programlisting>passwd:         compat <command>mymachines</command>
-group:          compat <command>mymachines</command>
+    <programlisting>passwd:         compat <command>mymachines</command> systemd
+group:          compat <command>mymachines</command> systemd
 shadow:         compat
 
-hosts:          files <command>mymachines</command> resolve myhostname
+hosts:          files <command>mymachines</command> resolve [!UNAVAIL=return] dns myhostname
 networks:       files
 
 protocols:      db files
@@ -103,6 +103,7 @@ netgroup:       nis</programlisting>
     <para>
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd-machined.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>nss-systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>nss-resolve</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>nss-myhostname</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry project='man-pages'><refentrytitle>nsswitch.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,

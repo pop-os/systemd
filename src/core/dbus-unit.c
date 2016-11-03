@@ -37,7 +37,7 @@
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_load_state, unit_load_state, UnitLoadState);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_job_mode, job_mode, JobMode);
-static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_failure_action, failure_action, FailureAction);
+static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_emergency_action, emergency_action, EmergencyAction);
 
 static int property_get_names(
                 sd_bus *bus,
@@ -263,10 +263,7 @@ static int property_get_can_stop(
         assert(reply);
         assert(u);
 
-        /* On the lower levels we assume that every unit we can start
-         * we can also stop */
-
-        return sd_bus_message_append(reply, "b", unit_can_start(u) && !u->refuse_manual_stop);
+        return sd_bus_message_append(reply, "b", unit_can_stop(u) && !u->refuse_manual_stop);
 }
 
 static int property_get_can_reload(
@@ -418,6 +415,7 @@ static int bus_verify_manage_units_async_full(
                 const char *verb,
                 int capability,
                 const char *polkit_message,
+                bool interactive,
                 sd_bus_message *call,
                 sd_bus_error *error) {
 
@@ -433,7 +431,15 @@ static int bus_verify_manage_units_async_full(
                 details[7] = GETTEXT_PACKAGE;
         }
 
-        return bus_verify_polkit_async(call, capability, "org.freedesktop.systemd1.manage-units", details, false, UID_INVALID, &u->manager->polkit_registry, error);
+        return bus_verify_polkit_async(
+                        call,
+                        capability,
+                        "org.freedesktop.systemd1.manage-units",
+                        details,
+                        interactive,
+                        UID_INVALID,
+                        &u->manager->polkit_registry,
+                        error);
 }
 
 int bus_unit_method_start_generic(
@@ -486,6 +492,7 @@ int bus_unit_method_start_generic(
                         verb,
                         CAP_SYS_ADMIN,
                         job_type < _JOB_TYPE_MAX ? polkit_message_for_job[job_type] : NULL,
+                        true,
                         message,
                         error);
         if (r < 0)
@@ -558,6 +565,7 @@ int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *
                         "kill",
                         CAP_KILL,
                         N_("Authentication is required to kill '$(unit)'."),
+                        true,
                         message,
                         error);
         if (r < 0)
@@ -588,6 +596,7 @@ int bus_unit_method_reset_failed(sd_bus_message *message, void *userdata, sd_bus
                         "reset-failed",
                         CAP_SYS_ADMIN,
                         N_("Authentication is required to reset the \"failed\" state of '$(unit)'."),
+                        true,
                         message,
                         error);
         if (r < 0)
@@ -620,6 +629,7 @@ int bus_unit_method_set_properties(sd_bus_message *message, void *userdata, sd_b
                         "set-property",
                         CAP_SYS_ADMIN,
                         N_("Authentication is required to set properties on '$(unit)'."),
+                        true,
                         message,
                         error);
         if (r < 0)
@@ -628,6 +638,53 @@ int bus_unit_method_set_properties(sd_bus_message *message, void *userdata, sd_b
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
         r = bus_unit_set_properties(u, message, runtime ? UNIT_RUNTIME : UNIT_PERSISTENT, true, error);
+        if (r < 0)
+                return r;
+
+        return sd_bus_reply_method_return(message, NULL);
+}
+
+int bus_unit_method_ref(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Unit *u = userdata;
+        int r;
+
+        assert(message);
+        assert(u);
+
+        r = mac_selinux_unit_access_check(u, message, "start", error);
+        if (r < 0)
+                return r;
+
+        r = bus_verify_manage_units_async_full(
+                        u,
+                        "ref",
+                        CAP_SYS_ADMIN,
+                        NULL,
+                        false,
+                        message,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+
+        r = bus_unit_track_add_sender(u, message);
+        if (r < 0)
+                return r;
+
+        return sd_bus_reply_method_return(message, NULL);
+}
+
+int bus_unit_method_unref(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Unit *u = userdata;
+        int r;
+
+        assert(message);
+        assert(u);
+
+        r = bus_unit_track_remove_sender(u, message);
+        if (r == -EUNATCH)
+                return sd_bus_error_setf(error, BUS_ERROR_NOT_REFERENCED, "Unit has not been referenced yet.");
         if (r < 0)
                 return r;
 
@@ -660,10 +717,6 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("PropagatesReloadTo", "as", property_get_dependencies, offsetof(Unit, dependencies[UNIT_PROPAGATES_RELOAD_TO]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ReloadPropagatedFrom", "as", property_get_dependencies, offsetof(Unit, dependencies[UNIT_RELOAD_PROPAGATED_FROM]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("JoinsNamespaceOf", "as", property_get_dependencies, offsetof(Unit, dependencies[UNIT_JOINS_NAMESPACE_OF]), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("RequiresOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("RequisiteOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("RequiredByOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("RequisiteOfOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("RequiresMountsFor", "as", NULL, offsetof(Unit, requires_mounts_for), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Documentation", "as", NULL, offsetof(Unit, documentation), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Description", "s", property_get_description, 0, SD_BUS_VTABLE_PROPERTY_CONST),
@@ -694,7 +747,7 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("IgnoreOnIsolate", "b", bus_property_get_bool, offsetof(Unit, ignore_on_isolate), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("NeedDaemonReload", "b", property_get_need_daemon_reload, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("JobTimeoutUSec", "t", bus_property_get_usec, offsetof(Unit, job_timeout), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("JobTimeoutAction", "s", property_get_failure_action, offsetof(Unit, job_timeout_action), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("JobTimeoutAction", "s", property_get_emergency_action, offsetof(Unit, job_timeout_action), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("JobTimeoutRebootArgument", "s", NULL, offsetof(Unit, job_timeout_reboot_arg), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ConditionResult", "b", bus_property_get_bool, offsetof(Unit, condition_result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("AssertResult", "b", bus_property_get_bool, offsetof(Unit, assert_result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
@@ -704,11 +757,12 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("Asserts", "a(sbbsi)", property_get_conditions, offsetof(Unit, asserts), 0),
         SD_BUS_PROPERTY("LoadError", "(ss)", property_get_load_error, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Transient", "b", bus_property_get_bool, offsetof(Unit, transient), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Perpetual", "b", bus_property_get_bool, offsetof(Unit, perpetual), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("StartLimitIntervalSec", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("StartLimitInterval", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN), /* obsolete alias name */
         SD_BUS_PROPERTY("StartLimitBurst", "u", bus_property_get_unsigned, offsetof(Unit, start_limit.burst), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("StartLimitAction", "s", property_get_failure_action, offsetof(Unit, start_limit_action), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("StartLimitAction", "s", property_get_emergency_action, offsetof(Unit, start_limit_action), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RebootArgument", "s", NULL, offsetof(Unit, reboot_arg), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("InvocationID", "ay", bus_property_get_id128, offsetof(Unit, invocation_id), 0),
 
         SD_BUS_METHOD("Start", "s", "o", method_start, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("Stop", "s", "o", method_stop, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -720,7 +774,15 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_METHOD("Kill", "si", NULL, bus_unit_method_kill, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ResetFailed", NULL, NULL, bus_unit_method_reset_failed, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetProperties", "ba(sv)", NULL, bus_unit_method_set_properties, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Ref", NULL, NULL, bus_unit_method_ref, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("Unref", NULL, NULL, bus_unit_method_unref, SD_BUS_VTABLE_UNPRIVILEGED),
 
+        /* Obsolete properties or obsolete alias names */
+        SD_BUS_PROPERTY("RequiresOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("RequisiteOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("RequiredByOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("RequisiteOfOverridable", "as", property_get_obsolete_dependencies, 0, SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("StartLimitInterval", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_VTABLE_END
 };
 
@@ -1104,7 +1166,7 @@ void bus_unit_send_removed_signal(Unit *u) {
         int r;
         assert(u);
 
-        if (!u->sent_dbus_new_signal)
+        if (!u->sent_dbus_new_signal || u->in_dbus_queue)
                 bus_unit_send_change_signal(u);
 
         if (!u->id)
@@ -1317,6 +1379,29 @@ static int bus_unit_set_transient_property(
                         return r;
 
                 return 1;
+
+        } else if (streq(name, "AddRef")) {
+
+                int b;
+
+                /* Why is this called "AddRef" rather than just "Ref", or "Reference"? There's already a "Ref()" method
+                 * on the Unit interface, and it's probably not a good idea to expose a property and a method on the
+                 * same interface (well, strictly speaking AddRef isn't exposed as full property, we just read it for
+                 * transient units, but still). And "References" and "ReferencedBy" is already used as unit reference
+                 * dependency type, hence let's not confuse things with that.
+                 *
+                 * Note that we don't acually add the reference to the bus track. We do that only after the setup of
+                 * the transient unit is complete, so that setting this property multiple times in the same transient
+                 * unit creation call doesn't count as individual references. */
+
+                r = sd_bus_message_read(message, "b", &b);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK)
+                        u->bus_track_add = b;
+
+                return 1;
         }
 
         return 0;
@@ -1420,4 +1505,72 @@ int bus_unit_check_load_state(Unit *u, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_UNIT, "Unit %s not found.", u->id);
 
         return sd_bus_error_set_errnof(error, u->load_error, "Unit %s is not loaded properly: %m.", u->id);
+}
+
+static int bus_track_handler(sd_bus_track *t, void *userdata) {
+        Unit *u = userdata;
+
+        assert(t);
+        assert(u);
+
+        u->bus_track = sd_bus_track_unref(u->bus_track); /* make sure we aren't called again */
+
+        unit_add_to_gc_queue(u);
+        return 0;
+}
+
+static int allocate_bus_track(Unit *u) {
+        int r;
+
+        assert(u);
+
+        if (u->bus_track)
+                return 0;
+
+        r = sd_bus_track_new(u->manager->api_bus, &u->bus_track, bus_track_handler, u);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_track_set_recursive(u->bus_track, true);
+        if (r < 0) {
+                u->bus_track = sd_bus_track_unref(u->bus_track);
+                return r;
+        }
+
+        return 0;
+}
+
+int bus_unit_track_add_name(Unit *u, const char *name) {
+        int r;
+
+        assert(u);
+
+        r = allocate_bus_track(u);
+        if (r < 0)
+                return r;
+
+        return sd_bus_track_add_name(u->bus_track, name);
+}
+
+int bus_unit_track_add_sender(Unit *u, sd_bus_message *m) {
+        int r;
+
+        assert(u);
+
+        r = allocate_bus_track(u);
+        if (r < 0)
+                return r;
+
+        return sd_bus_track_add_sender(u->bus_track, m);
+}
+
+int bus_unit_track_remove_sender(Unit *u, sd_bus_message *m) {
+        assert(u);
+
+        /* If we haven't allocated the bus track object yet, then there's definitely no reference taken yet, return an
+         * error */
+        if (!u->bus_track)
+                return -EUNATCH;
+
+        return sd_bus_track_remove_sender(u->bus_track, m);
 }

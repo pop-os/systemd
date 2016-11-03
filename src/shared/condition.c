@@ -37,6 +37,7 @@
 #include "condition.h"
 #include "extract-word.h"
 #include "fd-util.h"
+#include "fileio.h"
 #include "glob-util.h"
 #include "hostname-util.h"
 #include "ima-util.h"
@@ -145,25 +146,24 @@ static int condition_test_virtualization(Condition *c) {
         assert(c->parameter);
         assert(c->type == CONDITION_VIRTUALIZATION);
 
+        if (streq(c->parameter, "private-users"))
+                return running_in_userns();
+
         v = detect_virtualization();
         if (v < 0)
                 return v;
 
         /* First, compare with yes/no */
         b = parse_boolean(c->parameter);
-
-        if (v > 0 && b > 0)
-                return true;
-
-        if (v == 0 && b == 0)
-                return true;
+        if (b >= 0)
+                return b == !!v;
 
         /* Then, compare categorization */
-        if (VIRTUALIZATION_IS_VM(v) && streq(c->parameter, "vm"))
-                return true;
+        if (streq(c->parameter, "vm"))
+                return VIRTUALIZATION_IS_VM(v);
 
-        if (VIRTUALIZATION_IS_CONTAINER(v) && streq(c->parameter, "container"))
-                return true;
+        if (streq(c->parameter, "container"))
+                return VIRTUALIZATION_IS_CONTAINER(v);
 
         /* Finally compare id */
         return v != VIRTUALIZATION_NONE && streq(c->parameter, virtualization_to_string(v));
@@ -309,8 +309,44 @@ static int condition_test_needs_update(Condition *c) {
         if (lstat("/usr/", &usr) < 0)
                 return true;
 
-        return usr.st_mtim.tv_sec > other.st_mtim.tv_sec ||
-                (usr.st_mtim.tv_sec == other.st_mtim.tv_sec && usr.st_mtim.tv_nsec > other.st_mtim.tv_nsec);
+        /*
+         * First, compare seconds as they are always accurate...
+         */
+        if (usr.st_mtim.tv_sec != other.st_mtim.tv_sec)
+                return usr.st_mtim.tv_sec > other.st_mtim.tv_sec;
+
+        /*
+         * ...then compare nanoseconds.
+         *
+         * A false positive is only possible when /usr's nanoseconds > 0
+         * (otherwise /usr cannot be strictly newer than the target file)
+         * AND the target file's nanoseconds == 0
+         * (otherwise the filesystem supports nsec timestamps, see stat(2)).
+         */
+        if (usr.st_mtim.tv_nsec > 0 && other.st_mtim.tv_nsec == 0) {
+                _cleanup_free_ char *timestamp_str = NULL;
+                uint64_t timestamp;
+                int r;
+
+                r = parse_env_file(p, NULL, "TIMESTAMP_NSEC", &timestamp_str, NULL);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to parse timestamp file '%s', using mtime: %m", p);
+                        return true;
+                } else if (r == 0) {
+                        log_debug("No data in timestamp file '%s', using mtime", p);
+                        return true;
+                }
+
+                r = safe_atou64(timestamp_str, &timestamp);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to parse timestamp value '%s' in file '%s', using mtime: %m", timestamp_str, p);
+                        return true;
+                }
+
+                timespec_store(&other.st_mtim, timestamp);
+        }
+
+        return usr.st_mtim.tv_nsec > other.st_mtim.tv_nsec;
 }
 
 static int condition_test_first_boot(Condition *c) {

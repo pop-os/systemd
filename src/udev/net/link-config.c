@@ -168,6 +168,8 @@ static int load_link(link_config_ctx *ctx, const char *filename) {
         link->wol = _WOL_INVALID;
         link->duplex = _DUP_INVALID;
 
+        memset(&link->features, -1, _NET_DEV_FEAT_MAX);
+
         r = config_parse(NULL, filename, file,
                          "Match\0Link\0Ethernet\0",
                          config_item_perf_lookup, link_config_gperf_lookup,
@@ -189,20 +191,12 @@ static int load_link(link_config_ctx *ctx, const char *filename) {
 }
 
 static bool enable_name_policy(void) {
-        _cleanup_free_ char *line = NULL;
-        const char *word, *state;
+        _cleanup_free_ char *value = NULL;
         int r;
-        size_t l;
 
-        r = proc_cmdline(&line);
-        if (r < 0) {
-                log_warning_errno(r, "Failed to read /proc/cmdline, ignoring: %m");
-                return true;
-        }
-
-        FOREACH_WORD_QUOTED(word, l, line, state)
-                if (strneq(word, "net.ifnames=0", l))
-                        return false;
+        r = get_proc_cmdline_key("net.ifnames=", &value);
+        if (r > 0 && streq(value, "0"))
+            return false;
 
         return true;
 }
@@ -396,6 +390,10 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
         if (r < 0)
                 log_warning_errno(r, "Could not set WakeOnLan of %s to %s: %m",
                                   old_name, wol_to_string(config->wol));
+
+        r = ethtool_set_features(&ctx->ethtool_fd, old_name, config->features);
+        if (r < 0)
+                log_warning_errno(r, "Could not set offload features of %s: %m", old_name);
 
         ifindex = udev_device_get_ifindex(device);
         if (ifindex <= 0) {

@@ -294,10 +294,10 @@
         <term><varname>ListenUSBFunction=</varname></term>
         <listitem><para>Specifies a <ulink
         url="https://www.kernel.org/doc/Documentation/usb/functionfs.txt">USB
-        FunctionFS</ulink> endpoint location to listen on, for
+        FunctionFS</ulink> endpoints location to listen on, for
         implementation of USB gadget functions. This expects an
-        absolute file system path as the argument. Behavior otherwise
-        is very similar to the <varname>ListenFIFO=</varname>
+        absolute file system path of functionfs mount point as the argument.
+        Behavior otherwise is very similar to the <varname>ListenFIFO=</varname>
         directive above. Use this to open the FunctionFS endpoint
         <filename>ep0</filename>. When using this option, the
         activated service has to have the
@@ -443,6 +443,14 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>MaxConnectionsPerSource=</varname></term>
+        <listitem><para>The maximum number of connections for a service per source IP address.
+        This is very similar to the <varname>MaxConnections=</varname> directive
+        above. Disabled by default.</para>
+        </listitem>
+      </varlistentry>
+
+       <varlistentry>
         <term><varname>KeepAlive=</varname></term>
         <listitem><para>Takes a boolean argument. If true, the TCP/IP
         stack will send a keep alive message after 2h (depending on
@@ -527,7 +535,7 @@
         and the kernel will ignore initial ACK packets without any
         data. The argument specifies the approximate amount of time
         the kernel should wait for incoming data before falling back
-        to the normal behavior of honouring empty ACK packets. This
+        to the normal behavior of honoring empty ACK packets. This
         option is beneficial for protocols where the client sends the
         data first (e.g. HTTP, in contrast to SMTP), because the
         server process will not be woken up unnecessarily before it
