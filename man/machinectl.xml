@@ -186,12 +186,11 @@
       <varlistentry>
          <term><option>--uid=</option></term>
 
-         <listitem><para>When used with the <command>shell</command>
-         command, chooses the user ID to open the interactive shell
-         session as. If this switch is not specified, defaults to
-         <literal>root</literal>. Note that this switch is not
-         supported for the <command>login</command> command (see
-         below).</para></listitem>
+         <listitem><para>When used with the <command>shell</command> command, chooses the user ID to
+         open the interactive shell session as. If the argument to the <command>shell</command>
+         command also specifies a user name, this option is ignored. If the name is not specified
+         in either way, <literal>root</literal> will be used by default. Note that this switch is
+         not supported for the <command>login</command> command (see below).</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -285,6 +284,20 @@
         name passed.</para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>--max-addresses=</option></term>
+
+        <listitem><para>When used with the <option>list-machines</option>
+        command, limits the number of ip addresses output for every machine.
+        Defaults to 1. All addresses can be requested with <literal>all</literal>
+        as argument to <option>--max-addresses</option> . If the argument to
+        <option>--max-addresses</option> is less than the actual number
+        of addresses,<literal>...</literal>follows the last address.
+        If multiple addresses are to be written for a given machine, every
+        address except the first one is on a new line and is followed by
+        <literal>,</literal> if another address will be output afterwards. </para></listitem>
+      </varlistentry>
+
       <xi:include href="user-system-options.xml" xpointer="host" />
       <xi:include href="user-system-options.xml" xpointer="machine" />
 
@@ -330,18 +343,13 @@
       <varlistentry>
         <term><command>show</command> [<replaceable>NAME</replaceable>...]</term>
 
-        <listitem><para>Show properties of one or more registered
-        virtual machines or containers or the manager itself. If no
-        argument is specified, properties of the manager will be
-        shown. If a NAME is specified, properties of this virtual
-        machine or container are shown. By default, empty properties
-        are suppressed. Use <option>--all</option> to show those too.
-        To select specific properties to show, use
-        <option>--property=</option>. This command is intended to be
-        used whenever computer-parsable output is required, and does
-        not print the cgroup tree or journal entries. Use
-        <command>status</command> if you are looking for formatted
-        human-readable output.</para></listitem>
+        <listitem><para>Show properties of one or more registered virtual machines or containers or the manager
+        itself. If no argument is specified, properties of the manager will be shown. If a NAME is specified,
+        properties of this virtual machine or container are shown. By default, empty properties are suppressed. Use
+        <option>--all</option> to show those too.  To select specific properties to show, use
+        <option>--property=</option>. This command is intended to be used whenever computer-parsable output is
+        required, and does not print the control group tree or journal entries. Use <command>status</command> if you
+        are looking for formatted human-readable output.</para></listitem>
       </varlistentry>
 
       <varlistentry>

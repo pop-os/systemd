@@ -271,6 +271,11 @@ static int automount_coldplug(Unit *u) {
                                 return r;
 
                         (void) sd_event_source_set_description(a->pipe_event_source, "automount-io");
+                        if (a->deserialized_state == AUTOMOUNT_RUNNING) {
+                                r = automount_start_expire(a);
+                                if (r < 0)
+                                        log_unit_warning_errno(UNIT(a), r, "Failed to start expiration timer, ignoring: %m");
+                        }
                 }
 
                 automount_set_state(a, a->deserialized_state);
@@ -301,7 +306,7 @@ static void automount_dump(Unit *u, FILE *f, const char *prefix) {
 static void automount_enter_dead(Automount *a, AutomountResult f) {
         assert(a);
 
-        if (f != AUTOMOUNT_SUCCESS)
+        if (a->result == AUTOMOUNT_SUCCESS)
                 a->result = f;
 
         automount_set_state(a, a->result != AUTOMOUNT_SUCCESS ? AUTOMOUNT_FAILED : AUTOMOUNT_DEAD);
@@ -795,6 +800,10 @@ static int automount_start(Unit *u) {
                 return r;
         }
 
+        r = unit_acquire_invocation_id(u);
+        if (r < 0)
+                return r;
+
         a->result = AUTOMOUNT_SUCCESS;
         automount_enter_waiting(a);
         return 1;
@@ -1105,6 +1114,9 @@ const UnitVTable automount_vtable = {
         .reset_failed = automount_reset_failed,
 
         .bus_vtable = bus_automount_vtable,
+        .bus_set_property = bus_automount_set_property,
+
+        .can_transient = true,
 
         .shutdown = automount_shutdown,
         .supported = automount_supported,

@@ -44,6 +44,7 @@
 #include "fs-util.h"
 #include "hashmap.h"
 #include "hostname-util.h"
+#include "id128-util.h"
 #include "io-util.h"
 #include "journal-authenticate.h"
 #include "journal-file.h"
@@ -56,6 +57,7 @@
 #include "journald-server.h"
 #include "journald-stream.h"
 #include "journald-syslog.h"
+#include "log.h"
 #include "missing.h"
 #include "mkdir.h"
 #include "parse-util.h"
@@ -69,7 +71,7 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "user-util.h"
-#include "log.h"
+#include "syslog-util.h"
 
 #define USER_JOURNALS_MAX 1024
 
@@ -85,48 +87,24 @@
 /* The period to insert between posting changes for coalescing */
 #define POST_CHANGE_TIMER_INTERVAL_USEC (250*USEC_PER_MSEC)
 
-static int determine_space_for(
-                Server *s,
-                JournalMetrics *metrics,
-                const char *path,
-                const char *name,
-                bool verbose,
-                bool patch_min_use,
-                uint64_t *available,
-                uint64_t *limit) {
-
-        uint64_t sum = 0, ss_avail, avail;
+static int determine_path_usage(Server *s, const char *path, uint64_t *ret_used, uint64_t *ret_free) {
         _cleanup_closedir_ DIR *d = NULL;
         struct dirent *de;
         struct statvfs ss;
-        const char *p;
-        usec_t ts;
 
-        assert(s);
-        assert(metrics);
-        assert(path);
-        assert(name);
+        assert(ret_used);
+        assert(ret_free);
 
-        ts = now(CLOCK_MONOTONIC);
-
-        if (!verbose && s->cached_space_timestamp + RECHECK_SPACE_USEC > ts) {
-
-                if (available)
-                        *available = s->cached_space_available;
-                if (limit)
-                        *limit = s->cached_space_limit;
-
-                return 0;
-        }
-
-        p = strjoina(path, SERVER_MACHINE_ID(s));
-        d = opendir(p);
+        d = opendir(path);
         if (!d)
-                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno, "Failed to open %s: %m", p);
+                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR,
+                                      errno, "Failed to open %s: %m", path);
 
         if (fstatvfs(dirfd(d), &ss) < 0)
-                return log_error_errno(errno, "Failed to fstatvfs(%s): %m", p);
+                return log_error_errno(errno, "Failed to fstatvfs(%s): %m", path);
 
+        *ret_free = ss.f_bsize * ss.f_bavail;
+        *ret_used = 0;
         FOREACH_DIRENT_ALL(de, d, break) {
                 struct stat st;
 
@@ -135,88 +113,125 @@ static int determine_space_for(
                         continue;
 
                 if (fstatat(dirfd(d), de->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0) {
-                        log_debug_errno(errno, "Failed to stat %s/%s, ignoring: %m", p, de->d_name);
+                        log_debug_errno(errno, "Failed to stat %s/%s, ignoring: %m", path, de->d_name);
                         continue;
                 }
 
                 if (!S_ISREG(st.st_mode))
                         continue;
 
-                sum += (uint64_t) st.st_blocks * 512UL;
+                *ret_used += (uint64_t) st.st_blocks * 512UL;
         }
 
-        /* If requested, then let's bump the min_use limit to the
-         * current usage on disk. We do this when starting up and
-         * first opening the journal files. This way sudden spikes in
-         * disk usage will not cause journald to vacuum files without
-         * bounds. Note that this means that only a restart of
-         * journald will make it reset this value. */
-
-        if (patch_min_use)
-                metrics->min_use = MAX(metrics->min_use, sum);
-
-        ss_avail = ss.f_bsize * ss.f_bavail;
-        avail = LESS_BY(ss_avail, metrics->keep_free);
-
-        s->cached_space_limit = MIN(MAX(sum + avail, metrics->min_use), metrics->max_use);
-        s->cached_space_available = LESS_BY(s->cached_space_limit, sum);
-        s->cached_space_timestamp = ts;
-
-        if (verbose) {
-                char    fb1[FORMAT_BYTES_MAX], fb2[FORMAT_BYTES_MAX], fb3[FORMAT_BYTES_MAX],
-                        fb4[FORMAT_BYTES_MAX], fb5[FORMAT_BYTES_MAX], fb6[FORMAT_BYTES_MAX];
-                format_bytes(fb1, sizeof(fb1), sum);
-                format_bytes(fb2, sizeof(fb2), metrics->max_use);
-                format_bytes(fb3, sizeof(fb3), metrics->keep_free);
-                format_bytes(fb4, sizeof(fb4), ss_avail);
-                format_bytes(fb5, sizeof(fb5), s->cached_space_limit);
-                format_bytes(fb6, sizeof(fb6), s->cached_space_available);
-
-                server_driver_message(s, SD_MESSAGE_JOURNAL_USAGE,
-                                      LOG_MESSAGE("%s (%s) is %s, max %s, %s free.",
-                                                  name, path, fb1, fb5, fb6),
-                                      "JOURNAL_NAME=%s", name,
-                                      "JOURNAL_PATH=%s", path,
-                                      "CURRENT_USE=%"PRIu64, sum,
-                                      "CURRENT_USE_PRETTY=%s", fb1,
-                                      "MAX_USE=%"PRIu64, metrics->max_use,
-                                      "MAX_USE_PRETTY=%s", fb2,
-                                      "DISK_KEEP_FREE=%"PRIu64, metrics->keep_free,
-                                      "DISK_KEEP_FREE_PRETTY=%s", fb3,
-                                      "DISK_AVAILABLE=%"PRIu64, ss_avail,
-                                      "DISK_AVAILABLE_PRETTY=%s", fb4,
-                                      "LIMIT=%"PRIu64, s->cached_space_limit,
-                                      "LIMIT_PRETTY=%s", fb5,
-                                      "AVAILABLE=%"PRIu64, s->cached_space_available,
-                                      "AVAILABLE_PRETTY=%s", fb6,
-                                      NULL);
-        }
-
-        if (available)
-                *available = s->cached_space_available;
-        if (limit)
-                *limit = s->cached_space_limit;
-
-        return 1;
+        return 0;
 }
 
-static int determine_space(Server *s, bool verbose, bool patch_min_use, uint64_t *available, uint64_t *limit) {
+static void cache_space_invalidate(JournalStorageSpace *space) {
+        memset(space, 0, sizeof(*space));
+}
+
+static int cache_space_refresh(Server *s, JournalStorage *storage) {
+        JournalStorageSpace *space;
         JournalMetrics *metrics;
-        const char *path, *name;
+        uint64_t vfs_used, vfs_avail, avail;
+        usec_t ts;
+        int r;
 
         assert(s);
 
-        if (s->system_journal) {
-                path = "/var/log/journal/";
-                metrics = &s->system_metrics;
-                name = "System journal";
-        } else {
-                path = "/run/log/journal/";
-                metrics = &s->runtime_metrics;
-                name = "Runtime journal";
-        }
+        metrics = &storage->metrics;
+        space = &storage->space;
 
-        return determine_space_for(s, metrics, path, name, verbose, patch_min_use, available, limit);
+        ts = now(CLOCK_MONOTONIC);
+
+        if (space->timestamp + RECHECK_SPACE_USEC > ts)
+                return 0;
+
+        r = determine_path_usage(s, storage->path, &vfs_used, &vfs_avail);
+        if (r < 0)
+                return r;
+
+        space->vfs_used = vfs_used;
+        space->vfs_available = vfs_avail;
+
+        avail = LESS_BY(vfs_avail, metrics->keep_free);
+
+        space->limit = MIN(MAX(vfs_used + avail, metrics->min_use), metrics->max_use);
+        space->available = LESS_BY(space->limit, vfs_used);
+        space->timestamp = ts;
+        return 1;
+}
+
+static void patch_min_use(JournalStorage *storage) {
+        assert(storage);
+
+        /* Let's bump the min_use limit to the current usage on disk. We do
+         * this when starting up and first opening the journal files. This way
+         * sudden spikes in disk usage will not cause journald to vacuum files
+         * without bounds. Note that this means that only a restart of journald
+         * will make it reset this value. */
+
+        storage->metrics.min_use = MAX(storage->metrics.min_use, storage->space.vfs_used);
+}
+
+
+static int determine_space(Server *s, uint64_t *available, uint64_t *limit) {
+        JournalStorage *js;
+        int r;
+
+        assert(s);
+
+        js = s->system_journal ? &s->system_storage : &s->runtime_storage;
+
+        r = cache_space_refresh(s, js);
+        if (r >= 0) {
+                if (available)
+                        *available = js->space.available;
+                if (limit)
+                        *limit = js->space.limit;
+        }
+        return r;
+}
+
+void server_space_usage_message(Server *s, JournalStorage *storage) {
+        char fb1[FORMAT_BYTES_MAX], fb2[FORMAT_BYTES_MAX], fb3[FORMAT_BYTES_MAX],
+             fb4[FORMAT_BYTES_MAX], fb5[FORMAT_BYTES_MAX], fb6[FORMAT_BYTES_MAX];
+        JournalMetrics *metrics;
+
+        assert(s);
+
+        if (!storage)
+                storage = s->system_journal ? &s->system_storage : &s->runtime_storage;
+
+        if (cache_space_refresh(s, storage) < 0)
+                return;
+
+        metrics = &storage->metrics;
+        format_bytes(fb1, sizeof(fb1), storage->space.vfs_used);
+        format_bytes(fb2, sizeof(fb2), metrics->max_use);
+        format_bytes(fb3, sizeof(fb3), metrics->keep_free);
+        format_bytes(fb4, sizeof(fb4), storage->space.vfs_available);
+        format_bytes(fb5, sizeof(fb5), storage->space.limit);
+        format_bytes(fb6, sizeof(fb6), storage->space.available);
+
+        server_driver_message(s, SD_MESSAGE_JOURNAL_USAGE,
+                              LOG_MESSAGE("%s (%s) is %s, max %s, %s free.",
+                                          storage->name, storage->path, fb1, fb5, fb6),
+                              "JOURNAL_NAME=%s", storage->name,
+                              "JOURNAL_PATH=%s", storage->path,
+                              "CURRENT_USE=%"PRIu64, storage->space.vfs_used,
+                              "CURRENT_USE_PRETTY=%s", fb1,
+                              "MAX_USE=%"PRIu64, metrics->max_use,
+                              "MAX_USE_PRETTY=%s", fb2,
+                              "DISK_KEEP_FREE=%"PRIu64, metrics->keep_free,
+                              "DISK_KEEP_FREE_PRETTY=%s", fb3,
+                              "DISK_AVAILABLE=%"PRIu64, storage->space.vfs_available,
+                              "DISK_AVAILABLE_PRETTY=%s", fb4,
+                              "LIMIT=%"PRIu64, storage->space.limit,
+                              "LIMIT_PRETTY=%s", fb5,
+                              "AVAILABLE=%"PRIu64, storage->space.available,
+                              "AVAILABLE_PRETTY=%s", fb6,
+                              NULL);
 }
 
 static void server_add_acls(JournalFile *f, uid_t uid) {
@@ -267,6 +282,97 @@ static int open_journal(
         return r;
 }
 
+static bool flushed_flag_is_set(void) {
+        return (access("/run/systemd/journal/flushed", F_OK) >= 0);
+}
+
+static int system_journal_open(Server *s, bool flush_requested) {
+        bool flushed = false;
+        const char *fn;
+        int r = 0;
+
+        if (!s->system_journal &&
+            (s->storage == STORAGE_PERSISTENT || s->storage == STORAGE_AUTO) &&
+            (flush_requested || (flushed = flushed_flag_is_set()))) {
+
+                /* If in auto mode: first try to create the machine
+                 * path, but not the prefix.
+                 *
+                 * If in persistent mode: create /var/log/journal and
+                 * the machine path */
+
+                if (s->storage == STORAGE_PERSISTENT)
+                        (void) mkdir_p("/var/log/journal/", 0755);
+
+                (void) mkdir(s->system_storage.path, 0755);
+
+                fn = strjoina(s->system_storage.path, "/system.journal");
+                r = open_journal(s, true, fn, O_RDWR|O_CREAT, s->seal, &s->system_storage.metrics, &s->system_journal);
+                if (r >= 0) {
+                        server_add_acls(s->system_journal, 0);
+                        (void) cache_space_refresh(s, &s->system_storage);
+                        patch_min_use(&s->system_storage);
+                } else if (r < 0) {
+                        if (r != -ENOENT && r != -EROFS)
+                                log_warning_errno(r, "Failed to open system journal: %m");
+
+                        r = 0;
+                }
+
+                /* If the runtime journal is open, and we're post-flush, we're
+                 * recovering from a failed system journal rotate (ENOSPC)
+                 * for which the runtime journal was reopened.
+                 *
+                 * Perform an implicit flush to var, leaving the runtime
+                 * journal closed, now that the system journal is back.
+                 */
+                if (s->runtime_journal && flushed)
+                        (void) server_flush_to_var(s);
+        }
+
+        if (!s->runtime_journal &&
+            (s->storage != STORAGE_NONE)) {
+
+                fn = strjoina(s->runtime_storage.path, "/system.journal");
+
+                if (s->system_journal) {
+
+                        /* Try to open the runtime journal, but only
+                         * if it already exists, so that we can flush
+                         * it into the system journal */
+
+                        r = open_journal(s, false, fn, O_RDWR, false, &s->runtime_storage.metrics, &s->runtime_journal);
+                        if (r < 0) {
+                                if (r != -ENOENT)
+                                        log_warning_errno(r, "Failed to open runtime journal: %m");
+
+                                r = 0;
+                        }
+
+                } else {
+
+                        /* OK, we really need the runtime journal, so create
+                         * it if necessary. */
+
+                        (void) mkdir("/run/log", 0755);
+                        (void) mkdir("/run/log/journal", 0755);
+                        (void) mkdir_parents(fn, 0750);
+
+                        r = open_journal(s, true, fn, O_RDWR|O_CREAT, false, &s->runtime_storage.metrics, &s->runtime_journal);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to open runtime journal: %m");
+                }
+
+                if (s->runtime_journal) {
+                        server_add_acls(s->runtime_journal, 0);
+                        (void) cache_space_refresh(s, &s->runtime_storage);
+                        patch_min_use(&s->runtime_storage);
+                }
+        }
+
+        return r;
+}
+
 static JournalFile* find_journal(Server *s, uid_t uid) {
         _cleanup_free_ char *p = NULL;
         int r;
@@ -274,6 +380,17 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
         sd_id128_t machine;
 
         assert(s);
+
+        /* A rotate that fails to create the new journal (ENOSPC) leaves the
+         * rotated journal as NULL.  Unless we revisit opening, even after
+         * space is made available we'll continue to return NULL indefinitely.
+         *
+         * system_journal_open() is a noop if the journals are already open, so
+         * we can just call it here to recover from failed rotates (or anything
+         * else that's left the journals as NULL).
+         *
+         * Fixes https://github.com/systemd/systemd/issues/3968 */
+        (void) system_journal_open(s, false);
 
         /* We split up user logs only on /var, not on /run. If the
          * runtime file is open, we write to it exclusively, in order
@@ -283,7 +400,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
         if (s->runtime_journal)
                 return s->runtime_journal;
 
-        if (uid <= SYSTEM_UID_MAX)
+        if (uid <= SYSTEM_UID_MAX || uid_is_dynamic(uid))
                 return s->system_journal;
 
         r = sd_id128_get_machine(&machine);
@@ -305,7 +422,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
                 (void) journal_file_close(f);
         }
 
-        r = open_journal(s, true, p, O_RDWR|O_CREAT, s->seal, &s->system_metrics, &f);
+        r = open_journal(s, true, p, O_RDWR|O_CREAT, s->seal, &s->system_storage.metrics, &f);
         if (r < 0)
                 return s->system_journal;
 
@@ -399,50 +516,38 @@ void server_sync(Server *s) {
         s->sync_scheduled = false;
 }
 
-static void do_vacuum(
-                Server *s,
-                JournalFile *f,
-                JournalMetrics *metrics,
-                const char *path,
-                const char *name,
-                bool verbose,
-                bool patch_min_use) {
+static void do_vacuum(Server *s, JournalStorage *storage, bool verbose) {
 
-        const char *p;
-        uint64_t limit;
         int r;
 
         assert(s);
-        assert(metrics);
-        assert(path);
-        assert(name);
+        assert(storage);
 
-        if (!f)
-                return;
+        (void) cache_space_refresh(s, storage);
 
-        p = strjoina(path, SERVER_MACHINE_ID(s));
+        if (verbose)
+                server_space_usage_message(s, storage);
 
-        limit = metrics->max_use;
-        (void) determine_space_for(s, metrics, path, name, verbose, patch_min_use, NULL, &limit);
-
-        r = journal_directory_vacuum(p, limit, metrics->n_max_files, s->max_retention_usec, &s->oldest_file_usec,  verbose);
+        r = journal_directory_vacuum(storage->path, storage->space.limit,
+                                     storage->metrics.n_max_files, s->max_retention_usec,
+                                     &s->oldest_file_usec, verbose);
         if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to vacuum %s, ignoring: %m", p);
+                log_warning_errno(r, "Failed to vacuum %s, ignoring: %m", storage->path);
+
+        cache_space_invalidate(&storage->space);
 }
 
-int server_vacuum(Server *s, bool verbose, bool patch_min_use) {
+int server_vacuum(Server *s, bool verbose) {
         assert(s);
 
         log_debug("Vacuuming...");
 
         s->oldest_file_usec = 0;
 
-        do_vacuum(s, s->system_journal, &s->system_metrics, "/var/log/journal/", "System journal", verbose, patch_min_use);
-        do_vacuum(s, s->runtime_journal, &s->runtime_metrics, "/run/log/journal/", "Runtime journal", verbose, patch_min_use);
-
-        s->cached_space_limit = 0;
-        s->cached_space_available = 0;
-        s->cached_space_timestamp = 0;
+        if (s->system_journal)
+                do_vacuum(s, &s->system_storage, verbose);
+        if (s->runtime_journal)
+                do_vacuum(s, &s->runtime_storage, verbose);
 
         return 0;
 }
@@ -493,54 +598,88 @@ static void server_cache_hostname(Server *s) {
 
 static bool shall_try_append_again(JournalFile *f, int r) {
         switch(r) {
+
         case -E2BIG:           /* Hit configured limit          */
         case -EFBIG:           /* Hit fs limit                  */
         case -EDQUOT:          /* Quota limit hit               */
         case -ENOSPC:          /* Disk full                     */
                 log_debug("%s: Allocation limit reached, rotating.", f->path);
                 return true;
+
         case -EIO:             /* I/O error of some kind (mmap) */
                 log_warning("%s: IO error, rotating.", f->path);
                 return true;
+
         case -EHOSTDOWN:       /* Other machine                 */
                 log_info("%s: Journal file from other machine, rotating.", f->path);
                 return true;
+
         case -EBUSY:           /* Unclean shutdown              */
                 log_info("%s: Unclean shutdown, rotating.", f->path);
                 return true;
+
         case -EPROTONOSUPPORT: /* Unsupported feature           */
                 log_info("%s: Unsupported feature, rotating.", f->path);
                 return true;
+
         case -EBADMSG:         /* Corrupted                     */
         case -ENODATA:         /* Truncated                     */
         case -ESHUTDOWN:       /* Already archived              */
                 log_warning("%s: Journal file corrupted, rotating.", f->path);
                 return true;
+
         case -EIDRM:           /* Journal file has been deleted */
                 log_warning("%s: Journal file has been deleted, rotating.", f->path);
                 return true;
+
+        case -ETXTBSY:         /* Journal file is from the future */
+                log_warning("%s: Journal file is from the future, rotating.", f->path);
+                return true;
+
         default:
                 return false;
         }
 }
 
 static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned n, int priority) {
+        bool vacuumed = false, rotate = false;
+        struct dual_timestamp ts;
         JournalFile *f;
-        bool vacuumed = false;
         int r;
 
         assert(s);
         assert(iovec);
         assert(n > 0);
 
-        f = find_journal(s, uid);
-        if (!f)
-                return;
+        /* Get the closest, linearized time we have for this log event from the event loop. (Note that we do not use
+         * the source time, and not even the time the event was originally seen, but instead simply the time we started
+         * processing it, as we want strictly linear ordering in what we write out.) */
+        assert_se(sd_event_now(s->event, CLOCK_REALTIME, &ts.realtime) >= 0);
+        assert_se(sd_event_now(s->event, CLOCK_MONOTONIC, &ts.monotonic) >= 0);
 
-        if (journal_file_rotate_suggested(f, s->max_file_usec)) {
-                log_debug("%s: Journal header limits reached or header out-of-date, rotating.", f->path);
+        if (ts.realtime < s->last_realtime_clock) {
+                /* When the time jumps backwards, let's immediately rotate. Of course, this should not happen during
+                 * regular operation. However, when it does happen, then we should make sure that we start fresh files
+                 * to ensure that the entries in the journal files are strictly ordered by time, in order to ensure
+                 * bisection works correctly. */
+
+                log_debug("Time jumped backwards, rotating.");
+                rotate = true;
+        } else {
+
+                f = find_journal(s, uid);
+                if (!f)
+                        return;
+
+                if (journal_file_rotate_suggested(f, s->max_file_usec)) {
+                        log_debug("%s: Journal header limits reached or header out-of-date, rotating.", f->path);
+                        rotate = true;
+                }
+        }
+
+        if (rotate) {
                 server_rotate(s);
-                server_vacuum(s, false, false);
+                server_vacuum(s, false);
                 vacuumed = true;
 
                 f = find_journal(s, uid);
@@ -548,7 +687,9 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned
                         return;
         }
 
-        r = journal_file_append_entry(f, NULL, iovec, n, &s->seqnum, NULL, NULL);
+        s->last_realtime_clock = ts.realtime;
+
+        r = journal_file_append_entry(f, &ts, iovec, n, &s->seqnum, NULL, NULL);
         if (r >= 0) {
                 server_schedule_sync(s, priority);
                 return;
@@ -560,18 +701,56 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned
         }
 
         server_rotate(s);
-        server_vacuum(s, false, false);
+        server_vacuum(s, false);
 
         f = find_journal(s, uid);
         if (!f)
                 return;
 
         log_debug("Retrying write.");
-        r = journal_file_append_entry(f, NULL, iovec, n, &s->seqnum, NULL, NULL);
+        r = journal_file_append_entry(f, &ts, iovec, n, &s->seqnum, NULL, NULL);
         if (r < 0)
                 log_error_errno(r, "Failed to write entry (%d items, %zu bytes) despite vacuuming, ignoring: %m", n, IOVEC_TOTAL_SIZE(iovec, n));
         else
                 server_schedule_sync(s, priority);
+}
+
+static int get_invocation_id(const char *cgroup_root, const char *slice, const char *unit, char **ret) {
+        _cleanup_free_ char *escaped = NULL, *slice_path = NULL, *p = NULL;
+        char *copy, ids[SD_ID128_STRING_MAX];
+        int r;
+
+        /* Read the invocation ID of a unit off a unit. It's stored in the "trusted.invocation_id" extended attribute
+         * on the cgroup path. */
+
+        r = cg_slice_to_path(slice, &slice_path);
+        if (r < 0)
+                return r;
+
+        escaped = cg_escape(unit);
+        if (!escaped)
+                return -ENOMEM;
+
+        p = strjoin(cgroup_root, "/", slice_path, "/", escaped, NULL);
+        if (!p)
+                return -ENOMEM;
+
+        r = cg_get_xattr(SYSTEMD_CGROUP_CONTROLLER, p, "trusted.invocation_id", ids, 32);
+        if (r < 0)
+                return r;
+        if (r != 32)
+                return -EINVAL;
+        ids[32] = 0;
+
+        if (!id128_is_valid(ids))
+                return -EINVAL;
+
+        copy = strdup(ids);
+        if (!copy)
+                return -ENOMEM;
+
+        *ret = copy;
+        return 0;
 }
 
 static void dispatch_message_real(
@@ -612,7 +791,7 @@ static void dispatch_message_real(
         assert(s);
         assert(iovec);
         assert(n > 0);
-        assert(n + N_IOVEC_META_FIELDS + (object_pid ? N_IOVEC_OBJECT_FIELDS : 0) <= m);
+        assert(n + N_IOVEC_META_FIELDS + (object_pid > 0 ? N_IOVEC_OBJECT_FIELDS : 0) <= m);
 
         if (ucred) {
                 realuid = ucred->uid;
@@ -670,6 +849,7 @@ static void dispatch_message_real(
 
                 r = cg_pid_get_path_shifted(ucred->pid, s->cgroup_root, &c);
                 if (r >= 0) {
+                        _cleanup_free_ char *raw_unit = NULL, *raw_slice = NULL;
                         char *session = NULL;
 
                         x = strjoina("_SYSTEMD_CGROUP=", c);
@@ -689,9 +869,8 @@ static void dispatch_message_real(
                                 IOVEC_SET_STRING(iovec[n++], owner_uid);
                         }
 
-                        if (cg_path_get_unit(c, &t) >= 0) {
-                                x = strjoina("_SYSTEMD_UNIT=", t);
-                                free(t);
+                        if (cg_path_get_unit(c, &raw_unit) >= 0) {
+                                x = strjoina("_SYSTEMD_UNIT=", raw_unit);
                                 IOVEC_SET_STRING(iovec[n++], x);
                         } else if (unit_id && !session) {
                                 x = strjoina("_SYSTEMD_UNIT=", unit_id);
@@ -707,10 +886,23 @@ static void dispatch_message_real(
                                 IOVEC_SET_STRING(iovec[n++], x);
                         }
 
-                        if (cg_path_get_slice(c, &t) >= 0) {
-                                x = strjoina("_SYSTEMD_SLICE=", t);
+                        if (cg_path_get_slice(c, &raw_slice) >= 0) {
+                                x = strjoina("_SYSTEMD_SLICE=", raw_slice);
+                                IOVEC_SET_STRING(iovec[n++], x);
+                        }
+
+                        if (cg_path_get_user_slice(c, &t) >= 0) {
+                                x = strjoina("_SYSTEMD_USER_SLICE=", t);
                                 free(t);
                                 IOVEC_SET_STRING(iovec[n++], x);
+                        }
+
+                        if (raw_slice && raw_unit) {
+                                if (get_invocation_id(s->cgroup_root, raw_slice, raw_unit, &t) >= 0) {
+                                        x = strjoina("_SYSTEMD_INVOCATION_ID=", t);
+                                        free(t);
+                                        IOVEC_SET_STRING(iovec[n++], x);
+                                }
                         }
 
                         free(c);
@@ -818,13 +1010,25 @@ static void dispatch_message_real(
                                 IOVEC_SET_STRING(iovec[n++], x);
                         }
 
+                        if (cg_path_get_slice(c, &t) >= 0) {
+                                x = strjoina("OBJECT_SYSTEMD_SLICE=", t);
+                                free(t);
+                                IOVEC_SET_STRING(iovec[n++], x);
+                        }
+
+                        if (cg_path_get_user_slice(c, &t) >= 0) {
+                                x = strjoina("OBJECT_SYSTEMD_USER_SLICE=", t);
+                                free(t);
+                                IOVEC_SET_STRING(iovec[n++], x);
+                        }
+
                         free(c);
                 }
         }
         assert(n <= m);
 
         if (tv) {
-                sprintf(source_time, "_SOURCE_REALTIME_TIMESTAMP=%llu", (unsigned long long) timeval_load(tv));
+                sprintf(source_time, "_SOURCE_REALTIME_TIMESTAMP=" USEC_FMT, timeval_load(tv));
                 IOVEC_SET_STRING(iovec[n++], source_time);
         }
 
@@ -964,7 +1168,7 @@ void server_dispatch_message(
                 }
         }
 
-        (void) determine_space(s, false, false, &available, NULL);
+        (void) determine_space(s, &available, NULL);
         rl = journal_rate_limit_test(s->rate_limit, path, priority & LOG_PRIMASK, available);
         if (rl == 0)
                 return;
@@ -977,83 +1181,6 @@ void server_dispatch_message(
 
 finish:
         dispatch_message_real(s, iovec, n, m, ucred, tv, label, label_len, unit_id, priority, object_pid);
-}
-
-
-static int system_journal_open(Server *s, bool flush_requested) {
-        const char *fn;
-        int r = 0;
-
-        if (!s->system_journal &&
-            (s->storage == STORAGE_PERSISTENT || s->storage == STORAGE_AUTO) &&
-            (flush_requested
-             || access("/run/systemd/journal/flushed", F_OK) >= 0)) {
-
-                /* If in auto mode: first try to create the machine
-                 * path, but not the prefix.
-                 *
-                 * If in persistent mode: create /var/log/journal and
-                 * the machine path */
-
-                if (s->storage == STORAGE_PERSISTENT)
-                        (void) mkdir_p("/var/log/journal/", 0755);
-
-                fn = strjoina("/var/log/journal/", SERVER_MACHINE_ID(s));
-                (void) mkdir(fn, 0755);
-
-                fn = strjoina(fn, "/system.journal");
-                r = open_journal(s, true, fn, O_RDWR|O_CREAT, s->seal, &s->system_metrics, &s->system_journal);
-                if (r >= 0) {
-                        server_add_acls(s->system_journal, 0);
-                        (void) determine_space_for(s, &s->system_metrics, "/var/log/journal/", "System journal", true, true, NULL, NULL);
-                } else if (r < 0) {
-                        if (r != -ENOENT && r != -EROFS)
-                                log_warning_errno(r, "Failed to open system journal: %m");
-
-                        r = 0;
-                }
-        }
-
-        if (!s->runtime_journal &&
-            (s->storage != STORAGE_NONE)) {
-
-                fn = strjoina("/run/log/journal/", SERVER_MACHINE_ID(s), "/system.journal");
-
-                if (s->system_journal) {
-
-                        /* Try to open the runtime journal, but only
-                         * if it already exists, so that we can flush
-                         * it into the system journal */
-
-                        r = open_journal(s, false, fn, O_RDWR, false, &s->runtime_metrics, &s->runtime_journal);
-                        if (r < 0) {
-                                if (r != -ENOENT)
-                                        log_warning_errno(r, "Failed to open runtime journal: %m");
-
-                                r = 0;
-                        }
-
-                } else {
-
-                        /* OK, we really need the runtime journal, so create
-                         * it if necessary. */
-
-                        (void) mkdir("/run/log", 0755);
-                        (void) mkdir("/run/log/journal", 0755);
-                        (void) mkdir_parents(fn, 0750);
-
-                        r = open_journal(s, true, fn, O_RDWR|O_CREAT, false, &s->runtime_metrics, &s->runtime_journal);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to open runtime journal: %m");
-                }
-
-                if (s->runtime_journal) {
-                        server_add_acls(s->runtime_journal, 0);
-                        (void) determine_space_for(s, &s->runtime_metrics, "/run/log/journal/", "Runtime journal", true, true, NULL, NULL);
-                }
-        }
-
-        return r;
 }
 
 int server_flush_to_var(Server *s) {
@@ -1117,7 +1244,7 @@ int server_flush_to_var(Server *s) {
                 }
 
                 server_rotate(s);
-                server_vacuum(s, false, false);
+                server_vacuum(s, false);
 
                 if (!s->system_journal) {
                         log_notice("Didn't flush runtime journal since rotation of system journal wasn't successful.");
@@ -1284,14 +1411,15 @@ static int dispatch_sigusr1(sd_event_source *es, const struct signalfd_siginfo *
 
         log_info("Received request to flush runtime journal from PID " PID_FMT, si->ssi_pid);
 
-        server_flush_to_var(s);
+        (void) server_flush_to_var(s);
         server_sync(s);
-        server_vacuum(s, false, false);
+        server_vacuum(s, false);
 
         r = touch("/run/systemd/journal/flushed");
         if (r < 0)
                 log_warning_errno(r, "Failed to touch /run/systemd/journal/flushed, ignoring: %m");
 
+        server_space_usage_message(s, NULL);
         return 0;
 }
 
@@ -1303,7 +1431,12 @@ static int dispatch_sigusr2(sd_event_source *es, const struct signalfd_siginfo *
 
         log_info("Received request to rotate journal from PID " PID_FMT, si->ssi_pid);
         server_rotate(s);
-        server_vacuum(s, true, true);
+        server_vacuum(s, true);
+
+        if (s->system_journal)
+                patch_min_use(&s->system_storage);
+        if (s->runtime_journal)
+                patch_min_use(&s->runtime_storage);
 
         /* Let clients know when the most recent rotation happened. */
         r = write_timestamp_file_atomic("/run/systemd/journal/rotated", now(CLOCK_MONOTONIC));
@@ -1393,55 +1526,68 @@ static int setup_signals(Server *s) {
         return 0;
 }
 
-static int server_parse_proc_cmdline(Server *s) {
-        _cleanup_free_ char *line = NULL;
-        const char *p;
+static int parse_proc_cmdline_item(const char *key, const char *value, void *data) {
+        Server *s = data;
         int r;
 
-        r = proc_cmdline(&line);
-        if (r < 0) {
-                log_warning_errno(r, "Failed to read /proc/cmdline, ignoring: %m");
-                return 0;
-        }
+        assert(s);
 
-        p = line;
-        for (;;) {
-                _cleanup_free_ char *word = NULL;
-
-                r = extract_first_word(&p, &word, NULL, 0);
+        if (streq(key, "systemd.journald.forward_to_syslog")) {
+                r = value ? parse_boolean(value) : true;
                 if (r < 0)
-                        return log_error_errno(r, "Failed to parse journald syntax \"%s\": %m", line);
-
-                if (r == 0)
-                        break;
-
-                if (startswith(word, "systemd.journald.forward_to_syslog=")) {
-                        r = parse_boolean(word + 35);
-                        if (r < 0)
-                                log_warning("Failed to parse forward to syslog switch %s. Ignoring.", word + 35);
-                        else
-                                s->forward_to_syslog = r;
-                } else if (startswith(word, "systemd.journald.forward_to_kmsg=")) {
-                        r = parse_boolean(word + 33);
-                        if (r < 0)
-                                log_warning("Failed to parse forward to kmsg switch %s. Ignoring.", word + 33);
-                        else
-                                s->forward_to_kmsg = r;
-                } else if (startswith(word, "systemd.journald.forward_to_console=")) {
-                        r = parse_boolean(word + 36);
-                        if (r < 0)
-                                log_warning("Failed to parse forward to console switch %s. Ignoring.", word + 36);
-                        else
-                                s->forward_to_console = r;
-                } else if (startswith(word, "systemd.journald.forward_to_wall=")) {
-                        r = parse_boolean(word + 33);
-                        if (r < 0)
-                                log_warning("Failed to parse forward to wall switch %s. Ignoring.", word + 33);
-                        else
-                                s->forward_to_wall = r;
-                } else if (startswith(word, "systemd.journald"))
-                        log_warning("Invalid systemd.journald parameter. Ignoring.");
-        }
+                        log_warning("Failed to parse forward to syslog switch \"%s\". Ignoring.", value);
+                else
+                        s->forward_to_syslog = r;
+        } else if (streq(key, "systemd.journald.forward_to_kmsg")) {
+                r = value ? parse_boolean(value) : true;
+                if (r < 0)
+                        log_warning("Failed to parse forward to kmsg switch \"%s\". Ignoring.", value);
+                else
+                        s->forward_to_kmsg = r;
+        } else if (streq(key, "systemd.journald.forward_to_console")) {
+                r = value ? parse_boolean(value) : true;
+                if (r < 0)
+                        log_warning("Failed to parse forward to console switch \"%s\". Ignoring.", value);
+                else
+                        s->forward_to_console = r;
+        } else if (streq(key, "systemd.journald.forward_to_wall")) {
+                r = value ? parse_boolean(value) : true;
+                if (r < 0)
+                        log_warning("Failed to parse forward to wall switch \"%s\". Ignoring.", value);
+                else
+                        s->forward_to_wall = r;
+        } else if (streq(key, "systemd.journald.max_level_console") && value) {
+                r = log_level_from_string(value);
+                if (r < 0)
+                        log_warning("Failed to parse max level console value \"%s\". Ignoring.", value);
+                else
+                        s->max_level_console = r;
+        } else if (streq(key, "systemd.journald.max_level_store") && value) {
+                r = log_level_from_string(value);
+                if (r < 0)
+                        log_warning("Failed to parse max level store value \"%s\". Ignoring.", value);
+                else
+                        s->max_level_store = r;
+        } else if (streq(key, "systemd.journald.max_level_syslog") && value) {
+                r = log_level_from_string(value);
+                if (r < 0)
+                        log_warning("Failed to parse max level syslog value \"%s\". Ignoring.", value);
+                else
+                        s->max_level_syslog = r;
+        } else if (streq(key, "systemd.journald.max_level_kmsg") && value) {
+                r = log_level_from_string(value);
+                if (r < 0)
+                        log_warning("Failed to parse max level kmsg value \"%s\". Ignoring.", value);
+                else
+                        s->max_level_kmsg = r;
+        } else if (streq(key, "systemd.journald.max_level_wall") && value) {
+                r = log_level_from_string(value);
+                if (r < 0)
+                        log_warning("Failed to parse max level wall value \"%s\". Ignoring.", value);
+                else
+                        s->max_level_wall = r;
+        } else if (startswith(key, "systemd.journald"))
+                log_warning("Unknown journald kernel command line option \"%s\". Ignoring.", key);
 
         /* do not warn about state here, since probably systemd already did */
         return 0;
@@ -1450,7 +1596,7 @@ static int server_parse_proc_cmdline(Server *s) {
 static int server_parse_config_file(Server *s) {
         assert(s);
 
-        return config_parse_many(PKGSYSCONFDIR "/journald.conf",
+        return config_parse_many_nulstr(PKGSYSCONFDIR "/journald.conf",
                                  CONF_PATHS_NULSTR("systemd/journald.conf.d"),
                                  "Journal\0",
                                  config_item_perf_lookup, journald_gperf_lookup,
@@ -1563,7 +1709,7 @@ static int dispatch_notify_event(sd_event_source *es, int fd, uint32_t revents, 
         assert(s->notify_fd == fd);
 
         /* The $NOTIFY_SOCKET is writable again, now send exactly one
-         * message on it. Either it's the wtachdog event, the initial
+         * message on it. Either it's the watchdog event, the initial
          * READY=1 event or an stdout stream event. If there's nothing
          * to write anymore, turn our event source off. The next time
          * there's something to send it will be turned on again. */
@@ -1748,11 +1894,11 @@ int server_init(Server *s) {
         s->max_level_console = LOG_INFO;
         s->max_level_wall = LOG_EMERG;
 
-        journal_reset_metrics(&s->system_metrics);
-        journal_reset_metrics(&s->runtime_metrics);
+        journal_reset_metrics(&s->system_storage.metrics);
+        journal_reset_metrics(&s->runtime_storage.metrics);
 
         server_parse_config_file(s);
-        server_parse_proc_cmdline(s);
+        parse_proc_cmdline(parse_proc_cmdline_item, s, true);
 
         if (!!s->rate_limit_interval ^ !!s->rate_limit_burst) {
                 log_debug("Setting both rate limit interval and burst from "USEC_FMT",%u to 0,0",
@@ -1901,6 +2047,14 @@ int server_init(Server *s) {
         server_cache_hostname(s);
         server_cache_boot_id(s);
         server_cache_machine_id(s);
+
+        s->runtime_storage.name = "Runtime journal";
+        s->system_storage.name = "System journal";
+
+        s->runtime_storage.path = strjoin("/run/log/journal/", SERVER_MACHINE_ID(s), NULL);
+        s->system_storage.path  = strjoin("/var/log/journal/", SERVER_MACHINE_ID(s), NULL);
+        if (!s->runtime_storage.path || !s->system_storage.path)
+                return -ENOMEM;
 
         (void) server_connect_notify(s);
 

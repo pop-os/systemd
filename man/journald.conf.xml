@@ -129,23 +129,15 @@
       <varlistentry>
         <term><varname>SplitMode=</varname></term>
 
-        <listitem><para>Controls whether to split up journal files per user. Split-up journal files are primarily
-        useful for access control: on UNIX/Linux access control is managed per file, and the journal daemon will assign
-        users read access to their journal files. This setting takes one of <literal>uid</literal>,
-        <literal>login</literal> or <literal>none</literal>. If <literal>uid</literal>, all regular users will get each
-        their own journal files regardless of whether their processes possess login sessions or not, however system
-        users will log into the system journal. If <literal>login</literal>, actually logged-in users will get each
-        their own journal files, but users without login session and system users will log into the system
-        journal. Note that in this mode, user code running outside of any login session will log into the system log
-        instead of the split-out user logs. Most importantly, this means that information about core dumps of user
-        processes collected via the
-        <citerefentry><refentrytitle>systemd-coredump</refentrytitle><manvolnum>8</manvolnum></citerefentry> subsystem
-        will end up in the system logs instead of the user logs, and thus not be accessible to the owning users. If
-        <literal>none</literal>, journal files are not split up by user and all messages are instead stored in the
-        single system journal. In this mode unprivileged users generally do not have access to their own log data. Note
-        that splitting up journal files by user is only available for journals stored persistently. If journals are
-        stored on volatile storage (see above), only a single journal file for all user IDs is kept. Defaults to
-        <literal>uid</literal>.</para></listitem>
+        <listitem><para>Controls whether to split up journal files per user, either <literal>uid</literal> or
+        <literal>none</literal>. Split journal files are primarily useful for access control: on UNIX/Linux access
+        control is managed per file, and the journal daemon will assign users read access to their journal files. If
+        <literal>uid</literal>, all regular users will each get their own journal files, and system users will log to
+        the system journal. If <literal>none</literal>, journal files are not split up by user and all messages are
+        instead stored in the single system journal. In this mode unprivileged users generally do not have access to
+        their own log data. Note that splitting up journal files by user is only available for journals stored
+        persistently. If journals are stored on volatile storage (see <varname>Storage=</varname> above), only a single
+        journal file is used. Defaults to <literal>uid</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -309,22 +301,21 @@
         <term><varname>ForwardToConsole=</varname></term>
         <term><varname>ForwardToWall=</varname></term>
 
-        <listitem><para>Control whether log messages received by the
-        journal daemon shall be forwarded to a traditional syslog
-        daemon, to the kernel log buffer (kmsg), to the system
-        console, or sent as wall messages to all logged-in users.
-        These options take boolean arguments. If forwarding to syslog
-        is enabled but nothing reads messages from the socket,
-        forwarding to syslog has no effect. By default, only
-        forwarding to wall is enabled. These settings may be
-        overridden at boot time with the kernel command line options
-        <literal>systemd.journald.forward_to_syslog=</literal>,
-        <literal>systemd.journald.forward_to_kmsg=</literal>,
-        <literal>systemd.journald.forward_to_console=</literal>, and
-        <literal>systemd.journald.forward_to_wall=</literal>. When
-        forwarding to the console, the TTY to log to can be changed
-        with <varname>TTYPath=</varname>, described
-        below.</para></listitem>
+        <listitem><para>Control whether log messages received by the journal daemon shall
+        be forwarded to a traditional syslog daemon, to the kernel log buffer (kmsg), to
+        the system console, or sent as wall messages to all logged-in users.  These
+        options take boolean arguments. If forwarding to syslog is enabled but nothing
+        reads messages from the socket, forwarding to syslog has no effect. By default,
+        only forwarding to wall is enabled. These settings may be overridden at boot time
+        with the kernel command line options
+        <literal>systemd.journald.forward_to_syslog</literal>,
+        <literal>systemd.journald.forward_to_kmsg</literal>,
+        <literal>systemd.journald.forward_to_console</literal>, and
+        <literal>systemd.journald.forward_to_wall</literal>. If the option name is
+        specified without <literal>=</literal> and the following argument, true is
+        assumed. Otherwise, the argument is parsed as a boolean. When forwarding to the
+        console, the TTY to log to can be changed with <varname>TTYPath=</varname>,
+        described below.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -356,7 +347,14 @@
         <literal>notice</literal> for <varname>MaxLevelKMsg=</varname>,
         <literal>info</literal> for <varname>MaxLevelConsole=</varname>,
         and <literal>emerg</literal> for
-        <varname>MaxLevelWall=</varname>.</para></listitem>
+        <varname>MaxLevelWall=</varname>. These settings may be
+        overridden at boot time with the kernel command line options
+        <literal>systemd.journald.max_level_store=</literal>,
+        <literal>systemd.journald.max_level_syslog=</literal>,
+        <literal>systemd.journald.max_level_kmsg=</literal>,
+        <literal>systemd.journald.max_level_console=</literal>,
+        <literal>systemd.journald.max_level_wall=</literal>.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>

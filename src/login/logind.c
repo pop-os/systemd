@@ -38,6 +38,7 @@
 #include "signal-util.h"
 #include "strv.h"
 #include "udev-util.h"
+#include "cgroup-util.h"
 
 static void manager_free(Manager *m);
 
@@ -62,7 +63,7 @@ static void manager_reset_config(Manager *m) {
         m->idle_action = HANDLE_IGNORE;
 
         m->runtime_dir_size = physical_memory_scale(10U, 100U); /* 10% */
-        m->user_tasks_max = system_tasks_max_scale(33U, 100U); /* 33% */
+        m->user_tasks_max = system_tasks_max_scale(DEFAULT_USER_TASKS_MAX_PERCENTAGE, 100U); /* 33% */
         m->sessions_max = 8192;
         m->inhibitors_max = 8192;
 
@@ -125,7 +126,8 @@ static void manager_free(Manager *m) {
         Inhibitor *i;
         Button *b;
 
-        assert(m);
+        if (!m)
+                return;
 
         while ((session = hashmap_first(m->sessions)))
                 session_free(session);
@@ -1001,7 +1003,7 @@ static int manager_dispatch_idle_action(sd_event_source *s, uint64_t t, void *us
 static int manager_parse_config_file(Manager *m) {
         assert(m);
 
-        return config_parse_many(PKGSYSCONFDIR "/logind.conf",
+        return config_parse_many_nulstr(PKGSYSCONFDIR "/logind.conf",
                                  CONF_PATHS_NULSTR("systemd/logind.conf.d"),
                                  "Login\0",
                                  config_item_perf_lookup, logind_gperf_lookup,

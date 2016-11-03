@@ -34,7 +34,6 @@
 #include "string-util.h"
 
 const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX] = {
-
         [NETDEV_KIND_BRIDGE] = &bridge_vtable,
         [NETDEV_KIND_BOND] = &bond_vtable,
         [NETDEV_KIND_VLAN] = &vlan_vtable,
@@ -56,7 +55,7 @@ const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_TAP] = &tap_vtable,
         [NETDEV_KIND_IP6TNL] = &ip6tnl_vtable,
         [NETDEV_KIND_VRF] = &vrf_vtable,
-
+        [NETDEV_KIND_VCAN] = &vcan_vtable,
 };
 
 static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
@@ -81,7 +80,7 @@ static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_TAP] = "tap",
         [NETDEV_KIND_IP6TNL] = "ip6tnl",
         [NETDEV_KIND_VRF] = "vrf",
-
+        [NETDEV_KIND_VCAN] = "vcan",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(netdev_kind, NetDevKind);
@@ -516,7 +515,7 @@ static int netdev_create(NetDev *netdev, Link *link,
 
                 r = sd_netlink_message_close_container(m);
                 if (r < 0)
-                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_LINKINFO attribute: %m");
+                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_INFO_DATA attribute: %m");
 
                 r = sd_netlink_message_close_container(m);
                 if (r < 0)
@@ -577,6 +576,7 @@ static int netdev_load_one(Manager *manager, const char *filename) {
         _cleanup_netdev_unref_ NetDev *netdev = NULL;
         _cleanup_free_ NetDev *netdev_raw = NULL;
         _cleanup_fclose_ FILE *file = NULL;
+        const char *dropin_dirname;
         int r;
 
         assert(manager);
@@ -600,11 +600,12 @@ static int netdev_load_one(Manager *manager, const char *filename) {
                 return log_oom();
 
         netdev_raw->kind = _NETDEV_KIND_INVALID;
+        dropin_dirname = strjoina(basename(filename), ".d");
 
-        r = config_parse(NULL, filename, file,
-                         "Match\0NetDev\0",
-                         config_item_perf_lookup, network_netdev_gperf_lookup,
-                         true, false, true, netdev_raw);
+        r = config_parse_many(filename, network_dirs, dropin_dirname,
+                              "Match\0NetDev\0",
+                              config_item_perf_lookup, network_netdev_gperf_lookup,
+                              true, netdev_raw);
         if (r < 0)
                 return r;
 
@@ -620,7 +621,7 @@ static int netdev_load_one(Manager *manager, const char *filename) {
                 return 0;
 
         if (netdev_raw->kind == _NETDEV_KIND_INVALID) {
-                log_warning("NetDev with invalid Kind configured in %s. Ignoring", filename);
+                log_warning("NetDev has no Kind configured in %s. Ignoring", filename);
                 return 0;
         }
 

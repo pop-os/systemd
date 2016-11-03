@@ -130,15 +130,14 @@ int setup_seccomp(uint64_t cap_list_retain) {
         scmp_filter_ctx seccomp;
         int r;
 
-        seccomp = seccomp_init(SCMP_ACT_ALLOW);
-        if (!seccomp)
-                return log_oom();
-
-        r = seccomp_add_secondary_archs(seccomp);
-        if (r < 0) {
-                log_error_errno(r, "Failed to add secondary archs to seccomp filter: %m");
-                goto finish;
+        if (!is_seccomp_available()) {
+                log_debug("SECCOMP features not detected in the kernel, disabling SECCOMP audit filter");
+                return 0;
         }
+
+        r = seccomp_init_conservative(&seccomp, SCMP_ACT_ALLOW);
+        if (r < 0)
+                return log_error_errno(r, "Failed to allocate seccomp object: %m");
 
         r = seccomp_add_default_syscall_filter(seccomp, cap_list_retain);
         if (r < 0)
@@ -166,18 +165,7 @@ int setup_seccomp(uint64_t cap_list_retain) {
                 goto finish;
         }
 
-        r = seccomp_attr_set(seccomp, SCMP_FLTATR_CTL_NNP, 0);
-        if (r < 0) {
-                log_error_errno(r, "Failed to unset NO_NEW_PRIVS: %m");
-                goto finish;
-        }
-
         r = seccomp_load(seccomp);
-        if (r == -EINVAL) {
-                log_debug_errno(r, "Kernel is probably not configured with CONFIG_SECCOMP. Disabling seccomp audit filter: %m");
-                r = 0;
-                goto finish;
-        }
         if (r < 0) {
                 log_error_errno(r, "Failed to install seccomp audit filter: %m");
                 goto finish;

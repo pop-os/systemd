@@ -48,6 +48,7 @@
 #include "unit-name.h"
 #include "unit.h"
 #include "util.h"
+#include "virt.h"
 
 int main(int argc, char **argv) {
         test_table(architecture, ARCHITECTURE);
@@ -63,7 +64,7 @@ int main(int argc, char **argv) {
         test_table(device_state, DEVICE_STATE);
         test_table(exec_input, EXEC_INPUT);
         test_table(exec_output, EXEC_OUTPUT);
-        test_table(failure_action, FAILURE_ACTION);
+        test_table(emergency_action, EMERGENCY_ACTION);
         test_table(job_mode, JOB_MODE);
         test_table(job_result, JOB_RESULT);
         test_table(job_state, JOB_STATE);
@@ -114,6 +115,7 @@ int main(int argc, char **argv) {
         test_table(unit_load_state, UNIT_LOAD_STATE);
         test_table(unit_type, UNIT_TYPE);
         test_table(locale_variable, VARIABLE_LC);
+        test_table(virtualization, VIRTUALIZATION);
 
         test_table_sparse(object_compressed, OBJECT_COMPRESSED);
 

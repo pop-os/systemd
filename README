@@ -79,6 +79,7 @@ REQUIREMENTS:
           CONFIG_TMPFS_XATTR
           CONFIG_{TMPFS,EXT4,XFS,BTRFS_FS,...}_POSIX_ACL
           CONFIG_SECCOMP
+          CONFIG_SECCOMP_FILTER (required for seccomp support)
           CONFIG_CHECKPOINT_RESTORE (for the kcmp() syscall)
 
         Required for CPUShares= in resource control unit settings
@@ -119,7 +120,7 @@ REQUIREMENTS:
         libcap
         libmount >= 2.27.1 (from util-linux)
                 (util-linux *must* be built with --enable-libmount-force-mountinfo)
-        libseccomp >= 1.0.0 (optional)
+        libseccomp >= 2.3.1 (optional)
         libblkid >= 2.24 (from util-linux) (optional)
         libkmod >= 15 (optional)
         PAM >= 1.1.2 (optional)
@@ -168,6 +169,13 @@ REQUIREMENTS:
         under all circumstances. In fact, systemd-hostnamed will warn
         if nss-myhostname is not installed.
 
+        Additional packages are necessary to run some tests:
+        - busybox            (used by test/TEST-13-NSPAWN-SMOKE)
+        - nc                 (used by test/TEST-12-ISSUE-3171)
+        - python3-pyparsing
+        - python3-evdev      (used by hwdb parsing tests)
+        - strace             (used by test/test-functions)
+
 USERS AND GROUPS:
         Default udev rules use the following standard system group
         names, which need to be resolvable by getgrnam() at any time,
@@ -201,7 +209,7 @@ USERS AND GROUPS:
         "systemd-coredump" system user and group to exist.
 
 NSS:
-        systemd ships with three NSS modules:
+        systemd ships with four glibc NSS modules:
 
         nss-myhostname resolves the local hostname to locally
         configured IP addresses, as well as "localhost" to
@@ -210,15 +218,22 @@ NSS:
         nss-resolve enables DNS resolution via the systemd-resolved
         DNS/LLMNR caching stub resolver "systemd-resolved".
 
-        nss-mymachines enables resolution of all local containers
-        registered with machined to their respective IP addresses.
+        nss-mymachines enables resolution of all local containers registered
+        with machined to their respective IP addresses. It also maps UID/GIDs
+        ranges used by containers to useful names.
 
-        To make use of these NSS modules, please add them to the
-        "hosts: " line in /etc/nsswitch.conf. The "resolve" module
-        should replace the glibc "dns" module in this file.
+        nss-systemd enables resolution of all dynamically allocated service
+        users. (See the DynamicUser= setting in unit files.)
 
-        The three modules should be used in the following order:
+        To make use of these NSS modules, please add them to the "hosts:",
+        "passwd:" and "group:" lines in /etc/nsswitch.conf. The "resolve"
+        module should replace the glibc "dns" module in this file (and don't
+        worry, it chain-loads the "dns" module if it can't talk to resolved).
 
+        The four modules should be used in the following order:
+
+                passwd: compat mymachines systemd
+                group: compat mymachines systemd
                 hosts: files mymachines resolve myhostname
 
 SYSV INIT.D SCRIPTS:

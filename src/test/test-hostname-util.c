@@ -42,6 +42,7 @@ static void test_hostname_is_valid(void) {
         assert_se(!hostname_is_valid("foo..bar", false));
         assert_se(!hostname_is_valid("foo.bar..", false));
         assert_se(!hostname_is_valid("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", false));
+        assert_se(!hostname_is_valid("au-xph5-rvgrdsb5hcxc-47et3a5vvkrc-server-wyoz4elpdpe3.openstack.local", false));
 
         assert_se(hostname_is_valid("foobar", true));
         assert_se(hostname_is_valid("foobar.com", true));
@@ -103,7 +104,7 @@ static void test_read_hostname_config(void) {
         char *hostname;
         int fd;
 
-        fd = mkostemp_safe(path, O_RDWR|O_CLOEXEC);
+        fd = mkostemp_safe(path);
         assert(fd > 0);
         close(fd);
 

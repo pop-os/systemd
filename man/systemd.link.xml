@@ -107,7 +107,7 @@
         <listitem>
           <para>A whitespace-separated list of shell-style globs matching
           the device name, as exposed by the udev property
-          "INTERFACE". This can not be used to match on names that have
+          "INTERFACE". This cannot be used to match on names that have
           already been changed from userspace. Caution is advised when matching on
           kernel-assigned names, as they are known to be unstable
           between reboots.</para>
@@ -385,6 +385,46 @@
               </listitem>
             </varlistentry>
           </variablelist>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>TCPSegmentationOffload=</varname></term>
+        <listitem>
+          <para>The TCP Segmentation Offload (TSO) when true enables
+          TCP segmentation offload. Takes a boolean value.
+          Defaults to "unset".</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>GenericSegmentationOffload=</varname></term>
+        <listitem>
+          <para>The Generic Segmentation Offload (GSO) when true enables
+          generic segmentation offload. Takes a boolean value.
+          Defaults to "unset".</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>UDPSegmentationOffload=</varname></term>
+        <listitem>
+          <para>The UDP Segmentation Offload (USO) when true enables
+          UDP segmentation offload. Takes a boolean value.
+          Defaults to "unset".</para>
+        </listitem>
+      </varlistentry>
+    <varlistentry>
+        <term><varname>GenericReceiveOffload=</varname></term>
+        <listitem>
+          <para>The Generic Receive Offload (GRO) when true enables
+          generic receive offload. Takes a boolean value.
+          Defaults to "unset".</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>LargeReceiveOffload=</varname></term>
+        <listitem>
+          <para>The Large Receive Offload (LRO) when true enables
+          large receive offload. Takes a boolean value.
+          Defaults to "unset".</para>
         </listitem>
       </varlistentry>
     </variablelist>

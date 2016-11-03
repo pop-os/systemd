@@ -23,7 +23,18 @@
 #include "extract-word.h"
 #include "parse-util.h"
 #include "resolved-conf.h"
+#include "string-table.h"
 #include "string-util.h"
+
+DEFINE_CONFIG_PARSE_ENUM(config_parse_dns_stub_listener_mode, dns_stub_listener_mode, DnsStubListenerMode, "Failed to parse DNS stub listener mode setting");
+
+static const char* const dns_stub_listener_mode_table[_DNS_STUB_LISTENER_MODE_MAX] = {
+        [DNS_STUB_LISTENER_NO] = "no",
+        [DNS_STUB_LISTENER_UDP] = "udp",
+        [DNS_STUB_LISTENER_TCP] = "tcp",
+        [DNS_STUB_LISTENER_YES] = "yes",
+};
+DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(dns_stub_listener_mode, DnsStubListenerMode, DNS_STUB_LISTENER_YES);
 
 int manager_add_dns_server_by_string(Manager *m, DnsServerType type, const char *word) {
         union in_addr_union address;
@@ -221,7 +232,7 @@ int manager_parse_config_file(Manager *m) {
 
         assert(m);
 
-        r = config_parse_many(PKGSYSCONFDIR "/resolved.conf",
+        r = config_parse_many_nulstr(PKGSYSCONFDIR "/resolved.conf",
                               CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
                               "Resolve\0",
                               config_item_perf_lookup, resolved_gperf_lookup,

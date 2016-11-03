@@ -261,6 +261,8 @@ static void timer_set_state(Timer *t, TimerState state) {
         if (state != TIMER_WAITING) {
                 t->monotonic_event_source = sd_event_source_unref(t->monotonic_event_source);
                 t->realtime_event_source = sd_event_source_unref(t->realtime_event_source);
+                t->next_elapse_monotonic_or_boottime = USEC_INFINITY;
+                t->next_elapse_realtime = USEC_INFINITY;
         }
 
         if (state != old_state)
@@ -291,7 +293,7 @@ static int timer_coldplug(Unit *u) {
 static void timer_enter_dead(Timer *t, TimerResult f) {
         assert(t);
 
-        if (f != TIMER_SUCCESS)
+        if (t->result == TIMER_SUCCESS)
                 t->result = f;
 
         timer_set_state(t, t->result != TIMER_SUCCESS ? TIMER_FAILED : TIMER_DEAD);
@@ -616,6 +618,10 @@ static int timer_start(Unit *u) {
                 return r;
         }
 
+        r = unit_acquire_invocation_id(u);
+        if (r < 0)
+                return r;
+
         t->last_trigger = DUAL_TIMESTAMP_NULL;
 
         /* Reenable all timers that depend on unit activation time */
@@ -632,7 +638,7 @@ static int timer_start(Unit *u) {
                         /* The timer has never run before,
                          * make sure a stamp file exists.
                          */
-                        touch_file(t->stamp_path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID);
+                        (void) touch_file(t->stamp_path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID);
         }
 
         t->result = TIMER_SUCCESS;

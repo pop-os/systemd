@@ -210,6 +210,8 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_VTABLE_START(0),
         SD_BUS_PROPERTY("Delegate", "b", bus_property_get_bool, offsetof(CGroupContext, delegate), 0),
         SD_BUS_PROPERTY("CPUAccounting", "b", bus_property_get_bool, offsetof(CGroupContext, cpu_accounting), 0),
+        SD_BUS_PROPERTY("CPUWeight", "t", NULL, offsetof(CGroupContext, cpu_weight), 0),
+        SD_BUS_PROPERTY("StartupCPUWeight", "t", NULL, offsetof(CGroupContext, startup_cpu_weight), 0),
         SD_BUS_PROPERTY("CPUShares", "t", NULL, offsetof(CGroupContext, cpu_shares), 0),
         SD_BUS_PROPERTY("StartupCPUShares", "t", NULL, offsetof(CGroupContext, startup_cpu_shares), 0),
         SD_BUS_PROPERTY("CPUQuotaPerSecUSec", "t", bus_property_get_usec, offsetof(CGroupContext, cpu_quota_per_sec_usec), 0),
@@ -231,6 +233,7 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_PROPERTY("MemoryLow", "t", NULL, offsetof(CGroupContext, memory_low), 0),
         SD_BUS_PROPERTY("MemoryHigh", "t", NULL, offsetof(CGroupContext, memory_high), 0),
         SD_BUS_PROPERTY("MemoryMax", "t", NULL, offsetof(CGroupContext, memory_max), 0),
+        SD_BUS_PROPERTY("MemorySwapMax", "t", NULL, offsetof(CGroupContext, memory_swap_max), 0),
         SD_BUS_PROPERTY("MemoryLimit", "t", NULL, offsetof(CGroupContext, memory_limit), 0),
         SD_BUS_PROPERTY("DevicePolicy", "s", property_get_cgroup_device_policy, offsetof(CGroupContext, device_policy), 0),
         SD_BUS_PROPERTY("DeviceAllow", "a(ss)", property_get_device_allow, 0, 0),
@@ -299,6 +302,50 @@ int bus_cgroup_set_property(
                         c->cpu_accounting = b;
                         unit_invalidate_cgroup(u, CGROUP_MASK_CPUACCT|CGROUP_MASK_CPU);
                         unit_write_drop_in_private(u, mode, name, b ? "CPUAccounting=yes" : "CPUAccounting=no");
+                }
+
+                return 1;
+
+        } else if (streq(name, "CPUWeight")) {
+                uint64_t weight;
+
+                r = sd_bus_message_read(message, "t", &weight);
+                if (r < 0)
+                        return r;
+
+                if (!CGROUP_WEIGHT_IS_OK(weight))
+                        return sd_bus_error_set_errnof(error, EINVAL, "CPUWeight value out of range");
+
+                if (mode != UNIT_CHECK) {
+                        c->cpu_weight = weight;
+                        unit_invalidate_cgroup(u, CGROUP_MASK_CPU);
+
+                        if (weight == CGROUP_WEIGHT_INVALID)
+                                unit_write_drop_in_private(u, mode, name, "CPUWeight=");
+                        else
+                                unit_write_drop_in_private_format(u, mode, name, "CPUWeight=%" PRIu64, weight);
+                }
+
+                return 1;
+
+        } else if (streq(name, "StartupCPUWeight")) {
+                uint64_t weight;
+
+                r = sd_bus_message_read(message, "t", &weight);
+                if (r < 0)
+                        return r;
+
+                if (!CGROUP_WEIGHT_IS_OK(weight))
+                        return sd_bus_error_set_errnof(error, EINVAL, "StartupCPUWeight value out of range");
+
+                if (mode != UNIT_CHECK) {
+                        c->startup_cpu_weight = weight;
+                        unit_invalidate_cgroup(u, CGROUP_MASK_CPU);
+
+                        if (weight == CGROUP_CPU_SHARES_INVALID)
+                                unit_write_drop_in_private(u, mode, name, "StartupCPUWeight=");
+                        else
+                                unit_write_drop_in_private_format(u, mode, name, "StartupCPUWeight=%" PRIu64, weight);
                 }
 
                 return 1;
@@ -829,7 +876,7 @@ int bus_cgroup_set_property(
 
                 return 1;
 
-        } else if (STR_IN_SET(name, "MemoryLow", "MemoryHigh", "MemoryMax")) {
+        } else if (STR_IN_SET(name, "MemoryLow", "MemoryHigh", "MemoryMax", "MemorySwapMax")) {
                 uint64_t v;
 
                 r = sd_bus_message_read(message, "t", &v);
@@ -843,6 +890,8 @@ int bus_cgroup_set_property(
                                 c->memory_low = v;
                         else if (streq(name, "MemoryHigh"))
                                 c->memory_high = v;
+                        else if (streq(name, "MemorySwapMax"))
+                                c->memory_swap_max = v;
                         else
                                 c->memory_max = v;
 

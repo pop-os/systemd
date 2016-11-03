@@ -60,6 +60,9 @@
 #include "util.h"
 #include "verbs.h"
 #include "web-util.h"
+#include "stdio-util.h"
+
+#define ALL_IP_ADDRESSES -1
 
 static char **arg_property = NULL;
 static bool arg_all = false;
@@ -82,6 +85,9 @@ static ImportVerify arg_verify = IMPORT_VERIFY_SIGNATURE;
 static const char* arg_format = NULL;
 static const char *arg_uid = NULL;
 static char **arg_setenv = NULL;
+static int arg_addrs = 1;
+
+static int print_addresses(sd_bus *bus, const char *name, int, const char *pr1, const char *pr2, int n_addr);
 
 static void polkit_agent_open_if_enabled(void) {
 
@@ -109,6 +115,8 @@ typedef struct MachineInfo {
         const char *name;
         const char *class;
         const char *service;
+        char *os;
+        char *version_id;
 } MachineInfo;
 
 static int compare_machine_info(const void *a, const void *b) {
@@ -117,12 +125,92 @@ static int compare_machine_info(const void *a, const void *b) {
         return strcmp(x->name, y->name);
 }
 
+static void clean_machine_info(MachineInfo *machines, size_t n_machines) {
+        size_t i;
+
+        if (!machines || n_machines == 0)
+                return;
+
+        for (i = 0; i < n_machines; i++) {
+                free(machines[i].os);
+                free(machines[i].version_id);
+        }
+        free(machines);
+}
+
+static int get_os_release_property(sd_bus *bus, const char *name, const char *query, ...) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        const char *k, *v, *iter, **query_res = NULL;
+        size_t count = 0, awaited_args = 0;
+        va_list ap;
+        int r;
+
+        assert(bus);
+        assert(name);
+        assert(query);
+
+        NULSTR_FOREACH(iter, query)
+                awaited_args++;
+        query_res = newa0(const char *, awaited_args);
+
+        r = sd_bus_call_method(bus,
+                "org.freedesktop.machine1",
+                "/org/freedesktop/machine1",
+                "org.freedesktop.machine1.Manager",
+                "GetMachineOSRelease",
+                NULL, &reply, "s", name);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_enter_container(reply, 'a', "{ss}");
+        if (r < 0)
+                return bus_log_parse_error(r);
+
+        while ((r = sd_bus_message_read(reply, "{ss}", &k, &v)) > 0) {
+                count = 0;
+                NULSTR_FOREACH(iter, query) {
+                        if (streq(k, iter)) {
+                                query_res[count] = v;
+                                break;
+                        }
+                        count++;
+                }
+        }
+        if (r < 0)
+                return bus_log_parse_error(r);
+
+        r = sd_bus_message_exit_container(reply);
+        if (r < 0)
+                return bus_log_parse_error(r);
+
+        va_start(ap, query);
+        for (count = 0; count < awaited_args; count++) {
+                char *val, **out;
+
+                out = va_arg(ap, char **);
+                assert(out);
+                if (query_res[count]) {
+                        val = strdup(query_res[count]);
+                        if (!val) {
+                                va_end(ap);
+                                return log_oom();
+                        }
+                        *out = val;
+                }
+        }
+        va_end(ap);
+
+        return 0;
+}
+
 static int list_machines(int argc, char *argv[], void *userdata) {
 
-        size_t max_name = strlen("MACHINE"), max_class = strlen("CLASS"), max_service = strlen("SERVICE");
+        size_t max_name = strlen("MACHINE"), max_class = strlen("CLASS"),
+               max_service = strlen("SERVICE"), max_os = strlen("OS"), max_version_id = strlen("VERSION");
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        _cleanup_free_ MachineInfo *machines = NULL;
+        _cleanup_free_ char *prefix = NULL;
+        MachineInfo *machines = NULL;
         const char *name, *class, *service, *object;
         size_t n_machines = 0, n_allocated = 0, j;
         sd_bus *bus = userdata;
@@ -148,15 +236,25 @@ static int list_machines(int argc, char *argv[], void *userdata) {
         r = sd_bus_message_enter_container(reply, 'a', "(ssso)");
         if (r < 0)
                 return bus_log_parse_error(r);
-
         while ((r = sd_bus_message_read(reply, "(ssso)", &name, &class, &service, &object)) > 0) {
                 size_t l;
 
                 if (name[0] == '.' && !arg_all)
                         continue;
 
-                if (!GREEDY_REALLOC(machines, n_allocated, n_machines + 1))
-                        return log_oom();
+                if (!GREEDY_REALLOC(machines, n_allocated, n_machines + 1)) {
+                        r = log_oom();
+                        goto out;
+                }
+
+                machines[n_machines].os = NULL;
+                machines[n_machines].version_id = NULL;
+                r = get_os_release_property(bus, name,
+                                "ID\0" "VERSION_ID\0",
+                                &machines[n_machines].os,
+                                &machines[n_machines].version_id);
+                if (r < 0)
+                        goto out;
 
                 machines[n_machines].name = name;
                 machines[n_machines].class = class;
@@ -174,33 +272,72 @@ static int list_machines(int argc, char *argv[], void *userdata) {
                 if (l > max_service)
                         max_service = l;
 
+                l = machines[n_machines].os ? strlen(machines[n_machines].os) : 1;
+                if (l > max_os)
+                        max_os = l;
+
+                l = machines[n_machines].version_id ? strlen(machines[n_machines].version_id) : 1;
+                if (l > max_version_id)
+                        max_version_id = l;
+
                 n_machines++;
         }
-        if (r < 0)
-                return bus_log_parse_error(r);
+        if (r < 0) {
+                r = bus_log_parse_error(r);
+                goto out;
+        }
 
         r = sd_bus_message_exit_container(reply);
-        if (r < 0)
-                return bus_log_parse_error(r);
+        if (r < 0) {
+                r = bus_log_parse_error(r);
+                goto out;
+        }
 
         qsort_safe(machines, n_machines, sizeof(MachineInfo), compare_machine_info);
 
-        if (arg_legend)
-                printf("%-*s %-*s %-*s\n",
+        /* Allocate for prefix max characters for all fields + spaces between them + strlen(",\n") */
+        r = asprintf(&prefix, "%-*s",
+                        (int) (max_name +
+                        max_class +
+                        max_service +
+                        max_os +
+                        max_version_id + 5 + strlen(",\n")),
+                        ",\n");
+        if (r < 0) {
+                r = log_oom();
+                goto out;
+        }
+
+        if (arg_legend && n_machines > 0)
+                printf("%-*s %-*s %-*s %-*s %-*s %s\n",
                        (int) max_name, "MACHINE",
                        (int) max_class, "CLASS",
-                       (int) max_service, "SERVICE");
+                       (int) max_service, "SERVICE",
+                       (int) max_os, "OS",
+                       (int) max_version_id, "VERSION",
+                       "ADDRESSES");
 
-        for (j = 0; j < n_machines; j++)
-                printf("%-*s %-*s %-*s\n",
+        for (j = 0; j < n_machines; j++) {
+                printf("%-*s %-*s %-*s %-*s %-*s ",
                        (int) max_name, machines[j].name,
                        (int) max_class, machines[j].class,
-                       (int) max_service, machines[j].service);
+                       (int) max_service, strdash_if_empty(machines[j].service),
+                       (int) max_os, strdash_if_empty(machines[j].os),
+                       (int) max_version_id, strdash_if_empty(machines[j].version_id));
 
-        if (arg_legend)
+                r = print_addresses(bus, machines[j].name, 0, "", prefix, arg_addrs);
+                if (r == -ENOSYS)
+                        printf("-\n");
+        }
+
+        if (arg_legend && n_machines > 0)
                 printf("\n%zu machines listed.\n", n_machines);
+        else
+                printf("No machines.\n");
 
-        return 0;
+out:
+        clean_machine_info(machines, n_machines);
+        return r;
 }
 
 typedef struct ImageInfo {
@@ -305,7 +442,7 @@ static int list_images(int argc, char *argv[], void *userdata) {
 
         qsort_safe(images, n_images, sizeof(ImageInfo), compare_image_info);
 
-        if (arg_legend)
+        if (arg_legend && n_images > 0)
                 printf("%-*s %-*s %-3s %-*s %-*s %-*s\n",
                        (int) max_name, "NAME",
                        (int) max_type, "TYPE",
@@ -326,8 +463,10 @@ static int list_images(int argc, char *argv[], void *userdata) {
                        (int) max_mtime, strna(format_timestamp(mtime_buf, sizeof(mtime_buf), images[j].mtime)));
         }
 
-        if (arg_legend)
+        if (arg_legend && n_images > 0)
                 printf("\n%zu images listed.\n", n_images);
+        else
+                printf("No images.\n");
 
         return 0;
 }
@@ -390,8 +529,10 @@ static int show_unit_cgroup(sd_bus *bus, const char *unit, pid_t leader) {
         return 0;
 }
 
-static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *prefix, const char *prefix2) {
+static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *prefix, const char *prefix2, int n_addr) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_free_ char *addresses = NULL;
+        bool truncate = false;
         int r;
 
         assert(bus);
@@ -410,6 +551,11 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
         if (r < 0)
                 return r;
 
+        addresses = strdup(prefix);
+        if (!addresses)
+                return log_oom();
+        prefix = "";
+
         r = sd_bus_message_enter_container(reply, 'a', "(iay)");
         if (r < 0)
                 return bus_log_parse_error(r);
@@ -418,7 +564,7 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
                 int family;
                 const void *a;
                 size_t sz;
-                char buffer[MAX(INET6_ADDRSTRLEN, INET_ADDRSTRLEN)];
+                char buf_ifi[DECIMAL_STR_MAX(int) + 2], buffer[MAX(INET6_ADDRSTRLEN, INET_ADDRSTRLEN)];
 
                 r = sd_bus_message_read(reply, "i", &family);
                 if (r < 0)
@@ -428,11 +574,16 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
                 if (r < 0)
                         return bus_log_parse_error(r);
 
-                fputs(prefix, stdout);
-                fputs(inet_ntop(family, a, buffer, sizeof(buffer)), stdout);
-                if (family == AF_INET6 && ifi > 0)
-                        printf("%%%i", ifi);
-                fputc('\n', stdout);
+                if (n_addr != 0) {
+                        if (family == AF_INET6 && ifi > 0)
+                                xsprintf(buf_ifi, "%%%i", ifi);
+                        else
+                                strcpy(buf_ifi, "");
+
+                        if(!strextend(&addresses, prefix, inet_ntop(family, a, buffer, sizeof(buffer)), buf_ifi, NULL))
+                                return log_oom();
+                } else
+                        truncate = true;
 
                 r = sd_bus_message_exit_container(reply);
                 if (r < 0)
@@ -440,6 +591,9 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
 
                 if (prefix != prefix2)
                         prefix = prefix2;
+
+                if (n_addr > 0)
+                        n_addr -= 1;
         }
         if (r < 0)
                 return bus_log_parse_error(r);
@@ -448,44 +602,21 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
         if (r < 0)
                 return bus_log_parse_error(r);
 
+        fprintf(stdout, "%s%s\n", addresses, truncate ? "..." : "");
         return 0;
 }
 
 static int print_os_release(sd_bus *bus, const char *name, const char *prefix) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        const char *k, *v, *pretty = NULL;
+        _cleanup_free_ char *pretty = NULL;
         int r;
 
         assert(bus);
         assert(name);
         assert(prefix);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.machine1",
-                               "/org/freedesktop/machine1",
-                               "org.freedesktop.machine1.Manager",
-                               "GetMachineOSRelease",
-                               NULL,
-                               &reply,
-                               "s", name);
+        r = get_os_release_property(bus, name, "PRETTY_NAME\0", &pretty, NULL);
         if (r < 0)
                 return r;
-
-        r = sd_bus_message_enter_container(reply, 'a', "{ss}");
-        if (r < 0)
-                return bus_log_parse_error(r);
-
-        while ((r = sd_bus_message_read(reply, "{ss}", &k, &v)) > 0) {
-                if (streq(k, "PRETTY_NAME"))
-                        pretty = v;
-
-        }
-        if (r < 0)
-                return bus_log_parse_error(r);
-
-        r = sd_bus_message_exit_container(reply);
-        if (r < 0)
-                return bus_log_parse_error(r);
 
         if (pretty)
                 printf("%s%s\n", prefix, pretty);
@@ -591,7 +722,8 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
 
         print_addresses(bus, i->name, ifi,
                        "\t Address: ",
-                       "\t          ");
+                       "\n\t          ",
+                       ALL_IP_ADDRESSES);
 
         print_os_release(bus, i->name, "\t      OS: ");
 
@@ -1194,10 +1326,12 @@ static int process_forward(sd_event *event, PTYForward **forward, int master, PT
 
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGWINCH, SIGTERM, SIGINT, -1) >= 0);
 
-        if (streq(name, ".host"))
-                log_info("Connected to the local host. Press ^] three times within 1s to exit session.");
-        else
-                log_info("Connected to machine %s. Press ^] three times within 1s to exit session.", name);
+        if (!arg_quiet) {
+                if (streq(name, ".host"))
+                        log_info("Connected to the local host. Press ^] three times within 1s to exit session.");
+                else
+                        log_info("Connected to machine %s. Press ^] three times within 1s to exit session.", name);
+        }
 
         sd_event_add_signal(event, NULL, SIGINT, NULL, NULL);
         sd_event_add_signal(event, NULL, SIGTERM, NULL, NULL);
@@ -1221,15 +1355,52 @@ static int process_forward(sd_event *event, PTYForward **forward, int master, PT
         if (last_char != '\n')
                 fputc('\n', stdout);
 
-        if (machine_died)
-                log_info("Machine %s terminated.", name);
-        else if (streq(name, ".host"))
-                log_info("Connection to the local host terminated.");
-        else
-                log_info("Connection to machine %s terminated.", name);
+        if (!arg_quiet) {
+                if (machine_died)
+                        log_info("Machine %s terminated.", name);
+                else if (streq(name, ".host"))
+                        log_info("Connection to the local host terminated.");
+                else
+                        log_info("Connection to machine %s terminated.", name);
+        }
 
         sd_event_get_exit_code(event, &ret);
         return ret;
+}
+
+static int parse_machine_uid(const char *spec, const char **machine, char **uid) {
+        /*
+         * Whatever is specified in the spec takes priority over global arguments.
+         */
+        char *_uid = NULL;
+        const char *_machine = NULL;
+
+        if (spec) {
+                const char *at;
+
+                at = strchr(spec, '@');
+                if (at) {
+                        if (at == spec)
+                                /* Do the same as ssh and refuse "@host". */
+                                return -EINVAL;
+
+                        _machine = at + 1;
+                        _uid = strndup(spec, at - spec);
+                        if (!_uid)
+                                return -ENOMEM;
+                } else
+                        _machine = spec;
+        };
+
+        if (arg_uid && !_uid) {
+                _uid = strdup(arg_uid);
+                if (!_uid)
+                        return -ENOMEM;
+        }
+
+        *uid = _uid;
+        *machine = isempty(_machine) ? ".host" : _machine;
+        return 0;
 }
 
 static int login_machine(int argc, char *argv[], void *userdata) {
@@ -1307,7 +1478,8 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         int master = -1, r;
         sd_bus *bus = userdata;
-        const char *pty, *match, *machine, *path, *uid = NULL;
+        const char *pty, *match, *machine, *path;
+        _cleanup_free_ char *uid = NULL;
 
         assert(bus);
 
@@ -1338,22 +1510,9 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to attach bus to event loop: %m");
 
-        machine = argc < 2 || isempty(argv[1]) ? NULL : argv[1];
-
-        if (arg_uid)
-                uid = arg_uid;
-        else if (machine) {
-                const char *at;
-
-                at = strchr(machine, '@');
-                if (at) {
-                        uid = strndupa(machine, at - machine);
-                        machine = at + 1;
-                }
-        }
-
-        if (isempty(machine))
-                machine = ".host";
+        r = parse_machine_uid(argc >= 2 ? argv[1] : NULL, &machine, &uid);
+        if (r < 0)
+                return log_error_errno(r, "Failed to parse machine specification: %m");
 
         match = strjoina("type='signal',"
                          "sender='org.freedesktop.machine1',"
@@ -2314,7 +2473,7 @@ static int list_transfers(int argc, char *argv[], void *userdata) {
 
         qsort_safe(transfers, n_transfers, sizeof(TransferInfo), compare_transfer_info);
 
-        if (arg_legend)
+        if (arg_legend && n_transfers > 0)
                 printf("%-*s %-*s %-*s %-*s %-*s\n",
                        (int) MAX(2U, DECIMAL_STR_WIDTH(max_id)), "ID",
                        (int) 7, "PERCENT",
@@ -2330,8 +2489,10 @@ static int list_transfers(int argc, char *argv[], void *userdata) {
                        (int) max_local, transfers[j].local,
                        (int) max_remote, transfers[j].remote);
 
-        if (arg_legend)
+        if (arg_legend && n_transfers > 0)
                 printf("\n%zu transfers listed.\n", n_transfers);
+        else
+                printf("No transfers.\n");
 
         return 0;
 }
@@ -2468,6 +2629,7 @@ static int clean_images(int argc, char *argv[], void *userdata) {
 }
 
 static int help(int argc, char *argv[], void *userdata) {
+        pager_open(arg_no_pager, false);
 
         printf("%s [OPTIONS...] {COMMAND} ...\n\n"
                "Send control commands to or query the virtual machine and container\n"
@@ -2491,6 +2653,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --read-only              Create read-only bind mount\n"
                "     --mkdir                  Create directory before bind mounting, if missing\n"
                "  -n --lines=INTEGER          Number of journal entries to show\n"
+               "     --max-addresses=INTEGER  Number of internet addresses to show at most\n"
                "  -o --output=STRING          Change journal output mode (short,\n"
                "                              short-monotonic, verbose, export, json,\n"
                "                              json-pretty, json-sse, cat)\n"
@@ -2555,6 +2718,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_FORCE,
                 ARG_FORMAT,
                 ARG_UID,
+                ARG_NUMBER_IPS,
         };
 
         static const struct option options[] = {
@@ -2581,6 +2745,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "format",          required_argument, NULL, ARG_FORMAT          },
                 { "uid",             required_argument, NULL, ARG_UID             },
                 { "setenv",          required_argument, NULL, 'E'                 },
+                { "max-addresses",   required_argument, NULL, ARG_NUMBER_IPS      },
                 {}
         };
 
@@ -2769,6 +2934,18 @@ static int parse_argv(int argc, char *argv[]) {
                         r = strv_extend(&arg_setenv, optarg);
                         if (r < 0)
                                 return log_oom();
+                        break;
+
+                case ARG_NUMBER_IPS:
+                        if (streq(optarg, "all"))
+                                arg_addrs = ALL_IP_ADDRESSES;
+                        else if (safe_atoi(optarg, &arg_addrs) < 0) {
+                                log_error("Invalid number of IPs");
+                                return -EINVAL;
+                        } else if (arg_addrs < 0) {
+                                log_error("Number of IPs cannot be negative");
+                                return -EINVAL;
+                        }
                         break;
 
                 case '?':

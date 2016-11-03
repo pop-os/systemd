@@ -21,8 +21,8 @@
 
 typedef struct Mount Mount;
 
-#include "execute.h"
 #include "kill.h"
+#include "dynamic-user.h"
 
 typedef enum MountExecCommand {
         MOUNT_EXEC_MOUNT,
@@ -71,6 +71,9 @@ struct Mount {
 
         bool sloppy_options;
 
+        bool lazy_unmount;
+        bool force_unmount;
+
         MountResult result;
         MountResult reload_result;
 
@@ -85,6 +88,7 @@ struct Mount {
         CGroupContext cgroup_context;
 
         ExecRuntime *exec_runtime;
+        DynamicCreds dynamic_creds;
 
         MountState state, deserialized_state;
 

@@ -442,7 +442,7 @@ fail:
 static void busname_enter_dead(BusName *n, BusNameResult f) {
         assert(n);
 
-        if (f != BUSNAME_SUCCESS)
+        if (n->result == BUSNAME_SUCCESS)
                 n->result = f;
 
         busname_set_state(n, n->result != BUSNAME_SUCCESS ? BUSNAME_FAILED : BUSNAME_DEAD);
@@ -454,7 +454,7 @@ static void busname_enter_signal(BusName *n, BusNameState state, BusNameResult f
 
         assert(n);
 
-        if (f != BUSNAME_SUCCESS)
+        if (n->result == BUSNAME_SUCCESS)
                 n->result = f;
 
         kill_context_init(&kill_context);
@@ -638,6 +638,10 @@ static int busname_start(Unit *u) {
                 busname_enter_dead(n, BUSNAME_FAILURE_START_LIMIT_HIT);
                 return r;
         }
+
+        r = unit_acquire_invocation_id(u);
+        if (r < 0)
+                return r;
 
         n->result = BUSNAME_SUCCESS;
         busname_enter_making(n);
@@ -868,7 +872,7 @@ static void busname_sigchld_event(Unit *u, pid_t pid, int code, int status) {
 
         n->control_pid = 0;
 
-        if (is_clean_exit(code, status, NULL))
+        if (is_clean_exit(code, status, EXIT_CLEAN_COMMAND, NULL))
                 f = BUSNAME_SUCCESS;
         else if (code == CLD_EXITED)
                 f = BUSNAME_FAILURE_EXIT_CODE;
@@ -882,7 +886,7 @@ static void busname_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         log_unit_full(u, f == BUSNAME_SUCCESS ? LOG_DEBUG : LOG_NOTICE, 0,
                       "Control process exited, code=%s status=%i", sigchld_code_to_string(code), status);
 
-        if (f != BUSNAME_SUCCESS)
+        if (n->result == BUSNAME_SUCCESS)
                 n->result = f;
 
         switch (n->state) {

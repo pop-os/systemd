@@ -15,6 +15,7 @@ HOWTO:
             --with-kbd-setfont=
             --with-tty-gid=
             --with-ntp-servers=
+            --with-support-url=
 
         2) Try it out. Play around (as an ordinary user) with
         '/usr/lib/systemd/systemd --test --system' for a test run
@@ -39,6 +40,16 @@ NTP POOL:
         Again, if you ship your software or device with the default
         NTP servers, then you will get served wrong time, and will
         rely on services that might not be supported for long.
+
+PAM:
+        The default PAM config shipped by systemd is really bare bones.
+        It does not include many modules your distro might want to enable
+        to provide a more seamless experience. For example, limits set in
+        /etc/security/limits.conf will not be read unless you load pam_limits.
+        Make sure you add modules your distro expects from user services.
+
+        Pass --with-pamconfdir=no to ./configure to avoid installing this file
+        and instead install your own.
 
 CONTRIBUTING UPSTREAM:
 

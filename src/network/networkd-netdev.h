@@ -56,6 +56,7 @@ typedef enum NetDevKind {
         NETDEV_KIND_TUN,
         NETDEV_KIND_TAP,
         NETDEV_KIND_VRF,
+        NETDEV_KIND_VCAN,
         _NETDEV_KIND_MAX,
         _NETDEV_KIND_INVALID = -1
 } NetDevKind;
@@ -180,8 +181,8 @@ const struct ConfigPerfItem* network_netdev_gperf_lookup(const char *key, unsign
 
 #define log_netdev_full(netdev, level, error, ...)                      \
         ({                                                              \
-                NetDev *_n = (netdev);                                  \
-                _n ? log_object_internal(level, error, __FILE__, __LINE__, __func__, "INTERFACE=", _n->ifname, ##__VA_ARGS__) : \
+                const NetDev *_n = (netdev);                            \
+                _n ? log_object_internal(level, error, __FILE__, __LINE__, __func__, "INTERFACE=", _n->ifname, NULL, NULL, ##__VA_ARGS__) : \
                         log_internal(level, error, __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
         })
 

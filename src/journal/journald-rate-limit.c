@@ -190,7 +190,7 @@ static unsigned burst_modulate(unsigned burst, uint64_t available) {
         if (k <= 20)
                 return burst;
 
-        burst = (burst * (k-20)) / 4;
+        burst = (burst * (k-16)) / 4;
 
         /*
          * Example:
@@ -261,7 +261,7 @@ int journal_rate_limit_test(JournalRateLimit *r, const char *id, int priority, u
                 return 1 + s;
         }
 
-        if (p->num <= burst) {
+        if (p->num < burst) {
                 p->num++;
                 return 1;
         }

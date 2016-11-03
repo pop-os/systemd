@@ -20,6 +20,7 @@
 ***/
 
 typedef struct Socket Socket;
+typedef struct SocketPeer SocketPeer;
 
 #include "mount.h"
 #include "service.h"
@@ -79,9 +80,12 @@ struct Socket {
 
         LIST_HEAD(SocketPort, ports);
 
+        Set *peers_by_address;
+
         unsigned n_accepted;
         unsigned n_connections;
         unsigned max_connections;
+        unsigned max_connections_per_source;
 
         unsigned backlog;
         unsigned keep_alive_cnt;
@@ -94,7 +98,9 @@ struct Socket {
         ExecContext exec_context;
         KillContext kill_context;
         CGroupContext cgroup_context;
+
         ExecRuntime *exec_runtime;
+        DynamicCreds dynamic_creds;
 
         /* For Accept=no sockets refers to the one service we'll
         activate. For Accept=yes sockets is either NULL, or filled
@@ -161,6 +167,12 @@ struct Socket {
 
         RateLimit trigger_limit;
 };
+
+SocketPeer *socket_peer_ref(SocketPeer *p);
+SocketPeer *socket_peer_unref(SocketPeer *p);
+int socket_acquire_peer(Socket *s, int fd, SocketPeer **p);
+
+DEFINE_TRIVIAL_CLEANUP_FUNC(SocketPeer*, socket_peer_unref);
 
 /* Called from the service code when collecting fds */
 int socket_collect_fds(Socket *s, int **fds);

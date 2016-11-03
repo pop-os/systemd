@@ -6,7 +6,8 @@
 #  (at your option) any later version.
 
 [Unit]
-Description=Root Slice
+Description=Current graphical user session
 Documentation=man:systemd.special(7)
-DefaultDependencies=no
-Before=slices.target
+Requires=basic.target
+RefuseManualStart=yes
+StopWhenUnneeded=yes

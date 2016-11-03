@@ -121,6 +121,7 @@ enum nss_status _nss_resolve_gethostbyname4_r(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         struct gaih_addrtuple *r_tuple, *r_tuple_first = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        enum nss_status ret = NSS_STATUS_UNAVAIL;
         const char *canonical = NULL;
         size_t l, ms, idx;
         char *r_name;
@@ -167,6 +168,10 @@ enum nss_status _nss_resolve_gethostbyname4_r(
                 if (bus_error_shall_fallback(&error))
                         goto fallback;
 
+                /* Treat all other error conditions as NOTFOUND, and fail. This includes DNSSEC errors and
+                   suchlike. (We don't use UNAVAIL in this case so that the nsswitch.conf configuration can distuingish
+                   such executed but negative replies from complete failure to talk to resolved. */
+                ret = NSS_STATUS_NOTFOUND;
                 goto fail;
         }
 
@@ -281,7 +286,7 @@ fallback:
 fail:
         *errnop = -r;
         *h_errnop = NO_RECOVERY;
-        return NSS_STATUS_UNAVAIL;
+        return ret;
 }
 
 enum nss_status _nss_resolve_gethostbyname3_r(
@@ -297,6 +302,7 @@ enum nss_status _nss_resolve_gethostbyname3_r(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char *r_name, *r_aliases, *r_addr, *r_addr_list;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        enum nss_status ret = NSS_STATUS_UNAVAIL;
         size_t l, idx, ms, alen;
         const char *canonical;
         int c, r, i = 0;
@@ -350,6 +356,7 @@ enum nss_status _nss_resolve_gethostbyname3_r(
                 if (bus_error_shall_fallback(&error))
                         goto fallback;
 
+                ret = NSS_STATUS_NOTFOUND;
                 goto fail;
         }
 
@@ -476,7 +483,7 @@ fallback:
 fail:
         *errnop = -r;
         *h_errnop = NO_RECOVERY;
-        return NSS_STATUS_UNAVAIL;
+        return ret;
 }
 
 enum nss_status _nss_resolve_gethostbyaddr2_r(
@@ -491,6 +498,7 @@ enum nss_status _nss_resolve_gethostbyaddr2_r(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char *r_name, *r_aliases, *r_addr, *r_addr_list;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        enum nss_status ret = NSS_STATUS_UNAVAIL;
         unsigned c = 0, i = 0;
         size_t ms = 0, idx;
         const char *n;
@@ -557,10 +565,8 @@ enum nss_status _nss_resolve_gethostbyaddr2_r(
                 if (bus_error_shall_fallback(&error))
                         goto fallback;
 
-
-                *errnop = -r;
-                *h_errnop = NO_RECOVERY;
-                return NSS_STATUS_UNAVAIL;
+                ret = NSS_STATUS_NOTFOUND;
+                goto fail;
         }
 
         r = sd_bus_message_enter_container(reply, 'a', "(is)");
@@ -668,7 +674,7 @@ fallback:
 fail:
         *errnop = -r;
         *h_errnop = NO_RECOVERY;
-        return NSS_STATUS_UNAVAIL;
+        return ret;
 }
 
 NSS_GETHOSTBYNAME_FALLBACKS(resolve);

@@ -256,12 +256,8 @@ static int link_enable_ipv6(Link *link) {
         r = write_string_file(p, one_zero(disabled), WRITE_STRING_FILE_VERIFY_ON_FAILURE);
         if (r < 0)
                 log_link_warning_errno(link, r, "Cannot %s IPv6 for interface %s: %m", disabled ? "disable" : "enable", link->ifname);
-        else {
-                if (disabled)
-                        log_link_info(link, "IPv6 disabled for interface: %m");
-                else
-                        log_link_info(link, "IPv6 enabled for interface: %m");
-        }
+        else
+                log_link_info(link, "IPv6 %sd for interface: %m", enable_disable(!disabled));
 
         return 0;
 }
@@ -518,12 +514,11 @@ static void link_free(Link *link) {
         sd_lldp_unref(link->lldp);
         free(link->lldp_file);
 
+        ndisc_flush(link);
+
         sd_ipv4ll_unref(link->ipv4ll);
         sd_dhcp6_client_unref(link->dhcp6_client);
         sd_ndisc_unref(link->ndisc);
-
-        set_free_free(link->ndisc_rdnss);
-        set_free_free(link->ndisc_dnssl);
 
         if (link->manager)
                 hashmap_remove(link->manager->links, INT_TO_PTR(link->ifindex));
@@ -946,6 +941,19 @@ static int link_push_ntp_to_dhcp_server(Link *link, sd_dhcp_server *s) {
         return sd_dhcp_server_set_ntp(s, addresses, n_addresses);
 }
 
+static int link_set_bridge_fdb(Link *link) {
+        FdbEntry *fdb_entry;
+        int r;
+
+        LIST_FOREACH(static_fdb_entries, fdb_entry, link->network->static_fdb_entries) {
+                r = fdb_entry_configure(link, fdb_entry);
+                if (r < 0)
+                        return log_link_error_errno(link, r, "Failed to add MAC entry to static MAC table: %m");
+        }
+
+        return 0;
+}
+
 static int link_enter_set_addresses(Link *link) {
         Address *ad;
         int r;
@@ -953,6 +961,10 @@ static int link_enter_set_addresses(Link *link) {
         assert(link);
         assert(link->network);
         assert(link->state != _LINK_STATE_INVALID);
+
+        r = link_set_bridge_fdb(link);
+        if (r < 0)
+                return r;
 
         link_set_state(link, LINK_STATE_SETTING_ADDRESSES);
 
@@ -1119,21 +1131,6 @@ static int link_set_bridge_vlan(Link *link) {
         r = br_vlan_configure(link, link->network->pvid, link->network->br_vid_bitmap, link->network->br_untagged_bitmap);
         if (r < 0)
                 log_link_error_errno(link, r, "Failed to assign VLANs to bridge port: %m");
-
-        return r;
-}
-
-static int link_set_bridge_fdb(Link *link) {
-        FdbEntry *fdb_entry;
-        int r = 0;
-
-        LIST_FOREACH(static_fdb_entries, fdb_entry, link->network->static_fdb_entries) {
-                r = fdb_entry_configure(link, fdb_entry);
-                if (r < 0) {
-                        log_link_error_errno(link, r, "Failed to add MAC entry to static MAC table: %m");
-                        break;
-                }
-        }
 
         return r;
 }
@@ -1310,6 +1307,65 @@ int link_set_mtu(Link *link, uint32_t mtu) {
                 return log_link_error_errno(link, r, "Could not append MTU: %m");
 
         r = sd_netlink_call_async(link->manager->rtnl, req, set_mtu_handler, link, 0, NULL);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not send rtnetlink message: %m");
+
+        link_ref(link);
+
+        return 0;
+}
+
+static int set_flags_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userdata) {
+        _cleanup_link_unref_ Link *link = userdata;
+        int r;
+
+        assert(m);
+        assert(link);
+        assert(link->ifname);
+
+        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
+                return 1;
+
+        r = sd_netlink_message_get_errno(m);
+        if (r < 0)
+                log_link_warning_errno(link, r, "Could not set link flags: %m");
+
+        return 1;
+}
+
+static int link_set_flags(Link *link) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
+        unsigned ifi_change = 0;
+        unsigned ifi_flags = 0;
+        int r;
+
+        assert(link);
+        assert(link->manager);
+        assert(link->manager->rtnl);
+
+        if (link->flags & IFF_LOOPBACK)
+                return 0;
+
+        if (!link->network)
+                return 0;
+
+        if (link->network->arp < 0)
+                return 0;
+
+        r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_SETLINK, link->ifindex);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not allocate RTM_SETLINK message: %m");
+
+        if (link->network->arp >= 0) {
+                ifi_change |= IFF_NOARP;
+                ifi_flags |= link->network->arp ? 0 : IFF_NOARP;
+        }
+
+        r = sd_rtnl_message_link_set_flags(req, ifi_flags, ifi_change);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not set link flags: %m");
+
+        r = sd_netlink_call_async(link->manager->rtnl, req, set_flags_handler, link, 0, NULL);
         if (r < 0)
                 return log_link_error_errno(link, r, "Could not send rtnetlink message: %m");
 
@@ -1732,6 +1788,31 @@ static int link_down(Link *link) {
         return 0;
 }
 
+static int link_up_can(Link *link) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
+        int r;
+
+        assert(link);
+
+        log_link_debug(link, "Bringing CAN link up");
+
+        r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_SETLINK, link->ifindex);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not allocate RTM_SETLINK message: %m");
+
+        r = sd_rtnl_message_link_set_flags(req, IFF_UP, IFF_UP);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not set link flags: %m");
+
+        r = sd_netlink_call_async(link->manager->rtnl, req, link_up_handler, link, 0, NULL);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not send rtnetlink message: %m");
+
+        link_ref(link);
+
+        return 0;
+}
+
 static int link_handle_bound_to_list(Link *link) {
         Link *l;
         Iterator i;
@@ -2005,7 +2086,8 @@ static int link_joined(Link *link) {
                         log_link_error_errno(link, r, "Could not set bridge message: %m");
         }
 
-        if (link->network->bridge || streq_ptr("bridge", link->kind)) {
+        if (link->network->use_br_vlan &&
+            (link->network->bridge || streq_ptr("bridge", link->kind))) {
                 r = link_set_bridge_vlan(link);
                 if (r < 0)
                         log_link_error_errno(link, r, "Could not set bridge vlan: %m");
@@ -2318,6 +2400,37 @@ static int link_drop_foreign_config(Link *link) {
         return 0;
 }
 
+static int link_drop_config(Link *link) {
+        Address *address;
+        Route *route;
+        Iterator i;
+        int r;
+
+        SET_FOREACH(address, link->addresses, i) {
+                /* we consider IPv6LL addresses to be managed by the kernel */
+                if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1)
+                        continue;
+
+                r = address_remove(address, link, link_address_remove_handler);
+                if (r < 0)
+                        return r;
+        }
+
+        SET_FOREACH(route, link->routes, i) {
+                /* do not touch routes managed by the kernel */
+                if (route->protocol == RTPROT_KERNEL)
+                        continue;
+
+                r = route_remove(route, link, link_route_remove_handler);
+                if (r < 0)
+                        return r;
+        }
+
+        ndisc_flush(link);
+
+        return 0;
+}
+
 static int link_update_lldp(Link *link) {
         int r;
 
@@ -2346,6 +2459,19 @@ static int link_configure(Link *link) {
         assert(link->network);
         assert(link->state == LINK_STATE_PENDING);
 
+        if (streq_ptr(link->kind, "vcan")) {
+
+                if (!(link->flags & IFF_UP)) {
+                        r = link_up_can(link);
+                        if (r < 0) {
+                                link_enter_failed(link);
+                                return r;
+                        }
+                }
+
+                return 0;
+        }
+
         /* Drop foreign config, but ignore loopback or critical devices.
          * We do not want to remove loopback address or addresses used for root NFS. */
         if (!(link->flags & IFF_LOOPBACK) && !(link->network->dhcp_critical)) {
@@ -2353,10 +2479,6 @@ static int link_configure(Link *link) {
                 if (r < 0)
                         return r;
         }
-
-        r = link_set_bridge_fdb(link);
-        if (r < 0)
-                return r;
 
         r = link_set_proxy_arp(link);
         if (r < 0)
@@ -2383,6 +2505,10 @@ static int link_configure(Link *link) {
                 return r;
 
         r = link_set_ipv6_hop_limit(link);
+        if (r < 0)
+                return r;
+
+        r = link_set_flags(link);
         if (r < 0)
                 return r;
 
@@ -2716,17 +2842,17 @@ network_file_fail:
         if (dhcp4_address) {
                 r = in_addr_from_string(AF_INET, dhcp4_address, &address);
                 if (r < 0) {
-                        log_link_debug_errno(link, r, "Falied to parse DHCPv4 address %s: %m", dhcp4_address);
+                        log_link_debug_errno(link, r, "Failed to parse DHCPv4 address %s: %m", dhcp4_address);
                         goto dhcp4_address_fail;
                 }
 
                 r = sd_dhcp_client_new(&link->dhcp_client);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "Falied to create DHCPv4 client: %m");
+                        return log_link_error_errno(link, r, "Failed to create DHCPv4 client: %m");
 
                 r = sd_dhcp_client_set_request_address(link->dhcp_client, &address.in);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "Falied to set initial DHCPv4 address %s: %m", dhcp4_address);
+                        return log_link_error_errno(link, r, "Failed to set initial DHCPv4 address %s: %m", dhcp4_address);
         }
 
 dhcp4_address_fail:
@@ -2734,17 +2860,17 @@ dhcp4_address_fail:
         if (ipv4ll_address) {
                 r = in_addr_from_string(AF_INET, ipv4ll_address, &address);
                 if (r < 0) {
-                        log_link_debug_errno(link, r, "Falied to parse IPv4LL address %s: %m", ipv4ll_address);
+                        log_link_debug_errno(link, r, "Failed to parse IPv4LL address %s: %m", ipv4ll_address);
                         goto ipv4ll_address_fail;
                 }
 
                 r = sd_ipv4ll_new(&link->ipv4ll);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "Falied to create IPv4LL client: %m");
+                        return log_link_error_errno(link, r, "Failed to create IPv4LL client: %m");
 
                 r = sd_ipv4ll_set_address(link->ipv4ll, &address.in);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "Falied to set initial IPv4LL address %s: %m", ipv4ll_address);
+                        return log_link_error_errno(link, r, "Failed to set initial IPv4LL address %s: %m", ipv4ll_address);
         }
 
 ipv4ll_address_fail:
@@ -2862,6 +2988,17 @@ static int link_carrier_lost(Link *link) {
         if (r < 0) {
                 link_enter_failed(link);
                 return r;
+        }
+
+        r = link_drop_config(link);
+        if (r < 0)
+                return r;
+
+        if (!IN_SET(link->state, LINK_STATE_UNMANAGED, LINK_STATE_PENDING)) {
+                log_link_debug(link, "State is %s, dropping config", link_state_to_string(link->state));
+                r = link_drop_foreign_config(link);
+                if (r < 0)
+                        return r;
         }
 
         r = link_handle_bound_by_list(link);

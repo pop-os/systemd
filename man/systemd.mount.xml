@@ -160,7 +160,7 @@
     for details about the conversion.</para>
 
     <para>The NFS mount option <option>bg</option> for NFS background mounts
-    as documented in <citerefentry><refentrytitle>nfs</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    as documented in <citerefentry project='man-pages'><refentrytitle>nfs</refentrytitle><manvolnum>5</manvolnum></citerefentry>
     is not supported in <filename>/etc/fstab</filename> entries. The systemd mount option <option>nofail</option>
     provides similar functionality and should be used instead.</para>
 
@@ -352,6 +352,30 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>LazyUnmount=</varname></term>
+
+        <listitem><para>Takes a boolean argument. If true, detach the
+        filesystem from the filesystem hierarchy at time of the unmount
+        operation, and clean up all references to the filesystem as
+        soon as they are not busy anymore.
+        This corresponds with
+        <citerefentry project='man-pages'><refentrytitle>umount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
+        <parameter>-l</parameter> switch. Defaults to
+        off.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ForceUnmount=</varname></term>
+
+        <listitem><para>Takes a boolean argument. If true, force an
+        unmount (in case of an unreachable NFS system).
+        This corresponds with
+        <citerefentry project='man-pages'><refentrytitle>umount</refentrytitle><manvolnum>8</manvolnum></citerefentry>'s
+        <parameter>-f</parameter> switch. Defaults to
+        off.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>DirectoryMode=</varname></term>
         <listitem><para>Directories of mount points (and any parent
         directories) are automatically created if needed. This option
@@ -373,7 +397,7 @@
         Takes a unit-less value in seconds, or a time span value such
         as "5min 20s". Pass 0 to disable the timeout logic. The
         default value is set from the manager configuration file's
-        <varname>DefaultTimeoutStart=</varname>
+        <varname>DefaultTimeoutStartSec=</varname>
         variable.</para></listitem>
       </varlistentry>
     </variablelist>

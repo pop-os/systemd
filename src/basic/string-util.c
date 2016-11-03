@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "alloc-util.h"
 #include "gunicode.h"
@@ -323,6 +324,14 @@ char ascii_tolower(char x) {
         return x;
 }
 
+char ascii_toupper(char x) {
+
+        if (x >= 'a' && x <= 'z')
+                return x - 'a' + 'A';
+
+        return x;
+}
+
 char *ascii_strlower(char *t) {
         char *p;
 
@@ -330,6 +339,17 @@ char *ascii_strlower(char *t) {
 
         for (p = t; *p; p++)
                 *p = ascii_tolower(*p);
+
+        return t;
+}
+
+char *ascii_strupper(char *t) {
+        char *p;
+
+        assert(t);
+
+        for (p = t; *p; p++)
+                *p = ascii_toupper(*p);
 
         return t;
 }
@@ -423,7 +443,7 @@ static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_le
         if (old_length <= 3 || old_length <= new_length)
                 return strndup(s, old_length);
 
-        r = new0(char, new_length+1);
+        r = new0(char, new_length+3);
         if (!r)
                 return NULL;
 
@@ -433,12 +453,12 @@ static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_le
                 x = new_length - 3;
 
         memcpy(r, s, x);
-        r[x] = '.';
-        r[x+1] = '.';
-        r[x+2] = '.';
+        r[x] = 0xe2; /* tri-dot ellipsis: … */
+        r[x+1] = 0x80;
+        r[x+2] = 0xa6;
         memcpy(r + x + 3,
-               s + old_length - (new_length - x - 3),
-               new_length - x - 3);
+               s + old_length - (new_length - x - 1),
+               new_length - x - 1);
 
         return r;
 }
@@ -590,8 +610,7 @@ char *strreplace(const char *text, const char *old_string, const char *new_strin
         return r;
 
 oom:
-        free(r);
-        return NULL;
+        return mfree(r);
 }
 
 char *strip_tab_ansi(char **ibuf, size_t *_isz) {
@@ -662,8 +681,7 @@ char *strip_tab_ansi(char **ibuf, size_t *_isz) {
 
         if (ferror(f)) {
                 fclose(f);
-                free(obuf);
-                return NULL;
+                return mfree(obuf);
         }
 
         fclose(f);
@@ -803,24 +821,19 @@ int free_and_strdup(char **p, const char *s) {
         return 1;
 }
 
-#pragma GCC push_options
-#pragma GCC optimize("O0")
+/*
+ * Pointer to memset is volatile so that compiler must de-reference
+ * the pointer and can't assume that it points to any function in
+ * particular (such as memset, which it then might further "optimize")
+ * This approach is inspired by openssl's crypto/mem_clr.c.
+ */
+typedef void *(*memset_t)(void *,int,size_t);
+
+static volatile memset_t memset_func = memset;
 
 void* memory_erase(void *p, size_t l) {
-        volatile uint8_t* x = (volatile uint8_t*) p;
-
-        /* This basically does what memset() does, but hopefully isn't
-         * optimized away by the compiler. One of those days, when
-         * glibc learns memset_s() we should replace this call by
-         * memset_s(), but until then this has to do. */
-
-        for (; l > 0; l--)
-                *(x++) = 'x';
-
-        return p;
+        return memset_func(p, 'x', l);
 }
-
-#pragma GCC pop_options
 
 char* string_erase(char *x) {
 
