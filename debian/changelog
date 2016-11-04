@@ -1,5 +1,6 @@
-systemd (232-1) UNRELEASED; urgency=medium
+systemd (232-1) unstable; urgency=medium
 
+  [ Martin Pitt ]
   * New upstream release 232:
     - Fix "systemctl start" when ReadWriteDirectories is a symlink
       (Closes: ##792187)
@@ -12,8 +13,14 @@ systemd (232-1) UNRELEASED; urgency=medium
     on-memory one.
   * Build sd-boot on arm64. gnu-efi is available on arm64 now.
     (Closes: #842617)
+  * Link test-seccomp against seccomp libs to fix FTBFS
+  * debian/rules: Remove nss-systemd (until we package it)
+  * Install new systemd-mount
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Thu, 03 Nov 2016 21:14:06 +0200
+  [ Michael Biebl ]
+  * Install new journal-upload.conf man pages in systemd-journal-remote
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 04 Nov 2016 07:18:10 +0200
 
 systemd (231-10) unstable; urgency=medium
 
