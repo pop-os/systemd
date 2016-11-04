@@ -42,7 +42,7 @@ can use the usual systemctl or journalctl commands, or any other Linux shell
 command to list or kill processes. For example, run "systemctl list-jobs" to
 see what's currently being run, or "systemctl" to find units which are not in
 the expected state (e. g. "failed" for boot or still "active" during shutdown),
-and then get more detailled information with "systemctl status -l foo.service"
+and then get more detailed information with "systemctl status -l foo.service"
 to get a service "foo"'s status and recent logging.
 
 Enable and use networkd
