@@ -1,3 +1,14 @@
+systemd (232-2) UNRELEASED; urgency=medium
+
+  * Drop RestrictAddressFamilies from service files.
+    RestrictAddressFamilies= is broken on 32bit architectures and causes
+    various services to fail with a timeout, including
+    systemd-udevd.service.
+    While this might actually be a libseccomp issue, remove this option for
+    now until a proper solution is found. (Closes: #843160)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 05 Nov 2016 17:30:34 +0100
+
 systemd (232-1) unstable; urgency=medium
 
   [ Martin Pitt ]
