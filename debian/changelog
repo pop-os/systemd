@@ -1,4 +1,4 @@
-systemd (232-2) UNRELEASED; urgency=medium
+systemd (232-2) unstable; urgency=medium
 
   * Drop RestrictAddressFamilies from service files.
     RestrictAddressFamilies= is broken on 32bit architectures and causes
@@ -7,7 +7,7 @@ systemd (232-2) UNRELEASED; urgency=medium
     While this might actually be a libseccomp issue, remove this option for
     now until a proper solution is found. (Closes: #843160)
 
- -- Michael Biebl <biebl@debian.org>  Sat, 05 Nov 2016 17:30:34 +0100
+ -- Michael Biebl <biebl@debian.org>  Sat, 05 Nov 2016 22:43:27 +0100
 
 systemd (232-1) unstable; urgency=medium
 
