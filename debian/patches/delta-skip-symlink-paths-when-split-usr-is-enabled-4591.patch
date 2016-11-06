@@ -1,0 +1,71 @@
+From: Felipe Sateler <fsateler@users.noreply.github.com>
+Date: Sun, 6 Nov 2016 11:16:42 -0300
+Subject: delta: skip symlink paths when split-usr is enabled (#4591)
+
+If systemd is built with --enable-split-usr, but the system is indeed a
+merged-usr system, then systemd-delta gets all confused and reports
+that all units and configuration files have been overridden.
+
+Skip any prefix paths that are symlinks in this case.
+
+Fixes: #4573
+---
+ src/delta/delta.c | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/src/delta/delta.c b/src/delta/delta.c
+index f32744d..ce2427f 100644
+--- a/src/delta/delta.c
++++ b/src/delta/delta.c
+@@ -355,6 +355,21 @@ static int enumerate_dir(Hashmap *top, Hashmap *bottom, Hashmap *drops, const ch
+         }
+ }
+ 
++static int should_skip_prefix(const char* p) {
++#ifdef HAVE_SPLIT_USR
++        int r;
++        _cleanup_free_ char *target = NULL;
++
++        r = chase_symlinks(p, NULL, &target);
++        if (r < 0)
++                return r;
++
++        return !streq(p, target) && nulstr_contains(prefixes, target);
++#else
++        return 0;
++#endif
++}
++
+ static int process_suffix(const char *suffix, const char *onlyprefix) {
+         const char *p;
+         char *f;
+@@ -382,6 +397,15 @@ static int process_suffix(const char *suffix, const char *onlyprefix) {
+ 
+         NULSTR_FOREACH(p, prefixes) {
+                 _cleanup_free_ char *t = NULL;
++                int skip;
++
++                skip = should_skip_prefix(p);
++                if (skip < 0) {
++                        r = skip;
++                        goto finish;
++                }
++                if (skip)
++                        continue;
+ 
+                 t = strjoin(p, "/", suffix, NULL);
+                 if (!t) {
+@@ -459,6 +483,13 @@ static int process_suffix_chop(const char *arg) {
+         /* Strip prefix from the suffix */
+         NULSTR_FOREACH(p, prefixes) {
+                 const char *suffix;
++                int skip;
++
++                skip = should_skip_prefix(p);
++                if (skip < 0)
++                        return skip;
++                if (skip)
++                        continue;
+ 
+                 suffix = startswith(arg, p);
+                 if (suffix) {
