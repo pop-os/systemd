@@ -73,6 +73,7 @@ Depends: systemd-sysv,
   network-manager,
   busybox-static,
   apparmor,
+  pkg-config,
   python3
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
