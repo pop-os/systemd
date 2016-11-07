@@ -107,7 +107,8 @@ test_shutdown() {
 
 test_in_logind_session() {
     echo " * XDG_SESSION_ID=$XDG_SESSION_ID"
-    if grep 'systemd:.*session.*scope' /proc/self/cgroup; then
+    # cgroup v1: "1:name=systemd:/user.slice/..."; unified hierarchy: "0::/user.slice"
+    if grep -E '(name=systemd|^0:):.*session.*scope' /proc/self/cgroup; then
         echo " * process is in session cgroup"
     else
         echo "FAIL: process is not in session cgroup"
