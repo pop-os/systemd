@@ -25,3 +25,4 @@ debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Drop-RestrictAddressFamilies-from-service-files.patch
+debian/core-don-t-use-the-unified-hierarchy-for-the-systemd-cgro.patch
