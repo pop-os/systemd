@@ -1,3 +1,26 @@
+systemd (232-3) unstable; urgency=medium
+
+  [ Felipe Sateler ]
+  * Make systemd-delta less confused on merged-usr systems. (Closes: #843070)
+  * Fix wrong paths for /bin/mount when compiled on merged-usr system.
+    Then the build system finds /usr/bin/mount which won't exist on a
+    split-/usr system. Set the paths explicitly in debian/rules and drop
+    Use-different-default-paths-for-various-binaries.patch. (Closes: #843433)
+
+  [ Martin Pitt ]
+  * debian/tests/logind: Split out "pid in logind session" test
+  * debian/tests/logind: Adjust "in logind session" test for unified cgroup
+    hierarchy
+  * debian/tests/boot-and-services: Check common properties of CLI programs.
+    Verify that CLI programs have a sane behaviour and exit code when being
+    called with --help, --version, or an invalid option.
+  * nspawn: Fix exit code for --help and --version (Closes: #843544)
+  * core: Revert using the unified hierarchy for the systemd cgroup.
+    Too many things don't get along with it yet, like docker, LXC, or runc.
+    (Closes: #843509)
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 09 Nov 2016 09:34:45 +0100
+
 systemd (232-2) unstable; urgency=medium
 
   * Drop RestrictAddressFamilies from service files.
