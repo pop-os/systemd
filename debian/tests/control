@@ -20,6 +20,7 @@ Depends: systemd,
   locales,
   evemu-tools,
   python3,
+  pkg-config,
 Restrictions: needs-root, allow-stderr
 
 Tests: storage
@@ -29,6 +30,7 @@ Depends: systemd,
   locales,
   evemu-tools,
   python3,
+  pkg-config,
   cryptsetup-bin,
 Restrictions: needs-root, isolation-machine
 
@@ -40,6 +42,7 @@ Depends: systemd,
   locales,
   evemu-tools,
   python3,
+  pkg-config,
   cryptsetup-bin,
   systemd-sysv,
   dnsmasq-base
@@ -52,11 +55,11 @@ Depends: systemd,
   locales,
   evemu-tools,
   python3,
+  pkg-config,
   cryptsetup-bin,
   systemd-sysv,
   dnsmasq-base,
   build-essential,
-  pkg-config,
   libsystemd-dev,
 Restrictions: isolation-container
 
