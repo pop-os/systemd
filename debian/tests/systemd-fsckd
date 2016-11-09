@@ -229,6 +229,7 @@ def enable_plymouth(enable=True):
                 if line.startswith("GRUB_CMDLINE_LINUX_DEFAULT"):
                     print(line[:line.rfind('"')] + ' splash quiet"\n')
         else:
+            os.makedirs(os.path.dirname(TEST_AUTOPKGTEST_CONFIG_PATH), exist_ok=True)
             with open(TEST_AUTOPKGTEST_CONFIG_PATH, 'w') as f:
                 f.write('GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0 splash quiet"\n')
     elif not enable and plymouth_enabled:
