@@ -85,7 +85,20 @@ ifneq (, $(filter noudeb, $(DEB_BUILD_OPTIONS)))
 export DEB_BUILD_PROFILES += noudeb
 endif
 
+SPLIT_USR_PATHS = \
+	QUOTAON=/sbin/quotaon \
+	QUOTACHECK=/sbin/quotacheck \
+	SETCAP=/sbin/setcap \
+	KILL=/bin/kill \
+	KMOD=/bin/kmod \
+	KEXEC=/sbin/kexec \
+	SULOGIN=/sbin/sulogin \
+	MOUNT_PATH=/bin/mount \
+	UMOUNT_PATH=/bin/umount \
+	$(NULL)
+
 CONFFLAGS = \
+	$(SPLIT_USR_PATHS) \
 	--with-rootprefix= \
 	--with-rootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
 	--with-zshcompletiondir=/usr/share/zsh/vendor-completions \
