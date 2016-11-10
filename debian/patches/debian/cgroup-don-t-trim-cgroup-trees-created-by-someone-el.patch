@@ -14,7 +14,7 @@ Bug-Debian: https://bugs.debian.org/777601
  2 files changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
-index cede835..735f204 100644
+index 134e6e3..76c6d61 100644
 --- a/src/basic/cgroup-util.c
 +++ b/src/basic/cgroup-util.c
 @@ -2014,8 +2014,6 @@ int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path

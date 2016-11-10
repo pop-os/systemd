@@ -1,6 +1,7 @@
 From: Martin Pitt <martin.pitt@ubuntu.com>
-Date: Wed, 9 Nov 2016 08:43:57 +0100
+Date: Thu, 10 Nov 2016 05:33:13 +0100
 Subject: core: don't use the unified hierarchy for the systemd cgroup yet
+ (#4628)
 
 Too many things don't get along with the unified hierarchy yet:
 
@@ -16,10 +17,10 @@ software can opt into the unified hierarchy with
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
-index 735f204..76c6d61 100644
+index cede835..134e6e3 100644
 --- a/src/basic/cgroup-util.c
 +++ b/src/basic/cgroup-util.c
-@@ -2421,10 +2421,10 @@ bool cg_is_unified_systemd_controller_wanted(void) {
+@@ -2423,10 +2423,10 @@ bool cg_is_unified_systemd_controller_wanted(void) {
  
                  r = get_proc_cmdline_key("systemd.legacy_systemd_cgroup_controller=", &value);
                  if (r < 0)
