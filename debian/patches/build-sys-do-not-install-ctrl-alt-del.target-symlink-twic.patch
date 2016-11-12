@@ -1,0 +1,31 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sat, 12 Nov 2016 10:05:24 -0500
+Subject: build-sys: do not install ctrl-alt-del.target symlink twice
+
+It was a harmless but pointless duplication. Fixes #4655.
+
+Note: in general we try to install as little as possible in
+/etc/systemd/{system,user}. We only install .wants links there for units which
+are "user configurable", i.e. which have an [Install] section. Most our units
+and aliases are not user configurable, do not have an [Install] section, and
+must be symlinked statically during installation. A few units do have an
+[Install] section, and are enabled through symlinks in /etc/ during
+installation using GENERAL_ALIASES. It *would* be possible to not create those
+symlinks, and instead require 'systemctl preset' to be invoked after
+installation, but GENERAL_ALIASES works well enough.
+---
+ Makefile.am | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/Makefile.am b/Makefile.am
+index f2d8bf5..7f2d731 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -633,7 +633,6 @@ EXTRA_DIST += \
+ 	units/halt-local.service.in
+ 
+ GENERAL_ALIASES += \
+-	$(systemunitdir)/reboot.target $(pkgsysconfdir)/system/ctrl-alt-del.target \
+ 	$(systemunitdir)/machines.target $(pkgsysconfdir)/system/multi-user.target.wants/machines.target
+ 
+ dist_doc_DATA = \
