@@ -405,8 +405,6 @@ ExecStart=/bin/sleep 500
         self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
 
 
-@unittest.skipUnless('+SECCOMP' in subprocess.getoutput('systemctl --version'),
-                     'seccomp support not enabled')
 class SeccompTest(unittest.TestCase):
     '''Check seccomp syscall filtering'''
 
