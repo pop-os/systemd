@@ -25,7 +25,7 @@ You can disable these stable names and go back to the kernel-provided ones
     /etc/default/grub's GRUB_CMDLINE_LINUX_DEFAULT, then run "update-grub").
 
   - Disable the default *.link rules with
-    "ln -s /dev/null /etc/udev/rules.d/80-net-setup-link.rules"
+    "ln -s /dev/null /etc/systemd/network/99-default.link"
     and rebuild the initrd with "update-initramfs -u".
 
 See this page for more information:

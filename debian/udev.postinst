@@ -56,12 +56,14 @@ upgrade_fixes() {
   if dpkg --compare-versions "$2" lt-nl "220-7~" &&
      [ ! -e /etc/udev/rules.d/70-persistent-net.rules ] &&
      [ ! -e /etc/udev/rules.d/80-net-setup-link.rules ] &&
+     [ ! -e /etc/systemd/network/99-default.link ] &&
+     [ ! -L /etc/systemd/network/99-default.link ] &&
      ! grep -q net.ifnames /proc/cmdline && ! chrooted; then
-    mkdir -p /etc/udev/rules.d
-    cat <<EOF > /etc/udev/rules.d/80-net-setup-link.rules
+    mkdir -p /etc/systemd/network
+    cat <<EOF > /etc/systemd/network/99-default.link
 # This machine is most likely a virtualized guest, where the old persistent
 # network interface mechanism (75-persistent-net-generator.rules) did not work.
-# This file disables /lib/udev/rules.d/80-net-setup-link.rules to avoid
+# This file disables /lib/systemd/network/99-default.link to avoid
 # changing network interface names on upgrade. Please read
 # /usr/share/doc/udev/README.Debian.gz about how to migrate to the currently
 # supported mechanism.
