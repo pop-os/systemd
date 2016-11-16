@@ -23,10 +23,10 @@ for t in test/TEST*; do
     echo "========== `basename $t` =========="
     rm -rf /var/tmp/systemd-test.*
     if ! make -C $t clean setup run; then
-        for j in /var/tmp/systemd-test.*/journal/*/system.journal; do
+        for j in /var/tmp/systemd-test.*/journal/*; do
             [ -e "$j" ] || continue
             echo "---- $j ----"
-            journalctl --file=$j
+            journalctl --directory=$j
         done
         exit 1
     fi
