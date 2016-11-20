@@ -1,4 +1,4 @@
-systemd (232-4) UNRELEASED; urgency=medium
+systemd (232-4) unstable; urgency=medium
 
   [ Martin Pitt ]
   * debian/tests/unit-config: Query pkg-config for system unit dir.
@@ -60,7 +60,7 @@ systemd (232-4) UNRELEASED; urgency=medium
     See this discussion for more details:
     https://bugs.debian.org/823856 (Closes: #844775)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 20 Nov 2016 03:29:48 +0100
+ -- Michael Biebl <biebl@debian.org>  Sun, 20 Nov 2016 03:34:58 +0100
 
 systemd (232-3) unstable; urgency=medium
 
