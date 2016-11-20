@@ -1,3 +1,12 @@
+systemd (232-5) unstable; urgency=medium
+
+  * Add missing liblz4-tool build dependency.
+    Fixes test-compress failure during package build.
+  * systemd: Ship /var/lib.
+    This will soon contain a polkit pkla file.
+
+ -- Martin Pitt <mpitt@debian.org>  Sun, 20 Nov 2016 12:22:52 +0100
+
 systemd (232-4) unstable; urgency=medium
 
   [ Martin Pitt ]
