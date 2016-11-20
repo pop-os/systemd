@@ -1,3 +1,67 @@
+systemd (232-4) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/unit-config: Query pkg-config for system unit dir.
+    This fixes confusion on merged-/usr systems where both /usr/lib/systemd and
+    /lib/systemd exist. It's actually useful to verify that systemd.pc says the
+    truth.
+  * debian/tests/upstream: Fix clobbering of merged-/usr symlinks
+  * debian/tests/systemd-fsckd: Create /etc/default/grub.d if necessary
+  * debian/rules: Drop check for linking to libs in /usr.
+    This was just an approximation, as booting without an initrd could still be
+    broken by library updates (e. g. #828991). With merged /usr now being the
+    default this is now completely moot.
+  * Move kernel-install initrd script to a later prefix.
+    60- does not leave much room for scripts that want to run before initrd
+    building (which is usually one of the latest things to do), so bump to 85.
+    Thanks to Sjoerd Simons for the suggestion.
+  * Disable 99-default.link instead of the udev rule for disabling persistent interface names.
+    Disabling 80-net-setup-link.rules will also cause ID_NET_DRIVER to not be set
+    any more, which breaks 80-container-ve.network and matching on driver name in
+    general. So disable the actual default link policy instead.
+    Still keep testing for 80-net-setup-link.rules in the upgrade fix and
+    73-usb-net-by-mac.rules to keep the desired behaviour on systems which already
+    disabled ifnames via that udev rule.
+    See https://lists.freedesktop.org/archives/systemd-devel/2016-November/037805.html
+  * debian/tests/boot-and-services: Always run seccomp test
+    seccomp is now available on all architectures on which Debian and Ubuntu run
+    tests, so stop making this test silently skip if seccomp is disabled.
+  * Bump libseccomp build dependency as per configure.ac.
+  * Replace "Drop RestrictAddressFamilies=" patch with sed call.
+    With that it will also apply to upstream builds/CI, and it is structurally
+    simpler.
+  * Rebuild against libseccomp with fixed shlibs. (Closes: #844497)
+
+  [ Michael Biebl ]
+  * fstab-generator: add x-systemd.mount-timeout option. (Closes: #843989)
+  * build-sys: do not install ctrl-alt-del.target symlink twice.
+    (Closes: #844039)
+  * Enable lz4 support.
+    While the compression rate is not as good as XZ, it is much faster, so a
+    better default for the journal and especially systemd-coredump.
+    (Closes: #832010)
+
+  [ Felipe Sateler ]
+  * Enable machines.target by default. (Closes: #806787)
+
+  [ Evgeny Vereshchagin ]
+  * debian/tests/upstream: Print all journal files.
+    We don't print all journal files. This is misleading a bit:
+    https://github.com/systemd/systemd/pull/4331#issuecomment-252830790
+    https://github.com/systemd/systemd/pull/4395#discussion_r87948836
+
+  [ Luca Boccassi ]
+  * Use mount --move in initramfs-tools udev script.
+    Due to recent changes in busybox and initramfs-tools the mount
+    utility is no longer the one from busybox but from util-linux.
+    The latter does not support mount -o move.
+    The former supports both -o move and --move, so use it instead to be
+    compatible with both.
+    See this discussion for more details:
+    https://bugs.debian.org/823856 (Closes: #844775)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Sun, 20 Nov 2016 03:29:48 +0100
+
 systemd (232-3) unstable; urgency=medium
 
   [ Felipe Sateler ]
