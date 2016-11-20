@@ -57,6 +57,7 @@ usr/lib/systemd/
 usr/lib/tmpfiles.d/
 usr/lib/kernel
 usr/share/locale/
+var/lib
 ../../extra/init-functions.d lib/lsb/
 ../../extra/tmpfiles.d/*.conf usr/lib/tmpfiles.d/
 ../../extra/systemd-sysv-install lib/systemd/
