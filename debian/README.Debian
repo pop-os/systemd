@@ -45,6 +45,17 @@ the expected state (e. g. "failed" for boot or still "active" during shutdown),
 and then get more detailed information with "systemctl status -l foo.service"
 to get a service "foo"'s status and recent logging.
 
+In situations where the debug shell is not available, you can generate a
+/shutdown-log.txt file instead:
+1. Boot with these kernel command line options:
+    systemd.log_level=debug systemd.log_target=kmsg log_buf_len=1M
+2. Save the following script as /lib/systemd/system-shutdown/debug.sh and make it executable:
+    #!/bin/sh
+    mount -o remount,rw /
+    dmesg > /shutdown-log.txt
+    mount -o remount,ro /
+3. Reboot
+
 Enable and use networkd
 =======================
 networkd is a small and lean service to configure network interfaces, designed
