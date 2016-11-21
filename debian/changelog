@@ -1,3 +1,19 @@
+systemd (232-6) unstable; urgency=medium
+
+  * Add policykit-1 test dependency for networkd-test.py.
+  * debian/rules: Don't destroy unit symlinks with sed -i.
+    Commit 21711e74 introduced a "sed -i" to remove RestrictAddressFamilies= from
+    units. This also caused unit symlinks to get turned into real files, causing
+    D-BBus activated services like timedated to fail ("two units with the same
+    D-Bus name").
+  * Fall back to "mount -o move" in udev initramfs script
+    klibc's mount does not understand --move, so for the time being we need to
+    support both variants. (Closes: #845161)
+  * debian/README.Debian: Document how to generate a shutdown log.
+    Thanks 積丹尼 Dan Jacobson. (Closes: #826297)
+
+ -- Martin Pitt <mpitt@debian.org>  Mon, 21 Nov 2016 10:39:57 +0100
+
 systemd (232-5) unstable; urgency=medium
 
   * Add missing liblz4-tool build dependency.
