@@ -275,7 +275,7 @@ override_dh_install:
 	rm -f debian/install/*/usr/share/man/man8/nss-systemd.8
 	# FIXME: RestrictAddressFamilies= is broken on several architectures,
 	# see https://github.com/systemd/systemd/issues/4575 (#843160)
-	sed -i '/RestrictAddressFamilies/d' debian/install/*/lib/systemd/system/*.service
+	sed --follow-symlinks -i '/RestrictAddressFamilies/d' debian/install/*/lib/systemd/system/*.service
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
