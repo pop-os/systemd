@@ -2,10 +2,10 @@ systemd (232-6) unstable; urgency=medium
 
   * Add policykit-1 test dependency for networkd-test.py.
   * debian/rules: Don't destroy unit symlinks with sed -i.
-    Commit 21711e74 introduced a "sed -i" to remove RestrictAddressFamilies= from
-    units. This also caused unit symlinks to get turned into real files, causing
-    D-BBus activated services like timedated to fail ("two units with the same
-    D-Bus name").
+    Commit 21711e74 introduced a "sed -i" to remove RestrictAddressFamilies=
+    from units. This also caused unit symlinks to get turned into real files,
+    causing D-Bus activated services like timedated to fail ("two units with
+    the same D-Bus name").
   * Fall back to "mount -o move" in udev initramfs script
     klibc's mount does not understand --move, so for the time being we need to
     support both variants. (Closes: #845161)
@@ -40,17 +40,18 @@ systemd (232-4) unstable; urgency=medium
     60- does not leave much room for scripts that want to run before initrd
     building (which is usually one of the latest things to do), so bump to 85.
     Thanks to Sjoerd Simons for the suggestion.
-  * Disable 99-default.link instead of the udev rule for disabling persistent interface names.
-    Disabling 80-net-setup-link.rules will also cause ID_NET_DRIVER to not be set
-    any more, which breaks 80-container-ve.network and matching on driver name in
-    general. So disable the actual default link policy instead.
-    Still keep testing for 80-net-setup-link.rules in the upgrade fix and
-    73-usb-net-by-mac.rules to keep the desired behaviour on systems which already
-    disabled ifnames via that udev rule.
+  * Disable 99-default.link instead of the udev rule for disabling persistent
+    interface names.
+    Disabling 80-net-setup-link.rules will also cause ID_NET_DRIVER to not be
+    set any more, which breaks 80-container-ve.network and matching on driver
+    name in general. So disable the actual default link policy instead. Still
+    keep testing for 80-net-setup-link.rules in the upgrade fix and
+    73-usb-net-by-mac.rules to keep the desired behaviour on systems which
+    already disabled ifnames via that udev rule.
     See https://lists.freedesktop.org/archives/systemd-devel/2016-November/037805.html
   * debian/tests/boot-and-services: Always run seccomp test
-    seccomp is now available on all architectures on which Debian and Ubuntu run
-    tests, so stop making this test silently skip if seccomp is disabled.
+    seccomp is now available on all architectures on which Debian and Ubuntu
+    run tests, so stop making this test silently skip if seccomp is disabled.
   * Bump libseccomp build dependency as per configure.ac.
   * Replace "Drop RestrictAddressFamilies=" patch with sed call.
     With that it will also apply to upstream builds/CI, and it is structurally
