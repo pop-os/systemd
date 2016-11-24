@@ -4,6 +4,7 @@ nspawn-fix-exit-code-for-help-and-version-4609.patch
 core-don-t-use-the-unified-hierarchy-for-the-systemd-cgro.patch
 fstab-generator-add-x-systemd.mount-timeout-4603.patch
 build-sys-do-not-install-ctrl-alt-del.target-symlink-twic.patch
+networkd-allow-networkd-to-start-in-early-boot.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

@@ -1,0 +1,30 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Tue, 22 Nov 2016 08:41:51 +0100
+Subject: networkd: allow networkd to start in early boot
+
+With the previous improvements, networkd.service's "After=dbus.service" can now
+be dropped. That ordering effectively forced networkd.service to run in late
+boot only (dbus.service was rejected to run in early boot in
+https://bugs.freedesktop.org/show_bug.cgi?id=98254).
+
+Fixes #4504
+---
+ units/systemd-networkd.service.m4.in | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/units/systemd-networkd.service.m4.in b/units/systemd-networkd.service.m4.in
+index a968d8b..d1cf3fc 100644
+--- a/units/systemd-networkd.service.m4.in
++++ b/units/systemd-networkd.service.m4.in
+@@ -10,9 +10,8 @@ Description=Network Service
+ Documentation=man:systemd-networkd.service(8)
+ ConditionCapability=CAP_NET_ADMIN
+ DefaultDependencies=no
+-# dbus.service can be dropped once on kdbus, and systemd-udevd.service can be
+-# dropped once tuntap is moved to netlink
+-After=systemd-udevd.service dbus.service network-pre.target systemd-sysusers.service systemd-sysctl.service
++# systemd-udevd.service can be dropped once tuntap is moved to netlink
++After=systemd-udevd.service network-pre.target systemd-sysusers.service systemd-sysctl.service
+ Before=network.target multi-user.target shutdown.target
+ Conflicts=shutdown.target
+ Wants=network.target
