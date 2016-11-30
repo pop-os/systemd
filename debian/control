@@ -260,6 +260,23 @@ Description: nss module to resolve names via systemd-resolved
  .
  Installing this package automatically adds resolve to /etc/nsswitch.conf.
 
+Package: libnss-systemd
+Architecture: linux-any
+Multi-Arch: same
+Section: admin
+Priority: extra
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Description: nss module providing dynamic user and group name resolution
+ nss-systemd is a plug-in module for the GNU Name Service Switch (NSS)
+ functionality of the GNU C Library (glibc), providing UNIX user and group name
+ resolution for dynamic users and groups allocated through the DynamicUser=
+ option in systemd unit files. See systemd.exec(5) for details on this
+ option.
+ .
+ Installing this package automatically adds the module to /etc/nsswitch.conf.
+
 Package: libsystemd0
 Architecture: linux-any
 Multi-Arch: same
