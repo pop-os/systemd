@@ -1,0 +1,25 @@
+From: Martin Pitt <martin.pitt@ubuntu.com>
+Date: Thu, 24 Nov 2016 10:38:01 +0100
+Subject: hwdb/parse_hwdb.py: open files with UTF-8 mode
+
+pyparsing uses the system locale by default, which in the case of 'C' (in lots
+of build environment) will fail with a UnicodeDecodeError. Explicitly open it
+with UTF-8 encoding to guard against this.
+---
+ hwdb/parse_hwdb.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/hwdb/parse_hwdb.py b/hwdb/parse_hwdb.py
+index 5856d12..d94d8d1 100755
+--- a/hwdb/parse_hwdb.py
++++ b/hwdb/parse_hwdb.py
+@@ -133,7 +133,8 @@ def convert_properties(group):
+ def parse(fname):
+     grammar = hwdb_grammar()
+     try:
+-        parsed = grammar.parseFile(fname)
++        with open(fname, 'r', encoding='UTF-8') as f:
++            parsed = grammar.parseFile(f)
+     except ParseBaseException as e:
+         error('Cannot parse {}: {}', fname, e)
+         return []

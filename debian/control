@@ -50,7 +50,8 @@ Build-Depends: debhelper (>= 9.20160114),
                linux-base <!nocheck>,
                acl <!nocheck>,
                python3:native,
-               python3-lxml:native
+               python3-lxml:native,
+               python3-pyparsing <!nocheck>,
 
 Package: systemd
 Architecture: linux-any
