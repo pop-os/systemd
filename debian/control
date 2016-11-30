@@ -209,7 +209,6 @@ Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         systemd (= ${binary:Version}),
 Breaks: systemd (<< 222-1)
 Replaces: systemd (<< 222-1)
 Description: nss module providing fallback resolution for the current hostname
