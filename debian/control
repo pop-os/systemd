@@ -209,6 +209,7 @@ Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         systemd (= ${binary:Version}),
 Breaks: systemd (<< 222-1)
 Replaces: systemd (<< 222-1)
 Description: nss module providing fallback resolution for the current hostname
@@ -232,6 +233,7 @@ Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         systemd-container (= ${binary:Version}),
 Breaks: systemd (<< 222-1)
 Replaces: systemd (<< 222-1)
 Description: nss module to resolve hostnames for local container instances
@@ -250,7 +252,7 @@ Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         systemd,
+         systemd (= ${binary:Version}),
 Breaks: systemd (<< 227-3)
 Replaces: systemd (<< 227-3)
 Description: nss module to resolve names via systemd-resolved
@@ -268,6 +270,7 @@ Priority: extra
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         systemd (= ${binary:Version}),
 Description: nss module providing dynamic user and group name resolution
  nss-systemd is a plug-in module for the GNU Name Service Switch (NSS)
  functionality of the GNU C Library (glibc), providing UNIX user and group name
