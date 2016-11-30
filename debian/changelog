@@ -1,3 +1,27 @@
+systemd (232-7) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Mark liblz4-tool build dependency as <!nocheck>
+  * udev: Try mount -n -o move first
+    initramfs-tools is not actually using util-linux mount (yet), so making
+    mount -n --move the first alternative would trigger an error message if
+    users have built their initramfs without busybox support.
+
+  [ Alexander Kurtz ]
+  * debian/extra/kernel-install.d/85-initrd.install: Remove an unnecessary
+    variable. (Closes: #845977)
+
+  [ Martin Pitt ]
+  * Drop systemd-networkd's "After=dbus.service" ordering, so that it can
+    start during early boot (for cloud-init.service). It will auto-connect to
+    D-Bus once it becomes available later, and transient (from DHCP) hostname
+    and timezone setting do not currently work anyway. (LP: #1636912)
+  * Run hwdb/parse_hwdb.py during package build.
+  * Package libnss-systemd
+  * Make libnss-* depend on the same systemd package version.
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 30 Nov 2016 14:38:36 +0100
+
 systemd (232-6) unstable; urgency=medium
 
   * Add policykit-1 test dependency for networkd-test.py.
