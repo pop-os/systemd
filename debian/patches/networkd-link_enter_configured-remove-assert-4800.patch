@@ -1,0 +1,45 @@
+From: Susant Sahani <ssahani@users.noreply.github.com>
+Date: Mon, 5 Dec 2016 20:01:48 +0530
+Subject: networkd: link_enter_configured remove assert (#4800)
+
+When we are in link_enter_configured we assume that the
+link->state should be LINK_STATE_SETTING_ROUTES but in some
+situation it's LINK_STATlE_SETTING_ADDRESSES.
+
+Just ignore the wrong state.
+
+Also since the return value not used any where
+make link_enter_configured return type void.
+
+Fixes: #4746
+---
+ src/network/networkd-link.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index aefe733..4dfbe0b 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -686,18 +686,18 @@ static Address* link_find_dhcp_server_address(Link *link) {
+         return NULL;
+ }
+ 
+-static int link_enter_configured(Link *link) {
++static void link_enter_configured(Link *link) {
+         assert(link);
+         assert(link->network);
+-        assert(link->state == LINK_STATE_SETTING_ROUTES);
++
++        if (link->state != LINK_STATE_SETTING_ROUTES)
++                return;
+ 
+         log_link_info(link, "Configured");
+ 
+         link_set_state(link, LINK_STATE_CONFIGURED);
+ 
+         link_dirty(link);
+-
+-        return 0;
+ }
+ 
+ void link_check_ready(Link *link) {

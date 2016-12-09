@@ -7,6 +7,7 @@ build-sys-do-not-install-ctrl-alt-del.target-symlink-twic.patch
 networkd-allow-networkd-to-start-in-early-boot.patch
 parse_hwdb-fix-to-work-with-pyparsing-2.1.10.patch
 hwdb-parse_hwdb.py-open-files-with-UTF-8-mode.patch
+networkd-link_enter_configured-remove-assert-4800.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
