@@ -108,6 +108,7 @@ CONFFLAGS = \
 	--with-kbd-loadkeys=/bin/loadkeys \
 	--with-kbd-setfont=/bin/setfont \
 	--with-telinit=/lib/sysvinit/telinit \
+	--with-dbuspolicydir=/etc/dbus-1/system.d/
 	--with-support-url=$(SUPPORT_URL) \
 	--without-kill-user-processes \
 	--with-pamconfdir=no \
