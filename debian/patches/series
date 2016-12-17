@@ -10,6 +10,7 @@ hwdb-parse_hwdb.py-open-files-with-UTF-8-mode.patch
 networkd-link_enter_configured-remove-assert-4800.patch
 doc-clarify-NoNewPrivileges-4562.patch
 core-rework-logic-to-determine-when-we-decide-to-add-auto.patch
+rules-add-persistent-links-for-nbd-devices-4785.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
