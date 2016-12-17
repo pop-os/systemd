@@ -1,4 +1,4 @@
-systemd (232-8) UNRELEASED; urgency=medium
+systemd (232-8) unstable; urgency=medium
 
   [ Martin Pitt ]
   * Drop systemd dependency from libnss-myhostname again.
@@ -30,7 +30,7 @@ systemd (232-8) UNRELEASED; urgency=medium
     remote-fs.target. (Closes: #818978)
   * rules: Add persistent links for nbd devices. (Closes: #837999)
 
- -- Martin Pitt <martin.pitt@ubuntu.com>  Sat, 17 Dec 2016 01:52:21 +0100
+ -- Michael Biebl <biebl@debian.org>  Sat, 17 Dec 2016 01:54:18 +0100
 
 systemd (232-7) unstable; urgency=medium
 
