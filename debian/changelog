@@ -1,3 +1,37 @@
+systemd (232-8) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
+  * Drop systemd dependency from libnss-myhostname again.
+    This NSS module is completely independent from systemd, unlike the other
+    three.
+  * Install 71-seat.rules into the initrd.
+    This helps plymouth to detect applicable devices. (Closes: #756109)
+  * networkd: Fix crash when setting routes.
+  * resolved: Drop removal of resolvconf entry on stop.
+    This leads to timeouts on shutdown via the resolvconf hooks and does not
+    actually help much -- /etc/resolv.conf would then just be empty instead of
+    having a nonexisting 127.0.0.53 nameserver, so manually stopping resolved
+    in a running system is broken either way. (LP: #1648068)
+  * Keep RestrictAddressFamilies on amd64.
+    This option and libseccomp currently work on amd64 at least, so let's make
+    sure it does not break there as well, and benefit from the additional
+    protection at least on this architecture.
+  * Explicitly set D-Bus policy dir.
+    This is about to change upstream in
+    https://github.com/systemd/systemd/pull/4892, but as explained in commit
+    2edb1e16fb12f4 we need to keep the policies in /etc/ until stretch+1.
+
+  [ Michael Biebl ]
+  * doc: Clarify NoNewPrivileges in systemd.exec(5). (Closes: #756604)
+  * core: Rework logic to determine when we decide to add automatic deps for
+    mounts.  This adds a concept of "extrinsic" mounts. If mounts are
+    extrinsic we consider them managed by something else and do not add
+    automatic ordering against umount.target, local-fs.target,
+    remote-fs.target. (Closes: #818978)
+  * rules: Add persistent links for nbd devices. (Closes: #837999)
+
+ -- Martin Pitt <martin.pitt@ubuntu.com>  Sat, 17 Dec 2016 01:52:21 +0100
+
 systemd (232-7) unstable; urgency=medium
 
   [ Michael Biebl ]
