@@ -1,0 +1,32 @@
+From: Kees Cook <kees@outflux.net>
+Date: Thu, 3 Nov 2016 18:26:59 -0600
+Subject: doc: clarify NoNewPrivileges (#4562)
+
+Setting no_new_privs does not stop UID changes, but rather blocks
+gaining privileges through execve(). Also fixes a small typo.
+---
+ man/systemd.exec.xml | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index 3c350df..ea889c9 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -1235,13 +1235,13 @@
+         <term><varname>NoNewPrivileges=</varname></term>
+ 
+         <listitem><para>Takes a boolean argument. If true, ensures that the service
+-        process and all its children can never gain new privileges. This option is more
+-        powerful than the respective secure bits flags (see above), as it also prohibits
+-        UID changes of any kind. This is the simplest and most effective way to ensure that
++        process and all its children can never gain new privileges through
++        <function>execve</function> (e.g. via setuid or setgid bits, or filesystem
++        capabilities). This is the simplest and most effective way to ensure that
+         a process and its children can never elevate privileges again. Defaults to false,
+         but in the user manager instance certain settings force
+         <varname>NoNewPrivileges=yes</varname>, ignoring the value of this setting.
+-        Those is the case when <varname>SystemCallFilter=</varname>,
++        This is the case when <varname>SystemCallFilter=</varname>,
+         <varname>SystemCallArchitectures=</varname>,
+         <varname>RestrictAddressFamilies=</varname>,
+         <varname>PrivateDevices=</varname>,
