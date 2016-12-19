@@ -63,7 +63,7 @@ License: Expat
 
 Files: src/journal/lookup3.c
        src/journal/lookup3.h
-Copyright: 2006 Bob Jenkins
+Copyright: none
 License: public-domain
  You can use this free for any purpose. It's in the public domain. It has no
  warranty.
