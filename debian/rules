@@ -303,11 +303,7 @@ endif
 	done
 
 	# ship test-udev, so that we have it for autopkgtests
-	if [ -e build-deb/.libs/test-udev ]; then \
-		install -D build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev; \
-	else \
-		install -D build-deb/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev; \
-	fi
+	install -D build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
