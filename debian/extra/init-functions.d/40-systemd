@@ -28,8 +28,6 @@ if [ -d /run/systemd/system ]; then
                 fi
                 ;;
         esac
-    else
-        export _SYSTEMCTL_SKIP_REDIRECT="true"
     fi
 fi
 
