@@ -1,3 +1,30 @@
+systemd (232-9) UNRELEASED; urgency=medium
+
+  * Use --disable-wheel-group configure switch.
+    Instead of mangling the tmpfiles via sed to remove the wheel group, use
+    the configure switch which was added upstream in v230.
+    See https://github.com/systemd/systemd/issues/2492
+  * Update debian/copyright.
+    Bob Jenkins released the lookup3.[ch] files as public domain which means
+    there is no copyright holder.
+  * Drop fallback for older reportbug versions when attaching files
+  * debian/extra/init-functions.d/40-systemd: Stop checking for init env var.
+    This env variable is no longer set when systemd executes a service so
+    it's pointless to check for it.
+  * debian/extra/init-functions.d/40-systemd: Stop setting _SYSTEMCTL_SKIP_REDIRECT=true.
+    It seems we don't actually need it to detect recursive loops (PPID is
+    sufficient) and by exporting it we leak _SYSTEMCTL_SKIP_REDIRECT into
+    the runtime environment of the service. (Closes: #802018)
+  * debian/extra/init-functions.d/40-systemd: Rename _SYSTEMCTL_SKIP_REDIRECT.
+    Rename _SYSTEMCTL_SKIP_REDIRECT to SYSTEMCTL_SKIP_REDIRECT to be more
+    consistent with other environment variables which are used internally by
+    systemd, like SYSTEMCTL_SKIP_SYSV.
+  * Various specifier resolution fixes.
+    Turn on specifier expansion for more unit file settings.
+    See https://github.com/systemd/systemd/pull/4835 (Closes: #781730)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 11 Jan 2017 22:58:02 +0100
+
 systemd (232-8) unstable; urgency=medium
 
   [ Martin Pitt ]
