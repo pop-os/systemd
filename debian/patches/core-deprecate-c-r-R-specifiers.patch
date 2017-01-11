@@ -1,0 +1,100 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 7 Dec 2016 18:58:09 +0100
+Subject: core: deprecate %c, %r, %R specifiers
+
+%c and %r rely on settings made in the unit files themselves and hence resolve
+to different values depending on whether they are used before or after Slice=.
+Let's simply deprecate them and drop them from the documentation, as that's not
+really possible to fix. Moreover they are actually redundant, as the same
+information may always be queried from /proc/self/cgroup and /proc/1/cgroup.
+
+(Accurately speaking, %R is actually not broken like this as it is constant.
+However, let's remove all cgroup-related specifiers at once, as it is also
+redundant, and doesn't really make much sense alone.)
+
+(cherry picked from commit 1b89b0c499cd4bf0ff389caab4ecaae6e75f9d4e)
+---
+ man/systemd.unit.xml   | 15 ---------------
+ src/core/unit-printf.c | 16 +++++++++++++---
+ 2 files changed, 13 insertions(+), 18 deletions(-)
+
+diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
+index a767b2e..dbb0dc7 100644
+--- a/man/systemd.unit.xml
++++ b/man/systemd.unit.xml
+@@ -1246,21 +1246,6 @@
+       <entry>This is either the unescaped instance name (if applicable) with <filename>/</filename> prepended (if applicable), or the unescaped prefix name prepended with <filename>/</filename>.</entry>
+           </row>
+           <row>
+-      <entry><literal>%c</literal></entry>
+-      <entry>Control group path of the unit</entry>
+-      <entry>This path does not include the <filename>/sys/fs/cgroup/systemd/</filename> prefix.</entry>
+-          </row>
+-          <row>
+-      <entry><literal>%r</literal></entry>
+-      <entry>Control group path of the slice the unit is placed in</entry>
+-      <entry>This usually maps to the parent control group path of <literal>%c</literal>.</entry>
+-          </row>
+-          <row>
+-      <entry><literal>%R</literal></entry>
+-      <entry>Root control group path below which slices and units are placed</entry>
+-      <entry>For system instances, this resolves to <filename>/</filename>, except in containers, where this maps to the container's root control group path.</entry>
+-          </row>
+-          <row>
+       <entry><literal>%t</literal></entry>
+       <entry>Runtime directory</entry>
+       <entry>This is either <filename>/run</filename> (for the system manager) or the path <literal>$XDG_RUNTIME_DIR</literal> resolves to (for user managers).</entry>
+diff --git a/src/core/unit-printf.c b/src/core/unit-printf.c
+index 677eed2..a38af21 100644
+--- a/src/core/unit-printf.c
++++ b/src/core/unit-printf.c
+@@ -78,12 +78,18 @@ static int specifier_filename(char specifier, void *data, void *userdata, char *
+                 return unit_name_to_path(u->id, ret);
+ }
+ 
++static void bad_specifier(Unit *u, char specifier) {
++        log_unit_warning(u, "Specifier '%%%c' used in unit configuration, which is deprecated. Please update your unit file, as it does not work as intended.", specifier);
++}
++
+ static int specifier_cgroup(char specifier, void *data, void *userdata, char **ret) {
+         Unit *u = userdata;
+         char *n;
+ 
+         assert(u);
+ 
++        bad_specifier(u, specifier);
++
+         if (u->cgroup_path)
+                 n = strdup(u->cgroup_path);
+         else
+@@ -101,6 +107,8 @@ static int specifier_cgroup_root(char specifier, void *data, void *userdata, cha
+ 
+         assert(u);
+ 
++        bad_specifier(u, specifier);
++
+         n = strdup(u->manager->cgroup_root);
+         if (!n)
+                 return -ENOMEM;
+@@ -115,6 +123,8 @@ static int specifier_cgroup_slice(char specifier, void *data, void *userdata, ch
+ 
+         assert(u);
+ 
++        bad_specifier(u, specifier);
++
+         if (UNIT_ISSET(u->slice)) {
+                 Unit *slice;
+ 
+@@ -238,9 +248,9 @@ int unit_full_printf(Unit *u, const char *format, char **ret) {
+          * (which are likely not suitable for unescaped inclusion in unit names):
+          *
+          * %f: the unescaped instance if set, otherwise the id unescaped as path
+-         * %c: cgroup path of unit
+-         * %r: where units in this slice are placed in the cgroup tree
+-         * %R: the root of this systemd's instance tree
++         * %c: cgroup path of unit (deprecated)
++         * %r: where units in this slice are placed in the cgroup tree (deprecated)
++         * %R: the root of this systemd's instance tree (deprecated)
+          * %t: the runtime directory to place sockets in (e.g. "/run" or $XDG_RUNTIME_DIR)
+          *
+          * %h: the homedir of the running user

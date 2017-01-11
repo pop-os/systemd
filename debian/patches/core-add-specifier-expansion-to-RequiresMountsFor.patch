@@ -1,0 +1,43 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 5 Dec 2016 19:40:13 +0100
+Subject: core: add specifier expansion to RequiresMountsFor=
+
+This might be useful for some people, for example to pull in mounts for paths
+including the machine ID or hostname.
+
+(cherry picked from commit 744bb5b1bea4d04363f7894e86701efdd75b8acb)
+---
+ src/core/load-fragment.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index fcb73a5..70f1607 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -2558,7 +2558,7 @@ int config_parse_unit_requires_mounts_for(
+ 
+         FOREACH_WORD_QUOTED(word, l, rvalue, state) {
+                 int r;
+-                _cleanup_free_ char *n;
++                _cleanup_free_ char *n, *resolved = NULL;
+ 
+                 n = strndup(word, l);
+                 if (!n)
+@@ -2569,9 +2569,15 @@ int config_parse_unit_requires_mounts_for(
+                         continue;
+                 }
+ 
+-                r = unit_require_mounts_for(u, n);
++                r = unit_full_printf(u, n, &resolved);
+                 if (r < 0) {
+-                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to add required mount for, ignoring: %s", rvalue);
++                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve unit name \"%s\", ignoring: %m", n);
++                        continue;
++                }
++
++                r = unit_require_mounts_for(u, resolved);
++                if (r < 0) {
++                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to add required mount \"%s\", ignoring: %m", resolved);
+                         continue;
+                 }
+         }

@@ -1,0 +1,232 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 5 Dec 2016 18:56:25 +0100
+Subject: core: move specifier expansion out of service.c/socket.c
+
+This monopolizes unit file specifier expansion in load-fragment.c, and removes
+it from socket.c + service.c. This way expansion becomes an operation done exclusively at time of loading unit files.
+
+Previously specifiers were resolved for all settings during loading of unit
+files with the exception of ExecStart= and friends which were resolved in
+socket.c and service.c. With this change the latter is also moved to the
+loading of unit files.
+
+Fixes: #3061
+(cherry picked from commit 5125e76243c56662d9d0d91385a01ae8cb271e71)
+---
+ src/core/load-fragment.c | 64 ++++++++++++++++++++++++++++--------------------
+ src/core/service.c       |  9 ++-----
+ src/core/socket.c        |  8 +-----
+ 3 files changed, 40 insertions(+), 41 deletions(-)
+
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index cbc8268..1e65e63 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -576,6 +576,7 @@ int config_parse_exec(
+                 void *userdata) {
+ 
+         ExecCommand **e = data;
++        Unit *u = userdata;
+         const char *p;
+         bool semicolon;
+         int r;
+@@ -601,7 +602,7 @@ int config_parse_exec(
+                 _cleanup_free_ ExecCommand *nce = NULL;
+                 _cleanup_strv_free_ char **n = NULL;
+                 size_t nlen = 0, nbufsize = 0;
+-                char *f;
++                const char *f;
+                 int i;
+ 
+                 semicolon = false;
+@@ -628,47 +629,47 @@ int config_parse_exec(
+                         f++;
+                 }
+ 
+-                if (isempty(f)) {
++                r = unit_full_printf(u, f, &path);
++                if (r < 0) {
++                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve unit specifiers on %s, ignoring: %m", f);
++                        return 0;
++                }
++
++                if (isempty(path)) {
+                         /* First word is either "-" or "@" with no command. */
+                         log_syntax(unit, LOG_ERR, filename, line, 0, "Empty path in command line, ignoring: \"%s\"", rvalue);
+                         return 0;
+                 }
+-                if (!string_is_safe(f)) {
++                if (!string_is_safe(path)) {
+                         log_syntax(unit, LOG_ERR, filename, line, 0, "Executable path contains special characters, ignoring: %s", rvalue);
+                         return 0;
+                 }
+-                if (!path_is_absolute(f)) {
++                if (!path_is_absolute(path)) {
+                         log_syntax(unit, LOG_ERR, filename, line, 0, "Executable path is not absolute, ignoring: %s", rvalue);
+                         return 0;
+                 }
+-                if (endswith(f, "/")) {
++                if (endswith(path, "/")) {
+                         log_syntax(unit, LOG_ERR, filename, line, 0, "Executable path specifies a directory, ignoring: %s", rvalue);
+                         return 0;
+                 }
+ 
+-                if (f == firstword) {
+-                        path = firstword;
+-                        firstword = NULL;
+-                } else {
+-                        path = strdup(f);
+-                        if (!path)
+-                                return log_oom();
+-                }
+-
+                 if (!separate_argv0) {
++                        char *w = NULL;
++
+                         if (!GREEDY_REALLOC(n, nbufsize, nlen + 2))
+                                 return log_oom();
+-                        f = strdup(path);
+-                        if (!f)
++
++                        w = strdup(path);
++                        if (!w)
+                                 return log_oom();
+-                        n[nlen++] = f;
++                        n[nlen++] = w;
+                         n[nlen] = NULL;
+                 }
+ 
+                 path_kill_slashes(path);
+ 
+                 while (!isempty(p)) {
+-                        _cleanup_free_ char *word = NULL;
++                        _cleanup_free_ char *word = NULL, *resolved = NULL;
+ 
+                         /* Check explicitly for an unquoted semicolon as
+                          * command separator token.  */
+@@ -679,18 +680,21 @@ int config_parse_exec(
+                                 break;
+                         }
+ 
+-                        /* Check for \; explicitly, to not confuse it with \\;
+-                         * or "\;" or "\\;" etc.  extract_first_word would
+-                         * return the same for all of those.  */
++                        /* Check for \; explicitly, to not confuse it with \\; or "\;" or "\\;" etc.
++                         * extract_first_word() would return the same for all of those.  */
+                         if (p[0] == '\\' && p[1] == ';' && (!p[2] || strchr(WHITESPACE, p[2]))) {
++                                char *w;
++
+                                 p += 2;
+                                 p += strspn(p, WHITESPACE);
++
+                                 if (!GREEDY_REALLOC(n, nbufsize, nlen + 2))
+                                         return log_oom();
+-                                f = strdup(";");
+-                                if (!f)
++
++                                w = strdup(";");
++                                if (!w)
+                                         return log_oom();
+-                                n[nlen++] = f;
++                                n[nlen++] = w;
+                                 n[nlen] = NULL;
+                                 continue;
+                         }
+@@ -698,14 +702,20 @@ int config_parse_exec(
+                         r = extract_first_word_and_warn(&p, &word, WHITESPACE, EXTRACT_QUOTES|EXTRACT_CUNESCAPE, unit, filename, line, rvalue);
+                         if (r == 0)
+                                 break;
+-                        else if (r < 0)
++                        if (r < 0)
+                                 return 0;
+ 
++                        r = unit_full_printf(u, word, &resolved);
++                        if (r < 0) {
++                                log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to resolve unit specifiers on %s, ignoring: %m", word);
++                                return 0;
++                        }
++
+                         if (!GREEDY_REALLOC(n, nbufsize, nlen + 2))
+                                 return log_oom();
+-                        n[nlen++] = word;
++                        n[nlen++] = resolved;
+                         n[nlen] = NULL;
+-                        word = NULL;
++                        resolved = NULL;
+                 }
+ 
+                 if (!n || !n[0]) {
+diff --git a/src/core/service.c b/src/core/service.c
+index a7274a7..7222cca 100644
+--- a/src/core/service.c
++++ b/src/core/service.c
+@@ -49,7 +49,6 @@
+ #include "string-util.h"
+ #include "strv.h"
+ #include "unit-name.h"
+-#include "unit-printf.h"
+ #include "unit.h"
+ #include "utf8.h"
+ #include "util.h"
+@@ -1186,7 +1185,7 @@ static int service_spawn(
+                 ExecFlags flags,
+                 pid_t *_pid) {
+ 
+-        _cleanup_strv_free_ char **argv = NULL, **final_env = NULL, **our_env = NULL, **fd_names = NULL;
++        _cleanup_strv_free_ char **final_env = NULL, **our_env = NULL, **fd_names = NULL;
+         _cleanup_free_ int *fds = NULL;
+         unsigned n_fds = 0, n_env = 0;
+         const char *path;
+@@ -1244,10 +1243,6 @@ static int service_spawn(
+         if (r < 0)
+                 return r;
+ 
+-        r = unit_full_printf_strv(UNIT(s), c->argv, &argv);
+-        if (r < 0)
+-                return r;
+-
+         our_env = new0(char*, 9);
+         if (!our_env)
+                 return -ENOMEM;
+@@ -1330,7 +1325,7 @@ static int service_spawn(
+         } else
+                 path = UNIT(s)->cgroup_path;
+ 
+-        exec_params.argv = argv;
++        exec_params.argv = c->argv;
+         exec_params.environment = final_env;
+         exec_params.fds = fds;
+         exec_params.fd_names = fd_names;
+diff --git a/src/core/socket.c b/src/core/socket.c
+index 0b1c4ac..b3d6022 100644
+--- a/src/core/socket.c
++++ b/src/core/socket.c
+@@ -54,7 +54,6 @@
+ #include "string-util.h"
+ #include "strv.h"
+ #include "unit-name.h"
+-#include "unit-printf.h"
+ #include "unit.h"
+ #include "user-util.h"
+ #include "in-addr-util.h"
+@@ -1740,7 +1739,6 @@ static int socket_coldplug(Unit *u) {
+ }
+ 
+ static int socket_spawn(Socket *s, ExecCommand *c, pid_t *_pid) {
+-        _cleanup_free_ char **argv = NULL;
+         pid_t pid;
+         int r;
+         ExecParameters exec_params = {
+@@ -1772,11 +1770,7 @@ static int socket_spawn(Socket *s, ExecCommand *c, pid_t *_pid) {
+         if (r < 0)
+                 return r;
+ 
+-        r = unit_full_printf_strv(UNIT(s), c->argv, &argv);
+-        if (r < 0)
+-                return r;
+-
+-        exec_params.argv = argv;
++        exec_params.argv = c->argv;
+         exec_params.environment = UNIT(s)->manager->environment;
+         exec_params.flags |= UNIT(s)->manager->confirm_spawn ? EXEC_CONFIRM_SPAWN : 0;
+         exec_params.cgroup_supported = UNIT(s)->manager->cgroup_supported;

@@ -11,6 +11,15 @@ networkd-link_enter_configured-remove-assert-4800.patch
 doc-clarify-NoNewPrivileges-4562.patch
 core-rework-logic-to-determine-when-we-decide-to-add-auto.patch
 rules-add-persistent-links-for-nbd-devices-4785.patch
+core-move-specifier-expansion-out-of-service.c-socket.c.patch
+man-drop-reference-to-U-being-useless.patch
+core-resolve-more-specifiers-in-unit_name_printf.patch
+core-use-unit_full_printf-at-a-couple-of-locations-we-use.patch
+core-turn-on-specifier-expansion-for-more-unit-file-setti.patch
+core-add-specifier-expansion-to-RequiresMountsFor.patch
+core-add-specifier-expansion-to-ReadOnlyPaths-and-friends.patch
+core-deprecate-c-r-R-specifiers.patch
+core-add-a-note-clarifying-that-we-should-be-careful-when.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

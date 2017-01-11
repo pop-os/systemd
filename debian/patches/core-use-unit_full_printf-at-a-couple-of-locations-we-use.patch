@@ -1,0 +1,63 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 5 Dec 2016 19:25:44 +0100
+Subject: core: use unit_full_printf() at a couple of locations we used
+ unit_name_printf() before
+
+For settings that are not taking unit names there's no reason to use
+unit_name_printf(). Use unit_full_printf() instead, as the names are validated
+anyway in one form or another after expansion.
+
+(cherry picked from commit 18913df9a2aa5ee53a1dfb6f3cf8cdddcc7f11a3)
+---
+ src/core/load-fragment.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index 1e65e63..fcb73a5 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -1323,7 +1323,7 @@ int config_parse_exec_selinux_context(
+         } else
+                 ignore = false;
+ 
+-        r = unit_name_printf(u, rvalue, &k);
++        r = unit_full_printf(u, rvalue, &k);
+         if (r < 0) {
+                 log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve specifiers, ignoring: %m");
+                 return 0;
+@@ -1371,7 +1371,7 @@ int config_parse_exec_apparmor_profile(
+         } else
+                 ignore = false;
+ 
+-        r = unit_name_printf(u, rvalue, &k);
++        r = unit_full_printf(u, rvalue, &k);
+         if (r < 0) {
+                 log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve specifiers, ignoring: %m");
+                 return 0;
+@@ -1419,7 +1419,7 @@ int config_parse_exec_smack_process_label(
+         } else
+                 ignore = false;
+ 
+-        r = unit_name_printf(u, rvalue, &k);
++        r = unit_full_printf(u, rvalue, &k);
+         if (r < 0) {
+                 log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve specifiers, ignoring: %m");
+                 return 0;
+@@ -1686,7 +1686,7 @@ int config_parse_fdname(
+                 return 0;
+         }
+ 
+-        r = unit_name_printf(UNIT(s), rvalue, &p);
++        r = unit_full_printf(UNIT(s), rvalue, &p);
+         if (r < 0) {
+                 log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve specifiers, ignoring: %s", rvalue);
+                 return 0;
+@@ -3654,7 +3654,7 @@ int config_parse_runtime_directory(
+                 if (!t)
+                         return log_oom();
+ 
+-                r = unit_name_printf(u, t, &n);
++                r = unit_full_printf(u, t, &n);
+                 if (r < 0) {
+                         log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve specifiers, ignoring: %m");
+                         continue;
