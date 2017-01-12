@@ -1,4 +1,4 @@
-systemd (232-9) UNRELEASED; urgency=medium
+systemd (232-9) unstable; urgency=medium
 
   * Use --disable-wheel-group configure switch.
     Instead of mangling the tmpfiles via sed to remove the wheel group, use
@@ -23,7 +23,7 @@ systemd (232-9) UNRELEASED; urgency=medium
     Turn on specifier expansion for more unit file settings.
     See https://github.com/systemd/systemd/pull/4835 (Closes: #781730)
 
- -- Michael Biebl <biebl@debian.org>  Wed, 11 Jan 2017 22:58:02 +0100
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Jan 2017 16:59:22 +0100
 
 systemd (232-8) unstable; urgency=medium
 
