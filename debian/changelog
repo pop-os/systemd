@@ -1,3 +1,12 @@
+systemd (232-10) UNRELEASED; urgency=medium
+
+  * Add NULL sentinel to strjoin.
+    We haven't cherry-picked upstream commit 605405c6c which introduced a
+    strjoin macro that adds the NULL sentinel automatically so we need to do
+    it manually. (Closes: #851210)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 13 Jan 2017 04:52:35 +0100
+
 systemd (232-9) unstable; urgency=medium
 
   * Use --disable-wheel-group configure switch.
@@ -11,7 +20,8 @@ systemd (232-9) unstable; urgency=medium
   * debian/extra/init-functions.d/40-systemd: Stop checking for init env var.
     This env variable is no longer set when systemd executes a service so
     it's pointless to check for it.
-  * debian/extra/init-functions.d/40-systemd: Stop setting _SYSTEMCTL_SKIP_REDIRECT=true.
+  * debian/extra/init-functions.d/40-systemd: Stop setting
+    _SYSTEMCTL_SKIP_REDIRECT=true.
     It seems we don't actually need it to detect recursive loops (PPID is
     sufficient) and by exporting it we leak _SYSTEMCTL_SKIP_REDIRECT into
     the runtime environment of the service. (Closes: #802018)
