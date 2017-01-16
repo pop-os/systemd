@@ -17,7 +17,7 @@ software can opt into the unified hierarchy with
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
-index cede835..134e6e3 100644
+index 5fce32f..63c913f 100644
 --- a/src/basic/cgroup-util.c
 +++ b/src/basic/cgroup-util.c
 @@ -2423,10 +2423,10 @@ bool cg_is_unified_systemd_controller_wanted(void) {

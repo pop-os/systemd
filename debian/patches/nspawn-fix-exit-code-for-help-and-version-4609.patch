@@ -14,7 +14,7 @@ Fixes #4605.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
-index c56af6e..c8fc011 100644
+index 673e616..1563644 100644
 --- a/src/nspawn/nspawn.c
 +++ b/src/nspawn/nspawn.c
 @@ -4033,7 +4033,7 @@ int main(int argc, char *argv[]) {

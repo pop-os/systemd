@@ -7,15 +7,12 @@ Expanding specifiers here definitely makes sense.
 Also simplifies the loop a bit, as there's no reason to keep "prev" around...
 
 (cherry picked from commit 7b07e99320586fa3baf3e6cbb374f06c6ddc47d8)
-
-(we don't have commit 605405c6cc934466951b0c6bad5a9553620bcb08, so
-re-add NULL sentinel to strjoin)
 ---
  src/core/load-fragment.c | 34 ++++++++++++++++++++--------------
  1 file changed, 20 insertions(+), 14 deletions(-)
 
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index 70f1607..c1f4c3f 100644
+index 70f1607..2a53b07 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -3765,8 +3765,8 @@ int config_parse_namespace_path_strv(
@@ -78,7 +75,7 @@ index 70f1607..c1f4c3f 100644
 +                path_kill_slashes(resolved);
  
 -                r = strv_push(sv, word);
-+                joined = strjoin(ignore_enoent ? "-" : "", resolved, NULL);
++                joined = strjoin(ignore_enoent ? "-" : "", resolved);
 +
 +                r = strv_push(sv, joined);
                  if (r < 0)

@@ -48,7 +48,7 @@ index fedff13..1946a4c 100644
          e = path_startswith(t, "/usr/share/zoneinfo/");
          if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index ccf61d2..119d284 100644
+index fdd847e..31916a3 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
 @@ -80,6 +80,28 @@ int locale_setup(char ***environment) {
@@ -81,7 +81,7 @@ index ccf61d2..119d284 100644
          for (i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index a6bcd1a..50ab05e 100644
+index da72bee..f1163c0 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
 @@ -121,6 +121,24 @@ static int locale_read_data(Context *c) {

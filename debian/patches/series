@@ -1,3 +1,4 @@
+tree-wide-drop-NULL-sentinel-from-strjoin.patch
 build-sys-link-test-seccomp-against-seccomp-libs-4560.patch
 delta-skip-symlink-paths-when-split-usr-is-enabled-4591.patch
 nspawn-fix-exit-code-for-help-and-version-4609.patch

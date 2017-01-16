@@ -46,7 +46,7 @@ index b0f156f..68ff6f8 100644
          <term><option>auto</option></term>
  
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index e77bd71..0714fbe 100644
+index 46507de..f6a912a 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
 @@ -141,13 +141,14 @@ static bool mount_in_initrd(struct mntent *me) {

@@ -148,7 +148,7 @@ index ea889c9..33bca1b 100644
  
          <listitem><para>Takes a boolean argument. If true, explicit module loading will
 diff --git a/src/core/dbus-execute.c b/src/core/dbus-execute.c
-index 1a7f770..8b9c325 100644
+index 03f2378..d7bb049 100644
 --- a/src/core/dbus-execute.c
 +++ b/src/core/dbus-execute.c
 @@ -781,6 +781,7 @@ const sd_bus_vtable bus_exec_vtable[] = {
@@ -188,7 +188,7 @@ index 1a7f770..8b9c325 100644
  
          ri = rlimit_from_string(name);
 diff --git a/src/core/execute.c b/src/core/execute.c
-index f13ca30..dfbe49a 100644
+index 5bb23e2..b8a0246 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
 @@ -1534,6 +1534,18 @@ static int apply_private_devices(const Unit *u, const ExecContext *c) {
@@ -317,7 +317,7 @@ index d68ae4e..a9ce05b 100644
  $1.RestrictAddressFamilies,      config_parse_warn_compat,           DISABLED_CONFIGURATION,        0')
  $1.LimitCPU,                     config_parse_limit,                 RLIMIT_CPU,                    offsetof($1, exec_context.rlimit)
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index c1f4c3f..d7d7d82 100644
+index 2a53b07..99b7ed1 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -2923,6 +2923,54 @@ int config_parse_address_families(

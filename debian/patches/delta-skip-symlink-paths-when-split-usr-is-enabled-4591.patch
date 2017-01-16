@@ -14,7 +14,7 @@ Fixes: #4573
  1 file changed, 31 insertions(+)
 
 diff --git a/src/delta/delta.c b/src/delta/delta.c
-index f32744d..ce2427f 100644
+index 6848662..04de754 100644
 --- a/src/delta/delta.c
 +++ b/src/delta/delta.c
 @@ -355,6 +355,21 @@ static int enumerate_dir(Hashmap *top, Hashmap *bottom, Hashmap *drops, const ch
@@ -53,7 +53,7 @@ index f32744d..ce2427f 100644
 +                if (skip)
 +                        continue;
  
-                 t = strjoin(p, "/", suffix, NULL);
+                 t = strjoin(p, "/", suffix);
                  if (!t) {
 @@ -459,6 +483,13 @@ static int process_suffix_chop(const char *arg) {
          /* Strip prefix from the suffix */

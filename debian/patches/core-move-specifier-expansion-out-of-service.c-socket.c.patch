@@ -157,7 +157,7 @@ index cbc8268..1e65e63 100644
  
                  if (!n || !n[0]) {
 diff --git a/src/core/service.c b/src/core/service.c
-index a7274a7..7222cca 100644
+index f6acc2f..03101f5 100644
 --- a/src/core/service.c
 +++ b/src/core/service.c
 @@ -49,7 +49,6 @@

@@ -43,7 +43,7 @@ Fixes: #4575
  7 files changed, 1005 insertions(+), 558 deletions(-)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index dfbe49a..04845b2 100644
+index b8a0246..86ffa68 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
 @@ -1184,6 +1184,41 @@ static void rename_process_from_path(const char *path) {

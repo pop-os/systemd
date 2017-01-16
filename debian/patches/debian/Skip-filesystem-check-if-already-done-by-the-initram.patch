@@ -15,7 +15,7 @@ Closes: #810748
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index 0714fbe..3aea7ae 100644
+index f6a912a..b58e61a 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
 @@ -252,6 +252,7 @@ static int add_mount(

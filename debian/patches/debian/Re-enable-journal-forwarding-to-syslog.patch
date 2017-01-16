@@ -30,7 +30,7 @@ index 9daa964..e829d63 100644
          <literal>systemd.journald.forward_to_syslog</literal>,
          <literal>systemd.journald.forward_to_kmsg</literal>,
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index 908c7b8..05217e6 100644
+index dee153a..5daf633 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
 @@ -1884,6 +1884,7 @@ int server_init(Server *s) {
