@@ -1,3 +1,10 @@
+systemd (232-12) unstable; urgency=medium
+
+  * Fix build if seccomp support is disabled
+  * Enable seccomp support on ppc64
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 18 Jan 2017 19:43:51 +0100
+
 systemd (232-11) unstable; urgency=medium
 
   [ Martin Pitt ]
