@@ -73,7 +73,7 @@ Depends: ${shlibs:Depends},
          adduser,
 Breaks: lvm2 (<< 2.02.104-1),
         apparmor (<< 2.9.2-1),
-        systemd-shim (<< 8-2),
+        systemd-shim (<< 10-3~),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
         laptop-mode-tools (<< 1.68~),
@@ -188,7 +188,7 @@ Depends: ${shlibs:Depends},
          systemd (= ${binary:Version}),
          libpam-runtime (>= 1.0.1-6),
          dbus,
-         systemd-shim (>= 8-2) | systemd-sysv
+         systemd-shim (>= 10-3~) | systemd-sysv
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
  the systemd control group hierarchy for logind.
