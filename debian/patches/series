@@ -20,6 +20,8 @@ core-add-specifier-expansion-to-RequiresMountsFor.patch
 core-add-specifier-expansion-to-ReadOnlyPaths-and-friends.patch
 core-deprecate-c-r-R-specifiers.patch
 core-add-a-note-clarifying-that-we-should-be-careful-when.patch
+core-add-new-RestrictNamespaces-unit-file-setting.patch
+seccomp-rework-seccomp-code-to-improve-compat-with-some-a.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
