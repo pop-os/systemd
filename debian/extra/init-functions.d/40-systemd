@@ -47,6 +47,9 @@ systemctl_redirect () {
         reload|force-reload)
             s="Reloading $prog configuration (via systemctl)"
             ;;
+        try-restart)
+            s="Restarting $prog if running (via systemctl)"
+            ;;
         restart)
             s="Restarting $prog (via systemctl)"
             ;;
@@ -82,6 +85,7 @@ if [ "$_use_systemctl" = "1" ]; then
         "x$1" = xrestart -o \
         "x$1" = xreload -o \
         "x$1" = xforce-reload -o \
+        "x$1" = xtry-restart -o \
         "x$1" = xstatus ] ; then
 
         systemctl_redirect $0 $1
