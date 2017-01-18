@@ -298,7 +298,7 @@ index c7d0f77..56f880c 100644
          EXEC_CONFIRM_SPAWN     = 1U << 0,
          EXEC_APPLY_PERMISSIONS = 1U << 1,
 diff --git a/src/core/load-fragment-gperf.gperf.m4 b/src/core/load-fragment-gperf.gperf.m4
-index d68ae4e..a9ce05b 100644
+index af2f9d9..cb2f384 100644
 --- a/src/core/load-fragment-gperf.gperf.m4
 +++ b/src/core/load-fragment-gperf.gperf.m4
 @@ -57,12 +57,14 @@ m4_ifdef(`HAVE_SECCOMP',
