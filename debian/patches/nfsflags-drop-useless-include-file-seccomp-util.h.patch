@@ -1,0 +1,23 @@
+From: Franck Bui <fbui@suse.com>
+Date: Thu, 10 Nov 2016 10:18:32 +0100
+Subject: nfsflags: drop useless include file 'seccomp-util.h'
+
+This also fixes the build when seccomp is disabled.
+
+(cherry picked from commit 51b9bb4f8e88d420ae557c3ecf1922dd9ac95fcc)
+---
+ src/shared/nsflags.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/shared/nsflags.c b/src/shared/nsflags.c
+index 8fcbe97..49afbed 100644
+--- a/src/shared/nsflags.c
++++ b/src/shared/nsflags.c
+@@ -22,7 +22,6 @@
+ #include "alloc-util.h"
+ #include "extract-word.h"
+ #include "nsflags.h"
+-#include "seccomp-util.h"
+ #include "string-util.h"
+ 
+ const struct namespace_flag_map namespace_flag_map[] = {

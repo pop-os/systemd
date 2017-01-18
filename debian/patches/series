@@ -22,6 +22,7 @@ core-deprecate-c-r-R-specifiers.patch
 core-add-a-note-clarifying-that-we-should-be-careful-when.patch
 core-add-new-RestrictNamespaces-unit-file-setting.patch
 seccomp-rework-seccomp-code-to-improve-compat-with-some-a.patch
+nfsflags-drop-useless-include-file-seccomp-util.h.patch
 gpt-auto-generator-support-LUKS-encrypted-root-partitions.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
