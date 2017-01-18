@@ -1,3 +1,38 @@
+systemd (232-11) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Fix RestrictAddressFamilies=
+    Backport upstream fix for setting up seccomp filters to fix
+    RestrictAddressFamilies= on non-amd64 architectures. Drop the hack from
+    debian/rules to remove this property from unit files.
+    See #843160
+  * Use local machine-id for running tests during package build.
+    Since "init" and thus "systemd" are not part of debootstrap any more,
+    some buildd chroots don't have an /etc/machine-id any more. Port the old
+    Add-env-variable-for-machine-ID-path.patch to the current code, use a
+    local machine-id again, and always make test suite failures fatal.
+    (Closes: #851445)
+
+  [ Michael Biebl ]
+  * gpt-auto-generator: support LUKS encrypted root partitions
+    (Closes: #851475)
+  * Switch to bfd linker on mips*
+    The gold linker is currently producing broken libraries on mips*
+    resulting in segfaults for users of libsystemd. Switch to bfd until
+    binutils has been fixed. (Closes: #851412)
+  * Revert "core: turn on specifier expansion for more unit file settings"
+    The expansion of the % character broke the fstab-generator and
+    specifying the tmpfs size as percentage of physical RAM resulted in the
+    size being set to 4k. (Closes: #851492)
+  * Drop obsolete Conflicts, Breaks and Replaces
+  * Require systemd-shim version which supports v232.
+    See #844785
+
+  [ Ondřej Nový ]
+  * Redirect try-restart in init-functions hook (Closes: #851688)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 18 Jan 2017 12:38:54 +0100
+
 systemd (232-10) unstable; urgency=medium
 
   * Add NULL sentinel to strjoin.
