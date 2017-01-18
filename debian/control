@@ -72,7 +72,6 @@ Depends: ${shlibs:Depends},
          mount (>= 2.26),
          adduser,
 Breaks: lvm2 (<< 2.02.104-1),
-        lsb-base (<< 4.1+Debian4),
         apparmor (<< 2.9.2-1),
         systemd-shim (<< 8-2),
         ifupdown (<< 0.8.5~),
@@ -80,7 +79,6 @@ Breaks: lvm2 (<< 2.02.104-1),
         laptop-mode-tools (<< 1.68~),
         ${Breaks:rcs-compat}
 Replaces: udev (<< 228-5),
-Conflicts: klogd
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
@@ -100,14 +98,12 @@ Multi-Arch: foreign
 Section: admin
 Priority: important
 Conflicts: sysvinit-core,
-           upstart (<< 1.13.2-0ubuntu10~),
            upstart-sysv,
            openrc (<< 0.20.4-2.1),
            file-rc,
            systemd-shim,
 Replaces: sysvinit (<< 2.88dsf-44~),
           sysvinit-core,
-          upstart (<< 1.13.2-0ubuntu10~),
           upstart-sysv,
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
