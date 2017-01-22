@@ -98,12 +98,14 @@ Multi-Arch: foreign
 Section: admin
 Priority: important
 Conflicts: sysvinit-core,
+           upstart (<< 1.13.2-0ubuntu10~),
            upstart-sysv,
            openrc (<< 0.20.4-2.1),
            file-rc,
            systemd-shim,
 Replaces: sysvinit (<< 2.88dsf-44~),
           sysvinit-core,
+          upstart (<< 1.13.2-0ubuntu10~),
           upstart-sysv,
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
