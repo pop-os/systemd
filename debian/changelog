@@ -1,3 +1,14 @@
+systemd (232-13) unstable; urgency=medium
+
+  * Re-add versioned Conflicts/Replaces against upstart.
+    In Debian the upstart package was never split into upstart and
+    upstart-sysv, so we need to keep that for switching from upstart to
+    systemd-sysv. (Closes: #852156)
+  * Update Vcs-* according to the latest recommendation
+  * Update Homepage and the URLs in debian/copyright to use https
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 22 Jan 2017 08:19:28 +0100
+
 systemd (232-12) unstable; urgency=medium
 
   * Fix build if seccomp support is disabled
