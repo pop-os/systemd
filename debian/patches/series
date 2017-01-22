@@ -24,6 +24,8 @@ core-add-new-RestrictNamespaces-unit-file-setting.patch
 seccomp-rework-seccomp-code-to-improve-compat-with-some-a.patch
 nfsflags-drop-useless-include-file-seccomp-util.h.patch
 gpt-auto-generator-support-LUKS-encrypted-root-partitions.patch
+device-Avoid-calling-unit_free-NULL-in-device-setup-logic.patch
+core-make-unit_free-accept-NULL-pointers.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
