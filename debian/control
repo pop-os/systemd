@@ -7,8 +7,8 @@ Uploaders: Michael Biebl <biebl@debian.org>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>
 Standards-Version: 3.9.8
-Vcs-Git: git://anonscm.debian.org/pkg-systemd/systemd.git
-Vcs-Browser: https://anonscm.debian.org/cgit/pkg-systemd/systemd.git
+Vcs-Git: https://anonscm.debian.org/git/pkg-systemd/systemd.git
+Vcs-Browser: https://anonscm.debian.org/git/pkg-systemd/systemd.git
 Homepage: http://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper (>= 9.20160114),
                dpkg-dev (>= 1.17.14),
