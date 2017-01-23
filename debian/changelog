@@ -1,3 +1,10 @@
+systemd (232-14) unstable; urgency=medium
+
+  * Deal with NULL pointers more gracefully in unit_free() (Closes: #852202)
+  * Fix issues in journald during startup
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 23 Jan 2017 14:52:46 +0100
+
 systemd (232-13) unstable; urgency=medium
 
   * Re-add versioned Conflicts/Replaces against upstart.
