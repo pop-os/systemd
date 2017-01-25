@@ -152,10 +152,6 @@ fi
 
 case "$1" in
     start)
-    if init_is_upstart 2>/dev/null; then
-	exit 1
-    fi
-
     if [ ! -e "/run/udev/" ]; then
 	warn_if_interactive
     fi
@@ -215,9 +211,6 @@ case "$1" in
     ;;
 
     restart)
-    if init_is_upstart 2>/dev/null; then
-	exit 1
-    fi
     log_daemon_msg "Stopping $DESC" "$NAME"
     if start-stop-daemon --stop --name $NAME --user root --quiet --oknodo --retry 5; then
 	log_end_msg $?

@@ -320,10 +320,6 @@ endif
 
 override_dh_installinit:
 	dh_installinit --no-start
-	# the following are only upstart jobs
-	dh_installinit --name=udevtrigger --noscripts
-	dh_installinit --name=udevmonitor --noscripts
-	dh_installinit --name=udev-fallback-graphics --noscripts
 
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends
