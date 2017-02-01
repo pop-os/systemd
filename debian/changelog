@@ -1,3 +1,16 @@
+systemd (232-15) unstable; urgency=medium
+
+  * Add missing Build-Depends on tzdata.
+    It is required to successfully run the test suite. (Closes: #852883)
+  * Bump systemd Breaks to ensure it is upgraded in lockstep with udev.
+    The sandboxing features used by systemd-udevd.service require systemd
+    (>= 232-11). (Closes: #853078)
+  * Bump priority of libpam-systemd to standard.
+    This reflects the changes that have been made in the archive a while
+    ago. See #803184
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 01 Feb 2017 22:45:35 +0100
+
 systemd (232-14) unstable; urgency=medium
 
   * Deal with NULL pointers more gracefully in unit_free() (Closes: #852202)
