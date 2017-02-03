@@ -82,9 +82,15 @@ Depends: systemd-sysv,
   python3
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
+Test-Command: /usr/lib/*/systemd/test-seccomp
+Depends: libsystemd-dev
+Restrictions: needs-root, allow-stderr, isolation-container
+Features: test-name=seccomp
+
 Tests: udev
 Depends: tree,
   libudev-dev,
+  libsystemd-dev,
   perl,
   xz-utils,
 Restrictions: needs-root, allow-stderr, isolation-machine
@@ -92,6 +98,7 @@ Restrictions: needs-root, allow-stderr, isolation-machine
 Tests: upstream
 Depends: tree,
   libudev-dev,
+  libsystemd-dev,
   perl,
   xz-utils,
   kbd,
@@ -118,6 +125,7 @@ Depends: systemd-sysv,
   xserver-xorg-video-dummy,
   tree,
   libudev-dev,
+  libsystemd-dev,
   perl,
   xz-utils,
   kbd,

@@ -305,8 +305,9 @@ endif
 		(cd debian/$$pkg; find -mindepth 1 -type d) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
 
-	# ship test-udev, so that we have it for autopkgtests
+	# ship some test programs for autopkgtests
 	install -D build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev
+	install -D build-deb/.libs/test-seccomp debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/test-seccomp
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
