@@ -1,3 +1,20 @@
+systemd (232-16) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Add autopkgtest for test-seccomp
+  * udev: Fix by-id symlinks for devices whose IDs contain whitespace
+    (Closes: #851164, LP: #1647485)
+  * Add lintian overrides for binary-or-shlib-defines-rpath on shipped test
+    programs. This is apparently a new lintian warning on which uploads get
+    rejected.  These are only test programs, not in $PATH, and they need to
+    link against systemd's internal library.
+
+  [ Michael Biebl ]
+  * Fix seccomp filtering. (Closes: #852811)
+  * Do not crash on daemon-reexec when /run is full (Closes: #850074)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 09 Feb 2017 16:22:43 +0100
+
 systemd (232-15) unstable; urgency=medium
 
   * Add missing Build-Depends on tzdata.
