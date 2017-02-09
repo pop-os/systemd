@@ -53,6 +53,7 @@ Build-Depends: debhelper (>= 9.20160114),
                python3-lxml:native,
                python3-pyparsing <!nocheck>,
                tzdata <!nocheck>,
+               libcap2-bin <!nocheck>,
 
 Package: systemd
 Architecture: linux-any
