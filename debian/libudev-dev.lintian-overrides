@@ -1,2 +1,0 @@
-# test program only, needs to link against internal library
-libudev-dev: binary-or-shlib-defines-rpath usr/lib/*/udev/test-*

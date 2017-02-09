@@ -82,25 +82,33 @@ Depends: systemd-sysv,
   python3
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
-Test-Command: /usr/lib/*/systemd/test-seccomp
-Depends: libsystemd-dev
-Restrictions: needs-root, allow-stderr, isolation-container
-Features: test-name=seccomp
-
 Tests: udev
-Depends: tree,
-  libudev-dev,
-  libsystemd-dev,
+Depends: libsystemd-dev,
+  tree,
   perl,
   xz-utils,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
-Tests: upstream
-Depends: tree,
-  libudev-dev,
-  libsystemd-dev,
+Tests: root-unittests
+Depends: libsystemd-dev,
+  tree,
   perl,
   xz-utils,
+  libcap2-bin,
+  iproute2,
+  liblz4-tool,
+  acl,
+Restrictions: needs-root, allow-stderr, isolation-container
+
+Tests: upstream
+Depends: libsystemd-dev,
+  tree,
+  perl,
+  xz-utils,
+  libcap2-bin,
+  iproute2,
+  liblz4-tool,
+  acl,
   kbd,
   cryptsetup-bin,
   net-tools,
@@ -118,16 +126,14 @@ Depends: tree,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
-Depends: systemd-sysv,
-  network-manager,
-  policykit-1,
-  lightdm,
-  xserver-xorg-video-dummy,
+Depends: libsystemd-dev,
   tree,
-  libudev-dev,
-  libsystemd-dev,
   perl,
   xz-utils,
+  libcap2-bin,
+  iproute2,
+  liblz4-tool,
+  acl,
   kbd,
   cryptsetup-bin,
   net-tools,
@@ -142,6 +148,11 @@ Depends: systemd-sysv,
   make,
   systemd-journal-remote,
   systemd-container,
+  systemd-sysv,
+  network-manager,
+  policykit-1,
+  lightdm,
+  xserver-xorg-video-dummy,
 Restrictions: needs-recommends, needs-root, isolation-machine, allow-stderr, breaks-testbed
 
 # NOUPSTREAM: Do not run these tests for upstream builds

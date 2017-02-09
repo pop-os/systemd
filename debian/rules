@@ -305,9 +305,12 @@ endif
 		(cd debian/$$pkg; find -mindepth 1 -type d) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
 
-	# ship some test programs for autopkgtests
-	install -D build-deb/.libs/test-udev debian/libudev-dev/usr/lib/$(DEB_HOST_MULTIARCH)/udev/test-udev
-	install -D build-deb/.libs/test-seccomp debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/test-seccomp
+	# ship unit tests for autopkgtests and manual tests
+	install -d debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd-tests
+	install build-deb/.libs/test-* build-deb/test-copy build-deb/test-bus-error debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd-tests/
+	# put a list of automatic tests into our package for the autopkgtest
+	printf 'print-tests:\n\t@echo $$(TESTS)\n' | make -f build-deb/Makefile -f - print-tests | xargs -n1 | grep ^test- > debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd-tests/unittests.txt
+
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)

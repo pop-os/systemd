@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+# these tests fail because of the hardcoded TESTS_DIR; make overridable with env var
+EXFAIL="test-dns-packet
+test-cgroup-mask
+test-engine
+test-execute
+test-path
+test-sched-prio
+"
+
+# No items in catalog.
+# Assertion 'r >= 0' failed at ../src/journal/test-catalog.c:252, function main(). Aborting.
+EXFAIL="$EXFAIL
+test-catalog
+"
+
+res=0
+for t in $(cat /usr/lib/*/systemd-tests/unittests.txt); do
+    echo "====== $t ======="
+    # exit code 77 means "skip"
+    rc=0
+    /usr/lib/*/systemd-tests/$t || rc=$?
+    if [ "$rc" = 0 ]; then
+        echo "PASS: $t"
+    elif [ "$rc" = 77 ]; then
+        echo "SKIP: $t"
+    elif [ "${EXFAIL%$t*}" != "$EXFAIL" ]; then
+        echo "EXFAIL: $t"
+    else
+        echo "FAIL: $t (code: $rc)"
+        res=$rc
+    fi
+done
+exit $res
