@@ -54,6 +54,7 @@ Build-Depends: debhelper (>= 9.20160114),
                python3-pyparsing <!nocheck>,
                tzdata <!nocheck>,
                libcap2-bin <!nocheck>,
+               iproute2 <!nocheck>,
 
 Package: systemd
 Architecture: linux-any
