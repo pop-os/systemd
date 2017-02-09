@@ -1,0 +1,224 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 8 Feb 2017 15:14:02 +0100
+Subject: seccomp: MemoryDenyWriteExecute= should affect both mmap() and
+ mmap2() (#5254)
+
+On i386 we block the old mmap() call entirely, since we cannot properly
+filter it. Thankfully it hasn't been used by glibc since quite some
+time.
+
+Fixes: #5240
+
+(cherry-picked from commit 8a50cf6957f12dbb1f90411659da9b959a1983ff)
+---
+ man/systemd.exec.xml      | 27 +++++++-------
+ src/shared/seccomp-util.c | 92 +++++++++++++++++++++++++++++++++++++----------
+ src/shared/seccomp-util.h |  7 ++++
+ src/test/test-seccomp.c   | 12 ++++++-
+ 4 files changed, 106 insertions(+), 32 deletions(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index 9527103..3b42b55 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -1535,19 +1535,20 @@
+         <term><varname>MemoryDenyWriteExecute=</varname></term>
+ 
+         <listitem><para>Takes a boolean argument. If set, attempts to create memory mappings that are writable and
+-        executable at the same time, or to change existing memory mappings to become executable, or mapping shared memory
+-        segments as executable are prohibited.
+-        Specifically, a system call filter is added that rejects
+-        <citerefentry><refentrytitle>mmap</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+-        system calls with both <constant>PROT_EXEC</constant> and <constant>PROT_WRITE</constant> set,
+-        <citerefentry><refentrytitle>mprotect</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+-        system calls with <constant>PROT_EXEC</constant> set and
+-        <citerefentry><refentrytitle>shmat</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+-        system calls with <constant>SHM_EXEC</constant> set. Note that this option is incompatible with programs
+-        that generate program code dynamically at runtime, such as JIT execution engines, or programs compiled making
+-        use of the code "trampoline" feature of various C compilers. This option improves service security, as it makes
+-        harder for software exploits to change running code dynamically.
+-        </para></listitem>
++        executable at the same time, or to change existing memory mappings to become executable, or mapping shared
++        memory segments as executable are prohibited.  Specifically, a system call filter is added that rejects
++        <citerefentry><refentrytitle>mmap</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls with both
++        <constant>PROT_EXEC</constant> and <constant>PROT_WRITE</constant> set,
++        <citerefentry><refentrytitle>mprotect</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls with
++        <constant>PROT_EXEC</constant> set and
++        <citerefentry><refentrytitle>shmat</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls with
++        <constant>SHM_EXEC</constant> set. Note that this option is incompatible with programs that generate program
++        code dynamically at runtime, such as JIT execution engines, or programs compiled making use of the code
++        "trampoline" feature of various C compilers. This option improves service security, as it makes harder for
++        software exploits to change running code dynamically. Note that this feature is fully available on x86-64, and
++        partially on x86. Specifically, the <function>shmat()</function> protection is not available on x86. If running
++        in user mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
++        <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname> is implied.  </para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+diff --git a/src/shared/seccomp-util.c b/src/shared/seccomp-util.c
+index 1e6ff5b..64c21c8 100644
+--- a/src/shared/seccomp-util.c
++++ b/src/shared/seccomp-util.c
+@@ -996,27 +996,81 @@ int seccomp_restrict_realtime(void) {
+ }
+ 
+ int seccomp_memory_deny_write_execute(void) {
++
+         uint32_t arch;
+         int r;
+ 
+         SECCOMP_FOREACH_LOCAL_ARCH(arch) {
+                 _cleanup_(seccomp_releasep) scmp_filter_ctx seccomp = NULL;
++                int filter_syscall = 0, block_syscall = 0, shmat_syscall = 0;
+ 
+                 log_debug("Operating on architecture: %s", seccomp_arch_to_string(arch));
+ 
++                switch (arch) {
++
++                case SCMP_ARCH_X86:
++                        filter_syscall = SCMP_SYS(mmap2);
++                        block_syscall = SCMP_SYS(mmap);
++
++                        /* Note that shmat() isn't available on i386, where the call is multiplexed through ipc(). We
++                         * ignore that here, which means there's still a way to get writable/executable memory, if an
++                         * IPC key is mapped like this on i386. That's a pity, but no total loss. */
++                        break;
++
++                case SCMP_ARCH_X86_64:
++                case SCMP_ARCH_X32:
++                        filter_syscall = SCMP_SYS(mmap);
++                        shmat_syscall = SCMP_SYS(shmat);
++                        break;
++
++                /* Please add more definitions here, if you port systemd to other architectures! */
++
++#if !defined(__i386__) && !defined(__x86_64__)
++#warning "Consider adding the right mmap() syscall definitions here!"
++#endif
++                }
++
++                /* Can't filter mmap() on this arch, then skip it */
++                if (filter_syscall == 0)
++                        continue;
++
+                 r = seccomp_init_for_arch(&seccomp, arch, SCMP_ACT_ALLOW);
+                 if (r < 0)
+                         return r;
+ 
+-                r = seccomp_rule_add_exact(
+-                                seccomp,
+-                                SCMP_ACT_ERRNO(EPERM),
+-                                SCMP_SYS(mmap),
+-                                1,
+-                                SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC|PROT_WRITE, PROT_EXEC|PROT_WRITE));
+-                if (r < 0) {
+-                        log_debug_errno(r, "Failed to add mmap() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+-                        continue;
++                if (filter_syscall != 0)  {
++                        r = seccomp_rule_add_exact(
++                                        seccomp,
++                                        SCMP_ACT_ERRNO(EPERM),
++                                        filter_syscall,
++                                        1,
++                                        SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC|PROT_WRITE, PROT_EXEC|PROT_WRITE));
++                        if (r < 0) {
++                                _cleanup_free_ char *n = NULL;
++
++                                n = seccomp_syscall_resolve_num_arch(arch, filter_syscall);
++                                log_debug_errno(r, "Failed to add %s() rule for architecture %s, skipping: %m",
++                                                strna(n),
++                                                seccomp_arch_to_string(arch));
++                                continue;
++                        }
++                }
++
++                if (block_syscall != 0) {
++                        r = seccomp_rule_add_exact(
++                                        seccomp,
++                                        SCMP_ACT_ERRNO(EPERM),
++                                        block_syscall,
++                                        0);
++                        if (r < 0) {
++                                _cleanup_free_ char *n = NULL;
++
++                                n = seccomp_syscall_resolve_num_arch(arch, block_syscall);
++                                log_debug_errno(r, "Failed to add %s() rule for architecture %s, skipping: %m",
++                                                strna(n),
++                                                seccomp_arch_to_string(arch));
++                                continue;
++                        }
+                 }
+ 
+                 r = seccomp_rule_add_exact(
+@@ -1030,15 +1084,17 @@ int seccomp_memory_deny_write_execute(void) {
+                         continue;
+                 }
+ 
+-                r = seccomp_rule_add_exact(
+-                                seccomp,
+-                                SCMP_ACT_ERRNO(EPERM),
+-                                SCMP_SYS(shmat),
+-                                1,
+-                                SCMP_A2(SCMP_CMP_MASKED_EQ, SHM_EXEC, SHM_EXEC));
+-                if (r < 0) {
+-                        log_debug_errno(r, "Failed to add shmat() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+-                        continue;
++                if (shmat_syscall != 0) {
++                        r = seccomp_rule_add_exact(
++                                        seccomp,
++                                        SCMP_ACT_ERRNO(EPERM),
++                                        SCMP_SYS(shmat),
++                                        1,
++                                        SCMP_A2(SCMP_CMP_MASKED_EQ, SHM_EXEC, SHM_EXEC));
++                        if (r < 0) {
++                                log_debug_errno(r, "Failed to add shmat() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
++                                continue;
++                        }
+                 }
+ 
+                 r = seccomp_load(seccomp);
+diff --git a/src/shared/seccomp-util.h b/src/shared/seccomp-util.h
+index ba106eb..e89e0d9 100644
+--- a/src/shared/seccomp-util.h
++++ b/src/shared/seccomp-util.h
+@@ -79,6 +79,13 @@ int seccomp_memory_deny_write_execute(void);
+ #define SECCOMP_RESTRICT_ADDRESS_FAMILIES_BROKEN 0
+ #endif
+ 
++/* mmap() blocking is only available on some archs for now */
++#if defined(__x86_64__) || defined(__i386__)
++#define SECCOMP_MEMORY_DENY_WRITE_EXECUTE_BROKEN 0
++#else
++#define SECCOMP_MEMORY_DENY_WRITE_EXECUTE_BROKEN 1
++#endif
++
+ extern const uint32_t seccomp_local_archs[];
+ 
+ #define SECCOMP_FOREACH_LOCAL_ARCH(arch) \
+diff --git a/src/test/test-seccomp.c b/src/test/test-seccomp.c
+index 54e7947..3659238 100644
+--- a/src/test/test-seccomp.c
++++ b/src/test/test-seccomp.c
+@@ -384,11 +384,21 @@ static void test_memory_deny_write_execute(void) {
+                 assert_se(p != MAP_FAILED);
+                 assert_se(munmap(p, page_size()) >= 0);
+ 
+-                seccomp_memory_deny_write_execute();
++                p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
++                assert_se(p != MAP_FAILED);
++                assert_se(munmap(p, page_size()) >= 0);
+ 
++                assert_se(seccomp_memory_deny_write_execute() >= 0);
++
++#if SECCOMP_MEMORY_DENY_WRITE_EXECUTE_BROKEN
++                p = mmap(NULL, page_size(), PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
++                assert_se(p != MAP_FAILED);
++                assert_se(munmap(p, page_size()) >= 0);
++#else
+                 p = mmap(NULL, page_size(), PROT_WRITE|PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+                 assert_se(p == MAP_FAILED);
+                 assert_se(errno == EPERM);
++#endif
+ 
+                 p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+                 assert_se(p != MAP_FAILED);

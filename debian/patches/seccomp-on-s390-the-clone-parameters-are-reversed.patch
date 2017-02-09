@@ -1,0 +1,163 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 8 Feb 2017 16:21:11 +0100
+Subject: seccomp: on s390 the clone() parameters are reversed
+
+Add a bit of code that tries to get the right parameter order in place
+for some of the better known architectures, and skips
+restrict_namespaces for other archs.
+
+This also bypasses the test on archs where we don't know the right
+order.
+
+In this case I didn't bother with testing the case where no filter is
+applied, since that is hopefully just an issue for now, as there's
+nothing stopping us from supporting more archs, we just need to know
+which order is right.
+
+Fixes: #5241
+(cherry picked from commit ae9d60ce4eb116eefb7c4102074ae1cc13fd3216)
+---
+ man/systemd.exec.xml      |  5 ++++-
+ src/basic/raw-clone.h     |  4 ++--
+ src/shared/seccomp-util.c | 45 +++++++++++++++++++++++++++++++++++++++------
+ src/shared/seccomp-util.h |  7 +++++++
+ src/test/test-seccomp.c   |  3 +++
+ 5 files changed, 55 insertions(+), 9 deletions(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index 3b42b55..ea219ce 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -1466,7 +1466,10 @@
+         <citerefentry><refentrytitle>setns</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls, taking
+         the specified flags parameters into account. Note that — if this option is used — in addition to restricting
+         creation and switching of the specified types of namespaces (or all of them, if true) access to the
+-        <function>setns()</function> system call with a zero flags parameter is prohibited.</para></listitem>
++        <function>setns()</function> system call with a zero flags parameter is prohibited.  This setting is only
++        supported on x86, x86-64, s390 and s390x, and enforces no restrictions on other architectures. If running in user
++        mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
++        <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname> is implied.  </para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+diff --git a/src/basic/raw-clone.h b/src/basic/raw-clone.h
+index d473828..c6e531a 100644
+--- a/src/basic/raw-clone.h
++++ b/src/basic/raw-clone.h
+@@ -47,8 +47,8 @@
+ static inline int raw_clone(unsigned long flags) {
+         assert((flags & (CLONE_VM|CLONE_PARENT_SETTID|CLONE_CHILD_SETTID|
+                          CLONE_CHILD_CLEARTID|CLONE_SETTLS)) == 0);
+-#if defined(__s390__) || defined(__CRIS__)
+-        /* On s390 and cris the order of the first and second arguments
++#if defined(__s390x__) || defined(__s390__) || defined(__CRIS__)
++        /* On s390/s390x and cris the order of the first and second arguments
+          * of the raw clone() system call is reversed. */
+         return (int) syscall(__NR_clone, NULL, flags);
+ #elif defined(__sparc__) && defined(__arch64__)
+diff --git a/src/shared/seccomp-util.c b/src/shared/seccomp-util.c
+index 64c21c8..aa3fe7a 100644
+--- a/src/shared/seccomp-util.c
++++ b/src/shared/seccomp-util.c
+@@ -660,10 +660,35 @@ int seccomp_restrict_namespaces(unsigned long retain) {
+ 
+         SECCOMP_FOREACH_LOCAL_ARCH(arch) {
+                 _cleanup_(seccomp_releasep) scmp_filter_ctx seccomp = NULL;
++                int clone_reversed_order = -1;
+                 unsigned i;
+ 
+                 log_debug("Operating on architecture: %s", seccomp_arch_to_string(arch));
+ 
++                switch (arch) {
++
++                case SCMP_ARCH_X86_64:
++                case SCMP_ARCH_X86:
++                case SCMP_ARCH_X32:
++                        clone_reversed_order = 0;
++                        break;
++
++                case SCMP_ARCH_S390:
++                case SCMP_ARCH_S390X:
++                        /* On s390/s390x the first two parameters to clone are switched */
++                        clone_reversed_order = 1;
++                        break;
++
++                /* Please add more definitions here, if you port systemd to other architectures! */
++
++#if !defined(__i386__) && !defined(__x86_64__) && !defined(__s390__) && !defined(__s390x__)
++#warning "Consider adding the right clone() syscall definitions here!"
++#endif
++                }
++
++                if (clone_reversed_order < 0) /* we don't know the right order, let's ignore this arch... */
++                        continue;
++
+                 r = seccomp_init_for_arch(&seccomp, arch, SCMP_ACT_ALLOW);
+                 if (r < 0)
+                         return r;
+@@ -712,12 +737,20 @@ int seccomp_restrict_namespaces(unsigned long retain) {
+                                 break;
+                         }
+ 
+-                        r = seccomp_rule_add_exact(
+-                                        seccomp,
+-                                        SCMP_ACT_ERRNO(EPERM),
+-                                        SCMP_SYS(clone),
+-                                        1,
+-                                        SCMP_A0(SCMP_CMP_MASKED_EQ, f, f));
++                        if (clone_reversed_order == 0)
++                                r = seccomp_rule_add_exact(
++                                                seccomp,
++                                                SCMP_ACT_ERRNO(EPERM),
++                                                SCMP_SYS(clone),
++                                                1,
++                                                SCMP_A0(SCMP_CMP_MASKED_EQ, f, f));
++                        else
++                                r = seccomp_rule_add_exact(
++                                                seccomp,
++                                                SCMP_ACT_ERRNO(EPERM),
++                                                SCMP_SYS(clone),
++                                                1,
++                                                SCMP_A1(SCMP_CMP_MASKED_EQ, f, f));
+                         if (r < 0) {
+                                 log_debug_errno(r, "Failed to add clone() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                                 break;
+diff --git a/src/shared/seccomp-util.h b/src/shared/seccomp-util.h
+index e89e0d9..0a4ab9d 100644
+--- a/src/shared/seccomp-util.h
++++ b/src/shared/seccomp-util.h
+@@ -86,6 +86,13 @@ int seccomp_memory_deny_write_execute(void);
+ #define SECCOMP_MEMORY_DENY_WRITE_EXECUTE_BROKEN 1
+ #endif
+ 
++/* we don't know the right order of the clone() parameters except for these archs, for now */
++#if defined(__x86_64__) || defined(__i386__) || defined(__s390x__) || defined(__s390__)
++#define SECCOMP_RESTRICT_NAMESPACES_BROKEN 0
++#else
++#define SECCOMP_RESTRICT_NAMESPACES_BROKEN 1
++#endif
++
+ extern const uint32_t seccomp_local_archs[];
+ 
+ #define SECCOMP_FOREACH_LOCAL_ARCH(arch) \
+diff --git a/src/test/test-seccomp.c b/src/test/test-seccomp.c
+index 3659238..34a1275 100644
+--- a/src/test/test-seccomp.c
++++ b/src/test/test-seccomp.c
+@@ -158,6 +158,8 @@ static void test_restrict_namespace(void) {
+         assert_se(streq(s, "cgroup ipc net mnt pid user uts"));
+         assert_se(namespace_flag_from_string_many(s, &ul) == 0 && ul == NAMESPACE_FLAGS_ALL);
+ 
++#if SECCOMP_RESTRICT_NAMESPACES_BROKEN == 0
++
+         if (!is_seccomp_available())
+                 return;
+         if (geteuid() != 0)
+@@ -216,6 +218,7 @@ static void test_restrict_namespace(void) {
+         }
+ 
+         assert_se(wait_for_terminate_and_warn("nsseccomp", pid, true) == EXIT_SUCCESS);
++#endif
+ }
+ 
+ static void test_protect_sysctl(void) {

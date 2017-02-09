@@ -28,6 +28,11 @@ device-Avoid-calling-unit_free-NULL-in-device-setup-logic.patch
 core-make-unit_free-accept-NULL-pointers.patch
 journal-make-sure-to-initially-populate-the-space-info-ca.patch
 journald-don-t-flush-to-var-log-journal-before-we-get-ask.patch
+seccomp-don-t-ever-try-to-add-an-ABI-before-removing-the-.patch
+seccomp-RestrictAddressFamilies-is-not-supported-on-i386-.patch
+man-Document-that-RestrictAddressFamilies-doesn-t-work-on.patch
+seccomp-MemoryDenyWriteExecute-should-affect-both-mmap-an.patch
+seccomp-on-s390-the-clone-parameters-are-reversed.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
