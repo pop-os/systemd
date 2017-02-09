@@ -36,6 +36,8 @@ seccomp-on-s390-the-clone-parameters-are-reversed.patch
 libudev-util-change-util_replace_whitespace-to-return-num.patch
 udev-event-add-replace_whitespace-param-to-udev_event_app.patch
 udev-rules-perform-whitespace-replacement-for-symlink-sub.patch
+core-use-a-memfd-for-serialization.patch
+manager-refuse-reloading-reexecing-when-run-is-overly-ful.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

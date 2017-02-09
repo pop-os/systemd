@@ -1,0 +1,198 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 3 Feb 2017 12:12:54 +0100
+Subject: manager: refuse reloading/reexecing when /run is overly full
+
+Let's add an extra safety check: before entering a reload/reexec, let's
+verify that there's enough room in /run for it.
+
+Fixes: #5016
+(cherry picked from commit ae57dad3f92d116c66c4ca0223b7e07b44041436)
+---
+ src/core/dbus-manager.c                   | 63 +++++++++++++++++++++++++++++++
+ src/core/dbus-manager.h                   |  2 +
+ src/core/manager.c                        |  8 +++-
+ src/libsystemd/sd-bus/bus-common-errors.c |  1 +
+ src/libsystemd/sd-bus/bus-common-errors.h |  1 +
+ 5 files changed, 73 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index d7d3d3c..73cba4b 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -19,6 +19,7 @@
+ 
+ #include <errno.h>
+ #include <sys/prctl.h>
++#include <sys/statvfs.h>
+ #include <unistd.h>
+ 
+ #include "alloc-util.h"
+@@ -37,6 +38,7 @@
+ #include "formats-util.h"
+ #include "install.h"
+ #include "log.h"
++#include "parse-util.h"
+ #include "path-util.h"
+ #include "selinux-access.h"
+ #include "stat-util.h"
+@@ -47,6 +49,10 @@
+ #include "virt.h"
+ #include "watchdog.h"
+ 
++/* Require 16MiB free in /run/systemd for reloading/reexecing. After all we need to serialize our state there, and if
++ * we can't we'll fail badly. */
++#define RELOAD_DISK_SPACE_MIN (UINT64_C(16) * UINT64_C(1024) * UINT64_C(1024))
++
+ static UnitFileFlags unit_file_bools_to_flags(bool runtime, bool force) {
+         return (runtime ? UNIT_FILE_RUNTIME : 0) |
+                (force   ? UNIT_FILE_FORCE   : 0);
+@@ -1311,6 +1317,40 @@ static int method_refuse_snapshot(sd_bus_message *message, void *userdata, sd_bu
+         return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Support for snapshots has been removed.");
+ }
+ 
++static int verify_run_space(const char *message, sd_bus_error *error) {
++        struct statvfs svfs;
++        uint64_t available;
++
++        if (statvfs("/run/systemd", &svfs) < 0)
++                return sd_bus_error_set_errnof(error, errno, "Failed to statvfs(/run/systemd): %m");
++
++        available = (uint64_t) svfs.f_bfree * (uint64_t) svfs.f_bsize;
++
++        if (available < RELOAD_DISK_SPACE_MIN) {
++                char fb_available[FORMAT_BYTES_MAX], fb_need[FORMAT_BYTES_MAX];
++                return sd_bus_error_setf(error,
++                                         BUS_ERROR_DISK_FULL,
++                                         "%s, not enough space available on /run/systemd. "
++                                         "Currently, %s are free, but a safety buffer of %s is enforced.",
++                                         message,
++                                         format_bytes(fb_available, sizeof(fb_available), available),
++                                         format_bytes(fb_need, sizeof(fb_need), RELOAD_DISK_SPACE_MIN));
++        }
++
++        return 0;
++}
++
++int verify_run_space_and_log(const char *message) {
++        sd_bus_error error = SD_BUS_ERROR_NULL;
++        int r;
++
++        r = verify_run_space(message, &error);
++        if (r < 0)
++                log_error_errno(r, "%s", bus_error_message(&error, r));
++
++        return r;
++}
++
+ static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+         Manager *m = userdata;
+         int r;
+@@ -1318,6 +1358,10 @@ static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *
+         assert(message);
+         assert(m);
+ 
++        r = verify_run_space("Refusing to reload", error);
++        if (r < 0)
++                return r;
++
+         r = mac_selinux_access_check(message, "reload", error);
+         if (r < 0)
+                 return r;
+@@ -1350,6 +1394,10 @@ static int method_reexecute(sd_bus_message *message, void *userdata, sd_bus_erro
+         assert(message);
+         assert(m);
+ 
++        r = verify_run_space("Refusing to reexecute", error);
++        if (r < 0)
++                return r;
++
+         r = mac_selinux_access_check(message, "reload", error);
+         if (r < 0)
+                 return r;
+@@ -1468,11 +1516,26 @@ static int method_switch_root(sd_bus_message *message, void *userdata, sd_bus_er
+         char *ri = NULL, *rt = NULL;
+         const char *root, *init;
+         Manager *m = userdata;
++        struct statvfs svfs;
++        uint64_t available;
+         int r;
+ 
+         assert(message);
+         assert(m);
+ 
++        if (statvfs("/run/systemd", &svfs) < 0)
++                return sd_bus_error_set_errnof(error, errno, "Failed to statvfs(/run/systemd): %m");
++
++        available = (uint64_t) svfs.f_bfree * (uint64_t) svfs.f_bsize;
++
++        if (available < RELOAD_DISK_SPACE_MIN) {
++                char fb_available[FORMAT_BYTES_MAX], fb_need[FORMAT_BYTES_MAX];
++                log_warning("Dangerously low amount of free space on /run/systemd, root switching operation might not complete successfuly. "
++                            "Currently, %s are free, but %s are suggested. Proceeding anyway.",
++                            format_bytes(fb_available, sizeof(fb_available), available),
++                            format_bytes(fb_need, sizeof(fb_need), RELOAD_DISK_SPACE_MIN));
++        }
++
+         r = mac_selinux_access_check(message, "reboot", error);
+         if (r < 0)
+                 return r;
+diff --git a/src/core/dbus-manager.h b/src/core/dbus-manager.h
+index 36a2e94..9f3222d 100644
+--- a/src/core/dbus-manager.h
++++ b/src/core/dbus-manager.h
+@@ -26,3 +26,5 @@ extern const sd_bus_vtable bus_manager_vtable[];
+ void bus_manager_send_finished(Manager *m, usec_t firmware_usec, usec_t loader_usec, usec_t kernel_usec, usec_t initrd_usec, usec_t userspace_usec, usec_t total_usec);
+ void bus_manager_send_reloading(Manager *m, bool active);
+ void bus_manager_send_change_signal(Manager *m);
++
++int verify_run_space_and_log(const char *message);
+diff --git a/src/core/manager.c b/src/core/manager.c
+index af401bd..190019c 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1964,7 +1964,9 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t
+                         if (MANAGER_IS_SYSTEM(m)) {
+                                 /* This is for compatibility with the
+                                  * original sysvinit */
+-                                m->exit_code = MANAGER_REEXECUTE;
++                                r = verify_run_space_and_log("Refusing to reexecute");
++                                if (r >= 0)
++                                        m->exit_code = MANAGER_REEXECUTE;
+                                 break;
+                         }
+ 
+@@ -2041,7 +2043,9 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t
+                 }
+ 
+                 case SIGHUP:
+-                        m->exit_code = MANAGER_RELOAD;
++                        r = verify_run_space_and_log("Refusing to reload");
++                        if (r >= 0)
++                                m->exit_code = MANAGER_RELOAD;
+                         break;
+ 
+                 default: {
+diff --git a/src/libsystemd/sd-bus/bus-common-errors.c b/src/libsystemd/sd-bus/bus-common-errors.c
+index d2a826b..1bba746 100644
+--- a/src/libsystemd/sd-bus/bus-common-errors.c
++++ b/src/libsystemd/sd-bus/bus-common-errors.c
+@@ -47,6 +47,7 @@ BUS_ERROR_MAP_ELF_REGISTER const sd_bus_error_map bus_common_errors[] = {
+         SD_BUS_ERROR_MAP(BUS_ERROR_SCOPE_NOT_RUNNING,            EHOSTDOWN),
+         SD_BUS_ERROR_MAP(BUS_ERROR_NO_SUCH_DYNAMIC_USER,         ESRCH),
+         SD_BUS_ERROR_MAP(BUS_ERROR_NOT_REFERENCED,               EUNATCH),
++        SD_BUS_ERROR_MAP(BUS_ERROR_DISK_FULL,                    ENOSPC),
+ 
+         SD_BUS_ERROR_MAP(BUS_ERROR_NO_SUCH_MACHINE,              ENXIO),
+         SD_BUS_ERROR_MAP(BUS_ERROR_NO_SUCH_IMAGE,                ENOENT),
+diff --git a/src/libsystemd/sd-bus/bus-common-errors.h b/src/libsystemd/sd-bus/bus-common-errors.h
+index 525b79f..4523be0 100644
+--- a/src/libsystemd/sd-bus/bus-common-errors.h
++++ b/src/libsystemd/sd-bus/bus-common-errors.h
+@@ -43,6 +43,7 @@
+ #define BUS_ERROR_SCOPE_NOT_RUNNING "org.freedesktop.systemd1.ScopeNotRunning"
+ #define BUS_ERROR_NO_SUCH_DYNAMIC_USER "org.freedesktop.systemd1.NoSuchDynamicUser"
+ #define BUS_ERROR_NOT_REFERENCED "org.freedesktop.systemd1.NotReferenced"
++#define BUS_ERROR_DISK_FULL "org.freedesktop.systemd1.DiskFull"
+ 
+ #define BUS_ERROR_NO_SUCH_MACHINE "org.freedesktop.machine1.NoSuchMachine"
+ #define BUS_ERROR_NO_SUCH_IMAGE "org.freedesktop.machine1.NoSuchImage"

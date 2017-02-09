@@ -1,0 +1,47 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 3 Feb 2017 16:30:00 +0100
+Subject: core: use a memfd for serialization
+
+If we can, use a memfd for serializing state during a daemon reload or
+reexec. Fall back to a file in /run/systemd or /tmp only if memfds are
+not available.
+
+See: #5016
+(cherry picked from commit d53333d4b106423d4c281ad15aefe00e17a57893)
+---
+ src/core/manager.c | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 61d3c48..af401bd 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -2409,18 +2409,22 @@ void manager_send_unit_plymouth(Manager *m, Unit *u) {
+ }
+ 
+ int manager_open_serialization(Manager *m, FILE **_f) {
+-        const char *path;
+         int fd = -1;
+         FILE *f;
+ 
+         assert(_f);
+ 
+-        path = MANAGER_IS_SYSTEM(m) ? "/run/systemd" : "/tmp";
+-        fd = open_tmpfile_unlinkable(path, O_RDWR|O_CLOEXEC);
+-        if (fd < 0)
+-                return -errno;
++        fd = memfd_create("systemd-serialization", MFD_CLOEXEC);
++        if (fd < 0) {
++                const char *path;
+ 
+-        log_debug("Serializing state to %s", path);
++                path = MANAGER_IS_SYSTEM(m) ? "/run/systemd" : "/tmp";
++                fd = open_tmpfile_unlinkable(path, O_RDWR|O_CLOEXEC);
++                if (fd < 0)
++                        return -errno;
++                log_debug("Serializing state to %s.", path);
++        } else
++                log_debug("Serializing state to memfd.");
+ 
+         f = fdopen(fd, "w+");
+         if (!f) {
