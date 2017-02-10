@@ -1,3 +1,23 @@
+systemd (232-17) unstable; urgency=medium
+
+  * Add libcap2-bin build dependency for tests. This will make
+    test_exec_capabilityboundingset() actually run. (Closes: #854394)
+  * Add iproute2 build dependency for tests. This will make
+    test_exec_privatenetwork() actually run; it skips if "ip" is not present.
+    (Closes: #854396)
+  * autopkgtest: Run all upstream unit tests as root.
+    Ship all upstream unit tests in libsystemd-dev, and run them all as root
+    in autopkgtest. (Closes: #854392) This also fixes the FTBFS on non-seccomp
+    architectures.
+  * systemd-resolved.service.d/resolvconf.conf: Allow writing to
+    /run/resolvconf. Upstream PR #5283 will introduce permission restrictions
+    for systemd-resolved.service, including the lockdown to writing
+    /run/systemd/. This will then cause the resolvconf call in our drop-in to
+    fail as that needs to write to /run/resolvconf/. Add this to
+    ReadWritePaths=. (This is a no-op with the current unrestricted unit).
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 10 Feb 2017 11:52:46 +0100
+
 systemd (232-16) unstable; urgency=medium
 
   [ Martin Pitt ]
