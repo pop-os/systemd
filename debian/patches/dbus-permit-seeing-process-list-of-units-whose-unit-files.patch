@@ -1,0 +1,45 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 9 Feb 2017 21:01:28 +0100
+Subject: dbus: permit seeing process list of units whose unit files are
+ missing
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Previously, we'd refuse the GetUnitProcesses() bus call if the unit file
+couldn't be loaded. Which is wrong, as admins should be able to inspect
+services whose unit files was deleted. Change this logic, so that we
+permit introspecting the processes of any unit that is loaded,
+regardless if it has a unit file or not.
+
+(Note that we won't load unit files in GetUnitProcess(), but only
+operate on already loaded ones. That's because only loaded units can
+have processes — as that's how our GC logic works — and hence loading
+the unit just for the process tree is pointless, as it would be empty).
+
+See: #4995
+---
+ src/core/dbus-manager.c | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index 73cba4b..87bfa39 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -847,13 +847,9 @@ static int method_get_unit_processes(sd_bus_message *message, void *userdata, sd
+         if (r < 0)
+                 return r;
+ 
+-        r = manager_load_unit(m, name, NULL, error, &u);
+-        if (r < 0)
+-                return r;
+-
+-        r = bus_unit_check_load_state(u, error);
+-        if (r < 0)
+-                return r;
++        u = manager_get_unit(m, name);
++        if (!u)
++                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_UNIT, "Unit %s not loaded.", name);
+ 
+         return bus_unit_method_get_processes(message, u, error);
+ }
