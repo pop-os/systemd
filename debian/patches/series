@@ -41,6 +41,9 @@ udev-rules-perform-whitespace-replacement-for-symlink-sub.patch
 core-use-a-memfd-for-serialization.patch
 manager-refuse-reloading-reexecing-when-run-is-overly-ful.patch
 dbus-permit-seeing-process-list-of-units-whose-unit-files.patch
+install-never-hit-assert-when-we-can-t-figure-out-where-t.patch
+path-lookup-try-harder-acquiring-them-HOME-of-a-user.patch
+path-lookup-if-HOME-can-be-determined-but-XDG_RUNTIME_DIR.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
