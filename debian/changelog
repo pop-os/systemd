@@ -1,3 +1,20 @@
+systemd (232-18) unstable; urgency=medium
+
+  * udev autopkgtest: Adjust to script-based test /sys creation.
+    PR #5250 changes from the static sys.tar.xz to creating the test /sys
+    directory with a script. Get along with both cases until 233 gets
+    released and packaged.
+  * systemd-resolved.service.d/resolvconf.conf: Don't fail if resolvconf is
+    not installed. ReadWritePaths= fails by default if the referenced
+    directory does not exist. This happens if resolvconf is not installed, so
+    use '-' to ignore the absence. (Closes: #854814)
+  * Fix two more seccomp issues.
+  * Permit seeing process list of units whose unit files are missing.
+  * Fix systemctl --user enable/disable without $XDG_RUNTIME_DIR being set.
+    (Closes: #855050)
+
+ -- Martin Pitt <mpitt@debian.org>  Mon, 13 Feb 2017 17:36:12 +0100
+
 systemd (232-17) unstable; urgency=medium
 
   * Add libcap2-bin build dependency for tests. This will make
