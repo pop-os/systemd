@@ -33,6 +33,8 @@ seccomp-RestrictAddressFamilies-is-not-supported-on-i386-.patch
 man-Document-that-RestrictAddressFamilies-doesn-t-work-on.patch
 seccomp-MemoryDenyWriteExecute-should-affect-both-mmap-an.patch
 seccomp-on-s390-the-clone-parameters-are-reversed.patch
+seccomp-disable-RestrictAddressFamilies-for-the-ABI-we-sh.patch
+seccomp-order-seccomp-ABI-list-so-that-our-native-ABI-com.patch
 libudev-util-change-util_replace_whitespace-to-return-num.patch
 udev-event-add-replace_whitespace-param-to-udev_event_app.patch
 udev-rules-perform-whitespace-replacement-for-symlink-sub.patch
