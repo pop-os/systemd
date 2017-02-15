@@ -1,0 +1,61 @@
+From: afrantzis <alexandros.frantzis@canonical.com>
+Date: Fri, 3 Feb 2017 03:39:26 +0200
+Subject: logind: Don't try to emit a change signal for the 'Sessions'
+ property (#5211)
+
+The 'Sessions' property for both org.freedesktop.login1.User and
+org.freedesktop.login1.Seat is marked as EmitsChangedSignal(false).
+Trying to emit a change signal that includes the 'Sessions' property
+leads to the signal not being sent at all.
+
+Fixes #5210.
+---
+ src/login/logind-seat.c    | 2 --
+ src/login/logind-session.c | 9 +++------
+ 2 files changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/src/login/logind-seat.c b/src/login/logind-seat.c
+index ecc7bd2..a07ac34 100644
+--- a/src/login/logind-seat.c
++++ b/src/login/logind-seat.c
+@@ -541,8 +541,6 @@ int seat_attach_session(Seat *s, Session *session) {
+         LIST_PREPEND(sessions_by_seat, s->sessions, session);
+         seat_assign_position(s, session);
+ 
+-        seat_send_changed(s, "Sessions", NULL);
+-
+         /* On seats with VTs, the VT logic defines which session is active. On
+          * seats without VTs, we automatically activate new sessions. */
+         if (!seat_has_vts(s))
+diff --git a/src/login/logind-session.c b/src/login/logind-session.c
+index e83c37a..3e2d36c 100644
+--- a/src/login/logind-session.c
++++ b/src/login/logind-session.c
+@@ -586,12 +586,10 @@ int session_start(Session *s) {
+ 
+         /* Send signals */
+         session_send_signal(s, true);
+-        user_send_changed(s->user, "Sessions", "Display", NULL);
++        user_send_changed(s->user, "Display", NULL);
+         if (s->seat) {
+                 if (s->seat->active == s)
+-                        seat_send_changed(s->seat, "Sessions", "ActiveSession", NULL);
+-                else
+-                        seat_send_changed(s->seat, "Sessions", NULL);
++                        seat_send_changed(s->seat, "ActiveSession", NULL);
+         }
+ 
+         return 0;
+@@ -698,11 +696,10 @@ int session_finalize(Session *s) {
+                         seat_set_active(s->seat, NULL);
+ 
+                 seat_save(s->seat);
+-                seat_send_changed(s->seat, "Sessions", NULL);
+         }
+ 
+         user_save(s->user);
+-        user_send_changed(s->user, "Sessions", "Display", NULL);
++        user_send_changed(s->user, "Display", NULL);
+ 
+         return 0;
+ }
