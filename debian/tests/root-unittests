@@ -8,6 +8,7 @@ test-engine
 test-execute
 test-path
 test-sched-prio
+test-journal-importer
 "
 
 # No items in catalog.
