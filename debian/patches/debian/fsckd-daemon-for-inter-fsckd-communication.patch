@@ -338,7 +338,7 @@ index f33c53f..4b8ef2e 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..1b12042
+index 0000000..d48e53a
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,690 @@
