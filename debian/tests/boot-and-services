@@ -302,6 +302,8 @@ AppArmorProfile=violator-test
         self.assertNotIn('root:x', out, 'unit can read /etc/passwd')
 
 
+@unittest.skipIf(os.path.exists('/sys/fs/cgroup/cgroup.controllers'),
+                 'test needs to be reworked on unified cgroup hierarchy')
 class CgroupsTest(unittest.TestCase):
     '''Check cgroup setup'''
 
