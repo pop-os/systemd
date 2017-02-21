@@ -32,6 +32,10 @@ wait_suspend() {
 }
 
 test_suspend_on_lid() {
+    if systemd-detect-virt --quiet --container; then
+        echo " * Skipping suspend test in container"
+        return
+    fi
     if ! grep -q mem /sys/power/state; then
         echo " * suspend not supported on this testbed, skipping"
         return
@@ -124,6 +128,10 @@ test_acl() {
     # ACL tests
     if ! echo "$LOGINCTL_OUT" | grep -q "seat0"; then
         echo " * Skipping ACL tests, as there is no seat"
+        return
+    fi
+    if systemd-detect-virt --quiet --container; then
+        echo " * Skipping ACL tests in container"
         return
     fi
 

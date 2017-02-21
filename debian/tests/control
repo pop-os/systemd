@@ -11,7 +11,7 @@ Depends: systemd,
   acl,
   locales,
   evemu-tools,
-Restrictions: needs-root, isolation-machine
+Restrictions: needs-root, isolation-container
 
 Tests: unit-config
 Depends: systemd,
