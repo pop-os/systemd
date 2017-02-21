@@ -153,7 +153,7 @@ Depends: libsystemd-dev,
   policykit-1,
   lightdm,
   xserver-xorg-video-dummy,
-Restrictions: needs-recommends, needs-root, isolation-machine, allow-stderr, breaks-testbed
+Restrictions: needs-recommends, needs-root, isolation-container, allow-stderr, breaks-testbed
 
 # NOUPSTREAM: Do not run these tests for upstream builds
 
