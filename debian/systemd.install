@@ -29,6 +29,7 @@ usr/bin/systemd-run
 usr/bin/systemd-path
 usr/bin/systemd-socket-activate
 usr/bin/systemd-mount
+usr/bin/systemd-umount
 usr/bin/kernel-install
 usr/bin/bootctl
 usr/bin/busctl
@@ -49,6 +50,7 @@ usr/share/polkit-1/
 usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
 usr/lib/binfmt.d/
+usr/lib/environment.d/
 usr/lib/modules-load.d/
 usr/lib/sysctl.d/
 # FIXME: ship this once we generate a proper Debianized basic.conf
