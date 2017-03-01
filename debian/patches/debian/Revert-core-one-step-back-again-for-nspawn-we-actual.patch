@@ -14,10 +14,10 @@ Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
  1 file changed, 1 insertion(+), 17 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 0ab6d92..95c900c 100644
+index f76b6c3..f12ee03 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -3836,23 +3836,7 @@ int unit_kill_context(
+@@ -3889,23 +3889,7 @@ int unit_kill_context(
  
                  } else if (r > 0) {
  
@@ -33,10 +33,10 @@ index 0ab6d92..95c900c 100644
 -                         * should not exist in non-delegated units. On
 -                         * the unified hierarchy that's different,
 -                         * there we get proper events. Hence rely on
--                         * them.*/
+-                         * them. */
 -
--                        if  (cg_unified(SYSTEMD_CGROUP_CONTROLLER) > 0 ||
--                             (detect_container() == 0 && !unit_cgroup_delegate(u)))
+-                        if (cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER) > 0 ||
+-                            (detect_container() == 0 && !unit_cgroup_delegate(u)))
 -                                wait_for_exit = true;
 +                        wait_for_exit = true;
  

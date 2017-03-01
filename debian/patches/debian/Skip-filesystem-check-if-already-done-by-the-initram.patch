@@ -15,10 +15,10 @@ Closes: #810748
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index f6a912a..b58e61a 100644
+index 2677a3f..64f7197 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
-@@ -252,6 +252,7 @@ static int add_mount(
+@@ -305,6 +305,7 @@ static int add_mount(
                  *filtered = NULL;
          _cleanup_fclose_ FILE *f = NULL;
          int r;
@@ -26,17 +26,17 @@ index f6a912a..b58e61a 100644
  
          assert(what);
          assert(where);
-@@ -318,9 +319,13 @@ static int add_mount(
+@@ -377,9 +378,13 @@ static int add_mount(
          }
  
          if (passno != 0) {
--                r = generator_write_fsck_deps(f, arg_dest, what, where, fstype);
+-                r = generator_write_fsck_deps(f, dest, what, where, fstype);
 -                if (r < 0)
 -                        return r;
 +                if (streq(where, "/usr") && stat("/run/initramfs/fsck-usr", &sb) == 0)
 +                        ; /* skip /usr fsck if it has already been checked in the initramfs */
 +                else {
-+                        r = generator_write_fsck_deps(f, arg_dest, what, where, fstype);
++                        r = generator_write_fsck_deps(f, dest, what, where, fstype);
 +                        if (r < 0)
 +                                return r;
 +                }

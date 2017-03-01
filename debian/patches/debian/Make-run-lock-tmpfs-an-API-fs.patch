@@ -16,7 +16,7 @@ Closes: #751392
  2 files changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/core/mount-setup.c b/src/core/mount-setup.c
-index ca63a93..28b8f69 100644
+index 7295efb..39cabcd 100644
 --- a/src/core/mount-setup.c
 +++ b/src/core/mount-setup.c
 @@ -95,6 +95,8 @@ static const MountPoint mount_table[] = {
@@ -26,7 +26,7 @@ index ca63a93..28b8f69 100644
 +        { "tmpfs",       "/run/lock",                 "tmpfs",      "mode=1777,size=5242880",  MS_NOSUID|MS_NODEV|MS_NOEXEC,
 +          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
          { "cgroup",      "/sys/fs/cgroup",            "cgroup2",    NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
-           cg_is_unified_wanted, MNT_FATAL|MNT_IN_CONTAINER },
+           cg_is_unified_wanted, MNT_IN_CONTAINER },
          { "tmpfs",       "/sys/fs/cgroup",            "tmpfs",      "mode=755",                MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
 diff --git a/tmpfiles.d/legacy.conf b/tmpfiles.d/legacy.conf
 index 62e2ae0..ea5e735 100644

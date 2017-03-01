@@ -16,6 +16,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_230@LIBSYSTEMD_230 230
  LIBSYSTEMD_231@LIBSYSTEMD_231 231
  LIBSYSTEMD_232@LIBSYSTEMD_232 231-6~
+ LIBSYSTEMD_233@LIBSYSTEMD_233 233
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -322,12 +323,14 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_id128_get_boot@LIBSYSTEMD_209 0
  sd_id128_get_invocation@LIBSYSTEMD_232 232
  sd_id128_get_machine@LIBSYSTEMD_209 0
+ sd_id128_get_machine_app_specific@LIBSYSTEMD_233 233
  sd_id128_randomize@LIBSYSTEMD_209 0
  sd_id128_to_string@LIBSYSTEMD_209 0
  sd_is_fifo@LIBSYSTEMD_209 0
  sd_is_mq@LIBSYSTEMD_209 0
  sd_is_socket@LIBSYSTEMD_209 0
  sd_is_socket_inet@LIBSYSTEMD_209 0
+ sd_is_socket_sockaddr@LIBSYSTEMD_233 233
  sd_is_socket_unix@LIBSYSTEMD_209 0
  sd_is_special@LIBSYSTEMD_209 0
  sd_journal_add_conjunction@LIBSYSTEMD_209 0
