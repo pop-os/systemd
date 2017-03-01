@@ -48,6 +48,7 @@ resolved-follow-CNAMES-for-DNS-stub-replies.patch
 logind-Don-t-try-to-emit-a-change-signal-for-the-Sessions.patch
 resolved-fix-NSEC-proofs-for-missing-TLDs.patch
 automount-if-an-automount-unit-is-masked-don-t-react-to-a.patch
+resolved-add-the-new-KSK-to-the-built-in-resolved-trust-a.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
