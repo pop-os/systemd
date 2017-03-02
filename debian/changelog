@@ -1,3 +1,24 @@
+systemd (233-1) UNRELEASED; urgency=medium
+
+  * New upstream release 233:
+    - udev: Remove /run/udev/control on stop to avoid sendsigs to kill
+      udevd. (Closes: #791944)
+    - nspawn: Handle container directory symlinks. (Closes: #805785)
+    - Fix mount units to not become "active" when NFS mounts time out.
+      (Closes: #835810)
+    - hwdb: Rework path/priority comparison when loading files from /etc/
+      vs. /lib. (Closes: #845442)
+    - machinectl: Fix "list" command when failing to determine OS version.
+      (Closes: #849316)
+    - Support tilegx architecture. (Closes: #856306)
+    - systemd-sleep(8): Point out inhibitor interface as better alternative
+      for suspend integration. (Closes: #758279)
+    - journalctl: Improve error message wording when specifying boot
+      offset with ephemeral journal. (Closes: #839291)
+  * Install new systemd-umount and /usr/lib/environment.d/
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 02 Mar 2017 11:21:22 +0100
+
 systemd (232-19) unstable; urgency=medium
 
   [ Martin Pitt ]
