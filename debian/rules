@@ -88,7 +88,6 @@ endif
 SPLIT_USR_PATHS = \
 	QUOTAON=/sbin/quotaon \
 	QUOTACHECK=/sbin/quotacheck \
-	SETCAP=/sbin/setcap \
 	KILL=/bin/kill \
 	KMOD=/bin/kmod \
 	KEXEC=/sbin/kexec \
