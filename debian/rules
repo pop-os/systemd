@@ -85,12 +85,6 @@ ifneq (, $(filter noudeb, $(DEB_BUILD_OPTIONS)))
 export DEB_BUILD_PROFILES += noudeb
 endif
 
-# The gold linker is currently broken on mips*. See #851736.
-# Switch to bfd as a temporary workaround.
-ifneq ($(filter $(DEB_BUILD_ARCH), mips mipsel mips64el),)
-export DEB_LDFLAGS_MAINT_APPEND = -Wl,-fuse-ld=bfd
-endif
-
 SPLIT_USR_PATHS = \
 	QUOTAON=/sbin/quotaon \
 	QUOTACHECK=/sbin/quotacheck \
