@@ -33,7 +33,9 @@
 #ifdef HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
+#include "stat-util.h"
 #include "test-helper.h"
+#include "tests.h"
 #include "unit.h"
 #include "util.h"
 #include "virt.h"
@@ -144,11 +146,11 @@ static void test_exec_privatetmp(Manager *m) {
 
 static void test_exec_privatedevices(Manager *m) {
         if (detect_container() > 0) {
-                log_notice("testing in container, skipping private device tests");
+                log_notice("testing in container, skipping %s", __func__);
                 return;
         }
         if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping private device tests");
+                log_notice("testing without inaccessible, skipping %s", __func__);
                 return;
         }
 
@@ -157,12 +159,22 @@ static void test_exec_privatedevices(Manager *m) {
 }
 
 static void test_exec_privatedevices_capabilities(Manager *m) {
+        int r;
+
         if (detect_container() > 0) {
-                log_notice("testing in container, skipping private device tests");
+                log_notice("testing in container, skipping %s", __func__);
                 return;
         }
         if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping private device tests");
+                log_notice("testing without inaccessible, skipping %s", __func__);
+                return;
+        }
+
+        /* We use capsh to test if the capabilities are
+         * properly set, so be sure that it exists */
+        r = find_binary("capsh", NULL);
+        if (r < 0) {
+                log_error_errno(r, "Skipping %s, could not find capsh binary: %m", __func__);
                 return;
         }
 
@@ -173,14 +185,23 @@ static void test_exec_privatedevices_capabilities(Manager *m) {
 }
 
 static void test_exec_protectkernelmodules(Manager *m) {
+        int r;
+
         if (detect_container() > 0) {
-                log_notice("testing in container, skipping protectkernelmodules tests");
+                log_notice("testing in container, skipping %s", __func__);
                 return;
         }
         if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping protectkernelmodules tests");
+                log_notice("testing without inaccessible, skipping %s", __func__);
                 return;
         }
+
+        r = find_binary("capsh", NULL);
+        if (r < 0) {
+                log_error_errno(r, "Skipping %s, could not find capsh binary: %m", __func__);
+                return;
+        }
+
 
         test(m, "exec-protectkernelmodules-no-capabilities.service", 0, CLD_EXITED);
         test(m, "exec-protectkernelmodules-yes-capabilities.service", 0, CLD_EXITED);
@@ -188,15 +209,27 @@ static void test_exec_protectkernelmodules(Manager *m) {
 }
 
 static void test_exec_readonlypaths(Manager *m) {
+
+        if (path_is_read_only_fs("/var") > 0)
+                return;
+
         test(m, "exec-readonlypaths.service", 0, CLD_EXITED);
         test(m, "exec-readonlypaths-mount-propagation.service", 0, CLD_EXITED);
 }
 
 static void test_exec_readwritepaths(Manager *m) {
+
+        if (path_is_read_only_fs("/") > 0)
+                return;
+
         test(m, "exec-readwritepaths-mount-propagation.service", 0, CLD_EXITED);
 }
 
 static void test_exec_inaccessiblepaths(Manager *m) {
+
+        if (path_is_read_only_fs("/") > 0)
+                return;
+
         test(m, "exec-inaccessiblepaths-mount-propagation.service", 0, CLD_EXITED);
 }
 
@@ -219,6 +252,18 @@ static void test_exec_systemcallerrornumber(Manager *m) {
 #endif
 }
 
+static void test_exec_restrict_namespaces(Manager *m) {
+#ifdef HAVE_SECCOMP
+        if (!is_seccomp_available())
+                return;
+
+        test(m, "exec-restrict-namespaces-no.service", 0, CLD_EXITED);
+        test(m, "exec-restrict-namespaces-yes.service", 1, CLD_EXITED);
+        test(m, "exec-restrict-namespaces-mnt.service", 0, CLD_EXITED);
+        test(m, "exec-restrict-namespaces-mnt-blacklist.service", 1, CLD_EXITED);
+#endif
+}
+
 static void test_exec_systemcall_system_mode_with_user(Manager *m) {
 #ifdef HAVE_SECCOMP
         if (!is_seccomp_available())
@@ -228,7 +273,7 @@ static void test_exec_systemcall_system_mode_with_user(Manager *m) {
         else if (getpwnam("nfsnobody"))
                 test(m, "exec-systemcallfilter-system-user-nfsnobody.service", 0, CLD_EXITED);
         else
-                log_error_errno(errno, "Skipping test_exec_systemcall_system_mode_with_user, could not find nobody/nfsnobody user: %m");
+                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody user: %m", __func__);
 #endif
 }
 
@@ -238,7 +283,7 @@ static void test_exec_user(Manager *m) {
         else if (getpwnam("nfsnobody"))
                 test(m, "exec-user-nfsnobody.service", 0, CLD_EXITED);
         else
-                log_error_errno(errno, "Skipping test_exec_user, could not find nobody/nfsnobody user: %m");
+                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody user: %m", __func__);
 }
 
 static void test_exec_group(Manager *m) {
@@ -247,7 +292,7 @@ static void test_exec_group(Manager *m) {
         else if (getgrnam("nfsnobody"))
                 test(m, "exec-group-nfsnobody.service", 0, CLD_EXITED);
         else
-                log_error_errno(errno, "Skipping test_exec_group, could not find nobody/nfsnobody group: %m");
+                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody group: %m", __func__);
 }
 
 static void test_exec_supplementary_groups(Manager *m) {
@@ -328,17 +373,15 @@ static void test_exec_runtimedirectory(Manager *m) {
         else if (getgrnam("nfsnobody"))
                 test(m, "exec-runtimedirectory-owner-nfsnobody.service", 0, CLD_EXITED);
         else
-                log_error_errno(errno, "Skipping test_exec_runtimedirectory-owner, could not find nobody/nfsnobody group: %m");
+                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody group: %m", __func__);
 }
 
 static void test_exec_capabilityboundingset(Manager *m) {
         int r;
 
-        /* We use capsh to test if the capabilities are
-         * properly set, so be sure that it exists */
         r = find_binary("capsh", NULL);
         if (r < 0) {
-                log_error_errno(r, "Skipping test_exec_capabilityboundingset, could not find capsh binary: %m");
+                log_error_errno(r, "Skipping %s, could not find capsh binary: %m", __func__);
                 return;
         }
 
@@ -364,9 +407,9 @@ static void test_exec_capabilityambientset(Manager *m) {
                         test(m, "exec-capabilityambientset-nfsnobody.service", 0, CLD_EXITED);
                         test(m, "exec-capabilityambientset-merge-nfsnobody.service", 0, CLD_EXITED);
                 } else
-                        log_error_errno(errno, "Skipping test_exec_capabilityambientset, could not find nobody/nfsnobody user: %m");
+                        log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody user: %m", __func__);
         } else
-                log_error_errno(errno, "Skipping test_exec_capabilityambientset, the kernel does not support ambient capabilities: %m");
+                log_error_errno(errno, "Skipping %s, the kernel does not support ambient capabilities: %m", __func__);
 }
 
 static void test_exec_privatenetwork(Manager *m) {
@@ -374,7 +417,7 @@ static void test_exec_privatenetwork(Manager *m) {
 
         r = find_binary("ip", NULL);
         if (r < 0) {
-                log_error_errno(r, "Skipping test_exec_privatenetwork, could not find ip binary: %m");
+                log_error_errno(r, "Skipping %s, could not find ip binary: %m", __func__);
                 return;
         }
 
@@ -397,8 +440,12 @@ static void test_exec_spec_interpolation(Manager *m) {
         test(m, "exec-spec-interpolation.service", 0, CLD_EXITED);
 }
 
-static int run_tests(UnitFileScope scope, test_function_t *tests) {
-        test_function_t *test = NULL;
+static void test_exec_read_only_path_suceed(Manager *m) {
+        test(m, "exec-read-only-path-succeed.service", 0, CLD_EXITED);
+}
+
+static int run_tests(UnitFileScope scope, const test_function_t *tests) {
+        const test_function_t *test = NULL;
         Manager *m = NULL;
         int r;
 
@@ -421,7 +468,7 @@ static int run_tests(UnitFileScope scope, test_function_t *tests) {
 }
 
 int main(int argc, char *argv[]) {
-        test_function_t user_tests[] = {
+        static const test_function_t user_tests[] = {
                 test_exec_workingdirectory,
                 test_exec_personality,
                 test_exec_ignoresigpipe,
@@ -435,6 +482,7 @@ int main(int argc, char *argv[]) {
                 test_exec_privatenetwork,
                 test_exec_systemcallfilter,
                 test_exec_systemcallerrornumber,
+                test_exec_restrict_namespaces,
                 test_exec_user,
                 test_exec_group,
                 test_exec_supplementary_groups,
@@ -449,14 +497,16 @@ int main(int argc, char *argv[]) {
                 test_exec_oomscoreadjust,
                 test_exec_ioschedulingclass,
                 test_exec_spec_interpolation,
+                test_exec_read_only_path_suceed,
                 NULL,
         };
-        test_function_t system_tests[] = {
+        static const test_function_t system_tests[] = {
                 test_exec_systemcall_system_mode_with_user,
                 NULL,
         };
         int r;
 
+        log_set_max_level(LOG_DEBUG);
         log_parse_environment();
         log_open();
 
@@ -467,7 +517,7 @@ int main(int argc, char *argv[]) {
         }
 
         assert_se(setenv("XDG_RUNTIME_DIR", "/tmp/", 1) == 0);
-        assert_se(set_unit_path(TEST_DIR "/test-execute/") >= 0);
+        assert_se(set_unit_path(get_testdata_dir("/test-execute")) >= 0);
 
         /* Unset VAR1, VAR2 and VAR3 which are used in the PassEnvironment test
          * cases, otherwise (and if they are present in the environment),

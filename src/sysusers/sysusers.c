@@ -30,7 +30,7 @@
 #include "def.h"
 #include "fd-util.h"
 #include "fileio-label.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "hashmap.h"
 #include "path-util.h"
 #include "selinux-util.h"
@@ -211,7 +211,7 @@ static int make_backup(const char *target, const char *x) {
         if (r < 0)
                 return r;
 
-        r = copy_bytes(src, fileno(dst), (uint64_t) -1, true);
+        r = copy_bytes(src, fileno(dst), (uint64_t) -1, COPY_REFLINK);
         if (r < 0)
                 goto fail;
 

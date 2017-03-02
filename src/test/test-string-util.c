@@ -29,31 +29,20 @@ static void test_string_erase(void) {
         assert_se(streq(string_erase(x), ""));
 
         x = strdupa("1");
-        assert_se(streq(string_erase(x), "x"));
-
-        x = strdupa("12");
-        assert_se(streq(string_erase(x), "xx"));
-
-        x = strdupa("123");
-        assert_se(streq(string_erase(x), "xxx"));
-
-        x = strdupa("1234");
-        assert_se(streq(string_erase(x), "xxxx"));
-
-        x = strdupa("12345");
-        assert_se(streq(string_erase(x), "xxxxx"));
-
-        x = strdupa("123456");
-        assert_se(streq(string_erase(x), "xxxxxx"));
-
-        x = strdupa("1234567");
-        assert_se(streq(string_erase(x), "xxxxxxx"));
-
-        x = strdupa("12345678");
-        assert_se(streq(string_erase(x), "xxxxxxxx"));
+        assert_se(streq(string_erase(x), ""));
 
         x = strdupa("123456789");
-        assert_se(streq(string_erase(x), "xxxxxxxxx"));
+        assert_se(streq(string_erase(x), ""));
+
+        assert_se(x[1] == '\0');
+        assert_se(x[2] == '\0');
+        assert_se(x[3] == '\0');
+        assert_se(x[4] == '\0');
+        assert_se(x[5] == '\0');
+        assert_se(x[6] == '\0');
+        assert_se(x[7] == '\0');
+        assert_se(x[8] == '\0');
+        assert_se(x[9] == '\0');
 }
 
 static void test_ascii_strcasecmp_n(void) {
@@ -232,21 +221,25 @@ static void test_foreach_word(void) {
 }
 
 static void check(const char *test, char** expected, bool trailing) {
-        const char *word, *state;
-        size_t l;
-        int i = 0;
+        int i = 0, r;
 
         printf("<<<%s>>>\n", test);
-        FOREACH_WORD_QUOTED(word, l, test, state) {
-                _cleanup_free_ char *t = NULL;
+        for (;;) {
+                _cleanup_free_ char *word = NULL;
 
-                assert_se(t = strndup(word, l));
-                assert_se(strneq(expected[i++], word, l));
-                printf("<%s>\n", t);
+                r = extract_first_word(&test, &word, NULL, EXTRACT_QUOTES);
+                if (r == 0) {
+                        assert_se(!trailing);
+                        break;
+                } else if (r < 0) {
+                        assert_se(trailing);
+                        break;
+                }
+
+                assert_se(streq(word, expected[i++]));
+                printf("<%s>\n", word);
         }
-        printf("<<<%s>>>\n", state);
         assert_se(expected[i] == NULL);
-        assert_se(isempty(state) == !trailing);
 }
 
 static void test_foreach_word_quoted(void) {

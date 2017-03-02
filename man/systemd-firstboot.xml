@@ -63,8 +63,14 @@
 
     <para><command>systemd-firstboot</command> initializes the most
     basic system settings interactively on the first boot, or
-    optionally non-interactively when a system image is created. The
-    following settings may be set up:</para>
+    optionally non-interactively when a system image is created.
+    The service is started if <varname>ConditionFirstBoot=yes</varname>
+    is satisfied. This essentially means that <filename>/etc</filename>
+    is empty, see
+    <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    for details.</para>
+
+    <para>The following settings may be set up:</para>
 
     <itemizedlist>
       <listitem><para>The system locale, more specifically the two
@@ -238,6 +244,20 @@
 
     <para>On success, 0 is returned, a non-zero failure code
     otherwise.</para>
+  </refsect1>
+
+  <refsect1>
+    <title>Kernel Command Line</title>
+
+    <variablelist class='kernel-commandline-options'>
+      <varlistentry>
+        <term><varname>systemd.firstboot=</varname></term>
+
+        <listitem><para>Takes a boolean argument, defaults to on. If off, <filename>systemd-firstboot.service</filename>
+        won't interactively query the user for basic settings at first boot, even if those settings are not
+        initialized yet.</para></listitem>
+      </varlistentry>
+    </variablelist>
   </refsect1>
 
   <refsect1>

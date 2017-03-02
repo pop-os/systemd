@@ -34,7 +34,7 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio-label.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "logind.h"
 #include "mkdir.h"
@@ -1286,8 +1286,7 @@ static int flush_devices(Manager *m) {
         } else {
                 struct dirent *de;
 
-                while ((de = readdir(d))) {
-
+                FOREACH_DIRENT_ALL(de, d, break) {
                         if (!dirent_is_file(de))
                                 continue;
 
@@ -1431,7 +1430,7 @@ static int bus_manager_log_shutdown(
                 p = strjoina(p, " (", m->wall_message, ").");
 
         return log_struct(LOG_NOTICE,
-                          LOG_MESSAGE_ID(SD_MESSAGE_SHUTDOWN),
+                          "MESSAGE_ID=" SD_MESSAGE_SHUTDOWN_STR,
                           p,
                           q,
                           NULL);
@@ -2397,13 +2396,9 @@ static int method_set_wall_message(
         if (r == 0)
                 return 1; /* Will call us back */
 
-        if (isempty(wall_message))
-                m->wall_message = mfree(m->wall_message);
-        else {
-                r = free_and_strdup(&m->wall_message, wall_message);
-                if (r < 0)
-                        return log_oom();
-        }
+        r = free_and_strdup(&m->wall_message, empty_to_null(wall_message));
+        if (r < 0)
+                return log_oom();
 
         m->enable_wall_messages = enable_wall_messages;
 

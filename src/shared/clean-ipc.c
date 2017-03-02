@@ -36,7 +36,7 @@
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "log.h"
 #include "macro.h"
 #include "string-util.h"
@@ -225,7 +225,7 @@ static int clean_posix_shm_internal(DIR *dir, uid_t uid, gid_t gid) {
         FOREACH_DIRENT_ALL(de, dir, goto fail) {
                 struct stat st;
 
-                if (STR_IN_SET(de->d_name, "..", "."))
+                if (dot_or_dot_dot(de->d_name))
                         continue;
 
                 if (fstatat(dirfd(dir), de->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0) {
@@ -310,7 +310,7 @@ static int clean_posix_mq(uid_t uid, gid_t gid) {
                 struct stat st;
                 char fn[1+strlen(de->d_name)+1];
 
-                if (STR_IN_SET(de->d_name, "..", "."))
+                if (dot_or_dot_dot(de->d_name))
                         continue;
 
                 if (fstatat(dirfd(dir), de->d_name, &st, AT_SYMLINK_NOFOLLOW) < 0) {

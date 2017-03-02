@@ -38,7 +38,7 @@ bool fstab_is_mount_point(const char *mount) {
         _cleanup_endmntent_ FILE *f = NULL;
         struct mntent *m;
 
-        f = setmntent("/etc/fstab", "r");
+        f = setmntent("/etc/fstab", "re");
         if (!f)
                 return false;
 
@@ -213,7 +213,7 @@ static char *unquote(const char *s, const char* quotes) {
          * trailing quotes if there is one. Doesn't care about
          * escaping or anything.
          *
-         * DON'T USE THIS FOR NEW CODE ANYMORE!*/
+         * DON'T USE THIS FOR NEW CODE ANYMORE! */
 
         l = strlen(s);
         if (l < 2)
@@ -241,7 +241,7 @@ static char *tag_to_udev_node(const char *tagvalue, const char *by) {
         if (encode_devnode_name(u, t, enc_len) < 0)
                 return NULL;
 
-        return strjoin("/dev/disk/by-", by, "/", t, NULL);
+        return strjoin("/dev/disk/by-", by, "/", t);
 }
 
 char *fstab_node_to_udev_node(const char *p) {

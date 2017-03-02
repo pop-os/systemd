@@ -27,7 +27,7 @@
 #include "alloc-util.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "logind-acl.h"
 #include "logind-seat.h"
 #include "mkdir.h"
@@ -379,7 +379,8 @@ int seat_read_active_vt(Seat *s) {
         if (!seat_has_vts(s))
                 return 0;
 
-        lseek(s->manager->console_active_fd, SEEK_SET, 0);
+        if (lseek(s->manager->console_active_fd, SEEK_SET, 0) < 0)
+                return log_error_errno(errno, "lseek on console_active_fd failed: %m");
 
         k = read(s->manager->console_active_fd, t, sizeof(t)-1);
         if (k <= 0) {
@@ -396,10 +397,8 @@ int seat_read_active_vt(Seat *s) {
         }
 
         r = safe_atou(t+3, &vtnr);
-        if (r < 0) {
-                log_error("Failed to parse VT number %s", t+3);
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to parse VT number \"%s\": %m", t+3);
 
         if (!vtnr) {
                 log_error("VT number invalid: %s", t+3);
@@ -416,7 +415,7 @@ int seat_start(Seat *s) {
                 return 0;
 
         log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_SEAT_START),
+                   "MESSAGE_ID=" SD_MESSAGE_SEAT_START_STR,
                    "SEAT_ID=%s", s->id,
                    LOG_MESSAGE("New seat %s.", s->id),
                    NULL);
@@ -444,7 +443,7 @@ int seat_stop(Seat *s, bool force) {
 
         if (s->started)
                 log_struct(LOG_INFO,
-                           LOG_MESSAGE_ID(SD_MESSAGE_SEAT_STOP),
+                           "MESSAGE_ID=" SD_MESSAGE_SEAT_STOP_STR,
                            "SEAT_ID=%s", s->id,
                            LOG_MESSAGE("Removed seat %s.", s->id),
                            NULL);
@@ -540,8 +539,6 @@ int seat_attach_session(Seat *s, Session *session) {
         session->seat = s;
         LIST_PREPEND(sessions_by_seat, s->sessions, session);
         seat_assign_position(s, session);
-
-        seat_send_changed(s, "Sessions", NULL);
 
         /* On seats with VTs, the VT logic defines which session is active. On
          * seats without VTs, we automatically activate new sessions. */

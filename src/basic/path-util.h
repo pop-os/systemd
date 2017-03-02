@@ -24,6 +24,7 @@
 #include <stddef.h>
 
 #include "macro.h"
+#include "string-util.h"
 #include "time-util.h"
 
 #define DEFAULT_PATH_NORMAL "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
@@ -65,9 +66,21 @@ static inline bool path_equal_ptr(const char *a, const char *b) {
                 _found;                                         \
         })
 
+#define PATH_STARTSWITH_SET(p, ...)                             \
+        ({                                                      \
+                char **s;                                       \
+                bool _found = false;                            \
+                STRV_FOREACH(s, STRV_MAKE(__VA_ARGS__))         \
+                        if (path_startswith(p, *s)) {           \
+                               _found = true;                   \
+                               break;                           \
+                        }                                       \
+                _found;                                         \
+        })
+
 int path_strv_make_absolute_cwd(char **l);
-char** path_strv_resolve(char **l, const char *prefix);
-char** path_strv_resolve_uniq(char **l, const char *prefix);
+char** path_strv_resolve(char **l, const char *root);
+char** path_strv_resolve_uniq(char **l, const char *root);
 
 int find_binary(const char *name, char **filename);
 
@@ -128,3 +141,5 @@ bool is_device_path(const char *path);
 bool is_deviceallow_pattern(const char *path);
 
 int systemd_installation_has_version(const char *root, unsigned minimal_version);
+
+bool dot_or_dot_dot(const char *path);

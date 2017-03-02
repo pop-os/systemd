@@ -23,26 +23,29 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "set.h"
+
 const char* seccomp_arch_to_string(uint32_t c);
 int seccomp_arch_from_string(const char *n, uint32_t *ret);
 
-int seccomp_init_conservative(scmp_filter_ctx *ret, uint32_t default_action);
-
-int seccomp_add_secondary_archs(scmp_filter_ctx c);
+int seccomp_init_for_arch(scmp_filter_ctx *ret, uint32_t arch, uint32_t default_action);
 
 bool is_seccomp_available(void);
 
 typedef struct SyscallFilterSet {
         const char *name;
+        const char *help;
         const char *value;
 } SyscallFilterSet;
 
 enum {
+        /* Please leave DEFAULT first, but sort the rest alphabetically */
+        SYSCALL_FILTER_SET_DEFAULT,
         SYSCALL_FILTER_SET_BASIC_IO,
         SYSCALL_FILTER_SET_CLOCK,
         SYSCALL_FILTER_SET_CPU_EMULATION,
         SYSCALL_FILTER_SET_DEBUG,
-        SYSCALL_FILTER_SET_DEFAULT,
+        SYSCALL_FILTER_SET_FILE_SYSTEM,
         SYSCALL_FILTER_SET_IO_EVENT,
         SYSCALL_FILTER_SET_IPC,
         SYSCALL_FILTER_SET_KEYRING,
@@ -53,7 +56,9 @@ enum {
         SYSCALL_FILTER_SET_PRIVILEGED,
         SYSCALL_FILTER_SET_PROCESS,
         SYSCALL_FILTER_SET_RAW_IO,
+        SYSCALL_FILTER_SET_REBOOT,
         SYSCALL_FILTER_SET_RESOURCES,
+        SYSCALL_FILTER_SET_SWAP,
         _SYSCALL_FILTER_SET_MAX
 };
 
@@ -61,6 +66,43 @@ extern const SyscallFilterSet syscall_filter_sets[];
 
 const SyscallFilterSet *syscall_filter_set_find(const char *name);
 
-int seccomp_add_syscall_filter_set(scmp_filter_ctx seccomp, const SyscallFilterSet *set, uint32_t action);
+int seccomp_load_syscall_filter_set(uint32_t default_action, const SyscallFilterSet *set, uint32_t action);
+int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Set* set, uint32_t action);
 
-int seccomp_load_filter_set(uint32_t default_action, const SyscallFilterSet *set, uint32_t action);
+int seccomp_restrict_archs(Set *archs);
+int seccomp_restrict_namespaces(unsigned long retain);
+int seccomp_protect_sysctl(void);
+int seccomp_restrict_address_families(Set *address_families, bool whitelist);
+int seccomp_restrict_realtime(void);
+int seccomp_memory_deny_write_execute(void);
+
+#if defined(__i386__) || defined(__s390x__) || defined(__s390__) || defined(__powerpc64__) || defined(__powerpc__) || defined (__mips__)
+/* On these archs, socket() is implemented via the socketcall() syscall multiplexer, and we can't restrict it hence via
+ * seccomp */
+#define SECCOMP_RESTRICT_ADDRESS_FAMILIES_BROKEN 1
+#else
+#define SECCOMP_RESTRICT_ADDRESS_FAMILIES_BROKEN 0
+#endif
+
+/* mmap() blocking is only available on some archs for now */
+#if defined(__x86_64__) || defined(__i386__)
+#define SECCOMP_MEMORY_DENY_WRITE_EXECUTE_BROKEN 0
+#else
+#define SECCOMP_MEMORY_DENY_WRITE_EXECUTE_BROKEN 1
+#endif
+
+/* we don't know the right order of the clone() parameters except for these archs, for now */
+#if defined(__x86_64__) || defined(__i386__) || defined(__s390x__) || defined(__s390__) || defined(__powerpc64__)
+#define SECCOMP_RESTRICT_NAMESPACES_BROKEN 0
+#else
+#define SECCOMP_RESTRICT_NAMESPACES_BROKEN 1
+#endif
+
+extern const uint32_t seccomp_local_archs[];
+
+#define SECCOMP_FOREACH_LOCAL_ARCH(arch) \
+        for (unsigned _i = ({ (arch) = seccomp_local_archs[0]; 0; });   \
+             seccomp_local_archs[_i] != (uint32_t) -1;                  \
+             (arch) = seccomp_local_archs[++_i])
+
+DEFINE_TRIVIAL_CLEANUP_FUNC(scmp_filter_ctx, seccomp_release);

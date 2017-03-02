@@ -107,16 +107,14 @@ const char* split(const char **state, size_t *l, const char *separator, bool quo
 #define FOREACH_WORD_SEPARATOR(word, length, s, separator, state)       \
         _FOREACH_WORD(word, length, s, separator, false, state)
 
-#define FOREACH_WORD_QUOTED(word, length, s, state)                     \
-        _FOREACH_WORD(word, length, s, WHITESPACE, true, state)
-
 #define _FOREACH_WORD(word, length, s, separator, quoted, state)        \
         for ((state) = (s), (word) = split(&(state), &(length), (separator), (quoted)); (word); (word) = split(&(state), &(length), (separator), (quoted)))
 
 char *strappend(const char *s, const char *suffix);
 char *strnappend(const char *s, const char *suffix, size_t length);
 
-char *strjoin(const char *x, ...) _sentinel_;
+char *strjoin_real(const char *x, ...) _sentinel_;
+#define strjoin(a, ...) strjoin_real((a), __VA_ARGS__, NULL)
 
 #define strjoina(a, ...)                                                \
         ({                                                              \
@@ -191,7 +189,10 @@ static inline void *memmem_safe(const void *haystack, size_t haystacklen, const 
         return memmem(haystack, haystacklen, needle, needlelen);
 }
 
-void* memory_erase(void *p, size_t l);
+#if !HAVE_DECL_EXPLICIT_BZERO
+void explicit_bzero(void *p, size_t l);
+#endif
+
 char *string_erase(char *x);
 
 char *string_free_erase(char *s);

@@ -1482,7 +1482,7 @@ static VOID config_entry_add_osx(Config *config) {
                         root = LibOpenRoot(handles[i]);
                         if (!root)
                                 continue;
-                        found = config_entry_add_loader_auto(config, handles[i], root, NULL, L"auto-osx", 'a', L"OS X",
+                        found = config_entry_add_loader_auto(config, handles[i], root, NULL, L"auto-osx", 'a', L"macOS",
                                                              L"\\System\\Library\\CoreServices\\boot.efi");
                         uefi_call_wrapper(root->Close, 1, root);
                         if (found)
@@ -1647,7 +1647,7 @@ static EFI_STATUS image_start(EFI_HANDLE parent_image, const Config *config, con
                 loaded_image->LoadOptionsSize = (StrLen(loaded_image->LoadOptions)+1) * sizeof(CHAR16);
 
 #ifdef SD_BOOT_LOG_TPM
-                /* Try to log any options to the TPM, escpecially to catch manually edited options */
+                /* Try to log any options to the TPM, especially to catch manually edited options */
                 err = tpm_log_event(SD_TPM_PCR,
                                     (EFI_PHYSICAL_ADDRESS) loaded_image->LoadOptions,
                                     loaded_image->LoadOptionsSize, loaded_image->LoadOptions);
@@ -1787,7 +1787,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
 
         config_title_generate(&config);
 
-        /* select entry by configured pattern or EFI LoaderDefaultEntry= variable*/
+        /* select entry by configured pattern or EFI LoaderDefaultEntry= variable */
         config_default_entry_select(&config);
 
         /* if no configured entry to select from was found, enable the menu */

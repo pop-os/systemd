@@ -19,7 +19,7 @@
 
 __systemctl() {
         local mode=$1; shift 1
-        systemctl $mode --full --no-legend "$@"
+        systemctl $mode --full --no-legend "$@" 2>/dev/null
 }
 
 __systemd_properties() {
@@ -124,9 +124,9 @@ _systemctl () {
 
         local -A OPTS=(
                [STANDALONE]='--all -a --reverse --after --before --defaults --force -f --full -l --global
-                             --help -h --no-ask-password --no-block --no-legend --no-pager --no-reload --no-wall
+                             --help -h --no-ask-password --no-block --no-legend --no-pager --no-reload --no-wall --now
                              --quiet -q --privileged -P --system --user --version --runtime --recursive -r --firmware-setup
-                             --show-types -i --ignore-inhibitors --plain'
+                             --show-types -i --ignore-inhibitors --plain --failed'
                       [ARG]='--host -H --kill-who --property -p --signal -s --type -t --state --job-mode --root
                              --preset-mode -n --lines -o --output -M --machine'
         )

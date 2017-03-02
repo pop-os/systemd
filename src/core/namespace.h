@@ -21,9 +21,11 @@
 ***/
 
 typedef struct NameSpaceInfo NameSpaceInfo;
+typedef struct BindMount BindMount;
 
 #include <stdbool.h>
 
+#include "dissect-image.h"
 #include "macro.h"
 
 typedef enum ProtectHome {
@@ -44,26 +46,42 @@ typedef enum ProtectSystem {
 } ProtectSystem;
 
 struct NameSpaceInfo {
+        bool ignore_protect_paths:1;
         bool private_dev:1;
         bool protect_control_groups:1;
         bool protect_kernel_tunables:1;
         bool protect_kernel_modules:1;
+        bool mount_apivfs:1;
 };
 
-int setup_namespace(const char *chroot,
-                    const NameSpaceInfo *ns_info,
-                    char **read_write_paths,
-                    char **read_only_paths,
-                    char **inaccessible_paths,
-                    const char *tmp_dir,
-                    const char *var_tmp_dir,
-                    ProtectHome protect_home,
-                    ProtectSystem protect_system,
-                    unsigned long mount_flags);
+struct BindMount {
+        char *source;
+        char *destination;
+        bool read_only:1;
+        bool recursive:1;
+        bool ignore_enoent:1;
+};
 
-int setup_tmp_dirs(const char *id,
-                  char **tmp_dir,
-                  char **var_tmp_dir);
+int setup_namespace(
+                const char *root_directory,
+                const char *root_image,
+                const NameSpaceInfo *ns_info,
+                char **read_write_paths,
+                char **read_only_paths,
+                char **inaccessible_paths,
+                const BindMount *bind_mounts,
+                unsigned n_bind_mounts,
+                const char *tmp_dir,
+                const char *var_tmp_dir,
+                ProtectHome protect_home,
+                ProtectSystem protect_system,
+                unsigned long mount_flags,
+                DissectImageFlags dissected_image_flags);
+
+int setup_tmp_dirs(
+                const char *id,
+                char **tmp_dir,
+                char **var_tmp_dir);
 
 int setup_netns(int netns_storage_socket[2]);
 
@@ -72,3 +90,6 @@ ProtectHome protect_home_from_string(const char *s) _pure_;
 
 const char* protect_system_to_string(ProtectSystem p) _const_;
 ProtectSystem protect_system_from_string(const char *s) _pure_;
+
+void bind_mount_free_many(BindMount *b, unsigned n);
+int bind_mount_add(BindMount **b, unsigned *n, const BindMount *item);

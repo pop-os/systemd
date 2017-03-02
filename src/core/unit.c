@@ -36,7 +36,7 @@
 #include "escape.h"
 #include "execute.h"
 #include "fileio-label.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "id128-util.h"
 #include "load-dropin.h"
 #include "load-fragment.h"
@@ -389,10 +389,8 @@ void unit_add_to_gc_queue(Unit *u) {
         if (unit_check_gc(u))
                 return;
 
-        LIST_PREPEND(gc_queue, u->manager->gc_queue, u);
+        LIST_PREPEND(gc_queue, u->manager->gc_unit_queue, u);
         u->in_gc_queue = true;
-
-        u->manager->n_in_gc_queue++;
 }
 
 void unit_add_to_dbus_queue(Unit *u) {
@@ -404,6 +402,7 @@ void unit_add_to_dbus_queue(Unit *u) {
 
         /* Shortcut things if nobody cares */
         if (sd_bus_track_count(u->manager->subscribed) <= 0 &&
+            sd_bus_track_count(u->bus_track) <= 0 &&
             set_isempty(u->manager->private_buses)) {
                 u->sent_dbus_new_signal = true;
                 return;
@@ -518,7 +517,8 @@ void unit_free(Unit *u) {
         Iterator i;
         char *t;
 
-        assert(u);
+        if (!u)
+                return;
 
         if (u->transient_file)
                 fclose(u->transient_file);
@@ -570,10 +570,8 @@ void unit_free(Unit *u) {
         if (u->in_cleanup_queue)
                 LIST_REMOVE(cleanup_queue, u->manager->cleanup_queue, u);
 
-        if (u->in_gc_queue) {
-                LIST_REMOVE(gc_queue, u->manager->gc_queue, u);
-                u->manager->n_in_gc_queue--;
-        }
+        if (u->in_gc_queue)
+                LIST_REMOVE(gc_queue, u->manager->gc_unit_queue, u);
 
         if (u->in_cgroup_queue)
                 LIST_REMOVE(cgroup_queue, u->manager->cgroup_queue, u);
@@ -865,15 +863,25 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
                         return r;
         }
 
+        if (c->root_image) {
+                r = unit_require_mounts_for(u, c->root_image);
+                if (r < 0)
+                        return r;
+        }
+
         if (!MANAGER_IS_SYSTEM(u->manager))
                 return 0;
 
         if (c->private_tmp) {
-                r = unit_require_mounts_for(u, "/tmp");
-                if (r < 0)
-                        return r;
+                const char *p;
 
-                r = unit_require_mounts_for(u, "/var/tmp");
+                FOREACH_STRING(p, "/tmp", "/var/tmp") {
+                        r = unit_require_mounts_for(u, p);
+                        if (r < 0)
+                                return r;
+                }
+
+                r = unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_TMPFILES_SETUP_SERVICE, NULL, true);
                 if (r < 0)
                         return r;
         }
@@ -1082,6 +1090,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
 
 /* Common implementation for multiple backends */
 int unit_load_fragment_and_dropin(Unit *u) {
+        Unit *t;
         int r;
 
         assert(u);
@@ -1094,16 +1103,18 @@ int unit_load_fragment_and_dropin(Unit *u) {
         if (u->load_state == UNIT_STUB)
                 return -ENOENT;
 
-        /* Load drop-in directory data */
-        r = unit_load_dropin(unit_follow_merge(u));
-        if (r < 0)
-                return r;
+        /* If the unit is an alias and the final unit has already been
+         * loaded, there's no point in reloading the dropins one more time. */
+        t = unit_follow_merge(u);
+        if (t != u && t->load_state != UNIT_STUB)
+                return 0;
 
-        return 0;
+        return unit_load_dropin(t);
 }
 
 /* Common implementation for multiple backends */
 int unit_load_fragment_and_dropin_optional(Unit *u) {
+        Unit *t;
         int r;
 
         assert(u);
@@ -1119,12 +1130,13 @@ int unit_load_fragment_and_dropin_optional(Unit *u) {
         if (u->load_state == UNIT_STUB)
                 u->load_state = UNIT_LOADED;
 
-        /* Load drop-in directory data */
-        r = unit_load_dropin(unit_follow_merge(u));
-        if (r < 0)
-                return r;
+        /* If the unit is an alias and the final unit has already been
+         * loaded, there's no point in reloading the dropins one more time. */
+        t = unit_follow_merge(u);
+        if (t != u && t->load_state != UNIT_STUB)
+                return 0;
 
-        return 0;
+        return unit_load_dropin(t);
 }
 
 int unit_add_default_target_dependency(Unit *u, Unit *target) {
@@ -1455,9 +1467,8 @@ static void unit_status_print_starting_stopping(Unit *u, JobType t) {
 }
 
 static void unit_status_log_starting_stopping_reloading(Unit *u, JobType t) {
-        const char *format;
+        const char *format, *mid;
         char buf[LINE_MAX];
-        sd_id128_t mid;
 
         assert(u);
 
@@ -1475,9 +1486,9 @@ static void unit_status_log_starting_stopping_reloading(Unit *u, JobType t) {
         snprintf(buf, sizeof buf, format, unit_description(u));
         REENABLE_WARNING;
 
-        mid = t == JOB_START ? SD_MESSAGE_UNIT_STARTING :
-              t == JOB_STOP  ? SD_MESSAGE_UNIT_STOPPING :
-                               SD_MESSAGE_UNIT_RELOADING;
+        mid = t == JOB_START ? "MESSAGE_ID=" SD_MESSAGE_UNIT_STARTING_STR :
+              t == JOB_STOP  ? "MESSAGE_ID=" SD_MESSAGE_UNIT_STOPPING_STR :
+                               "MESSAGE_ID=" SD_MESSAGE_UNIT_RELOADING_STR;
 
         /* Note that we deliberately use LOG_MESSAGE() instead of
          * LOG_UNIT_MESSAGE() here, since this is supposed to mimic
@@ -1486,7 +1497,7 @@ static void unit_status_log_starting_stopping_reloading(Unit *u, JobType t) {
          * possible, which means we should avoid the low-level unit
          * name. */
         log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(mid),
+                   mid,
                    LOG_UNIT_ID(u),
                    LOG_MESSAGE("%s", buf),
                    NULL);
@@ -1515,6 +1526,43 @@ int unit_start_limit_test(Unit *u) {
         return emergency_action(u->manager, u->start_limit_action, u->reboot_arg, "unit failed");
 }
 
+bool unit_shall_confirm_spawn(Unit *u) {
+        assert(u);
+
+        if (manager_is_confirm_spawn_disabled(u->manager))
+                return false;
+
+        /* For some reasons units remaining in the same process group
+         * as PID 1 fail to acquire the console even if it's not used
+         * by any process. So skip the confirmation question for them. */
+        return !unit_get_exec_context(u)->same_pgrp;
+}
+
+static bool unit_verify_deps(Unit *u) {
+        Unit *other;
+        Iterator j;
+
+        assert(u);
+
+        /* Checks whether all BindsTo= dependencies of this unit are fulfilled — if they are also combined with
+         * After=. We do not check Requires= or Requisite= here as they only should have an effect on the job
+         * processing, but do not have any effect afterwards. We don't check BindsTo= dependencies that are not used in
+         * conjunction with After= as for them any such check would make things entirely racy. */
+
+        SET_FOREACH(other, u->dependencies[UNIT_BINDS_TO], j) {
+
+                if (!set_contains(u->dependencies[UNIT_AFTER], other))
+                        continue;
+
+                if (!UNIT_IS_ACTIVE_OR_RELOADING(unit_active_state(other))) {
+                        log_unit_notice(u, "Bound to unit %s, but unit isn't active.", other->id);
+                        return false;
+                }
+        }
+
+        return true;
+}
+
 /* Errors:
  *         -EBADR:      This unit type does not support starting.
  *         -EALREADY:   Unit is already started.
@@ -1523,6 +1571,7 @@ int unit_start_limit_test(Unit *u) {
  *         -EPROTO:     Assert failed
  *         -EINVAL:     Unit not loaded
  *         -EOPNOTSUPP: Unit type not supported
+ *         -ENOLINK:    The necessary dependencies are not fulfilled.
  */
 int unit_start(Unit *u) {
         UnitActiveState state;
@@ -1567,6 +1616,12 @@ int unit_start(Unit *u) {
          */
         if (!unit_supported(u))
                 return -EOPNOTSUPP;
+
+        /* Let's make sure that the deps really are in order before we start this. Normally the job engine should have
+         * taken care of this already, but let's check this here again. After all, our dependencies might not be in
+         * effect anymore, due to a reload or due to a failed condition. */
+        if (!unit_verify_deps(u))
+                return -ENOLINK;
 
         /* Forward to the main object, if we aren't it. */
         following = unit_following(u);
@@ -2510,7 +2565,7 @@ int unit_set_default_slice(Unit *u) {
                         return -ENOMEM;
 
                 if (MANAGER_IS_SYSTEM(u->manager))
-                        b = strjoin("system-", escaped, ".slice", NULL);
+                        b = strjoin("system-", escaped, ".slice");
                 else
                         b = strappend(escaped, ".slice");
                 if (!b)
@@ -2628,7 +2683,7 @@ void unit_unwatch_bus_name(Unit *u, const char *name) {
         assert(u);
         assert(name);
 
-        hashmap_remove_value(u->manager->watch_bus, name, u);
+        (void) hashmap_remove_value(u->manager->watch_bus, name, u);
         u->match_bus_slot = sd_bus_slot_unref(u->match_bus_slot);
 }
 
@@ -3040,6 +3095,9 @@ int unit_add_node_link(Unit *u, const char *what, bool wants, UnitDependency dep
         if (r < 0)
                 return r;
 
+        if (dep == UNIT_REQUIRES && device_shall_be_bound_by(device, u))
+                dep = UNIT_BINDS_TO;
+
         r = unit_add_two_dependencies(u, UNIT_AFTER,
                                       MANAGER_IS_SYSTEM(u->manager) ? dep : UNIT_WANTS,
                                       device, true);
@@ -3094,6 +3152,11 @@ static bool fragment_mtime_newer(const char *path, usec_t mtime, bool path_maske
         struct stat st;
 
         if (!path)
+                return false;
+
+        /* If the source is some virtual kernel file system, then we assume we watch it anyway, and hence pretend we
+         * are never out-of-date. */
+        if (PATH_STARTSWITH_SET(path, "/proc", "/sys"))
                 return false;
 
         if (stat(path, &st) < 0)
@@ -3429,14 +3492,6 @@ int unit_patch_contexts(Unit *u) {
                         ec->working_directory_missing_ok = true;
                 }
 
-                if (MANAGER_IS_USER(u->manager) &&
-                    (ec->syscall_whitelist ||
-                     !set_isempty(ec->syscall_filter) ||
-                     !set_isempty(ec->syscall_archs) ||
-                     ec->address_families_whitelist ||
-                     !set_isempty(ec->address_families)))
-                        ec->no_new_privileges = true;
-
                 if (ec->private_devices)
                         ec->capability_bounding_set &= ~((UINT64_C(1) << CAP_MKNOD) | (UINT64_C(1) << CAP_SYS_RAWIO));
 
@@ -3670,7 +3725,7 @@ int unit_make_transient(Unit *u) {
         if (!UNIT_VTABLE(u)->can_transient)
                 return -EOPNOTSUPP;
 
-        path = strjoin(u->manager->lookup_paths.transient, "/", u->id, NULL);
+        path = strjoin(u->manager->lookup_paths.transient, "/", u->id);
         if (!path)
                 return -ENOMEM;
 
@@ -3755,14 +3810,14 @@ int unit_kill_context(
                 bool main_pid_alien) {
 
         bool wait_for_exit = false, send_sighup;
-        cg_kill_log_func_t log_func;
+        cg_kill_log_func_t log_func = NULL;
         int sig, r;
 
         assert(u);
         assert(c);
 
-        /* Kill the processes belonging to this unit, in preparation for shutting the unit down. Returns > 0 if we
-         * killed something worth waiting for, 0 otherwise. */
+        /* Kill the processes belonging to this unit, in preparation for shutting the unit down.
+         * Returns > 0 if we killed something worth waiting for, 0 otherwise. */
 
         if (c->kill_mode == KILL_NONE)
                 return 0;
@@ -3774,9 +3829,8 @@ int unit_kill_context(
                 IN_SET(k, KILL_TERMINATE, KILL_TERMINATE_AND_LOG) &&
                 sig != SIGHUP;
 
-        log_func =
-                k != KILL_TERMINATE ||
-                IN_SET(sig, SIGKILL, SIGABRT) ? log_kill : NULL;
+        if (k != KILL_TERMINATE || IN_SET(sig, SIGKILL, SIGABRT))
+                log_func = log_kill;
 
         if (main_pid > 0) {
                 if (log_func)
@@ -3847,10 +3901,10 @@ int unit_kill_context(
                          * should not exist in non-delegated units. On
                          * the unified hierarchy that's different,
                          * there we get proper events. Hence rely on
-                         * them.*/
+                         * them. */
 
-                        if  (cg_unified(SYSTEMD_CGROUP_CONTROLLER) > 0 ||
-                             (detect_container() == 0 && !unit_cgroup_delegate(u)))
+                        if (cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER) > 0 ||
+                            (detect_container() == 0 && !unit_cgroup_delegate(u)))
                                 wait_for_exit = true;
 
                         if (send_sighup) {
@@ -4020,7 +4074,7 @@ void unit_warn_if_dir_nonempty(Unit *u, const char* where) {
         }
 
         log_struct(LOG_NOTICE,
-                   LOG_MESSAGE_ID(SD_MESSAGE_OVERMOUNTING),
+                   "MESSAGE_ID=" SD_MESSAGE_OVERMOUNTING_STR,
                    LOG_UNIT_ID(u),
                    LOG_UNIT_MESSAGE(u, "Directory %s to mount over is not empty, mounting anyway.", where),
                    "WHERE=%s", where,
@@ -4042,7 +4096,7 @@ int unit_fail_if_symlink(Unit *u, const char* where) {
                 return 0;
 
         log_struct(LOG_ERR,
-                   LOG_MESSAGE_ID(SD_MESSAGE_OVERMOUNTING),
+                   "MESSAGE_ID=" SD_MESSAGE_OVERMOUNTING_STR,
                    LOG_UNIT_ID(u),
                    LOG_UNIT_MESSAGE(u, "Mount on symlink %s not allowed.", where),
                    "WHERE=%s", where,

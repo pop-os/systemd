@@ -29,6 +29,7 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "fs-util.h"
 #include "hashmap.h"
 #include "mount-util.h"
 #include "parse-util.h"
@@ -111,9 +112,10 @@ int fd_is_mount_point(int fd, const char *filename, int flags) {
 
         r = name_to_handle_at(fd, filename, &h.handle, &mount_id, flags);
         if (r < 0) {
-                if (errno == ENOSYS)
-                        /* This kernel does not support name_to_handle_at()
-                         * fall back to simpler logic. */
+                if (IN_SET(errno, ENOSYS, EACCES, EPERM))
+                        /* This kernel does not support name_to_handle_at() at all, or the syscall was blocked (maybe
+                         * through seccomp, because we are running inside of a container?): fall back to simpler
+                         * logic. */
                         goto fallback_fdinfo;
                 else if (errno == EOPNOTSUPP)
                         /* This kernel or file system does not support
@@ -162,7 +164,7 @@ int fd_is_mount_point(int fd, const char *filename, int flags) {
 
 fallback_fdinfo:
         r = fd_fdinfo_mnt_id(fd, filename, flags, &mount_id);
-        if (IN_SET(r, -EOPNOTSUPP, -EACCES))
+        if (IN_SET(r, -EOPNOTSUPP, -EACCES, -EPERM))
                 goto fallback_fstat;
         if (r < 0)
                 return r;
@@ -205,9 +207,10 @@ fallback_fstat:
 }
 
 /* flags can be AT_SYMLINK_FOLLOW or 0 */
-int path_is_mount_point(const char *t, int flags) {
-        _cleanup_close_ int fd = -1;
+int path_is_mount_point(const char *t, const char *root, int flags) {
         _cleanup_free_ char *canonical = NULL, *parent = NULL;
+        _cleanup_close_ int fd = -1;
+        int r;
 
         assert(t);
 
@@ -219,9 +222,9 @@ int path_is_mount_point(const char *t, int flags) {
          * /bin -> /usr/bin/ and /usr is a mount point, then the parent that we
          * look at needs to be /usr, not /. */
         if (flags & AT_SYMLINK_FOLLOW) {
-                canonical = canonicalize_file_name(t);
-                if (!canonical)
-                        return -errno;
+                r = chase_symlinks(t, root, 0, &canonical);
+                if (r < 0)
+                        return r;
 
                 t = canonical;
         }
@@ -473,7 +476,7 @@ int bind_remount_recursive(const char *prefix, bool ro, char **blacklist) {
                                 return r;
 
                         /* Deal with mount points that are obstructed by a later mount */
-                        r = path_is_mount_point(x, 0);
+                        r = path_is_mount_point(x, NULL, 0);
                         if (r == -ENOENT || r == 0)
                                 continue;
                         if (r < 0)
@@ -642,7 +645,7 @@ static char* mount_flags_to_string(long unsigned flags) {
                     FLAG(MS_I_VERSION),
                     FLAG(MS_STRICTATIME),
                     FLAG(MS_LAZYTIME),
-                    y, NULL);
+                    y);
         if (!x)
                 return NULL;
         if (!y)
@@ -671,6 +674,9 @@ int mount_verbose(
         else if ((flags & MS_BIND) && !type)
                 log_debug("Bind-mounting %s on %s (%s \"%s\")...",
                           what, where, strnull(fl), strempty(options));
+        else if (flags & MS_MOVE)
+                log_debug("Moving mount %s → %s (%s \"%s\")...",
+                          what, where, strnull(fl), strempty(options));
         else
                 log_debug("Mounting %s on %s (%s \"%s\")...",
                           strna(type), where, strnull(fl), strempty(options));
@@ -685,5 +691,37 @@ int umount_verbose(const char *what) {
         log_debug("Umounting %s...", what);
         if (umount(what) < 0)
                 return log_error_errno(errno, "Failed to unmount %s: %m", what);
+        return 0;
+}
+
+const char *mount_propagation_flags_to_string(unsigned long flags) {
+
+        switch (flags & (MS_SHARED|MS_SLAVE|MS_PRIVATE)) {
+        case 0:
+                return "";
+        case MS_SHARED:
+                return "shared";
+        case MS_SLAVE:
+                return "slave";
+        case MS_PRIVATE:
+                return "private";
+        }
+
+        return NULL;
+}
+
+
+int mount_propagation_flags_from_string(const char *name, unsigned long *ret) {
+
+        if (isempty(name))
+                *ret = 0;
+        else if (streq(name, "shared"))
+                *ret = MS_SHARED;
+        else if (streq(name, "slave"))
+                *ret = MS_SLAVE;
+        else if (streq(name, "private"))
+                *ret = MS_PRIVATE;
+        else
+                return -EINVAL;
         return 0;
 }

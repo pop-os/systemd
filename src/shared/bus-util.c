@@ -43,6 +43,7 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "missing.h"
+#include "nsflags.h"
 #include "parse-util.h"
 #include "proc-cmdline.h"
 #include "rlimit-util.h"
@@ -676,7 +677,7 @@ int bus_connect_user_systemd(sd_bus **_bus) {
         if (r < 0)
                 return r;
 
-        bus->address = strjoin("unix:path=", ee, "/systemd/private", NULL);
+        bus->address = strjoin("unix:path=", ee, "/systemd/private");
         if (!bus->address)
                 return -ENOMEM;
 
@@ -769,6 +770,23 @@ int bus_print_property(const char *name, sd_bus_message *property, bool value, b
                         char timespan[FORMAT_TIMESPAN_MAX];
 
                         print_property(name, "%s", format_timespan(timespan, sizeof(timespan), u, 0));
+                } else if (streq(name, "RestrictNamespaces")) {
+                        _cleanup_free_ char *s = NULL;
+                        const char *result = NULL;
+
+                        if ((u & NAMESPACE_FLAGS_ALL) == 0)
+                                result = "yes";
+                        else if ((u & NAMESPACE_FLAGS_ALL) == NAMESPACE_FLAGS_ALL)
+                                result = "no";
+                        else {
+                                r = namespace_flag_to_string_many(u, &s);
+                                if (r < 0)
+                                        return r;
+
+                                result = s;
+                        }
+
+                        print_property(name, "%s", result);
                 } else
                         print_property(name, "%"PRIu64, u);
 
@@ -1098,9 +1116,9 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_
 int bus_message_map_all_properties(
                 sd_bus_message *m,
                 const struct bus_properties_map *map,
+                sd_bus_error *error,
                 void *userdata) {
 
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
 
         assert(m);
@@ -1138,9 +1156,9 @@ int bus_message_map_all_properties(
 
                         v = (uint8_t *)userdata + prop->offset;
                         if (map[i].set)
-                                r = prop->set(sd_bus_message_get_bus(m), member, m, &error, v);
+                                r = prop->set(sd_bus_message_get_bus(m), member, m, error, v);
                         else
-                                r = map_basic(sd_bus_message_get_bus(m), member, m, &error, v);
+                                r = map_basic(sd_bus_message_get_bus(m), member, m, error, v);
                         if (r < 0)
                                 return r;
 
@@ -1166,6 +1184,7 @@ int bus_message_map_all_properties(
 int bus_message_map_properties_changed(
                 sd_bus_message *m,
                 const struct bus_properties_map *map,
+                sd_bus_error *error,
                 void *userdata) {
 
         const char *member;
@@ -1174,7 +1193,7 @@ int bus_message_map_properties_changed(
         assert(m);
         assert(map);
 
-        r = bus_message_map_all_properties(m, map, userdata);
+        r = bus_message_map_all_properties(m, map, error, userdata);
         if (r < 0)
                 return r;
 
@@ -1204,10 +1223,10 @@ int bus_map_all_properties(
                 const char *destination,
                 const char *path,
                 const struct bus_properties_map *map,
+                sd_bus_error *error,
                 void *userdata) {
 
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
 
         assert(bus);
@@ -1221,13 +1240,13 @@ int bus_map_all_properties(
                         path,
                         "org.freedesktop.DBus.Properties",
                         "GetAll",
-                        &error,
+                        error,
                         &m,
                         "s", "");
         if (r < 0)
                 return r;
 
-        return bus_message_map_all_properties(m, map, userdata);
+        return bus_message_map_all_properties(m, map, error, userdata);
 }
 
 int bus_connect_transport(BusTransport transport, const char *host, bool user, sd_bus **ret) {
@@ -1460,7 +1479,7 @@ int bus_path_encode_unique(sd_bus *b, const char *prefix, const char *sender_id,
         if (!external_label)
                 return -ENOMEM;
 
-        p = strjoin(prefix, "/", sender_label, "/", external_label, NULL);
+        p = strjoin(prefix, "/", sender_label, "/", external_label);
         if (!p)
                 return -ENOMEM;
 
@@ -1564,4 +1583,23 @@ int bus_property_get_rlimit(
         u = x == RLIM_INFINITY ? (uint64_t) -1 : (uint64_t) x;
 
         return sd_bus_message_append(reply, "t", u);
+}
+
+int bus_track_add_name_many(sd_bus_track *t, char **l) {
+        int r = 0;
+        char **i;
+
+        assert(t);
+
+        /* Continues adding after failure, and returns the first failure. */
+
+        STRV_FOREACH(i, l) {
+                int k;
+
+                k = sd_bus_track_add_name(t, *i);
+                if (k < 0 && r >= 0)
+                        r = k;
+        }
+
+        return r;
 }

@@ -22,6 +22,7 @@
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "cgroup-util.h"
+#include "dbus-job.h"
 #include "dbus-unit.h"
 #include "dbus.h"
 #include "fd-util.h"
@@ -481,7 +482,7 @@ int bus_unit_method_start_generic(
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Job mode %s invalid", smode);
 
         if (reload_if_possible)
-                verb = strjoin("reload-or-", job_type_to_string(job_type), NULL);
+                verb = strjoin("reload-or-", job_type_to_string(job_type));
         else
                 verb = strdup(job_type_to_string(job_type));
         if (!verb)
@@ -984,7 +985,7 @@ static int append_cgroup(sd_bus_message *reply, const char *p, Set *pids) {
                 if (r == 0)
                         break;
 
-                j = strjoin(p, "/", g, NULL);
+                j = strjoin(p, "/", g);
                 if (!j)
                         return -ENOMEM;
 
@@ -1004,6 +1005,10 @@ int bus_unit_method_get_processes(sd_bus_message *message, void *userdata, sd_bu
         int r;
 
         assert(message);
+
+        r = mac_selinux_unit_access_check(u, message, "status", error);
+        if (r < 0)
+                return r;
 
         pids = set_new(NULL);
         if (!pids)
@@ -1126,7 +1131,7 @@ void bus_unit_send_change_signal(Unit *u) {
         if (!u->id)
                 return;
 
-        r = bus_foreach_bus(u->manager, NULL, u->sent_dbus_new_signal ? send_changed_signal : send_new_signal, u);
+        r = bus_foreach_bus(u->manager, u->bus_track, u->sent_dbus_new_signal ? send_changed_signal : send_new_signal, u);
         if (r < 0)
                 log_unit_debug_errno(u, r, "Failed to send unit change signal for %s: %m", u->id);
 
@@ -1172,7 +1177,7 @@ void bus_unit_send_removed_signal(Unit *u) {
         if (!u->id)
                 return;
 
-        r = bus_foreach_bus(u->manager, NULL, send_removed_signal, u);
+        r = bus_foreach_bus(u->manager, u->bus_track, send_removed_signal, u);
         if (r < 0)
                 log_unit_debug_errno(u, r, "Failed to send unit remove signal for %s: %m", u->id);
 }
@@ -1217,23 +1222,15 @@ int bus_unit_queue_job(
             (type == JOB_STOP && u->refuse_manual_stop) ||
             ((type == JOB_RESTART || type == JOB_TRY_RESTART) && (u->refuse_manual_start || u->refuse_manual_stop)) ||
             (type == JOB_RELOAD_OR_START && job_type_collapse(type, u) == JOB_START && u->refuse_manual_start))
-                return sd_bus_error_setf(error, BUS_ERROR_ONLY_BY_DEPENDENCY, "Operation refused, unit %s may be requested by dependency only.", u->id);
+                return sd_bus_error_setf(error, BUS_ERROR_ONLY_BY_DEPENDENCY, "Operation refused, unit %s may be requested by dependency only (it is configured to refuse manual start/stop).", u->id);
 
         r = manager_add_job(u->manager, type, u, mode, error, &j);
         if (r < 0)
                 return r;
 
-        if (sd_bus_message_get_bus(message) == u->manager->api_bus) {
-                if (!j->clients) {
-                        r = sd_bus_track_new(sd_bus_message_get_bus(message), &j->clients, NULL, NULL);
-                        if (r < 0)
-                                return r;
-                }
-
-                r = sd_bus_track_add_sender(j->clients, message);
-                if (r < 0)
-                        return r;
-        }
+        r = bus_job_track_sender(j, message);
+        if (r < 0)
+                return r;
 
         path = job_dbus_path(j);
         if (!path)
@@ -1363,7 +1360,7 @@ static int bus_unit_set_transient_property(
                                 if (r < 0)
                                         return r;
 
-                                label = strjoin(name, "-", other, NULL);
+                                label = strjoin(name, "-", other);
                                 if (!label)
                                         return -ENOMEM;
 
@@ -1507,7 +1504,7 @@ int bus_unit_check_load_state(Unit *u, sd_bus_error *error) {
         return sd_bus_error_set_errnof(error, u->load_error, "Unit %s is not loaded properly: %m.", u->id);
 }
 
-static int bus_track_handler(sd_bus_track *t, void *userdata) {
+static int bus_unit_track_handler(sd_bus_track *t, void *userdata) {
         Unit *u = userdata;
 
         assert(t);
@@ -1519,7 +1516,7 @@ static int bus_track_handler(sd_bus_track *t, void *userdata) {
         return 0;
 }
 
-static int allocate_bus_track(Unit *u) {
+static int bus_unit_allocate_bus_track(Unit *u) {
         int r;
 
         assert(u);
@@ -1527,7 +1524,7 @@ static int allocate_bus_track(Unit *u) {
         if (u->bus_track)
                 return 0;
 
-        r = sd_bus_track_new(u->manager->api_bus, &u->bus_track, bus_track_handler, u);
+        r = sd_bus_track_new(u->manager->api_bus, &u->bus_track, bus_unit_track_handler, u);
         if (r < 0)
                 return r;
 
@@ -1545,7 +1542,7 @@ int bus_unit_track_add_name(Unit *u, const char *name) {
 
         assert(u);
 
-        r = allocate_bus_track(u);
+        r = bus_unit_allocate_bus_track(u);
         if (r < 0)
                 return r;
 
@@ -1557,7 +1554,7 @@ int bus_unit_track_add_sender(Unit *u, sd_bus_message *m) {
 
         assert(u);
 
-        r = allocate_bus_track(u);
+        r = bus_unit_allocate_bus_track(u);
         if (r < 0)
                 return r;
 

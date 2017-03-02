@@ -434,7 +434,7 @@ static int request_parse_arguments_iterator(
                 return MHD_YES;
         }
 
-        p = strjoin(key, "=", strempty(value), NULL);
+        p = strjoin(key, "=", strempty(value));
         if (!p) {
                 m->argument_parse_error = log_oom();
                 return MHD_NO;
@@ -905,14 +905,14 @@ static int parse_argv(int argc, char *argv[]) {
                 { "key",       required_argument, NULL, ARG_KEY       },
                 { "cert",      required_argument, NULL, ARG_CERT      },
                 { "trust",     required_argument, NULL, ARG_TRUST     },
-                { "directory", required_argument, NULL, 'D' },
+                { "directory", required_argument, NULL, 'D'           },
                 {}
         };
 
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "h", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hD:", options, NULL)) >= 0)
 
                 switch(c) {
 
@@ -958,6 +958,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 #else
                         log_error("Option --trust is not available.");
+                        return -EINVAL;
 #endif
                 case 'D':
                         arg_directory = optarg;
@@ -1028,10 +1029,9 @@ int main(int argc, char *argv[]) {
                         { MHD_OPTION_END, 0, NULL }};
                 int opts_pos = 2;
 
-                /* We force MHD_USE_PIPE_FOR_SHUTDOWN here, in order
-                 * to make sure libmicrohttpd doesn't use shutdown()
-                 * on our listening socket, which would break socket
-                 * re-activation. See
+                /* We force MHD_USE_ITC here, in order to make sure
+                 * libmicrohttpd doesn't use shutdown() on our listening
+                 * socket, which would break socket re-activation. See
                  *
                  * https://lists.gnu.org/archive/html/libmicrohttpd/2015-09/msg00014.html
                  * https://github.com/systemd/systemd/pull/1286
@@ -1040,7 +1040,7 @@ int main(int argc, char *argv[]) {
                 int flags =
                         MHD_USE_DEBUG |
                         MHD_USE_DUAL_STACK |
-                        MHD_USE_PIPE_FOR_SHUTDOWN |
+                        MHD_USE_ITC |
                         MHD_USE_POLL |
                         MHD_USE_THREAD_PER_CONNECTION;
 

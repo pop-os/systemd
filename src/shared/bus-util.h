@@ -50,9 +50,9 @@ struct bus_properties_map {
 
 int bus_map_id128(sd_bus *bus, const char *member, sd_bus_message *m, sd_bus_error *error, void *userdata);
 
-int bus_message_map_all_properties(sd_bus_message *m, const struct bus_properties_map *map,  void *userdata);
-int bus_message_map_properties_changed(sd_bus_message *m, const struct bus_properties_map *map, void *userdata);
-int bus_map_all_properties(sd_bus *bus, const char *destination, const char *path, const struct bus_properties_map *map, void *userdata);
+int bus_message_map_all_properties(sd_bus_message *m, const struct bus_properties_map *map, sd_bus_error *error, void *userdata);
+int bus_message_map_properties_changed(sd_bus_message *m, const struct bus_properties_map *map, sd_bus_error *error, void *userdata);
+int bus_map_all_properties(sd_bus *bus, const char *destination, const char *path, const struct bus_properties_map *map, sd_bus_error *error, void *userdata);
 
 int bus_async_unregister_and_exit(sd_event *e, sd_bus *bus, const char *name);
 
@@ -159,3 +159,5 @@ int bus_path_encode_unique(sd_bus *b, const char *prefix, const char *sender_id,
 int bus_path_decode_unique(const char *path, const char *prefix, char **ret_sender, char **ret_external);
 
 int bus_property_get_rlimit(sd_bus *bus, const char *path, const char *interface, const char *property, sd_bus_message *reply, void *userdata, sd_bus_error *error);
+
+int bus_track_add_name_many(sd_bus_track *t, char **l);

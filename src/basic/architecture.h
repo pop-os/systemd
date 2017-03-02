@@ -124,13 +124,21 @@ int uname_architecture(void);
 #elif defined(__sparc__)
 #  define native_architecture() ARCHITECTURE_SPARC
 #  define LIB_ARCH_TUPLE "sparc-linux-gnu"
-#elif defined(__mips64__)
+#elif defined(__mips64) && defined(__LP64__)
 #  if __BYTE_ORDER == __BIG_ENDIAN
 #    define native_architecture() ARCHITECTURE_MIPS64
-#    error "Missing LIB_ARCH_TUPLE for MIPS64"
+#    define LIB_ARCH_TUPLE "mips64-linux-gnuabi64"
 #  else
 #    define native_architecture() ARCHITECTURE_MIPS64_LE
-#    error "Missing LIB_ARCH_TUPLE for MIPS64_LE"
+#    define LIB_ARCH_TUPLE "mips64el-linux-gnuabi64"
+#  endif
+#elif defined(__mips64)
+#  if __BYTE_ORDER == __BIG_ENDIAN
+#    define native_architecture() ARCHITECTURE_MIPS64
+#    define LIB_ARCH_TUPLE "mips64-linux-gnuabin32"
+#  else
+#    define native_architecture() ARCHITECTURE_MIPS64_LE
+#    define LIB_ARCH_TUPLE "mips64el-linux-gnuabin32"
 #  endif
 #elif defined(__mips__)
 #  if __BYTE_ORDER == __BIG_ENDIAN
@@ -150,6 +158,7 @@ int uname_architecture(void);
 #  else
 #    define native_architecture() ARCHITECTURE_ARM64
 #    define LIB_ARCH_TUPLE "aarch64-linux-gnu"
+#    define SECONDARY_ARCHITECTURE ARCHITECTURE_ARM
 #  endif
 #elif defined(__arm__)
 #  if __BYTE_ORDER == __BIG_ENDIAN
@@ -186,14 +195,15 @@ int uname_architecture(void);
 #  define LIB_ARCH_TUPLE "m68k-linux-gnu"
 #elif defined(__tilegx__)
 #  define native_architecture() ARCHITECTURE_TILEGX
-#  error "Missing LIB_ARCH_TUPLE for TILEGX"
+#  define LIB_ARCH_TUPLE "tilegx-linux-gnu"
 #elif defined(__cris__)
 #  define native_architecture() ARCHITECTURE_CRIS
 #  error "Missing LIB_ARCH_TUPLE for CRIS"
 #elif defined(__nios2__)
 #  define native_architecture() ARCHITECTURE_NIOS2
 #  define LIB_ARCH_TUPLE "nios2-linux-gnu"
-#elif defined(__riscv__)
+#elif defined(__riscv__) || defined(__riscv)
+        /* __riscv__ is obsolete, remove in 2018 */
 #  if __SIZEOF_POINTER__ == 4
 #    define native_architecture() ARCHITECTURE_RISCV32
 #    define LIB_ARCH_TUPLE "riscv32-linux-gnu"

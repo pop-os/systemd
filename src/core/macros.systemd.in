@@ -31,6 +31,8 @@
 %_binfmtdir @binfmtdir@
 %_systemdgeneratordir @systemgeneratordir@
 %_systemdusergeneratordir @usergeneratordir@
+%_systemd_system_env_generator_dir @systemenvgeneratordir@
+%_systemd_user_env_generator_dir @userenvgeneratordir@
 
 %systemd_requires \
 Requires(post): systemd \
@@ -81,7 +83,7 @@ fi \
 %systemd_user_postun_with_restart() %{nil}
 
 %udev_hwdb_update() \
-udevadm hwdb --update >/dev/null 2>&1 || : \
+systemd-hwdb update >/dev/null 2>&1 || : \
 %{nil}
 
 %udev_rules_update() \

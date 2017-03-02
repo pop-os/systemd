@@ -40,7 +40,7 @@
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "hashmap.h"
 #include "hostname-util.h"
@@ -144,7 +144,7 @@ static int cache_space_refresh(Server *s, JournalStorage *storage) {
 
         ts = now(CLOCK_MONOTONIC);
 
-        if (space->timestamp + RECHECK_SPACE_USEC > ts)
+        if (space->timestamp != 0 && space->timestamp + RECHECK_SPACE_USEC > ts)
                 return 0;
 
         r = determine_path_usage(s, storage->path, &vfs_used, &vfs_avail);
@@ -214,7 +214,7 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
         format_bytes(fb5, sizeof(fb5), storage->space.limit);
         format_bytes(fb6, sizeof(fb6), storage->space.available);
 
-        server_driver_message(s, SD_MESSAGE_JOURNAL_USAGE,
+        server_driver_message(s, "MESSAGE_ID=" SD_MESSAGE_JOURNAL_USAGE_STR,
                               LOG_MESSAGE("%s (%s) is %s, max %s, %s free.",
                                           storage->name, storage->path, fb1, fb5, fb6),
                               "JOURNAL_NAME=%s", storage->name,
@@ -283,17 +283,16 @@ static int open_journal(
 }
 
 static bool flushed_flag_is_set(void) {
-        return (access("/run/systemd/journal/flushed", F_OK) >= 0);
+        return access("/run/systemd/journal/flushed", F_OK) >= 0;
 }
 
 static int system_journal_open(Server *s, bool flush_requested) {
-        bool flushed = false;
         const char *fn;
         int r = 0;
 
         if (!s->system_journal &&
-            (s->storage == STORAGE_PERSISTENT || s->storage == STORAGE_AUTO) &&
-            (flush_requested || (flushed = flushed_flag_is_set()))) {
+            IN_SET(s->storage, STORAGE_PERSISTENT, STORAGE_AUTO) &&
+            (flush_requested || flushed_flag_is_set())) {
 
                 /* If in auto mode: first try to create the machine
                  * path, but not the prefix.
@@ -326,8 +325,8 @@ static int system_journal_open(Server *s, bool flush_requested) {
                  * Perform an implicit flush to var, leaving the runtime
                  * journal closed, now that the system journal is back.
                  */
-                if (s->runtime_journal && flushed)
-                        (void) server_flush_to_var(s);
+                if (!flush_requested)
+                        (void) server_flush_to_var(s, true);
         }
 
         if (!s->runtime_journal &&
@@ -731,7 +730,7 @@ static int get_invocation_id(const char *cgroup_root, const char *slice, const c
         if (!escaped)
                 return -ENOMEM;
 
-        p = strjoin(cgroup_root, "/", slice_path, "/", escaped, NULL);
+        p = strjoin(cgroup_root, "/", slice_path, "/", escaped);
         if (!p)
                 return -ENOMEM;
 
@@ -761,7 +760,8 @@ static void dispatch_message_real(
                 const char *label, size_t label_len,
                 const char *unit_id,
                 int priority,
-                pid_t object_pid) {
+                pid_t object_pid,
+                char *cgroup) {
 
         char    pid[sizeof("_PID=") + DECIMAL_STR_MAX(pid_t)],
                 uid[sizeof("_UID=") + DECIMAL_STR_MAX(uid_t)],
@@ -847,7 +847,12 @@ static void dispatch_message_real(
                 }
 #endif
 
-                r = cg_pid_get_path_shifted(ucred->pid, s->cgroup_root, &c);
+                r = 0;
+                if (cgroup)
+                        c = cgroup;
+                else
+                        r = cg_pid_get_path_shifted(ucred->pid, s->cgroup_root, &c);
+
                 if (r >= 0) {
                         _cleanup_free_ char *raw_unit = NULL, *raw_slice = NULL;
                         char *session = NULL;
@@ -905,7 +910,8 @@ static void dispatch_message_real(
                                 }
                         }
 
-                        free(c);
+                        if (!cgroup)
+                                free(c);
                 } else if (unit_id) {
                         x = strjoina("_SYSTEMD_UNIT=", unit_id);
                         IOVEC_SET_STRING(iovec[n++], x);
@@ -1062,8 +1068,7 @@ static void dispatch_message_real(
         write_to_journal(s, journal_uid, iovec, n, priority);
 }
 
-void server_driver_message(Server *s, sd_id128_t message_id, const char *format, ...) {
-        char mid[11 + 32 + 1];
+void server_driver_message(Server *s, const char *message_id, const char *format, ...) {
         struct iovec iovec[N_IOVEC_META_FIELDS + 5 + N_IOVEC_PAYLOAD_FIELDS];
         unsigned n = 0, m;
         int r;
@@ -1081,11 +1086,8 @@ void server_driver_message(Server *s, sd_id128_t message_id, const char *format,
         assert_cc(6 == LOG_INFO);
         IOVEC_SET_STRING(iovec[n++], "PRIORITY=6");
 
-        if (!sd_id128_is_null(message_id)) {
-                snprintf(mid, sizeof(mid), LOG_MESSAGE_ID(message_id));
-                IOVEC_SET_STRING(iovec[n++], mid);
-        }
-
+        if (message_id)
+                IOVEC_SET_STRING(iovec[n++], message_id);
         m = n;
 
         va_start(ap, format);
@@ -1098,7 +1100,7 @@ void server_driver_message(Server *s, sd_id128_t message_id, const char *format,
         ucred.gid = getgid();
 
         if (r >= 0)
-                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), &ucred, NULL, NULL, 0, NULL, LOG_INFO, 0);
+                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), &ucred, NULL, NULL, 0, NULL, LOG_INFO, 0, NULL);
 
         while (m < n)
                 free(iovec[m++].iov_base);
@@ -1112,7 +1114,7 @@ void server_driver_message(Server *s, sd_id128_t message_id, const char *format,
                 n = 3;
                 IOVEC_SET_STRING(iovec[n++], "PRIORITY=4");
                 IOVEC_SET_STRING(iovec[n++], buf);
-                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), &ucred, NULL, NULL, 0, NULL, LOG_INFO, 0);
+                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), &ucred, NULL, NULL, 0, NULL, LOG_INFO, 0, NULL);
         }
 }
 
@@ -1129,7 +1131,7 @@ void server_dispatch_message(
         int rl, r;
         _cleanup_free_ char *path = NULL;
         uint64_t available = 0;
-        char *c;
+        char *c = NULL;
 
         assert(s);
         assert(iovec || n == 0);
@@ -1175,15 +1177,18 @@ void server_dispatch_message(
 
         /* Write a suppression message if we suppressed something */
         if (rl > 1)
-                server_driver_message(s, SD_MESSAGE_JOURNAL_DROPPED,
+                server_driver_message(s, "MESSAGE_ID=" SD_MESSAGE_JOURNAL_DROPPED_STR,
                                       LOG_MESSAGE("Suppressed %u messages from %s", rl - 1, path),
                                       NULL);
 
 finish:
-        dispatch_message_real(s, iovec, n, m, ucred, tv, label, label_len, unit_id, priority, object_pid);
+        /* restore cgroup path for logging */
+        if (c)
+                *c = '/';
+        dispatch_message_real(s, iovec, n, m, ucred, tv, label, label_len, unit_id, priority, object_pid, path);
 }
 
-int server_flush_to_var(Server *s) {
+int server_flush_to_var(Server *s, bool require_flag_file) {
         sd_id128_t machine;
         sd_journal *j = NULL;
         char ts[FORMAT_TIMESPAN_MAX];
@@ -1193,11 +1198,13 @@ int server_flush_to_var(Server *s) {
 
         assert(s);
 
-        if (s->storage != STORAGE_AUTO &&
-            s->storage != STORAGE_PERSISTENT)
+        if (!IN_SET(s->storage, STORAGE_AUTO, STORAGE_PERSISTENT))
                 return 0;
 
         if (!s->runtime_journal)
+                return 0;
+
+        if (require_flag_file && !flushed_flag_is_set())
                 return 0;
 
         (void) system_journal_open(s, true);
@@ -1272,7 +1279,7 @@ finish:
 
         sd_journal_close(j);
 
-        server_driver_message(s, SD_ID128_NULL,
+        server_driver_message(s, NULL,
                               LOG_MESSAGE("Time spent on flushing to /var is %s for %u entries.",
                                           format_timespan(ts, sizeof(ts), now(CLOCK_MONOTONIC) - start, 0),
                                           n),
@@ -1411,7 +1418,7 @@ static int dispatch_sigusr1(sd_event_source *es, const struct signalfd_siginfo *
 
         log_info("Received request to flush runtime journal from PID " PID_FMT, si->ssi_pid);
 
-        (void) server_flush_to_var(s);
+        (void) server_flush_to_var(s, false);
         server_sync(s);
         server_vacuum(s, false);
 
@@ -1480,7 +1487,7 @@ static int setup_signals(Server *s) {
 
         assert(s);
 
-        assert(sigprocmask_many(SIG_SETMASK, NULL, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGRTMIN+1, -1) >= 0);
+        assert_se(sigprocmask_many(SIG_SETMASK, NULL, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGRTMIN+1, -1) >= 0);
 
         r = sd_event_add_signal(s->event, &s->sigusr1_event_source, SIGUSR1, dispatch_sigusr1, s);
         if (r < 0)
@@ -1532,60 +1539,93 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
         assert(s);
 
-        if (streq(key, "systemd.journald.forward_to_syslog")) {
+        if (proc_cmdline_key_streq(key, "systemd.journald.forward_to_syslog")) {
+
                 r = value ? parse_boolean(value) : true;
                 if (r < 0)
                         log_warning("Failed to parse forward to syslog switch \"%s\". Ignoring.", value);
                 else
                         s->forward_to_syslog = r;
-        } else if (streq(key, "systemd.journald.forward_to_kmsg")) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.forward_to_kmsg")) {
+
                 r = value ? parse_boolean(value) : true;
                 if (r < 0)
                         log_warning("Failed to parse forward to kmsg switch \"%s\". Ignoring.", value);
                 else
                         s->forward_to_kmsg = r;
-        } else if (streq(key, "systemd.journald.forward_to_console")) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.forward_to_console")) {
+
                 r = value ? parse_boolean(value) : true;
                 if (r < 0)
                         log_warning("Failed to parse forward to console switch \"%s\". Ignoring.", value);
                 else
                         s->forward_to_console = r;
-        } else if (streq(key, "systemd.journald.forward_to_wall")) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.forward_to_wall")) {
+
                 r = value ? parse_boolean(value) : true;
                 if (r < 0)
                         log_warning("Failed to parse forward to wall switch \"%s\". Ignoring.", value);
                 else
                         s->forward_to_wall = r;
-        } else if (streq(key, "systemd.journald.max_level_console") && value) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.max_level_console")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
                 r = log_level_from_string(value);
                 if (r < 0)
                         log_warning("Failed to parse max level console value \"%s\". Ignoring.", value);
                 else
                         s->max_level_console = r;
-        } else if (streq(key, "systemd.journald.max_level_store") && value) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.max_level_store")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
                 r = log_level_from_string(value);
                 if (r < 0)
                         log_warning("Failed to parse max level store value \"%s\". Ignoring.", value);
                 else
                         s->max_level_store = r;
-        } else if (streq(key, "systemd.journald.max_level_syslog") && value) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.max_level_syslog")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
                 r = log_level_from_string(value);
                 if (r < 0)
                         log_warning("Failed to parse max level syslog value \"%s\". Ignoring.", value);
                 else
                         s->max_level_syslog = r;
-        } else if (streq(key, "systemd.journald.max_level_kmsg") && value) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.max_level_kmsg")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
                 r = log_level_from_string(value);
                 if (r < 0)
                         log_warning("Failed to parse max level kmsg value \"%s\". Ignoring.", value);
                 else
                         s->max_level_kmsg = r;
-        } else if (streq(key, "systemd.journald.max_level_wall") && value) {
+
+        } else if (proc_cmdline_key_streq(key, "systemd.journald.max_level_wall")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
                 r = log_level_from_string(value);
                 if (r < 0)
                         log_warning("Failed to parse max level wall value \"%s\". Ignoring.", value);
                 else
                         s->max_level_wall = r;
+
         } else if (startswith(key, "systemd.journald"))
                 log_warning("Unknown journald kernel command line option \"%s\". Ignoring.", key);
 
@@ -1898,7 +1938,10 @@ int server_init(Server *s) {
         journal_reset_metrics(&s->runtime_storage.metrics);
 
         server_parse_config_file(s);
-        parse_proc_cmdline(parse_proc_cmdline_item, s, true);
+
+        r = proc_cmdline_parse(parse_proc_cmdline_item, s, PROC_CMDLINE_STRIP_RD_PREFIX);
+        if (r < 0)
+                log_warning_errno(r, "Failed to parse kernel command line, ignoring: %m");
 
         if (!!s->rate_limit_interval ^ !!s->rate_limit_burst) {
                 log_debug("Setting both rate limit interval and burst from "USEC_FMT",%u to 0,0",
@@ -2051,8 +2094,8 @@ int server_init(Server *s) {
         s->runtime_storage.name = "Runtime journal";
         s->system_storage.name = "System journal";
 
-        s->runtime_storage.path = strjoin("/run/log/journal/", SERVER_MACHINE_ID(s), NULL);
-        s->system_storage.path  = strjoin("/var/log/journal/", SERVER_MACHINE_ID(s), NULL);
+        s->runtime_storage.path = strjoin("/run/log/journal/", SERVER_MACHINE_ID(s));
+        s->system_storage.path  = strjoin("/var/log/journal/", SERVER_MACHINE_ID(s));
         if (!s->runtime_storage.path || !s->system_storage.path)
                 return -ENOMEM;
 

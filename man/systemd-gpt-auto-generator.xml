@@ -62,7 +62,7 @@
     partitions and creates mount and swap units for them, based on the
     partition type GUIDs of GUID partition tables (GPT). It implements
     the <ulink
-    url="http://www.freedesktop.org/wiki/Specifications/DiscoverablePartitionsSpec/">Discoverable
+    url="https://www.freedesktop.org/wiki/Specifications/DiscoverablePartitionsSpec/">Discoverable
     Partitions Specification</ulink>. Note that this generator has no
     effect on non-GPT systems, or where the directories under the
     mount points are already non-empty. Also, on systems where the
@@ -121,6 +121,11 @@
             <entry>b921b045-1df0-41c3-af44-4c6f280d3fae</entry>
             <entry><filename>Root Partition (64-bit ARM)</filename></entry>
             <entry>On 64-bit ARM systems, the first ARM root partition on the disk the EFI ESP is located on is mounted to the root directory <filename>/</filename>.</entry>
+          </row>
+          <row>
+            <entry>993d8d3d-f80e-4225-855a-9daf8ed7ea97</entry>
+            <entry><filename>Root Partition (Itanium/IA-64)</filename></entry>
+            <entry>On Itanium systems, the first Itanium root partition on the disk the EFI ESP is located on is mounted to the root directory <filename>/</filename>.</entry>
           </row>
           <row>
             <entry>933ac7e1-2eb4-4f13-b844-0e14e2aef915</entry>
