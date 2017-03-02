@@ -90,6 +90,8 @@ Settings* settings_free(Settings *s) {
         strv_free(s->parameters);
         strv_free(s->environment);
         free(s->user);
+        free(s->pivot_root_new);
+        free(s->pivot_root_old);
         free(s->working_directory);
 
         strv_free(s->network_interfaces);
@@ -237,6 +239,34 @@ int config_parse_id128(
         return 0;
 }
 
+int config_parse_pivot_root(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        Settings *settings = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        r = pivot_root_parse(&settings->pivot_root_new, &settings->pivot_root_old, rvalue);
+        if (r < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r, "Invalid pivot root mount specification %s: %m", rvalue);
+                return 0;
+        }
+
+        return 0;
+}
+
 int config_parse_bind(
                 const char *unit,
                 const char *filename,
@@ -289,6 +319,32 @@ int config_parse_tmpfs(
                 log_syntax(unit, LOG_ERR, filename, line, r, "Invalid temporary file system specification %s: %m", rvalue);
                 return 0;
         }
+
+        return 0;
+}
+
+int config_parse_overlay(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        Settings *settings = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+
+        r = overlay_mount_parse(&settings->custom_mounts, &settings->n_custom_mounts, rvalue, ltype);
+        if (r < 0)
+                log_syntax(unit, LOG_ERR, filename, line, r, "Invalid overlay file system specification %s, ignoring: %m", rvalue);
 
         return 0;
 }

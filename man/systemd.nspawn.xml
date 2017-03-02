@@ -202,6 +202,15 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>PivotRoot=</varname></term>
+
+        <listitem><para>Selects a directory to pivot to <filename>/</filename> inside the container when starting up.
+        Takes a single path, or a pair of two paths separated by a colon. Both paths must be absolute, and are resolved
+        in the container's file system namespace. This corresponds to the <option>--pivot-root=</option> command line
+        switch.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>Capability=</varname></term>
         <term><varname>DropCapability=</varname></term>
 
@@ -332,6 +341,17 @@
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         for details about the specific options supported. This setting
         is privileged (see above).</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Overlay=</varname></term>
+        <term><varname>OverlayReadOnly=</varname></term>
+
+        <listitem><para>Adds an overlay mount point. Takes a colon-separated list of paths.  This option may be used
+        multiple times to configure multiple overlay mounts. This option is equivalent to the command line switches
+        <option>--overlay=</option> and <option>--overlay-ro=</option>, see
+        <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry> for details
+        about the specific options supported. This setting is privileged (see above).</para></listitem>
       </varlistentry>
 
       <varlistentry>

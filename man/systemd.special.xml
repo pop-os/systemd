@@ -47,16 +47,14 @@
     <refpurpose>Special systemd units</refpurpose>
   </refnamediv>
 
-  <refsynopsisdiv>
-    <para><filename>basic.target</filename>,
+  <refsynopsisdiv><para>
+    <!-- sort alphabetically, targets first -->
+    <filename>basic.target</filename>,
     <filename>bluetooth.target</filename>,
-    <filename>ctrl-alt-del.target</filename>,
-    <filename>cryptsetup.target</filename>,
     <filename>cryptsetup-pre.target</filename>,
-    <filename>dbus.service</filename>,
-    <filename>dbus.socket</filename>,
+    <filename>cryptsetup.target</filename>,
+    <filename>ctrl-alt-del.target</filename>,
     <filename>default.target</filename>,
-    <filename>display-manager.service</filename>,
     <filename>emergency.target</filename>,
     <filename>exit.target</filename>,
     <filename>final.target</filename>,
@@ -66,25 +64,26 @@
     <filename>hibernate.target</filename>,
     <filename>hybrid-sleep.target</filename>,
     <filename>initrd-fs.target</filename>,
+    <filename>initrd-root-device.target</filename>,
+    <filename>initrd-root-fs.target</filename>,
     <filename>kbrequest.target</filename>,
     <filename>kexec.target</filename>,
-    <filename>local-fs.target</filename>,
     <filename>local-fs-pre.target</filename>,
+    <filename>local-fs.target</filename>,
+    <filename>machines.target</filename>
     <filename>multi-user.target</filename>,
-    <filename>network.target</filename>,
     <filename>network-online.target</filename>,
     <filename>network-pre.target</filename>,
+    <filename>network.target</filename>,
     <filename>nss-lookup.target</filename>,
     <filename>nss-user-lookup.target</filename>,
     <filename>paths.target</filename>,
     <filename>poweroff.target</filename>,
     <filename>printer.target</filename>,
     <filename>reboot.target</filename>,
-    <filename>remote-fs.target</filename>,
     <filename>remote-fs-pre.target</filename>,
+    <filename>remote-fs.target</filename>,
     <filename>rescue.target</filename>,
-    <filename>initrd-root-device.target</filename>,
-    <filename>initrd-root-fs.target</filename>,
     <filename>rpcbind.target</filename>,
     <filename>runlevel2.target</filename>,
     <filename>runlevel3.target</filename>,
@@ -105,17 +104,24 @@
     <filename>time-sync.target</filename>,
     <filename>timers.target</filename>,
     <filename>umount.target</filename>,
+    <!-- slices -->
     <filename>-.slice</filename>,
     <filename>system.slice</filename>,
     <filename>user.slice</filename>,
-    <filename>machine.slice</filename></para>
-  </refsynopsisdiv>
+    <filename>machine.slice</filename>,
+    <!-- the rest -->
+    <filename>dbus.service</filename>,
+    <filename>dbus.socket</filename>,
+    <filename>display-manager.service</filename>,
+    <filename>system-update-cleanup.service</filename>
+  </para></refsynopsisdiv>
 
   <refsect1>
     <title>Description</title>
 
-    <para>A few units are treated specially by systemd. They have
-    special internal semantics and cannot be renamed.</para>
+    <para>A few units are treated specially by systemd. Many of them have
+    special internal semantics and cannot be renamed, while others simply
+    have a standard meaning and should be present on all systems.</para>
   </refsect1>
 
   <refsect1>
@@ -348,6 +354,14 @@
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term><filename>machines.target</filename></term>
+        <listitem>
+          <para>A standard target unit for starting all the containers
+          and other virtual machines. See <filename>systemd-nspawn@.service</filename>
+          for an example.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term><filename>multi-user.target</filename></term>
         <listitem>
           <para>A special target unit for setting up a multi-user
@@ -385,7 +399,7 @@
           is part of the boot of most systems, while
           <filename>network-online.target</filename> is not, except
           when at least one unit requires it. Also see <ulink
-          url="http://www.freedesktop.org/wiki/Software/systemd/NetworkTarget">Running
+          url="https://www.freedesktop.org/wiki/Software/systemd/NetworkTarget">Running
           Services After the Network is up</ulink> for more
           information.</para>
 
@@ -602,21 +616,27 @@
           on. All userspace log messages will be made available on
           this socket. For more information about syslog integration,
           please consult the <ulink
-          url="http://www.freedesktop.org/wiki/Software/systemd/syslog">Syslog
+          url="https://www.freedesktop.org/wiki/Software/systemd/syslog">Syslog
           Interface</ulink> document.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><filename>system-update.target</filename></term>
+        <term><filename>system-update-cleanup.service</filename></term>
         <listitem>
-          <para>A special target unit that is used for off-line system
-          updates.
+          <para>A special target unit that is used for offline system updates.
           <citerefentry><refentrytitle>systemd-system-update-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-          will redirect the boot process to this target if
-          <filename>/system-update</filename> exists. For more
-          information see the <ulink
-          url="http://freedesktop.org/wiki/Software/systemd/SystemUpdates">System
-          Updates Specification</ulink>.</para>
+          will redirect the boot process to this target if <filename>/system-update</filename>
+          exists. For more information see
+          <citerefentry><refentrytitle>systemd.offline-updates</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+          </para>
+
+          <para>Updates should happen before the <filename>system-update.target</filename> is
+          reached, and the services which implement them should cause the machine to reboot. As
+          a safety measure, if this does not happen, and <filename>/system-update</filename>
+          still exists after <filename>system-update.target</filename> is reached,
+          <filename>system-update-cleanup.service</filename> will remove this symlink and
+          reboot the machine.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -765,7 +785,7 @@
           is shut down. It is hence useful when writing service files
           that require network access on shutdown, which should order
           themselves after this target, but not pull it in. Also see
-          <ulink url="http://www.freedesktop.org/wiki/Software/systemd/NetworkTarget">Running
+          <ulink url="https://www.freedesktop.org/wiki/Software/systemd/NetworkTarget">Running
           Services After the Network is up</ulink> for more
           information. Also see
           <filename>network-online.target</filename> described
@@ -923,7 +943,7 @@ Description=Render the desktop icons with Nautilus
 PartOf=graphical-session.target
 
 [Service]
-...
+…
         </programlisting>
       </example>
     </refsect2>

@@ -18,7 +18,7 @@
 # Message catalog for systemd's own messages
 
 # The catalog format is documented on
-# http://www.freedesktop.org/wiki/Software/systemd/catalog
+# https://www.freedesktop.org/wiki/Software/systemd/catalog
 
 # For an explanation why we do all this, see https://xkcd.com/1024/
 
@@ -115,7 +115,7 @@ als Fehler dem jeweiligen Hersteller gemeldet werden.
 Subject: A new session @SESSION_ID@ has been created for user @USER_ID@
 Defined-By: systemd
 Support: %SUPPORT_URL%
-Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
+Documentation: https://www.freedesktop.org/wiki/Software/systemd/multiseat
 
 A new session with the ID @SESSION_ID@ has been created for the user @USER_ID@.
 
@@ -125,7 +125,7 @@ The leading process of the session is @LEADER@.
 Subject: Session @SESSION_ID@ has been terminated
 Defined-By: systemd
 Support: %SUPPORT_URL%
-Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
+Documentation: https://www.freedesktop.org/wiki/Software/systemd/multiseat
 
 A session with the ID @SESSION_ID@ has been terminated.
 
@@ -133,7 +133,7 @@ A session with the ID @SESSION_ID@ has been terminated.
 Subject: A new seat @SEAT_ID@ is now available
 Defined-By: systemd
 Support: %SUPPORT_URL%
-Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
+Documentation: https://www.freedesktop.org/wiki/Software/systemd/multiseat
 
 A new seat @SEAT_ID@ has been configured and is now available.
 
@@ -141,7 +141,7 @@ A new seat @SEAT_ID@ has been configured and is now available.
 Subject: Seat @SEAT_ID@ has now been removed
 Defined-By: systemd
 Support: %SUPPORT_URL%
-Documentation: http://www.freedesktop.org/wiki/Software/systemd/multiseat
+Documentation: https://www.freedesktop.org/wiki/Software/systemd/multiseat
 
 A seat @SEAT_ID@ has been removed and is no longer available.
 
@@ -172,14 +172,25 @@ Defined-By: systemd
 Support: %SUPPORT_URL%
 
 All system services necessary queued for starting at boot have been
-successfully started. Note that this does not mean that the machine is
-now idle as services might still be busy with completing start-up.
+started. Note that this does not mean that the machine is now idle as services
+might still be busy with completing start-up.
 
 Kernel start-up required @KERNEL_USEC@ microseconds.
 
 Initial RAM disk start-up required @INITRD_USEC@ microseconds.
 
 Userspace start-up required @USERSPACE_USEC@ microseconds.
+
+-- eed00a68ffd84e31882105fd973abdd1
+Subject: User manager start-up is now complete
+Defined-By: systemd
+Support: %SUPPORT_URL%
+
+The user manager instance for user @_UID@ has been started. All services queued
+for starting have been started. Note that other services might still be starting
+up or be started at any later time.
+
+Startup of the manager took @USERSPACE_USEC@ microseconds.
 
 -- 6bbd95ee977941e497c48be27c254128
 Subject: System sleep state @SLEEP@ entered

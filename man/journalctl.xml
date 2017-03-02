@@ -318,8 +318,10 @@
                 <para>serializes the journal into a binary (but mostly
                 text-based) stream suitable for backups and network
                 transfer (see
-                <ulink url="http://www.freedesktop.org/wiki/Software/systemd/export">Journal Export Format</ulink>
-                for more information).</para>
+                <ulink url="https://www.freedesktop.org/wiki/Software/systemd/export">Journal Export Format</ulink>
+                for more information). To import the binary stream back
+                into native journald format use
+                <citerefentry><refentrytitle>systemd-journal-remote</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
               </listitem>
             </varlistentry>
 
@@ -330,7 +332,7 @@
               <listitem>
                 <para>formats entries as JSON data structures, one per
                 line (see
-                <ulink url="http://www.freedesktop.org/wiki/Software/systemd/json">Journal JSON Format</ulink>
+                <ulink url="https://www.freedesktop.org/wiki/Software/systemd/json">Journal JSON Format</ulink>
                 for more information).</para>
               </listitem>
             </varlistentry>
@@ -399,7 +401,7 @@
         manuals. Note that help texts are not available for all
         messages, but only for selected ones. For more information on
         the message catalog, please refer to the
-        <ulink url="http://www.freedesktop.org/wiki/Software/systemd/catalog">Message Catalog Developer Documentation</ulink>.</para>
+        <ulink url="https://www.freedesktop.org/wiki/Software/systemd/catalog">Message Catalog Developer Documentation</ulink>.</para>
 
         <para>Note: when attaching <command>journalctl</command>
         output to bug reports, please do <emphasis>not</emphasis> use
@@ -412,7 +414,7 @@
         <term><option>--quiet</option></term>
 
         <listitem><para>Suppresses all info messages
-        (i.e. "-- Logs begin at ...", "-- Reboot --"),
+        (i.e. "-- Logs begin at …", "-- Reboot --"),
         any warning messages regarding
         inaccessible system journals when run as a normal
         user.</para></listitem>
@@ -573,7 +575,7 @@
 
         <listitem><para>The cursor is shown after the last entry after
         two dashes:</para>
-        <programlisting>-- cursor: s=0639...</programlisting>
+        <programlisting>-- cursor: s=0639…</programlisting>
         <para>The format of the cursor is private
         and subject to change.</para></listitem>
       </varlistentry>
@@ -675,7 +677,7 @@
         a new 128-bit ID suitable for identifying messages. This is
         intended for usage by developers who need a new identifier for
         a new message they introduce and want to make
-        recognizable. This will print the new ID in three different
+        recognizable. This will print the new ID in four different
         formats which can be copied into source code or similar.
         </para></listitem>
       </varlistentry>
@@ -731,7 +733,7 @@
 
       <varlistentry>
         <term><option>--list-catalog
-        <optional><replaceable>128-bit-ID...</replaceable></optional>
+        <optional><replaceable>128-bit-ID…</replaceable></optional>
         </option></term>
 
         <listitem><para>List the contents of the message catalog as a
@@ -745,7 +747,7 @@
 
       <varlistentry>
         <term><option>--dump-catalog
-        <optional><replaceable>128-bit-ID...</replaceable></optional>
+        <optional><replaceable>128-bit-ID…</replaceable></optional>
         </option></term>
 
         <listitem><para>Show the contents of the message catalog, with
@@ -923,7 +925,9 @@
       <citerefentry><refentrytitle>coredumpctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.journal-fields</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>journald.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-      <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+      <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd-journal-remote</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd-journal-upload</refentrytitle><manvolnum>8</manvolnum></citerefentry>
     </para>
   </refsect1>
 </refentry>

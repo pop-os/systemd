@@ -104,7 +104,7 @@
     for kernel-to-userspace and userspace-to-userspace interfaces. Some
     of them may not be changed via mount units, and cannot be
     disabled. For a longer discussion see <ulink
-    url="http://www.freedesktop.org/wiki/Software/systemd/APIFileSystems">API
+    url="https://www.freedesktop.org/wiki/Software/systemd/APIFileSystems">API
     File Systems</ulink>.</para>
   </refsect1>
 
@@ -194,6 +194,25 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>x-systemd.before=</option></term>
+        <term><option>x-systemd.after=</option></term>
+
+        <listitem><para>Configures a <varname>Before=</varname>
+        dependency or <varname>After=</varname> between the created
+        mount unit and another systemd unit, such as a mount unit.
+        The argument should be a unit name or an absolute path
+        to a mount point. This option may be specified more than once.
+        This option is particularly useful for mount point declarations
+        with <option>nofail</option> option that are mounted
+        asynchronously but need to be mounted before or after some unit
+        start, for example, before <filename>local-fs.target</filename>
+        unit.
+        See <varname>Before=</varname> and <varname>After=</varname> in
+        <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        for details.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>x-systemd.requires-mounts-for=</option></term>
 
         <listitem><para>Configures a
@@ -204,6 +223,19 @@
         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for details.</para></listitem>
        </varlistentry>
+
+      <varlistentry>
+        <term><option>x-systemd.device-bound</option></term>
+
+        <listitem><para>The block device backed file system will be upgraded
+        to <varname>BindsTo=</varname> dependency. This option is only useful
+        when mounting file systems manually with
+        <citerefentry><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        as the default dependency in this case is <varname>Requires=</varname>.
+        This option is already implied by entries in <filename>/etc/fstab</filename>
+        or by mount units.
+        </para></listitem>
+      </varlistentry>
 
       <varlistentry>
         <term><option>x-systemd.automount</option></term>
@@ -240,6 +272,25 @@
         </listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><option>x-systemd.mount-timeout=</option></term>
+
+        <listitem><para>Configure how long systemd should wait for the
+        mount command to finish before giving up on an entry from
+        <filename>/etc/fstab</filename>. Specify a time in seconds or
+        explicitly append a unit such as <literal>s</literal>,
+        <literal>min</literal>, <literal>h</literal>,
+        <literal>ms</literal>.</para>
+
+        <para>Note that this option can only be used in
+        <filename>/etc/fstab</filename>, and will be
+        ignored when part of the <varname>Options=</varname>
+        setting in a unit file.</para>
+
+        <para>See <varname>TimeoutSec=</varname> below for
+        details.</para>
+        </listitem>
+      </varlistentry>
       <varlistentry>
         <term><option>noauto</option></term>
         <term><option>auto</option></term>
@@ -305,14 +356,12 @@
 
       <varlistentry>
         <term><varname>What=</varname></term>
-        <listitem><para>Takes an absolute path of a device node, file
-        or other resource to mount. See
-        <citerefentry project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        for details. If this refers to a device node, a dependency on
-        the respective device unit is automatically created. (See
-        <citerefentry><refentrytitle>systemd.device</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for more information.) This option is
-        mandatory.</para></listitem>
+        <listitem><para>Takes an absolute path of a device node, file or other resource to mount. See <citerefentry
+        project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry> for details. If
+        this refers to a device node, a dependency on the respective device unit is automatically created. (See
+        <citerefentry><refentrytitle>systemd.device</refentrytitle><manvolnum>5</manvolnum></citerefentry> for more
+        information.) This option is mandatory. Note that the usual specifier expansion is applied to this setting,
+        literal percent characters should hence be written as <literal>%%</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -334,9 +383,9 @@
       <varlistentry>
         <term><varname>Options=</varname></term>
 
-        <listitem><para>Mount options to use when mounting. This takes
-        a comma-separated list of options. This setting is
-        optional.</para></listitem>
+        <listitem><para>Mount options to use when mounting. This takes a comma-separated list of options. This setting
+        is optional. Note that the usual specifier expansion is applied to this setting, literal percent characters
+        should hence be written as <literal>%%</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>

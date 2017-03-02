@@ -35,7 +35,7 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "io-util.h"
 #include "logind-session.h"
 #include "mkdir.h"
@@ -505,7 +505,7 @@ static int session_start_scope(Session *s) {
                 char *scope, *job = NULL;
                 const char *description;
 
-                scope = strjoin("session-", s->id, ".scope", NULL);
+                scope = strjoin("session-", s->id, ".scope");
                 if (!scope)
                         return log_oom();
 
@@ -561,7 +561,7 @@ int session_start(Session *s) {
                 return r;
 
         log_struct(s->class == SESSION_BACKGROUND ? LOG_DEBUG : LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_SESSION_START),
+                   "MESSAGE_ID=" SD_MESSAGE_SESSION_START_STR,
                    "SESSION_ID=%s", s->id,
                    "USER_ID=%s", s->user->name,
                    "LEADER="PID_FMT, s->leader,
@@ -586,12 +586,10 @@ int session_start(Session *s) {
 
         /* Send signals */
         session_send_signal(s, true);
-        user_send_changed(s->user, "Sessions", "Display", NULL);
+        user_send_changed(s->user, "Display", NULL);
         if (s->seat) {
                 if (s->seat->active == s)
-                        seat_send_changed(s->seat, "Sessions", "ActiveSession", NULL);
-                else
-                        seat_send_changed(s->seat, "Sessions", NULL);
+                        seat_send_changed(s->seat, "ActiveSession", NULL);
         }
 
         return 0;
@@ -668,7 +666,7 @@ int session_finalize(Session *s) {
 
         if (s->started)
                 log_struct(s->class == SESSION_BACKGROUND ? LOG_DEBUG : LOG_INFO,
-                           LOG_MESSAGE_ID(SD_MESSAGE_SESSION_STOP),
+                           "MESSAGE_ID=" SD_MESSAGE_SESSION_STOP_STR,
                            "SESSION_ID=%s", s->id,
                            "USER_ID=%s", s->user->name,
                            "LEADER="PID_FMT, s->leader,
@@ -698,11 +696,10 @@ int session_finalize(Session *s) {
                         seat_set_active(s->seat, NULL);
 
                 seat_save(s->seat);
-                seat_send_changed(s->seat, "Sessions", NULL);
         }
 
         user_save(s->user);
-        user_send_changed(s->user, "Sessions", "Display", NULL);
+        user_send_changed(s->user, "Display", NULL);
 
         return 0;
 }

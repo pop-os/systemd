@@ -441,6 +441,9 @@ struct UnitVTable {
 
         /* True if transient units of this type are OK */
         bool can_transient:1;
+
+        /* True if queued jobs of this type should be GC'ed if no other job needs them anymore */
+        bool gc_jobs:1;
 };
 
 extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
@@ -653,6 +656,8 @@ void unit_notify_user_lookup(Unit *u, uid_t uid, gid_t gid);
 
 int unit_set_invocation_id(Unit *u, sd_id128_t id);
 int unit_acquire_invocation_id(Unit *u);
+
+bool unit_shall_confirm_spawn(Unit *u);
 
 /* Macros which append UNIT= or USER_UNIT= to the message */
 

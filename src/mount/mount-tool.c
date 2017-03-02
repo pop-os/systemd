@@ -40,6 +40,7 @@ enum {
         ACTION_DEFAULT,
         ACTION_MOUNT,
         ACTION_AUTOMOUNT,
+        ACTION_UMOUNT,
         ACTION_LIST,
 } arg_action = ACTION_DEFAULT;
 
@@ -99,6 +100,7 @@ static void help(void) {
                "                                  Set automount unit property\n"
                "     --bind-device                Bind automount unit to device\n"
                "     --list                       List mountable block devices\n"
+               "  -u --umount                     Unmount mount points\n"
                , program_invocation_short_name);
 }
 
@@ -137,6 +139,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "discover",           no_argument,       NULL, ARG_DISCOVER           },
                 { "type",               required_argument, NULL, 't'                    },
                 { "options",            required_argument, NULL, 'o'                    },
+                { "fsck",               required_argument, NULL, ARG_FSCK               },
                 { "description",        required_argument, NULL, ARG_DESCRIPTION        },
                 { "property",           required_argument, NULL, 'p'                    },
                 { "automount",          required_argument, NULL, ARG_AUTOMOUNT          },
@@ -144,6 +147,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "automount-property", required_argument, NULL, ARG_AUTOMOUNT_PROPERTY },
                 { "bind-device",        no_argument,       NULL, ARG_BIND_DEVICE        },
                 { "list",               no_argument,       NULL, ARG_LIST               },
+                { "umount",             no_argument,       NULL, 'u'                    },
+                { "unmount",            no_argument,       NULL, 'u'                    },
                 {},
         };
 
@@ -152,7 +157,10 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hqH:M:t:o:p:A", options, NULL)) >= 0)
+        if (strstr(program_invocation_short_name, "systemd-umount"))
+                        arg_action = ACTION_UMOUNT;
+
+        while ((c = getopt_long(argc, argv, "hqH:M:t:o:p:Au", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -261,6 +269,10 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_LIST:
                         arg_action = ACTION_LIST;
+                        break;
+
+                case 'u':
+                        arg_action = ACTION_UMOUNT;
                         break;
 
                 case '?':
@@ -607,6 +619,89 @@ static int start_transient_automount(
         return 0;
 }
 
+static int stop_mount(
+                sd_bus *bus,
+                char **argv,
+                const char *suffix) {
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_(bus_wait_for_jobs_freep) BusWaitForJobs *w = NULL;
+        _cleanup_free_ char *mount_unit = NULL;
+        int r;
+
+        if (!arg_no_block) {
+                r = bus_wait_for_jobs_new(bus, &w);
+                if (r < 0)
+                        return log_error_errno(r, "Could not watch jobs: %m");
+        }
+
+        r = unit_name_from_path(arg_mount_where, suffix, &mount_unit);
+        if (r < 0)
+                return log_error_errno(r, "Failed to make mount unit name: %m");
+
+        r = sd_bus_message_new_method_call(
+                        bus,
+                        &m,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "StopUnit");
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        r = sd_bus_message_set_allow_interactive_authorization(m, arg_ask_password);
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        /* Name and mode */
+        r = sd_bus_message_append(m, "ss", mount_unit, "fail");
+        if (r < 0)
+                return bus_log_create_error(r);
+
+        polkit_agent_open_if_enabled();
+
+        r = sd_bus_call(bus, m, 0, &error, &reply);
+        if (r < 0)
+                return log_error_errno(r, "Failed to stop mount unit: %s", bus_error_message(&error, r));
+
+        if (w) {
+                const char *object;
+
+                r = sd_bus_message_read(reply, "o", &object);
+                if (r < 0)
+                        return bus_log_parse_error(r);
+
+                r = bus_wait_for_jobs_one(w, object, arg_quiet);
+                if (r < 0)
+                        return r;
+        }
+
+        if (!arg_quiet)
+                log_info("Stopped unit %s%s%s for mount point: %s%s%s",
+                         ansi_highlight(), mount_unit, ansi_normal(),
+                         ansi_highlight(), arg_mount_where, ansi_normal());
+
+        return 0;
+}
+
+static int stop_mounts(
+                sd_bus *bus,
+                char **argv) {
+
+        int r;
+
+        r = stop_mount(bus, argv + optind, ".mount");
+        if (r < 0)
+                return r;
+
+        r = stop_mount(bus, argv + optind, ".automount");
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
 static int acquire_mount_type(struct udev_device *d) {
         const char *v;
 
@@ -697,7 +792,7 @@ static int acquire_mount_where(struct udev_device *d) {
                 if (!filename_is_valid(escaped))
                         return 0;
 
-                arg_mount_where = strjoin("/run/media/system/", escaped, NULL);
+                arg_mount_where = strjoin("/run/media/system/", escaped);
         } else
                 arg_mount_where = strdup(v);
 
@@ -721,7 +816,7 @@ static int acquire_description(struct udev_device *d) {
                 label = udev_device_get_property_value(d, "ID_PART_ENTRY_NUMBER");
 
         if (model && label)
-                arg_description = strjoin(model, " ", label, NULL);
+                arg_description = strjoin(model, " ", label);
         else if (label)
                 arg_description = strdup(label);
         else if (model)
@@ -930,7 +1025,7 @@ static int list_devices(void) {
                 j = items + n++;
 
                 for (c = 0; c < _COLUMN_MAX; c++) {
-                        const char *x;
+                        const char *x = NULL;
                         size_t k;
 
                         switch (c) {
@@ -1091,6 +1186,10 @@ int main(int argc, char* argv[]) {
 
         case ACTION_AUTOMOUNT:
                 r = start_transient_automount(bus, argv + optind);
+                break;
+
+        case ACTION_UMOUNT:
+                r = stop_mounts(bus, argv + optind);
                 break;
 
         default:

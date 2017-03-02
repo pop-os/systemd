@@ -133,6 +133,7 @@ static bool valid_chassis(const char *chassis) {
                         "container\0"
                         "desktop\0"
                         "laptop\0"
+                        "convertible\0"
                         "server\0"
                         "tablet\0"
                         "handset\0"
@@ -199,6 +200,10 @@ static const char* fallback_chassis(void) {
 
         case 0x1E: /* Tablet */
                 return "tablet";
+
+        case 0x1F: /* Convertible */
+        case 0x20: /* Detachable */
+                return "convertible";
         }
 
 try_acpi:
@@ -283,7 +288,7 @@ static int context_update_kernel_hostname(Context *c) {
 
         /* ... and the ultimate fallback */
         else
-                hn = "localhost";
+                hn = FALLBACK_HOSTNAME;
 
         if (sethostname_idempotent(hn) < 0)
                 return -errno;
@@ -335,7 +340,7 @@ static int context_write_data_machine_info(Context *c) {
                         continue;
                 }
 
-                t = strjoin(name[p], "=", c->data[p], NULL);
+                t = strjoin(name[p], "=", c->data[p]);
                 if (!t)
                         return -ENOMEM;
 
@@ -419,7 +424,7 @@ static int method_set_hostname(sd_bus_message *m, void *userdata, sd_bus_error *
                 name = c->data[PROP_STATIC_HOSTNAME];
 
         if (isempty(name))
-                name = "localhost";
+                name = FALLBACK_HOSTNAME;
 
         if (!hostname_is_valid(name, false))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid hostname '%s'", name);

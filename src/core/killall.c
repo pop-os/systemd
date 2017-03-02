@@ -24,8 +24,9 @@
 
 #include "alloc-util.h"
 #include "def.h"
+#include "dirent-util.h"
 #include "fd-util.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "killall.h"
 #include "parse-util.h"
 #include "process-util.h"
@@ -65,29 +66,26 @@ static bool ignore_proc(pid_t pid, bool warn_rootfs) {
         if (count <= 0)
                 return true;
 
-        /* Processes with argv[0][0] = '@' we ignore from the killing
-         * spree.
+        /* Processes with argv[0][0] = '@' we ignore from the killing spree.
          *
          * http://www.freedesktop.org/wiki/Software/systemd/RootStorageDaemons */
-        if (c == '@' && warn_rootfs) {
-                _cleanup_free_ char *comm = NULL;
+        if (c != '@')
+                return false;
 
-                r = pid_from_same_root_fs(pid);
-                if (r < 0)
-                        return true;
+        if (warn_rootfs &&
+            pid_from_same_root_fs(pid) == 0) {
+
+                _cleanup_free_ char *comm = NULL;
 
                 get_process_comm(pid, &comm);
 
-                if (r)
-                        log_notice("Process " PID_FMT " (%s) has been marked to be excluded from killing. It is "
-                                   "running from the root file system, and thus likely to block re-mounting of the "
-                                   "root file system to read-only. Please consider moving it into an initrd file "
-                                   "system instead.", pid, strna(comm));
-                return true;
-        } else if (c == '@')
-                return true;
+                log_notice("Process " PID_FMT " (%s) has been marked to be excluded from killing. It is "
+                           "running from the root file system, and thus likely to block re-mounting of the "
+                           "root file system to read-only. Please consider moving it into an initrd file "
+                           "system instead.", pid, strna(comm));
+        }
 
-        return false;
+        return true;
 }
 
 static void wait_for_children(Set *pids, sigset_t *mask) {
@@ -172,7 +170,7 @@ static int killall(int sig, Set *pids, bool send_sighup) {
         if (!dir)
                 return -errno;
 
-        while ((d = readdir(dir))) {
+        FOREACH_DIRENT_ALL(d, dir, break) {
                 pid_t pid;
                 int r;
 
@@ -215,7 +213,8 @@ static int killall(int sig, Set *pids, bool send_sighup) {
 
 
                         if (get_ctty_devnr(pid, NULL) >= 0)
-                                kill(pid, SIGHUP);
+                                /* it's OK if the process is gone, just ignore the result */
+                                (void) kill(pid, SIGHUP);
                 }
         }
 

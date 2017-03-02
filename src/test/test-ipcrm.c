@@ -24,13 +24,15 @@
 int main(int argc, char *argv[]) {
         uid_t uid;
         int r;
-        const char* name = argv[1] ?: "nfsnobody";
+        const char* name = argv[1] ?: NOBODY_USER_NAME;
 
         r = get_user_creds(&name, &uid, NULL, NULL, NULL);
         if (r < 0) {
-                log_error_errno(r, "Failed to resolve \"%s\": %m", name);
-                return EXIT_FAILURE;
+                log_full_errno(r == -ESRCH ? LOG_NOTICE : LOG_ERR,
+                               r, "Failed to resolve \"%s\": %m", name);
+                return r == -ESRCH ? EXIT_TEST_SKIP : EXIT_FAILURE;
         }
 
-        return clean_ipc_by_uid(uid) < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+        r = clean_ipc_by_uid(uid);
+        return  r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

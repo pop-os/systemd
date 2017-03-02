@@ -60,7 +60,7 @@ static void test_one(const char *p) {
         _cleanup_free_ char *with_utc;
 
         log_info("Test: %s", p);
-        with_utc = strjoin(p, " UTC", NULL);
+        with_utc = strjoin(p, " UTC");
         test_should_pass(p);
         test_should_pass(with_utc);
 }
@@ -69,7 +69,7 @@ static void test_one_noutc(const char *p) {
         _cleanup_free_ char *with_utc;
 
         log_info("Test: %s", p);
-        with_utc = strjoin(p, " UTC", NULL);
+        with_utc = strjoin(p, " UTC");
         test_should_pass(p);
         test_should_fail(with_utc);
 }
@@ -95,6 +95,16 @@ int main(int argc, char *argv[]) {
         test_one_noutc("@1395716396");
         test_should_parse("today UTC");
         test_should_fail("today UTC UTC");
+        test_should_parse("1970-1-1 UTC");
+        test_should_fail("1969-1-1 UTC");
+#if SIZEOF_TIME_T == 8
+        test_should_parse("9999-12-30 23:59:59 UTC");
+        test_should_fail("9999-12-31 00:00:00 UTC");
+        test_should_fail("10000-01-01 00:00:00 UTC");
+#elif SIZEOF_TIME_T == 4
+        test_should_parse("2038-01-19 03:14:07 UTC");
+        test_should_fail( "2038-01-19 03:14:08 UTC");
+#endif
 
         return 0;
 }

@@ -20,7 +20,6 @@
  */
 
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -31,6 +30,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "dirent-util.h"
 #include "string-util.h"
 #include "udev.h"
 
@@ -405,7 +405,7 @@ static struct udev_device *handle_scsi_default(struct udev_device *parent, char 
                 parent = NULL;
                 goto out;
         }
-        for (dent = readdir(dir); dent != NULL; dent = readdir(dir)) {
+        FOREACH_DIRENT_ALL(dent, dir, break) {
                 char *rest;
                 int i;
 
@@ -664,11 +664,8 @@ static int builtin_path_id(struct udev_device *dev, int argc, char *argv[], bool
                         parent = skip_subsystem(parent, "xen");
                         supported_parent = true;
                 } else if (streq(subsys, "virtio")) {
-                        while (parent && streq_ptr("virtio", udev_device_get_subsystem(parent)))
-                                parent = udev_device_get_parent(parent);
-                        path_prepend(&path, "virtio-pci-%s", udev_device_get_sysname(parent));
+                        parent = skip_subsystem(parent, "virtio");
                         supported_transport = true;
-                        supported_parent = true;
                 } else if (streq(subsys, "scm")) {
                         path_prepend(&path, "scm-%s", udev_device_get_sysname(parent));
                         parent = skip_subsystem(parent, "scm");

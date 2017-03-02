@@ -56,7 +56,7 @@ static int setup_test(Manager **m) {
         STRV_FOREACH(test_path, tests_path) {
                 _cleanup_free_ char *p = NULL;
 
-                p = strjoin("/tmp/test-path_", *test_path, NULL);
+                p = strjoin("/tmp/test-path_", *test_path);
                 assert_se(p);
 
                 (void) rm_rf(p, REMOVE_ROOT|REMOVE_PHYSICAL);
@@ -262,8 +262,8 @@ int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
 
+        assert_se(set_unit_path(get_testdata_dir("/test-path")) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
-        assert_se(set_unit_path(TEST_DIR "/test-path/") >= 0);
 
         for (test = tests; test && *test; test++) {
                 int r;

@@ -240,7 +240,6 @@ static int list_seats(int argc, char *argv[], void *userdata) {
         sd_bus *bus = userdata;
         unsigned k = 0;
         int r;
-
         assert(bus);
         assert(argv);
 
@@ -280,35 +279,17 @@ static int list_seats(int argc, char *argv[], void *userdata) {
 }
 
 static int show_unit_cgroup(sd_bus *bus, const char *interface, const char *unit, pid_t leader) {
+        _cleanup_free_ char *cgroup = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        _cleanup_free_ char *path = NULL;
-        const char *cgroup;
         unsigned c;
         int r;
 
         assert(bus);
         assert(unit);
 
-        path = unit_dbus_path_from_name(unit);
-        if (!path)
-                return log_oom();
-
-        r = sd_bus_get_property(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        path,
-                        interface,
-                        "ControlGroup",
-                        &error,
-                        &reply,
-                        "s");
+        r = show_cgroup_get_unit_path_and_warn(bus, unit, &cgroup);
         if (r < 0)
-                return log_error_errno(r, "Failed to query ControlGroup: %s", bus_error_message(&error, r));
-
-        r = sd_bus_message_read(reply, "s", &cgroup);
-        if (r < 0)
-                return bus_log_parse_error(r);
+                return r;
 
         if (isempty(cgroup))
                 return 0;
@@ -501,14 +482,15 @@ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_li
                 {}
         };
 
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char since1[FORMAT_TIMESTAMP_RELATIVE_MAX], *s1;
         char since2[FORMAT_TIMESTAMP_MAX], *s2;
         _cleanup_(session_status_info_clear) SessionStatusInfo i = {};
         int r;
 
-        r = bus_map_all_properties(bus, "org.freedesktop.login1", path, map, &i);
+        r = bus_map_all_properties(bus, "org.freedesktop.login1", path, map, &error, &i);
         if (r < 0)
-                return log_error_errno(r, "Could not get properties: %m");
+                return log_error_errno(r, "Could not get properties: %s", bus_error_message(&error, r));
 
         if (*new_line)
                 printf("\n");
@@ -630,14 +612,15 @@ static int print_user_status_info(sd_bus *bus, const char *path, bool *new_line)
                 {}
         };
 
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char since1[FORMAT_TIMESTAMP_RELATIVE_MAX], *s1;
         char since2[FORMAT_TIMESTAMP_MAX], *s2;
         _cleanup_(user_status_info_clear) UserStatusInfo i = {};
         int r;
 
-        r = bus_map_all_properties(bus, "org.freedesktop.login1", path, map, &i);
+        r = bus_map_all_properties(bus, "org.freedesktop.login1", path, map, &error, &i);
         if (r < 0)
-                return log_error_errno(r, "Could not get properties: %m");
+                return log_error_errno(r, "Could not get properties: %s", bus_error_message(&error, r));
 
         if (*new_line)
                 printf("\n");
@@ -704,12 +687,13 @@ static int print_seat_status_info(sd_bus *bus, const char *path, bool *new_line)
                 {}
         };
 
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(seat_status_info_clear) SeatStatusInfo i = {};
         int r;
 
-        r = bus_map_all_properties(bus, "org.freedesktop.login1", path, map, &i);
+        r = bus_map_all_properties(bus, "org.freedesktop.login1", path, map, &error, &i);
         if (r < 0)
-                return log_error_errno(r, "Could not get properties: %m");
+                return log_error_errno(r, "Could not get properties: %s", bus_error_message(&error, r));
 
         if (*new_line)
                 printf("\n");

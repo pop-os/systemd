@@ -22,6 +22,7 @@
 #include "install.h"
 #include "mkdir.h"
 #include "rm-rf.h"
+#include "special.h"
 #include "string-util.h"
 
 static void test_basic_mask_and_enable(const char *root) {
@@ -338,7 +339,7 @@ static void test_default(const char *root) {
         assert_se(n_changes == 1);
         assert_se(changes[0].type == UNIT_FILE_SYMLINK);
         assert_se(streq(changes[0].source, "/usr/lib/systemd/system/test-default-real.target"));
-        p = strjoina(root, SYSTEM_CONFIG_UNIT_PATH"/default.target");
+        p = strjoina(root, SYSTEM_CONFIG_UNIT_PATH "/" SPECIAL_DEFAULT_TARGET);
         assert_se(streq(changes[0].path, p));
         unit_file_changes_free(changes, n_changes);
         changes = NULL; n_changes = 0;
@@ -735,6 +736,28 @@ static void test_preset_order(const char *root) {
         assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "prefix-2.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
 }
 
+static void test_static_instance(const char *root) {
+        UnitFileState state;
+        const char *p;
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "static-instance@.service", &state) == -ENOENT);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "static-instance@foo.service", &state) == -ENOENT);
+
+        p = strjoina(root, "/usr/lib/systemd/system/static-instance@.service");
+        assert_se(write_string_file(p,
+                                    "[Install]\n"
+                                    "WantedBy=multi-user.target\n", WRITE_STRING_FILE_CREATE) >= 0);
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "static-instance@.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "static-instance@foo.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
+
+        p = strjoina(root, "/usr/lib/systemd/system/static-instance@foo.service");
+        assert_se(symlink("static-instance@.service", p) >= 0);
+
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "static-instance@.service", &state) >= 0 && state == UNIT_FILE_DISABLED);
+        assert_se(unit_file_get_state(UNIT_FILE_SYSTEM, root, "static-instance@foo.service", &state) >= 0 && state == UNIT_FILE_STATIC);
+}
+
 int main(int argc, char *argv[]) {
         char root[] = "/tmp/rootXXXXXX";
         const char *p;
@@ -765,6 +788,7 @@ int main(int argc, char *argv[]) {
         test_preset_and_list(root);
         test_preset_order(root);
         test_revert(root);
+        test_static_instance(root);
 
         assert_se(rm_rf(root, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
 

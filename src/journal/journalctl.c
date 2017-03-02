@@ -52,6 +52,7 @@
 #include "journal-def.h"
 #include "journal-internal.h"
 #include "journal-qrcode.h"
+#include "journal-util.h"
 #include "journal-vacuum.h"
 #include "journal-verify.h"
 #include "locale-util.h"
@@ -103,7 +104,7 @@ static const char *arg_directory = NULL;
 static char **arg_file = NULL;
 static bool arg_file_stdin = false;
 static int arg_priorities = 0xFF;
-static const char *arg_verify_key = NULL;
+static char *arg_verify_key = NULL;
 #ifdef HAVE_GCRYPT
 static usec_t arg_interval = DEFAULT_FSS_INTERVAL_USEC;
 static bool arg_force = false;
@@ -192,7 +193,7 @@ static int add_matches_for_device(sd_journal *j, const char *devpath) {
                         continue;
                 }
 
-                match = strjoin("_KERNEL_DEVICE=+", subsys, ":", sysname, NULL);
+                match = strjoin("_KERNEL_DEVICE=+", subsys, ":", sysname);
                 if (!match)
                         return log_oom();
 
@@ -683,7 +684,13 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_VERIFY_KEY:
                         arg_action = ACTION_VERIFY;
-                        arg_verify_key = optarg;
+                        r = free_and_strdup(&arg_verify_key, optarg);
+                        if (r < 0)
+                                return r;
+                        /* Use memset not string_erase so this doesn't look confusing
+                         * in ps or htop output. */
+                        memset(optarg, 'x', strlen(optarg));
+
                         arg_merge = false;
                         break;
 
@@ -885,7 +892,7 @@ static int parse_argv(int argc, char *argv[]) {
                  * to users, and automatically turn --unit= into --user-unit= if combined with --user. */
                 r = strv_extend_strv(&arg_user_units, arg_system_units, true);
                 if (r < 0)
-                        return -ENOMEM;
+                        return r;
 
                 arg_system_units = strv_free(arg_system_units);
         }
@@ -906,7 +913,7 @@ static int generate_new_id128(void) {
                SD_ID128_FORMAT_STR "\n\n"
                "As UUID:\n"
                "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n\n"
-               "As macro:\n"
+               "As man:sd-id128(3) macro:\n"
                "#define MESSAGE_XYZ SD_ID128_MAKE(",
                SD_ID128_FORMAT_VAL(id),
                SD_ID128_FORMAT_VAL(id));
@@ -938,21 +945,21 @@ static int add_matches(sd_journal *j, char **args) {
                         have_term = false;
 
                 } else if (path_is_absolute(*i)) {
-                        _cleanup_free_ char *p, *t = NULL, *t2 = NULL, *interpreter = NULL;
-                        const char *path;
+                        _cleanup_free_ char *p = NULL, *t = NULL, *t2 = NULL, *interpreter = NULL;
                         struct stat st;
 
-                        p = canonicalize_file_name(*i);
-                        path = p ?: *i;
+                        r = chase_symlinks(*i, NULL, 0, &p);
+                        if (r < 0)
+                                return log_error_errno(r, "Couldn't canonicalize path: %m");
 
-                        if (lstat(path, &st) < 0)
+                        if (lstat(p, &st) < 0)
                                 return log_error_errno(errno, "Couldn't stat file: %m");
 
                         if (S_ISREG(st.st_mode) && (0111 & st.st_mode)) {
-                                if (executable_is_script(path, &interpreter) > 0) {
+                                if (executable_is_script(p, &interpreter) > 0) {
                                         _cleanup_free_ char *comm;
 
-                                        comm = strndup(basename(path), 15);
+                                        comm = strndup(basename(p), 15);
                                         if (!comm)
                                                 return log_oom();
 
@@ -968,7 +975,7 @@ static int add_matches(sd_journal *j, char **args) {
                                                         return log_oom();
                                         }
                                 } else {
-                                        t = strappend("_EXE=", path);
+                                        t = strappend("_EXE=", p);
                                         if (!t)
                                                 return log_oom();
                                 }
@@ -979,7 +986,7 @@ static int add_matches(sd_journal *j, char **args) {
                                         r = sd_journal_add_match(j, t2, 0);
 
                         } else if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode)) {
-                                r = add_matches_for_device(j, path);
+                                r = add_matches_for_device(j, p);
                                 if (r < 0)
                                         return r;
                         } else {
@@ -1799,129 +1806,6 @@ static int verify(sd_journal *j) {
         return r;
 }
 
-static int access_check_var_log_journal(sd_journal *j) {
-#ifdef HAVE_ACL
-        _cleanup_strv_free_ char **g = NULL;
-        const char* dir;
-#endif
-        int r;
-
-        assert(j);
-
-        if (arg_quiet)
-                return 0;
-
-        /* If we are root, we should have access, don't warn. */
-        if (getuid() == 0)
-                return 0;
-
-        /* If we are in the 'systemd-journal' group, we should have
-         * access too. */
-        r = in_group("systemd-journal");
-        if (r < 0)
-                return log_error_errno(r, "Failed to check if we are in the 'systemd-journal' group: %m");
-        if (r > 0)
-                return 0;
-
-#ifdef HAVE_ACL
-        if (laccess("/run/log/journal", F_OK) >= 0)
-                dir = "/run/log/journal";
-        else
-                dir = "/var/log/journal";
-
-        /* If we are in any of the groups listed in the journal ACLs,
-         * then all is good, too. Let's enumerate all groups from the
-         * default ACL of the directory, which generally should allow
-         * access to most journal files too. */
-        r = acl_search_groups(dir, &g);
-        if (r < 0)
-                return log_error_errno(r, "Failed to search journal ACL: %m");
-        if (r > 0)
-                return 0;
-
-        /* Print a pretty list, if there were ACLs set. */
-        if (!strv_isempty(g)) {
-                _cleanup_free_ char *s = NULL;
-
-                /* Thre are groups in the ACL, let's list them */
-                r = strv_extend(&g, "systemd-journal");
-                if (r < 0)
-                        return log_oom();
-
-                strv_sort(g);
-                strv_uniq(g);
-
-                s = strv_join(g, "', '");
-                if (!s)
-                        return log_oom();
-
-                log_notice("Hint: You are currently not seeing messages from other users and the system.\n"
-                           "      Users in groups '%s' can see all messages.\n"
-                           "      Pass -q to turn off this notice.", s);
-                return 1;
-        }
-#endif
-
-        /* If no ACLs were found, print a short version of the message. */
-        log_notice("Hint: You are currently not seeing messages from other users and the system.\n"
-                   "      Users in the 'systemd-journal' group can see all messages. Pass -q to\n"
-                   "      turn off this notice.");
-
-        return 1;
-}
-
-static int access_check(sd_journal *j) {
-        Iterator it;
-        void *code;
-        char *path;
-        int r = 0;
-
-        assert(j);
-
-        if (hashmap_isempty(j->errors)) {
-                if (ordered_hashmap_isempty(j->files))
-                        log_notice("No journal files were found.");
-
-                return 0;
-        }
-
-        if (hashmap_contains(j->errors, INT_TO_PTR(-EACCES))) {
-                (void) access_check_var_log_journal(j);
-
-                if (ordered_hashmap_isempty(j->files))
-                        r = log_error_errno(EACCES, "No journal files were opened due to insufficient permissions.");
-        }
-
-        HASHMAP_FOREACH_KEY(path, code, j->errors, it) {
-                int err;
-
-                err = abs(PTR_TO_INT(code));
-
-                switch (err) {
-                case EACCES:
-                        continue;
-
-                case ENODATA:
-                        log_warning_errno(err, "Journal file %s is truncated, ignoring file.", path);
-                        break;
-
-                case EPROTONOSUPPORT:
-                        log_warning_errno(err, "Journal file %s uses an unsupported feature, ignoring file.", path);
-                        break;
-
-                case EBADMSG:
-                        log_warning_errno(err, "Journal file %s corrupted, ignoring file.", path);
-                        break;
-
-                default:
-                        log_warning_errno(err, "An error was encountered while opening journal file or directory %s, ignoring file: %m", path);
-                        break;
-                }
-        }
-
-        return r;
-}
-
 static int flush_to_var(void) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
@@ -2233,7 +2117,7 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        r = access_check(j);
+        r = journal_access_check_and_warn(j, arg_quiet);
         if (r < 0)
                 goto finish;
 
@@ -2318,7 +2202,7 @@ int main(int argc, char *argv[]) {
         if (arg_boot_offset != 0 &&
             sd_journal_has_runtime_files(j) > 0 &&
             sd_journal_has_persistent_files(j) == 0) {
-                log_info("Specifying boot ID has no effect, no persistent journal was found");
+                log_info("Specifying boot ID or boot offset has no effect, no persistent journal was found.");
                 r = 0;
                 goto finish;
         }
@@ -2621,6 +2505,7 @@ finish:
         strv_free(arg_user_units);
 
         free(arg_root);
+        free(arg_verify_key);
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

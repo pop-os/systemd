@@ -18,7 +18,6 @@
 ***/
 
 #include <alloca.h>
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sched.h>
@@ -41,7 +40,7 @@
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "formats-util.h"
+#include "format-util.h"
 #include "hashmap.h"
 #include "hostname-util.h"
 #include "log.h"
@@ -60,9 +59,6 @@
 #include "user-util.h"
 #include "util.h"
 
-/* Put this test here for a lack of better place */
-assert_cc(EAGAIN == EWOULDBLOCK);
-
 int saved_argc = 0;
 char **saved_argv = NULL;
 static int saved_in_initrd = -1;
@@ -79,146 +75,6 @@ size_t page_size(void) {
 
         pgsz = (size_t) r;
         return pgsz;
-}
-
-static int do_execute(char **directories, usec_t timeout, char *argv[]) {
-        _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
-        _cleanup_set_free_free_ Set *seen = NULL;
-        char **directory;
-
-        /* We fork this all off from a child process so that we can
-         * somewhat cleanly make use of SIGALRM to set a time limit */
-
-        (void) reset_all_signal_handlers();
-        (void) reset_signal_mask();
-
-        assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
-
-        pids = hashmap_new(NULL);
-        if (!pids)
-                return log_oom();
-
-        seen = set_new(&string_hash_ops);
-        if (!seen)
-                return log_oom();
-
-        STRV_FOREACH(directory, directories) {
-                _cleanup_closedir_ DIR *d;
-                struct dirent *de;
-
-                d = opendir(*directory);
-                if (!d) {
-                        if (errno == ENOENT)
-                                continue;
-
-                        return log_error_errno(errno, "Failed to open directory %s: %m", *directory);
-                }
-
-                FOREACH_DIRENT(de, d, break) {
-                        _cleanup_free_ char *path = NULL;
-                        pid_t pid;
-                        int r;
-
-                        if (!dirent_is_file(de))
-                                continue;
-
-                        if (set_contains(seen, de->d_name)) {
-                                log_debug("%1$s/%2$s skipped (%2$s was already seen).", *directory, de->d_name);
-                                continue;
-                        }
-
-                        r = set_put_strdup(seen, de->d_name);
-                        if (r < 0)
-                                return log_oom();
-
-                        path = strjoin(*directory, "/", de->d_name, NULL);
-                        if (!path)
-                                return log_oom();
-
-                        if (null_or_empty_path(path)) {
-                                log_debug("%s is empty (a mask).", path);
-                                continue;
-                        }
-
-                        pid = fork();
-                        if (pid < 0) {
-                                log_error_errno(errno, "Failed to fork: %m");
-                                continue;
-                        } else if (pid == 0) {
-                                char *_argv[2];
-
-                                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
-
-                                if (!argv) {
-                                        _argv[0] = path;
-                                        _argv[1] = NULL;
-                                        argv = _argv;
-                                } else
-                                        argv[0] = path;
-
-                                execv(path, argv);
-                                return log_error_errno(errno, "Failed to execute %s: %m", path);
-                        }
-
-                        log_debug("Spawned %s as " PID_FMT ".", path, pid);
-
-                        r = hashmap_put(pids, PID_TO_PTR(pid), path);
-                        if (r < 0)
-                                return log_oom();
-                        path = NULL;
-                }
-        }
-
-        /* Abort execution of this process after the timout. We simply
-         * rely on SIGALRM as default action terminating the process,
-         * and turn on alarm(). */
-
-        if (timeout != USEC_INFINITY)
-                alarm((timeout + USEC_PER_SEC - 1) / USEC_PER_SEC);
-
-        while (!hashmap_isempty(pids)) {
-                _cleanup_free_ char *path = NULL;
-                pid_t pid;
-
-                pid = PTR_TO_PID(hashmap_first_key(pids));
-                assert(pid > 0);
-
-                path = hashmap_remove(pids, PID_TO_PTR(pid));
-                assert(path);
-
-                wait_for_terminate_and_warn(path, pid, true);
-        }
-
-        return 0;
-}
-
-void execute_directories(const char* const* directories, usec_t timeout, char *argv[]) {
-        pid_t executor_pid;
-        int r;
-        char *name;
-        char **dirs = (char**) directories;
-
-        assert(!strv_isempty(dirs));
-
-        name = basename(dirs[0]);
-        assert(!isempty(name));
-
-        /* Executes all binaries in the directories in parallel and waits
-         * for them to finish. Optionally a timeout is applied. If a file
-         * with the same name exists in more than one directory, the
-         * earliest one wins. */
-
-        executor_pid = fork();
-        if (executor_pid < 0) {
-                log_error_errno(errno, "Failed to fork: %m");
-                return;
-
-        } else if (executor_pid == 0) {
-                r = do_execute(dirs, timeout, argv);
-                _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
-        }
-
-        wait_for_terminate_and_warn(name, executor_pid, true);
 }
 
 bool plymouth_running(void) {
@@ -493,7 +349,7 @@ void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
         u = nmemb;
         while (l < u) {
                 idx = (l + u) / 2;
-                p = (void *)(((const char *) base) + (idx * size));
+                p = (const char *) base + idx * size;
                 comparison = compar(key, p, arg);
                 if (comparison < 0)
                         u = idx;
@@ -508,27 +364,16 @@ void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
 int on_ac_power(void) {
         bool found_offline = false, found_online = false;
         _cleanup_closedir_ DIR *d = NULL;
+        struct dirent *de;
 
         d = opendir("/sys/class/power_supply");
         if (!d)
                 return errno == ENOENT ? true : -errno;
 
-        for (;;) {
-                struct dirent *de;
+        FOREACH_DIRENT(de, d, return -errno) {
                 _cleanup_close_ int fd = -1, device = -1;
                 char contents[6];
                 ssize_t n;
-
-                errno = 0;
-                de = readdir(d);
-                if (!de && errno > 0)
-                        return -errno;
-
-                if (!de)
-                        break;
-
-                if (hidden_or_backup_file(de->d_name))
-                        continue;
 
                 device = openat(dirfd(d), de->d_name, O_DIRECTORY|O_RDONLY|O_CLOEXEC|O_NOCTTY);
                 if (device < 0) {

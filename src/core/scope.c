@@ -273,7 +273,9 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
         if (state == SCOPE_STOP_SIGTERM)
                 skip_signal = bus_scope_send_request_stop(s) > 0;
 
-        if (!skip_signal) {
+        if (skip_signal)
+                r = 1; /* wait */
+        else {
                 r = unit_kill_context(
                                 UNIT(s),
                                 &s->kill_context,
@@ -283,8 +285,7 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
                                 -1, -1, false);
                 if (r < 0)
                         goto fail;
-        } else
-                r = 1;
+        }
 
         if (r > 0) {
                 r = scope_arm_timer(s, usec_add(now(CLOCK_MONOTONIC), s->timeout_stop_usec));
@@ -474,7 +475,7 @@ static void scope_sigchld_event(Unit *u, pid_t pid, int code, int status) {
 
         /* If the PID set is empty now, then let's finish this off
            (On unified we use proper notifications) */
-        if (cg_unified(SYSTEMD_CGROUP_CONTROLLER) <= 0 && set_isempty(u->pids))
+        if (cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER) == 0 && set_isempty(u->pids))
                 scope_notify_cgroup_empty_event(u);
 }
 

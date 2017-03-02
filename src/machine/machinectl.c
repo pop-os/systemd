@@ -138,7 +138,7 @@ static void clean_machine_info(MachineInfo *machines, size_t n_machines) {
         free(machines);
 }
 
-static int get_os_release_property(sd_bus *bus, const char *name, const char *query, ...) {
+static int call_get_os_release(sd_bus *bus, const char *method, const char *name, const char *query, ...) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         const char *k, *v, *iter, **query_res = NULL;
         size_t count = 0, awaited_args = 0;
@@ -153,12 +153,13 @@ static int get_os_release_property(sd_bus *bus, const char *name, const char *qu
                 awaited_args++;
         query_res = newa0(const char *, awaited_args);
 
-        r = sd_bus_call_method(bus,
-                "org.freedesktop.machine1",
-                "/org/freedesktop/machine1",
-                "org.freedesktop.machine1.Manager",
-                "GetMachineOSRelease",
-                NULL, &reply, "s", name);
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.machine1",
+                        "/org/freedesktop/machine1",
+                        "org.freedesktop.machine1.Manager",
+                        method,
+                        NULL, &reply, "s", name);
         if (r < 0)
                 return r;
 
@@ -193,7 +194,7 @@ static int get_os_release_property(sd_bus *bus, const char *name, const char *qu
                         val = strdup(query_res[count]);
                         if (!val) {
                                 va_end(ap);
-                                return log_oom();
+                                return -ENOMEM;
                         }
                         *out = val;
                 }
@@ -242,23 +243,23 @@ static int list_machines(int argc, char *argv[], void *userdata) {
                 if (name[0] == '.' && !arg_all)
                         continue;
 
-                if (!GREEDY_REALLOC(machines, n_allocated, n_machines + 1)) {
+                if (!GREEDY_REALLOC0(machines, n_allocated, n_machines + 1)) {
                         r = log_oom();
                         goto out;
                 }
 
-                machines[n_machines].os = NULL;
-                machines[n_machines].version_id = NULL;
-                r = get_os_release_property(bus, name,
-                                "ID\0" "VERSION_ID\0",
-                                &machines[n_machines].os,
-                                &machines[n_machines].version_id);
-                if (r < 0)
-                        goto out;
-
                 machines[n_machines].name = name;
                 machines[n_machines].class = class;
                 machines[n_machines].service = service;
+
+                (void) call_get_os_release(
+                                bus,
+                                "GetMachineOSRelease",
+                                name,
+                                "ID\0"
+                                "VERSION_ID\0",
+                                &machines[n_machines].os,
+                                &machines[n_machines].version_id);
 
                 l = strlen(name);
                 if (l > max_name)
@@ -326,14 +327,18 @@ static int list_machines(int argc, char *argv[], void *userdata) {
                        (int) max_version_id, strdash_if_empty(machines[j].version_id));
 
                 r = print_addresses(bus, machines[j].name, 0, "", prefix, arg_addrs);
-                if (r == -ENOSYS)
-                        printf("-\n");
+                if (r <= 0) /* error or no addresses defined? */
+                        fputs("-\n", stdout);
+                else
+                        fputc('\n', stdout);
         }
 
-        if (arg_legend && n_machines > 0)
-                printf("\n%zu machines listed.\n", n_machines);
-        else
-                printf("No machines.\n");
+        if (arg_legend) {
+                if (n_machines > 0)
+                        printf("\n%zu machines listed.\n", n_machines);
+                else
+                        printf("No machines.\n");
+        }
 
 out:
         clean_machine_info(machines, n_machines);
@@ -463,44 +468,28 @@ static int list_images(int argc, char *argv[], void *userdata) {
                        (int) max_mtime, strna(format_timestamp(mtime_buf, sizeof(mtime_buf), images[j].mtime)));
         }
 
-        if (arg_legend && n_images > 0)
-                printf("\n%zu images listed.\n", n_images);
-        else
-                printf("No images.\n");
+        if (arg_legend) {
+                if (n_images > 0)
+                        printf("\n%zu images listed.\n", n_images);
+                else
+                        printf("No images.\n");
+        }
 
         return 0;
 }
 
 static int show_unit_cgroup(sd_bus *bus, const char *unit, pid_t leader) {
+        _cleanup_free_ char *cgroup = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        _cleanup_free_ char *path = NULL;
-        const char *cgroup;
         int r;
         unsigned c;
 
         assert(bus);
         assert(unit);
 
-        path = unit_dbus_path_from_name(unit);
-        if (!path)
-                return log_oom();
-
-        r = sd_bus_get_property(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        path,
-                        unit_dbus_interface_from_name(unit),
-                        "ControlGroup",
-                        &error,
-                        &reply,
-                        "s");
+        r = show_cgroup_get_unit_path_and_warn(bus, unit, &cgroup);
         if (r < 0)
-                return log_error_errno(r, "Failed to query ControlGroup: %s", bus_error_message(&error, r));
-
-        r = sd_bus_message_read(reply, "s", &cgroup);
-        if (r < 0)
-                return bus_log_parse_error(r);
+                return r;
 
         if (isempty(cgroup))
                 return 0;
@@ -533,6 +522,7 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ char *addresses = NULL;
         bool truncate = false;
+        unsigned n = 0;
         int r;
 
         assert(bus);
@@ -580,7 +570,7 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
                         else
                                 strcpy(buf_ifi, "");
 
-                        if(!strextend(&addresses, prefix, inet_ntop(family, a, buffer, sizeof(buffer)), buf_ifi, NULL))
+                        if (!strextend(&addresses, prefix, inet_ntop(family, a, buffer, sizeof(buffer)), buf_ifi, NULL))
                                 return log_oom();
                 } else
                         truncate = true;
@@ -594,6 +584,8 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
 
                 if (n_addr > 0)
                         n_addr -= 1;
+
+                n++;
         }
         if (r < 0)
                 return bus_log_parse_error(r);
@@ -602,11 +594,13 @@ static int print_addresses(sd_bus *bus, const char *name, int ifi, const char *p
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        fprintf(stdout, "%s%s\n", addresses, truncate ? "..." : "");
-        return 0;
+        if (n > 0)
+                fprintf(stdout, "%s%s", addresses, truncate ? "..." : "");
+
+        return (int) n;
 }
 
-static int print_os_release(sd_bus *bus, const char *name, const char *prefix) {
+static int print_os_release(sd_bus *bus, const char *method, const char *name, const char *prefix) {
         _cleanup_free_ char *pretty = NULL;
         int r;
 
@@ -614,13 +608,44 @@ static int print_os_release(sd_bus *bus, const char *name, const char *prefix) {
         assert(name);
         assert(prefix);
 
-        r = get_os_release_property(bus, name, "PRETTY_NAME\0", &pretty, NULL);
+        r = call_get_os_release(bus, method, name, "PRETTY_NAME\0", &pretty, NULL);
         if (r < 0)
                 return r;
 
         if (pretty)
                 printf("%s%s\n", prefix, pretty);
 
+        return 0;
+}
+
+static int print_uid_shift(sd_bus *bus, const char *name) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        uint32_t shift;
+        int r;
+
+        assert(bus);
+        assert(name);
+
+        r = sd_bus_call_method(bus,
+                               "org.freedesktop.machine1",
+                               "/org/freedesktop/machine1",
+                               "org.freedesktop.machine1.Manager",
+                               "GetMachineUIDShift",
+                               &error,
+                               &reply,
+                               "s", name);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to query UID/GID shift: %s", bus_error_message(&error, r));
+
+        r = sd_bus_message_read(reply, "u", &shift);
+        if (r < 0)
+                return r;
+
+        if (shift == 0) /* Don't show trivial mappings */
+                return 0;
+
+        printf("       UID Shift: %" PRIu32 "\n", shift);
         return 0;
 }
 
@@ -720,12 +745,15 @@ static void print_machine_status_info(sd_bus *bus, MachineStatusInfo *i) {
                 fputc('\n', stdout);
         }
 
-        print_addresses(bus, i->name, ifi,
-                       "\t Address: ",
-                       "\n\t          ",
-                       ALL_IP_ADDRESSES);
+        if (print_addresses(bus, i->name, ifi,
+                            "\t Address: ",
+                            "\n\t          ",
+                            ALL_IP_ADDRESSES) > 0)
+                fputc('\n', stdout);
 
-        print_os_release(bus, i->name, "\t      OS: ");
+        print_os_release(bus, "GetMachineOSRelease", i->name, "\t      OS: ");
+
+        print_uid_shift(bus, i->name);
 
         if (i->unit) {
                 printf("\t    Unit: %s\n", i->unit);
@@ -785,6 +813,7 @@ static int show_machine_info(const char *verb, sd_bus *bus, const char *path, bo
                 {}
         };
 
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(machine_status_info_clear) MachineStatusInfo info = {};
         int r;
 
@@ -797,9 +826,10 @@ static int show_machine_info(const char *verb, sd_bus *bus, const char *path, bo
                                    "org.freedesktop.machine1",
                                    path,
                                    map,
+                                   &error,
                                    &info);
         if (r < 0)
-                return log_error_errno(r, "Could not get properties: %m");
+                return log_error_errno(r, "Could not get properties: %s", bus_error_message(&error, r));
 
         if (*new_line)
                 printf("\n");
@@ -923,6 +953,8 @@ static void print_image_status_info(sd_bus *bus, ImageStatusInfo *i) {
         if (i->path)
                 printf("\t    Path: %s\n", i->path);
 
+        print_os_release(bus, "GetImageOSRelease", i->name, "\t      OS: ");
+
         printf("\t      RO: %s%s%s\n",
                i->read_only ? ansi_highlight_red() : "",
                i->read_only ? "read-only" : "writable",
@@ -973,6 +1005,7 @@ static int show_image_info(sd_bus *bus, const char *path, bool *new_line) {
                 {}
         };
 
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(image_status_info_clear) ImageStatusInfo info = {};
         int r;
 
@@ -984,9 +1017,10 @@ static int show_image_info(sd_bus *bus, const char *path, bool *new_line) {
                                    "org.freedesktop.machine1",
                                    path,
                                    map,
+                                   &error,
                                    &info);
         if (r < 0)
-                return log_error_errno(r, "Could not get properties: %m");
+                return log_error_errno(r, "Could not get properties: %s", bus_error_message(&error, r));
 
         if (*new_line)
                 printf("\n");
@@ -1040,6 +1074,8 @@ static int show_pool_info(sd_bus *bus) {
                 .usage = (uint64_t) -1,
                 .limit = (uint64_t) -1,
         };
+
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
 
         assert(bus);
@@ -1048,9 +1084,10 @@ static int show_pool_info(sd_bus *bus) {
                                    "org.freedesktop.machine1",
                                    "/org/freedesktop/machine1",
                                    map,
+                                   &error,
                                    &info);
         if (r < 0)
-                return log_error_errno(r, "Could not get properties: %m");
+                return log_error_errno(r, "Could not get properties: %s", bus_error_message(&error, r));
 
         print_pool_status_info(bus, &info);
 
@@ -2489,10 +2526,12 @@ static int list_transfers(int argc, char *argv[], void *userdata) {
                        (int) max_local, transfers[j].local,
                        (int) max_remote, transfers[j].remote);
 
-        if (arg_legend && n_transfers > 0)
-                printf("\n%zu transfers listed.\n", n_transfers);
-        else
-                printf("No transfers.\n");
+        if (arg_legend) {
+                if (n_transfers > 0)
+                        printf("\n%zu transfers listed.\n", n_transfers);
+                else
+                        printf("No transfers.\n");
+        }
 
         return 0;
 }
@@ -2657,9 +2696,9 @@ static int help(int argc, char *argv[], void *userdata) {
                "  -o --output=STRING          Change journal output mode (short,\n"
                "                              short-monotonic, verbose, export, json,\n"
                "                              json-pretty, json-sse, cat)\n"
-               "      --verify=MODE           Verification mode for downloaded images (no,\n"
+               "     --verify=MODE            Verification mode for downloaded images (no,\n"
                "                              checksum, signature)\n"
-               "      --force                 Download image even if already exists\n\n"
+               "     --force                  Download image even if already exists\n\n"
                "Machine Commands:\n"
                "  list                        List running VMs and containers\n"
                "  status NAME...              Show VM/container details\n"
@@ -2756,7 +2795,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argv);
 
         for (;;) {
-                static const char option_string[] = "-hp:als:H:M:qn:o:";
+                static const char option_string[] = "-hp:als:H:M:qn:o:E:";
 
                 c = getopt_long(argc, argv, option_string + reorder, options, NULL);
                 if (c < 0)

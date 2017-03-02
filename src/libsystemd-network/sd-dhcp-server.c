@@ -857,7 +857,7 @@ int dhcp_server_handle_message(sd_dhcp_server *server, DHCPMessage *message,
 
                         if (!existing_lease) {
                                 lease = new0(DHCPLease, 1);
-                                lease->address = req->requested_ip;
+                                lease->address = address;
                                 lease->client_id.data = memdup(req->client_id.data,
                                                                req->client_id.length);
                                 if (!lease->client_id.data) {
@@ -1022,7 +1022,7 @@ int sd_dhcp_server_start(sd_dhcp_server *server) {
         }
         server->fd_raw = r;
 
-        r = dhcp_network_bind_udp_socket(INADDR_ANY, DHCP_PORT_SERVER);
+        r = dhcp_network_bind_udp_socket(server->ifindex, INADDR_ANY, DHCP_PORT_SERVER);
         if (r < 0) {
                 sd_dhcp_server_stop(server);
                 return r;

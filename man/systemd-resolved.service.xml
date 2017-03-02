@@ -62,7 +62,7 @@
 
     <itemizedlist>
       <listitem><para>The native, fully-featured API <command>systemd-resolved</command> exposes on the bus. See the
-      <ulink url="http://www.freedesktop.org/wiki/Software/systemd/resolved">API Documentation</ulink> for
+      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/resolved">API Documentation</ulink> for
       details. Usage of this API is generally recommended to clients as it is asynchronous and fully featured (for
       example, properly returns DNSSEC validation status and interface scope for addresses as necessary for supporting
       link-local networking).</para></listitem>
@@ -116,8 +116,9 @@
       current gateway, useful for referencing it independently of the
       current network configuration state.</para></listitem>
 
-      <listitem><para>The mappings defined in <filename>/etc/hosts</filename> are resolved to their configured
-      addresses and back.</para></listitem>
+      <listitem><para>The mappings defined in <filename>/etc/hosts</filename> are resolved
+      to their configured addresses and back, but they will not affect lookups for
+      non-address types (like MX).</para></listitem>
     </itemizedlist>
 
     <para>Lookup requests are routed to the available DNS servers
@@ -155,7 +156,7 @@
     per-interface domains are exclusively routed to the matching
     interfaces.</para>
 
-    <para>See the <ulink url="http://www.freedesktop.org/wiki/Software/systemd/resolved"> resolved D-Bus API
+    <para>See the <ulink url="https://www.freedesktop.org/wiki/Software/systemd/resolved"> resolved D-Bus API
     Documentation</ulink> for information about the APIs <filename>systemd-resolved</filename> provides.</para>
 
   </refsect1>

@@ -287,14 +287,24 @@ static int lookup_block_device(const char *p, dev_t *dev) {
 static int whitelist_device(const char *path, const char *node, const char *acc) {
         char buf[2+DECIMAL_STR_MAX(dev_t)*2+2+4];
         struct stat st;
+        bool ignore_notfound;
         int r;
 
         assert(path);
         assert(acc);
 
+        if (node[0] == '-') {
+                /* Non-existent paths starting with "-" must be silently ignored */
+                node++;
+                ignore_notfound = true;
+        } else
+                ignore_notfound = false;
+
         if (stat(node, &st) < 0) {
-                log_warning("Couldn't stat device %s", node);
-                return -errno;
+                if (errno == ENOENT && ignore_notfound)
+                        return 0;
+
+                return log_warning_errno(errno, "Couldn't stat device %s: %m", node);
         }
 
         if (!S_ISCHR(st.st_mode) && !S_ISBLK(st.st_mode)) {
@@ -849,8 +859,7 @@ static void cgroup_context_apply(Unit *u, CGroupMask mask, ManagerState state) {
 
         if ((mask & CGROUP_MASK_MEMORY) && !is_root) {
                 if (cg_all_unified() > 0) {
-                        uint64_t max;
-                        uint64_t swap_max = CGROUP_LIMIT_MAX;
+                        uint64_t max, swap_max = CGROUP_LIMIT_MAX;
 
                         if (cgroup_context_has_unified_memory_config(c)) {
                                 max = c->memory_max;
@@ -914,8 +923,8 @@ static void cgroup_context_apply(Unit *u, CGroupMask mask, ManagerState state) {
                                 "/dev/tty\0" "rwm\0"
                                 "/dev/pts/ptmx\0" "rw\0" /* /dev/pts/ptmx may not be duplicated, but accessed */
                                 /* Allow /run/systemd/inaccessible/{chr,blk} devices for mapping InaccessiblePaths */
-                                "/run/systemd/inaccessible/chr\0" "rwm\0"
-                                "/run/systemd/inaccessible/blk\0" "rwm\0";
+                                "-/run/systemd/inaccessible/chr\0" "rwm\0"
+                                "-/run/systemd/inaccessible/blk\0" "rwm\0";
 
                         const char *x, *y;
 
@@ -928,7 +937,7 @@ static void cgroup_context_apply(Unit *u, CGroupMask mask, ManagerState state) {
                 }
 
                 LIST_FOREACH(device_allow, a, c->device_allow) {
-                        char acc[4];
+                        char acc[4], *val;
                         unsigned k = 0;
 
                         if (a->r)
@@ -945,10 +954,10 @@ static void cgroup_context_apply(Unit *u, CGroupMask mask, ManagerState state) {
 
                         if (startswith(a->path, "/dev/"))
                                 whitelist_device(path, a->path, acc);
-                        else if (startswith(a->path, "block-"))
-                                whitelist_major(path, a->path + 6, 'b', acc);
-                        else if (startswith(a->path, "char-"))
-                                whitelist_major(path, a->path + 5, 'c', acc);
+                        else if ((val = startswith(a->path, "block-")))
+                                whitelist_major(path, val, 'b', acc);
+                        else if ((val = startswith(a->path, "char-")))
+                                whitelist_major(path, val, 'c', acc);
                         else
                                 log_unit_debug(u, "Ignoring device %s while writing cgroup attribute.", a->path);
                 }
@@ -1201,9 +1210,10 @@ char *unit_default_cgroup_path(Unit *u) {
                 return NULL;
 
         if (slice)
-                return strjoin(u->manager->cgroup_root, "/", slice, "/", escaped, NULL);
+                return strjoin(u->manager->cgroup_root, "/", slice, "/",
+                               escaped);
         else
-                return strjoin(u->manager->cgroup_root, "/", escaped, NULL);
+                return strjoin(u->manager->cgroup_root, "/", escaped);
 }
 
 int unit_set_cgroup_path(Unit *u, const char *path) {
@@ -1249,9 +1259,9 @@ int unit_watch_cgroup(Unit *u) {
                 return 0;
 
         /* Only applies to the unified hierarchy */
-        r = cg_unified(SYSTEMD_CGROUP_CONTROLLER);
+        r = cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER);
         if (r < 0)
-                return log_unit_error_errno(u, r, "Failed detect whether the unified hierarchy is used: %m");
+                return log_error_errno(r, "Failed to determine whether the name=systemd hierarchy is unified: %m");
         if (r == 0)
                 return 0;
 
@@ -1643,7 +1653,7 @@ static int unit_watch_pids_in_path(Unit *u, const char *path) {
                 while ((r = cg_read_subgroup(d, &fn)) > 0) {
                         _cleanup_free_ char *p = NULL;
 
-                        p = strjoin(path, "/", fn, NULL);
+                        p = strjoin(path, "/", fn);
                         free(fn);
 
                         if (!p)
@@ -1662,6 +1672,8 @@ static int unit_watch_pids_in_path(Unit *u, const char *path) {
 }
 
 int unit_watch_all_pids(Unit *u) {
+        int r;
+
         assert(u);
 
         /* Adds all PIDs from our cgroup to the set of PIDs we
@@ -1672,7 +1684,10 @@ int unit_watch_all_pids(Unit *u) {
         if (!u->cgroup_path)
                 return -ENOENT;
 
-        if (cg_unified(SYSTEMD_CGROUP_CONTROLLER) > 0) /* On unified we can use proper notifications */
+        r = cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER);
+        if (r < 0)
+                return r;
+        if (r > 0) /* On unified we can use proper notifications */
                 return 0;
 
         return unit_watch_pids_in_path(u, u->cgroup_path);
@@ -1745,7 +1760,7 @@ static int on_cgroup_inotify_event(sd_event_source *s, int fd, uint32_t revents,
 int manager_setup_cgroup(Manager *m) {
         _cleanup_free_ char *path = NULL;
         CGroupController c;
-        int r, all_unified, systemd_unified;
+        int r, all_unified;
         char *e;
 
         assert(m);
@@ -1782,25 +1797,30 @@ int manager_setup_cgroup(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Cannot find cgroup mount point: %m");
 
+        r = cg_unified_flush();
+        if (r < 0)
+                return log_error_errno(r, "Couldn't determine if we are running in the unified hierarchy: %m");
+
         all_unified = cg_all_unified();
-        systemd_unified = cg_unified(SYSTEMD_CGROUP_CONTROLLER);
-
-        if (all_unified < 0 || systemd_unified < 0)
-                return log_error_errno(all_unified < 0 ? all_unified : systemd_unified,
-                                       "Couldn't determine if we are running in the unified hierarchy: %m");
-
-        if (all_unified > 0)
+        if (r < 0)
+                return log_error_errno(r, "Couldn't determine whether we are in all unified mode: %m");
+        if (r > 0)
                 log_debug("Unified cgroup hierarchy is located at %s.", path);
-        else if (systemd_unified > 0)
-                log_debug("Unified cgroup hierarchy is located at %s. Controllers are on legacy hierarchies.", path);
-        else
-                log_debug("Using cgroup controller " SYSTEMD_CGROUP_CONTROLLER ". File system hierarchy is at %s.", path);
+        else {
+                r = cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to determine whether systemd's own controller is in unified mode: %m");
+                if (r > 0)
+                        log_debug("Unified cgroup hierarchy is located at %s. Controllers are on legacy hierarchies.", path);
+                else
+                        log_debug("Using cgroup controller " SYSTEMD_CGROUP_CONTROLLER_LEGACY ". File system hierarchy is at %s.", path);
+        }
 
         if (!m->test_run) {
                 const char *scope_path;
 
                 /* 3. Install agent */
-                if (systemd_unified) {
+                if (cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER) > 0) {
 
                         /* In the unified hierarchy we can get
                          * cgroup empty notifications via inotify. */
@@ -1986,10 +2006,13 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
         if ((u->cgroup_realized_mask & CGROUP_MASK_MEMORY) == 0)
                 return -ENODATA;
 
-        if (cg_all_unified() <= 0)
-                r = cg_get_attribute("memory", u->cgroup_path, "memory.usage_in_bytes", &v);
-        else
+        r = cg_all_unified();
+        if (r < 0)
+                return r;
+        if (r > 0)
                 r = cg_get_attribute("memory", u->cgroup_path, "memory.current", &v);
+        else
+                r = cg_get_attribute("memory", u->cgroup_path, "memory.usage_in_bytes", &v);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)
@@ -2031,7 +2054,10 @@ static int unit_get_cpu_usage_raw(Unit *u, nsec_t *ret) {
         if (!u->cgroup_path)
                 return -ENODATA;
 
-        if (cg_all_unified() > 0) {
+        r = cg_all_unified();
+        if (r < 0)
+                return r;
+        if (r > 0) {
                 const char *keys[] = { "usage_usec", NULL };
                 _cleanup_free_ char *val = NULL;
                 uint64_t us;

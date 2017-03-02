@@ -43,7 +43,6 @@ static int files_add(Hashmap *h, const char *root, const char *path, const char 
         int r;
 
         assert(path);
-        assert(suffix);
 
         dirpath = prefix_roota(root, path);
 
@@ -60,7 +59,7 @@ static int files_add(Hashmap *h, const char *root, const char *path, const char 
                 if (!dirent_is_file_with_suffix(de, suffix))
                         continue;
 
-                p = strjoin(dirpath, "/", de->d_name, NULL);
+                p = strjoin(dirpath, "/", de->d_name);
                 if (!p)
                         return -ENOMEM;
 
@@ -94,7 +93,6 @@ static int conf_files_list_strv_internal(char ***strv, const char *suffix, const
         int r;
 
         assert(strv);
-        assert(suffix);
 
         /* This alters the dirs string array */
         if (!path_strv_resolve_uniq(dirs, root))
@@ -126,7 +124,6 @@ int conf_files_list_strv(char ***strv, const char *suffix, const char *root, con
         _cleanup_strv_free_ char **copy = NULL;
 
         assert(strv);
-        assert(suffix);
 
         copy = strv_copy((char**) dirs);
         if (!copy)
@@ -140,7 +137,6 @@ int conf_files_list(char ***strv, const char *suffix, const char *root, const ch
         va_list ap;
 
         assert(strv);
-        assert(suffix);
 
         va_start(ap, dir);
         dirs = strv_new_ap(dir, ap);
@@ -156,7 +152,6 @@ int conf_files_list_nulstr(char ***strv, const char *suffix, const char *root, c
         _cleanup_strv_free_ char **dirs = NULL;
 
         assert(strv);
-        assert(suffix);
 
         dirs = strv_split_nulstr(d);
         if (!dirs)

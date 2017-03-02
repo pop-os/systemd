@@ -17,7 +17,6 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/kd.h>
@@ -53,6 +52,7 @@
 #include "dirent-util.h"
 #include "env-util.h"
 #include "escape.h"
+#include "exec-util.h"
 #include "exit-status.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -103,6 +103,7 @@ static int manager_dispatch_idle_pipe_fd(sd_event_source *source, int fd, uint32
 static int manager_dispatch_user_lookup_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata);
 static int manager_dispatch_jobs_in_progress(sd_event_source *source, usec_t usec, void *userdata);
 static int manager_dispatch_run_queue(sd_event_source *source, void *userdata);
+static int manager_run_environment_generators(Manager *m);
 static int manager_run_generators(Manager *m);
 
 static void manager_watch_jobs_in_progress(Manager *m) {
@@ -110,6 +111,12 @@ static void manager_watch_jobs_in_progress(Manager *m) {
         int r;
 
         assert(m);
+
+        /* We do not want to show the cylon animation if the user
+         * needs to confirm service executions otherwise confirmation
+         * messages will be screwed by the cylon animation. */
+        if (!manager_is_confirm_spawn_disabled(m))
+                return;
 
         if (m->jobs_in_progress_event_source)
                 return;
@@ -227,6 +234,7 @@ static void manager_print_jobs_in_progress(Manager *m) {
 
 static int have_ask_password(void) {
         _cleanup_closedir_ DIR *dir;
+        struct dirent *de;
 
         dir = opendir("/run/systemd/ask-password");
         if (!dir) {
@@ -236,19 +244,11 @@ static int have_ask_password(void) {
                         return -errno;
         }
 
-        for (;;) {
-                struct dirent *de;
-
-                errno = 0;
-                de = readdir(dir);
-                if (!de && errno > 0)
-                        return -errno;
-                if (!de)
-                        return false;
-
+        FOREACH_DIRENT_ALL(de, dir, return -errno) {
                 if (startswith(de->d_name, "ask."))
                         return true;
         }
+        return false;
 }
 
 static int manager_dispatch_ask_password_fd(sd_event_source *source,
@@ -532,9 +532,9 @@ static int manager_default_environment(Manager *m) {
         if (MANAGER_IS_SYSTEM(m)) {
                 /* The system manager always starts with a clean
                  * environment for its children. It does not import
-                 * the kernel or the parents exported variables.
+                 * the kernel's or the parents' exported variables.
                  *
-                 * The initial passed environ is untouched to keep
+                 * The initial passed environment is untouched to keep
                  * /proc/self/environ valid; it is used for tagging
                  * the init process inside containers. */
                 m->environment = strv_new("PATH=" DEFAULT_PATH,
@@ -542,11 +542,10 @@ static int manager_default_environment(Manager *m) {
 
                 /* Import locale variables LC_*= from configuration */
                 locale_setup(&m->environment);
-        } else {
+        } else
                 /* The user manager passes its own environment
                  * along to its children. */
                 m->environment = strv_copy(environ);
-        }
 
         if (!m->environment)
                 return -ENOMEM;
@@ -777,7 +776,10 @@ static int manager_setup_cgroups_agent(Manager *m) {
         if (!MANAGER_IS_SYSTEM(m))
                 return 0;
 
-        if (cg_unified(SYSTEMD_CGROUP_CONTROLLER) > 0) /* We don't need this anymore on the unified hierarchy */
+        r = cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER);
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine whether unified cgroups hierarchy is used: %m");
+        if (r > 0) /* We don't need this anymore on the unified hierarchy */
                 return 0;
 
         if (m->cgroups_agent_fd < 0) {
@@ -981,10 +983,9 @@ good:
         unit_gc_mark_good(u, gc_marker);
 }
 
-static unsigned manager_dispatch_gc_queue(Manager *m) {
+static unsigned manager_dispatch_gc_unit_queue(Manager *m) {
+        unsigned n = 0, gc_marker;
         Unit *u;
-        unsigned n = 0;
-        unsigned gc_marker;
 
         assert(m);
 
@@ -996,12 +997,12 @@ static unsigned manager_dispatch_gc_queue(Manager *m) {
 
         gc_marker = m->gc_marker;
 
-        while ((u = m->gc_queue)) {
+        while ((u = m->gc_unit_queue)) {
                 assert(u->in_gc_queue);
 
                 unit_gc_sweep(u, gc_marker);
 
-                LIST_REMOVE(gc_queue, m->gc_queue, u);
+                LIST_REMOVE(gc_queue, m->gc_unit_queue, u);
                 u->in_gc_queue = false;
 
                 n++;
@@ -1015,7 +1016,29 @@ static unsigned manager_dispatch_gc_queue(Manager *m) {
                 }
         }
 
-        m->n_in_gc_queue = 0;
+        return n;
+}
+
+static unsigned manager_dispatch_gc_job_queue(Manager *m) {
+        unsigned n = 0;
+        Job *j;
+
+        assert(m);
+
+        while ((j = m->gc_job_queue)) {
+                assert(j->in_gc_queue);
+
+                LIST_REMOVE(gc_queue, m->gc_job_queue, j);
+                j->in_gc_queue = false;
+
+                n++;
+
+                if (job_check_gc(j))
+                        continue;
+
+                log_unit_debug(j->unit, "Collecting job.");
+                (void) job_finish_and_invalidate(j, JOB_COLLECTED, false, false);
+        }
 
         return n;
 }
@@ -1035,7 +1058,8 @@ static void manager_clear_jobs_and_units(Manager *m) {
         assert(!m->dbus_unit_queue);
         assert(!m->dbus_job_queue);
         assert(!m->cleanup_queue);
-        assert(!m->gc_queue);
+        assert(!m->gc_unit_queue);
+        assert(!m->gc_job_queue);
 
         assert(hashmap_isempty(m->jobs));
         assert(hashmap_isempty(m->units));
@@ -1196,7 +1220,7 @@ static void manager_build_unit_path_cache(Manager *m) {
                 FOREACH_DIRENT(de, d, r = -errno; goto fail) {
                         char *p;
 
-                        p = strjoin(streq(*i, "/") ? "" : *i, "/", de->d_name, NULL);
+                        p = strjoin(streq(*i, "/") ? "" : *i, "/", de->d_name);
                         if (!p) {
                                 r = -ENOMEM;
                                 goto fail;
@@ -1239,6 +1263,10 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
         assert(m);
 
         r = lookup_paths_init(&m->lookup_paths, m->unit_file_scope, 0, NULL);
+        if (r < 0)
+                return r;
+
+        r = manager_run_environment_generators(m);
         if (r < 0)
                 return r;
 
@@ -1378,7 +1406,7 @@ tr_abort:
 }
 
 int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode mode, sd_bus_error *e, Job **ret) {
-        Unit *unit;
+        Unit *unit = NULL;  /* just to appease gcc, initialization is not really necessary */
         int r;
 
         assert(m);
@@ -1389,6 +1417,7 @@ int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode 
         r = manager_load_unit(m, name, NULL, NULL, &unit);
         if (r < 0)
                 return r;
+        assert(unit);
 
         return manager_add_job(m, type, unit, mode, e, ret);
 }
@@ -1461,6 +1490,7 @@ int manager_load_unit_prepare(
 
         assert(m);
         assert(name || path);
+        assert(_ret);
 
         /* This will prepare the unit for loading, but not actually
          * load anything from disk. */
@@ -1508,8 +1538,7 @@ int manager_load_unit_prepare(
         unit_add_to_dbus_queue(ret);
         unit_add_to_gc_queue(ret);
 
-        if (_ret)
-                *_ret = ret;
+        *_ret = ret;
 
         return 0;
 }
@@ -1524,6 +1553,7 @@ int manager_load_unit(
         int r;
 
         assert(m);
+        assert(_ret);
 
         /* This will load the service information files, but not actually
          * start any services or anything. */
@@ -1534,8 +1564,7 @@ int manager_load_unit(
 
         manager_dispatch_load_queue(m);
 
-        if (_ret)
-                *_ret = unit_follow_merge(*_ret);
+        *_ret = unit_follow_merge(*_ret);
 
         return 0;
 }
@@ -1964,7 +1993,9 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t 
                         if (MANAGER_IS_SYSTEM(m)) {
                                 /* This is for compatibility with the
                                  * original sysvinit */
-                                m->exit_code = MANAGER_REEXECUTE;
+                                r = verify_run_space_and_log("Refusing to reexecute");
+                                if (r >= 0)
+                                        m->exit_code = MANAGER_REEXECUTE;
                                 break;
                         }
 
@@ -2041,7 +2072,9 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t 
                 }
 
                 case SIGHUP:
-                        m->exit_code = MANAGER_RELOAD;
+                        r = verify_run_space_and_log("Refusing to reload");
+                        if (r >= 0)
+                                m->exit_code = MANAGER_RELOAD;
                         break;
 
                 default: {
@@ -2145,8 +2178,8 @@ static int manager_dispatch_time_change_fd(sd_event_source *source, int fd, uint
         assert(m);
         assert(m->time_change_fd == fd);
 
-        log_struct(LOG_INFO,
-                   LOG_MESSAGE_ID(SD_MESSAGE_TIME_CHANGE),
+        log_struct(LOG_DEBUG,
+                   "MESSAGE_ID=" SD_MESSAGE_TIME_CHANGE_STR,
                    LOG_MESSAGE("Time has been changed"),
                    NULL);
 
@@ -2228,7 +2261,10 @@ int manager_loop(Manager *m) {
                 if (manager_dispatch_load_queue(m) > 0)
                         continue;
 
-                if (manager_dispatch_gc_queue(m) > 0)
+                if (manager_dispatch_gc_job_queue(m) > 0)
+                        continue;
+
+                if (manager_dispatch_gc_unit_queue(m) > 0)
                         continue;
 
                 if (manager_dispatch_cleanup_queue(m) > 0)
@@ -2409,18 +2445,14 @@ void manager_send_unit_plymouth(Manager *m, Unit *u) {
 }
 
 int manager_open_serialization(Manager *m, FILE **_f) {
-        const char *path;
-        int fd = -1;
+        int fd;
         FILE *f;
 
         assert(_f);
 
-        path = MANAGER_IS_SYSTEM(m) ? "/run/systemd" : "/tmp";
-        fd = open_tmpfile_unlinkable(path, O_RDWR|O_CLOEXEC);
+        fd = open_serialization_fd("systemd-state");
         if (fd < 0)
-                return -errno;
-
-        log_debug("Serializing state to %s", path);
+                return fd;
 
         f = fdopen(fd, "w+");
         if (!f) {
@@ -2429,7 +2461,6 @@ int manager_open_serialization(Manager *m, FILE **_f) {
         }
 
         *_f = f;
-
         return 0;
 }
 
@@ -2437,7 +2468,6 @@ int manager_serialize(Manager *m, FILE *f, FDSet *fds, bool switching_root) {
         Iterator i;
         Unit *u;
         const char *t;
-        char **e;
         int r;
 
         assert(m);
@@ -2467,17 +2497,8 @@ int manager_serialize(Manager *m, FILE *f, FDSet *fds, bool switching_root) {
                 dual_timestamp_serialize(f, "units-load-finish-timestamp", &m->units_load_finish_timestamp);
         }
 
-        if (!switching_root) {
-                STRV_FOREACH(e, m->environment) {
-                        _cleanup_free_ char *ce;
-
-                        ce = cescape(*e);
-                        if (!ce)
-                                return -ENOMEM;
-
-                        fprintf(f, "env=%s\n", *e);
-                }
-        }
+        if (!switching_root)
+                (void) serialize_environment(f, m->environment);
 
         if (m->notify_fd >= 0) {
                 int copy;
@@ -2565,6 +2586,7 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
 
         for (;;) {
                 char line[LINE_MAX], *l;
+                const char *val;
 
                 if (!fgets(line, sizeof(line), f)) {
                         if (feof(f))
@@ -2581,95 +2603,83 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                 if (l[0] == 0)
                         break;
 
-                if (startswith(l, "current-job-id=")) {
+                if ((val = startswith(l, "current-job-id="))) {
                         uint32_t id;
 
-                        if (safe_atou32(l+15, &id) < 0)
-                                log_debug("Failed to parse current job id value %s", l+15);
+                        if (safe_atou32(val, &id) < 0)
+                                log_debug("Failed to parse current job id value %s", val);
                         else
                                 m->current_job_id = MAX(m->current_job_id, id);
 
-                } else if (startswith(l, "n-installed-jobs=")) {
+                } else if ((val = startswith(l, "n-installed-jobs="))) {
                         uint32_t n;
 
-                        if (safe_atou32(l+17, &n) < 0)
-                                log_debug("Failed to parse installed jobs counter %s", l+17);
+                        if (safe_atou32(val, &n) < 0)
+                                log_debug("Failed to parse installed jobs counter %s", val);
                         else
                                 m->n_installed_jobs += n;
 
-                } else if (startswith(l, "n-failed-jobs=")) {
+                } else if ((val = startswith(l, "n-failed-jobs="))) {
                         uint32_t n;
 
-                        if (safe_atou32(l+14, &n) < 0)
-                                log_debug("Failed to parse failed jobs counter %s", l+14);
+                        if (safe_atou32(val, &n) < 0)
+                                log_debug("Failed to parse failed jobs counter %s", val);
                         else
                                 m->n_failed_jobs += n;
 
-                } else if (startswith(l, "taint-usr=")) {
+                } else if ((val = startswith(l, "taint-usr="))) {
                         int b;
 
-                        b = parse_boolean(l+10);
+                        b = parse_boolean(val);
                         if (b < 0)
-                                log_debug("Failed to parse taint /usr flag %s", l+10);
+                                log_debug("Failed to parse taint /usr flag %s", val);
                         else
                                 m->taint_usr = m->taint_usr || b;
 
-                } else if (startswith(l, "firmware-timestamp="))
-                        dual_timestamp_deserialize(l+19, &m->firmware_timestamp);
-                else if (startswith(l, "loader-timestamp="))
-                        dual_timestamp_deserialize(l+17, &m->loader_timestamp);
-                else if (startswith(l, "kernel-timestamp="))
-                        dual_timestamp_deserialize(l+17, &m->kernel_timestamp);
-                else if (startswith(l, "initrd-timestamp="))
-                        dual_timestamp_deserialize(l+17, &m->initrd_timestamp);
-                else if (startswith(l, "userspace-timestamp="))
-                        dual_timestamp_deserialize(l+20, &m->userspace_timestamp);
-                else if (startswith(l, "finish-timestamp="))
-                        dual_timestamp_deserialize(l+17, &m->finish_timestamp);
-                else if (startswith(l, "security-start-timestamp="))
-                        dual_timestamp_deserialize(l+25, &m->security_start_timestamp);
-                else if (startswith(l, "security-finish-timestamp="))
-                        dual_timestamp_deserialize(l+26, &m->security_finish_timestamp);
-                else if (startswith(l, "generators-start-timestamp="))
-                        dual_timestamp_deserialize(l+27, &m->generators_start_timestamp);
-                else if (startswith(l, "generators-finish-timestamp="))
-                        dual_timestamp_deserialize(l+28, &m->generators_finish_timestamp);
-                else if (startswith(l, "units-load-start-timestamp="))
-                        dual_timestamp_deserialize(l+27, &m->units_load_start_timestamp);
-                else if (startswith(l, "units-load-finish-timestamp="))
-                        dual_timestamp_deserialize(l+28, &m->units_load_finish_timestamp);
+                } else if ((val = startswith(l, "firmware-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->firmware_timestamp);
+                else if ((val = startswith(l, "loader-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->loader_timestamp);
+                else if ((val = startswith(l, "kernel-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->kernel_timestamp);
+                else if ((val = startswith(l, "initrd-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->initrd_timestamp);
+                else if ((val = startswith(l, "userspace-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->userspace_timestamp);
+                else if ((val = startswith(l, "finish-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->finish_timestamp);
+                else if ((val = startswith(l, "security-start-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->security_start_timestamp);
+                else if ((val = startswith(l, "security-finish-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->security_finish_timestamp);
+                else if ((val = startswith(l, "generators-start-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->generators_start_timestamp);
+                else if ((val = startswith(l, "generators-finish-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->generators_finish_timestamp);
+                else if ((val = startswith(l, "units-load-start-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->units_load_start_timestamp);
+                else if ((val = startswith(l, "units-load-finish-timestamp=")))
+                        dual_timestamp_deserialize(val, &m->units_load_finish_timestamp);
                 else if (startswith(l, "env=")) {
-                        _cleanup_free_ char *uce = NULL;
-                        char **e;
-
-                        r = cunescape(l + 4, UNESCAPE_RELAX, &uce);
+                        r = deserialize_environment(&m->environment, l);
                         if (r < 0)
-                                goto finish;
+                                return r;
 
-                        e = strv_env_set(m->environment, uce);
-                        if (!e) {
-                                r = -ENOMEM;
-                                goto finish;
-                        }
-
-                        strv_free(m->environment);
-                        m->environment = e;
-
-                } else if (startswith(l, "notify-fd=")) {
+                } else if ((val = startswith(l, "notify-fd="))) {
                         int fd;
 
-                        if (safe_atoi(l + 10, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
-                                log_debug("Failed to parse notify fd: %s", l + 10);
+                        if (safe_atoi(val, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                                log_debug("Failed to parse notify fd: %s", val);
                         else {
                                 m->notify_event_source = sd_event_source_unref(m->notify_event_source);
                                 safe_close(m->notify_fd);
                                 m->notify_fd = fdset_remove(fds, fd);
                         }
 
-                } else if (startswith(l, "notify-socket=")) {
+                } else if ((val = startswith(l, "notify-socket="))) {
                         char *n;
 
-                        n = strdup(l+14);
+                        n = strdup(val);
                         if (!n) {
                                 r = -ENOMEM;
                                 goto finish;
@@ -2678,22 +2688,22 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                         free(m->notify_socket);
                         m->notify_socket = n;
 
-                } else if (startswith(l, "cgroups-agent-fd=")) {
+                } else if ((val = startswith(l, "cgroups-agent-fd="))) {
                         int fd;
 
-                        if (safe_atoi(l + 17, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
-                                log_debug("Failed to parse cgroups agent fd: %s", l + 10);
+                        if (safe_atoi(val, &fd) < 0 || fd < 0 || !fdset_contains(fds, fd))
+                                log_debug("Failed to parse cgroups agent fd: %s", val);
                         else {
                                 m->cgroups_agent_event_source = sd_event_source_unref(m->cgroups_agent_event_source);
                                 safe_close(m->cgroups_agent_fd);
                                 m->cgroups_agent_fd = fdset_remove(fds, fd);
                         }
 
-                } else if (startswith(l, "user-lookup=")) {
+                } else if ((val = startswith(l, "user-lookup="))) {
                         int fd0, fd1;
 
-                        if (sscanf(l + 12, "%i %i", &fd0, &fd1) != 2 || fd0 < 0 || fd1 < 0 || fd0 == fd1 || !fdset_contains(fds, fd0) || !fdset_contains(fds, fd1))
-                                log_debug("Failed to parse user lookup fd: %s", l + 12);
+                        if (sscanf(val, "%i %i", &fd0, &fd1) != 2 || fd0 < 0 || fd1 < 0 || fd0 == fd1 || !fdset_contains(fds, fd0) || !fdset_contains(fds, fd1))
+                                log_debug("Failed to parse user lookup fd: %s", val);
                         else {
                                 m->user_lookup_event_source = sd_event_source_unref(m->user_lookup_event_source);
                                 safe_close_pair(m->user_lookup_fds);
@@ -2701,15 +2711,15 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
                                 m->user_lookup_fds[1] = fdset_remove(fds, fd1);
                         }
 
-                } else if (startswith(l, "dynamic-user="))
-                        dynamic_user_deserialize_one(m, l + 13, fds);
-                else if (startswith(l, "destroy-ipc-uid="))
-                        manager_deserialize_uid_refs_one(m, l + 16);
-                else if (startswith(l, "destroy-ipc-gid="))
-                        manager_deserialize_gid_refs_one(m, l + 16);
-                else if (startswith(l, "subscribed=")) {
+                } else if ((val = startswith(l, "dynamic-user=")))
+                        dynamic_user_deserialize_one(m, val, fds);
+                else if ((val = startswith(l, "destroy-ipc-uid=")))
+                        manager_deserialize_uid_refs_one(m, val);
+                else if ((val = startswith(l, "destroy-ipc-gid=")))
+                        manager_deserialize_gid_refs_one(m, val);
+                else if ((val = startswith(l, "subscribed="))) {
 
-                        if (strv_extend(&m->deserialized_subscribed, l+11) < 0)
+                        if (strv_extend(&m->deserialized_subscribed, val) < 0)
                                 log_oom();
 
                 } else if (!startswith(l, "kdbus-fd=")) /* ignore this one */
@@ -2791,6 +2801,10 @@ int manager_reload(Manager *m) {
         m->gid_refs = hashmap_free(m->gid_refs);
 
         q = lookup_paths_init(&m->lookup_paths, m->unit_file_scope, 0, NULL);
+        if (q < 0 && r >= 0)
+                r = q;
+
+        q = manager_run_environment_generators(m);
         if (q < 0 && r >= 0)
                 r = q;
 
@@ -2897,7 +2911,7 @@ static void manager_notify_finished(Manager *m) {
                         initrd_usec = m->userspace_timestamp.monotonic - m->initrd_timestamp.monotonic;
 
                         log_struct(LOG_INFO,
-                                   LOG_MESSAGE_ID(SD_MESSAGE_STARTUP_FINISHED),
+                                   "MESSAGE_ID=" SD_MESSAGE_STARTUP_FINISHED_STR,
                                    "KERNEL_USEC="USEC_FMT, kernel_usec,
                                    "INITRD_USEC="USEC_FMT, initrd_usec,
                                    "USERSPACE_USEC="USEC_FMT, userspace_usec,
@@ -2912,7 +2926,7 @@ static void manager_notify_finished(Manager *m) {
                         initrd_usec = 0;
 
                         log_struct(LOG_INFO,
-                                   LOG_MESSAGE_ID(SD_MESSAGE_STARTUP_FINISHED),
+                                   "MESSAGE_ID=" SD_MESSAGE_STARTUP_FINISHED_STR,
                                    "KERNEL_USEC="USEC_FMT, kernel_usec,
                                    "USERSPACE_USEC="USEC_FMT, userspace_usec,
                                    LOG_MESSAGE("Startup finished in %s (kernel) + %s (userspace) = %s.",
@@ -2926,7 +2940,7 @@ static void manager_notify_finished(Manager *m) {
                 total_usec = userspace_usec = m->finish_timestamp.monotonic - m->userspace_timestamp.monotonic;
 
                 log_struct(LOG_INFO,
-                           LOG_MESSAGE_ID(SD_MESSAGE_STARTUP_FINISHED),
+                           "MESSAGE_ID=" SD_MESSAGE_USER_STARTUP_FINISHED_STR,
                            "USERSPACE_USEC="USEC_FMT, userspace_usec,
                            LOG_MESSAGE("Startup finished in %s.",
                                        format_timespan(sum, sizeof(sum), total_usec, USEC_PER_MSEC)),
@@ -2967,7 +2981,7 @@ void manager_check_finished(Manager *m) {
         manager_close_idle_pipe(m);
 
         /* Turn off confirm spawn now */
-        m->confirm_spawn = false;
+        m->confirm_spawn = NULL;
 
         /* No need to update ask password status when we're going non-interactive */
         manager_close_ask_password(m);
@@ -2985,10 +2999,56 @@ void manager_check_finished(Manager *m) {
         manager_invalidate_startup_units(m);
 }
 
+static bool generator_path_any(const char* const* paths) {
+        char **path;
+        bool found = false;
+
+        /* Optimize by skipping the whole process by not creating output directories
+         * if no generators are found. */
+        STRV_FOREACH(path, (char**) paths)
+                if (access(*path, F_OK) == 0)
+                        found = true;
+                else if (errno != ENOENT)
+                        log_warning_errno(errno, "Failed to open generator directory %s: %m", *path);
+
+        return found;
+}
+
+static const char* system_env_generator_binary_paths[] = {
+        "/run/systemd/system-environment-generators",
+        "/etc/systemd/system-environment-generators",
+        "/usr/local/lib/systemd/system-environment-generators",
+        SYSTEM_ENV_GENERATOR_PATH,
+        NULL
+};
+
+static const char* user_env_generator_binary_paths[] = {
+        "/run/systemd/user-environment-generators",
+        "/etc/systemd/user-environment-generators",
+        "/usr/local/lib/systemd/user-environment-generators",
+        USER_ENV_GENERATOR_PATH,
+        NULL
+};
+
+static int manager_run_environment_generators(Manager *m) {
+        char **tmp = NULL; /* this is only used in the forked process, no cleanup here */
+        const char **paths;
+        void* args[] = {&tmp, &tmp, &m->environment};
+
+        if (m->test_run)
+                return 0;
+
+        paths = MANAGER_IS_SYSTEM(m) ? system_env_generator_binary_paths : user_env_generator_binary_paths;
+
+        if (!generator_path_any(paths))
+                return 0;
+
+        return execute_directories(paths, DEFAULT_TIMEOUT_USEC, gather_environment, args, NULL);
+}
+
 static int manager_run_generators(Manager *m) {
         _cleanup_strv_free_ char **paths = NULL;
         const char *argv[5];
-        char **path;
         int r;
 
         assert(m);
@@ -3000,18 +3060,9 @@ static int manager_run_generators(Manager *m) {
         if (!paths)
                 return log_oom();
 
-        /* Optimize by skipping the whole process by not creating output directories
-         * if no generators are found. */
-        STRV_FOREACH(path, paths) {
-                if (access(*path, F_OK) >= 0)
-                        goto found;
-                if (errno != ENOENT)
-                        log_warning_errno(errno, "Failed to open generator directory %s: %m", *path);
-        }
+        if (!generator_path_any((const char* const*) paths))
+                return 0;
 
-        return 0;
-
- found:
         r = lookup_paths_mkdir_generator(&m->lookup_paths);
         if (r < 0)
                 goto finish;
@@ -3023,7 +3074,8 @@ static int manager_run_generators(Manager *m) {
         argv[4] = NULL;
 
         RUN_WITH_UMASK(0022)
-                execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC, (char**) argv);
+                execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC,
+                                    NULL, NULL, (char**) argv);
 
 finish:
         lookup_paths_trim_generator(&m->lookup_paths);
@@ -3152,6 +3204,49 @@ static bool manager_get_show_status(Manager *m, StatusType type) {
         return false;
 }
 
+const char *manager_get_confirm_spawn(Manager *m) {
+        static int last_errno = 0;
+        const char *vc = m->confirm_spawn;
+        struct stat st;
+        int r;
+
+        /* Here's the deal: we want to test the validity of the console but don't want
+         * PID1 to go through the whole console process which might block. But we also
+         * want to warn the user only once if something is wrong with the console so we
+         * cannot do the sanity checks after spawning our children. So here we simply do
+         * really basic tests to hopefully trap common errors.
+         *
+         * If the console suddenly disappear at the time our children will really it
+         * then they will simply fail to acquire it and a positive answer will be
+         * assumed. New children will fallback to /dev/console though.
+         *
+         * Note: TTYs are devices that can come and go any time, and frequently aren't
+         * available yet during early boot (consider a USB rs232 dongle...). If for any
+         * reason the configured console is not ready, we fallback to the default
+         * console. */
+
+        if (!vc || path_equal(vc, "/dev/console"))
+                return vc;
+
+        r = stat(vc, &st);
+        if (r < 0)
+                goto fail;
+
+        if (!S_ISCHR(st.st_mode)) {
+                errno = ENOTTY;
+                goto fail;
+        }
+
+        last_errno = 0;
+        return vc;
+fail:
+        if (last_errno != errno) {
+                last_errno = errno;
+                log_warning_errno(errno, "Failed to open %s: %m, using default console", vc);
+        }
+        return "/dev/console";
+}
+
 void manager_set_first_boot(Manager *m, bool b) {
         assert(m);
 
@@ -3166,6 +3261,17 @@ void manager_set_first_boot(Manager *m, bool b) {
         }
 
         m->first_boot = b;
+}
+
+void manager_disable_confirm_spawn(void) {
+        (void) touch("/run/systemd/confirm_spawn_disabled");
+}
+
+bool manager_is_confirm_spawn_disabled(Manager *m) {
+        if (!m->confirm_spawn)
+                return true;
+
+        return access("/run/systemd/confirm_spawn_disabled", F_OK) >= 0;
 }
 
 void manager_status_printf(Manager *m, StatusType type, const char *status, const char *format, ...) {
