@@ -1,3 +1,34 @@
+systemd (232-19) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/README.source: Update patch and changelog handling to current
+    reality.
+  * root-unittests autopkgtest: Blacklist test-journal-importer.
+    This got added in a recent PR, but running this requires using "make
+    install-tests" which hasn't landed yet.
+  * fsckd: Fix format specifiers on 32 bit architectures.
+  * resolved: Fix NSEC proofs for missing TLDs (Closes: #855479)
+  * boot-and-services autopkgtest: Skip CgroupsTest on unified hierarchy.
+  * boot-smoke autopkgtest: Run in containers, too.
+  * logind autopkgtest: Adjust to work in containers.
+
+  [ Dimitri John Ledkov ]
+  * Fix resolved failing to follow CNAMES for DNS stub replies (LP: #1647031)
+  * Fix emitting change signals with a sessions property in logind
+    (LP: #1661568)
+
+  [ Michael Biebl ]
+  * If an automount unit is masked, don't react to activation anymore.
+    Otherwise we'll hit an assert sooner or later. (Closes: #856035)
+
+  [ Felipe Sateler ]
+  * resolved: add the new KSK to the built-in resolved trust anchor.
+    The old root key will be discarded in early 2018, so get this into
+    stretch.
+  * Backport some zsh completion fixes from upstream (Closes: #847203)
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 02 Mar 2017 09:21:12 +0100
+
 systemd (232-18) unstable; urgency=medium
 
   * udev autopkgtest: Adjust to script-based test /sys creation.
