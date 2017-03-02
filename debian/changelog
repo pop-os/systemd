@@ -1,5 +1,6 @@
-systemd (233-1) UNRELEASED; urgency=medium
+systemd (233-1) experimental; urgency=medium
 
+  [ Martin Pitt ]
   * New upstream release 233:
     - udev: Remove /run/udev/control on stop to avoid sendsigs to kill
       udevd. (Closes: #791944)
@@ -16,8 +17,17 @@ systemd (233-1) UNRELEASED; urgency=medium
     - journalctl: Improve error message wording when specifying boot
       offset with ephemeral journal. (Closes: #839291)
   * Install new systemd-umount and /usr/lib/environment.d/
+  * Use "make install-tests" for shipped unit tests
+  * Switch back to gold linker on mips*
+    Bug #851736 got fixed now.
+  * debian/rules: Drop obsolete SETCAP path
 
- -- Martin Pitt <mpitt@debian.org>  Thu, 02 Mar 2017 11:21:22 +0100
+  [ Michael Biebl ]
+  * Drop upstart jobs for udev
+  * Drop /sbin/udevadm compat symlink from udev-udeb and initramfs
+  * Drop Breaks and Replaces from pre-jessie
+
+ -- Martin Pitt <mpitt@debian.org>  Thu, 02 Mar 2017 17:10:09 +0100
 
 systemd (232-19) unstable; urgency=medium
 
