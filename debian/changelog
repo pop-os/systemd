@@ -1,3 +1,22 @@
+systemd (233-3) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * Install D-Bus policy files in /usr
+  * Drop no longer needed maintainer scripts migration code and simplify
+    various version checks
+  * Fix location of installed tests
+  * Override package-name-doesnt-match-sonames lintian warning for libnss-*
+  * Don't ship any symlinks in /etc/systemd/system.
+    Those should be created dynamically via "systemctl enable".
+
+  [ Martin Pitt ]
+  * root-unittests autopkgtest: Skip test-udev.
+    It has its own autopkgtest and needs some special preparation. At some
+    point that should be merged into root-unittests, but let's quickfix this
+    to unbreak upstream CI.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 03 Mar 2017 19:49:44 +0100
+
 systemd (233-2) experimental; urgency=medium
 
   * test: skip instead of fail if crypto kmods are not available.
