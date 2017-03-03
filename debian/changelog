@@ -1,3 +1,13 @@
+systemd (233-2) experimental; urgency=medium
+
+  * test: skip instead of fail if crypto kmods are not available.
+    The Debian buildds have module loading disabled, thus AF_ALG sockets are
+    not available during build. Skip the tests that cover those (khash and
+    id128) instead of failing them in this case.
+    https://github.com/systemd/systemd/issues/5524
+
+ -- Martin Pitt <mpitt@debian.org>  Fri, 03 Mar 2017 11:51:25 +0100
+
 systemd (233-1) experimental; urgency=medium
 
   [ Martin Pitt ]
