@@ -266,6 +266,8 @@ override_dh_install:
 	rm -rf debian/install/*/usr/share/factory/
 	# remove symlinks enabling default-on services
 	rm -rf debian/install/*/etc/systemd/system/*.target.wants/
+	# remove aliases
+	find debian/install/*/etc/systemd/system/ -type l -delete
 	# FIXME: generate proper sysusers.d/basic.conf for Debian, and add autopkgtest
 	rm -rf debian/install/*/usr/lib/sysusers.d/*
 	rm -f debian/install/*/lib/systemd/system/*sysusers*.service debian/install/*/lib/systemd/system/*/*sysusers*.service
