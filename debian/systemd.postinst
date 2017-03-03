@@ -28,10 +28,8 @@ if [ "$1" = "triggered" ]; then
     exit 0
 fi
 
-# Enable getty and remote-fs.target by default on new installs, and on
-# upgrades from old systemd versions (where the symlinks included as deb
-# content, and will thus have been removed by dpkg during the upgrade).
-if dpkg --compare-versions "$2" lt "214-1"; then
+# Enable getty and remote-fs.target by default on new installs
+if [ -z "$2" ]; then
     systemctl enable getty@tty1.service || true
     systemctl enable remote-fs.target || true
 fi
@@ -47,7 +45,7 @@ if [ -e /lib/systemd/system/ondemand.service ] && dpkg --compare-versions "$2" l
 fi
 
 # Do a one-time migration of the local time setting
-if dpkg --compare-versions "$2" lt "33-1"; then
+if [ -z "$2" ]; then
     if [ -f /etc/default/rcS ]; then
         . /etc/default/rcS
     fi
@@ -57,7 +55,7 @@ if dpkg --compare-versions "$2" lt "33-1"; then
 fi
 
 # Do a one-time migration of the TMPTIME setting
-if dpkg --compare-versions "$2" lt "204-9"; then
+if [ -z "$2" ]; then
     if [ -f /etc/default/rcS ]; then
         . /etc/default/rcS
     fi
@@ -76,7 +74,7 @@ EOF
 fi
 
 # Do a one-time migration of the RAMTMP setting
-if dpkg --compare-versions "$2" lt "204-8"; then
+if [ -z "$2" ]; then
     if [ -f /etc/default/rcS ]; then
         . /etc/default/rcS
     fi
