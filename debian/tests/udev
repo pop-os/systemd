@@ -12,6 +12,6 @@ else
     tar -C $TEST_DIR/test -xf test/sys.tar.xz
 fi
 cp test/udev-test.pl $TEST_DIR
-cp /usr/lib/*/systemd/test-udev $TEST_DIR
+cp /usr/lib/*/systemd/tests/test-udev $TEST_DIR
 cd $TEST_DIR
 ./udev-test.pl

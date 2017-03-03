@@ -300,9 +300,10 @@ endif
 	done
 
 	# ship unit tests for autopkgtests and manual tests; as it's in -dev, it must be a multi-arch dir
-	cp -r debian/install/tests/usr/lib/systemd/tests debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/
+	install -d debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/tests
+	cp -r debian/install/tests/usr/lib/systemd/tests/* debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/tests/
 	#  FIXME: upstream build system should do that
-	install -m 755 build-deb/.libs/test-udev debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/
+	install -m 755 build-deb/.libs/test-udev debian/libsystemd-dev/usr/lib/$(DEB_HOST_MULTIARCH)/systemd/tests/
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
