@@ -11,7 +11,7 @@ save_is_enabled() {
     fi
 }
 
-if [ "$1" = "install" ] || [ "$1" = "upgrade" ] && dpkg --compare-versions "$2" ge "204"; then
+if [ "$1" = upgrade ]; then
     [ -d /run/systemd ] || mkdir /run/systemd
     rm -f /run/systemd/was-enabled
 
@@ -21,19 +21,11 @@ if [ "$1" = "install" ] || [ "$1" = "upgrade" ] && dpkg --compare-versions "$2" 
     save_is_enabled getty@tty1.service
     save_is_enabled remote-fs.target
     save_is_enabled rescue.target
-    if dpkg --compare-versions "$2" ge "204-8~" ; then
-        save_is_enabled tmp.mount
-    fi
-    if dpkg --compare-versions "$2" ge "209" ; then
-        save_is_enabled systemd-networkd.service
-    fi
-    if dpkg --compare-versions "$2" ge "211" ; then
-        save_is_enabled systemd-networkd-wait-online.service
-    fi
-    if dpkg --compare-versions "$2" ge "213" ; then
-        save_is_enabled systemd-resolved.service
-        save_is_enabled systemd-timesyncd.service
-    fi
+    save_is_enabled tmp.mount
+    save_is_enabled systemd-networkd.service
+    save_is_enabled systemd-networkd-wait-online.service
+    save_is_enabled systemd-resolved.service
+    save_is_enabled systemd-timesyncd.service
 fi
 
 #DEBHELPER#
