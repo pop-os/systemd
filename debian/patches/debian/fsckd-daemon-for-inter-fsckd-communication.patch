@@ -109,7 +109,7 @@ index d562641..18618ff 100644
  	man/systemd-getty-generator.xml \
  	man/systemd-gpt-auto-generator.xml \
 diff --git a/Makefile.am b/Makefile.am
-index 2a56107..569ab72 100644
+index 65de9f1..379e82b 100644
 --- a/Makefile.am
 +++ b/Makefile.am
 @@ -415,6 +415,7 @@ rootlibexec_PROGRAMS = \
@@ -144,7 +144,7 @@ index 2a56107..569ab72 100644
  	units/systemd-machine-id-commit.service.in \
  	units/user@.service.m4.in \
  	units/debug-shell.service.in \
-@@ -2799,6 +2803,14 @@ systemd_fsck_LDADD = \
+@@ -2800,6 +2804,14 @@ systemd_fsck_LDADD = \
  	libsystemd-shared.la
  
  # ------------------------------------------------------------------------------
