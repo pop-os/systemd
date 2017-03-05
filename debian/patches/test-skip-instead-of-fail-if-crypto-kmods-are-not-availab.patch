@@ -2,18 +2,18 @@ From: Martin Pitt <martin@piware.de>
 Date: Thu, 2 Mar 2017 23:42:01 +0100
 Subject: test: skip instead of fail if crypto kmods are not available
 
-The Debian buildds have module loading disabled, thus AF_ALG sockets are not
-available during build. Skip the tests that cover those (khash and id128)
-instead of failing them in this case.
+Package build machines may have module loading disabled, thus AF_ALG
+sockets are not available. Skip the tests that cover those (khash and
+id128) instead of failing them in this case.
 
-Bug: https://github.com/systemd/systemd/issues/5524
+Fixes #5524
 ---
  src/test/test-hash.c  | 10 +++++++++-
  src/test/test-id128.c | 15 ++++++++++-----
  2 files changed, 19 insertions(+), 6 deletions(-)
 
 diff --git a/src/test/test-hash.c b/src/test/test-hash.c
-index 1972b94..5e4707d 100644
+index 1972b94..02d1cfa 100644
 --- a/src/test/test-hash.c
 +++ b/src/test/test-hash.c
 @@ -17,6 +17,8 @@
@@ -39,14 +39,14 @@ index 1972b94..5e4707d 100644
 +        r = khash_new(&h, "foobar");
 +        if (r == -EAFNOSUPPORT) {
 +                puts("khash not supported on this kernel, skipping");
-+                return 0;
++                return EXIT_TEST_SKIP;
 +        }
 +        assert_se(r == -EOPNOTSUPP);
  
          assert_se(khash_new(&h, "sha256") >= 0);
          assert_se(khash_get_size(h) == 32);
 diff --git a/src/test/test-id128.c b/src/test/test-id128.c
-index e8c4c3e..21d7cd3 100644
+index e8c4c3e..e5f4520 100644
 --- a/src/test/test-id128.c
 +++ b/src/test/test-id128.c
 @@ -154,11 +154,16 @@ int main(int argc, char *argv[]) {
@@ -60,7 +60,7 @@ index e8c4c3e..21d7cd3 100644
 -        assert_se(!sd_id128_equal(id, id2));
 +        r = sd_id128_get_machine_app_specific(SD_ID128_MAKE(f0,3d,aa,eb,1c,33,4b,43,a7,32,17,29,44,bf,77,2e), &id);
 +        if (r == -EAFNOSUPPORT) {
-+                puts("khash not supported on this kernel, skipping");
++                log_info("khash not supported on this kernel, skipping sd_id128_get_machine_app_specific() checks");
 +        } else {
 +                assert_se(r >= 0);
 +                assert_se(sd_id128_get_machine_app_specific(SD_ID128_MAKE(f0,3d,aa,eb,1c,33,4b,43,a7,32,17,29,44,bf,77,2e), &id2) >= 0);
