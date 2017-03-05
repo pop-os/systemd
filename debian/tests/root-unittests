@@ -12,7 +12,7 @@ test-catalog
 res=0
 for t in /usr/lib/*/systemd/tests/test-*; do
     tname=$(basename $t)
-    # test-udev needs special prep and has its own test; FIXME: merge it here
+    # test-udev needs special prep and has its own test
     [ "$tname" != test-udev ] || continue
     echo "====== $tname ======="
     # exit code 77 means "skip"
