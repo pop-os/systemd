@@ -43,7 +43,7 @@ gbp pq import --force
 echo "Cherry-picking the following commits:"
 echo "$commits"
 
-picks=$(echo "$commits" | sed -e 's/^/pick /' -e 's/$/\\n/' | tr --delete '\n' )
+picks=$(echo "$commits" | xargs echo exec git cherry-pick -x --no-edit --commit)
 
 # find the first debian commit
 firstdebian=$(git log -i --grep "topic.*debian" --pretty=%h --reverse $debbranch..$pqbranch | head -1)
