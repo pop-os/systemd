@@ -318,12 +318,12 @@ Depends: ${shlibs:Depends},
          util-linux (>= 2.27.1),
          s390-tools (>> 1.6.2) [s390],
          procps
-Breaks: systemd (<< 232-11),
+Breaks: systemd (<< 233-4),
         ifupdown (<< 0.8.5~),
         ifplugd (<< 0.28-19.1~),
         joystick (<< 1:1.4.9-1~),
         ${Breaks:usb-modeswitch},
-Replaces: systemd (<< 224-2)
+Replaces: systemd (<< 233-4)
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
  /dev/, handles hotplug events and loads drivers at boot time.
