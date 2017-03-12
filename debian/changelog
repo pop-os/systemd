@@ -1,3 +1,19 @@
+systemd (233-4) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
+  * udev autopkgtest: Drop obsolete sys.tar.xz fallback.
+    This was only necessary for supporting 232 as well.
+  * root-unittest: Drop obsolete FIXME comment.
+  * Add libpolkit-gobject-1-dev build dep for polkit version detection.
+  * Move systemd.link(5) to udev package
+    .link files are being handled by udev, so it should ship the
+    corresponding manpage. Bump Breaks/Replaces accordingly. (Closes: #857270)
+
+  [ Michael Biebl ]
+  * Restart journald on upgrades (Closes: #851438)
+
+ -- Martin Pitt <mpitt@debian.org>  Sun, 12 Mar 2017 11:40:35 +0100
+
 systemd (233-3) experimental; urgency=medium
 
   [ Michael Biebl ]
