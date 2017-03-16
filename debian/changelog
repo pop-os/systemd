@@ -1,18 +1,25 @@
-systemd (233-4) UNRELEASED; urgency=medium
+systemd (233-4) experimental; urgency=medium
 
   [ Martin Pitt ]
   * udev autopkgtest: Drop obsolete sys.tar.xz fallback.
     This was only necessary for supporting 232 as well.
   * root-unittest: Drop obsolete FIXME comment.
   * Add libpolkit-gobject-1-dev build dep for polkit version detection.
-  * Move systemd.link(5) to udev package
+  * Move systemd.link(5) to udev package.
     .link files are being handled by udev, so it should ship the
     corresponding manpage. Bump Breaks/Replaces accordingly. (Closes: #857270)
 
   [ Michael Biebl ]
   * Restart journald on upgrades (Closes: #851438)
+  * Avoid strict DM API versioning.
+    Compiling against the dm-ioctl.h header as provided by the Linux kernel
+    will embed the DM interface version number. Running an older kernel can
+    lead to errors on shutdown when trying to detach DM devices.
+    As a workaround, build against a local copy of dm-ioctl.h based on 3.13,
+    which is the minimum required version to support DM_DEFERRED_REMOVE.
+    (Closes: #856337)
 
- -- Martin Pitt <mpitt@debian.org>  Sun, 12 Mar 2017 11:40:35 +0100
+ -- Michael Biebl <biebl@debian.org>  Thu, 16 Mar 2017 18:40:16 +0100
 
 systemd (233-3) experimental; urgency=medium
 
