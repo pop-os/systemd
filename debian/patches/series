@@ -1,5 +1,7 @@
 test-skip-instead-of-fail-if-crypto-kmods-are-not-availab.patch
 Avoid-strict-DM-interface-version-dependencies-5519.patch
+units-do-not-throw-a-warning-in-emergency-mode-if-plymout.patch
+units-apply-plymouth-warning-fix-to-in-rescue-mode-as-wel.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
