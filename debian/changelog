@@ -1,3 +1,15 @@
+systemd (233-5) experimental; urgency=medium
+
+  * Do not throw a warning in emergency and rescue mode if plymouth is not
+    installed.
+    Ideally, plymouth should only be referenced via dependencies, not
+    ExecStartPre. This at least avoids the confusing error message on
+    minimal installations that do not carry plymouth.
+  * rules: Allow SPARC vdisk devices when identifying CD drives
+    (Closes: #858014)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 21 Mar 2017 21:00:08 +0100
+
 systemd (233-4) experimental; urgency=medium
 
   [ Martin Pitt ]
