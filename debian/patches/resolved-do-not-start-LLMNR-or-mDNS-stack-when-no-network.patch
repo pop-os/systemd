@@ -1,0 +1,74 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 16 Mar 2017 15:52:34 +0900
+Subject: resolved: do not start LLMNR or mDNS stack when no network enables
+ them
+
+When no network enables LLMNR or mDNS, it is not necessary to create
+LLMNR or mDNS related sockets. So, let's create them only when
+LLMNR- or mDNS-enabled network becomes active or at least one network
+enables `LLMNR=` or `MulticastDNS=` options.
+
+(cherry picked from commit c6a8f6f66da111a417cef7be81ceb9a8f336e541)
+---
+ src/resolve/resolved-link.c    | 17 +++++++++++++++++
+ src/resolve/resolved-manager.c |  8 --------
+ 2 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
+index 3f7f903..d06096f 100644
+--- a/src/resolve/resolved-link.c
++++ b/src/resolve/resolved-link.c
+@@ -28,6 +28,8 @@
+ #include "mkdir.h"
+ #include "parse-util.h"
+ #include "resolved-link.h"
++#include "resolved-llmnr.h"
++#include "resolved-mdns.h"
+ #include "string-util.h"
+ #include "strv.h"
+ 
+@@ -523,10 +525,25 @@ static void link_read_settings(Link *l) {
+ }
+ 
+ int link_update(Link *l) {
++        int r;
++
+         assert(l);
+ 
+         link_read_settings(l);
+         link_load_user(l);
++
++        if (l->llmnr_support != RESOLVE_SUPPORT_NO) {
++                r = manager_llmnr_start(l->manager);
++                if (r < 0)
++                        return r;
++        }
++
++        if (l->mdns_support != RESOLVE_SUPPORT_NO) {
++                r = manager_mdns_start(l->manager);
++                if (r < 0)
++                        return r;
++        }
++
+         link_allocate_scopes(l);
+         link_add_rrs(l, false);
+ 
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index c4e4409..9db8b8f 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -612,14 +612,6 @@ int manager_start(Manager *m) {
+         if (r < 0)
+                 return r;
+ 
+-        r = manager_llmnr_start(m);
+-        if (r < 0)
+-                return r;
+-
+-        r = manager_mdns_start(m);
+-        if (r < 0)
+-                return r;
+-
+         return 0;
+ }
+ 

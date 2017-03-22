@@ -3,6 +3,10 @@ Avoid-strict-DM-interface-version-dependencies-5519.patch
 units-do-not-throw-a-warning-in-emergency-mode-if-plymout.patch
 units-apply-plymouth-warning-fix-to-in-rescue-mode-as-wel.patch
 rules-allow-SPARC-vdisk-devices-when-identifying-CD-drive.patch
+resolved-do-not-start-LLMNR-or-mDNS-stack-when-no-network.patch
+resolved-detect-and-warn-other-running-mDNS-stack.patch
+resolved-add-global-config-option-to-control-mDNS-stack.patch
+resolved-detect-and-warn-other-running-LLMNR-stack.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

@@ -1,0 +1,61 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 16 Mar 2017 14:30:16 +0900
+Subject: resolved: add global config option to control mDNS stack
+
+(cherry picked from commit 77525fdc8d60bff55b60b9e443401187204ddfe7)
+---
+ man/resolved.conf.xml            | 15 +++++++++++++++
+ src/resolve/resolved-gperf.gperf |  1 +
+ src/resolve/resolved.conf.in     |  1 +
+ 3 files changed, 17 insertions(+)
+
+diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
+index 4fc1ef1..7babc5c 100644
+--- a/man/resolved.conf.xml
++++ b/man/resolved.conf.xml
+@@ -127,6 +127,21 @@
+       </varlistentry>
+ 
+       <varlistentry>
++        <term><varname>MulticastDNS=</varname></term>
++        <listitem><para>Takes a boolean argument or
++        <literal>resolve</literal>. Controls Multicast DNS support (<ulink
++        url="https://tools.ietf.org/html/rfc6762">RFC 6762</ulink>) on
++        the local host. If true, enables full Multicast DNS responder and
++        resolver support. If false, disables both. If set to
++        <literal>resolve</literal>, only resolution support is enabled,
++        but responding is disabled. Note that
++        <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++        also maintains per-link Multicast DNS settings. Multicast DNS will be
++        enabled on a link only if the per-link and the
++        global setting is on.</para></listitem>
++      </varlistentry>
++
++      <varlistentry>
+         <term><varname>DNSSEC=</varname></term>
+         <listitem><para>Takes a boolean argument or
+         <literal>allow-downgrade</literal>. If true all DNS lookups are
+diff --git a/src/resolve/resolved-gperf.gperf b/src/resolve/resolved-gperf.gperf
+index 446f85c..5153563 100644
+--- a/src/resolve/resolved-gperf.gperf
++++ b/src/resolve/resolved-gperf.gperf
+@@ -18,6 +18,7 @@ Resolve.DNS,             config_parse_dns_servers,            DNS_SERVER_SYSTEM,
+ Resolve.FallbackDNS,     config_parse_dns_servers,            DNS_SERVER_FALLBACK, 0
+ Resolve.Domains,         config_parse_search_domains,         0,                   0
+ Resolve.LLMNR,           config_parse_resolve_support,        0,                   offsetof(Manager, llmnr_support)
++Resolve.MulticastDNS,    config_parse_resolve_support,        0,                   offsetof(Manager, mdns_support)
+ Resolve.DNSSEC,          config_parse_dnssec_mode,            0,                   offsetof(Manager, dnssec_mode)
+ Resolve.Cache,           config_parse_bool,                   0,                   offsetof(Manager, enable_cache)
+ Resolve.DNSStubListener, config_parse_dns_stub_listener_mode, 0,                   offsetof(Manager, dns_stub_listener_mode)
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index 60afa15..e6b2062 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
+@@ -16,6 +16,7 @@
+ #FallbackDNS=@DNS_SERVERS@
+ #Domains=
+ #LLMNR=yes
++#MulticastDNS=yes
+ #DNSSEC=@DEFAULT_DNSSEC_MODE@
+ #Cache=yes
+ #DNSStubListener=udp
