@@ -121,8 +121,8 @@ CONFFLAGS = \
 	--with-system-uid-max=999 \
 	--with-system-gid-max=999
 
-# resolved's DNSSEC support is still not mature enough, disable for stable
-# Debian/Ubuntu releases
+# resolved's DNSSEC support is still not mature enough, don't enable it by
+# default on stable Ubuntu releases
 CONFFLAGS += $(shell grep -q yakkety /etc/os-release && echo --with-default-dnssec=no)
 
 CONFFLAGS_deb = \
