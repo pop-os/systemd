@@ -64,8 +64,7 @@ Section: admin
 Priority: important
 Recommends: libpam-systemd,
             dbus
-Suggests: systemd-ui,
-          systemd-container,
+Suggests: systemd-container,
           policykit-1
 Pre-Depends: ${shlibs:Pre-Depends},
              ${misc:Pre-Depends}
