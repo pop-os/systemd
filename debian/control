@@ -181,6 +181,17 @@ Description: tools for storing and retrieving coredumps
   * systemd-coredump
   * coredumpctl
 
+Package: systemd-tests
+Architecture: linux-any
+Section: admin
+Priority: optional
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd (= ${binary:Version}),
+Description: systemd tests
+ This package contains the test binaries. Those binaries are primarily used
+ for autopkgtest and not meant to be installed on regular user systems.
+
 Package: libpam-systemd
 Architecture: linux-any
 Multi-Arch: same

@@ -83,14 +83,14 @@ Depends: systemd-sysv,
 Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
 Tests: udev
-Depends: libsystemd-dev,
+Depends: systemd-tests,
   tree,
   perl,
   xz-utils,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: root-unittests
-Depends: libsystemd-dev,
+Depends: systemd-tests,
   tree,
   perl,
   xz-utils,

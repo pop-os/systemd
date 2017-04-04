@@ -10,7 +10,7 @@ test-catalog
 "
 
 res=0
-for t in /usr/lib/*/systemd/tests/test-*; do
+for t in /usr/lib/systemd/tests/test-*; do
     tname=$(basename $t)
     # test-udev needs special prep and has its own test
     [ "$tname" != test-udev ] || continue
