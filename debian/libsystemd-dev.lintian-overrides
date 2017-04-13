@@ -1,2 +1,0 @@
-# test programs only, need to link against internal library
-libsystemd-dev: binary-or-shlib-defines-rpath usr/lib/*/systemd/tests/test-*
