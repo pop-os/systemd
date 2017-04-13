@@ -313,6 +313,7 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/
 	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
 	install --mode=755 debian/extra/set-cpufreq debian/systemd/lib/systemd/
+	install -D --mode=755 debian/extra/write_persistent_net_s390x_virtio debian/udev/usr/share/systemd/write_persistent_net_s390x_virtio
 endif
 
 override_dh_installinit:
