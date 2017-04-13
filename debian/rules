@@ -326,7 +326,7 @@ override_dh_shlibdeps:
 	dh_shlibdeps --remaining-packages -Lsystemd
 
 override_dh_makeshlibs:
-	sed 's/SHARED_LIB_VERSION/$(shell sed -n '/^PACKAGE_VERSION/ {s/^.*= *//; p}' build-deb/Makefile)/' debian/shlibs.local.in > debian/shlibs.local
+	sed 's/SHARED_LIB_VERSION/$(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.h | tr -d \")/' debian/shlibs.local.in > debian/shlibs.local
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
