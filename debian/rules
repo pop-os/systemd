@@ -27,124 +27,119 @@ ifneq (, $(filter noudeb, $(DEB_BUILD_OPTIONS)))
 export DEB_BUILD_PROFILES += noudeb
 endif
 
-SPLIT_USR_PATHS = \
-	QUOTAON=/sbin/quotaon \
-	QUOTACHECK=/sbin/quotacheck \
-	KILL=/bin/kill \
-	KMOD=/bin/kmod \
-	KEXEC=/sbin/kexec \
-	SULOGIN=/sbin/sulogin \
-	MOUNT_PATH=/bin/mount \
-	UMOUNT_PATH=/bin/umount \
-	$(NULL)
-
 CONFFLAGS = \
-	$(SPLIT_USR_PATHS) \
-	--with-rootprefix= \
-	--with-rootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
-	--with-zshcompletiondir=/usr/share/zsh/vendor-completions \
-	--with-sysvinit-path=/etc/init.d \
-	--with-sysvrcnd-path=/etc \
-	--with-debug-shell=/bin/bash \
-	--with-kbd-loadkeys=/bin/loadkeys \
-	--with-kbd-setfont=/bin/setfont \
-	--with-telinit=/lib/sysvinit/telinit \
-	--with-dbuspolicydir=/usr/share/dbus-1/system.d/ \
-	--with-support-url=$(SUPPORT_URL) \
-	--without-kill-user-processes \
-	--with-pamconfdir=no \
-	--enable-split-usr \
-	--disable-qrencode \
-	--disable-vconsole \
-	--disable-firstboot \
-	--disable-xkbcommon \
-	--disable-wheel-group \
-	--with-ntp-servers="$(DEFAULT_NTP_SERVERS)"  \
-	--with-system-uid-max=999 \
-	--with-system-gid-max=999 \
-	--with-nobody-user=nobody \
-	--with-nobody-group=nogroup
+	-Db_lto=true \
+	-Drootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
+	-Dsplit-usr=true \
+	-Dquotaon-path=/sbin/quotaon \
+	-Dquotacheck-path=/sbin/quotacheck \
+	-Dkill-path=/bin/kill \
+	-Dkmod-path=/bin/kmod \
+	-Dkexec-path=/sbin/kexec \
+	-Dsulogin-path=/sbin/sulogin \
+	-Dmount-path=/bin/mount \
+	-Dumount-path=/bin/umount \
+	-Dloadkeys-path=/bin/loadkeys \
+	-Dsetfont-path=/bin/setfont \
+	-Dtelinit-path=/lib/sysvinit/telinit \
+	-Dsysvinit-path=/etc/init.d \
+	-Dsysvrcnd-path=/etc \
+	-Ddebug-shell=/bin/bash \
+	-Dzshcompletiondir=/usr/share/zsh/vendor-completions \
+	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
+	-Dsupport-url=$(SUPPORT_URL) \
+	-Dkill-user-processes=false \
+	-Dpamconfdir=no \
+	-Dqrencode=false \
+	-Dvconsole=false \
+	-Dfirstboot=false \
+	-Dxkbcommon=false \
+	-Dwheel-group=false \
+	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
+	-Dsystem-uid-max=999 \
+	-Dsystem-gid-max=999 \
+	-Dnobody-user=nobody \
+	-Dnobody-group=nogroup
 
 # resolved's DNSSEC support is still not mature enough, don't enable it by
 # default on stable Debian or any Ubuntu releases
-CONFFLAGS += $(shell grep -qE 'stretch|ubuntu' /etc/os-release && echo --with-default-dnssec=no)
+CONFFLAGS += $(shell grep -qE 'stretch|ubuntu' /etc/os-release && echo -Ddefault-dnssec=no)
 
 CONFFLAGS_deb = \
-	--enable-selinux \
-	--enable-hwdb \
-	--enable-sysusers \
-	--enable-efi \
-	PYTHON=python3
+	-Dselinux=true \
+	-Dhwdb=true \
+	-Dsysusers=true \
+	-Dinstall-tests=true \
+	-Defi=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS_deb += \
-	--enable-audit \
-	--enable-libcryptsetup \
-	--enable-coredump \
-	--enable-elfutils \
-	--enable-apparmor \
-	--enable-libidn \
-	--enable-libiptc \
-	--enable-libcurl \
-	--enable-importd \
-	--enable-microhttpd \
-	--enable-gnutls
+	-Daudit=true \
+	-Dlibcryptsetup=true \
+	-Dcoredump=true \
+	-Delfutils=true \
+	-Dapparmor=true \
+	-Dlibidn=true \
+	-Dlibiptc=true \
+	-Dlibcurl=true \
+	-Dimportd=true \
+	-Dmicrohttpd=true \
+	-Dgnutls=true
 else
 CONFFLAGS_deb += \
-	--disable-audit \
-	--disable-libcryptsetup \
-	--disable-coredump \
-	--disable-elfutils \
-	--disable-apparmor \
-	--disable-libidn \
-	--disable-libiptc \
-	--disable-libcurl \
-	--disable-importd \
-	--disable-microhttpd \
-	--disable-gnutls
+	-Daudit=false \
+	-Dlibcryptsetup=false \
+	-Dcoredump=false \
+	-Delfutils=false \
+	-Dapparmor=false \
+	-Dlibidn=false \
+	-Dlibiptc=false \
+	-Dlibcurl=false \
+	-Dimportd=false \
+	-Dmicrohttpd=false \
+	-Dgnutls=false
 endif
 
 CONFFLAGS_udeb = \
-	--disable-libcryptsetup \
-	--disable-coredump \
-	--disable-elfutils \
-	--disable-pam \
-	--disable-audit \
-	--disable-selinux \
-	--disable-apparmor \
-	--disable-libidn \
-	--disable-libiptc \
-	--disable-smack \
-	--disable-ima \
-	--disable-binfmt \
-	--disable-quotacheck \
-	--disable-tmpfiles \
-	--disable-randomseed \
-	--disable-backlight \
-	--disable-logind \
-	--disable-machined \
-	--disable-libcurl \
-	--disable-importd \
-	--disable-microhttpd \
-	--disable-gnutls \
-	--disable-hostnamed \
-	--disable-timedated \
-	--disable-networkd \
-	--disable-timesyncd \
-	--disable-localed \
-	--disable-myhostname \
-	--disable-resolved \
-	--disable-polkit \
-	--disable-acl \
-	--disable-gcrypt \
-	--disable-rfkill \
-	--disable-hwdb \
-	--disable-manpages \
-	--disable-efi \
-	--disable-gnuefi \
-	--disable-seccomp \
-	--disable-sysusers \
-	--without-python
+	-Dlibcryptsetup=false \
+	-Dcoredump=false \
+	-Delfutils=false \
+	-Dpam=false \
+	-Daudit=false \
+	-Dselinux=false\
+	-Dapparmor=false \
+	-Dlibidn=false \
+	-Dlibiptc=false \
+	-Dsmack=false \
+	-Dima=false \
+	-Dbinfmt=false \
+	-Dquotacheck=false \
+	-Dtmpfiles=false \
+	-Drandomseed=false \
+	-Dbacklight=false \
+	-Dlogind=false \
+	-Dmachined=false \
+	-Dlibcurl=false \
+	-Dimportd=false \
+	-Dmicrohttpd=false \
+	-Dgnutls=false \
+	-Dhostnamed=false \
+	-Dtimedated=false \
+	-Dnetworkd=false \
+	-Dtimesyncd=false \
+	-Dlocaled=false \
+	-Dmyhostname=false \
+	-Dresolved=false \
+	-Dpolkit=false \
+	-Dacl=false \
+	-Dgcrypt=false \
+	-Drfkill=false \
+	-Dhwdb=false \
+	-Dman=false \
+	-Defi=false \
+	-Dgnuefi=false \
+	-Dseccomp=false \
+	-Dsysusers=false
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=build-deb \
@@ -169,7 +164,6 @@ ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_auto_install --builddirectory=build-udeb \
 		--destdir=debian/install/udeb
 endif
-	$(MAKE) -C build-deb install-tests DESTDIR=$(CURDIR)/debian/install/tests
 	# fix paths in manpages; manually check the remaining /usr occurrences
 	# occasionally, with filtering out paths which are known to be in /usr:
 	# grep -r /usr debian/install/deb/usr/share/man/|egrep -v '/usr/local|os.*release|factory|zoneinfo|tmpfiles|kernel|foo|machines|sysctl|dbus|include|binfmt'
@@ -219,8 +213,6 @@ ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
 
-	dh_install -psystemd-tests --sourcedir=debian/install/tests
-
 	dh_install --remaining-packages --sourcedir=debian/install/deb $(DH_INSTALL_MISSING)
 
 	# we don't want /tmp to be a tmpfs by default
@@ -248,7 +240,7 @@ endif
 	done
 
 	#  FIXME: upstream build system should do that
-	install -m 755 build-deb/.libs/test-udev debian/systemd-tests/usr/lib/systemd/tests/
+	install -m 755 build-deb/test-udev debian/systemd-tests/usr/lib/systemd/tests/
 
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
@@ -275,13 +267,6 @@ override_dh_makeshlibs:
 	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
 
-autoreconf:
-	intltoolize -f -c
-	autoreconf -f -i
-
-override_dh_autoreconf:
-	dh_autoreconf --as-needed debian/rules -- autoreconf
-
 override_dh_strip:
 	dh_strip --dbgsym-migration='systemd-dbg (<< 229-6~)'
 
@@ -290,9 +275,8 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	echo "01234567890123456789012345678901" > build-deb/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
 	# some tests are known to fail under ancient kernels
-	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id make -C build-deb check || ( \
-		cd build-deb; \
-		for f in test-*.log; do echo "==== $$f ===="; cat $$f; done; \
+	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id ninja -C build-deb test || ( \
+		cat build-deb/meson-logs/testlog.txt; \
 		if linux-version compare "$$(uname -r)" ge 3.13; then \
 		    exit 1; \
 		else \
@@ -301,4 +285,4 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 endif
 
 %:
-	dh $@ --without systemd
+	dh $@ --without autoreconf,systemd --buildsystem=meson
