@@ -58,6 +58,7 @@ CONFFLAGS = \
 	-Dxkbcommon=false \
 	-Dwheel-group=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
+	-Dlink-udev-shared=false \
 	-Dsystem-uid-max=999 \
 	-Dsystem-gid-max=999 \
 	-Dnobody-user=nobody \
