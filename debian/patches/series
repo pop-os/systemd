@@ -8,6 +8,7 @@ resolved-detect-and-warn-other-running-mDNS-stack.patch
 resolved-add-global-config-option-to-control-mDNS-stack.patch
 resolved-detect-and-warn-other-running-LLMNR-stack.patch
 journal-fix-up-syslog-facility-when-forwarding-native-mes.patch
+test-TEST-12-ISSUE-3171-specify-w1-option-to-netcat-due-t.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

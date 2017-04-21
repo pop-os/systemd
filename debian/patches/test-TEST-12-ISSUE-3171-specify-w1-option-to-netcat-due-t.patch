@@ -1,0 +1,48 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Tue, 11 Apr 2017 20:34:29 +0100
+Subject: test/TEST-12-ISSUE-3171: specify -w1 option to netcat due to default
+ change. (#5722)
+
+On Ubuntu 17.04 (zesty zapus) netcat-openbsd was upgraded from 1.105-7ubuntu1
+to 1.130-3, at the same time the defaults got changed from -q0 to -q-1
+(infinity) the net result is that `echo A | nc -U' call now hangs, preventing
+the testcase to complete. One could use the old default of -q0, but that option
+is not available in some netcat implementations. Thus settle to specify -w1
+instead to mitigate the testcase hang.
+(cherry picked from commit c618423a5aacb0378985f6d49d31be65866ab79a)
+---
+ test/TEST-12-ISSUE-3171/test.sh | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/test/TEST-12-ISSUE-3171/test.sh b/test/TEST-12-ISSUE-3171/test.sh
+index e20f470..c252bdf 100755
+--- a/test/TEST-12-ISSUE-3171/test.sh
++++ b/test/TEST-12-ISSUE-3171/test.sh
+@@ -67,23 +67,23 @@ EOL
+ systemctl start test.socket
+ systemctl is-active test.socket
+ [[ "$(stat --format='%G' /run/test.socket)" == adm ]]
+-echo A | nc -U /run/test.socket
++echo A | nc -w1 -U /run/test.socket
+ 
+ mv $U ${U}.disabled
+ systemctl daemon-reload
+ systemctl is-active test.socket
+ [[ "$(stat --format='%G' /run/test.socket)" == adm ]]
+-echo B | nc -U /run/test.socket && exit 1
++echo B | nc -w1 -U /run/test.socket && exit 1
+ 
+ mv ${U}.disabled $U
+ systemctl daemon-reload
+ systemctl is-active test.socket
+-echo C | nc -U /run/test.socket && exit 1
++echo C | nc -w1 -U /run/test.socket && exit 1
+ [[ "$(stat --format='%G' /run/test.socket)" == adm ]]
+ 
+ systemctl restart test.socket
+ systemctl is-active test.socket
+-echo D | nc -U /run/test.socket
++echo D | nc -w1 -U /run/test.socket
+ [[ "$(stat --format='%G' /run/test.socket)" == adm ]]
+ 
+ 
