@@ -31,7 +31,10 @@ mkdir -p debian/tmp
  git clone https://github.com/systemd/systemd.git upstream || (rm -rf upstream; sleep 60; git clone https://github.com/systemd/systemd.git upstream)
  cd upstream
  $FETCH
- $CO)
+ $CO
+ git config user.email "invalid@example.com"
+ git config user.name "Merge dummy user"
+ git rebase master)
 UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//')
 
 # clean out original upstream sources and patches
