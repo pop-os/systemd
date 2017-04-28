@@ -1,3 +1,43 @@
+systemd (233-6) experimental; urgency=medium
+
+  [ Felipe Sateler ]
+  * Backport upstream PR #5531.
+    This delays opening the mdns and llmnr sockets until a network has enabled
+    them. This silences annoying messages when networkd receives such packets
+    without expecting them: Got mDNS UDP packet on unknown scope.
+
+  [ Martin Pitt ]
+  * resolved: Disable DNSSEC by default on stretch and zesty.
+    Both Debian stretch and Ubuntu zesty are close to releasing, switch to
+    DNSSEC=off by default for those. Users can still turn it back on with
+    DNSSEC=allow-downgrade (or even "yes").
+
+  [ Michael Biebl ]
+  * Add Conflicts against hal.
+    Since v183, udev no longer supports RUN+="socket:". This feature is
+    still used by hal, but now generates vast amounts of errors in the
+    journal. Thus force the removal of hal by adding a Conflicts to the udev
+    package. This is safe, as hal is long dead and no longer useful.
+  * Drop systemd-ui Suggests
+    systemd-ui is unmaintained upstream and not particularly useful anymore.
+  * journal: fix up syslog facility when forwarding native messages.
+    Native journal messages (_TRANSPORT=journal) typically don't have a
+    syslog facility attached to it. As a result when forwarding the
+    messages to syslog they ended up with facility 0 (LOG_KERN).
+    Apply syslog_fixup_facility() so we use LOG_USER instead.
+    (Closes: #837893)
+  * Split upstream tests into systemd-tests binary package (Closes: #859152)
+  * Get PACKAGE_VERSION from config.h.
+    This also works with meson and is not autotools specific.
+
+  [ Sjoerd Simons ]
+  * init-functions Only call daemon-reload when planning to redirect
+    systemctl daemon-reload is a quite a heavy operation, it will re-parse
+    all configuration and re-run all generators. This should only be done
+    when strictly needed. (Closes: #861158)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 28 Apr 2017 21:47:14 +0200
+
 systemd (233-5) experimental; urgency=medium
 
   * Do not throw a warning in emergency and rescue mode if plymouth is not
