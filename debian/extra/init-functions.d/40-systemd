@@ -12,14 +12,14 @@ if [ -d /run/systemd/system ]; then
     state=$(systemctl -p LoadState --value show $service 2>/dev/null) || state="not-found"
     [ "$state" = "masked" ] && exit 0
 
-    # If the state is not-found, this might be a newly installed SysV init
-    # script where systemd-sysv-generator has not been run yet.
-    [ "$state" != "not-found" ] || [ "$(id -u)" != 0 ] || systemctl --no-ask-password daemon-reload
-
     # Redirect SysV init scripts when executed by the user
     if [ $PPID -ne 1 ] && [ -z "${SYSTEMCTL_SKIP_REDIRECT:-}" ]; then
         case $(readlink -f "$0") in
             /etc/init.d/*)
+                # If the state is not-found, this might be a newly installed SysV init
+                # script where systemd-sysv-generator has not been run yet.
+                [ "$state" != "not-found" ] || [ "$(id -u)" != 0 ] || systemctl --no-ask-password daemon-reload
+
                 _use_systemctl=1
                 # Some services can't reload through the .service file,
                 # but can through the init script.
