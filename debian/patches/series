@@ -37,3 +37,4 @@ debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
+debian/Skip-starting-systemd-remount-fs.service-in-containers.patch

@@ -1,0 +1,27 @@
+From: Balint Reczey <rbalint@ubuntu.com>
+Date: Mon, 8 May 2017 17:02:03 +0200
+Subject: Skip starting systemd-remount-fs.service in containers
+
+even when /etc/fstab is present.
+
+This allows entering fully running state even when /etc/fstab
+lists / to be mounted from a device which is not present in the
+container.
+
+LP: #1576341
+---
+ units/systemd-remount-fs.service.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/units/systemd-remount-fs.service.in b/units/systemd-remount-fs.service.in
+index 8d9daac..bc59aa4 100644
+--- a/units/systemd-remount-fs.service.in
++++ b/units/systemd-remount-fs.service.in
+@@ -15,6 +15,7 @@ After=systemd-fsck-root.service
+ Before=local-fs-pre.target local-fs.target shutdown.target
+ Wants=local-fs-pre.target
+ ConditionPathExists=/etc/fstab
++ConditionVirtualization=!container
+ 
+ [Service]
+ Type=oneshot
