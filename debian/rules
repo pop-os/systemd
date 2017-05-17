@@ -122,8 +122,8 @@ CONFFLAGS = \
 	--with-system-gid-max=999
 
 # resolved's DNSSEC support is still not mature enough, don't enable it by
-# default on stable Debian/Ubuntu releases
-CONFFLAGS += $(shell grep -qE 'stretch|yakkety|zesty' /etc/os-release && echo --with-default-dnssec=no)
+# default on stable Debian or any Ubuntu releases
+CONFFLAGS += $(shell grep -qE 'stretch|ubuntu' /etc/os-release && echo --with-default-dnssec=no)
 
 CONFFLAGS_deb = \
 	--enable-selinux \

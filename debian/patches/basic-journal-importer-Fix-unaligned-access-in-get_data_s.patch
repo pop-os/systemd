@@ -1,0 +1,31 @@
+From: John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
+Date: Wed, 22 Mar 2017 03:36:50 +0100
+Subject: basic/journal-importer: Fix unaligned access in get_data_size()
+ (#5622)
+
+(cherry picked from commit f652c62d71a412704efe7c73c2066d1baaf83456)
+---
+ src/basic/journal-importer.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/basic/journal-importer.c b/src/basic/journal-importer.c
+index 4c13e46..06f54f5 100644
+--- a/src/basic/journal-importer.c
++++ b/src/basic/journal-importer.c
+@@ -24,6 +24,7 @@
+ #include "fd-util.h"
+ #include "parse-util.h"
+ #include "string-util.h"
++#include "unaligned.h"
+ 
+ enum {
+         IMPORTER_STATE_LINE = 0,    /* waiting to read, or reading line */
+@@ -203,7 +204,7 @@ static int get_data_size(JournalImporter *imp) {
+         if (r <= 0)
+                 return r;
+ 
+-        imp->data_size = le64toh( *(uint64_t *) data );
++        imp->data_size = unaligned_read_le64(data);
+         if (imp->data_size > DATA_SIZE_MAX) {
+                 log_error("Stream declares field with size %zu > DATA_SIZE_MAX = %u",
+                           imp->data_size, DATA_SIZE_MAX);

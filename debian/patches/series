@@ -8,6 +8,7 @@ resolved-detect-and-warn-other-running-mDNS-stack.patch
 resolved-add-global-config-option-to-control-mDNS-stack.patch
 resolved-detect-and-warn-other-running-LLMNR-stack.patch
 journal-fix-up-syslog-facility-when-forwarding-native-mes.patch
+basic-journal-importer-Fix-unaligned-access-in-get_data_s.patch
 test-TEST-12-ISSUE-3171-specify-w1-option-to-netcat-due-t.patch
 networkd-Add-bridge-port-priority-setting-5545.patch
 main-improve-RLIMIT_NOFILE-handling-5795.patch
