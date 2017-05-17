@@ -1,0 +1,107 @@
+From: Franck Bui <fbui@suse.com>
+Date: Fri, 31 Mar 2017 16:32:09 +0200
+Subject: udev: net_id - support predictable ifnames on vio buses (#5675)
+
+For IBM PowerVM Virtual I/O network devices, we can build predictable names
+based on the slot number passed as part of the OF "reg" property.  Valid slot
+numbers range between 2-32767, so we only need the bottom half of the unit
+address passed.
+
+For example:
+
+  /proc/device-tree/vdevice/l-lan@30000002
+  /proc/device-tree/vdevice/vnic@30000005
+
+would initially map to something like:
+
+  /sys/devices/vio/30000002/net/eth0
+  /sys/devices/vio/30000005/net/eth1
+
+and would then translate to env2 and env5
+
+This patch ignores the bus number, as there should only ever be one bus, and
+then remove leading zeros.
+(cherry picked from commit 765a00b98d9176aeafc8a677a0e426edd2a20aab)
+---
+ src/udev/udev-builtin-net_id.c | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index bd7b789..dcbfba3 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -45,6 +45,7 @@
+  *                                         — PCI geographical location
+  *   [P<domain>]p<bus>s<slot>[f<function>][u<port>][..][c<config>][i<interface>]
+  *                                         — USB port number chain
++ *   v<slot>                               - VIO slot number (IBM PowerVM)
+  *
+  * All multi-function PCI devices will carry the [f<function>] number in the
+  * device name, including the function 0 device.
+@@ -122,6 +123,7 @@ enum netname_type{
+         NET_BCMA,
+         NET_VIRTIO,
+         NET_CCW,
++        NET_VIO,
+ };
+ 
+ struct netnames {
+@@ -139,6 +141,7 @@ struct netnames {
+         char usb_ports[IFNAMSIZ];
+         char bcma_core[IFNAMSIZ];
+         char ccw_busid[IFNAMSIZ];
++        char vio_slot[IFNAMSIZ];
+ };
+ 
+ /* skip intermediate virtio devices */
+@@ -319,6 +322,33 @@ out:
+         return err;
+ }
+ 
++static int names_vio(struct udev_device *dev, struct netnames *names) {
++        struct udev_device *parent;
++        unsigned busid, slotid, ethid;
++        const char *syspath;
++
++        /* check if our direct parent is a VIO device with no other bus in-between */
++        parent = udev_device_get_parent(dev);
++        if (!parent)
++                return -ENOENT;
++
++        if (!streq_ptr("vio", udev_device_get_subsystem(parent)))
++                 return -ENOENT;
++
++        /* The devices' $DEVPATH number is tied to (virtual) hardware (slot id
++         * selected in the HMC), thus this provides a reliable naming (e.g.
++         * "/devices/vio/30000002/net/eth1"); we ignore the bus number, as
++         * there should only ever be one bus, and then remove leading zeros. */
++        syspath = udev_device_get_syspath(dev);
++
++        if (sscanf(syspath, "/sys/devices/vio/%4x%4x/net/eth%u", &busid, &slotid, &ethid) != 3)
++                return -EINVAL;
++
++        xsprintf(names->vio_slot, "v%u", slotid);
++        names->type = NET_VIO;
++        return 0;
++}
++
+ static int names_pci(struct udev_device *dev, struct netnames *names) {
+         struct udev_device *parent;
+ 
+@@ -591,6 +621,16 @@ static int builtin_net_id(struct udev_device *dev, int argc, char *argv[], bool
+                 goto out;
+         }
+ 
++        /* get ibmveth/ibmvnic slot-based names. */
++        err = names_vio(dev, &names);
++        if (err >= 0 && names.type == NET_VIO) {
++                char str[IFNAMSIZ];
++
++                if (snprintf(str, sizeof(str), "%s%s", prefix, names.vio_slot) < (int)sizeof(str))
++                        udev_builtin_add_property(dev, test, "ID_NET_NAME_SLOT", str);
++                goto out;
++        }
++
+         /* get PCI based path names, we compose only PCI based paths */
+         err = names_pci(dev, &names);
+         if (err < 0)

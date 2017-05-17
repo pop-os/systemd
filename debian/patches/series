@@ -12,6 +12,7 @@ basic-journal-importer-Fix-unaligned-access-in-get_data_s.patch
 test-TEST-12-ISSUE-3171-specify-w1-option-to-netcat-due-t.patch
 networkd-Add-bridge-port-priority-setting-5545.patch
 main-improve-RLIMIT_NOFILE-handling-5795.patch
+udev-net_id-support-predictable-ifnames-on-vio-buses-5675.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
