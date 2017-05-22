@@ -1,3 +1,9 @@
+systemd (233-6ubuntu3) artful; urgency=medium
+
+  * resolved: fix null pointer dereference crash (LP: #1621396)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 22 May 2017 09:29:22 +0100
+
 systemd (233-6ubuntu2) artful; urgency=medium
 
   [ Michael Biebl ]
