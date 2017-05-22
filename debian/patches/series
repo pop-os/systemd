@@ -10,6 +10,7 @@ resolved-detect-and-warn-other-running-LLMNR-stack.patch
 journal-fix-up-syslog-facility-when-forwarding-native-mes.patch
 basic-journal-importer-Fix-unaligned-access-in-get_data_s.patch
 ima-Ensure-policy-exists-before-asking-the-kernel-to-load.patch
+service-serialize-information-about-currently-executing-c.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
