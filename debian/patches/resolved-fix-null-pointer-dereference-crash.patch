@@ -1,0 +1,25 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Mon, 22 May 2017 09:18:21 +0100
+Subject: resolved: fix null pointer dereference crash.
+
+Bug-Upstream: https://github.com/systemd/systemd/pull/5998
+LP: #1621396
+(cherry picked from commit 4875d605c8ec6ee0d78026410a93ed03d1780cfa)
+---
+ src/resolve/resolved-dns-packet.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/resolve/resolved-dns-packet.c b/src/resolve/resolved-dns-packet.c
+index 6529702..7ff6d1f 100644
+--- a/src/resolve/resolved-dns-packet.c
++++ b/src/resolve/resolved-dns-packet.c
+@@ -2269,6 +2269,9 @@ int dns_packet_is_reply_for(DnsPacket *p, const DnsResourceKey *key) {
+         if (r < 0)
+                 return r;
+ 
++        if (p->question == NULL)
++                return 0;
++
+         if (p->question->n_keys != 1)
+                 return 0;
+ 
