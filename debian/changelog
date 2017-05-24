@@ -1,3 +1,27 @@
+systemd (233-7) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * basic/journal-importer: Fix unaligned access in get_data_size()
+    (Closes: #862062)
+  * ima: Ensure policy exists before asking the kernel to load it
+    (Closes: #863111)
+  * Add Depends: procps to systemd.
+    It's required by /usr/lib/systemd/user/systemd-exit.service which calls
+    /bin/kill to stop the systemd --user instance. (Closes: #862292)
+  * service: Serialize information about currently executing command
+    (Closes: #861157)
+  * seccomp: Add clone syscall definitions for mips (Closes: #861171)
+
+  [ Dimitri John Ledkov ]
+  * ubuntu: disable dnssec on any ubuntu releases (LP: #1690605)
+
+  [ Felipe Sateler ]
+  * Specify nobody user and group.
+    Otherwise nss-systemd will translate to group 'nobody', which doesn't
+    exist on debian systems.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 24 May 2017 12:26:18 +0200
+
 systemd (233-6) experimental; urgency=medium
 
   [ Felipe Sateler ]
