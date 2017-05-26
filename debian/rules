@@ -362,4 +362,4 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 endif
 
 %:
-	dh $@ --with autoreconf --parallel
+	dh $@ --without systemd
