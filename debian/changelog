@@ -1,3 +1,17 @@
+systemd (233-8) experimental; urgency=medium
+
+  * Bump debhelper compatibility level to 10
+  * Drop versioned Build-Depends on dpkg-dev.
+    It's no longer necessary as even Jessie ships a new enough version.
+  * timesyncd: don't use compiled-in list if FallbackNTP has been configured
+    explicitly (Closes: #861769)
+  * resolved: fix null pointer p->question dereferencing.
+    This fixes a bug which allowed a remote DoS (daemon crash) via a crafted
+    DNS response with an empty question section.
+    Fixes: CVE-2017-9217 (Closes: #863277)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 29 May 2017 14:12:08 +0200
+
 systemd (233-7) experimental; urgency=medium
 
   [ Michael Biebl ]
