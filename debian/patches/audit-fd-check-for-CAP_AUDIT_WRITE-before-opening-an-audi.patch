@@ -1,0 +1,41 @@
+From: Gary Tierney <gary.tierney@gmx.com>
+Date: Tue, 2 May 2017 21:05:32 +0100
+Subject: audit-fd: check for CAP_AUDIT_WRITE before opening an audit socket
+
+Adds a check to audit-fd.c to ensure that CAP_AUDIT_WRITE is present in
+the set of effective capabilities before opening an audit netlink
+socket.  This ensures that unprivileged systemd instances (MANAGER_USER)
+don't try to log AVC permission checks with the audit subsystem when
+CAP_AUDIT_WRITE is not present.
+
+(cherry picked from commit b3fb3c01eeedd1995c74dbe30fe33f189bc828e2)
+---
+ src/core/audit-fd.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/core/audit-fd.c b/src/core/audit-fd.c
+index 76afe3f..a91906b 100644
+--- a/src/core/audit-fd.c
++++ b/src/core/audit-fd.c
+@@ -27,6 +27,7 @@
+ #include <libaudit.h>
+ #include <stdbool.h>
+ 
++#include "capability-util.h"
+ #include "fd-util.h"
+ #include "log.h"
+ #include "util.h"
+@@ -37,6 +38,13 @@ static int audit_fd;
+ int get_audit_fd(void) {
+ 
+         if (!initialized) {
++                if (have_effective_cap(CAP_AUDIT_WRITE) == 0) {
++                        audit_fd = -EPERM;
++                        initialized = true;
++
++                        return audit_fd;
++                }
++
+                 audit_fd = audit_open();
+ 
+                 if (audit_fd < 0) {
