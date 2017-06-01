@@ -14,6 +14,7 @@ service-serialize-information-about-currently-executing-c.patch
 seccomp-add-clone-syscall-definitions-for-mips-5880.patch
 timesyncd-don-t-use-compiled-in-list-if-FallbackNTP-has-b.patch
 resolved-bugfix-of-null-pointer-p-question-dereferencing-.patch
+hwdb-use-path_join-to-generate-the-hwdb_bin-path-6063.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

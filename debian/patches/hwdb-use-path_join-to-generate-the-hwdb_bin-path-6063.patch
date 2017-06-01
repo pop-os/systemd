@@ -1,0 +1,31 @@
+From: Michael Biebl <mbiebl@gmail.com>
+Date: Thu, 1 Jun 2017 03:21:11 +0200
+Subject: hwdb: use path_join() to generate the hwdb_bin path (#6063)
+
+This avoids having double slashes which can confuse selinux.
+(cherry picked from commit 0aac506b64dd6102374635290ca979b080d1192f)
+---
+ src/hwdb/hwdb.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/hwdb/hwdb.c b/src/hwdb/hwdb.c
+index a23b614..df79fbc 100644
+--- a/src/hwdb/hwdb.c
++++ b/src/hwdb/hwdb.c
+@@ -31,6 +31,7 @@
+ #include "hwdb-util.h"
+ #include "label.h"
+ #include "mkdir.h"
++#include "path-util.h"
+ #include "selinux-util.h"
+ #include "strbuf.h"
+ #include "string-util.h"
+@@ -670,7 +671,7 @@ static int hwdb_update(int argc, char *argv[], void *userdata) {
+         log_debug("strings dedup'ed: %8zu bytes (%8zu)",
+                   trie->strings->dedup_len, trie->strings->dedup_count);
+ 
+-        hwdb_bin = strjoin(arg_root, "/", arg_hwdb_bin_dir, "/hwdb.bin");
++        hwdb_bin = path_join(arg_root, arg_hwdb_bin_dir, "hwdb.bin");
+         if (!hwdb_bin)
+                 return -ENOMEM;
+ 
