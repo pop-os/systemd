@@ -1,3 +1,41 @@
+systemd (233-8) experimental; urgency=medium
+
+  * Bump debhelper compatibility level to 10
+  * Drop versioned Build-Depends on dpkg-dev.
+    It's no longer necessary as even Jessie ships a new enough version.
+  * timesyncd: don't use compiled-in list if FallbackNTP has been configured
+    explicitly (Closes: #861769)
+  * resolved: fix null pointer p->question dereferencing.
+    This fixes a bug which allowed a remote DoS (daemon crash) via a crafted
+    DNS response with an empty question section.
+    Fixes: CVE-2017-9217 (Closes: #863277)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 29 May 2017 14:12:08 +0200
+
+systemd (233-7) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * basic/journal-importer: Fix unaligned access in get_data_size()
+    (Closes: #862062)
+  * ima: Ensure policy exists before asking the kernel to load it
+    (Closes: #863111)
+  * Add Depends: procps to systemd.
+    It's required by /usr/lib/systemd/user/systemd-exit.service which calls
+    /bin/kill to stop the systemd --user instance. (Closes: #862292)
+  * service: Serialize information about currently executing command
+    (Closes: #861157)
+  * seccomp: Add clone syscall definitions for mips (Closes: #861171)
+
+  [ Dimitri John Ledkov ]
+  * ubuntu: disable dnssec on any ubuntu releases (LP: #1690605)
+
+  [ Felipe Sateler ]
+  * Specify nobody user and group.
+    Otherwise nss-systemd will translate to group 'nobody', which doesn't
+    exist on debian systems.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 24 May 2017 12:26:18 +0200
+
 systemd (233-6ubuntu3) artful; urgency=medium
 
   * resolved: fix null pointer dereference crash (LP: #1621396)

@@ -119,7 +119,9 @@ CONFFLAGS = \
 	--disable-wheel-group \
 	--with-ntp-servers="$(DEFAULT_NTP_SERVERS)"  \
 	--with-system-uid-max=999 \
-	--with-system-gid-max=999
+	--with-system-gid-max=999 \
+	--with-nobody-user=nobody \
+	--with-nobody-group=nogroup
 
 # resolved's DNSSEC support is still not mature enough, don't enable it by
 # default on stable Debian or any Ubuntu releases
@@ -361,4 +363,4 @@ ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 endif
 
 %:
-	dh $@ --with autoreconf --parallel
+	dh $@ --without systemd

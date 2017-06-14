@@ -1,0 +1,225 @@
+From: Gary Tierney <gary.tierney@gmx.com>
+Date: Tue, 2 May 2017 17:42:19 +0100
+Subject: Revert "selinux: split up mac_selinux_have() from mac_selinux_use()"
+
+This reverts commit 6355e75610a8d47fc3ba5ab8bd442172a2cfe574.
+
+The previously mentioned commit inadvertently broke a lot of SELinux related
+functionality for both unprivileged users and systemd instances running as
+MANAGER_USER.  In particular, setting the correct SELinux context after a User=
+directive is used would fail to work since we attempt to set the security
+context after changing UID.  Additionally, it causes activated socket units to
+be mislabeled for systemd --user processes since setsockcreatecon() would never
+be called.
+
+Reverting this fixes the issues with labeling outlined above, and reinstates
+SELinux access checks on unprivileged user services.
+
+(cherry picked from commit 6d395665e5ce7b64f3de4c9550c0779843e6cc44)
+---
+ src/basic/selinux-util.c           | 20 +++++---------------
+ src/basic/selinux-util.h           |  1 -
+ src/journal/journald-native.c      |  2 +-
+ src/journal/journald-server.c      |  2 +-
+ src/journal/journald-stream.c      |  2 +-
+ src/journal/journald-syslog.c      |  2 +-
+ src/libsystemd/sd-bus/bus-socket.c |  2 +-
+ src/shared/condition.c             |  2 +-
+ src/test/test-condition.c          |  2 +-
+ src/test/test-selinux.c            |  8 ++++----
+ 10 files changed, 16 insertions(+), 27 deletions(-)
+
+diff --git a/src/basic/selinux-util.c b/src/basic/selinux-util.c
+index bc07654..380285d 100644
+--- a/src/basic/selinux-util.c
++++ b/src/basic/selinux-util.c
+@@ -53,7 +53,7 @@ static struct selabel_handle *label_hnd = NULL;
+ #define log_enforcing(...) log_full(security_getenforce() == 1 ? LOG_ERR : LOG_DEBUG, __VA_ARGS__)
+ #endif
+ 
+-bool mac_selinux_have(void) {
++bool mac_selinux_use(void) {
+ #ifdef HAVE_SELINUX
+         if (cached_use < 0)
+                 cached_use = is_selinux_enabled() > 0;
+@@ -64,16 +64,6 @@ bool mac_selinux_have(void) {
+ #endif
+ }
+ 
+-bool mac_selinux_use(void) {
+-        if (!mac_selinux_have())
+-                return false;
+-
+-        /* Never try to configure SELinux features if we aren't
+-         * root */
+-
+-        return getuid() == 0;
+-}
+-
+ void mac_selinux_retest(void) {
+ #ifdef HAVE_SELINUX
+         cached_use = -1;
+@@ -205,7 +195,7 @@ int mac_selinux_get_create_label_from_exe(const char *exe, char **label) {
+         assert(exe);
+         assert(label);
+ 
+-        if (!mac_selinux_have())
++        if (!mac_selinux_use())
+                 return -EOPNOTSUPP;
+ 
+         r = getcon_raw(&mycon);
+@@ -231,7 +221,7 @@ int mac_selinux_get_our_label(char **label) {
+         assert(label);
+ 
+ #ifdef HAVE_SELINUX
+-        if (!mac_selinux_have())
++        if (!mac_selinux_use())
+                 return -EOPNOTSUPP;
+ 
+         r = getcon_raw(label);
+@@ -255,7 +245,7 @@ int mac_selinux_get_child_mls_label(int socket_fd, const char *exe, const char *
+         assert(exe);
+         assert(label);
+ 
+-        if (!mac_selinux_have())
++        if (!mac_selinux_use())
+                 return -EOPNOTSUPP;
+ 
+         r = getcon_raw(&mycon);
+@@ -310,7 +300,7 @@ char* mac_selinux_free(char *label) {
+         if (!label)
+                 return NULL;
+ 
+-        if (!mac_selinux_have())
++        if (!mac_selinux_use())
+                 return NULL;
+ 
+ 
+diff --git a/src/basic/selinux-util.h b/src/basic/selinux-util.h
+index ce6bc8e..5bf7236 100644
+--- a/src/basic/selinux-util.h
++++ b/src/basic/selinux-util.h
+@@ -26,7 +26,6 @@
+ #include "macro.h"
+ 
+ bool mac_selinux_use(void);
+-bool mac_selinux_have(void);
+ void mac_selinux_retest(void);
+ 
+ int mac_selinux_init(void);
+diff --git a/src/journal/journald-native.c b/src/journal/journald-native.c
+index c9bf383..74b00ad 100644
+--- a/src/journal/journald-native.c
++++ b/src/journal/journald-native.c
+@@ -479,7 +479,7 @@ int server_open_native_socket(Server*s) {
+                 return log_error_errno(errno, "SO_PASSCRED failed: %m");
+ 
+ #ifdef HAVE_SELINUX
+-        if (mac_selinux_have()) {
++        if (mac_selinux_use()) {
+                 r = setsockopt(s->native_fd, SOL_SOCKET, SO_PASSSEC, &one, sizeof(one));
+                 if (r < 0)
+                         log_warning_errno(errno, "SO_PASSSEC failed: %m");
+diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
+index 6466e46..ed060e7 100644
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -918,7 +918,7 @@ static void dispatch_message_real(
+                 }
+ 
+ #ifdef HAVE_SELINUX
+-                if (mac_selinux_have()) {
++                if (mac_selinux_use()) {
+                         if (label) {
+                                 x = alloca(strlen("_SELINUX_CONTEXT=") + label_len + 1);
+ 
+diff --git a/src/journal/journald-stream.c b/src/journal/journald-stream.c
+index bc092f3..77551dc 100644
+--- a/src/journal/journald-stream.c
++++ b/src/journal/journald-stream.c
+@@ -494,7 +494,7 @@ static int stdout_stream_install(Server *s, int fd, StdoutStream **ret) {
+         if (r < 0)
+                 return log_error_errno(r, "Failed to determine peer credentials: %m");
+ 
+-        if (mac_selinux_have()) {
++        if (mac_selinux_use()) {
+                 r = getpeersec(fd, &stream->label);
+                 if (r < 0 && r != -EOPNOTSUPP)
+                         (void) log_warning_errno(r, "Failed to determine peer security context: %m");
+diff --git a/src/journal/journald-syslog.c b/src/journal/journald-syslog.c
+index 4743690..8e034c8 100644
+--- a/src/journal/journald-syslog.c
++++ b/src/journal/journald-syslog.c
+@@ -410,7 +410,7 @@ int server_open_syslog_socket(Server *s) {
+                 return log_error_errno(errno, "SO_PASSCRED failed: %m");
+ 
+ #ifdef HAVE_SELINUX
+-        if (mac_selinux_have()) {
++        if (mac_selinux_use()) {
+                 r = setsockopt(s->syslog_fd, SOL_SOCKET, SO_PASSSEC, &one, sizeof(one));
+                 if (r < 0)
+                         log_warning_errno(errno, "SO_PASSSEC failed: %m");
+diff --git a/src/libsystemd/sd-bus/bus-socket.c b/src/libsystemd/sd-bus/bus-socket.c
+index e6ed15e..8b25002 100644
+--- a/src/libsystemd/sd-bus/bus-socket.c
++++ b/src/libsystemd/sd-bus/bus-socket.c
+@@ -607,7 +607,7 @@ static void bus_get_peercred(sd_bus *b) {
+         b->ucred_valid = getpeercred(b->input_fd, &b->ucred) >= 0;
+ 
+         /* Get the SELinux context of the peer */
+-        if (mac_selinux_have()) {
++        if (mac_selinux_use()) {
+                 r = getpeersec(b->input_fd, &b->label);
+                 if (r < 0 && r != -EOPNOTSUPP)
+                         log_debug_errno(r, "Failed to determine peer security context: %m");
+diff --git a/src/shared/condition.c b/src/shared/condition.c
+index 0b77d2c..aec7ebb 100644
+--- a/src/shared/condition.c
++++ b/src/shared/condition.c
+@@ -235,7 +235,7 @@ static int condition_test_security(Condition *c) {
+         assert(c->type == CONDITION_SECURITY);
+ 
+         if (streq(c->parameter, "selinux"))
+-                return mac_selinux_have();
++                return mac_selinux_use();
+         if (streq(c->parameter, "smack"))
+                 return mac_smack_use();
+         if (streq(c->parameter, "apparmor"))
+diff --git a/src/test/test-condition.c b/src/test/test-condition.c
+index dd985f5..3bb7f92 100644
+--- a/src/test/test-condition.c
++++ b/src/test/test-condition.c
+@@ -243,7 +243,7 @@ static void test_condition_test_security(void) {
+ 
+         condition = condition_new(CONDITION_SECURITY, "selinux", false, true);
+         assert_se(condition);
+-        assert_se(condition_test(condition) != mac_selinux_have());
++        assert_se(condition_test(condition) != mac_selinux_use());
+         condition_free(condition);
+ 
+         condition = condition_new(CONDITION_SECURITY, "ima", false, false);
+diff --git a/src/test/test-selinux.c b/src/test/test-selinux.c
+index b676c25..190736a 100644
+--- a/src/test/test-selinux.c
++++ b/src/test/test-selinux.c
+@@ -35,16 +35,16 @@ static void test_testing(void) {
+         b = mac_selinux_use();
+         log_info("mac_selinux_use → %s", yes_no(b));
+ 
+-        b = mac_selinux_have();
+-        log_info("mac_selinux_have → %s", yes_no(b));
++        b = mac_selinux_use();
++        log_info("mac_selinux_use → %s", yes_no(b));
+ 
+         mac_selinux_retest();
+ 
+         b = mac_selinux_use();
+         log_info("mac_selinux_use → %s", yes_no(b));
+ 
+-        b = mac_selinux_have();
+-        log_info("mac_selinux_have → %s", yes_no(b));
++        b = mac_selinux_use();
++        log_info("mac_selinux_use → %s", yes_no(b));
+ }
+ 
+ static void test_loading(void) {

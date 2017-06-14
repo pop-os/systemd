@@ -11,8 +11,7 @@ Standards-Version: 3.9.8
 Vcs-Git: https://anonscm.debian.org/git/pkg-systemd/systemd.git
 Vcs-Browser: https://anonscm.debian.org/git/pkg-systemd/systemd.git
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
-Build-Depends: debhelper (>= 9.20160114),
-               dpkg-dev (>= 1.17.14),
+Build-Depends: debhelper (>= 10),
                pkg-config,
                xsltproc,
                docbook-xsl,
@@ -75,6 +74,7 @@ Depends: ${shlibs:Depends},
          util-linux (>= 2.27.1),
          mount (>= 2.26),
          adduser,
+         procps,
 Breaks: apparmor (<< 2.9.2-1),
         systemd-shim (<< 10-3~),
         ifupdown (<< 0.8.5~),
