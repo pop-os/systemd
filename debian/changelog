@@ -1,3 +1,39 @@
+systemd (233-8ubuntu1) artful; urgency=medium
+
+  Merge from experimental. Existing Ubuntu cherry-picks:
+  * TEST-12: cherry-pick upstream fix for compat with new netcat-openbsd.
+  * networkd: cherry-pick support for setting bridge port's priority.
+    This is a useful feature/bugfix to improve feature parity of networkd with
+    ifupdown. This matches netplan's expectations to be able to set bridge port's
+    priorities via networked. This featue is to be used by netplan/MAAS/OpenStack.
+  * Cherrypick upstream commit to enable system use kernel maximum limit for RLIMIT_NOFILE isntead of hard-coded (low) limit of 65536.
+  * debian/tests/root-unittests: disable execute and seccomp tests on arm
+    test-seccomp and test-execute fail on arm64 kernels. Marking both tests as
+    expected failures. An upstream bug report is filed to resolve these.
+  * Cherrypick upstream patch for vio predictable interface names.
+  * Cherrypick upstream patch for platform predictable interface names.
+
+  Ubuntu cherry-picks, now also applied in Debian:
+  * resolved: fix null pointer dereference crash
+
+  Remaining Ubuntu delta:
+  * ubuntu: udev.postinst preserve virtio interfaces names on upgrades, on s390x.
+    New udev generates stable interface names on s390x kvm instances, however, upon
+    upgrades existing ethX names should be preserved to prevent breaking networking
+    and software configurations.
+    This patch only affects Ubuntu systems.
+  * Skip starting systemd-remount-fs.service in containers
+    even when /etc/fstab is present.
+    This allows entering fully running state even when /etc/fstab
+    lists / to be mounted from a device which is not present in the
+    container.
+
+  New Ubuntu cherry-picks:
+  * loginctl: Chrerry-pick upstream fix to not ignore multiple session ids.
+    (LP: #1682154)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 19 Jun 2017 15:24:30 +0100
+
 systemd (233-8) experimental; urgency=medium
 
   * Bump debhelper compatibility level to 10
