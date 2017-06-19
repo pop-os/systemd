@@ -7,11 +7,9 @@ include /usr/share/dpkg/default.mk
 
 ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
-    BREAKS_USB_MODESWITCH =
     SUPPORT_URL = http://www.ubuntu.com/support
 else
     DEFAULT_NTP_SERVERS = 0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
-    BREAKS_USB_MODESWITCH = usb-modeswitch (<< 2.3.0+repack0-1~)
     SUPPORT_URL = https://www.debian.org/support
 endif
 
@@ -344,7 +342,7 @@ override_dh_strip:
 	dh_strip --dbgsym-migration='systemd-dbg (<< 229-6~)'
 
 override_dh_gencontrol:
-	dh_gencontrol -- -VBreaks:usb-modeswitch="$(BREAKS_USB_MODESWITCH)" -VBreaks:rcs-compat="$(BREAKS_RCS_COMPAT)"
+	dh_gencontrol -- -VBreaks:rcs-compat="$(BREAKS_RCS_COMPAT)"
 
 override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
