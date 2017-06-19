@@ -1,3 +1,15 @@
+systemd (233-9) unstable; urgency=medium
+
+  * hwdb: Use path_join() to generate the hwdb_bin path.
+    This ensures /lib/udev/hwdb.bin gets the correct SELinux context. Having
+    double slashes in the path makes selabel_lookup_raw() return the wrong
+    context. (Closes: #851933)
+  * Drop no longer needed Breaks against usb-modeswitch
+  * Drop Breaks for packages shipping rcS init scripts.
+    This transition was completed in stretch.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 19 Jun 2017 15:10:14 +0200
+
 systemd (233-8) experimental; urgency=medium
 
   * Bump debhelper compatibility level to 10
