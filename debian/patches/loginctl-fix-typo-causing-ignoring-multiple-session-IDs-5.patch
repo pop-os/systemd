@@ -1,0 +1,23 @@
+From: slodki <slodki@users.noreply.github.com>
+Date: Thu, 13 Apr 2017 12:34:59 +0200
+Subject: loginctl: fix typo causing ignoring multiple session IDs (#5732)
+
+Fixes #5733
+(cherry picked from commit b0d08b056e73007695f2f001213da73d19802e23)
+---
+ src/login/loginctl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/login/loginctl.c b/src/login/loginctl.c
+index 7dea5c0..68cac4c 100644
+--- a/src/login/loginctl.c
++++ b/src/login/loginctl.c
+@@ -929,7 +929,7 @@ static int show_session(int argc, char *argv[], void *userdata) {
+                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+                 _cleanup_free_ char *path = NULL;
+ 
+-                r = get_session_path(bus, argv[1], &error, &path);
++                r = get_session_path(bus, argv[i], &error, &path);
+                 if (r < 0) {
+                         log_error("Failed to get session path: %s", bus_error_message(&error, r));
+                         return r;
