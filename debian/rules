@@ -21,7 +21,6 @@ ifeq ($(TEST_UPSTREAM),)
 else
     DH_INSTALL_MISSING = --list-missing
     GENSYMBOLS_LEVEL = 1
-    BREAKS_RCS_COMPAT =
 endif
 
 ifneq (, $(filter noudeb, $(DEB_BUILD_OPTIONS)))
