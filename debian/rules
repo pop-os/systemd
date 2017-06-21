@@ -9,10 +9,12 @@ ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
     BREAKS_USB_MODESWITCH =
     SUPPORT_URL = http://www.ubuntu.com/support
+    CONFFLAGS_DISTRO = --with-dns-servers=''
 else
     DEFAULT_NTP_SERVERS = 0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
     BREAKS_USB_MODESWITCH = usb-modeswitch (<< 2.3.0+repack0-1~)
     SUPPORT_URL = https://www.debian.org/support
+    CONFFLAGS_DISTRO =
 endif
 
 # Drop these after stretch
@@ -206,10 +208,10 @@ CONFFLAGS_udeb = \
 
 override_dh_auto_configure:
 	dh_auto_configure --builddirectory=build-deb \
-		-- $(CONFFLAGS) $(CONFFLAGS_deb)
+		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_deb)
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_auto_configure --builddirectory=build-udeb \
-		-- $(CONFFLAGS) $(CONFFLAGS_udeb)
+		-- $(CONFFLAGS) $(CONFFLAGS_DISTRO) $(CONFFLAGS_udeb)
 endif
 
 override_dh_auto_build:
