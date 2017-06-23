@@ -239,9 +239,6 @@ endif
 		(cd debian/$$pkg; find -mindepth 1 -type d) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
 
-	#  FIXME: upstream build system should do that
-	install -m 755 build-deb/test-udev debian/systemd-tests/usr/lib/systemd/tests/
-
 	# Ubuntu specific files
 ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=644 debian/extra/udev.py debian/udev/usr/share/apport/package-hooks/udev.py
