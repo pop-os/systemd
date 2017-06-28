@@ -1,3 +1,13 @@
+systemd (233-8ubuntu2) artful; urgency=medium
+
+  * Disable fallback DNS servers.
+    This causes resolved to call-home to google, attempt to access network when
+    none is available, and spams logs. (LP: #1449001, #1698734)
+  * SECURITY UPDATE: Out-of-bounds write in systemd-resolved.
+    CVE-2017-9445 (LP: #1695546)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 28 Jun 2017 13:27:28 +0100
+
 systemd (233-8ubuntu1) artful; urgency=medium
 
   Merge from experimental. Existing Ubuntu cherry-picks:
