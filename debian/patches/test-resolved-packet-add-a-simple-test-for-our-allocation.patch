@@ -1,0 +1,107 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Wed, 28 Jun 2017 13:14:30 +0100
+Subject: test-resolved-packet: add a simple test for our allocation functions
+
+(cherry picked from commit 751ca3f1de316ca79b60001334dbdf54077e1d01)
+---
+ .gitignore                         |  1 +
+ Makefile.am                        | 14 ++++++++++++
+ src/resolve/test-resolved-packet.c | 45 ++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 60 insertions(+)
+ create mode 100644 src/resolve/test-resolved-packet.c
+
+diff --git a/.gitignore b/.gitignore
+index 01cb6e7..25b976a 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -269,6 +269,7 @@
+ /test-replace-var
+ /test-resolve
+ /test-resolve-tables
++/test-resolved-packet
+ /test-ring
+ /test-rlimit-util
+ /test-sched-prio
+diff --git a/Makefile.am b/Makefile.am
+index 65de9f1..c9b04ec 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -5665,6 +5665,7 @@ dist_zshcompletion_data += \
+ tests += \
+ 	test-dns-packet \
+ 	test-resolve-tables \
++	test-resolved-packet \
+ 	test-dnssec
+ 
+ manual_tests += \
+@@ -5686,6 +5687,19 @@ test_resolve_tables_LDADD = \
+ 	$(GCRYPT_LIBS) \
+ 	-lm
+ 
++test_resolved_packet_SOURCES = \
++	src/resolve/test-resolved-packet.c \
++	$(basic_dns_sources)
++
++test_resolved_packet_CFLAGS = \
++	$(AM_CFLAGS) \
++	$(GCRYPT_CFLAGS)
++
++test_resolved_packet_LDADD = \
++	libsystemd-shared.la \
++	$(GCRYPT_LIBS) \
++	-lm
++
+ test_dns_packet_SOURCES = \
+ 	src/resolve/test-dns-packet.c \
+ 	$(basic_dns_sources)
+diff --git a/src/resolve/test-resolved-packet.c b/src/resolve/test-resolved-packet.c
+new file mode 100644
+index 0000000..8b7da14
+--- /dev/null
++++ b/src/resolve/test-resolved-packet.c
+@@ -0,0 +1,45 @@
++/***
++  This file is part of systemd
++
++  Copyright 2017 Zbigniew Jędrzejewski-Szmek
++
++  systemd is free software; you can redistribute it and/or modify it
++  under the terms of the GNU Lesser General Public License as published by
++  the Free Software Foundation; either version 2.1 of the License, or
++  (at your option) any later version.
++
++  systemd is distributed in the hope that it will be useful, but
++  WITHOUT ANY WARRANTY; without even the implied warranty of
++  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++  Lesser General Public License for more details.
++
++  You should have received a copy of the GNU Lesser General Public License
++  along with systemd; If not, see <http://www.gnu.org/licenses/>.
++***/
++
++#include "log.h"
++#include "resolved-dns-packet.h"
++
++static void test_dns_packet_new(void) {
++        size_t i;
++
++        for (i = 0; i < DNS_PACKET_SIZE_MAX + 2; i++) {
++                _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
++
++                assert_se(dns_packet_new(&p, DNS_PROTOCOL_DNS, i) == 0);
++
++                log_debug("dns_packet_new: %zu → %zu", i, p->allocated);
++                assert_se(p->allocated >= MIN(DNS_PACKET_SIZE_MAX, i));
++        }
++}
++
++int main(int argc, char **argv) {
++
++        log_set_max_level(LOG_DEBUG);
++        log_parse_environment();
++        log_open();
++
++        test_dns_packet_new();
++
++        return 0;
++}

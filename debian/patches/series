@@ -23,6 +23,10 @@ main-improve-RLIMIT_NOFILE-handling-5795.patch
 udev-net_id-support-predictable-ifnames-on-vio-buses-5675.patch
 udev-net_id-add-support-for-platform-bus-ACPI-mostly-arm6.patch
 loginctl-fix-typo-causing-ignoring-multiple-session-IDs-5.patch
+test-resolved-packet-add-a-simple-test-for-our-allocation.patch
+resolved-simplify-alloc-size-calculation.patch
+resolved-do-not-allocate-packets-with-minimum-size.patch
+resolved-define-various-packet-sizes-as-unsigned.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

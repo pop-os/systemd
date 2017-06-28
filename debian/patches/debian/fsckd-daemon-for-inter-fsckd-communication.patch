@@ -109,7 +109,7 @@ index d562641..18618ff 100644
  	man/systemd-getty-generator.xml \
  	man/systemd-gpt-auto-generator.xml \
 diff --git a/Makefile.am b/Makefile.am
-index 65de9f1..379e82b 100644
+index c9b04ec..9de46cc 100644
 --- a/Makefile.am
 +++ b/Makefile.am
 @@ -415,6 +415,7 @@ rootlibexec_PROGRAMS = \
