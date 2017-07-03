@@ -1,0 +1,51 @@
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Wed, 26 Apr 2017 06:18:10 +0200
+Subject: main: improve RLIMIT_NOFILE handling (#5795)
+
+This has systemd look at /proc/sys/fs/nr_open to find the current maximum of
+open files compiled into the kernel and tries to set the RLIMIT_NOFILE max to
+it. This has the advantage the value chosen as limit is less arbitrary and also
+improves the behavior of systemd in containers that have an rlimit set: When
+systemd currently starts in a container that has RLIMIT_NOFILE set to e.g.
+100000 systemd will lower it to 65536. With this patch systemd will try to set
+the nofile limit to the allowed kernel maximum. If this fails, it will compute
+the minimum of the current set value (the limit that is set on the container)
+and the maximum value as soft limit and the currently set maximum value as the
+maximum value. This way it retains the limit set on the container.
+
+(cherry picked from commit 6385cb31ef443be3e0d6da5ea62a267a49174688)
+---
+ src/core/main.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/main.c b/src/core/main.c
+index bcf9ea5..e6ae0be 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -1162,6 +1162,8 @@ static int prepare_reexecute(Manager *m, FILE **_f, FDSet **_fds, bool switching
+ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
+         struct rlimit nl;
+         int r;
++        int min_max;
++        _cleanup_free_ char *nr_open = NULL;
+ 
+         assert(saved_rlimit);
+ 
+@@ -1182,8 +1184,16 @@ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
+                 arg_default_rlimit[RLIMIT_NOFILE] = rl;
+         }
+ 
++        /* Get current RLIMIT_NOFILE maximum compiled into the kernel. */
++        r = read_one_line_file("/proc/sys/fs/nr_open", &nr_open);
++        if (r == 0)
++                r = safe_atoi(nr_open, &min_max);
++        /* If we fail, fallback to the hard-coded kernel limit of 1024 * 1024. */
++        if (r < 0)
++                min_max = 1024 * 1024;
++
+         /* Bump up the resource limit for ourselves substantially */
+-        nl.rlim_cur = nl.rlim_max = 64*1024;
++        nl.rlim_cur = nl.rlim_max = min_max;
+         r = setrlimit_closest(RLIMIT_NOFILE, &nl);
+         if (r < 0)
+                 return log_warning_errno(r, "Setting RLIMIT_NOFILE failed, ignoring: %m");

@@ -20,6 +20,7 @@ resolved-simplify-alloc-size-calculation.patch
 resolved-do-not-allocate-packets-with-minimum-size.patch
 resolved-define-various-packet-sizes-as-unsigned.patch
 systemctl-be-truly-quiet-in-systemctl-q-is-enabled.patch
+main-improve-RLIMIT_NOFILE-handling-5795.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
