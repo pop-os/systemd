@@ -1,3 +1,27 @@
+systemd (233-10) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Adjust var-lib-machines.mount target.
+    Upstream PR #6095 changed the location to
+    {remote-fs,machines}.target.wants, so just install all available ones.
+
+  [ Dimitri John Ledkov ]
+  * Fix out-of-bounds write in systemd-resolved.
+    CVE-2017-9445 (Closes: #866147, LP: #1695546)
+
+  [ Michael Biebl ]
+  * Be truly quiet in systemctl -q is-enabled (Closes: #866579)
+  * Improve RLIMIT_NOFILE handling.
+    Use /proc/sys/fs/nr_open to find the current limit of open files
+    compiled into the kernel instead of using a hard-coded value of 65536
+    for RLIMIT_NOFILE. (Closes: #865449)
+
+  [ Nicolas Braud-Santoni ]
+  * debian/extra/rules: Use updated U2F ruleset.
+    This ruleset comes from Yubico's libu2f-host. (Closes: #824532)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 03 Jul 2017 18:51:58 +0200
+
 systemd (233-9) unstable; urgency=medium
 
   * hwdb: Use path_join() to generate the hwdb_bin path.
