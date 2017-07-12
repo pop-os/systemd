@@ -44,14 +44,17 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
 ---
  Makefile-man.am                    |  12 +
  Makefile.am                        |  12 +
+ man/rules/meson.build              |   1 +
  man/systemd-fsckd.service.xml      | 162 +++++++++
+ meson.build                        |   8 +
  po/POTFILES.in                     |   1 +
  src/fsckd/fsckd.c                  | 690 +++++++++++++++++++++++++++++++++++++
+ units/meson.build                  |   2 +
  units/systemd-fsck-root.service.in |   2 +
  units/systemd-fsck@.service.in     |   3 +-
  units/systemd-fsckd.service.in     |  17 +
  units/systemd-fsckd.socket         |  15 +
- 9 files changed, 913 insertions(+), 1 deletion(-)
+ 12 files changed, 924 insertions(+), 1 deletion(-)
  create mode 100644 man/systemd-fsckd.service.xml
  create mode 100644 src/fsckd/fsckd.c
  create mode 100644 units/systemd-fsckd.service.in
@@ -159,6 +162,18 @@ index c16e622..b374f5a 100644
  systemd_ac_power_SOURCES = \
  	src/ac-power/ac-power.c
  
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index 9f7201a..1c79bc3 100644
+--- a/man/rules/meson.build
++++ b/man/rules/meson.build
+@@ -528,6 +528,7 @@ manpages = [
+   '8',
+   ['systemd-fsck', 'systemd-fsck-root.service'],
+   ''],
++ ['systemd-fsckd.service', '8', ['systemd-fsckd.socket', 'systemd-fsckd'], ''],
+  ['systemd-fstab-generator', '8', [], ''],
+  ['systemd-getty-generator', '8', [], ''],
+  ['systemd-gpt-auto-generator', '8', [], ''],
 diff --git a/man/systemd-fsckd.service.xml b/man/systemd-fsckd.service.xml
 new file mode 100644
 index 0000000..b7ad58d
@@ -327,6 +342,25 @@ index 0000000..b7ad58d
 +  </refsect1>
 +
 +</refentry>
+diff --git a/meson.build b/meson.build
+index 20b27c8..eabf215 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1852,6 +1852,14 @@ executable('systemd-fsck',
+            install : true,
+            install_dir : rootlibexecdir)
+ 
++executable('systemd-fsckd',
++           'src/fsckd/fsckd.c',
++           include_directories : includes,
++           link_with : [libshared],
++           install_rpath : rootlibexecdir,
++           install : true,
++           install_dir : rootlibexecdir)
++
+ executable('systemd-sleep',
+            'src/sleep/sleep.c',
+            include_directories : includes,
 diff --git a/po/POTFILES.in b/po/POTFILES.in
 index f33c53f..4b8ef2e 100644
 --- a/po/POTFILES.in
@@ -1032,6 +1066,26 @@ index 0000000..d48e53a
 +finish:
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
+diff --git a/units/meson.build b/units/meson.build
+index e94add6..05cff0e 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -78,6 +78,7 @@ units = [
+          'multi-user.target.wants/'],
+         ['systemd-coredump.socket',             'ENABLE_COREDUMP',
+          'sockets.target.wants/'],
++        ['systemd-fsckd.socket',                ''],
+         ['systemd-initctl.socket',              '',
+          'sockets.target.wants/'],
+         ['systemd-journal-gatewayd.socket',     'ENABLE_REMOTE HAVE_MICROHTTPD'],
+@@ -130,6 +131,7 @@ in_units = [
+          'sysinit.target.wants/'],
+         ['systemd-fsck-root.service',            ''],
+         ['systemd-fsck@.service',                ''],
++        ['systemd-fsckd.service',                ''],
+         ['systemd-halt.service',                 ''],
+         ['systemd-hibernate-resume@.service',    'ENABLE_HIBERNATE'],
+         ['systemd-hibernate.service',            'ENABLE_HIBERNATE'],
 diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
 index 3617abf..f493445 100644
 --- a/units/systemd-fsck-root.service.in
