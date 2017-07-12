@@ -17,6 +17,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_231@LIBSYSTEMD_231 231
  LIBSYSTEMD_232@LIBSYSTEMD_232 232
  LIBSYSTEMD_233@LIBSYSTEMD_233 233
+ LIBSYSTEMD_234@LIBSYSTEMD_234 234
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -141,6 +142,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_append_string_memfd@LIBSYSTEMD_221 221
  sd_bus_message_append_string_space@LIBSYSTEMD_221 221
  sd_bus_message_append_strv@LIBSYSTEMD_221 221
+ sd_bus_message_appendv@LIBSYSTEMD_234 234
  sd_bus_message_at_end@LIBSYSTEMD_221 221
  sd_bus_message_close_container@LIBSYSTEMD_221 221
  sd_bus_message_copy@LIBSYSTEMD_221 221
