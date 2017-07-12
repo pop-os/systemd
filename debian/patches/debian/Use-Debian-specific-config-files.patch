@@ -11,15 +11,15 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c    |  21 ++++-
  src/core/locale-setup.c  |  22 +++++
- src/locale/keymap-util.c | 203 +++++++++++++++++++++++++----------------------
+ src/locale/keymap-util.c | 204 +++++++++++++++++++++++++----------------------
  src/timedate/timedated.c |  10 +++
- 4 files changed, 158 insertions(+), 98 deletions(-)
+ 4 files changed, 158 insertions(+), 99 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index a0db97c..b680978 100644
+index 68ba86f..384b39a 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1296,8 +1296,25 @@ int get_timezone(char **tz) {
+@@ -1320,8 +1320,25 @@ int get_timezone(char **tz) {
          int r;
  
          r = readlink_malloc("/etc/localtime", &t);
@@ -81,7 +81,7 @@ index fdd847e..31916a3 100644
          for (i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index da72bee..f1163c0 100644
+index 105d9b0..f1163c0 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
 @@ -121,6 +121,24 @@ static int locale_read_data(Context *c) {
@@ -216,7 +216,7 @@ index da72bee..f1163c0 100644
          if (r < 0)
                  return r;
  
-@@ -338,65 +315,99 @@ int vconsole_write_data(Context *c) {
+@@ -338,66 +315,99 @@ int vconsole_write_data(Context *c) {
  }
  
  int x11_write_data(Context *c) {
@@ -277,8 +277,9 @@ index da72bee..f1163c0 100644
 +                if (!u)
 +                        return -ENOMEM;
  
--        fputs("# Read and parsed by systemd-localed. It's probably wise not to edit this file\n"
--              "# manually too freely.\n"
+-        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
+-              "# probably wise not to edit this file manually. Use localectl(1) to\n"
+-              "# instruct systemd-localed to update it.\n"
 -              "Section \"InputClass\"\n"
 -              "        Identifier \"system-keyboard\"\n"
 -              "        MatchIsKeyboard \"on\"\n", f);
