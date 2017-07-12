@@ -162,7 +162,7 @@ static int journal_file_set_offline_thread_join(JournalFile *f) {
 
         f->offline_state = OFFLINE_JOINED;
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
+        if (mmap_cache_got_sigbus(f->mmap, f->cache_fd))
                 return -EIO;
 
         return 0;
@@ -300,7 +300,7 @@ static int journal_file_set_online(JournalFile *f) {
                 }
         }
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
+        if (mmap_cache_got_sigbus(f->mmap, f->cache_fd))
                 return -EIO;
 
         switch (f->header->state) {
@@ -356,8 +356,8 @@ JournalFile* journal_file_close(JournalFile *f) {
 
         journal_file_set_offline(f, true);
 
-        if (f->mmap && f->fd >= 0)
-                mmap_cache_close_fd(f->mmap, f->fd);
+        if (f->mmap && f->cache_fd)
+                mmap_cache_free_fd(f->mmap, f->cache_fd);
 
         if (f->fd >= 0 && f->defrag_on_close) {
 
@@ -546,6 +546,8 @@ static bool warn_wrong_flags(const JournalFile *f, bool compatible) {
 }
 
 static int journal_file_verify_header(JournalFile *f) {
+        uint64_t arena_size, header_size;
+
         assert(f);
         assert(f->header);
 
@@ -564,17 +566,21 @@ static int journal_file_verify_header(JournalFile *f) {
         if (f->header->state >= _STATE_MAX)
                 return -EBADMSG;
 
+        header_size = le64toh(f->header->header_size);
+
         /* The first addition was n_data, so check that we are at least this large */
-        if (le64toh(f->header->header_size) < HEADER_SIZE_MIN)
+        if (header_size < HEADER_SIZE_MIN)
                 return -EBADMSG;
 
         if (JOURNAL_HEADER_SEALED(f->header) && !JOURNAL_HEADER_CONTAINS(f->header, n_entry_arrays))
                 return -EBADMSG;
 
-        if ((le64toh(f->header->header_size) + le64toh(f->header->arena_size)) > (uint64_t) f->last_stat.st_size)
+        arena_size = le64toh(f->header->arena_size);
+
+        if (UINT64_MAX - header_size < arena_size || header_size + arena_size > (uint64_t) f->last_stat.st_size)
                 return -ENODATA;
 
-        if (le64toh(f->header->tail_object_offset) > (le64toh(f->header->header_size) + le64toh(f->header->arena_size)))
+        if (le64toh(f->header->tail_object_offset) > header_size + arena_size)
                 return -ENODATA;
 
         if (!VALID64(le64toh(f->header->data_hash_table_offset)) ||
@@ -606,6 +612,9 @@ static int journal_file_verify_header(JournalFile *f) {
                         log_debug("Journal file %s has unknown state %i.", f->path, state);
                         return -EBUSY;
                 }
+
+                if (f->header->field_hash_table_size == 0 || f->header->data_hash_table_size == 0)
+                        return -EBADMSG;
 
                 /* Don't permit appending to files from the future. Because otherwise the realtime timestamps wouldn't
                  * be strictly ordered in the entries in the file anymore, and we can't have that since it breaks
@@ -651,7 +660,7 @@ static int journal_file_allocate(JournalFile *f, uint64_t offset, uint64_t size)
          * for sure, since we always call posix_fallocate()
          * ourselves */
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
+        if (mmap_cache_got_sigbus(f->mmap, f->cache_fd))
                 return -EIO;
 
         old_size =
@@ -740,7 +749,7 @@ static int journal_file_move_to(JournalFile *f, ObjectType type, bool keep_alway
                         return -EADDRNOTAVAIL;
         }
 
-        return mmap_cache_get(f->mmap, f->fd, f->prot, type_to_context(type), keep_always, offset, size, &f->last_stat, ret);
+        return mmap_cache_get(f->mmap, f->cache_fd, f->prot, type_to_context(type), keep_always, offset, size, &f->last_stat, ret);
 }
 
 static uint64_t minimum_header_size(Object *o) {
@@ -1848,7 +1857,7 @@ int journal_file_append_entry(JournalFile *f, const dual_timestamp *ts, const st
          * it is very likely just an effect of a nullified replacement
          * mapping page */
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd))
+        if (mmap_cache_got_sigbus(f->mmap, f->cache_fd))
                 r = -EIO;
 
         if (f->post_change_timer)
@@ -3135,6 +3144,12 @@ int journal_file_open(
                 f->close_fd = true;
         }
 
+        f->cache_fd = mmap_cache_add_fd(f->mmap, f->fd);
+        if (!f->cache_fd) {
+                r = -ENOMEM;
+                goto fail;
+        }
+
         r = journal_file_fstat(f);
         if (r < 0)
                 goto fail;
@@ -3181,7 +3196,7 @@ int journal_file_open(
                 goto fail;
         }
 
-        r = mmap_cache_get(f->mmap, f->fd, f->prot, CONTEXT_HEADER, true, 0, PAGE_ALIGN(sizeof(Header)), &f->last_stat, &h);
+        r = mmap_cache_get(f->mmap, f->cache_fd, f->prot, CONTEXT_HEADER, true, 0, PAGE_ALIGN(sizeof(Header)), &f->last_stat, &h);
         if (r < 0)
                 goto fail;
 
@@ -3238,7 +3253,7 @@ int journal_file_open(
 #endif
         }
 
-        if (mmap_cache_got_sigbus(f->mmap, f->fd)) {
+        if (mmap_cache_got_sigbus(f->mmap, f->cache_fd)) {
                 r = -EIO;
                 goto fail;
         }
@@ -3260,7 +3275,7 @@ int journal_file_open(
         return 0;
 
 fail:
-        if (f->fd >= 0 && mmap_cache_got_sigbus(f->mmap, f->fd))
+        if (f->cache_fd && mmap_cache_got_sigbus(f->mmap, f->cache_fd))
                 r = -EIO;
 
         (void) journal_file_close(f);
@@ -3473,7 +3488,7 @@ int journal_file_copy_entry(JournalFile *from, JournalFile *to, Object *o, uint6
 
         r = journal_file_append_entry_internal(to, &ts, xor_hash, items, n, seqnum, ret, offset);
 
-        if (mmap_cache_got_sigbus(to->mmap, to->fd))
+        if (mmap_cache_got_sigbus(to->mmap, to->cache_fd))
                 return -EIO;
 
         return r;

@@ -724,10 +724,9 @@ static int path_set_xattrs(Item *i, const char *path) {
 
                 n = strlen(*value);
                 log_debug("Setting extended attribute '%s=%s' on %s.", *name, *value, path);
-                if (lsetxattr(path, *name, *value, n, 0) < 0) {
-                        log_error("Setting extended attribute %s=%s on %s failed: %m", *name, *value, path);
-                        return -errno;
-                }
+                if (lsetxattr(path, *name, *value, n, 0) < 0)
+                        return log_error_errno(errno, "Setting extended attribute %s=%s on %s failed: %m",
+                                               *name, *value, path);
         }
         return 0;
 }
@@ -973,7 +972,7 @@ static int path_set_attribute(Item *item, const char *path) {
 
         r = chattr_fd(fd, f, item->attribute_mask);
         if (r < 0)
-                log_full_errno(r == -ENOTTY ? LOG_DEBUG : LOG_WARNING,
+                log_full_errno(r == -ENOTTY || r == -EOPNOTSUPP ? LOG_DEBUG : LOG_WARNING,
                                r,
                                "Cannot set file attribute for '%s', value=0x%08x, mask=0x%08x: %m",
                                path, item->attribute_value, item->attribute_mask);
@@ -1093,19 +1092,14 @@ static int item_do_children(Item *i, const char *path, action_t action) {
 
 static int glob_item(Item *i, action_t action, bool recursive) {
         _cleanup_globfree_ glob_t g = {
-                .gl_closedir = (void (*)(void *)) closedir,
-                .gl_readdir = (struct dirent *(*)(void *)) readdir,
                 .gl_opendir = (void *(*)(const char *)) opendir_nomod,
-                .gl_lstat = lstat,
-                .gl_stat = stat,
         };
         int r = 0, k;
         char **fn;
 
-        errno = 0;
-        k = glob(i->path, GLOB_NOSORT|GLOB_BRACE|GLOB_ALTDIRFUNC, NULL, &g);
-        if (k != 0 && k != GLOB_NOMATCH)
-                return log_error_errno(errno ?: EIO, "glob(%s) failed: %m", i->path);
+        k = safe_glob(i->path, GLOB_NOSORT|GLOB_BRACE, &g);
+        if (k < 0 && k != -ENOENT)
+                return log_error_errno(k, "glob(%s) failed: %m", i->path);
 
         STRV_FOREACH(fn, g.gl_pathv) {
                 k = action(i, *fn);

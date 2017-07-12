@@ -17,9 +17,11 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
  ***/
 
-#ifdef HAVE_LIBIDN
-#include <idna.h>
-#include <stringprep.h>
+#if defined(HAVE_LIBIDN2)
+#  include <idn2.h>
+#elif defined(HAVE_LIBIDN)
+#  include <idna.h>
+#  include <stringprep.h>
 #endif
 
 #include <endian.h>
@@ -299,8 +301,8 @@ int dns_label_escape_new(const char *p, size_t l, char **ret) {
         return r;
 }
 
-int dns_label_apply_idna(const char *encoded, size_t encoded_size, char *decoded, size_t decoded_max) {
 #ifdef HAVE_LIBIDN
+int dns_label_apply_idna(const char *encoded, size_t encoded_size, char *decoded, size_t decoded_max) {
         _cleanup_free_ uint32_t *input = NULL;
         size_t input_size, l;
         const char *p;
@@ -348,13 +350,9 @@ int dns_label_apply_idna(const char *encoded, size_t encoded_size, char *decoded
                 decoded[l] = 0;
 
         return (int) l;
-#else
-        return 0;
-#endif
 }
 
 int dns_label_undo_idna(const char *encoded, size_t encoded_size, char *decoded, size_t decoded_max) {
-#ifdef HAVE_LIBIDN
         size_t input_size, output_size;
         _cleanup_free_ uint32_t *input = NULL;
         _cleanup_free_ char *result = NULL;
@@ -399,10 +397,8 @@ int dns_label_undo_idna(const char *encoded, size_t encoded_size, char *decoded,
                 decoded[w] = 0;
 
         return w;
-#else
-        return 0;
-#endif
 }
+#endif
 
 int dns_name_concat(const char *a, const char *b, char **_ret) {
         _cleanup_free_ char *ret = NULL;
@@ -1274,6 +1270,26 @@ int dns_name_common_suffix(const char *a, const char *b, const char **ret) {
 }
 
 int dns_name_apply_idna(const char *name, char **ret) {
+        /* Return negative on error, 0 if not implemented, positive on success. */
+
+#if defined(HAVE_LIBIDN2)
+        int r;
+
+        assert(name);
+        assert(ret);
+
+        r = idn2_lookup_u8((uint8_t*) name, (uint8_t**) ret,
+                           IDN2_NFC_INPUT | IDN2_NONTRANSITIONAL);
+        if (r == IDN2_OK)
+                return 1; /* *ret has been written */
+        log_debug("idn2_lookup_u8(\"%s\") failed: %s", name, idn2_strerror(r));
+        if (r == IDN2_2HYPHEN)
+                /* The name has two hypens — forbidden by IDNA2008 in some cases */
+                return 0;
+        if (IN_SET(r, IDN2_TOO_BIG_DOMAIN, IDN2_TOO_BIG_LABEL))
+                return -ENOSPC;
+        return -EINVAL;
+#elif defined(HAVE_LIBIDN)
         _cleanup_free_ char *buf = NULL;
         size_t n = 0, allocated = 0;
         bool first = true;
@@ -1309,7 +1325,7 @@ int dns_name_apply_idna(const char *name, char **ret) {
                 else
                         buf[n++] = '.';
 
-                n +=r;
+                n += r;
         }
 
         if (n > DNS_HOSTNAME_MAX)
@@ -1322,7 +1338,10 @@ int dns_name_apply_idna(const char *name, char **ret) {
         *ret = buf;
         buf = NULL;
 
-        return (int) n;
+        return 1;
+#else
+        return 0;
+#endif
 }
 
 int dns_name_is_valid_or_address(const char *name) {

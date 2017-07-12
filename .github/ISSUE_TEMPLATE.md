@@ -1,15 +1,18 @@
 ### Submission type
 
-  - [ ] Bug report
-  - [ ] Request for enhancement (RFE)
+<!-- Delete the inappropriate option below: -->
 
-*NOTE: Do not submit anything other than bug reports or RFEs via the issue tracker!*
+ - Bug report
+ - Request for enhancement (RFE)
+
+<!-- **NOTE:** Do not submit anything other than bug reports or RFEs via the issue tracker! -->
 
 ### systemd version the issue has been seen with
 
 > …
 
-*NOTE: Do not submit bug reports about anything but the two most recently released systemd versions upstream!*
+<!-- **NOTE:** Do not submit bug reports about anything but the two most recently released systemd versions upstream! -->
+<!-- For older version please use distribution trackers (see https://github.com/systemd/systemd/blob/master/.github/CONTRIBUTING.md#filing-issues). -->
 
 ### Used distribution
 

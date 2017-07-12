@@ -8,7 +8,7 @@
 [Unit]
 Description=Time & Date Service
 Documentation=man:systemd-timedated.service(8) man:localtime(5)
-Documentation=http://www.freedesktop.org/wiki/Software/systemd/timedated
+Documentation=https://www.freedesktop.org/wiki/Software/systemd/timedated
 
 [Service]
 ExecStart=@rootlibexecdir@/systemd-timedated
@@ -16,11 +16,15 @@ BusName=org.freedesktop.timedate1
 WatchdogSec=3min
 CapabilityBoundingSet=CAP_SYS_TIME
 PrivateTmp=yes
-ProtectSystem=yes
+ProtectSystem=strict
 ProtectHome=yes
 ProtectControlGroups=yes
 ProtectKernelTunables=yes
+ProtectKernelModules=yes
 MemoryDenyWriteExecute=yes
 RestrictRealtime=yes
+RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX
-SystemCallFilter=~@cpu-emulation @debug @keyring @module @mount @obsolete @raw-io
+SystemCallFilter=~@cpu-emulation @debug @keyring @module @mount @obsolete @raw-io @reboot @swap
+SystemCallArchitectures=native
+ReadWritePaths=/etc

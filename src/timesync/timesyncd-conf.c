@@ -34,6 +34,9 @@ int manager_parse_server_string(Manager *m, ServerType type, const char *string)
 
         first = type == SERVER_FALLBACK ? m->fallback_servers : m->system_servers;
 
+        if (type == SERVER_FALLBACK)
+                 m->have_fallbacks = true;
+
         for (;;) {
                 _cleanup_free_ char *word = NULL;
                 bool found = false;
@@ -61,6 +64,13 @@ int manager_parse_server_string(Manager *m, ServerType type, const char *string)
         }
 
         return 0;
+}
+
+int manager_parse_fallback_string(Manager *m, const char *string) {
+        if (m->have_fallbacks)
+                return 0;
+
+        return manager_parse_server_string(m, SERVER_FALLBACK, string);
 }
 
 int config_parse_servers(
@@ -99,8 +109,8 @@ int manager_parse_config_file(Manager *m) {
         assert(m);
 
         return config_parse_many_nulstr(PKGSYSCONFDIR "/timesyncd.conf",
-                                 CONF_PATHS_NULSTR("systemd/timesyncd.conf.d"),
-                                 "Time\0",
-                                 config_item_perf_lookup, timesyncd_gperf_lookup,
-                                 false, m);
+                                        CONF_PATHS_NULSTR("systemd/timesyncd.conf.d"),
+                                        "Time\0",
+                                        config_item_perf_lookup, timesyncd_gperf_lookup,
+                                        false, m);
 }

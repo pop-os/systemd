@@ -56,59 +56,73 @@
  */
 
 _public_ int sd_pid_get_session(pid_t pid, char **session) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(session, -EINVAL);
 
-        return cg_pid_get_session(pid, session);
+        r = cg_pid_get_session(pid, session);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_unit(pid_t pid, char **unit) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(unit, -EINVAL);
 
-        return cg_pid_get_unit(pid, unit);
+        r = cg_pid_get_unit(pid, unit);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_user_unit(pid_t pid, char **unit) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(unit, -EINVAL);
 
-        return cg_pid_get_user_unit(pid, unit);
+        r = cg_pid_get_user_unit(pid, unit);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_machine_name(pid_t pid, char **name) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(name, -EINVAL);
 
-        return cg_pid_get_machine_name(pid, name);
+        r = cg_pid_get_machine_name(pid, name);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_slice(pid_t pid, char **slice) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(slice, -EINVAL);
 
-        return cg_pid_get_slice(pid, slice);
+        r = cg_pid_get_slice(pid, slice);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_user_slice(pid_t pid, char **slice) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(slice, -EINVAL);
 
-        return cg_pid_get_user_slice(pid, slice);
+        r = cg_pid_get_user_slice(pid, slice);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_owner_uid(pid_t pid, uid_t *uid) {
+        int r;
 
         assert_return(pid >= 0, -EINVAL);
         assert_return(uid, -EINVAL);
 
-        return cg_pid_get_owner_uid(pid, uid);
+        r = cg_pid_get_owner_uid(pid, uid);
+        return IN_SET(r, -ENXIO, -ENOMEDIUM) ? -ENODATA : r;
 }
 
 _public_ int sd_pid_get_cgroup(pid_t pid, char **cgroup) {
@@ -279,7 +293,7 @@ _public_ int sd_uid_get_state(uid_t uid, char**state) {
                         return -ENOMEM;
 
         }
-        if (r < 0) {
+        else if (r < 0) {
                 free(s);
                 return r;
         }
@@ -687,7 +701,7 @@ _public_ int sd_seat_get_sessions(const char *seat, char ***sessions, uid_t **ui
 
         r = parse_env_file(p, NEWLINE,
                            "SESSIONS", &s,
-                           "ACTIVE_SESSIONS", &t,
+                           "UIDS", &t,
                            NULL);
         if (r == -ENOENT)
                 return -ENXIO;
@@ -723,7 +737,7 @@ _public_ int sd_seat_get_sessions(const char *seat, char ***sessions, uid_t **ui
 
                                 r = parse_uid(k, b + i);
                                 if (r < 0)
-                                        continue;
+                                        return r;
 
                                 i++;
                         }
@@ -784,11 +798,27 @@ _public_ int sd_seat_can_graphical(const char *seat) {
 }
 
 _public_ int sd_get_seats(char ***seats) {
-        return get_files_in_directory("/run/systemd/seats/", seats);
+        int r;
+
+        r = get_files_in_directory("/run/systemd/seats/", seats);
+        if (r == -ENOENT) {
+                if (seats)
+                        *seats = NULL;
+                return 0;
+        }
+        return r;
 }
 
 _public_ int sd_get_sessions(char ***sessions) {
-        return get_files_in_directory("/run/systemd/sessions/", sessions);
+        int r;
+
+        r = get_files_in_directory("/run/systemd/sessions/", sessions);
+        if (r == -ENOENT) {
+                if (sessions)
+                        *sessions = NULL;
+                return 0;
+        }
+        return r;
 }
 
 _public_ int sd_get_uids(uid_t **users) {
@@ -799,8 +829,14 @@ _public_ int sd_get_uids(uid_t **users) {
         _cleanup_free_ uid_t *l = NULL;
 
         d = opendir("/run/systemd/users/");
-        if (!d)
+        if (!d) {
+                if (errno == ENOENT) {
+                        if (users)
+                                *users = NULL;
+                        return 0;
+                }
                 return -errno;
+        }
 
         FOREACH_DIRENT_ALL(de, d, return -errno) {
                 int k;
@@ -842,12 +878,16 @@ _public_ int sd_get_uids(uid_t **users) {
 }
 
 _public_ int sd_get_machine_names(char ***machines) {
-        char **l = NULL, **a, **b;
+        _cleanup_strv_free_ char **l = NULL;
+        char **a, **b;
         int r;
 
-        assert_return(machines, -EINVAL);
-
         r = get_files_in_directory("/run/systemd/machines/", &l);
+        if (r == -ENOENT) {
+                if (machines)
+                        *machines = NULL;
+                return 0;
+        }
         if (r < 0)
                 return r;
 
@@ -855,7 +895,7 @@ _public_ int sd_get_machine_names(char ***machines) {
                 r = 0;
 
                 /* Filter out the unit: symlinks */
-                for (a = l, b = l; *a; a++) {
+                for (a = b = l; *a; a++) {
                         if (startswith(*a, "unit:") || !machine_name_is_valid(*a))
                                 free(*a);
                         else {
@@ -868,7 +908,10 @@ _public_ int sd_get_machine_names(char ***machines) {
                 *b = NULL;
         }
 
-        *machines = l;
+        if (machines) {
+                *machines = l;
+                l = NULL;
+        }
         return r;
 }
 

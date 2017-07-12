@@ -11,7 +11,6 @@ MANPAGES += \
 	man/bootup.7 \
 	man/busctl.1 \
 	man/daemon.7 \
-	man/environment.d.5 \
 	man/file-hierarchy.7 \
 	man/halt.8 \
 	man/hostname.5 \
@@ -24,7 +23,6 @@ MANPAGES += \
 	man/localtime.5 \
 	man/machine-id.5 \
 	man/machine-info.5 \
-	man/nss-systemd.8 \
 	man/os-release.5 \
 	man/sd-bus-errors.3 \
 	man/sd-bus.3 \
@@ -111,15 +109,12 @@ MANPAGES += \
 	man/systemd-debug-generator.8 \
 	man/systemd-delta.1 \
 	man/systemd-detect-virt.1 \
-	man/systemd-environment-d-generator.8 \
 	man/systemd-escape.1 \
 	man/systemd-fsck@.service.8 \
 	man/systemd-fstab-generator.8 \
 	man/systemd-getty-generator.8 \
 	man/systemd-gpt-auto-generator.8 \
 	man/systemd-halt.service.8 \
-	man/systemd-hibernate-resume-generator.8 \
-	man/systemd-hibernate-resume@.service.8 \
 	man/systemd-inhibit.1 \
 	man/systemd-initctl.service.8 \
 	man/systemd-journald.service.8 \
@@ -130,7 +125,6 @@ MANPAGES += \
 	man/systemd-nspawn.1 \
 	man/systemd-path.1 \
 	man/systemd-remount-fs.service.8 \
-	man/systemd-resolve.1 \
 	man/systemd-run.1 \
 	man/systemd-sleep.conf.5 \
 	man/systemd-socket-activate.1 \
@@ -148,7 +142,6 @@ MANPAGES += \
 	man/systemd.1 \
 	man/systemd.automount.5 \
 	man/systemd.device.5 \
-	man/systemd.environment-generator.7 \
 	man/systemd.exec.5 \
 	man/systemd.generator.7 \
 	man/systemd.journal-fields.7 \
@@ -187,7 +180,6 @@ MANPAGES += \
 	man/udev_new.3 \
 	man/udevadm.8
 MANPAGES_ALIAS += \
-	man/30-systemd-environment-d-generator.8 \
 	man/SD_ALERT.3 \
 	man/SD_BUS_ERROR_ACCESS_DENIED.3 \
 	man/SD_BUS_ERROR_ADDRESS_IN_USE.3 \
@@ -266,7 +258,6 @@ MANPAGES_ALIAS += \
 	man/SD_WARNING.3 \
 	man/init.1 \
 	man/journald.conf.d.5 \
-	man/libnss_systemd.so.2.8 \
 	man/poweroff.8 \
 	man/reboot.8 \
 	man/sd_bus_creds_get_audit_login_uid.3 \
@@ -326,6 +317,7 @@ MANPAGES_ALIAS += \
 	man/sd_bus_message_append_array_space.3 \
 	man/sd_bus_message_append_string_iovec.3 \
 	man/sd_bus_message_append_string_space.3 \
+	man/sd_bus_message_appendv.3 \
 	man/sd_bus_message_get_realtime_usec.3 \
 	man/sd_bus_message_get_reply_cookie.3 \
 	man/sd_bus_message_get_seqnum.3 \
@@ -462,7 +454,6 @@ MANPAGES_ALIAS += \
 	man/systemd-ask-password-wall.service.8 \
 	man/systemd-fsck-root.service.8 \
 	man/systemd-fsck.8 \
-	man/systemd-hibernate-resume.8 \
 	man/systemd-hibernate.service.8 \
 	man/systemd-hybrid-sleep.service.8 \
 	man/systemd-initctl.8 \
@@ -546,7 +537,6 @@ MANPAGES_ALIAS += \
 	man/udev_ref.3 \
 	man/udev_unref.3 \
 	man/user.conf.d.5
-man/30-systemd-environment-d-generator.8: man/systemd-environment-d-generator.8
 man/SD_ALERT.3: man/sd-daemon.3
 man/SD_BUS_ERROR_ACCESS_DENIED.3: man/sd-bus-errors.3
 man/SD_BUS_ERROR_ADDRESS_IN_USE.3: man/sd-bus-errors.3
@@ -625,7 +615,6 @@ man/SD_NOTICE.3: man/sd-daemon.3
 man/SD_WARNING.3: man/sd-daemon.3
 man/init.1: man/systemd.1
 man/journald.conf.d.5: man/journald.conf.5
-man/libnss_systemd.so.2.8: man/nss-systemd.8
 man/poweroff.8: man/halt.8
 man/reboot.8: man/halt.8
 man/sd_bus_creds_get_audit_login_uid.3: man/sd_bus_creds_get_pid.3
@@ -685,6 +674,7 @@ man/sd_bus_message_append_array_memfd.3: man/sd_bus_message_append_array.3
 man/sd_bus_message_append_array_space.3: man/sd_bus_message_append_array.3
 man/sd_bus_message_append_string_iovec.3: man/sd_bus_message_append_string_memfd.3
 man/sd_bus_message_append_string_space.3: man/sd_bus_message_append_string_memfd.3
+man/sd_bus_message_appendv.3: man/sd_bus_message_append.3
 man/sd_bus_message_get_realtime_usec.3: man/sd_bus_message_get_monotonic_usec.3
 man/sd_bus_message_get_reply_cookie.3: man/sd_bus_message_get_cookie.3
 man/sd_bus_message_get_seqnum.3: man/sd_bus_message_get_monotonic_usec.3
@@ -821,7 +811,6 @@ man/systemd-ask-password-wall.path.8: man/systemd-ask-password-console.service.8
 man/systemd-ask-password-wall.service.8: man/systemd-ask-password-console.service.8
 man/systemd-fsck-root.service.8: man/systemd-fsck@.service.8
 man/systemd-fsck.8: man/systemd-fsck@.service.8
-man/systemd-hibernate-resume.8: man/systemd-hibernate-resume@.service.8
 man/systemd-hibernate.service.8: man/systemd-suspend.service.8
 man/systemd-hybrid-sleep.service.8: man/systemd-suspend.service.8
 man/systemd-initctl.8: man/systemd-initctl.service.8
@@ -905,9 +894,6 @@ man/udev_monitor_unref.3: man/udev_monitor_new_from_netlink.3
 man/udev_ref.3: man/udev_new.3
 man/udev_unref.3: man/udev_new.3
 man/user.conf.d.5: man/systemd-system.conf.5
-man/30-systemd-environment-d-generator.html: man/systemd-environment-d-generator.html
-	$(html-alias)
-
 man/SD_ALERT.html: man/sd-daemon.html
 	$(html-alias)
 
@@ -1142,9 +1128,6 @@ man/init.html: man/systemd.html
 man/journald.conf.d.html: man/journald.conf.html
 	$(html-alias)
 
-man/libnss_systemd.so.2.html: man/nss-systemd.html
-	$(html-alias)
-
 man/poweroff.html: man/halt.html
 	$(html-alias)
 
@@ -1320,6 +1303,9 @@ man/sd_bus_message_append_string_iovec.html: man/sd_bus_message_append_string_me
 	$(html-alias)
 
 man/sd_bus_message_append_string_space.html: man/sd_bus_message_append_string_memfd.html
+	$(html-alias)
+
+man/sd_bus_message_appendv.html: man/sd_bus_message_append.html
 	$(html-alias)
 
 man/sd_bus_message_get_realtime_usec.html: man/sd_bus_message_get_monotonic_usec.html
@@ -1730,9 +1716,6 @@ man/systemd-fsck-root.service.html: man/systemd-fsck@.service.html
 man/systemd-fsck.html: man/systemd-fsck@.service.html
 	$(html-alias)
 
-man/systemd-hibernate-resume.html: man/systemd-hibernate-resume@.service.html
-	$(html-alias)
-
 man/systemd-hibernate.service.html: man/systemd-suspend.service.html
 	$(html-alias)
 
@@ -2038,6 +2021,19 @@ MANPAGES_ALIAS += \
 
 endif
 
+if ENABLE_ENVIRONMENT_D
+MANPAGES += \
+	man/environment.d.5 \
+	man/systemd-environment-d-generator.8 \
+	man/systemd.environment-generator.7
+MANPAGES_ALIAS += \
+	man/30-systemd-environment-d-generator.8
+man/30-systemd-environment-d-generator.8: man/systemd-environment-d-generator.8
+man/30-systemd-environment-d-generator.html: man/systemd-environment-d-generator.html
+	$(html-alias)
+
+endif
+
 if ENABLE_FIRSTBOOT
 MANPAGES += \
 	man/systemd-firstboot.1
@@ -2045,6 +2041,18 @@ MANPAGES_ALIAS += \
 	man/systemd-firstboot.service.1
 man/systemd-firstboot.service.1: man/systemd-firstboot.1
 man/systemd-firstboot.service.html: man/systemd-firstboot.html
+	$(html-alias)
+
+endif
+
+if ENABLE_HIBERNATE
+MANPAGES += \
+	man/systemd-hibernate-resume-generator.8 \
+	man/systemd-hibernate-resume@.service.8
+MANPAGES_ALIAS += \
+	man/systemd-hibernate-resume.8
+man/systemd-hibernate-resume.8: man/systemd-hibernate-resume@.service.8
+man/systemd-hibernate-resume.html: man/systemd-hibernate-resume@.service.html
 	$(html-alias)
 
 endif
@@ -2156,6 +2164,17 @@ man/systemd-networkd.html: man/systemd-networkd.service.html
 
 endif
 
+if ENABLE_NSS_SYSTEMD
+MANPAGES += \
+	man/nss-systemd.8
+MANPAGES_ALIAS += \
+	man/libnss_systemd.so.2.8
+man/libnss_systemd.so.2.8: man/nss-systemd.8
+man/libnss_systemd.so.2.html: man/nss-systemd.html
+	$(html-alias)
+
+endif
+
 if ENABLE_QUOTACHECK
 MANPAGES += \
 	man/systemd-quotacheck.service.8
@@ -2183,6 +2202,7 @@ MANPAGES += \
 	man/dnssec-trust-anchors.d.5 \
 	man/nss-resolve.8 \
 	man/resolved.conf.5 \
+	man/systemd-resolve.1 \
 	man/systemd-resolved.service.8
 MANPAGES_ALIAS += \
 	man/libnss_resolve.so.2.8 \

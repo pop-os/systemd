@@ -28,6 +28,8 @@
 #include "mkdir.h"
 #include "parse-util.h"
 #include "resolved-link.h"
+#include "resolved-llmnr.h"
+#include "resolved-mdns.h"
 #include "string-util.h"
 #include "strv.h"
 
@@ -311,6 +313,12 @@ void link_set_dnssec_mode(Link *l, DnssecMode mode) {
 
         assert(l);
 
+#ifndef HAVE_GCRYPT
+        if (mode == DNSSEC_YES || mode == DNSSEC_ALLOW_DOWNGRADE)
+                log_warning("DNSSEC option for the link cannot be enabled or set to allow-downgrade when systemd-resolved is built without gcrypt support. Turning off DNSSEC support.");
+        return;
+#endif
+
         if (l->dnssec_mode == mode)
                 return;
 
@@ -523,10 +531,25 @@ static void link_read_settings(Link *l) {
 }
 
 int link_update(Link *l) {
+        int r;
+
         assert(l);
 
         link_read_settings(l);
         link_load_user(l);
+
+        if (l->llmnr_support != RESOLVE_SUPPORT_NO) {
+                r = manager_llmnr_start(l->manager);
+                if (r < 0)
+                        return r;
+        }
+
+        if (l->mdns_support != RESOLVE_SUPPORT_NO) {
+                r = manager_mdns_start(l->manager);
+                if (r < 0)
+                        return r;
+        }
+
         link_allocate_scopes(l);
         link_add_rrs(l, false);
 
@@ -539,7 +562,7 @@ bool link_relevant(Link *l, int family, bool local_multicast) {
 
         assert(l);
 
-        /* A link is relevant for local multicast traffic if it isn't a loopback or pointopoint device, has a link
+        /* A link is relevant for local multicast traffic if it isn't a loopback device, has a link
          * beat, can do multicast and has at least one link-local (or better) IP address.
          *
          * A link is relevant for non-multicast traffic if it isn't a loopback device, has a link beat, and has at
@@ -552,9 +575,6 @@ bool link_relevant(Link *l, int family, bool local_multicast) {
                 return false;
 
         if (local_multicast) {
-                if (l->flags & IFF_POINTOPOINT)
-                        return false;
-
                 if ((l->flags & IFF_MULTICAST) != IFF_MULTICAST)
                         return false;
         }
@@ -594,7 +614,7 @@ DnsServer* link_set_dns_server(Link *l, DnsServer *s) {
                 return s;
 
         if (s)
-                log_info("Switching to DNS server %s for interface %s.", dns_server_string(s), l->name);
+                log_debug("Switching to DNS server %s for interface %s.", dns_server_string(s), l->name);
 
         dns_server_unref(l->current_dns_server);
         l->current_dns_server = dns_server_ref(s);

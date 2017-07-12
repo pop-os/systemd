@@ -107,7 +107,7 @@ dual_timestamp* dual_timestamp_from_realtime(dual_timestamp *ts, usec_t u) {
         ts->realtime = u;
 
         delta = (int64_t) now(CLOCK_REALTIME) - (int64_t) u;
-        ts->monotonic = usec_sub(now(CLOCK_MONOTONIC), delta);
+        ts->monotonic = usec_sub_signed(now(CLOCK_MONOTONIC), delta);
 
         return ts;
 }
@@ -124,8 +124,8 @@ triple_timestamp* triple_timestamp_from_realtime(triple_timestamp *ts, usec_t u)
 
         ts->realtime = u;
         delta = (int64_t) now(CLOCK_REALTIME) - (int64_t) u;
-        ts->monotonic = usec_sub(now(CLOCK_MONOTONIC), delta);
-        ts->boottime = clock_boottime_supported() ? usec_sub(now(CLOCK_BOOTTIME), delta) : USEC_INFINITY;
+        ts->monotonic = usec_sub_signed(now(CLOCK_MONOTONIC), delta);
+        ts->boottime = clock_boottime_supported() ? usec_sub_signed(now(CLOCK_BOOTTIME), delta) : USEC_INFINITY;
 
         return ts;
 }
@@ -141,7 +141,7 @@ dual_timestamp* dual_timestamp_from_monotonic(dual_timestamp *ts, usec_t u) {
 
         ts->monotonic = u;
         delta = (int64_t) now(CLOCK_MONOTONIC) - (int64_t) u;
-        ts->realtime = usec_sub(now(CLOCK_REALTIME), delta);
+        ts->realtime = usec_sub_signed(now(CLOCK_REALTIME), delta);
 
         return ts;
 }
@@ -156,8 +156,8 @@ dual_timestamp* dual_timestamp_from_boottime_or_monotonic(dual_timestamp *ts, us
 
         dual_timestamp_get(ts);
         delta = (int64_t) now(clock_boottime_or_monotonic()) - (int64_t) u;
-        ts->realtime = usec_sub(ts->realtime, delta);
-        ts->monotonic = usec_sub(ts->monotonic, delta);
+        ts->realtime = usec_sub_signed(ts->realtime, delta);
+        ts->monotonic = usec_sub_signed(ts->monotonic, delta);
 
         return ts;
 }
@@ -241,7 +241,7 @@ usec_t timeval_load(const struct timeval *tv) {
 struct timeval *timeval_store(struct timeval *tv, usec_t u) {
         assert(tv);
 
-        if (u == USEC_INFINITY||
+        if (u == USEC_INFINITY ||
             u / USEC_PER_SEC > TIME_T_MAX) {
                 tv->tv_sec = (time_t) -1;
                 tv->tv_usec = (suseconds_t) -1;
@@ -555,14 +555,28 @@ void dual_timestamp_serialize(FILE *f, const char *name, dual_timestamp *t) {
 
 int dual_timestamp_deserialize(const char *value, dual_timestamp *t) {
         uint64_t a, b;
+        int r, pos;
 
         assert(value);
         assert(t);
 
-        if (sscanf(value, "%" PRIu64 "%" PRIu64, &a, &b) != 2) {
-                log_debug("Failed to parse dual timestamp value \"%s\": %m", value);
+        pos = strspn(value, WHITESPACE);
+        if (value[pos] == '-')
+                return -EINVAL;
+        pos += strspn(value + pos, DIGITS);
+        pos += strspn(value + pos, WHITESPACE);
+        if (value[pos] == '-')
+                return -EINVAL;
+
+        r = sscanf(value, "%" PRIu64 "%" PRIu64 "%n", &a, &b, &pos);
+        if (r != 2) {
+                log_debug("Failed to parse dual timestamp value \"%s\".", value);
                 return -EINVAL;
         }
+
+        if (value[pos] != '\0')
+                /* trailing garbage */
+                return -EINVAL;
 
         t->realtime = a;
         t->monotonic = b;
@@ -850,10 +864,10 @@ finish:
         if (ret > USEC_TIMESTAMP_FORMATTABLE_MAX)
                 return -EINVAL;
 
-        if (ret > minus)
+        if (ret >= minus)
                 ret -= minus;
         else
-                ret = 0;
+                return -EINVAL;
 
         *usec = ret;
 
@@ -993,6 +1007,16 @@ int parse_time(const char *t, usec_t *usec, usec_t default_unit) {
 
 int parse_sec(const char *t, usec_t *usec) {
         return parse_time(t, usec, USEC_PER_SEC);
+}
+
+int parse_sec_fix_0(const char *t, usec_t *usec) {
+        t += strspn(t, WHITESPACE);
+        if (streq(t, "0")) {
+                *usec = USEC_INFINITY;
+                return 0;
+        }
+
+        return parse_sec(t, usec);
 }
 
 int parse_nsec(const char *t, nsec_t *nsec) {
@@ -1336,4 +1360,23 @@ unsigned long usec_to_jiffies(usec_t u) {
         }
 
         return DIV_ROUND_UP(u , USEC_PER_SEC / hz);
+}
+
+usec_t usec_shift_clock(usec_t x, clockid_t from, clockid_t to) {
+        usec_t a, b;
+
+        if (x == USEC_INFINITY)
+                return USEC_INFINITY;
+        if (map_clock_id(from) == map_clock_id(to))
+                return x;
+
+        a = now(from);
+        b = now(to);
+
+        if (x > a)
+                /* x lies in the future */
+                return usec_add(b, usec_sub_unsigned(x, a));
+        else
+                /* x lies in the past */
+                return usec_sub_unsigned(b, usec_sub_unsigned(a, x));
 }

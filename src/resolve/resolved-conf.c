@@ -233,10 +233,10 @@ int manager_parse_config_file(Manager *m) {
         assert(m);
 
         r = config_parse_many_nulstr(PKGSYSCONFDIR "/resolved.conf",
-                              CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
-                              "Resolve\0",
-                              config_item_perf_lookup, resolved_gperf_lookup,
-                              false, m);
+                                     CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
+                                     "Resolve\0",
+                                     config_item_perf_lookup, resolved_gperf_lookup,
+                                     false, m);
         if (r < 0)
                 return r;
 
@@ -246,6 +246,12 @@ int manager_parse_config_file(Manager *m) {
                         return r;
         }
 
+#ifndef HAVE_GCRYPT
+        if (m->dnssec_mode != DNSSEC_NO) {
+                log_warning("DNSSEC option cannot be enabled or set to allow-downgrade when systemd-resolved is built without gcrypt support. Turning off DNSSEC support.");
+                m->dnssec_mode = DNSSEC_NO;
+        }
+#endif
         return 0;
 
 }

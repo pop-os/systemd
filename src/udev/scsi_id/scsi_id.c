@@ -391,7 +391,7 @@ static int set_options(struct udev *udev,
                         break;
 
                 case 'V':
-                        printf("%s\n", VERSION);
+                        printf("%s\n", PACKAGE_VERSION);
                         exit(0);
 
                 case 'x':
@@ -577,6 +577,8 @@ int main(int argc, char **argv)
         int newargc;
         char **newargv = NULL;
 
+        log_set_target(LOG_TARGET_AUTO);
+        udev_parse_config();
         log_parse_environment();
         log_open();
 

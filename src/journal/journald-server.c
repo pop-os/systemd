@@ -918,7 +918,7 @@ static void dispatch_message_real(
                 }
 
 #ifdef HAVE_SELINUX
-                if (mac_selinux_have()) {
+                if (mac_selinux_use()) {
                         if (label) {
                                 x = alloca(strlen("_SELINUX_CONTEXT=") + label_len + 1);
 
@@ -1637,10 +1637,10 @@ static int server_parse_config_file(Server *s) {
         assert(s);
 
         return config_parse_many_nulstr(PKGSYSCONFDIR "/journald.conf",
-                                 CONF_PATHS_NULSTR("systemd/journald.conf.d"),
-                                 "Journal\0",
-                                 config_item_perf_lookup, journald_gperf_lookup,
-                                 false, s);
+                                        CONF_PATHS_NULSTR("systemd/journald.conf.d"),
+                                        "Journal\0",
+                                        config_item_perf_lookup, journald_gperf_lookup,
+                                        false, s);
 }
 
 static int server_dispatch_sync(sd_event_source *es, usec_t t, void *userdata) {
@@ -2177,6 +2177,8 @@ void server_done(Server *s) {
         free(s->tty_path);
         free(s->cgroup_root);
         free(s->hostname_field);
+        free(s->runtime_storage.path);
+        free(s->system_storage.path);
 
         if (s->mmap)
                 mmap_cache_unref(s->mmap);

@@ -7,7 +7,19 @@
 
 # See tmpfiles.d(5) for details
 
-d /var/lib/systemd/journal-upload 0755 systemd-journal-upload systemd-journal-upload - -
+q /var 0755 - - -
 
-z /var/log/journal/remote 2755 systemd-journal-remote systemd-journal-remote - -
-z /run/log/journal/remote 2755 systemd-journal-remote systemd-journal-remote - -
+L /var/run - - - - ../run
+
+d /var/log 0755 - - -
+m4_ifdef(`HAVE_UTMP',
+f /var/log/wtmp 0664 root utmp -
+f /var/log/btmp 0600 root utmp -
+f /var/log/lastlog 0664 root utmp -
+)m4_dnl
+
+d /var/cache 0755 - - -
+
+d /var/lib 0755 - - -
+
+d /var/spool 0755 - - -

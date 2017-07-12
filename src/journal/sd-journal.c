@@ -882,8 +882,11 @@ static int real_journal_next_skip(sd_journal *j, direction_t direction, uint64_t
         if (skip == 0) {
                 /* If this is not a discrete skip, then at least
                  * resolve the current location */
-                if (j->current_location.type != LOCATION_DISCRETE)
-                        return real_journal_next(j, direction);
+                if (j->current_location.type != LOCATION_DISCRETE) {
+                        r = real_journal_next(j, direction);
+                        if (r < 0)
+                                return r;
+                }
 
                 return 0;
         }
@@ -2424,6 +2427,7 @@ _public_ int sd_journal_process(sd_journal *j) {
         assert_return(!journal_pid_changed(j), -ECHILD);
 
         j->last_process_usec = now(CLOCK_MONOTONIC);
+        j->last_invalidate_counter = j->current_invalidate_counter;
 
         for (;;) {
                 union inotify_event_buffer buffer;

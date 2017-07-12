@@ -28,6 +28,7 @@
 #include "resolve-util.h"
 
 #include "networkd-address.h"
+#include "networkd-address-label.h"
 #include "networkd-brvlan.h"
 #include "networkd-fdb.h"
 #include "networkd-lldp-tx.h"
@@ -157,13 +158,21 @@ struct Network {
         AddressFamilyBoolean link_local;
         bool ipv4ll_route;
 
+        /* IPv6 prefix delegation support */
+        bool router_prefix_delegation;
+        usec_t router_lifetime_usec;
+        uint8_t router_preference;
+        bool router_managed;
+        bool router_other_information;
+
         /* Bridge Support */
         bool use_bpdu;
         bool hairpin;
         bool fast_leave;
         bool allow_port_to_be_root;
         bool unicast_flood;
-        unsigned cost;
+        uint32_t cost;
+        uint16_t priority;
 
         bool use_br_vlan;
         uint16_t pvid;
@@ -176,6 +185,7 @@ struct Network {
         int ipv6_accept_ra;
         int ipv6_dad_transmits;
         int ipv6_hop_limit;
+        int ipv6_proxy_ndp;
         int proxy_arp;
 
         bool ipv6_accept_ra_use_dns;
@@ -201,15 +211,21 @@ struct Network {
         LIST_HEAD(Route, static_routes);
         LIST_HEAD(FdbEntry, static_fdb_entries);
         LIST_HEAD(IPv6ProxyNDPAddress, ipv6_proxy_ndp_addresses);
+        LIST_HEAD(AddressLabel, address_labels);
+        LIST_HEAD(Prefix, static_prefixes);
 
         unsigned n_static_addresses;
         unsigned n_static_routes;
         unsigned n_static_fdb_entries;
         unsigned n_ipv6_proxy_ndp_addresses;
+        unsigned n_address_labels;
+        unsigned n_static_prefixes;
 
         Hashmap *addresses_by_section;
         Hashmap *routes_by_section;
         Hashmap *fdb_entries_by_section;
+        Hashmap *address_labels_by_section;
+        Hashmap *prefixes_by_section;
 
         struct in_addr_data *dns;
         unsigned n_dns;

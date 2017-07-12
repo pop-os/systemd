@@ -507,7 +507,7 @@
             <para>This setting is read by
             <citerefentry><refentrytitle>systemd-resolved.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
             "Search domains" correspond to the <varname>domain</varname> and <varname>search</varname> entries in
-            <citerefentry><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+            <citerefentry project='man-pages'><refentrytitle>resolv.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
             Domain name routing has no equivalent in the traditional glibc API, which has no concept of domain
             name servers limited to a specific link.</para>
           </listitem>
@@ -612,22 +612,27 @@
         </para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><varname>IPv6ProxyNDPAddress=</varname></term>
-          <listitem><para>An IPv6 address, for which Neighbour Advertisement
-          messages will be proxied.
-          Proxy NDP (Neighbor Discovery Protocol) is a technique for IPv6 to
-          allow routing of addresses to a different destination when peers expect them
-          to be present on a certain physical link.
+          <term><varname>IPv6ProxyNDP=</varname></term>
+          <listitem><para>A boolean. Configures proxy NDP for IPv6. Proxy NDP (Neighbor Discovery
+          Protocol) is a technique for IPv6 to allow routing of addresses to a different
+          destination when peers expect them to be present on a certain physical link.
           In this case a router answers Neighbour Advertisement messages intended for
           another machine by offering its own MAC address as destination.
-          Unlike proxy ARP for IPv4, is not enabled globally, but will only send Neighbour
+          Unlike proxy ARP for IPv4, it is not enabled globally, but will only send Neighbour
           Advertisement messages for addresses in the IPv6 neighbor proxy table,
-          which can also be shown by <command>ip -6 neighbour show proxy</command>
-          This option may be specified more than once. systemd-networkd will control the
-          per-interface `proxy_ndp` switch for each configured interface, depending on whether
-          there are <option>IPv6ProxyNDPAddress=</option> entries configured and add these to
-          the kernels IPv6 neighbor proxy table.
-          Defaults to unset.
+          which can also be shown by <command>ip -6 neighbour show proxy</command>.
+          systemd-networkd will control the per-interface `proxy_ndp` switch for each configured
+          interface depending on this option.
+          Defautls to unset.
+        </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>IPv6ProxyNDPAddress=</varname></term>
+          <listitem><para>An IPv6 address, for which Neighbour Advertisement messages will be
+          proxied. This option may be specified more than once. systemd-networkd will add the
+          <option>IPv6ProxyNDPAddress=</option> entries to the kernel's IPv6 neighbor proxy table.
+          This option implies <option>IPv6ProxyNDP=true</option> but has no effect if
+          <option>IPv6ProxyNDP</option> has been set to false. Defaults to unset.
         </para></listitem>
         </varlistentry>
         <varlistentry>
@@ -796,6 +801,33 @@
       </variablelist>
   </refsect1>
 
+    <refsect1>
+    <title>[IPv6AddressLabel] Section Options</title>
+
+      <para>An <literal>[IPv6AddressLabel]</literal> section accepts the
+      following keys. Specify several <literal>[IPv6AddressLabel]</literal>
+      sections to configure several addresse labels. IPv6 address labels are
+      used for address selection. See <ulink url="https://tools.ietf.org/html/rfc3484">RFC 3484</ulink>.
+      Precedence is managed by userspace, and only the label itself is stored in the kernel</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>Label=</varname></term>
+          <listitem>
+            <para> The label for the prefix (an unsigned integer) ranges 0 to 4294967294.
+            0xffffffff is reserved. This key is mandatory.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Prefix=</varname></term>
+          <listitem>
+            <para>IPv6 prefix is an address with a prefix length, separated by a slash <literal>/</literal> character.
+            This key is mandatory. </para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
+
   <refsect1>
     <title>[Route] Section Options</title>
       <para>The <literal>[Route]</literal> section accepts the
@@ -809,6 +841,16 @@
             <para>As in the <literal>[Network]</literal> section.</para>
           </listitem>
         </varlistentry>
+         <varlistentry>
+           <term><varname>GatewayOnlink=</varname></term>
+           <listitem>
+             <para>The <literal>GatewayOnlink</literal> option tells the kernel that it does not have
+             to check if the gateway is reachable directly by the current machine (i.e., the kernel does
+             not need to check if the gateway is attached to the local network), so that we can insert the
+             route in the kernel table without it being complained about. A boolean, defaults to <literal>no</literal>.
+             </para>
+           </listitem>
+         </varlistentry>
         <varlistentry>
           <term><varname>Destination=</varname></term>
           <listitem>
@@ -829,6 +871,16 @@
           <term><varname>Metric=</varname></term>
           <listitem>
             <para>The metric of the route (an unsigned integer).</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>IPv6Preference=</varname></term>
+          <listitem>
+            <para>Specifies the route preference as defined in <ulink
+            url="https://tools.ietf.org/html/rfc4191">RFC4191</ulink> for Router Discovery messages.
+            Which can be one of <literal>low</literal> the route has a lowest priority,
+            <literal>medium</literal> the route has a default priority or
+            <literal>high</literal> the route has a highest priority.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -853,6 +905,15 @@
           <para>The table identifier for the route (a number between 1 and 4294967295, or 0 to unset).
           The table can be retrieved using <command>ip route show table <replaceable>num</replaceable></command>.
           </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Protocol=</varname></term>
+          <listitem>
+            <para>The Protocol identifier for the route. Takes a number between 0 and 255 or the special values
+            <literal>kernel</literal>, <literal>boot</literal> and <literal>static</literal>. Defaults to
+            <literal>static</literal>.
+            </para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -937,9 +998,11 @@
         <varlistentry>
           <term><varname>UseRoutes=</varname></term>
           <listitem>
-            <para>When true (the default), the static routes will be
-            requested from the DHCP server and added to the routing
-            table with a metric of 1024.</para>
+            <para>When true (the default), the static routes will be requested from the DHCP server and added to the
+              routing table with a metric of 1024, and a scope of "global", "link" or "host", depending on the route's
+              destination and gateway. If the destination is on the local host, e.g., 127.x.x.x, or the same as the
+              link's own address, the scope will be set to "host". Otherwise if the gateway is null (a direct route), a
+              "link" scope will be used. For anything else, scope defaults to "global".</para>
           </listitem>
         </varlistentry>
 
@@ -1257,7 +1320,18 @@
             <para>Sets the "cost" of sending packets of this interface.
             Each port in a bridge may have a different speed and the cost
             is used to decide which link to use. Faster interfaces
-            should have lower costs.</para>
+            should have lower costs. It is an interger value between 1 and
+            65535.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Priority=</varname></term>
+          <listitem>
+            <para>Sets the "priority" of sending packets on this interface.
+            Each port in a bridge may have a different priority which is used
+            to decide which link to use. Lower value means higher priority.
+            It is an interger value between 0 to 63. Networkd does not set any
+            default, meaning the kernel default value of 32 is used.</para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -1513,7 +1587,7 @@ VRF=vrf1
       <title>MacVTap</title>
       <para>This brings up a network interface <literal>macvtap-test</literal>
       and attaches it to <literal>enp0s25</literal>.</para>
-      <programlisting># /lib/systemd/network/25-macvtap.network
+      <programlisting># /usr/lib/systemd/network/25-macvtap.network
 [Match]
 Name=enp0s25
 
