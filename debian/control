@@ -213,7 +213,7 @@ Package: libnss-myhostname
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -236,7 +236,7 @@ Package: libnss-mymachines
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -255,7 +255,7 @@ Package: libnss-resolve
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -273,7 +273,7 @@ Package: libnss-systemd
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
