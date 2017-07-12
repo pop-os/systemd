@@ -17,6 +17,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <linux/icmpv6.h>
+
 #include "alloc-util.h"
 #include "conf-parser.h"
 #include "in-addr-util.h"
@@ -228,7 +230,7 @@ int route_get(Link *link,
               unsigned char dst_prefixlen,
               unsigned char tos,
               uint32_t priority,
-              unsigned char table,
+              uint32_t table,
               Route **ret) {
 
         Route route, *existing;
@@ -270,7 +272,7 @@ static int route_add_internal(
                 unsigned char dst_prefixlen,
                 unsigned char tos,
                 uint32_t priority,
-                unsigned char table,
+                uint32_t table,
                 Route **ret) {
 
         _cleanup_route_free_ Route *route = NULL;
@@ -316,7 +318,7 @@ int route_add_foreign(
                 unsigned char dst_prefixlen,
                 unsigned char tos,
                 uint32_t priority,
-                unsigned char table,
+                uint32_t table,
                 Route **ret) {
 
         return route_add_internal(link, &link->routes_foreign, family, dst, dst_prefixlen, tos, priority, table, ret);
@@ -329,7 +331,7 @@ int route_add(
               unsigned char dst_prefixlen,
               unsigned char tos,
               uint32_t priority,
-              unsigned char table,
+              uint32_t table,
               Route **ret) {
 
         Route *route;
@@ -755,10 +757,9 @@ int config_parse_destination(const char *unit,
 
         Network *network = userdata;
         _cleanup_route_free_ Route *n = NULL;
-        const char *address, *e;
         union in_addr_union buffer;
         unsigned char prefixlen;
-        int r, f;
+        int r;
 
         assert(filename);
         assert(section);
@@ -770,45 +771,20 @@ int config_parse_destination(const char *unit,
         if (r < 0)
                 return r;
 
-        /* Destination|Source=address/prefixlen */
-
-        /* address */
-        e = strchr(rvalue, '/');
-        if (e)
-                address = strndupa(rvalue, e - rvalue);
-        else
-                address = rvalue;
-
-        r = in_addr_from_string_auto(address, &f, &buffer);
+        r = in_addr_prefix_from_string(rvalue, AF_INET, &buffer, &prefixlen);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Destination is invalid, ignoring assignment: %s", address);
-                return 0;
-        }
-
-        if (f != AF_INET && f != AF_INET6) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Unknown address family, ignoring assignment: %s", address);
-                return 0;
-        }
-
-        /* prefixlen */
-        if (e) {
-                r = safe_atou8(e + 1, &prefixlen);
+                r = in_addr_prefix_from_string(rvalue, AF_INET6, &buffer, &prefixlen);
                 if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r, "Route destination prefix length is invalid, ignoring assignment: %s", e + 1);
+                        log_syntax(unit, LOG_ERR, filename, line, r,
+                                   "Route %s= prefix is invalid, ignoring assignment: %s",
+                                   lvalue, rvalue);
                         return 0;
                 }
-        } else {
-                switch (f) {
-                        case AF_INET:
-                                prefixlen = 32;
-                                break;
-                        case AF_INET6:
-                                prefixlen = 128;
-                                break;
-                }
-        }
 
-        n->family = f;
+                n->family = AF_INET6;
+        } else
+                n->family = AF_INET;
+
         if (streq(lvalue, "Destination")) {
                 n->dst = buffer;
                 n->dst_prefixlen = prefixlen;
@@ -934,6 +910,114 @@ int config_parse_route_table(const char *unit,
         }
 
         n->table = k;
+
+        n = NULL;
+
+        return 0;
+}
+
+int config_parse_gateway_onlink(const char *unit,
+                                const char *filename,
+                                unsigned line,
+                                const char *section,
+                                unsigned section_line,
+                                const char *lvalue,
+                                int ltype,
+                                const char *rvalue,
+                                void *data,
+                                void *userdata) {
+        Network *network = userdata;
+        _cleanup_route_free_ Route *n = NULL;
+        int r;
+
+        assert(filename);
+        assert(section);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r < 0)
+                return r;
+
+        r = parse_boolean(rvalue);
+        if (r < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r,
+                           "Could not parse gateway onlink \"%s\", ignoring assignment: %m", rvalue);
+                return 0;
+        }
+
+        SET_FLAG(n->flags, RTNH_F_ONLINK, r);
+        n = NULL;
+
+        return 0;
+}
+
+int config_parse_ipv6_route_preference(const char *unit,
+                                       const char *filename,
+                                       unsigned line,
+                                       const char *section,
+                                       unsigned section_line,
+                                       const char *lvalue,
+                                       int ltype,
+                                       const char *rvalue,
+                                       void *data,
+                                       void *userdata) {
+        Network *network = userdata;
+        _cleanup_route_free_ Route *n = NULL;
+        int r;
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r < 0)
+                return r;
+
+        if (streq(rvalue, "low"))
+                n->pref = ICMPV6_ROUTER_PREF_LOW;
+        else if (streq(rvalue, "medium"))
+                n->pref = ICMPV6_ROUTER_PREF_MEDIUM;
+        else if (streq(rvalue, "high"))
+                n->pref = ICMPV6_ROUTER_PREF_HIGH;
+        else {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Unknown route preference: %s", rvalue);
+                return 0;
+        }
+
+        n = NULL;
+
+        return 0;
+}
+
+int config_parse_route_protocol(const char *unit,
+                                const char *filename,
+                                unsigned line,
+                                const char *section,
+                                unsigned section_line,
+                                const char *lvalue,
+                                int ltype,
+                                const char *rvalue,
+                                void *data,
+                                void *userdata) {
+        Network *network = userdata;
+        _cleanup_route_free_ Route *n = NULL;
+        int r;
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r < 0)
+                return r;
+
+        if (streq(rvalue, "kernel"))
+                n->protocol = RTPROT_KERNEL;
+        else if (streq(rvalue, "boot"))
+                n->protocol = RTPROT_BOOT;
+        else if (streq(rvalue, "static"))
+                n->protocol = RTPROT_STATIC;
+        else {
+                r = safe_atou8(rvalue , &n->protocol);
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Could not parse route protocol \"%s\", ignoring assignment: %m", rvalue);
+                        return 0;
+                }
+        }
 
         n = NULL;
 

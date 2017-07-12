@@ -422,7 +422,7 @@ static bool chroot_symlinks_same(const char *root, const char *wd, const char *a
 
         a = strjoina(path_is_absolute(a) ? root : wd, "/", a);
         b = strjoina(path_is_absolute(b) ? root : wd, "/", b);
-        return path_equal_or_files_same(a, b);
+        return path_equal_or_files_same(a, b, 0);
 }
 
 static int create_symlink(
@@ -3045,7 +3045,7 @@ int unit_file_get_list(
                         if (errno == ENOENT)
                                 continue;
                         if (IN_SET(errno, ENOTDIR, EACCES)) {
-                                log_debug("Failed to open \"%s\": %m", *i);
+                                log_debug_errno(errno, "Failed to open \"%s\": %m", *i);
                                 continue;
                         }
 

@@ -28,12 +28,12 @@
 #include "in-addr-util.h"
 #include "ndisc-internal.h"
 #include "ndisc-router.h"
+#include "random-util.h"
 #include "socket-util.h"
 #include "string-util.h"
 #include "util.h"
 
-#define NDISC_ROUTER_SOLICITATION_INTERVAL (4U * USEC_PER_SEC)
-#define NDISC_MAX_ROUTER_SOLICITATIONS 3U
+#define NDISC_TIMEOUT_NO_RA_USEC (NDISC_ROUTER_SOLICITATION_INTERVAL * NDISC_MAX_ROUTER_SOLICITATIONS)
 
 static void ndisc_callback(sd_ndisc *ndisc, sd_ndisc_event event, sd_ndisc_router *rt) {
         assert(ndisc);
@@ -129,6 +129,8 @@ static int ndisc_reset(sd_ndisc *nd) {
         assert(nd);
 
         nd->timeout_event_source = sd_event_source_unref(nd->timeout_event_source);
+        nd->timeout_no_ra = sd_event_source_unref(nd->timeout_no_ra);
+        nd->retransmit_time = 0;
         nd->recv_event_source = sd_event_source_unref(nd->recv_event_source);
         nd->fd = safe_close(nd->fd);
 
@@ -221,23 +223,9 @@ static int ndisc_handle_datagram(sd_ndisc *nd, sd_ndisc_router *rt) {
 static int ndisc_recv(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(sd_ndisc_router_unrefp) sd_ndisc_router *rt = NULL;
         sd_ndisc *nd = userdata;
-        union {
-                struct cmsghdr cmsghdr;
-                uint8_t buf[CMSG_SPACE(sizeof(int)) + /* ttl */
-                            CMSG_SPACE(sizeof(struct timeval))];
-        } control = {};
-        struct iovec iov = {};
-        union sockaddr_union sa = {};
-        struct msghdr msg = {
-                .msg_name = &sa.sa,
-                .msg_namelen = sizeof(sa),
-                .msg_iov = &iov,
-                .msg_iovlen = 1,
-                .msg_control = &control,
-                .msg_controllen = sizeof(control),
-        };
-        struct cmsghdr *cmsg;
-        ssize_t len, buflen;
+        ssize_t buflen;
+        int r;
+        _cleanup_free_ char *addr = NULL;
 
         assert(s);
         assert(nd);
@@ -251,84 +239,78 @@ static int ndisc_recv(sd_event_source *s, int fd, uint32_t revents, void *userda
         if (!rt)
                 return -ENOMEM;
 
-        iov.iov_base = NDISC_ROUTER_RAW(rt);
-        iov.iov_len = rt->raw_size;
+        r = icmp6_receive(fd, NDISC_ROUTER_RAW(rt), rt->raw_size, &rt->address,
+                     &rt->timestamp);
+        if (r < 0) {
+                switch (r) {
+                case -EADDRNOTAVAIL:
+                        (void) in_addr_to_string(AF_INET6, (union in_addr_union*) &rt->address, &addr);
+                        log_ndisc("Received RA from non-link-local address %s. Ignoring", addr);
+                        break;
 
-        len = recvmsg(fd, &msg, MSG_DONTWAIT);
-        if (len < 0) {
-                if (errno == EAGAIN || errno == EINTR)
-                        return 0;
+                case -EMULTIHOP:
+                        log_ndisc("Received RA with invalid hop limit. Ignoring.");
+                        break;
 
-                return log_ndisc_errno(errno, "Could not receive message from ICMPv6 socket: %m");
-        }
-
-        if ((size_t) len != rt->raw_size) {
-                log_ndisc("Packet size mismatch.");
-                return -EINVAL;
-        }
-
-        if (msg.msg_namelen == sizeof(struct sockaddr_in6) &&
-            sa.in6.sin6_family == AF_INET6)  {
-
-                if (in_addr_is_link_local(AF_INET6, (union in_addr_union*) &sa.in6.sin6_addr) <= 0) {
-                        _cleanup_free_ char *addr = NULL;
-
-                        (void) in_addr_to_string(AF_INET6, (union in_addr_union*) &sa.in6.sin6_addr, &addr);
-                        log_ndisc("Received RA from non-link-local address %s. Ignoring.", strna(addr));
-                        return 0;
+                case -EPFNOSUPPORT:
+                        log_ndisc("Received invalid source address from ICMPv6 socket.");
+                        break;
                 }
 
-                rt->address = sa.in6.sin6_addr;
-
-        } else if (msg.msg_namelen > 0) {
-                log_ndisc("Received invalid source address size from ICMPv6 socket: %zu bytes", (size_t) msg.msg_namelen);
-                return -EINVAL;
+                return 0;
         }
-
-        /* namelen == 0 only happens when running the test-suite over a socketpair */
-
-        assert(!(msg.msg_flags & MSG_CTRUNC));
-        assert(!(msg.msg_flags & MSG_TRUNC));
-
-        CMSG_FOREACH(cmsg, &msg) {
-                if (cmsg->cmsg_level == SOL_IPV6 &&
-                    cmsg->cmsg_type == IPV6_HOPLIMIT &&
-                    cmsg->cmsg_len == CMSG_LEN(sizeof(int))) {
-                        int hops = *(int*) CMSG_DATA(cmsg);
-
-                        if (hops != 255) {
-                                log_ndisc("Received RA with invalid hop limit %d. Ignoring.", hops);
-                                return 0;
-                        }
-                }
-
-                if (cmsg->cmsg_level == SOL_SOCKET &&
-                    cmsg->cmsg_type == SO_TIMESTAMP &&
-                    cmsg->cmsg_len == CMSG_LEN(sizeof(struct timeval)))
-                        triple_timestamp_from_realtime(&rt->timestamp, timeval_load((struct timeval*) CMSG_DATA(cmsg)));
-        }
-
-        if (!triple_timestamp_is_set(&rt->timestamp))
-                triple_timestamp_get(&rt->timestamp);
 
         nd->timeout_event_source = sd_event_source_unref(nd->timeout_event_source);
 
         return ndisc_handle_datagram(nd, rt);
 }
 
+static usec_t ndisc_timeout_compute_random(usec_t val) {
+        /* compute a time that is random within ±10% of the given value */
+        return val - val / 10 +
+                (random_u64() % (2 * USEC_PER_SEC)) * val / 10 / USEC_PER_SEC;
+}
+
 static int ndisc_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
         sd_ndisc *nd = userdata;
-        usec_t time_now, next_timeout;
+        usec_t time_now;
         int r;
+        char time_string[FORMAT_TIMESPAN_MAX];
 
         assert(s);
         assert(nd);
         assert(nd->event);
 
-        if (nd->nd_sent >= NDISC_MAX_ROUTER_SOLICITATIONS) {
-                nd->timeout_event_source = sd_event_source_unref(nd->timeout_event_source);
-                ndisc_callback(nd, SD_NDISC_EVENT_TIMEOUT, NULL);
-                return 0;
+        assert_se(sd_event_now(nd->event, clock_boottime_or_monotonic(), &time_now) >= 0);
+
+        nd->timeout_event_source = sd_event_source_unref(nd->timeout_event_source);
+
+        if (!nd->retransmit_time)
+                nd->retransmit_time = ndisc_timeout_compute_random(NDISC_ROUTER_SOLICITATION_INTERVAL);
+        else {
+                if (nd->retransmit_time > NDISC_MAX_ROUTER_SOLICITATION_INTERVAL / 2)
+                        nd->retransmit_time = ndisc_timeout_compute_random(NDISC_MAX_ROUTER_SOLICITATION_INTERVAL);
+                else
+                        nd->retransmit_time += ndisc_timeout_compute_random(nd->retransmit_time);
+        }
+
+        r = sd_event_add_time(nd->event, &nd->timeout_event_source,
+                              clock_boottime_or_monotonic(),
+                              time_now + nd->retransmit_time,
+                              10 * USEC_PER_MSEC, ndisc_timeout, nd);
+        if (r < 0)
+                goto fail;
+
+        r = sd_event_source_set_priority(nd->timeout_event_source, nd->event_priority);
+        if (r < 0)
+                goto fail;
+
+        (void) sd_event_source_set_description(nd->timeout_event_source, "ndisc-timeout-no-ra");
+
+        r = sd_event_source_set_enabled(nd->timeout_event_source, SD_EVENT_ONESHOT);
+        if (r < 0) {
+                log_ndisc_errno(r, "Error reenabling timer: %m");
+                goto fail;
         }
 
         r = icmp6_send_router_solicitation(nd->fd, &nd->mac_addr);
@@ -337,28 +319,28 @@ static int ndisc_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
                 goto fail;
         }
 
-        log_ndisc("Sent Router Solicitation");
-        nd->nd_sent++;
-
-        assert_se(sd_event_now(nd->event, clock_boottime_or_monotonic(), &time_now) >= 0);
-        next_timeout = time_now + NDISC_ROUTER_SOLICITATION_INTERVAL;
-
-        r = sd_event_source_set_time(nd->timeout_event_source, next_timeout);
-        if (r < 0) {
-                log_ndisc_errno(r, "Error updating timer: %m");
-                goto fail;
-        }
-
-        r = sd_event_source_set_enabled(nd->timeout_event_source, SD_EVENT_ONESHOT);
-        if (r < 0) {
-                log_ndisc_errno(r, "Error reenabling timer: %m");
-                goto fail;
-        }
+        log_ndisc("Sent Router Solicitation, next solicitation in %s",
+                  format_timespan(time_string, FORMAT_TIMESPAN_MAX,
+                                  nd->retransmit_time, USEC_PER_SEC));
 
         return 0;
 
 fail:
         sd_ndisc_stop(nd);
+        return 0;
+}
+
+static int ndisc_timeout_no_ra(sd_event_source *s, uint64_t usec, void *userdata) {
+        sd_ndisc *nd = userdata;
+
+        assert(s);
+        assert(nd);
+
+        log_ndisc("No RA received before link confirmation timeout");
+
+        nd->timeout_no_ra = sd_event_source_unref(nd->timeout_no_ra);
+        ndisc_callback(nd, SD_NDISC_EVENT_TIMEOUT, NULL);
+
         return 0;
 }
 
@@ -376,6 +358,7 @@ _public_ int sd_ndisc_stop(sd_ndisc *nd) {
 
 _public_ int sd_ndisc_start(sd_ndisc *nd) {
         int r;
+        usec_t time_now;
 
         assert_return(nd, -EINVAL);
         assert_return(nd->event, -EINVAL);
@@ -386,6 +369,10 @@ _public_ int sd_ndisc_start(sd_ndisc *nd) {
 
         assert(!nd->recv_event_source);
         assert(!nd->timeout_event_source);
+
+        r = sd_event_now(nd->event, clock_boottime_or_monotonic(), &time_now);
+        if (r < 0)
+                goto fail;
 
         nd->fd = icmp6_bind_router_solicitation(nd->ifindex);
         if (nd->fd < 0)
@@ -410,6 +397,19 @@ _public_ int sd_ndisc_start(sd_ndisc *nd) {
                 goto fail;
 
         (void) sd_event_source_set_description(nd->timeout_event_source, "ndisc-timeout");
+
+        r = sd_event_add_time(nd->event, &nd->timeout_no_ra,
+                              clock_boottime_or_monotonic(),
+                              time_now + NDISC_TIMEOUT_NO_RA_USEC,
+                              10 * USEC_PER_MSEC, ndisc_timeout_no_ra, nd);
+        if (r < 0)
+                goto fail;
+
+        r = sd_event_source_set_priority(nd->timeout_no_ra, nd->event_priority);
+        if (r < 0)
+                goto fail;
+
+        (void) sd_event_source_set_description(nd->timeout_no_ra, "ndisc-timeout-no-ra");
 
         log_ndisc("Started IPv6 Router Solicitation client");
         return 1;

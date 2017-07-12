@@ -395,6 +395,9 @@ static void test_safe_atou16(void) {
 
         r = safe_atou16("junk", &l);
         assert_se(r == -EINVAL);
+
+        r = safe_atou16("123x", &l);
+        assert_se(r == -EINVAL);
 }
 
 static void test_safe_atoi16(void) {
@@ -424,6 +427,70 @@ static void test_safe_atoi16(void) {
         assert_se(r == -ERANGE);
 
         r = safe_atoi16("junk", &l);
+        assert_se(r == -EINVAL);
+
+        r = safe_atoi16("123x", &l);
+        assert_se(r == -EINVAL);
+}
+
+static void test_safe_atou64(void) {
+        int r;
+        uint64_t l;
+
+        r = safe_atou64("12345", &l);
+        assert_se(r == 0);
+        assert_se(l == 12345);
+
+        r = safe_atou64("  12345", &l);
+        assert_se(r == 0);
+        assert_se(l == 12345);
+
+        r = safe_atou64("18446744073709551617", &l);
+        assert_se(r == -ERANGE);
+
+        r = safe_atou64("-1", &l);
+        assert_se(r == -ERANGE);
+
+        r = safe_atou64("  -1", &l);
+        assert_se(r == -ERANGE);
+
+        r = safe_atou64("junk", &l);
+        assert_se(r == -EINVAL);
+
+        r = safe_atou64("123x", &l);
+        assert_se(r == -EINVAL);
+}
+
+static void test_safe_atoi64(void) {
+        int r;
+        int64_t l;
+
+        r = safe_atoi64("-12345", &l);
+        assert_se(r == 0);
+        assert_se(l == -12345);
+
+        r = safe_atoi64("  -12345", &l);
+        assert_se(r == 0);
+        assert_se(l == -12345);
+
+        r = safe_atoi64("32767", &l);
+        assert_se(r == 0);
+        assert_se(l == 32767);
+
+        r = safe_atoi64("  32767", &l);
+        assert_se(r == 0);
+        assert_se(l == 32767);
+
+        r = safe_atoi64("9223372036854775813", &l);
+        assert_se(r == -ERANGE);
+
+        r = safe_atoi64("-9223372036854775813", &l);
+        assert_se(r == -ERANGE);
+
+        r = safe_atoi64("junk", &l);
+        assert_se(r == -EINVAL);
+
+        r = safe_atoi64("123x", &l);
         assert_se(r == -EINVAL);
 }
 
@@ -526,6 +593,19 @@ static void test_parse_nice(void) {
         assert_se(parse_nice("+20", &n) == -ERANGE);
 }
 
+static void test_parse_dev(void) {
+        dev_t dev;
+
+        assert_se(parse_dev("0", &dev) == -EINVAL);
+        assert_se(parse_dev("5", &dev) == -EINVAL);
+        assert_se(parse_dev("5:", &dev) == -EINVAL);
+        assert_se(parse_dev(":5", &dev) == -EINVAL);
+#if SIZEOF_DEV_T < 8
+        assert_se(parse_dev("4294967295:4294967295", &dev) == -EINVAL);
+#endif
+        assert_se(parse_dev("8:11", &dev) >= 0 && major(dev) == 8 && minor(dev) == 11);
+}
+
 int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
@@ -538,10 +618,13 @@ int main(int argc, char *argv[]) {
         test_safe_atolli();
         test_safe_atou16();
         test_safe_atoi16();
+        test_safe_atou64();
+        test_safe_atoi64();
         test_safe_atod();
         test_parse_percent();
         test_parse_percent_unbounded();
         test_parse_nice();
+        test_parse_dev();
 
         return 0;
 }

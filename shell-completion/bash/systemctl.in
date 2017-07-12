@@ -172,7 +172,7 @@ _systemctl () {
                                 comps='full enable-only disable-only'
                         ;;
                         --output|-o)
-                                comps='short short-full short-iso short-precise short-monotonic short-unix verbose export json
+                                comps='short short-full short-iso short-iso-precise short-precise short-monotonic short-unix verbose export json
                                        json-pretty json-sse cat'
                         ;;
                         --machine|-M)
@@ -189,7 +189,7 @@ _systemctl () {
         fi
 
         local -A VERBS=(
-                [ALL_UNITS]='is-active is-failed is-enabled status show cat mask preset help list-dependencies edit set-property'
+                [ALL_UNITS]='is-active is-failed is-enabled status show cat mask preset help list-dependencies edit set-property revert'
             [ENABLED_UNITS]='disable'
            [DISABLED_UNITS]='enable'
         [REENABLABLE_UNITS]='reenable'

@@ -31,6 +31,7 @@
 #include "hwdb-util.h"
 #include "label.h"
 #include "mkdir.h"
+#include "path-util.h"
 #include "selinux-util.h"
 #include "strbuf.h"
 #include "string-util.h"
@@ -390,7 +391,7 @@ static int trie_store(struct trie *trie, const char *filename) {
         int64_t size;
         struct trie_header_f h = {
                 .signature = HWDB_SIG,
-                .tool_version = htole64(atoi(VERSION)),
+                .tool_version = htole64(atoi(PACKAGE_VERSION)),
                 .header_size = htole64(sizeof(struct trie_header_f)),
                 .node_size = htole64(sizeof(struct trie_node_f)),
                 .child_entry_size = htole64(sizeof(struct trie_child_entry_f)),
@@ -670,7 +671,7 @@ static int hwdb_update(int argc, char *argv[], void *userdata) {
         log_debug("strings dedup'ed: %8zu bytes (%8zu)",
                   trie->strings->dedup_len, trie->strings->dedup_count);
 
-        hwdb_bin = strjoin(arg_root, "/", arg_hwdb_bin_dir, "/hwdb.bin");
+        hwdb_bin = path_join(arg_root, arg_hwdb_bin_dir, "hwdb.bin");
         if (!hwdb_bin)
                 return -ENOMEM;
 

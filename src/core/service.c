@@ -45,6 +45,7 @@
 #include "service.h"
 #include "signal-util.h"
 #include "special.h"
+#include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -412,13 +413,12 @@ static int service_add_fd_store(Service *s, int fd, const char *name) {
         }
 
         r = sd_event_add_io(UNIT(s)->manager->event, &fs->event_source, fd, 0, on_fd_store_io, fs);
-        if (r < 0) {
+        if (r < 0 && r != -EPERM) { /* EPERM indicates fds that aren't pollable, which is OK */
                 free(fs->fdname);
                 free(fs);
                 return r;
-        }
-
-        (void) sd_event_source_set_description(fs->event_source, "service-fd-store");
+        } else if (r >= 0)
+                (void) sd_event_source_set_description(fs->event_source, "service-fd-store");
 
         LIST_PREPEND(fd_store, s->fd_store, fs);
         s->n_fd_store++;
@@ -1067,14 +1067,21 @@ static int service_coldplug(Unit *u) {
         return 0;
 }
 
-static int service_collect_fds(Service *s, int **fds, char ***fd_names) {
+static int service_collect_fds(Service *s,
+                               int **fds,
+                               char ***fd_names,
+                               unsigned *n_storage_fds,
+                               unsigned *n_socket_fds) {
+
         _cleanup_strv_free_ char **rfd_names = NULL;
         _cleanup_free_ int *rfds = NULL;
-        int rn_fds = 0, r;
+        unsigned rn_socket_fds = 0, rn_storage_fds = 0;
+        int r;
 
         assert(s);
         assert(fds);
         assert(fd_names);
+        assert(n_socket_fds);
 
         if (s->socket_fd >= 0) {
 
@@ -1089,7 +1096,7 @@ static int service_collect_fds(Service *s, int **fds, char ***fd_names) {
                 if (!rfd_names)
                         return -ENOMEM;
 
-                rn_fds = 1;
+                rn_socket_fds = 1;
         } else {
                 Iterator i;
                 Unit *u;
@@ -1115,20 +1122,20 @@ static int service_collect_fds(Service *s, int **fds, char ***fd_names) {
 
                         if (!rfds) {
                                 rfds = cfds;
-                                rn_fds = cn_fds;
+                                rn_socket_fds = cn_fds;
 
                                 cfds = NULL;
                         } else {
                                 int *t;
 
-                                t = realloc(rfds, (rn_fds + cn_fds) * sizeof(int));
+                                t = realloc(rfds, (rn_socket_fds + cn_fds) * sizeof(int));
                                 if (!t)
                                         return -ENOMEM;
 
-                                memcpy(t + rn_fds, cfds, cn_fds * sizeof(int));
+                                memcpy(t + rn_socket_fds, cfds, cn_fds * sizeof(int));
 
                                 rfds = t;
-                                rn_fds += cn_fds;
+                                rn_socket_fds += cn_fds;
                         }
 
                         r = strv_extend_n(&rfd_names, socket_fdname(sock), cn_fds);
@@ -1139,40 +1146,45 @@ static int service_collect_fds(Service *s, int **fds, char ***fd_names) {
 
         if (s->n_fd_store > 0) {
                 ServiceFDStore *fs;
+                unsigned n_fds;
                 char **nl;
                 int *t;
 
-                t = realloc(rfds, (rn_fds + s->n_fd_store) * sizeof(int));
+                t = realloc(rfds, (rn_socket_fds + s->n_fd_store) * sizeof(int));
                 if (!t)
                         return -ENOMEM;
 
                 rfds = t;
 
-                nl = realloc(rfd_names, (rn_fds + s->n_fd_store + 1) * sizeof(char*));
+                nl = realloc(rfd_names, (rn_socket_fds + s->n_fd_store + 1) * sizeof(char*));
                 if (!nl)
                         return -ENOMEM;
 
                 rfd_names = nl;
+                n_fds = rn_socket_fds;
 
                 LIST_FOREACH(fd_store, fs, s->fd_store) {
-                        rfds[rn_fds] = fs->fd;
-                        rfd_names[rn_fds] = strdup(strempty(fs->fdname));
-                        if (!rfd_names[rn_fds])
+                        rfds[n_fds] = fs->fd;
+                        rfd_names[n_fds] = strdup(strempty(fs->fdname));
+                        if (!rfd_names[n_fds])
                                 return -ENOMEM;
 
-                        rn_fds++;
+                        rn_storage_fds++;
+                        n_fds++;
                 }
 
-                rfd_names[rn_fds] = NULL;
+                rfd_names[n_fds] = NULL;
         }
 
         *fds = rfds;
         *fd_names = rfd_names;
+        *n_socket_fds = rn_socket_fds;
+        *n_storage_fds = rn_storage_fds;
 
         rfds = NULL;
         rfd_names = NULL;
 
-        return rn_fds;
+        return 0;
 }
 
 static bool service_exec_needs_notify_socket(Service *s, ExecFlags flags) {
@@ -1203,7 +1215,7 @@ static int service_spawn(
 
         _cleanup_strv_free_ char **final_env = NULL, **our_env = NULL, **fd_names = NULL;
         _cleanup_free_ int *fds = NULL;
-        unsigned n_fds = 0, n_env = 0;
+        unsigned n_storage_fds = 0, n_socket_fds = 0, n_env = 0;
         const char *path;
         pid_t pid;
 
@@ -1247,12 +1259,11 @@ static int service_spawn(
             s->exec_context.std_output == EXEC_OUTPUT_SOCKET ||
             s->exec_context.std_error == EXEC_OUTPUT_SOCKET) {
 
-                r = service_collect_fds(s, &fds, &fd_names);
+                r = service_collect_fds(s, &fds, &fd_names, &n_storage_fds, &n_socket_fds);
                 if (r < 0)
                         return r;
 
-                n_fds = r;
-                log_unit_debug(UNIT(s), "Passing %i fds to service", n_fds);
+                log_unit_debug(UNIT(s), "Passing %i fds to service", n_storage_fds + n_socket_fds);
         }
 
         r = service_arm_timer(s, usec_add(now(CLOCK_MONOTONIC), timeout));
@@ -1346,7 +1357,8 @@ static int service_spawn(
         exec_params.environment = final_env;
         exec_params.fds = fds;
         exec_params.fd_names = fd_names;
-        exec_params.n_fds = n_fds;
+        exec_params.n_storage_fds = n_storage_fds;
+        exec_params.n_socket_fds = n_socket_fds;
         exec_params.confirm_spawn = manager_get_confirm_spawn(UNIT(s)->manager);
         exec_params.cgroup_supported = UNIT(s)->manager->cgroup_supported;
         exec_params.cgroup_path = path;
@@ -2140,6 +2152,79 @@ _pure_ static bool service_can_reload(Unit *u) {
         return !!s->exec_command[SERVICE_EXEC_RELOAD];
 }
 
+static unsigned service_exec_command_index(Unit *u, ServiceExecCommand id, ExecCommand *current) {
+        Service *s = SERVICE(u);
+        unsigned idx = 0;
+        ExecCommand *first, *c;
+
+        assert(s);
+
+        first = s->exec_command[id];
+
+        /* Figure out where we are in the list by walking back to the beginning */
+        for (c = current; c != first; c = c->command_prev)
+                idx++;
+
+        return idx;
+}
+
+static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command) {
+        Service *s = SERVICE(u);
+        ServiceExecCommand id;
+        unsigned idx;
+        const char *type;
+        char **arg;
+        _cleanup_free_ char *args = NULL, *p = NULL;
+        size_t allocated = 0, length = 0;
+
+        assert(s);
+        assert(f);
+
+        if (!command)
+                return 0;
+
+        if (command == s->control_command) {
+                type = "control";
+                id = s->control_command_id;
+        } else {
+                type = "main";
+                id = SERVICE_EXEC_START;
+        }
+
+        idx = service_exec_command_index(u, id, command);
+
+        STRV_FOREACH(arg, command->argv) {
+                size_t n;
+                _cleanup_free_ char *e = NULL;
+
+                e = xescape(*arg, WHITESPACE);
+                if (!e)
+                        return -ENOMEM;
+
+                n = strlen(e);
+                if (!GREEDY_REALLOC(args, allocated, length + 1 + n + 1))
+                        return -ENOMEM;
+
+                if (length > 0)
+                        args[length++] = ' ';
+
+                memcpy(args + length, e, n);
+                length += n;
+        }
+
+        if (!GREEDY_REALLOC(args, allocated, length + 1))
+                return -ENOMEM;
+        args[length++] = 0;
+
+        p = xescape(command->path, WHITESPACE);
+        if (!p)
+                return -ENOMEM;
+
+        fprintf(f, "%s-command=%s %u %s %s\n", type, service_exec_command_to_string(id), idx, p, args);
+
+        return 0;
+}
+
 static int service_serialize(Unit *u, FILE *f, FDSet *fds) {
         Service *s = SERVICE(u);
         ServiceFDStore *fs;
@@ -2167,11 +2252,8 @@ static int service_serialize(Unit *u, FILE *f, FDSet *fds) {
         if (r < 0)
                 return r;
 
-        /* FIXME: There's a minor uncleanliness here: if there are
-         * multiple commands attached here, we will start from the
-         * first one again */
-        if (s->control_command_id >= 0)
-                unit_serialize_item(u, f, "control-command", service_exec_command_to_string(s->control_command_id));
+        service_serialize_exec_command(u, f, s->control_command);
+        service_serialize_exec_command(u, f, s->main_command);
 
         r = unit_serialize_item_fd(u, f, fds, "stdin-fd", s->stdin_fd);
         if (r < 0)
@@ -2223,6 +2305,106 @@ static int service_serialize(Unit *u, FILE *f, FDSet *fds) {
 
         if (s->watchdog_override_enable)
                unit_serialize_item_format(u, f, "watchdog-override-usec", USEC_FMT, s->watchdog_override_usec);
+
+        return 0;
+}
+
+static int service_deserialize_exec_command(Unit *u, const char *key, const char *value) {
+        Service *s = SERVICE(u);
+        int r;
+        unsigned idx = 0, i;
+        bool control, found = false;
+        ServiceExecCommand id = _SERVICE_EXEC_COMMAND_INVALID;
+        ExecCommand *command = NULL;
+        _cleanup_free_ char *path = NULL;
+        _cleanup_strv_free_ char **argv = NULL;
+
+        enum ExecCommandState {
+                STATE_EXEC_COMMAND_TYPE,
+                STATE_EXEC_COMMAND_INDEX,
+                STATE_EXEC_COMMAND_PATH,
+                STATE_EXEC_COMMAND_ARGS,
+                _STATE_EXEC_COMMAND_MAX,
+                _STATE_EXEC_COMMAND_INVALID = -1,
+        } state;
+
+        assert(s);
+        assert(key);
+        assert(value);
+
+        control = streq(key, "control-command");
+
+        state = STATE_EXEC_COMMAND_TYPE;
+
+        for (;;) {
+                _cleanup_free_ char *arg = NULL;
+
+                r = extract_first_word(&value, &arg, NULL, EXTRACT_CUNESCAPE);
+                if (r == 0)
+                        break;
+                else if (r < 0)
+                        return r;
+
+                switch (state) {
+                case STATE_EXEC_COMMAND_TYPE:
+                        id = service_exec_command_from_string(arg);
+                        if (id < 0)
+                                return -EINVAL;
+
+                        state = STATE_EXEC_COMMAND_INDEX;
+                        break;
+                case STATE_EXEC_COMMAND_INDEX:
+                        r = safe_atou(arg, &idx);
+                        if (r < 0)
+                                return -EINVAL;
+
+                        state = STATE_EXEC_COMMAND_PATH;
+                        break;
+                case STATE_EXEC_COMMAND_PATH:
+                        path = arg;
+                        arg = NULL;
+                        state = STATE_EXEC_COMMAND_ARGS;
+
+                        if (!path_is_absolute(path))
+                                return -EINVAL;
+                        break;
+                case STATE_EXEC_COMMAND_ARGS:
+                        r = strv_extend(&argv, arg);
+                        if (r < 0)
+                                return -ENOMEM;
+                        break;
+                default:
+                        assert_not_reached("Unknown error at deserialization of exec command");
+                        break;
+                }
+        }
+
+        if (state != STATE_EXEC_COMMAND_ARGS)
+                return -EINVAL;
+
+        /* Let's check whether exec command on given offset matches data that we just deserialized */
+        for (command = s->exec_command[id], i = 0; command; command = command->command_next, i++) {
+                if (i != idx)
+                        continue;
+
+                found = strv_equal(argv, command->argv) && streq(command->path, path);
+                break;
+        }
+
+        if (!found) {
+                /* Command at the index we serialized is different, let's look for command that exactly
+                 * matches but is on different index. If there is no such command we will not resume execution. */
+                for (command = s->exec_command[id]; command; command = command->command_next)
+                        if (strv_equal(command->argv, argv) && streq(command->path, path))
+                                break;
+        }
+
+        if (command && control)
+                s->control_command = command;
+        else if (command)
+                s->main_command = command;
+        else
+                log_unit_warning(u, "Current command vanished from the unit file, execution of the command list won't be resumed.");
 
         return 0;
 }
@@ -2309,16 +2491,6 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                         s->status_text = t;
                 }
 
-        } else if (streq(key, "control-command")) {
-                ServiceExecCommand id;
-
-                id = service_exec_command_from_string(value);
-                if (id < 0)
-                        log_unit_debug(u, "Failed to parse exec-command value: %s", value);
-                else {
-                        s->control_command_id = id;
-                        s->control_command = s->exec_command[id];
-                }
         } else if (streq(key, "accept-socket")) {
                 Unit *socket;
 
@@ -2437,6 +2609,10 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                         s->watchdog_override_enable = true;
                         s->watchdog_override_usec = watchdog_override_usec;
                 }
+        } else if (STR_IN_SET(key, "main-command", "control-command")) {
+                r = service_deserialize_exec_command(u, key, value);
+                if (r < 0)
+                        log_unit_debug_errno(u, r, "Failed to parse serialized command \"%s\": %m", value);
         } else
                 log_unit_debug(u, "Unknown serialization key: %s", key);
 
@@ -2693,7 +2869,6 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
 
                 log_struct(f == SERVICE_SUCCESS ? LOG_DEBUG :
                            (code == CLD_EXITED ? LOG_NOTICE : LOG_WARNING),
-                           LOG_UNIT_ID(u),
                            LOG_UNIT_MESSAGE(u, "Main process exited, code=%s, status=%i/%s",
                                             sigchld_code_to_string(code), status,
                                             strna(code == CLD_EXITED
@@ -2701,6 +2876,7 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                                   : signal_to_string(status))),
                            "EXIT_CODE=%s", sigchld_code_to_string(code),
                            "EXIT_STATUS=%i", status,
+                           LOG_UNIT_ID(u),
                            NULL);
 
                 if (s->result == SERVICE_SUCCESS)
@@ -3406,15 +3582,6 @@ static const char* const service_exec_command_table[_SERVICE_EXEC_COMMAND_MAX] =
 };
 
 DEFINE_STRING_TABLE_LOOKUP(service_exec_command, ServiceExecCommand);
-
-static const char* const notify_access_table[_NOTIFY_ACCESS_MAX] = {
-        [NOTIFY_NONE] = "none",
-        [NOTIFY_MAIN] = "main",
-        [NOTIFY_EXEC] = "exec",
-        [NOTIFY_ALL] = "all"
-};
-
-DEFINE_STRING_TABLE_LOOKUP(notify_access, NotifyAccess);
 
 static const char* const notify_state_table[_NOTIFY_STATE_MAX] = {
         [NOTIFY_UNKNOWN] = "unknown",

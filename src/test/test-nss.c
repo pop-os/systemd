@@ -71,9 +71,11 @@ static void* open_handle(const char* dir, const char* module, int flags) {
         const char *path;
         void *handle;
 
-        if (dir)
-                path = strjoina(dir, "/.libs/libnss_", module, ".so.2");
-        else
+        if (dir) {
+                path = strjoina(dir, "/libnss_", module, ".so.2");
+                if (access(path, F_OK) < 0)
+                        path = strjoina(dir, "/.libs/libnss_", module, ".so.2");
+        } else
                 path = strjoina("libnss_", module, ".so.2");
 
         handle = dlopen(path, flags);
@@ -103,7 +105,7 @@ static int print_gaih_addrtuples(const struct gaih_addrtuple *tuples) {
                         goto numerical_index;
 
                 if (if_indextoname(it->scopeid, ifname) == NULL) {
-                        log_warning("if_indextoname(%d) failed: %m", it->scopeid);
+                        log_warning_errno(errno, "if_indextoname(%d) failed: %m", it->scopeid);
                 numerical_index:
                         xsprintf(ifname, "%i", it->scopeid);
                 };

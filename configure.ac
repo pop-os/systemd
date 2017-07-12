@@ -20,7 +20,7 @@
 AC_PREREQ([2.64])
 
 AC_INIT([systemd],
-        [233],
+        [234],
         [https://github.com/systemd/systemd/issues],
         [systemd],
         [https://www.freedesktop.org/wiki/Software/systemd])
@@ -57,6 +57,7 @@ AS_IF([test "x$enable_largefile" = "xno"], [AC_MSG_ERROR([--disable-largefile is
 SET_ARCH(X86_64, x86_64*)
 SET_ARCH(IA32, i*86*)
 SET_ARCH(MIPS, mips*)
+SET_ARCH(ARM, arm*)
 SET_ARCH(AARCH64, aarch64*)
 
 # i18n stuff for the PolicyKit policy files, heck whether intltool can be found, disable NLS otherwise
@@ -327,7 +328,6 @@ AC_CHECK_DECLS([
         pivot_root,
         name_to_handle_at,
         setns,
-        getrandom,
         renameat2,
         kcmp,
         keyctl,
@@ -342,6 +342,13 @@ AC_CHECK_DECLS([
 #include <sched.h>
 #include <string.h>
 #include <linux/loop.h>
+]])
+
+AC_CHECK_DECLS([getrandom],
+               [AC_DEFINE([USE_SYS_RANDOM_H], [], [sys/random.h is usable])],
+               [AC_CHECK_DECLS([getrandom], [], [], [[
+#include <sys/random.h>
+]])], [[
 #include <linux/random.h>
 ]])
 
@@ -360,7 +367,8 @@ AC_CHECK_DECLS([IFLA_INET6_ADDR_GEN_MODE,
                 IFLA_PHYS_PORT_ID,
                 IFLA_BOND_AD_INFO,
                 IFLA_VLAN_PROTOCOL,
-                IFLA_VXLAN_REMCSUM_NOPARTIAL,
+                IFLA_VXLAN_GPE,
+                IFLA_GENEVE_LABEL,
                 IFLA_IPTUN_ENCAP_DPORT,
                 IFLA_GRE_ENCAP_DPORT,
                 IFLA_BRIDGE_VLAN_INFO,
@@ -398,13 +406,27 @@ AS_IF([test "x$enable_dbus" != "xno"], [
 AM_CONDITIONAL(HAVE_DBUS, [test "$have_dbus" = "yes"])
 
 # ------------------------------------------------------------------------------
+have_glib=no
+AC_ARG_ENABLE(glib, AS_HELP_STRING([--disable-glib], [disable usage of glib,gobject,gio in tests]))
+AS_IF([test "x$enable_glib" != "xno"], [
+        PKG_CHECK_MODULES(GLIB, [glib-2.0 >= 2.22.0 gobject-2.0 >= 2.22.0 gio-2.0],
+                [AC_DEFINE(HAVE_GLIB, 1, [Define if glib,gobject,gio are available]) have_glib=yes],
+                [have_glib=no])
+        AS_IF([test "x$have_glib" = "xno" -a "x$enable_glib" = "xyes"],
+                [AC_MSG_ERROR([*** glib support requested but libraries not found])])])
+
+# ------------------------------------------------------------------------------
 have_utmp=yes
 AC_ARG_ENABLE([utmp], AS_HELP_STRING([--disable-utmp], [disable utmp/wtmp log handling]),
         AS_CASE("x${enableval}",
                 [xyes], [have_utmp=yes],
                 [xno],  [have_utmp=no],
                 AC_MSG_ERROR(bad value ${enableval} for --enable-utmp)))
-AS_IF([test "x$have_utmp" = "xyes"], [AC_DEFINE(HAVE_UTMP, 1, [Define if utmp/wtmp support is enabled])])
+AS_IF([test "x$have_utmp" = "xyes"], [
+        AC_DEFINE(HAVE_UTMP, 1, [Define if utmp/wtmp support is enabled])
+        have_utmp=yes
+        M4_DEFINES="$M4_DEFINES -DHAVE_UTMP"],
+        [have_utmp=no])
 AM_CONDITIONAL([HAVE_UTMP], [test "x$have_utmp" = "xyes"])
 
 # ------------------------------------------------------------------------------
@@ -1011,6 +1033,40 @@ if test "x$enable_libidn" != "xno"; then
 fi
 AM_CONDITIONAL(HAVE_LIBIDN, [test "$have_libidn" = "yes"])
 
+have_libidn2=no
+AC_ARG_ENABLE(libidn2, AS_HELP_STRING([--disable-libidn2], [disable optional LIBIDN2 support]))
+if test "$have_libidn" != "yes"; then
+        if test "x$enable_libidn2" != "xno"; then
+                PKG_CHECK_MODULES(LIBIDN2, [libidn2 >= 2.0.0],
+                       [AC_DEFINE(HAVE_LIBIDN2, 1, [Define if libidn2 is available])
+                        have_libidn2=yes
+                        M4_DEFINES="$M4_DEFINES -DHAVE_LIBIDN2"],
+                       [have_libidn2=no])
+                if test "x$have_libidn2" = "xno" -a "x$enable_libidn2" = "xyes"; then
+                        AC_MSG_ERROR([*** libidn2 support requested but libraries not found])
+                fi
+        fi
+fi
+AM_CONDITIONAL(HAVE_LIBIDN2, [test "$have_libidn2" = "yes"])
+
+# ------------------------------------------------------------------------------
+have_idn=no
+AC_ARG_ENABLE(idn, AS_HELP_STRING([--disable-idn], [disable IDN when printing host names]))
+if test "x$enable_idn" != "xno"; then
+        have_idn=yes
+        AC_DEFINE(ENABLE_IDN, [1], [IDN is enabled])
+fi
+AM_CONDITIONAL(ENABLE_IDN, [test "$have_idn" = "yes"])
+
+# ------------------------------------------------------------------------------
+have_nss_systemd=no
+AC_ARG_ENABLE(nss-systemd, AS_HELP_STRING([--disable-nss-systemd], [disable nss-systemd support]))
+if test "x$enable_nss_systemd" != "xno"; then
+        have_nss_systemd=yes
+        AC_DEFINE(ENABLE_NSS_SYSTEMD, [1], [nss-systemd is enabled])
+fi
+AM_CONDITIONAL(ENABLE_NSS_SYSTEMD, [test "$have_nss_systemd" = "yes"])
+
 # ------------------------------------------------------------------------------
 have_libiptc=no
 AC_ARG_ENABLE(libiptc, AS_HELP_STRING([--disable-libiptc], [disable optional LIBIPTC support]))
@@ -1074,6 +1130,11 @@ if test "x$enable_sysusers" != "xno"; then
 fi
 AM_CONDITIONAL(ENABLE_SYSUSERS, [test "$have_sysusers" = "yes"])
 
+AC_ARG_ENABLE(gshadow, AS_HELP_STRING([--disable-gshadow], [disable shadow group support]))
+AS_IF([test "x${enable_gshadow}" != "xno"], [
+        AC_DEFINE(ENABLE_GSHADOW, 1, [shadow group support is enabled])
+])
+
 # ------------------------------------------------------------------------------
 have_firstboot=no
 AC_ARG_ENABLE(firstboot, AS_HELP_STRING([--disable-firstboot], [disable firstboot support]))
@@ -1113,7 +1174,7 @@ if test "x$enable_logind" != "xno"; then
         have_logind=yes
 fi
 AM_CONDITIONAL(ENABLE_LOGIND, [test "$have_logind" = "yes"])
-AS_IF([test "$have_logind" = "yes"], [ AC_DEFINE(HAVE_LOGIND, [1], [Logind support available]) ])
+AS_IF([test "$have_logind" = "yes"], [ AC_DEFINE(ENABLE_LOGIND, [1], [Logind support available]) ])
 
 AC_ARG_WITH([kill-user-processes],
         [AS_HELP_STRING([--without-kill-user-processes], [set logind's KillUserProcesses=no by default])])
@@ -1206,6 +1267,16 @@ AC_DEFINE_UNQUOTED(SYSTEM_GID_MAX, [$SYSTEM_GID_MAX], [Maximum System GID])
 AC_SUBST(SYSTEM_GID_MAX)
 
 # ------------------------------------------------------------------------------
+
+AC_ARG_WITH(dev-kvm-mode,
+        AS_HELP_STRING([--with-dev-kvm-mode=MODE],
+                [/dev/kvm access mode, defaults to "0660"]),
+        [DEV_KVM_MODE="$withval"],
+        [DEV_KVM_MODE="0660"])
+
+AC_SUBST(DEV_KVM_MODE, [$DEV_KVM_MODE], [/dev/kvm access mode])
+
+# ------------------------------------------------------------------------------
 have_localed=no
 AC_ARG_ENABLE(localed, AS_HELP_STRING([--disable-localed], [disable locale daemon]))
 if test "x$enable_localed" != "xno"; then
@@ -1228,8 +1299,14 @@ AC_ARG_ENABLE(polkit, AS_HELP_STRING([--disable-polkit], [disable PolicyKit supp
 if test "x$enable_polkit" != "xno"; then
         AC_DEFINE(ENABLE_POLKIT, 1, [Define if PolicyKit support is to be enabled])
         have_polkit=yes
+
+        # also enable support for *.pkla files on old polkit
+        PKG_CHECK_MODULES(POLKIT, [ polkit-gobject-1 < 0.106 ],
+                           [polkit_pkla=yes],
+                           [polkit_pkla=no])
 fi
 AM_CONDITIONAL(ENABLE_POLKIT, [test "x$have_polkit" = "xyes"])
+AM_CONDITIONAL(ENABLE_POLKIT_PKLA, [test "x$polkit_pkla" = "xyes"])
 
 # ------------------------------------------------------------------------------
 have_resolved=no
@@ -1257,6 +1334,11 @@ AC_ARG_WITH(default-dnssec,
                [default DNSSEC mode, defaults to "allow-downgrade"]),
         [DEFAULT_DNSSEC_MODE="$withval"],
         [DEFAULT_DNSSEC_MODE="allow-downgrade"])
+
+if test "x$have_gcrypt" = xno -a "x${DEFAULT_DNSSEC_MODE}" != xno ; then
+        AC_MSG_WARN(default-dnssec cannot be set to yes or allow-downgrade when gcrypt is disabled. Setting default-dnssec to no.)
+        DEFAULT_DNSSEC_MODE="no"
+fi
 
 AS_CASE("x${DEFAULT_DNSSEC_MODE}",
         [xno], [mode=DNSSEC_NO],
@@ -1297,6 +1379,9 @@ AM_COND_IF(ARCH_IA32, [
 AM_COND_IF(ARCH_X86_64, [
         EFI_MACHINE_TYPE_NAME=x64])
 
+AM_COND_IF(ARCH_ARM, [
+        EFI_MACHINE_TYPE_NAME=arm])
+
 AM_COND_IF(ARCH_AARCH64, [
         EFI_MACHINE_TYPE_NAME=aa64])
 
@@ -1306,7 +1391,13 @@ AC_SUBST([EFI_MACHINE_TYPE_NAME])
 have_gnuefi=no
 AC_ARG_ENABLE(gnuefi, AS_HELP_STRING([--enable-gnuefi], [enable optional gnuefi support]))
 AS_IF([test "x$enable_gnuefi" != "xno"], [
-        AC_CHECK_HEADERS(efi/${EFI_ARCH}/efibind.h,
+        AC_ARG_WITH(efi-includedir,
+                AS_HELP_STRING([--with-efi-includedir=PATH], [path to EFI include directory]),
+                [EFI_INC_DIR="$withval"], [EFI_INC_DIR="/usr/include"]
+        )
+        AC_SUBST([EFI_INC_DIR])
+
+        AC_CHECK_HEADERS(${EFI_INC_DIR}/efi/${EFI_ARCH}/efibind.h,
                 [AC_DEFINE(HAVE_GNUEFI, 1, [Define if gnuefi is available])
                  have_gnuefi=yes],
                 [AS_IF([test "x$enable_gnuefi" = xyes],
@@ -1335,12 +1426,6 @@ AS_IF([test "x$enable_gnuefi" != "xno"], [
               [AS_IF([test "x$enable_gnuefi" = xyes],
                      [AC_MSG_ERROR([*** gnuefi support requested but files not found])],
                      [have_gnuefi=no])])
-
-        AC_ARG_WITH(efi-includedir,
-                AS_HELP_STRING([--with-efi-includedir=PATH], [path to EFI include directory]),
-                [EFI_INC_DIR="$withval"], [EFI_INC_DIR="/usr/include"]
-        )
-        AC_SUBST([EFI_INC_DIR])
 ])
 AM_CONDITIONAL(HAVE_GNUEFI, [test "x$have_gnuefi" = xyes])
 
@@ -1571,6 +1656,12 @@ AC_ARG_WITH([pamconfdir],
 AM_CONDITIONAL(ENABLE_PAM_CONFIG, [test "$with_pamconfdir" != "no"])
 AX_NORMALIZE_PATH([with_pamconfdir])
 
+AC_ARG_WITH([rpmmacrosdir],
+        AS_HELP_STRING([--with-rpmmacrosdir=DIR], [directory to store macros for RPM]),
+        [], [with_rpmmacrosdir=\${prefix}/lib/rpm/macros.d])
+AM_CONDITIONAL(ENABLE_RPM_MACROS, [test "$with_rpmmacrosdir" != "no"])
+AX_NORMALIZE_PATH([with_rpmmacrosdir])
+
 AC_ARG_ENABLE([split-usr],
         AS_HELP_STRING([--enable-split-usr], [assume that /bin, /sbin aren't symlinks into /usr]),
         [],
@@ -1641,6 +1732,7 @@ AC_SUBST([bashcompletiondir], [$with_bashcompletiondir])
 AC_SUBST([zshcompletiondir], [$with_zshcompletiondir])
 AC_SUBST([pamlibdir], [$with_pamlibdir])
 AC_SUBST([pamconfdir], [$with_pamconfdir])
+AC_SUBST([rpmmacrosdir], [$with_rpmmacrosdir])
 AC_SUBST([rootprefix], [$with_rootprefix])
 AC_SUBST([rootlibdir], [$with_rootlibdir])
 
@@ -1651,7 +1743,7 @@ AC_CONFIG_FILES([
 
 AC_OUTPUT
 AC_MSG_RESULT([
-        $PACKAGE_NAME $VERSION
+        $PACKAGE_NAME $PACKAGE_VERSION
 
         libcryptsetup:                     ${have_libcryptsetup}
         PAM:                               ${have_pam}
@@ -1671,7 +1763,9 @@ AC_MSG_RESULT([
         MICROHTTPD:                        ${have_microhttpd}
         GNUTLS:                            ${have_gnutls}
         libcurl:                           ${have_libcurl}
+        libidn2:                           ${have_libidn2}
         libidn:                            ${have_libidn}
+        IDN:                               ${have_idn}
         libiptc:                           ${have_libiptc}
         ELFUTILS:                          ${have_elfutils}
         binfmt:                            ${have_binfmt}
@@ -1700,7 +1794,7 @@ AC_MSG_RESULT([
         default DNS servers:               ${DNS_SERVERS}
         default DNSSEC mode:               ${DEFAULT_DNSSEC_MODE}
         coredump:                          ${have_coredump}
-        polkit:                            ${have_polkit}
+        polkit:                            ${have_polkit} (legacy pkla support: ${polkit_pkla})
         efi:                               ${have_efi}
         gnuefi:                            ${have_gnuefi}
         efi arch:                          ${EFI_ARCH}
@@ -1714,7 +1808,9 @@ AC_MSG_RESULT([
         blkid:                             ${have_blkid}
         libmount:                          ${have_libmount}
         dbus:                              ${have_dbus}
+        glib:                              ${have_glib}
         nss-myhostname:                    ${have_myhostname}
+        nss-systemd:                       ${have_nss_systemd}
         hwdb:                              ${enable_hwdb}
         tpm:                               ${have_tpm}
         Python:                            ${have_python}
@@ -1740,6 +1836,7 @@ AC_MSG_RESULT([
         build Python:                      ${PYTHON}
         PAM modules dir:                   ${with_pamlibdir}
         PAM configuration dir:             ${with_pamconfdir}
+        RPM macros dir:                    ${with_rpmmacrosdir}
         D-Bus policy dir:                  ${with_dbuspolicydir}
         D-Bus session dir:                 ${with_dbussessionservicedir}
         D-Bus system dir:                  ${with_dbussystemservicedir}
@@ -1753,6 +1850,7 @@ AC_MSG_RESULT([
         TTY GID:                           ${TTY_GID}
         maximum system UID:                ${SYSTEM_UID_MAX}
         maximum system GID:                ${SYSTEM_GID_MAX}
+        /dev/kvm access mode:              ${DEV_KVM_MODE}
         certificate root:                  ${CERTIFICATEROOT}
         support URL:                       ${SUPPORT_URL}
         nobody user name:                  ${NOBODY_USER_NAME}

@@ -112,7 +112,7 @@ static void device_init(Unit *u) {
          * indefinitely for plugged in devices, something which cannot
          * happen for the other units since their operations time out
          * anyway. */
-        u->job_timeout = u->manager->default_timeout_start_usec;
+        u->job_running_timeout = u->manager->default_timeout_start_usec;
 
         u->ignore_on_isolate = true;
 }
@@ -501,12 +501,16 @@ static void device_update_found_one(Device *d, bool add, DeviceFound found, bool
                  * now referenced by the kernel, then we assume the
                  * kernel knows it now, and udev might soon too. */
                 device_set_state(d, DEVICE_TENTATIVE);
-        else
+        else {
                 /* If nobody sees the device, or if the device was
                  * previously seen by udev and now is only referenced
                  * from the kernel, then we consider the device is
                  * gone, the kernel just hasn't noticed it yet. */
+
                 device_set_state(d, DEVICE_DEAD);
+                device_unset_sysfs(d);
+        }
+
 }
 
 static int device_update_found_by_sysfs(Manager *m, const char *sysfs, bool add, DeviceFound found, bool now) {

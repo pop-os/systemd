@@ -345,10 +345,10 @@ static int bus_method_resolve_hostname(sd_bus_message *message, void *userdata, 
                 return r;
 
         r = dns_question_new_address(&question_idna, family, hostname, true);
-        if (r < 0)
+        if (r < 0 && r != -EALREADY)
                 return r;
 
-        r = dns_query_new(m, &q, question_utf8, question_idna, ifindex, flags);
+        r = dns_query_new(m, &q, question_utf8, question_idna ?: question_utf8, ifindex, flags);
         if (r < 0)
                 return r;
 
@@ -1450,6 +1450,8 @@ static int bus_property_get_ntas(
         return sd_bus_message_close_container(reply);
 }
 
+static BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_dns_stub_listener_mode, dns_stub_listener_mode, DnsStubListenerMode);
+
 static int bus_method_reset_statistics(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Manager *m = userdata;
         DnsScope *s;
@@ -1577,6 +1579,7 @@ static const sd_bus_vtable resolve_vtable[] = {
         SD_BUS_PROPERTY("DNSSECStatistics", "(tttt)", bus_property_get_dnssec_statistics, 0, 0),
         SD_BUS_PROPERTY("DNSSECSupported", "b", bus_property_get_dnssec_supported, 0, 0),
         SD_BUS_PROPERTY("DNSSECNegativeTrustAnchors", "as", bus_property_get_ntas, 0, 0),
+        SD_BUS_PROPERTY("DNSStubListener", "s", bus_property_get_dns_stub_listener_mode, offsetof(Manager, dns_stub_listener_mode), 0),
 
         SD_BUS_METHOD("ResolveHostname", "isit", "a(iiay)st", bus_method_resolve_hostname, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ResolveAddress", "iiayt", "a(is)t", bus_method_resolve_address, SD_BUS_VTABLE_UNPRIVILEGED),

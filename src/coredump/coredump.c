@@ -144,10 +144,10 @@ static int parse_config(void) {
         };
 
         return config_parse_many_nulstr(PKGSYSCONFDIR "/coredump.conf",
-                                 CONF_PATHS_NULSTR("systemd/coredump.conf.d"),
-                                 "Coredump\0",
-                                 config_item_table_lookup, items,
-                                 false, NULL);
+                                        CONF_PATHS_NULSTR("systemd/coredump.conf.d"),
+                                        "Coredump\0",
+                                        config_item_table_lookup, items,
+                                        false, NULL);
 }
 
 static inline uint64_t storage_size_max(void) {
@@ -800,12 +800,11 @@ log:
         if (journald_crash) {
                 /* We cannot log to the journal, so just print the MESSAGE.
                  * The target was set previously to something safe. */
-                log_struct(LOG_ERR, core_message, NULL);
+                log_dispatch(LOG_ERR, 0, core_message);
                 return 0;
         }
 
-        if (core_message)
-                IOVEC_SET_STRING(iovec[n_iovec++], core_message);
+        IOVEC_SET_STRING(iovec[n_iovec++], core_message);
 
         if (truncated)
                 IOVEC_SET_STRING(iovec[n_iovec++], "COREDUMP_TRUNCATED=1");
@@ -1326,7 +1325,8 @@ static int process_backtrace(int argc, char *argv[]) {
                         log_error_errno(r, "Failed to parse journal entry on stdin: %m");
                         goto finish;
                 }
-                if (r == 1)
+                if (r == 1 ||                        /* complete entry */
+                    journal_importer_eof(&importer)) /* end of data */
                         break;
         }
 

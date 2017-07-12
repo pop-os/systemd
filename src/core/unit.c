@@ -99,6 +99,7 @@ Unit *unit_new(Manager *m, size_t size) {
         u->on_failure_job_mode = JOB_REPLACE;
         u->cgroup_inotify_wd = -1;
         u->job_timeout = USEC_INFINITY;
+        u->job_running_timeout = USEC_INFINITY;
         u->ref_uid = UID_INVALID;
         u->ref_gid = GID_INVALID;
         u->cpu_usage_last = NSEC_INFINITY;
@@ -955,9 +956,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
                 "%s\tPerpetual: %s\n"
                 "%s\tSlice: %s\n"
                 "%s\tCGroup: %s\n"
-                "%s\tCGroup realized: %s\n"
-                "%s\tCGroup mask: 0x%x\n"
-                "%s\tCGroup members mask: 0x%x\n",
+                "%s\tCGroup realized: %s\n",
                 prefix, u->id,
                 prefix, unit_description(u),
                 prefix, strna(u->instance),
@@ -974,9 +973,18 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, yes_no(u->perpetual),
                 prefix, strna(unit_slice_name(u)),
                 prefix, strna(u->cgroup_path),
-                prefix, yes_no(u->cgroup_realized),
-                prefix, u->cgroup_realized_mask,
-                prefix, u->cgroup_members_mask);
+                prefix, yes_no(u->cgroup_realized));
+
+        if (u->cgroup_realized_mask != 0) {
+                _cleanup_free_ char *s = NULL;
+                (void) cg_mask_to_string(u->cgroup_realized_mask, &s);
+                fprintf(f, "%s\tCGroup mask: %s\n", prefix, strnull(s));
+        }
+        if (u->cgroup_members_mask != 0) {
+                _cleanup_free_ char *s = NULL;
+                (void) cg_mask_to_string(u->cgroup_members_mask, &s);
+                fprintf(f, "%s\tCGroup members mask: %s\n", prefix, strnull(s));
+        }
 
         SET_FOREACH(t, u->names, i)
                 fprintf(f, "%s\tName: %s\n", prefix, t);
@@ -1336,6 +1344,9 @@ int unit_load(Unit *u) {
                         goto fail;
                 }
 
+                if (u->job_running_timeout != USEC_INFINITY && u->job_running_timeout > u->job_timeout)
+                        log_unit_warning(u, "JobRunningTimeoutSec= is greater than JobTimeoutSec=, it has no effect.");
+
                 unit_update_cgroup_members_masks(u);
         }
 
@@ -1497,9 +1508,9 @@ static void unit_status_log_starting_stopping_reloading(Unit *u, JobType t) {
          * possible, which means we should avoid the low-level unit
          * name. */
         log_struct(LOG_INFO,
-                   mid,
-                   LOG_UNIT_ID(u),
                    LOG_MESSAGE("%s", buf),
+                   LOG_UNIT_ID(u),
+                   mid,
                    NULL);
 }
 
@@ -1819,6 +1830,10 @@ static void unit_check_binds_to(Unit *u) {
 
         SET_FOREACH(other, u->dependencies[UNIT_BINDS_TO], i) {
                 if (other->job)
+                        continue;
+
+                if (!other->coldplugged)
+                        /* We might yet create a job for the other unit… */
                         continue;
 
                 if (!UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(other)))
@@ -2627,6 +2642,9 @@ static int signal_name_owner_changed(sd_bus_message *message, void *userdata, sd
                 return 0;
         }
 
+        old_owner = isempty(old_owner) ? NULL : old_owner;
+        new_owner = isempty(new_owner) ? NULL : new_owner;
+
         if (UNIT_VTABLE(u)->bus_name_owner_change)
                 UNIT_VTABLE(u)->bus_name_owner_change(u, name, old_owner, new_owner);
 
@@ -2693,6 +2711,25 @@ bool unit_can_serialize(Unit *u) {
         return UNIT_VTABLE(u)->serialize && UNIT_VTABLE(u)->deserialize_item;
 }
 
+static int unit_serialize_cgroup_mask(FILE *f, const char *key, CGroupMask mask) {
+        _cleanup_free_ char *s = NULL;
+        int r = 0;
+
+        assert(f);
+        assert(key);
+
+        if (mask != 0) {
+                r = cg_mask_to_string(mask, &s);
+                if (r >= 0) {
+                        fputs(key, f);
+                        fputc('=', f);
+                        fputs(s, f);
+                        fputc('\n', f);
+                }
+        }
+        return r;
+}
+
 int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
         int r;
 
@@ -2740,6 +2777,8 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
         if (u->cgroup_path)
                 unit_serialize_item(u, f, "cgroup", u->cgroup_path);
         unit_serialize_item(u, f, "cgroup-realized", yes_no(u->cgroup_realized));
+        (void) unit_serialize_cgroup_mask(f, "cgroup-realized-mask", u->cgroup_realized_mask);
+        (void) unit_serialize_cgroup_mask(f, "cgroup-enabled-mask", u->cgroup_enabled_mask);
 
         if (uid_is_valid(u->ref_uid))
                 unit_serialize_item_format(u, f, "ref-uid", UID_FMT, u->ref_uid);
@@ -2995,6 +3034,20 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                         else
                                 u->cgroup_realized = b;
 
+                        continue;
+
+                } else if (streq(l, "cgroup-realized-mask")) {
+
+                        r = cg_mask_from_string(v, &u->cgroup_realized_mask);
+                        if (r < 0)
+                                log_unit_debug(u, "Failed to parse cgroup-realized-mask %s, ignoring.", v);
+                        continue;
+
+                } else if (streq(l, "cgroup-enabled-mask")) {
+
+                        r = cg_mask_from_string(v, &u->cgroup_enabled_mask);
+                        if (r < 0)
+                                log_unit_debug(u, "Failed to parse cgroup-enabled-mask %s, ignoring.", v);
                         continue;
 
                 } else if (streq(l, "ref-uid")) {

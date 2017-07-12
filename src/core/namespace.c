@@ -27,6 +27,7 @@
 #include <linux/fs.h>
 
 #include "alloc-util.h"
+#include "base-filesystem.h"
 #include "dev-setup.h"
 #include "fd-util.h"
 #include "fs-util.h"
@@ -792,13 +793,14 @@ static int apply_mount(
         return 0;
 }
 
-static int make_read_only(MountEntry *m, char **blacklist) {
+static int make_read_only(MountEntry *m, char **blacklist, FILE *proc_self_mountinfo) {
         int r = 0;
 
         assert(m);
+        assert(proc_self_mountinfo);
 
         if (mount_entry_read_only(m))
-                r = bind_remount_recursive(mount_entry_path(m), true, blacklist);
+                r = bind_remount_recursive_with_mountinfo(mount_entry_path(m), true, blacklist, proc_self_mountinfo);
         else if (m->mode == PRIVATE_DEV) { /* Superblock can be readonly but the submounts can't */
                 if (mount(NULL, mount_entry_path(m), NULL, MS_REMOUNT|DEV_MOUNT_OPTIONS|MS_RDONLY, NULL) < 0)
                         r = -errno;
@@ -815,18 +817,24 @@ static int make_read_only(MountEntry *m, char **blacklist) {
         return r;
 }
 
-static bool namespace_info_mount_apivfs(const NameSpaceInfo *ns_info) {
+static bool namespace_info_mount_apivfs(const char *root_directory, const NameSpaceInfo *ns_info) {
         assert(ns_info);
 
-        /* ProtectControlGroups= and ProtectKernelTunables= imply MountAPIVFS=, since to protect the API VFS mounts,
-         * they need to be around in the first place... */
+        /*
+         * ProtectControlGroups= and ProtectKernelTunables= imply MountAPIVFS=,
+         * since to protect the API VFS mounts, they need to be around in the
+         * first place... and RootDirectory= or RootImage= need to be set.
+         */
 
-        return ns_info->mount_apivfs ||
-                ns_info->protect_control_groups ||
-                ns_info->protect_kernel_tunables;
+        /* root_directory should point to a mount point */
+        return root_directory &&
+                (ns_info->mount_apivfs ||
+                 ns_info->protect_control_groups ||
+                 ns_info->protect_kernel_tunables);
 }
 
 static unsigned namespace_calculate_mounts(
+                const char* root_directory,
                 const NameSpaceInfo *ns_info,
                 char** read_write_paths,
                 char** read_only_paths,
@@ -863,7 +871,7 @@ static unsigned namespace_calculate_mounts(
                 (ns_info->protect_control_groups ? 1 : 0) +
                 (ns_info->protect_kernel_modules ? ELEMENTSOF(protect_kernel_modules_table) : 0) +
                 protect_home_cnt + protect_system_cnt +
-                (namespace_info_mount_apivfs(ns_info) ? ELEMENTSOF(apivfs_table) : 0);
+                (namespace_info_mount_apivfs(root_directory, ns_info) ? ELEMENTSOF(apivfs_table) : 0);
 }
 
 int setup_namespace(
@@ -931,6 +939,7 @@ int setup_namespace(
         }
 
         n_mounts = namespace_calculate_mounts(
+                        root_directory,
                         ns_info,
                         read_write_paths,
                         read_only_paths,
@@ -1009,7 +1018,7 @@ int setup_namespace(
                 if (r < 0)
                         goto finish;
 
-                if (namespace_info_mount_apivfs(ns_info)) {
+                if (namespace_info_mount_apivfs(root_directory, ns_info)) {
                         r = append_static_mounts(&m, apivfs_table, ELEMENTSOF(apivfs_table), ns_info->ignore_protect_paths);
                         if (r < 0)
                                 goto finish;
@@ -1044,6 +1053,10 @@ int setup_namespace(
                 }
         }
 
+        /* Try to set up the new root directory before mounting anything there */
+        if (root_directory)
+                (void) base_filesystem_create(root_directory, UID_INVALID, GID_INVALID);
+
         if (root_image) {
                 r = dissected_image_mount(dissected_image, root_directory, dissect_image_flags);
                 if (r < 0)
@@ -1070,8 +1083,17 @@ int setup_namespace(
         }
 
         if (n_mounts > 0) {
+                _cleanup_fclose_ FILE *proc_self_mountinfo = NULL;
                 char **blacklist;
                 unsigned j;
+
+                /* Open /proc/self/mountinfo now as it may become unavailable if we mount anything on top of /proc.
+                 * For example, this is the case with the option: 'InaccessiblePaths=/proc' */
+                proc_self_mountinfo = fopen("/proc/self/mountinfo", "re");
+                if (!proc_self_mountinfo) {
+                        r = -errno;
+                        goto finish;
+                }
 
                 /* First round, add in all special mounts we need */
                 for (m = mounts; m < mounts + n_mounts; ++m) {
@@ -1088,7 +1110,7 @@ int setup_namespace(
 
                 /* Second round, flip the ro bits if necessary. */
                 for (m = mounts; m < mounts + n_mounts; ++m) {
-                        r = make_read_only(m, blacklist);
+                        r = make_read_only(m, blacklist, proc_self_mountinfo);
                         if (r < 0)
                                 goto finish;
                 }

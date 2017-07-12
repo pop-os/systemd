@@ -34,6 +34,14 @@
 #define DHCP_DEFAULT_LEASE_TIME_USEC USEC_PER_HOUR
 #define DHCP_MAX_LEASE_TIME_USEC (USEC_PER_HOUR*12)
 
+static void dhcp_lease_free(DHCPLease *lease) {
+        if (!lease)
+                return;
+
+        free(lease->client_id.data);
+        free(lease);
+}
+
 /* configures the server's address and subnet, and optionally the pool's size and offset into the subnet
  * the whole pool must fit into the subnet, and may not contain the first (any) nor last (broadcast) address
  * moreover, the server's own address may be in the pool, and is in that case reserved in order not to
@@ -47,7 +55,6 @@ int sd_dhcp_server_configure_pool(sd_dhcp_server *server, struct in_addr *addres
         assert_return(address, -EINVAL);
         assert_return(address->s_addr != INADDR_ANY, -EINVAL);
         assert_return(prefixlen <= 32, -ERANGE);
-        assert_return(server->address == INADDR_ANY, -EBUSY);
 
         assert_se(in_addr_prefixlen_to_netmask(&netmask_addr, prefixlen));
         netmask = netmask_addr.s_addr;
@@ -78,19 +85,28 @@ int sd_dhcp_server_configure_pool(sd_dhcp_server *server, struct in_addr *addres
         else
                 size = size_max;
 
-        server->bound_leases = new0(DHCPLease*, size);
-        if (!server->bound_leases)
-                return -ENOMEM;
+        if (server->address != address->s_addr || server->netmask != netmask || server->pool_size != size || server->pool_offset != offset) {
+                DHCPLease *lease;
 
-        server->pool_offset = offset;
-        server->pool_size = size;
+                free(server->bound_leases);
+                server->bound_leases = new0(DHCPLease*, size);
+                if (!server->bound_leases)
+                        return -ENOMEM;
 
-        server->address = address->s_addr;
-        server->netmask = netmask;
-        server->subnet = address->s_addr & netmask;
+                server->pool_offset = offset;
+                server->pool_size = size;
 
-        if (server_off >= offset && server_off - offset < size)
-                server->bound_leases[server_off - offset] = &server->invalid_lease;
+                server->address = address->s_addr;
+                server->netmask = netmask;
+                server->subnet = address->s_addr & netmask;
+
+                if (server_off >= offset && server_off - offset < size)
+                        server->bound_leases[server_off - offset] = &server->invalid_lease;
+
+                /* Drop any leases associated with the old address range */
+                while ((lease = hashmap_steal_first(server->leases_by_client_id)))
+                        dhcp_lease_free(lease);
+        }
 
         return 0;
 }
@@ -143,14 +159,6 @@ static const struct hash_ops client_id_hash_ops = {
         .compare = client_id_compare_func
 };
 
-static void dhcp_lease_free(DHCPLease *lease) {
-        if (!lease)
-                return;
-
-        free(lease->client_id.data);
-        free(lease);
-}
-
 sd_dhcp_server *sd_dhcp_server_unref(sd_dhcp_server *server) {
         DHCPLease *lease;
 
@@ -197,7 +205,11 @@ int sd_dhcp_server_new(sd_dhcp_server **ret, int ifindex) {
         server->address = htobe32(INADDR_ANY);
         server->netmask = htobe32(INADDR_ANY);
         server->ifindex = ifindex;
+
         server->leases_by_client_id = hashmap_new(&client_id_hash_ops);
+        if (!server->leases_by_client_id)
+                return -ENOMEM;
+
         server->default_lease_time = DIV_ROUND_UP(DHCP_DEFAULT_LEASE_TIME_USEC, USEC_PER_SEC);
         server->max_lease_time = DIV_ROUND_UP(DHCP_MAX_LEASE_TIME_USEC, USEC_PER_SEC);
 
@@ -857,6 +869,8 @@ int dhcp_server_handle_message(sd_dhcp_server *server, DHCPMessage *message,
 
                         if (!existing_lease) {
                                 lease = new0(DHCPLease, 1);
+                                if (!lease)
+                                        return -ENOMEM;
                                 lease->address = address;
                                 lease->client_id.data = memdup(req->client_id.data,
                                                                req->client_id.length);

@@ -6,17 +6,12 @@
 #  (at your option) any later version.
 
 # See tmpfiles.d(5) for details
+m4_ifdef(`HAVE_LIBCURL',
 
-q /var 0755 - - -
+d /var/lib/systemd/journal-upload 0755 systemd-journal-upload systemd-journal-upload - -
+)m4_dnl
+m4_ifdef(`HAVE_MICROHTTPD',
 
-L /var/run - - - - ../run
-
-d /var/log 0755 - - -
-f /var/log/wtmp 0664 root utmp -
-f /var/log/btmp 0600 root utmp -
-
-d /var/cache 0755 - - -
-
-d /var/lib 0755 - - -
-
-d /var/spool 0755 - - -
+z /var/log/journal/remote 2755 systemd-journal-remote systemd-journal-remote - -
+z /run/log/journal/remote 2755 systemd-journal-remote systemd-journal-remote - -
+)m4_dnl

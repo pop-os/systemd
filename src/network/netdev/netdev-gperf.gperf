@@ -4,6 +4,7 @@
 #include "network-internal.h"
 #include "netdev/bond.h"
 #include "netdev/bridge.h"
+#include "netdev/geneve.h"
 #include "netdev/ipvlan.h"
 #include "netdev/macvlan.h"
 #include "netdev/tunnel.h"
@@ -36,6 +37,10 @@ NetDev.Kind,                 config_parse_netdev_kind,             0,           
 NetDev.MTUBytes,             config_parse_iec_size,                0,                             offsetof(NetDev, mtu)
 NetDev.MACAddress,           config_parse_hwaddr,                  0,                             offsetof(NetDev, mac)
 VLAN.Id,                     config_parse_vlanid,                  0,                             offsetof(VLan, id)
+VLAN.GVRP,                   config_parse_tristate,                0,                             offsetof(VLan, gvrp)
+VLAN.MVRP,                   config_parse_tristate,                0,                             offsetof(VLan, mvrp)
+VLAN.LooseBinding,           config_parse_tristate,                0,                             offsetof(VLan, loose_binding)
+VLAN.ReorderHeader,          config_parse_tristate,                0,                             offsetof(VLan, reorder_hdr)
 MACVLAN.Mode,                config_parse_macvlan_mode,            0,                             offsetof(MacVlan, mode)
 MACVTAP.Mode,                config_parse_macvlan_mode,            0,                             offsetof(MacVlan, mode)
 IPVLAN.Mode,                 config_parse_ipvlan_mode,             0,                             offsetof(IPVlan, mode)
@@ -77,7 +82,17 @@ VXLAN.FDBAgeingSec,          config_parse_sec,                     0,           
 VXLAN.GroupPolicyExtension,  config_parse_bool,                    0,                             offsetof(VxLan, group_policy)
 VXLAN.MaximumFDBEntries,     config_parse_unsigned,                0,                             offsetof(VxLan, max_fdb)
 VXLAN.PortRange,             config_parse_port_range,              0,                             0
-VXLAN.DestinationPort,       config_parse_destination_port,        0,                             offsetof(VxLan, dest_port)
+VXLAN.DestinationPort,       config_parse_ip_port,                 0,                             offsetof(VxLan, dest_port)
+VXLAN.FlowLabel,             config_parse_flow_label,              0,                             0
+GENEVE.Id,                   config_parse_geneve_vni,              0,                             offsetof(Geneve, id)
+GENEVE.Remote,               config_parse_geneve_address,          0,                             offsetof(Geneve, remote)
+GENEVE.TOS,                  config_parse_uint8,                   0,                             offsetof(Geneve, tos)
+GENEVE.TTL,                  config_parse_uint8,                   0,                             offsetof(Geneve, ttl)
+GENEVE.UDPChecksum,          config_parse_bool,                    0,                             offsetof(Geneve, udpcsum)
+GENEVE.UDP6ZeroCheckSumRx,   config_parse_bool,                    0,                             offsetof(Geneve, udp6zerocsumrx)
+GENEVE.UDP6ZeroCheckSumTx,   config_parse_bool,                    0,                             offsetof(Geneve, udp6zerocsumtx)
+GENEVE.DestinationPort,      config_parse_ip_port,                 0,                             offsetof(Geneve, dest_port)
+GENEVE.FlowLabel,            config_parse_geneve_flow_label,       0,                             0
 Tun.OneQueue,                config_parse_bool,                    0,                             offsetof(TunTap, one_queue)
 Tun.MultiQueue,              config_parse_bool,                    0,                             offsetof(TunTap, multi_queue)
 Tun.PacketInfo,              config_parse_bool,                    0,                             offsetof(TunTap, packet_info)
@@ -113,7 +128,7 @@ Bridge.MaxAgeSec,            config_parse_sec,                     0,           
 Bridge.AgeingTimeSec,        config_parse_sec,                     0,                             offsetof(Bridge, ageing_time)
 Bridge.ForwardDelaySec,      config_parse_sec,                     0,                             offsetof(Bridge, forward_delay)
 Bridge.Priority,             config_parse_uint16,                  0,                             offsetof(Bridge, priority)
-Bridge.DefaultPVID,          config_parse_vlanid,                  0,                             offsetof(Bridge, default_pvid)
+Bridge.DefaultPVID,          config_parse_default_port_vlanid,     0,                             offsetof(Bridge, default_pvid)
 Bridge.MulticastQuerier,     config_parse_tristate,                0,                             offsetof(Bridge, mcast_querier)
 Bridge.MulticastSnooping,    config_parse_tristate,                0,                             offsetof(Bridge, mcast_snooping)
 Bridge.VLANFiltering,        config_parse_tristate,                0,                             offsetof(Bridge, vlan_filtering)

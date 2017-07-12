@@ -28,6 +28,7 @@
 #include "network-internal.h"
 #include "netdev/netdev.h"
 #include "networkd-manager.h"
+#include "networkd-link.h"
 #include "siphash24.h"
 #include "stat-util.h"
 #include "string-table.h"
@@ -35,6 +36,7 @@
 
 #include "netdev/bridge.h"
 #include "netdev/bond.h"
+#include "netdev/geneve.h"
 #include "netdev/vlan.h"
 #include "netdev/macvlan.h"
 #include "netdev/ipvlan.h"
@@ -69,6 +71,7 @@ const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_IP6TNL] = &ip6tnl_vtable,
         [NETDEV_KIND_VRF] = &vrf_vtable,
         [NETDEV_KIND_VCAN] = &vcan_vtable,
+        [NETDEV_KIND_GENEVE] = &geneve_vtable,
 };
 
 static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
@@ -94,6 +97,7 @@ static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_IP6TNL] = "ip6tnl",
         [NETDEV_KIND_VRF] = "vrf",
         [NETDEV_KIND_VCAN] = "vcan",
+        [NETDEV_KIND_GENEVE] = "geneve",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(netdev_kind, NetDevKind);
@@ -217,6 +221,13 @@ static int netdev_enslave_ready(NetDev *netdev, Link* link, sd_netlink_message_h
         assert(IN_SET(netdev->kind, NETDEV_KIND_BRIDGE, NETDEV_KIND_BOND, NETDEV_KIND_VRF));
         assert(link);
         assert(callback);
+
+        if (link->flags & IFF_UP) {
+                log_netdev_debug(netdev, "Link '%s' was up when attempting to enslave it. Bringing link down.", link->ifname);
+                r = link_down(link);
+                if (r < 0)
+                        return log_netdev_error_errno(netdev, r, "Could not bring link down: %m");
+        }
 
         r = sd_rtnl_message_new_link(netdev->manager->rtnl, &req, RTM_SETLINK, link->ifindex);
         if (r < 0)

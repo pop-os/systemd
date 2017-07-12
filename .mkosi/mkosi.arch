@@ -32,8 +32,6 @@ RootSize=2G
 Cache=/var/cache/pacman/pkg/
 BuildPackages=
         acl
-        autoconf
-        automake
         bzip2
         cryptsetup
         curl
@@ -50,7 +48,7 @@ BuildPackages=
         kmod
         libcap
         libgcrypt
-        libidn
+        libidn2
         libmicrohttpd
         libseccomp
         libtool
@@ -58,10 +56,13 @@ BuildPackages=
         libxkbcommon
         libxslt
         lz4
-        make
+        meson
         pam
         pkgconfig
         python
         python-lxml
         qrencode
         xz
+
+Packages=
+        libidn2

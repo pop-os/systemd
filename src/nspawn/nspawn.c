@@ -18,7 +18,7 @@
 ***/
 
 #ifdef HAVE_BLKID
-#include <blkid/blkid.h>
+#include <blkid.h>
 #endif
 #include <errno.h>
 #include <getopt.h>
@@ -389,12 +389,10 @@ static void parse_mount_settings_env(void) {
         if (r < 0) {
                 log_warning_errno(r, "Failed to parse SYSTEMD_NSPAWN_API_VFS_WRITABLE from environment, ignoring.");
                 return;
-        } else if (r > 0)
-                arg_mount_settings &= ~MOUNT_APPLY_APIVFS_RO;
-        else
-                arg_mount_settings |= MOUNT_APPLY_APIVFS_RO;
+        }
 
-        arg_mount_settings &= ~MOUNT_APPLY_APIVFS_NETNS;
+        SET_FLAG(arg_mount_settings, MOUNT_APPLY_APIVFS_RO, r == 0);
+        SET_FLAG(arg_mount_settings, MOUNT_APPLY_APIVFS_NETNS, false);
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -1085,8 +1083,8 @@ static int parse_argv(int argc, char *argv[]) {
         if (arg_userns_mode == USER_NAMESPACE_PICK)
                 arg_userns_chown = true;
 
-        if (arg_keep_unit && cg_pid_get_owner_uid(0, NULL) >= 0) {
-                log_error("--keep-unit may not be used when invoked from a user session.");
+        if (arg_keep_unit && arg_register && cg_pid_get_owner_uid(0, NULL) >= 0) {
+                log_error("--keep-unit --register=yes may not be used when invoked from a user session.");
                 return -EINVAL;
         }
 
@@ -1157,6 +1155,10 @@ static int parse_argv(int argc, char *argv[]) {
                 arg_settings_mask = _SETTINGS_MASK_ALL;
 
         arg_caps_retain = (arg_caps_retain | plus | (arg_private_network ? 1ULL << CAP_NET_ADMIN : 0)) & ~minus;
+
+        r = cg_unified_flush();
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine whether the unified cgroups hierarchy is used: %m");
 
         e = getenv("SYSTEMD_NSPAWN_CONTAINER_SERVICE");
         if (e)
@@ -1321,17 +1323,32 @@ static int setup_timezone(const char *dest) {
         return 0;
 }
 
-static int resolved_running(void) {
+static int resolved_listening(void) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+        _cleanup_free_ char *dns_stub_listener_mode = NULL;
         int r;
 
-        /* Check if resolved is running */
+        /* Check if resolved is listening */
 
         r = sd_bus_open_system(&bus);
         if (r < 0)
                 return r;
 
-        return bus_name_has_owner(bus, "org.freedesktop.resolve1", NULL);
+        r = bus_name_has_owner(bus, "org.freedesktop.resolve1", NULL);
+        if (r <= 0)
+                return r;
+
+        r = sd_bus_get_property_string(bus,
+                                       "org.freedesktop.resolve1",
+                                       "/org/freedesktop/resolve1",
+                                       "org.freedesktop.resolve1.Manager",
+                                       "DNSStubListener",
+                                       NULL,
+                                       &dns_stub_listener_mode);
+        if (r < 0)
+                return r;
+
+        return STR_IN_SET(dns_stub_listener_mode, "udp", "yes");
 }
 
 static int setup_resolv_conf(const char *dest) {
@@ -1358,7 +1375,7 @@ static int setup_resolv_conf(const char *dest) {
         }
 
         if (access("/usr/lib/systemd/resolv.conf", F_OK) >= 0 &&
-            resolved_running() > 0) {
+            resolved_listening() > 0) {
 
                 /* resolved is enabled on the host. In this, case bind mount its static resolv.conf file into the
                  * container, so that the container can use the host's resolver. Given that network namespacing is
@@ -2012,7 +2029,7 @@ static int determine_names(void) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to find image for machine '%s': %m", arg_machine);
                         if (r == 0) {
-                                log_error("No image for machine '%s': %m", arg_machine);
+                                log_error("No image for machine '%s'.", arg_machine);
                                 return -ENOENT;
                         }
 
@@ -3370,7 +3387,19 @@ static int run(int master,
                                 arg_container_service_name);
                 if (r < 0)
                         return r;
-        }
+        } else if (!arg_keep_unit) {
+                r = allocate_scope(
+                                arg_machine,
+                                *pid,
+                                arg_slice,
+                                arg_custom_mounts, arg_n_custom_mounts,
+                                arg_kill_signal,
+                                arg_property);
+                if (r < 0)
+                        return r;
+
+        } else if (arg_slice || arg_property)
+                log_notice("Machine and scope registration turned off, --slice= and --property= settings will have no effect.");
 
         r = sync_cgroup(*pid, arg_unified_cgroup_hierarchy, arg_uid_shift);
         if (r < 0)
@@ -3529,10 +3558,6 @@ int main(int argc, char *argv[]) {
 
         log_parse_environment();
         log_open();
-
-        r = cg_unified_flush();
-        if (r < 0)
-                return log_error_errno(r, "Failed to determine whether the unified cgroups hierarchy is used: %m");
 
         /* Make sure rename_process() in the stub init process can work */
         saved_argv = argv;

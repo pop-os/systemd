@@ -24,6 +24,7 @@
 #include "fd-util.h"
 #include "parse-util.h"
 #include "string-util.h"
+#include "unaligned.h"
 
 enum {
         IMPORTER_STATE_LINE = 0,    /* waiting to read, or reading line */
@@ -68,6 +69,7 @@ void journal_importer_cleanup(JournalImporter *imp) {
                 safe_close(imp->fd);
         }
 
+        free(imp->name);
         free(imp->buf);
         iovw_free_contents(&imp->iovw);
 }
@@ -203,7 +205,7 @@ static int get_data_size(JournalImporter *imp) {
         if (r <= 0)
                 return r;
 
-        imp->data_size = le64toh( *(uint64_t *) data );
+        imp->data_size = unaligned_read_le64(data);
         if (imp->data_size > DATA_SIZE_MAX) {
                 log_error("Stream declares field with size %zu > DATA_SIZE_MAX = %u",
                           imp->data_size, DATA_SIZE_MAX);
@@ -314,7 +316,7 @@ int journal_importer_process_data(JournalImporter *imp) {
                         return r;
                 if (r == 0) {
                         imp->state = IMPORTER_STATE_EOF;
-                        return r;
+                        return 0;
                 }
                 assert(n > 0);
                 assert(line[n-1] == '\n');
