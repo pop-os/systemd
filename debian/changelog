@@ -1,3 +1,48 @@
+systemd (234-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 234
+    - tmpfiles: Create /var/log/lastlog if it does not exist.
+      (Closes: #866313)
+    - network: Bridge vlan without PVID. (Closes: #859941)
+  * Rebase patches
+  * Switch build system from autotools to meson.
+    Update the Build-Depends accordingly.
+  * Update fsckd patch for meson
+  * udev autopkgtest: no longer install test-udev binary manually.
+    This is now done by the upstream build system.
+  * Update symbols file for libsystemd0
+  * Update lintian override for systemd-tests.
+    Upstream now installs manual and unsafe tests in subdirectories of
+    /usr/lib/systemd/tests/, so ignore those as well.
+  * Bump Standards-Version to 4.0.0
+  * Change priority of libnss-* packages from extra to optional.
+  * Use UTF-8 locale when building the package.
+    Otherwise meson will be pretty unhappy when trying to process files with
+    unicode characters. Use C.UTF-8 as this locale is pretty much guaranteed
+    to be available everywhere.
+  * Mark test-timesync as manual.
+    The test tries to setup inotify watches for /run/systemd/netif/links
+    which fails in a buildd environment where systemd is not active.
+  * Do not link udev against libsystemd-shared.
+    We ship udev in a separate binary package, so can't use
+    libsystemd-shared, which is part of the systemd binary package.
+  * Avoid requiring a "kvm" system group.
+    This group is not universally available and as a result generates a
+    warning during boot. As kvm is only really useful if the qemu package is
+    installed and this package already takes care of setting up the proper
+    permissions for /dev/kvm, drop this rule from 50-udev-default.rules.
+
+  [ Martin Pitt ]
+  * udev README.Debian: Update transitional rules and mention *.link files.
+    - 01-mac-for-usb.link got replaced with 73-usb-net-by-mac.rules
+    - /etc/systemd/network/50-virtio-kernel-names.link is an upgrade
+      transition for VMs with virtio
+    - Describe *.link files as a simpler/less error prone (but also less
+      flexible) way of customizing interface names. (Closes: #868002)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 13 Jul 2017 17:38:28 +0200
+
 systemd (233-10) unstable; urgency=medium
 
   [ Martin Pitt ]
