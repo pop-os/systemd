@@ -64,8 +64,10 @@ Then for every interface name use a command like
 to find out where it is being used.
 
 Then on "real hardware" machines, rename the file to
-70-persistent-net.rules.old; on VMs remove the file
-/etc/udev/rules.d/80-net-setup-link.rules instead.
+70-persistent-net.rules.old; on VMs remove the files
+/etc/systemd/network/99-default.link and
+/etc/systemd/network/50-virtio-kernel-names.link (the latter only exists on
+VMs that use virtio network devices).
 
 Reboot, adjust configuration files, and test your system.
 
@@ -74,14 +76,22 @@ Custom net interface naming
 In some cases it is convenient to define your own specific names for network
 interfaces. These can be customized in two different ways:
 
- * You can create your own names via udev rules, based on arbitrary attribute
-   and property matches. See man udev(7) for documentation how to write udev
-   rules. For example, you can create /etc/udev/rules.d/76-netnames.rules with
+ * You can create your own names via *.link files (see systemd.link(5)) based
+   on hardware properties. For example, /etc/systemd/network/dmz.link:
 
-   ------------ snip ----------
-   # identify device by MAC address
-   SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="11:22:aa:bb:cc:33", NAME="eth-dmz"
+   ------------ snip ------------
+   [Match]
+   MACAddress=11:22:aa:bb:cc:33
 
+   [Link]
+   Name=eth-dmz
+   ------------ snip ------------
+
+ * If you need attributes that link files don't expose, or you need more
+   powerful pattern matching, you can create udev rules (see udev(7))
+   like /etc/udev/rules.d/76-netnames.rules:
+
+   ------------ snip ------------
    # identify by vendor/model ID
    SUBSYSTEM=="net", ACTION=="add", ENV{ID_VENDOR_ID}=="0x8086", \
        ENV{ID_MODEL_ID}=="0x1502", NAME="eth-intel-gb"
@@ -101,7 +111,7 @@ interfaces. These can be customized in two different ways:
    (kernel/bios/path/MAC based naming) in an /etc/systemd/network/*.link file,
    for individual devices or entire device classes. See man systemd.link(5) for
    details about this. /lib/systemd/network/99-default.link is the default
-   policy, and /lib/systemd/network/01-mac-for-usb.link makes it use MAC based
+   policy. Note that /lib/udev/rules.d/73-usb-net-by-mac.rules uses MAC based
    names for USB devices.
 
 Any of the above changes require an initrd update with "update-initramfs -u" to
