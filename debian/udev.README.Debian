@@ -77,7 +77,7 @@ In some cases it is convenient to define your own specific names for network
 interfaces. These can be customized in two different ways:
 
  * You can create your own names via *.link files (see systemd.link(5)) based
-   on hardware properties. For example, /etc/systemd/network/dmz.link:
+   on hardware properties. For example, /etc/systemd/network/10-dmz.link:
 
    ------------ snip ------------
    [Match]
