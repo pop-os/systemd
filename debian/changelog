@@ -1,3 +1,29 @@
+systemd (234-1ubuntu1) artful; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * Merge with debian, outstanding delta below.
+  * ubuntu: udev.postinst preserve virtio interfaces names on upgrades, on s390x.
+    New udev generates stable interface names on s390x kvm instances, however, upon
+    upgrades existing ethX names should be preserved to prevent breaking networking
+    and software configurations.
+    This patch only affects Ubuntu systems. (Closes: #860246) (LP: #1682437)
+  * debian/tests/root-unittests: disable execute and seccomp tests on arm
+    test-seccomp and test-execute fail on arm64 kernels. Marking both tests as
+    expected failures. An upstream bug report is filed to resolve these.
+    (LP: #1672499)
+  * Disable fallback DNS servers.
+    This causes resolved to call-home to google, attempt to access network when
+    none is available, and spams logs. (LP: #1449001, #1698734)
+
+  [ Balint Reczey ]
+  * Skip starting systemd-remount-fs.service in containers
+    even when /etc/fstab is present.
+    This allows entering fully running state even when /etc/fstab
+    lists / to be mounted from a device which is not present in the
+    container. (LP: #1576341)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 17 Jul 2017 10:59:34 +0100
+
 systemd (234-1) unstable; urgency=medium
 
   [ Michael Biebl ]
