@@ -264,6 +264,8 @@ static int output_timestamp_realtime(FILE *f, sd_journal *j, OutputMode mode, Ou
                 }
 
         } else {
+                char usec[7];
+
                 gettime_r = (flags & OUTPUT_UTC) ? gmtime_r : localtime_r;
                 t = (time_t) (x / USEC_PER_SEC);
 
@@ -275,9 +277,19 @@ static int output_timestamp_realtime(FILE *f, sd_journal *j, OutputMode mode, Ou
 
                 case OUTPUT_SHORT_ISO:
                         if (strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", gettime_r(&t, &tm)) <= 0) {
-                                log_error("Failed for format ISO time");
+                                log_error("Failed to format ISO time");
                                 return -EINVAL;
                         }
+                        break;
+
+                case OUTPUT_SHORT_ISO_PRECISE:
+                        /* No usec in strftime, so we leave space and copy over */
+                        if (strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S.xxxxxx%z", gettime_r(&t, &tm)) <= 0) {
+                                log_error("Failed to format ISO-precise time");
+                                return -EINVAL;
+                        }
+                        xsprintf(usec, "%06"PRI_USEC, x % USEC_PER_SEC);
+                        memcpy(buf + 20, usec, 6);
                         break;
 
                 case OUTPUT_SHORT:
@@ -473,6 +485,7 @@ static int output_verbose(
         _cleanup_free_ char *cursor = NULL;
         uint64_t realtime = 0;
         char ts[FORMAT_TIMESTAMP_MAX + 7];
+        const char *timestamp;
         int r;
 
         assert(f);
@@ -508,10 +521,10 @@ static int output_verbose(
         if (r < 0)
                 return log_error_errno(r, "Failed to get cursor: %m");
 
+        timestamp = flags & OUTPUT_UTC ? format_timestamp_us_utc(ts, sizeof ts, realtime)
+                                       : format_timestamp_us(ts, sizeof ts, realtime);
         fprintf(f, "%s [%s]\n",
-                flags & OUTPUT_UTC ?
-                format_timestamp_us_utc(ts, sizeof(ts), realtime) :
-                format_timestamp_us(ts, sizeof(ts), realtime),
+                timestamp ?: "(no timestamp)",
                 cursor);
 
         JOURNAL_FOREACH_DATA_RETVAL(j, data, length, r) {
@@ -949,6 +962,7 @@ static int (*output_funcs[_OUTPUT_MODE_MAX])(
 
         [OUTPUT_SHORT] = output_short,
         [OUTPUT_SHORT_ISO] = output_short,
+        [OUTPUT_SHORT_ISO_PRECISE] = output_short,
         [OUTPUT_SHORT_PRECISE] = output_short,
         [OUTPUT_SHORT_MONOTONIC] = output_short,
         [OUTPUT_SHORT_UNIX] = output_short,
@@ -977,7 +991,6 @@ int output_journal(
                 n_columns = columns();
 
         ret = output_funcs[mode](f, j, mode, n_columns, flags);
-        fflush(stdout);
 
         if (ellipsized && ret > 0)
                 *ellipsized = true;

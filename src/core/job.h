@@ -150,6 +150,7 @@ struct Job {
 
         sd_event_source *timer_event_source;
         usec_t begin_usec;
+        usec_t begin_running_usec;
 
         /*
          * This tracks where to send signals, and also which clients
@@ -220,7 +221,7 @@ int job_type_merge_and_collapse(JobType *a, JobType b, Unit *u);
 void job_add_to_run_queue(Job *j);
 void job_add_to_dbus_queue(Job *j);
 
-int job_start_timer(Job *j);
+int job_start_timer(Job *j, bool job_running);
 
 int job_run_and_invalidate(Job *j);
 int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool already);

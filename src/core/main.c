@@ -536,7 +536,7 @@ static int config_parse_cpu_affinity2(
                 return ncpus;
 
         if (sched_setaffinity(0, CPU_ALLOC_SIZE(ncpus), c) < 0)
-                log_warning("Failed to set CPU affinity: %m");
+                log_warning_errno(errno, "Failed to set CPU affinity: %m");
 
         return 0;
 }
@@ -1162,6 +1162,8 @@ static int prepare_reexecute(Manager *m, FILE **_f, FDSet **_fds, bool switching
 static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
         struct rlimit nl;
         int r;
+        int min_max;
+        _cleanup_free_ char *nr_open = NULL;
 
         assert(saved_rlimit);
 
@@ -1182,8 +1184,16 @@ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
                 arg_default_rlimit[RLIMIT_NOFILE] = rl;
         }
 
+        /* Get current RLIMIT_NOFILE maximum compiled into the kernel. */
+        r = read_one_line_file("/proc/sys/fs/nr_open", &nr_open);
+        if (r == 0)
+                r = safe_atoi(nr_open, &min_max);
+        /* If we fail, fallback to the hard-coded kernel limit of 1024 * 1024. */
+        if (r < 0)
+                min_max = 1024 * 1024;
+
         /* Bump up the resource limit for ourselves substantially */
-        nl.rlim_cur = nl.rlim_max = 64*1024;
+        nl.rlim_cur = nl.rlim_max = min_max;
         r = setrlimit_closest(RLIMIT_NOFILE, &nl);
         if (r < 0)
                 return log_warning_errno(r, "Setting RLIMIT_NOFILE failed, ignoring: %m");
@@ -1770,7 +1780,7 @@ int main(int argc, char *argv[]) {
                 if (prctl(PR_SET_TIMERSLACK, arg_timer_slack_nsec) < 0)
                         log_error_errno(errno, "Failed to adjust timer slack: %m");
 
-        if (!cap_test_all(arg_capability_bounding_set)) {
+        if (arg_system && !cap_test_all(arg_capability_bounding_set)) {
                 r = capability_bounding_set_drop_usermode(arg_capability_bounding_set);
                 if (r < 0) {
                         log_emergency_errno(r, "Failed to drop capability bounding set of usermode helpers: %m");

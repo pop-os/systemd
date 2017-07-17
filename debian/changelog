@@ -1,3 +1,84 @@
+systemd (234-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 234
+    - tmpfiles: Create /var/log/lastlog if it does not exist.
+      (Closes: #866313)
+    - network: Bridge vlan without PVID. (Closes: #859941)
+  * Rebase patches
+  * Switch build system from autotools to meson.
+    Update the Build-Depends accordingly.
+  * Update fsckd patch for meson
+  * udev autopkgtest: no longer install test-udev binary manually.
+    This is now done by the upstream build system.
+  * Update symbols file for libsystemd0
+  * Update lintian override for systemd-tests.
+    Upstream now installs manual and unsafe tests in subdirectories of
+    /usr/lib/systemd/tests/, so ignore those as well.
+  * Bump Standards-Version to 4.0.0
+  * Change priority of libnss-* packages from extra to optional.
+  * Use UTF-8 locale when building the package.
+    Otherwise meson will be pretty unhappy when trying to process files with
+    unicode characters. Use C.UTF-8 as this locale is pretty much guaranteed
+    to be available everywhere.
+  * Mark test-timesync as manual.
+    The test tries to setup inotify watches for /run/systemd/netif/links
+    which fails in a buildd environment where systemd is not active.
+  * Do not link udev against libsystemd-shared.
+    We ship udev in a separate binary package, so can't use
+    libsystemd-shared, which is part of the systemd binary package.
+  * Avoid requiring a "kvm" system group.
+    This group is not universally available and as a result generates a
+    warning during boot. As kvm is only really useful if the qemu package is
+    installed and this package already takes care of setting up the proper
+    permissions for /dev/kvm, drop this rule from 50-udev-default.rules.
+
+  [ Martin Pitt ]
+  * udev README.Debian: Update transitional rules and mention *.link files.
+    - 01-mac-for-usb.link got replaced with 73-usb-net-by-mac.rules
+    - /etc/systemd/network/50-virtio-kernel-names.link is an upgrade
+      transition for VMs with virtio
+    - Describe *.link files as a simpler/less error prone (but also less
+      flexible) way of customizing interface names. (Closes: #868002)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 13 Jul 2017 17:38:28 +0200
+
+systemd (233-10) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Adjust var-lib-machines.mount target.
+    Upstream PR #6095 changed the location to
+    {remote-fs,machines}.target.wants, so just install all available ones.
+
+  [ Dimitri John Ledkov ]
+  * Fix out-of-bounds write in systemd-resolved.
+    CVE-2017-9445 (Closes: #866147, LP: #1695546)
+
+  [ Michael Biebl ]
+  * Be truly quiet in systemctl -q is-enabled (Closes: #866579)
+  * Improve RLIMIT_NOFILE handling.
+    Use /proc/sys/fs/nr_open to find the current limit of open files
+    compiled into the kernel instead of using a hard-coded value of 65536
+    for RLIMIT_NOFILE. (Closes: #865449)
+
+  [ Nicolas Braud-Santoni ]
+  * debian/extra/rules: Use updated U2F ruleset.
+    This ruleset comes from Yubico's libu2f-host. (Closes: #824532)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 03 Jul 2017 18:51:58 +0200
+
+systemd (233-9) unstable; urgency=medium
+
+  * hwdb: Use path_join() to generate the hwdb_bin path.
+    This ensures /lib/udev/hwdb.bin gets the correct SELinux context. Having
+    double slashes in the path makes selabel_lookup_raw() return the wrong
+    context. (Closes: #851933)
+  * Drop no longer needed Breaks against usb-modeswitch
+  * Drop Breaks for packages shipping rcS init scripts.
+    This transition was completed in stretch.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 19 Jun 2017 15:10:14 +0200
+
 systemd (233-8ubuntu2) artful; urgency=medium
 
   * Disable fallback DNS servers.

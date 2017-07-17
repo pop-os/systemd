@@ -15,10 +15,10 @@ Closes: #810748
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index 2677a3f..64f7197 100644
+index 7f23b9f..6edf6a5 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
-@@ -305,6 +305,7 @@ static int add_mount(
+@@ -307,6 +307,7 @@ static int add_mount(
                  *filtered = NULL;
          _cleanup_fclose_ FILE *f = NULL;
          int r;
@@ -26,7 +26,7 @@ index 2677a3f..64f7197 100644
  
          assert(what);
          assert(where);
-@@ -377,9 +378,13 @@ static int add_mount(
+@@ -393,9 +394,13 @@ static int add_mount(
          }
  
          if (passno != 0) {
@@ -42,7 +42,7 @@ index 2677a3f..64f7197 100644
 +                }
          }
  
-         fprintf(f,
+         fprintf(f, "\n[Mount]\n");
 diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
 index f493445..89c381f 100644
 --- a/units/systemd-fsck-root.service.in

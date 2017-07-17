@@ -1,0 +1,23 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Thu, 13 Jul 2017 03:53:00 +0200
+Subject: Mark test-timesync as manual
+
+The test tries to setup inotify watches for /run/systemd/netif/links
+which fails in a buildd environment where systemd is not active.
+
+See https://github.com/systemd/systemd/issues/6353
+---
+ src/timesync/meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/timesync/meson.build b/src/timesync/meson.build
+index 4391afa..04022a8 100644
+--- a/src/timesync/meson.build
++++ b/src/timesync/meson.build
+@@ -38,5 +38,5 @@ tests += [
+           timesyncd_gperf_c],
+          [libshared],
+          [libm],
+-         'ENABLE_TIMESYNCD'],
++         'ENABLE_TIMESYNCD', 'manual'],
+ ]

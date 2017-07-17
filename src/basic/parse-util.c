@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <xlocale.h>
 
 #include "alloc-util.h"
 #include "extract-word.h"
@@ -588,5 +587,20 @@ int parse_ip_port(const char *s, uint16_t *ret) {
 
         *ret = (uint16_t) l;
 
+        return 0;
+}
+
+int parse_dev(const char *s, dev_t *ret) {
+        unsigned x, y;
+        dev_t d;
+
+        if (sscanf(s, "%u:%u", &x, &y) != 2)
+                return -EINVAL;
+
+        d = makedev(x, y);
+        if ((unsigned) major(d) != x || (unsigned) minor(d) != y)
+                return -EINVAL;
+
+        *ret = d;
         return 0;
 }

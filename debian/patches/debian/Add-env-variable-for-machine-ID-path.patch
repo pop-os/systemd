@@ -20,7 +20,7 @@ Bug: https://bugs.freedesktop.org/show_bug.cgi?id=62344
  2 files changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
-index cc89f2d..d403021 100644
+index b1f6c53..d759b6b 100644
 --- a/src/libsystemd/sd-id128/sd-id128.c
 +++ b/src/libsystemd/sd-id128/sd-id128.c
 @@ -105,7 +105,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
@@ -33,7 +33,7 @@ index cc89f2d..d403021 100644
                          return r;
  
 diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
-index e774f56..a0e3f30 100644
+index 9e964a8..81aee43 100644
 --- a/src/test/test-fs-util.c
 +++ b/src/test/test-fs-util.c
 @@ -146,7 +146,7 @@ static void test_chase_symlinks(void) {

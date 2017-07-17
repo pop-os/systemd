@@ -20,7 +20,6 @@
 #ifdef HAVE_LIBCRYPTSETUP
 #include <libcryptsetup.h>
 #endif
-#include <linux/dm-ioctl.h>
 #include <sys/mount.h>
 
 #include "architecture.h"
@@ -32,6 +31,7 @@
 #include "fs-util.h"
 #include "gpt.h"
 #include "hexdecoct.h"
+#include "linux-3.13/dm-ioctl.h"
 #include "mount-util.h"
 #include "path-util.h"
 #include "stat-util.h"
@@ -42,7 +42,7 @@
 #include "udev-util.h"
 #include "xattr-util.h"
 
-static int probe_filesystem(const char *node, char **ret_fstype) {
+_unused_ static int probe_filesystem(const char *node, char **ret_fstype) {
 #ifdef HAVE_BLKID
         _cleanup_blkid_free_probe_ blkid_probe b = NULL;
         const char *fstype;
@@ -301,7 +301,7 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
                 _cleanup_udev_device_unref_ struct udev_device *q;
                 unsigned long long pflags;
                 blkid_partition pp;
-                const char *node;
+                const char *node, *sysname;
                 dev_t qn;
                 int nr;
 
@@ -314,6 +314,12 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
                         continue;
 
                 if (st.st_rdev == qn)
+                        continue;
+
+                /* Filter out weird MMC RPMB partitions, which cannot reasonably be read, see
+                 * https://github.com/systemd/systemd/issues/5806 */
+                sysname = udev_device_get_sysname(q);
+                if (sysname && startswith(sysname, "mmcblk") && endswith(sysname, "rpmb"))
                         continue;
 
                 node = udev_device_get_devnode(q);
@@ -951,7 +957,7 @@ int dissected_image_decrypt(
          *
          *      = 0           → There was nothing to decrypt
          *      > 0           → Decrypted successfully
-         *      -ENOKEY       → There's some to decrypt but no key was supplied
+         *      -ENOKEY       → There's something to decrypt but no key was supplied
          *      -EKEYREJECTED → Passed key was not correct
          */
 

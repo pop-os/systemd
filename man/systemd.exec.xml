@@ -138,7 +138,7 @@
       <varlistentry>
         <term><varname>RootImage=</varname></term>
         <listitem><para>Takes a path to a block device node or regular file as argument. This call is similar to
-        <varname>RootDirectory=</varname> however mounts a file system hierarchy from a block device node or loopack
+        <varname>RootDirectory=</varname> however mounts a file system hierarchy from a block device node or loopback
         file instead of a directory. The device node or file system image file needs to contain a file system without a
         partition table, or a file system within an MBR/MS-DOS or GPT partition table with only a single
         Linux-compatible partition, or a set of file systems within a GPT partition table that follows the <ulink
@@ -165,13 +165,28 @@
         <term><varname>Group=</varname></term>
 
         <listitem><para>Set the UNIX user or group that the processes are executed as, respectively. Takes a single
-        user or group name, or numeric ID as argument. For system services (services run by the system service manager,
+        user or group name, or a numeric ID as argument. For system services (services run by the system service manager,
         i.e. managed by PID 1) and for user services of the root user (services managed by root's instance of
         <command>systemd --user</command>), the default is <literal>root</literal>, but <varname>User=</varname> may be
         used to specify a different user. For user services of any other user, switching user identity is not
         permitted, hence the only valid setting is the same user the user's service manager is running as. If no group
         is set, the default group of the user is used. This setting does not affect commands whose command line is
-        prefixed with <literal>+</literal>.</para></listitem>
+        prefixed with <literal>+</literal>.</para>
+
+        <para>Note that restrictions on the user/group name syntax are enforced: the specified name must consist only
+        of the characters a-z, A-Z, 0-9, <literal>_</literal> and <literal>-</literal>, except for the first character
+        which must be one of a-z, A-Z or <literal>_</literal> (i.e. numbers and <literal>-</literal> are not permitted
+        as first character). The user/group name must have at least one character, and at most 31. These restrictions
+        are enforced in order to avoid ambiguities and to ensure user/group names and unit files remain portable among
+        Linux systems.</para>
+
+        <para>When used in conjunction with <varname>DynamicUser=</varname> the user/group name specified is
+        dynamically allocated at the time the service is started, and released at the time the service is stopped —
+        unless it is already allocated statically (see below). If <varname>DynamicUser=</varname> is not used the
+        specified user and group must have been created statically in the user database no later than the moment the
+        service is started, for example using the
+        <citerefentry><refentrytitle>sysusers.d</refentrytitle><manvolnum>5</manvolnum></citerefentry> facility, which
+        is applied at boot or package install time.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -352,7 +367,7 @@
         assignments have no effect. Variable expansion is not
         performed inside the strings, however, specifier expansion is
         possible. The $ character has no special meaning. If you need
-        to assign a value containing spaces to a variable, use double
+        to assign a value containing spaces or the equals sign to a variable, use double
         quotes (") for the assignment.</para>
 
         <para>Example:
@@ -1038,14 +1053,19 @@
         <varname>After=</varname> dependencies on all mount units necessary to access <filename>/tmp</filename> and
         <filename>/var/tmp</filename>. Moreover an implicitly <varname>After=</varname> ordering on
         <citerefentry><refentrytitle>systemd-tmpfiles-setup.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
-        is added.</para></listitem>
+        is added.</para>
+
+        <para>Note that the implementation of this setting might be impossible (for example if mount namespaces
+        are not available), and the unit should be written in a way that does not solely rely on this setting for
+        security.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>PrivateDevices=</varname></term>
 
-        <listitem><para>Takes a boolean argument. If true, sets up a new /dev namespace for the executed processes and
-        only adds API pseudo devices such as <filename>/dev/null</filename>, <filename>/dev/zero</filename> or
+        <listitem><para>Takes a boolean argument. If true, sets up a new <filename>/dev</filename> mount for the
+        executed processes and only adds API pseudo devices such as <filename>/dev/null</filename>,
+        <filename>/dev/zero</filename> or
         <filename>/dev/random</filename> (as well as the pseudo TTY subsystem) to it, but no physical devices such as
         <filename>/dev/sda</filename>, system memory <filename>/dev/mem</filename>, system ports
         <filename>/dev/port</filename> and others. This is useful to securely turn off physical device access by the
@@ -1056,8 +1076,8 @@
         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for details). Note that using this setting will disconnect propagation of mounts from the service to the host
         (propagation in the opposite direction continues to work).  This means that this setting may not be used for
-        services which shall be able to install mount points in the main mount namespace. The /dev namespace will be
-        mounted read-only and 'noexec'.  The latter may break old programs which try to set up executable memory by
+        services which shall be able to install mount points in the main mount namespace. The new <filename>/dev</filename>
+        will be mounted read-only and 'noexec'. The latter may break old programs which try to set up executable memory by
         using <citerefentry><refentrytitle>mmap</refentrytitle><manvolnum>2</manvolnum></citerefentry> of
         <filename>/dev/zero</filename> instead of using <constant>MAP_ANON</constant>. This setting is implied if
         <varname>DynamicUser=</varname> is set. For this setting the same restrictions regarding mount propagation and
@@ -1065,7 +1085,11 @@
         If turned on and if running in user mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant>
         capability (e.g. setting <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname>
         is implied.
-        </para></listitem>
+        </para>
+
+        <para>Note that the implementation of this setting might be impossible (for example if mount namespaces
+        are not available), and the unit should be written in a way that does not solely rely on this setting for
+        security.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1076,7 +1100,7 @@
         configures only the loopback network device
         <literal>lo</literal> inside it. No other network devices will
         be available to the executed process. This is useful to
-        securely turn off network access by the executed process.
+        turn off network access by the executed process.
         Defaults to false. It is possible to run two or more units
         within the same private network namespace by using the
         <varname>JoinsNamespaceOf=</varname> directive, see
@@ -1086,7 +1110,11 @@
         The latter has the effect that AF_UNIX sockets in the abstract
         socket namespace will become unavailable to the processes
         (however, those located in the file system will continue to be
-        accessible).</para></listitem>
+        accessible).</para>
+
+        <para>Note that the implementation of this setting might be impossible (for example if network namespaces
+        are not available), and the unit should be written in a way that does not solely rely on this setting for
+        security.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1108,7 +1136,11 @@
         <para>This setting is particularly useful in conjunction with
         <varname>RootDirectory=</varname>/<varname>RootImage=</varname>, as the need to synchronize the user and group
         databases in the root directory and on the host is reduced, as the only users and groups who need to be matched
-        are <literal>root</literal>, <literal>nobody</literal> and the unit's own user and group.</para></listitem>
+        are <literal>root</literal>, <literal>nobody</literal> and the unit's own user and group.</para>
+
+        <para>Note that the implementation of this setting might be impossible (for example if user namespaces
+        are not available), and the unit should be written in a way that does not solely rely on this setting for
+        security.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1580,7 +1612,7 @@
 
         <listitem><para>Restricts access to Linux namespace functionality for the processes of this unit. For details
         about Linux namespaces, see
-        <citerefentry><refentrytitle>namespaces</refentrytitle><manvolnum>7</manvolnum></citerefentry>. Either takes a
+        <citerefentry project='man-pages'><refentrytitle>namespaces</refentrytitle><manvolnum>7</manvolnum></citerefentry>. Either takes a
         boolean argument, or a space-separated list of namespace type identifiers. If false (the default), no
         restrictions on namespace creation and switching are made. If true, access to any kind of namespacing is
         prohibited. Otherwise, a space-separated list of namespace type identifiers must be specified, consisting of
@@ -1597,7 +1629,8 @@
         the specified flags parameters into account. Note that — if this option is used — in addition to restricting
         creation and switching of the specified types of namespaces (or all of them, if true) access to the
         <function>setns()</function> system call with a zero flags parameter is prohibited.  This setting is only
-        supported on x86, x86-64, s390 and s390x, and enforces no restrictions on other architectures. If running in user
+        supported on x86, x86-64, mips, mips-le, mips64, mips64-le, mips64-n32, mips64-le-n32, ppc64, ppc64-le,
+        s390 and s390x, and enforces no restrictions on other architectures. If running in user
         mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
         <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname> is implied.  </para></listitem>
       </varlistentry>
@@ -1620,7 +1653,6 @@
 
       <varlistentry>
         <term><varname>RuntimeDirectory=</varname></term>
-        <term><varname>RuntimeDirectoryMode=</varname></term>
 
         <listitem><para>Takes a list of directory names. If set, one
         or more directories by the specified names will be created
@@ -1645,6 +1677,16 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>RuntimeDirectoryMode=</varname></term>
+
+        <listitem><para>Specifies the access mode of the directories specified in
+        <varname>RuntimeDirectory=</varname> as an octal number. Defaults to
+        <constant>0755</constant>. See "Permissions" in
+        <citerefentry project='man-pages'><refentrytitle>path_resolution</refentrytitle><manvolnum>7</manvolnum></citerefentry> for a discussion of the meaning of permission bits.
+        </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>MemoryDenyWriteExecute=</varname></term>
 
         <listitem><para>Takes a boolean argument. If set, attempts to create memory mappings that are writable and
@@ -1655,8 +1697,8 @@
         <citerefentry><refentrytitle>mprotect</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls with
         <constant>PROT_EXEC</constant> set and
         <citerefentry><refentrytitle>shmat</refentrytitle><manvolnum>2</manvolnum></citerefentry> system calls with
-        <constant>SHM_EXEC</constant> set. Note that this option is incompatible with programs that generate program
-        code dynamically at runtime, such as JIT execution engines, or programs compiled making use of the code
+        <constant>SHM_EXEC</constant> set. Note that this option is incompatible with programs and libraries that
+        generate program code dynamically at runtime, including JIT execution engines, executable stacks, and code
         "trampoline" feature of various C compilers. This option improves service security, as it makes harder for
         software exploits to change running code dynamically. Note that this feature is fully available on x86-64, and
         partially on x86. Specifically, the <function>shmat()</function> protection is not available on x86. Note that

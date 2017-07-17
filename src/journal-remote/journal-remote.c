@@ -529,7 +529,7 @@ static int process_http_upload(
                         log_warning("Failed to process data for connection %p", connection);
                         if (r == -E2BIG)
                                 return mhd_respondf(connection,
-                                                    r, MHD_HTTP_REQUEST_ENTITY_TOO_LARGE,
+                                                    r, MHD_HTTP_PAYLOAD_TOO_LARGE,
                                                     "Entry is too large, maximum is " STRINGIFY(DATA_SIZE_MAX) " bytes.");
                         else
                                 return mhd_respondf(connection,
@@ -1200,9 +1200,9 @@ static int parse_config(void) {
                 {}};
 
         return config_parse_many_nulstr(PKGSYSCONFDIR "/journal-remote.conf",
-                                 CONF_PATHS_NULSTR("systemd/journal-remote.conf.d"),
-                                 "Remote\0", config_item_table_lookup, items,
-                                 false, NULL);
+                                        CONF_PATHS_NULSTR("systemd/journal-remote.conf.d"),
+                                        "Remote\0", config_item_table_lookup, items,
+                                        false, NULL);
 }
 
 static void help(void) {

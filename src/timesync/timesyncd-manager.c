@@ -378,10 +378,10 @@ static int manager_adjust_clock(Manager *m, double offset, int leap_sec) {
         m->drift_ppm = tmx.freq / 65536;
 
         log_debug("  status       : %04i %s\n"
-                  "  time now     : %li.%03"PRI_USEC"\n"
-                  "  constant     : %li\n"
+                  "  time now     : %"PRI_TIME".%03"PRI_USEC"\n"
+                  "  constant     : %"PRI_TIMEX"\n"
                   "  offset       : %+.3f sec\n"
-                  "  freq offset  : %+li (%i ppm)\n",
+                  "  freq offset  : %+"PRI_TIMEX" (%i ppm)\n",
                   tmx.status, tmx.status & STA_UNSYNC ? "unsync" : "sync",
                   tmx.time.tv_sec, tmx.time.tv_usec / NSEC_PER_MSEC,
                   tmx.constant,
@@ -1123,10 +1123,6 @@ int manager_new(Manager **ret) {
         m->server_socket = m->clock_watch_fd = -1;
 
         RATELIMIT_INIT(m->ratelimit, RATELIMIT_INTERVAL_USEC, RATELIMIT_BURST);
-
-        r = manager_parse_server_string(m, SERVER_FALLBACK, NTP_SERVERS);
-        if (r < 0)
-                return r;
 
         r = sd_event_default(&m->event);
         if (r < 0)

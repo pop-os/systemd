@@ -6,9 +6,9 @@
 #  (at your option) any later version.
 
 [Unit]
-Description=Temporary Directory
+Description=Temporary Directory (/tmp)
 Documentation=man:hier(7)
-Documentation=http://www.freedesktop.org/wiki/Software/systemd/APIFileSystems
+Documentation=https://www.freedesktop.org/wiki/Software/systemd/APIFileSystems
 ConditionPathIsSymbolicLink=!/tmp
 DefaultDependencies=no
 Conflicts=umount.target

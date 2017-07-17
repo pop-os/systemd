@@ -299,8 +299,9 @@ static void help(void) {
                "     --no-tail             Show all lines, even in follow mode\n"
                "  -r --reverse             Show the newest entries first\n"
                "  -o --output=STRING       Change journal output mode (short, short-precise,\n"
-               "                             short-iso, short-full, short-monotonic, short-unix,\n"
-               "                             verbose, export, json, json-pretty, json-sse, cat)\n"
+               "                             short-iso, short-iso-precise, short-full,\n"
+               "                             short-monotonic, short-unix, verbose, export,\n"
+               "                             json, json-pretty, json-sse, cat)\n"
                "     --utc                 Express time in Coordinated Universal Time (UTC)\n"
                "  -x --catalog             Add message explanations where available\n"
                "     --no-full             Ellipsize fields\n"
@@ -2364,20 +2365,13 @@ int main(int argc, char *argv[]) {
                 log_error_errno(r, "Failed to iterate through journal: %m");
                 goto finish;
         }
-        if (r == 0) {
-                if (arg_follow)
-                        need_seek = true;
-                else {
-                        if (!arg_quiet)
-                                printf("-- No entries --\n");
-                        goto finish;
-                }
-        }
+        if (r == 0)
+                need_seek = true;
 
         if (!arg_follow)
                 pager_open(arg_no_pager, arg_pager_end);
 
-        if (!arg_quiet) {
+        if (!arg_quiet && (arg_lines != 0 || arg_follow)) {
                 usec_t start, end;
                 char start_buf[FORMAT_TIMESTAMP_MAX], end_buf[FORMAT_TIMESTAMP_MAX];
 
@@ -2473,6 +2467,9 @@ int main(int argc, char *argv[]) {
                 }
 
                 if (!arg_follow) {
+                        if (n_shown == 0 && !arg_quiet)
+                                printf("-- No entries --\n");
+
                         if (arg_show_cursor) {
                                 _cleanup_free_ char *cursor = NULL;
 
@@ -2486,6 +2483,7 @@ int main(int argc, char *argv[]) {
                         break;
                 }
 
+                fflush(stdout);
                 r = sd_journal_wait(j, (uint64_t) -1);
                 if (r < 0) {
                         log_error_errno(r, "Couldn't wait for journal event: %m");
@@ -2496,6 +2494,7 @@ int main(int argc, char *argv[]) {
         }
 
 finish:
+        fflush(stdout);
         pager_close();
 
         strv_free(arg_file);

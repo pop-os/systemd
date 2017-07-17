@@ -47,6 +47,7 @@
 #include "dropin.h"
 #include "efivars.h"
 #include "env-util.h"
+#include "escape.h"
 #include "exit-status.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -1780,6 +1781,7 @@ static int list_dependencies_one(
         STRV_FOREACH(c, deps) {
                 if (strv_contains(*units, *c)) {
                         if (!arg_plain) {
+                                printf("  ");
                                 r = list_dependencies_print("...", level + 1, (branches << 1) | (c[1] == NULL ? 0 : 1), 1);
                                 if (r < 0)
                                         return r;
@@ -3190,8 +3192,8 @@ static int start_unit(int argc, char *argv[], void *userdata) {
         return r;
 }
 
+#ifdef ENABLE_LOGIND
 static int logind_set_wall_message(void) {
-#ifdef HAVE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus;
         _cleanup_free_ char *m = NULL;
@@ -3219,15 +3221,14 @@ static int logind_set_wall_message(void) {
 
         if (r < 0)
                 return log_warning_errno(r, "Failed to set wall message, ignoring: %s", bus_error_message(&error, r));
-
-#endif
         return 0;
 }
+#endif
 
 /* Ask systemd-logind, which might grant access to unprivileged users
  * through PolicyKit */
 static int logind_reboot(enum action a) {
-#ifdef HAVE_LOGIND
+#ifdef ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         const char *method, *description;
         sd_bus *bus;
@@ -3290,7 +3291,7 @@ static int logind_reboot(enum action a) {
 }
 
 static int logind_check_inhibitors(enum action a) {
-#ifdef HAVE_LOGIND
+#ifdef ENABLE_LOGIND
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_strv_free_ char **sessions = NULL;
         const char *what, *who, *why, *mode;
@@ -3409,7 +3410,7 @@ static int logind_check_inhibitors(enum action a) {
 }
 
 static int logind_prepare_firmware_setup(void) {
-#ifdef HAVE_LOGIND
+#ifdef ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus;
         int r;
@@ -3817,6 +3818,8 @@ typedef struct UnitStatusInfo {
         bool failed_assert_negate;
         const char *failed_assert;
         const char *failed_assert_parameter;
+        usec_t next_elapse_real;
+        usec_t next_elapse_monotonic;
 
         /* Socket */
         unsigned n_accepted;
@@ -3985,6 +3988,31 @@ static void print_status_info(
                 printf(" since %s\n", s2);
         else
                 printf("\n");
+
+        if (endswith(i->id, ".timer")) {
+                char tstamp1[FORMAT_TIMESTAMP_RELATIVE_MAX],
+                     tstamp2[FORMAT_TIMESTAMP_MAX];
+                char *next_rel_time, *next_time;
+                dual_timestamp nw, next = {i->next_elapse_real,
+                                           i->next_elapse_monotonic};
+                usec_t next_elapse;
+
+                printf("  Trigger: ");
+
+                dual_timestamp_get(&nw);
+                next_elapse = calc_next_elapse(&nw, &next);
+                next_rel_time = format_timestamp_relative(tstamp1,
+                                                          sizeof(tstamp1),
+                                                          next_elapse);
+                next_time = format_timestamp(tstamp2,
+                                             sizeof(tstamp2),
+                                             next_elapse);
+
+                if (next_time && next_rel_time)
+                        printf("%s; %s\n", next_time, next_rel_time);
+                else
+                        printf("n/a\n");
+        }
 
         if (!i->condition_result && i->condition_timestamp > 0) {
                 UnitCondition *c;
@@ -4423,6 +4451,10 @@ static int status_property(const char *name, sd_bus_message *m, UnitStatusInfo *
                         i->tasks_max = u;
                 else if (streq(name, "CPUUsageNSec"))
                         i->cpu_usage_nsec = u;
+                else if (streq(name, "NextElapseUSecMonotonic"))
+                        i->next_elapse_monotonic = u;
+                else if (streq(name, "NextElapseUSecRealtime"))
+                        i->next_elapse_real = u;
 
                 break;
         }
@@ -5573,6 +5605,24 @@ static int reset_failed(int argc, char *argv[], void *userdata) {
         return r;
 }
 
+static int print_variable(const char *s) {
+        const char *sep;
+        _cleanup_free_ char *esc = NULL;
+
+        sep = strchr(s, '=');
+        if (!sep) {
+                log_error("Invalid environment block");
+                return -EUCLEAN;
+        }
+
+        esc = shell_maybe_quote(sep + 1, ESCAPE_POSIX);
+        if (!esc)
+                return log_oom();
+
+        printf("%.*s=%s\n", (int)(sep-s), s, esc);
+        return 0;
+}
+
 static int show_environment(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
@@ -5602,8 +5652,11 @@ static int show_environment(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        while ((r = sd_bus_message_read_basic(reply, SD_BUS_TYPE_STRING, &text)) > 0)
-                puts(text);
+        while ((r = sd_bus_message_read_basic(reply, SD_BUS_TYPE_STRING, &text)) > 0) {
+                r = print_variable(text);
+                if (r < 0)
+                        return r;
+        }
         if (r < 0)
                 return bus_log_parse_error(r);
 
@@ -5654,7 +5707,7 @@ static int switch_root(int argc, char *argv[], void *userdata) {
 
                 /* If the passed init is actually the same as the
                  * systemd binary, then let's suppress it. */
-                if (files_same(root_init_path, root_systemd_path) > 0)
+                if (files_same(root_init_path, root_systemd_path, 0) > 0)
                         init = NULL;
         }
 
@@ -5890,7 +5943,8 @@ static int enable_sysv_units(const char *verb, char **args) {
                 if (!l)
                         return log_oom();
 
-                log_info("Executing: %s", l);
+                if (!arg_quiet)
+                        log_info("Executing: %s", l);
 
                 pid = fork();
                 if (pid < 0)
@@ -5975,6 +6029,34 @@ static int mangle_names(char **original_names, char ***mangled_names) {
 
         *i = NULL;
         *mangled_names = l;
+
+        return 0;
+}
+
+static int normalize_filenames(char **names) {
+        char **u;
+        int r;
+
+        STRV_FOREACH(u, names)
+                if (!path_is_absolute(*u)) {
+                        char* normalized_path;
+
+                        if (!isempty(arg_root)) {
+                                log_error("Non-absolute paths are not allowed when --root is used: %s", *u);
+                                return -EINVAL;
+                        }
+
+                        if (!strchr(*u,'/')) {
+                                log_error("Link argument does contain at least one directory separator: %s", *u);
+                                return -EINVAL;
+                        }
+
+                        r = path_make_absolute_cwd(*u, &normalized_path);
+                        if (r < 0)
+                                return r;
+
+                        free_and_replace(*u, normalized_path);
+                }
 
         return 0;
 }
@@ -6071,6 +6153,12 @@ static int enable_unit(int argc, char *argv[], void *userdata) {
 
         if (streq(verb, "disable")) {
                 r = normalize_names(names, true);
+                if (r < 0)
+                        return r;
+        }
+
+        if (streq(verb, "link")) {
+                r = normalize_filenames(names);
                 if (r < 0)
                         return r;
         }
@@ -7001,7 +7089,8 @@ static void systemctl_help(void) {
                "     --root=PATH      Enable unit files in the specified root directory\n"
                "  -n --lines=INTEGER  Number of journal entries to show\n"
                "  -o --output=STRING  Change journal output mode (short, short-precise,\n"
-               "                             short-iso, short-full, short-monotonic, short-unix,\n"
+               "                             short-iso, short-iso-precise, short-full,\n"
+               "                             short-monotonic, short-unix,\n"
                "                             verbose, export, json, json-pretty, json-sse, cat)\n"
                "     --firmware-setup Tell the firmware to show the setup menu on next boot\n"
                "     --plain          Print unit dependencies as a list instead of a tree\n\n"
@@ -8245,12 +8334,14 @@ static int halt_now(enum action a) {
         switch (a) {
 
         case ACTION_HALT:
-                log_info("Halting.");
+                if (!arg_quiet)
+                        log_info("Halting.");
                 (void) reboot(RB_HALT_SYSTEM);
                 return -errno;
 
         case ACTION_POWEROFF:
-                log_info("Powering off.");
+                if (!arg_quiet)
+                        log_info("Powering off.");
                 (void) reboot(RB_POWER_OFF);
                 return -errno;
 
@@ -8259,16 +8350,18 @@ static int halt_now(enum action a) {
                 _cleanup_free_ char *param = NULL;
 
                 r = read_one_line_file("/run/systemd/reboot-param", &param);
-                if (r < 0)
+                if (r < 0 && r != -ENOENT)
                         log_warning_errno(r, "Failed to read reboot parameter file: %m");
 
                 if (!isempty(param)) {
-                        log_info("Rebooting with argument '%s'.", param);
+                        if (!arg_quiet)
+                                log_info("Rebooting with argument '%s'.", param);
                         (void) syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, param);
                         log_warning_errno(errno, "Failed to reboot with parameter, retrying without: %m");
                 }
 
-                log_info("Rebooting.");
+                if (!arg_quiet)
+                        log_info("Rebooting.");
                 (void) reboot(RB_AUTOBOOT);
                 return -errno;
         }
@@ -8280,7 +8373,7 @@ static int halt_now(enum action a) {
 
 static int logind_schedule_shutdown(void) {
 
-#ifdef HAVE_LOGIND
+#ifdef ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char date[FORMAT_TIMESTAMP_MAX];
         const char *action;
@@ -8329,7 +8422,8 @@ static int logind_schedule_shutdown(void) {
         if (r < 0)
                 return log_warning_errno(r, "Failed to call ScheduleShutdown in logind, proceeding with immediate shutdown: %s", bus_error_message(&error, r));
 
-        log_info("Shutdown scheduled for %s, use 'shutdown -c' to cancel.", format_timestamp(date, sizeof(date), arg_when));
+        if (!arg_quiet)
+                log_info("Shutdown scheduled for %s, use 'shutdown -c' to cancel.", format_timestamp(date, sizeof(date), arg_when));
         return 0;
 #else
         log_error("Cannot schedule shutdown without logind support, proceeding with immediate shutdown.");
@@ -8408,7 +8502,7 @@ static int runlevel_main(void) {
 }
 
 static int logind_cancel_shutdown(void) {
-#ifdef HAVE_LOGIND
+#ifdef ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus;
         int r;
@@ -8457,7 +8551,9 @@ int main(int argc, char*argv[]) {
                 goto finish;
 
         if (arg_action != ACTION_SYSTEMCTL && running_in_chroot() > 0) {
-                log_info("Running in chroot, ignoring request.");
+
+                if (!arg_quiet)
+                        log_info("Running in chroot, ignoring request.");
                 r = 0;
                 goto finish;
         }

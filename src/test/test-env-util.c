@@ -21,6 +21,8 @@
 #include <string.h>
 
 #include "env-util.h"
+#include "fd-util.h"
+#include "fileio.h"
 #include "string-util.h"
 #include "strv.h"
 #include "util.h"
@@ -314,6 +316,57 @@ static void test_env_assignment_is_valid(void) {
         assert_se(!env_assignment_is_valid("głąb=printf \"\x1b]0;<mock-chroot>\x07<mock-chroot>\""));
 }
 
+static void test_deserialize_environment(void) {
+        _cleanup_strv_free_ char **env = strv_new("A=1", NULL);
+
+        assert_se(deserialize_environment(&env, "env=test") < 0);
+        assert_se(deserialize_environment(&env, "env=B=2") >= 0);
+
+        assert_se(strv_equal(env, STRV_MAKE("A=1", "B=2")));
+}
+
+static void test_serialize_environment(void) {
+        char fn[] = "/tmp/test-env-util.XXXXXXX";
+        int fd, r;
+        _cleanup_fclose_ FILE *f = NULL;
+
+        _cleanup_strv_free_ char **env = strv_new("A=1",
+                                                  "B=2",
+                                                  "C=ąęółń",
+                                                  "D=D=a\\x0Ab",
+                                                  NULL);
+        _cleanup_strv_free_ char **env2 = NULL;
+
+        fd = mkostemp_safe(fn);
+        assert_se(fd >= 0);
+
+        assert_se(f = fdopen(fd, "r+"));
+
+        assert_se(serialize_environment(f, env) == 0);
+        assert_se(fflush_and_check(f) == 0);
+
+        rewind(f);
+
+        for (;;) {
+                char line[LINE_MAX];
+                const char *l;
+
+                if (!fgets(line, sizeof line, f))
+                        break;
+
+                char_array_0(line);
+                l = strstrip(line);
+
+                r = deserialize_environment(&env2, l);
+                assert_se(r == 1);
+        }
+        assert_se(feof(f));
+
+        assert_se(strv_equal(env, env2));
+
+        unlink(fn);
+}
+
 int main(int argc, char *argv[]) {
         test_strv_env_delete();
         test_strv_env_get();
@@ -330,6 +383,8 @@ int main(int argc, char *argv[]) {
         test_env_name_is_valid();
         test_env_value_is_valid();
         test_env_assignment_is_valid();
+        test_deserialize_environment();
+        test_serialize_environment();
 
         return 0;
 }

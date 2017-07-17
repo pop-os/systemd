@@ -1,19 +1,22 @@
-# FIDO u2f devices for two-factor authentication; current clients access the
-# device directly
-ACTION!="add|change", GOTO="fido_u2f_end"
-SUBSYSTEM!="hidraw", GOTO="fido_u2f_end"
-KERNEL!="hidraw*", GOTO="fido_u2f_end"
+# this udev file should be used with udev 188 and newer
+ACTION!="add|change", GOTO="u2f_end"
 
-# FIDO u2f devices, until there is a proper kernel driver
-ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0113|0114|0115|0116|0120|0402|0403|0406|0407|0410", TAG+="uaccess"
+# Yubico YubiKey
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1050", ATTRS{idProduct}=="0113|0114|0115|0116|0120|0402|0403|0406|0407|0410", TAG+="uaccess"
 
-# Happlink (formaly Plug-Up) Security KEY
-ATTRS{idVendor}=="2581", ATTRS{idProduct}=="f1d0", TAG+="uaccess"
+# Happlink (formerly Plug-Up) Security KEY
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2581", ATTRS{idProduct}=="f1d0", TAG+="uaccess"
 
-# Neowave Keydo
-ATTRS{idVendor}=="1e0d", ATTRS{idProduct}=="f1d0", TAG+="uaccess"
+#  Neowave Keydo and Keydo AES
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1e0d", ATTRS{idProduct}=="f1d0|f1ae", TAG+="uaccess"
 
 # HyperSecu HyperFIDO
-ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0880", TAG+="uaccess"
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="096e|2ccf", ATTRS{idProduct}=="0880", TAG+="uaccess"
 
-LABEL="fido_u2f_end"
+# Feitian ePass FIDO
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="096e", ATTRS{idProduct}=="0850", TAG+="uaccess"
+
+# JaCarta U2F
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="24dc", ATTRS{idProduct}=="0101", TAG+="uaccess"
+
+LABEL="u2f_end"

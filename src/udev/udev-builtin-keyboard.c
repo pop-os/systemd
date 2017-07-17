@@ -29,7 +29,7 @@
 #include "string-util.h"
 #include "udev.h"
 
-static const struct key *keyboard_lookup_key(const char *str, GPERF_LEN_TYPE len);
+static const struct key_name *keyboard_lookup_key(const char *str, GPERF_LEN_TYPE len);
 #include "keyboard-keys-from-name.h"
 
 static int install_force_release(struct udev_device *dev, const unsigned *release, unsigned release_count) {
@@ -76,7 +76,7 @@ static void map_keycode(int fd, const char *devnode, int scancode, const char *k
                 unsigned key;
         } map;
         char *endptr;
-        const struct key *k;
+        const struct key_name *k;
         unsigned keycode_num;
 
         /* translate identifier to key code */
@@ -173,6 +173,9 @@ static void set_trackpoint_sensitivity(struct udev_device *dev, const char *valu
         if (r < 0) {
                 log_error("Unable to parse POINTINGSTICK_SENSITIVITY '%s' for '%s'", value, udev_device_get_devnode(dev));
                 return;
+        } else if (val_i < 0 || val_i > 255) {
+                log_error("POINTINGSTICK_SENSITIVITY %d outside range [0..255] for '%s' ", val_i, udev_device_get_devnode(dev));
+                return;
         }
 
         xsprintf(val_s, "%d", val_i);
@@ -198,6 +201,7 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
         unsigned release_count = 0;
         _cleanup_close_ int fd = -1;
         const char *node;
+        int has_abs = -1;
 
         node = udev_device_get_devnode(dev);
         if (!node) {
@@ -257,6 +261,24 @@ static int builtin_keyboard(struct udev_device *dev, int argc, char *argv[], boo
                                 if (fd < 0)
                                         return EXIT_FAILURE;
                         }
+
+                        if (has_abs == -1) {
+                                unsigned long bits;
+                                int rc;
+
+                                rc = ioctl(fd, EVIOCGBIT(0, sizeof(bits)), &bits);
+                                if (rc < 0) {
+                                        log_error_errno(errno, "Unable to EVIOCGBIT device \"%s\"", node);
+                                        return EXIT_FAILURE;
+                                }
+
+                                has_abs = !!(bits & (1 << EV_ABS));
+                                if (!has_abs)
+                                        log_warning("EVDEV_ABS override set but no EV_ABS present on device \"%s\"", node);
+                        }
+
+                        if (!has_abs)
+                                continue;
 
                         override_abs(fd, node, evcode, udev_list_entry_get_value(entry));
                 } else if (streq(key, "POINTINGSTICK_SENSITIVITY"))

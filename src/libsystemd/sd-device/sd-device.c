@@ -195,8 +195,7 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
                                         /* this is not a valid device */
                                         return -ENODEV;
 
-                                log_debug("sd-device: %s does not have an uevent file: %m", syspath);
-                                return -errno;
+                                return log_debug_errno(errno, "sd-device: %s does not have an uevent file: %m", syspath);
                         }
                 } else {
                         /* everything else just needs to be a directory */
@@ -322,6 +321,10 @@ _public_ int sd_device_new_from_subsystem_sysname(sd_device **ret, const char *s
                 return sd_device_new_from_syspath(ret, syspath);
 
         syspath = strjoina("/sys/class/", subsystem, "/", name);
+        if (access(syspath, F_OK) >= 0)
+                return sd_device_new_from_syspath(ret, syspath);
+
+        syspath = strjoina("/sys/firmware/", subsystem, "/", sysname);
         if (access(syspath, F_OK) >= 0)
                 return sd_device_new_from_syspath(ret, syspath);
 
@@ -1892,6 +1895,7 @@ _public_ int sd_device_set_sysattr_value(sd_device *device, const char *sysattr,
                 r = device_add_sysattr_value(device, sysattr, value);
                 if (r < 0)
                         return r;
+                value = NULL;
 
                 return -ENXIO;
         }

@@ -20,7 +20,7 @@
 
 [Distribution]
 Distribution=fedora
-Release=25
+Release=26
 
 [Output]
 Format=raw_btrfs
@@ -32,8 +32,6 @@ RootSize=3G
 [Packages]
 BuildPackages=
         audit-libs-devel
-        autoconf
-        automake
         bzip2-devel
         cryptsetup-devel
         dbus-devel
@@ -54,7 +52,7 @@ BuildPackages=
         libcap-devel
         libcurl-devel
         libgcrypt-devel
-        libidn-devel
+        libidn2-devel
         libmicrohttpd-devel
         libmount-devel
         libseccomp-devel
@@ -62,8 +60,9 @@ BuildPackages=
         libtool
         libxkbcommon-devel
         libxslt
+        lz4
         lz4-devel
-        make
+        meson
         pam-devel
         pkgconfig
         python3-devel
@@ -71,3 +70,6 @@ BuildPackages=
         qrencode-devel
         tree
         xz-devel
+
+Packages=
+        libidn2

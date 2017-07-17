@@ -7,19 +7,17 @@ Uploaders: Michael Biebl <biebl@debian.org>,
            Marco d'Itri <md@linux.it>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>
-Standards-Version: 3.9.8
+Standards-Version: 4.0.0
 Vcs-Git: https://anonscm.debian.org/git/pkg-systemd/systemd.git
 Vcs-Browser: https://anonscm.debian.org/git/pkg-systemd/systemd.git
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
-Build-Depends: debhelper (>= 10),
+Build-Depends: debhelper (>= 10.4~),
                pkg-config,
                xsltproc,
                docbook-xsl,
                docbook-xml,
                m4,
-               dh-autoreconf,
-               automake (>= 1.11),
-               autoconf (>= 2.63),
+               meson (>= 0.40.0),
                intltool,
                gperf,
                gnu-efi [amd64 i386 arm64],
@@ -80,7 +78,6 @@ Breaks: apparmor (<< 2.9.2-1),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
         laptop-mode-tools (<< 1.68~),
-        ${Breaks:rcs-compat}
 Replaces: udev (<< 228-5),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
@@ -217,7 +214,7 @@ Package: libnss-myhostname
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -240,7 +237,7 @@ Package: libnss-mymachines
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -259,7 +256,7 @@ Package: libnss-resolve
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -277,7 +274,7 @@ Package: libnss-systemd
 Architecture: linux-any
 Multi-Arch: same
 Section: admin
-Priority: extra
+Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -334,7 +331,6 @@ Breaks: systemd (<< 233-4),
         ifupdown (<< 0.8.5~),
         ifplugd (<< 0.28-19.1~),
         joystick (<< 1:1.4.9-1~),
-        ${Breaks:usb-modeswitch},
 Replaces: systemd (<< 233-4)
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from

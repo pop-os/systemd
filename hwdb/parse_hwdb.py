@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # -*- Mode: python; coding: utf-8; indent-tabs-mode: nil -*- */
 #
 # This file is part of systemd. It is distrubuted under the MIT license, see
@@ -66,6 +66,7 @@ UDEV_TAG = Word(string.ascii_uppercase, alphanums + '_')
 TYPES = {'mouse':    ('usb', 'bluetooth', 'ps2', '*'),
          'evdev':    ('name', 'atkbd', 'input'),
          'touchpad': ('i8042', 'rmi', 'bluetooth', 'usb'),
+         'joystick': ('i8042', 'rmi', 'bluetooth', 'usb'),
          'keyboard': ('name', ),
          'sensor':   ('modalias', ),
         }
@@ -109,9 +110,12 @@ def property_grammar():
              ('MOUSE_WHEEL_TILT_VERTICAL', Literal('1')),
              ('POINTINGSTICK_SENSITIVITY', INTEGER),
              ('POINTINGSTICK_CONST_ACCEL', REAL),
+             ('ID_INPUT_JOYSTICK_INTEGRATION', Or(('internal', 'external'))),
              ('ID_INPUT_TOUCHPAD_INTEGRATION', Or(('internal', 'external'))),
              ('XKB_FIXED_LAYOUT', STRING),
              ('XKB_FIXED_VARIANT', STRING),
+             ('KEYBOARD_LED_NUMLOCK', Literal('0')),
+             ('KEYBOARD_LED_CAPSLOCK', Literal('0')),
              ('ACCEL_MOUNT_MATRIX', mount_matrix),
             )
     fixed_props = [Literal(name)('NAME') - Suppress('=') - val('VALUE')
@@ -168,7 +172,9 @@ def check_one_keycode(prop, value):
     if value != '!' and ecodes is not None:
         key = 'KEY_' + value.upper()
         if key not in ecodes:
-            error('Keycode {} unknown', key)
+            key = value.upper()
+            if key not in ecodes:
+                error('Keycode {} unknown', key)
 
 def check_properties(groups):
     grammar = property_grammar()
