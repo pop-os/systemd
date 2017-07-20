@@ -1,0 +1,147 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Thu, 20 Jul 2017 22:56:33 +0100
+Subject: resolved: create private stub resolve file for integration with
+ resolvconf
+
+This creates a second private resolve.conf file which lists the stub resolver
+and the resolved acquired search domains.
+
+This file is then supplied to resolvconf, such that non-nss using software does
+name resolution via stub resolver, with search domains information.
+
+In the future, this may become the default resolv.conf on Ubuntu.
+---
+ src/resolve/resolved-resolv-conf.c               | 34 +++++++++++++++++++++++-
+ src/resolve/resolved-resolv-conf.h               |  1 +
+ units/meson.build                                |  2 ++
+ units/systemd-resolved-update-resolvconf.path    |  2 ++
+ units/systemd-resolved-update-resolvconf.service |  3 +++
+ units/systemd-resolved.service.m4.in             |  1 +
+ 6 files changed, 42 insertions(+), 1 deletion(-)
+ create mode 100644 units/systemd-resolved-update-resolvconf.path
+ create mode 100644 units/systemd-resolved-update-resolvconf.service
+
+diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
+index 3c62550..27a04ea 100644
+--- a/src/resolve/resolved-resolv-conf.c
++++ b/src/resolve/resolved-resolv-conf.c
+@@ -228,11 +228,27 @@ static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *doma
+         return fflush_and_check(f);
+ }
+ 
++static int write_stub_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *domains) {
++        Iterator i;
++
++        fputs("# This file is managed by man:systemd-resolved(8). Do not edit.\n#\n"
++              "# 127.0.0.53 is the systemd-resolved stub resolver.\n"
++              "# run \"systemd-resolve --status\" to see details about the actual nameservers.\n"
++              "nameserver 127.0.0.53\n\n", f);
++
++        if (!ordered_set_isempty(domains))
++                write_resolv_conf_search(domains, f);
++
++        return fflush_and_check(f);
++}
++
+ int manager_write_resolv_conf(Manager *m) {
+ 
+         _cleanup_ordered_set_free_ OrderedSet *dns = NULL, *domains = NULL;
+         _cleanup_free_ char *temp_path = NULL;
++        _cleanup_free_ char *temp_path_stub = NULL;
+         _cleanup_fclose_ FILE *f = NULL;
++        _cleanup_fclose_ FILE *f_stub = NULL;
+         int r;
+ 
+         assert(m);
+@@ -252,8 +268,11 @@ int manager_write_resolv_conf(Manager *m) {
+         r = fopen_temporary_label(PRIVATE_RESOLV_CONF, PRIVATE_RESOLV_CONF, &f, &temp_path);
+         if (r < 0)
+                 return log_warning_errno(r, "Failed to open private resolv.conf file for writing: %m");
+-
++        r = fopen_temporary_label(PRIVATE_STUB_RESOLV_CONF, PRIVATE_STUB_RESOLV_CONF, &f_stub, &temp_path_stub);
++        if (r < 0)
++                return log_warning_errno(r, "Failed to open private stub-resolv.conf file for writing: %m");
+         (void) fchmod(fileno(f), 0644);
++        (void) fchmod(fileno(f_stub), 0644);
+ 
+         r = write_resolv_conf_contents(f, dns, domains);
+         if (r < 0) {
+@@ -266,11 +285,24 @@ int manager_write_resolv_conf(Manager *m) {
+                 goto fail;
+         }
+ 
++        r = write_stub_resolv_conf_contents(f_stub, dns, domains);
++        if (r < 0) {
++                log_error_errno(r, "Failed to write private stub-resolv.conf contents: %m");
++                goto fail;
++        }
++
++        if (rename(temp_path_stub, PRIVATE_STUB_RESOLV_CONF) < 0) {
++                r = log_error_errno(errno, "Failed to move private stub-resolv.conf file into place: %m");
++                goto fail;
++        }
++
+         return 0;
+ 
+ fail:
+         (void) unlink(PRIVATE_RESOLV_CONF);
+         (void) unlink(temp_path);
++        (void) unlink(PRIVATE_STUB_RESOLV_CONF);
++        (void) unlink(temp_path_stub);
+ 
+         return r;
+ }
+diff --git a/src/resolve/resolved-resolv-conf.h b/src/resolve/resolved-resolv-conf.h
+index 75fa080..e2ddeb6 100644
+--- a/src/resolve/resolved-resolv-conf.h
++++ b/src/resolve/resolved-resolv-conf.h
+@@ -22,6 +22,7 @@
+ #include "resolved-manager.h"
+ 
+ #define PRIVATE_RESOLV_CONF "/run/systemd/resolve/resolv.conf"
++#define PRIVATE_STUB_RESOLV_CONF "/run/systemd/resolve/stub-resolv.conf"
+ 
+ int manager_read_resolv_conf(Manager *m);
+ int manager_write_resolv_conf(Manager *m);
+diff --git a/units/meson.build b/units/meson.build
+index 05cff0e..37d754a 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -91,6 +91,8 @@ units = [
+          'sockets.target.wants/'],
+         ['systemd-networkd.socket',             '',
+          join_paths(pkgsysconfdir, 'system/sockets.target.wants/')],
++        ['systemd-resolved-update-resolvconf.path', '',],
++        ['systemd-resolved-update-resolvconf.service', '',],
+         ['systemd-rfkill.socket',               'ENABLE_RFKILL'],
+         ['systemd-tmpfiles-clean.timer',        '',
+          'timers.target.wants/'],
+diff --git a/units/systemd-resolved-update-resolvconf.path b/units/systemd-resolved-update-resolvconf.path
+new file mode 100644
+index 0000000..ae0d1af
+--- /dev/null
++++ b/units/systemd-resolved-update-resolvconf.path
+@@ -0,0 +1,2 @@
++[Path]
++PathChanged=/run/systemd/resolve/stub-resolv.conf
+diff --git a/units/systemd-resolved-update-resolvconf.service b/units/systemd-resolved-update-resolvconf.service
+new file mode 100644
+index 0000000..f525505
+--- /dev/null
++++ b/units/systemd-resolved-update-resolvconf.service
+@@ -0,0 +1,3 @@
++[Service]
++Type=oneshot
++ExecStart=+/bin/sh -c '[ ! -e /run/resolvconf/enable-updates ] || cat /run/systemd/resolve/stub-resolv.conf | /sbin/resolvconf -a systemd-resolved'
+diff --git a/units/systemd-resolved.service.m4.in b/units/systemd-resolved.service.m4.in
+index 931156a..8abc04a 100644
+--- a/units/systemd-resolved.service.m4.in
++++ b/units/systemd-resolved.service.m4.in
+@@ -14,6 +14,7 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/writing-resolver
+ After=systemd-networkd.service network.target
+ Before=network-online.target nss-lookup.target
+ Wants=nss-lookup.target
++Wants=systemd-resolved-update-resolvconf.path
+ 
+ # On kdbus systems we pull in the busname explicitly, because it
+ # carries policy that allows the daemon to acquire its name.
