@@ -1,0 +1,83 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Thu, 20 Jul 2017 14:35:54 +0200
+Subject: Revert "units: Tell login to preserve environment"
+
+Environment=LANG= LANGUAGE= LC_CTYPE= ... as used in the getty units is
+not unsetting the variables but instead sets it to an empty var. Passing
+that environment to login messes up the system locale settings and
+breaks programs like gpg-agent.
+
+This reverts commit db6aedab9292678918f15807a0d835be35511667.
+
+Closes: #868695
+---
+ units/console-getty.service.m4.in    | 5 +----
+ units/container-getty@.service.m4.in | 5 +----
+ units/getty@.service.m4              | 5 +----
+ units/serial-getty@.service.m4       | 5 +----
+ 4 files changed, 4 insertions(+), 16 deletions(-)
+
+diff --git a/units/console-getty.service.m4.in b/units/console-getty.service.m4.in
+index d9d0cba..413d940 100644
+--- a/units/console-getty.service.m4.in
++++ b/units/console-getty.service.m4.in
+@@ -16,10 +16,7 @@ After=rc-local.service
+ Before=getty.target
+ 
+ [Service]
+-# The '-o' option value tells agetty to replace 'login' arguments with an
+-# option to preserve environment (-p), followed by '--' for safety, and then
+-# the entered username.
+-ExecStart=-/sbin/agetty -o '-p -- \\u' --noclear --keep-baud console 115200,38400,9600 $TERM
++ExecStart=-/sbin/agetty --noclear --keep-baud console 115200,38400,9600 $TERM
+ Type=idle
+ Restart=always
+ RestartSec=0
+diff --git a/units/container-getty@.service.m4.in b/units/container-getty@.service.m4.in
+index fd0be86..e126f3a 100644
+--- a/units/container-getty@.service.m4.in
++++ b/units/container-getty@.service.m4.in
+@@ -17,10 +17,7 @@ IgnoreOnIsolate=yes
+ ConditionPathExists=/dev/pts/%I
+ 
+ [Service]
+-# The '-o' option value tells agetty to replace 'login' arguments with an
+-# option to preserve environment (-p), followed by '--' for safety, and then
+-# the entered username.
+-ExecStart=-/sbin/agetty -o '-p -- \\u' --noclear --keep-baud pts/%I 115200,38400,9600 $TERM
++ExecStart=-/sbin/agetty --noclear --keep-baud pts/%I 115200,38400,9600 $TERM
+ Type=idle
+ Restart=always
+ RestartSec=0
+diff --git a/units/getty@.service.m4 b/units/getty@.service.m4
+index 2a84061..5b82c13 100644
+--- a/units/getty@.service.m4
++++ b/units/getty@.service.m4
+@@ -33,10 +33,7 @@ ConditionPathExists=/dev/tty0
+ 
+ [Service]
+ # the VT is cleared by TTYVTDisallocate
+-# The '-o' option value tells agetty to replace 'login' arguments with an
+-# option to preserve environment (-p), followed by '--' for safety, and then
+-# the entered username.
+-ExecStart=-/sbin/agetty -o '-p -- \\u' --noclear %I $TERM
++ExecStart=-/sbin/agetty --noclear %I $TERM
+ Type=idle
+ Restart=always
+ RestartSec=0
+diff --git a/units/serial-getty@.service.m4 b/units/serial-getty@.service.m4
+index b7caeaf..609c5b6 100644
+--- a/units/serial-getty@.service.m4
++++ b/units/serial-getty@.service.m4
+@@ -28,10 +28,7 @@ Conflicts=rescue.service
+ Before=rescue.service
+ 
+ [Service]
+-# The '-o' option value tells agetty to replace 'login' arguments with an
+-# option to preserve environment (-p), followed by '--' for safety, and then
+-# the entered username.
+-ExecStart=-/sbin/agetty -o '-p -- \\u' --keep-baud 115200,38400,9600 %I $TERM
++ExecStart=-/sbin/agetty --keep-baud 115200,38400,9600 %I $TERM
+ Type=idle
+ Restart=always
+ UtmpIdentifier=%I
