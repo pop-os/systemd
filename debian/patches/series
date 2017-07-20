@@ -24,3 +24,4 @@ debian/Add-env-variable-for-machine-ID-path.patch
 debian/Mark-test-timesync-as-manual.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
 debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
+debian/Ubuntu-UseDomains-by-default.patch
