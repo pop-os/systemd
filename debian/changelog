@@ -1,3 +1,23 @@
+systemd (234-2) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * udev README.Debian: Fix name of example *.link file
+
+  [ Felipe Sateler ]
+  * test-condition: Don't assume that all non-root users are normal users.
+    Automated builders may run under a dedicated system user, and this test
+    would fail that.
+
+  [ Michael Biebl ]
+  * Revert "units: Tell login to preserve environment"
+    Environment=LANG= LANGUAGE= LC_CTYPE= ... as used in the getty units is
+    not unsetting the variables but instead sets it to an empty var. Passing
+    that environment to login messes up the system locale settings and
+    breaks programs like gpg-agent.
+    (Closes: #868695)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 20 Jul 2017 15:13:42 +0200
+
 systemd (234-1) unstable; urgency=medium
 
   [ Michael Biebl ]
