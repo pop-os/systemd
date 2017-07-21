@@ -23,10 +23,6 @@ remove_nss_entry() {
 
 if [ "$1" = remove ]; then
     remove_nss_entry /etc/nsswitch.conf libnss-resolve resolve
-    systemctl disable systemd-resolved.service
-    if [ -d /run/systemd/system ]; then
-        deb-systemd-invoke stop systemd-resolved.service || true
-    fi
 fi
 
 #DEBHELPER#
