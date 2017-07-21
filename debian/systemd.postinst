@@ -44,6 +44,11 @@ if dpkg --compare-versions "$2" lt "234-1ubuntu2~"; then
     systemctl enable systemd-resolved.service || true
 fi
 
+# Use stub resolve.conf by default on new installs
+if [ -z "$2" ] && [ ! -e /etc/resolv.conf ]; then
+    ln -s ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+fi
+
 # Enable ondemand by default on new installs installs and upgrades
 if [ -e /lib/systemd/system/ondemand.service ] && dpkg --compare-versions "$2" lt "231-7~"; then
     systemctl enable ondemand.service || true
