@@ -1,4 +1,5 @@
 test-condition-don-t-assume-that-all-non-root-users-are-n.patch
+tests-ignore-router-state-in-networkd-test-6390.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
