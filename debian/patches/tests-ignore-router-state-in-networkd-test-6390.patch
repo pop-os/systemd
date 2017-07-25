@@ -1,0 +1,26 @@
+From: Martin Pitt <martinpitt@users.noreply.github.com>
+Date: Tue, 18 Jul 2017 00:06:35 +0200
+Subject: tests: ignore router state in networkd test (#6390)
+
+In networkd-test.py, don't assert that the router state is "routable".
+While it should eventually become that, we don't wait for it, and thus
+at that point it often is "carrier" or "degrated" still. It is also not
+really relevant as this only tests the "client" side interface.
+(cherry picked from commit 23fa427d660be54ba3fa98842023dd9b7e77a1b0)
+---
+ test/networkd-test.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/networkd-test.py b/test/networkd-test.py
+index eee8b65..9bf7ee0 100755
+--- a/test/networkd-test.py
++++ b/test/networkd-test.py
+@@ -334,7 +334,7 @@ DHCP=%s
+ 
+             # check networkctl state
+             out = subprocess.check_output(['networkctl'])
+-            self.assertRegex(out, (r'%s\s+ether\s+routable\s+unmanaged' % self.if_router).encode())
++            self.assertRegex(out, (r'%s\s+ether\s+[a-z-]+\s+unmanaged' % self.if_router).encode())
+             self.assertRegex(out, (r'%s\s+ether\s+routable\s+configured' % self.iface).encode())
+ 
+             out = subprocess.check_output(['networkctl', 'status', self.iface])
