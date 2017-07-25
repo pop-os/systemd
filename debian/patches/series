@@ -26,3 +26,4 @@ debian/Avoid-requiring-a-kvm-system-group.patch
 debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-resolved-resolvconf-integration.patch
+debian/Ubuntu-Ship-modprobe.d-drop-in-to-set-bonding-max_bonds-to-0.patch

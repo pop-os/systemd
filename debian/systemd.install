@@ -57,6 +57,7 @@ usr/lib/sysctl.d/
 #usr/lib/sysusers.d/
 usr/lib/systemd/
 usr/lib/tmpfiles.d/
+lib/modprobe.d/
 usr/lib/kernel
 usr/share/locale/
 var/lib
