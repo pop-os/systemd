@@ -1,3 +1,35 @@
+systemd (234-1ubuntu2) artful; urgency=medium
+
+  * Set UseDomains to true, by default, on Ubuntu.
+    On Ubuntu, fallback DNS servers are disabled, therefore we do not leak queries
+    to a preset 3rd party by default. In resolved, dnssec is also disabled by
+    default, as too much of the internet is broken and using Ubuntu users to debug
+    the internet is not very productive - most of the time the end-user cannot fix
+    or know how to notify the site owners about the dnssec mistakes. Inherintally
+    the DHCP acquired DNS servers are therefore trusted, and are free to spoof
+    records. Not trusting DNS search domains, in such scenario, provides limited
+    security or privacy benefits. From user point of view, this also appears to be
+    a regression from previous Ubuntu releases which do trust DHCP acquired search
+    domains by default.
+    Therefore we are enabling UseDomains by default on Ubuntu.
+    Users may override this setting in the .network files by specifying
+    [DHCP|IPv6AcceptRA] UseDomains=no|route options.
+  * resolved: create private stub resolve file for integration with resolvconf.
+    The stub-resolve.conf file points at resolved stub resolver, but also lists the
+    available search domains. This is required to correctly resolve domains without
+    using resolve nss module.
+  * Enable systemd-resolved by default
+  * Create /etc/resolv.conf at postinst, pointing at the stub resolver.
+    The stub resolver file is dynamically managed by systemd-resolved. It points at
+    the stub resolver as the nameserver, however it also dynamically updates the
+    search stanza, thus non-nss dns tools work correctly with unqualified names and
+    correctly use the DHCP acquired search domains.
+  * libnss-resolve: do not disable and stop systemd-resolved
+    resolved is always used by default on ubuntu via stub resolver, therefore it
+    should continue to operate without libnss-resolve module installed.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 21 Jul 2017 17:07:17 +0100
+
 systemd (234-1ubuntu1) artful; urgency=medium
 
   [ Dimitri John Ledkov ]
