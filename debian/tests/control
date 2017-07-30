@@ -121,8 +121,10 @@ Depends: libsystemd-dev,
   gcc,
   libc6-dev | libc-dev,
   make,
+  quota,
   systemd-journal-remote,
   systemd-container,
+  systemd-coredump,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
