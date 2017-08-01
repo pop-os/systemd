@@ -15,7 +15,7 @@ Fixes #5971 #6184
  create mode 100644 modprobe.d/systemd.conf
 
 diff --git a/meson.build b/meson.build
-index 20b27c8..09a4609 100644
+index eabf215..00ef5c3 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -73,6 +73,7 @@ polkitpkladir = join_paths(localstatedir, 'lib/polkit-1/localauthority/10-vendor
@@ -26,7 +26,7 @@ index 20b27c8..09a4609 100644
  
  # Our own paths
  pkgdatadir = join_paths(datadir, 'systemd')
-@@ -2295,6 +2296,8 @@ install_data('xorg/50-systemd-user.sh',
+@@ -2303,6 +2304,8 @@ install_data('xorg/50-systemd-user.sh',
               install_dir : xinitrcdir)
  install_data('system-preset/90-systemd.preset',
               install_dir : systempresetdir)
@@ -35,7 +35,7 @@ index 20b27c8..09a4609 100644
  install_data('README',
               'NEWS',
               'CODING_STYLE',
-@@ -2381,6 +2384,7 @@ status = [
+@@ -2389,6 +2392,7 @@ status = [
          'PAM modules dir:                   @0@'.format(pamlibdir),
          'PAM configuration dir:             @0@'.format(pamconfdir),
          'RPM macros dir:                    @0@'.format(rpmmacrosdir),

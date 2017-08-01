@@ -14,7 +14,7 @@ LP: #1576341
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-remount-fs.service.in b/units/systemd-remount-fs.service.in
-index 8d9daac..bc59aa4 100644
+index 29d0674..7bb5477 100644
 --- a/units/systemd-remount-fs.service.in
 +++ b/units/systemd-remount-fs.service.in
 @@ -15,6 +15,7 @@ After=systemd-fsck-root.service
