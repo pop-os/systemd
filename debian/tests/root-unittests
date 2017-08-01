@@ -9,6 +9,15 @@ EXFAIL="$EXFAIL
 test-catalog
 "
 
+# test-execute fail on armhf and are currently executed on arm64 kernels.
+# https://github.com/systemd/systemd/issues/5851
+arch=$(dpkg --print-architecture)
+if [ "$arch" = "armhf" ]; then
+    EXFAIL="$EXFAIL
+test-execute
+"
+fi
+
 res=0
 for t in /usr/lib/systemd/tests/test-*; do
     tname=$(basename $t)
