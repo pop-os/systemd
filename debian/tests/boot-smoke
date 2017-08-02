@@ -29,31 +29,56 @@ EOF
         done
     fi
 else
+    ret=0
+
+    echo "waiting to boot..."
+    TIMEOUT=35
+    while [ $TIMEOUT -ge 0 ]; do
+        state="$(systemctl is-system-running || true)"
+        case $state in
+            running|degraded)
+                break
+                ;;
+            *)
+                sleep 1
+                TIMEOUT=$((TIMEOUT - 1))
+		;;
+        esac
+    done
+
     echo "checking for failed unmounts for user systemd"
     if journalctl | grep -E "systemd\[([2-9]|[1-9][0-9]+)\].*Failed unmounting"; then
-        exit 1
+        ret=1
     fi
     echo "checking for connection timeouts"
     if journalctl | grep "Connection timed out"; then
-        exit 1
+        ret=1
     fi
 
     echo "checking that polkitd runs"
-    pidof polkitd
+    if ! pidof polkitd; then
+        echo "polkitd is NOT running"
+        ret=1
+    fi
+
+    echo "checking failed jobs (non fatal)"
+    if [ "$state" != "running" ]; then
+        echo "systemctl is-system-running returns: $state"
+        systemctl --no-pager --no-legend list-jobs > $ADT_ARTIFACTS/running-jobs.txt || true
+    fi
 
     echo "checking that there are no running jobs"
-    TIMEOUT=10
-    while [ $TIMEOUT -ge 0 ]; do
-        running="$(systemctl --no-pager --no-legend list-jobs || true)"
-        [ -n "$running" ] || break
-        TIMEOUT=$((TIMEOUT - 1))
-    done
+    running="$(systemctl --no-pager --no-legend list-jobs || true)"
     if [ -n "$running" ]; then
         echo "running jobs after remaining timeout $TIMEOUT: $running"
         journalctl --sync
         journalctl -ab > $ADT_ARTIFACTS/journal.txt
         udevadm info --export-db > $ADT_ARTIFACTS/udevdb.txt
-        exit 1
+        ret=1
+    fi
+
+    if [ "$ret" != "0" ]; then
+       exit $ret
     fi
 fi
 
