@@ -1,3 +1,15 @@
+systemd (234-2ubuntu2) artful; urgency=medium
+
+  * Ignore failures to set Nice priority on services in containers.
+  * Disable execute test on armhf.
+  * units: set ConditionVirtualization=!private-users on journald audit socket.
+    It fails to start in unprivileged containers.
+  * boot-smoke: refactor ADT test.
+    Wait for system to settle down and get to either running or degraded state,
+    then collect all metrics, and exit with an error if any of the tests failed.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 02 Aug 2017 03:02:03 +0100
+
 systemd (234-2ubuntu1) artful; urgency=medium
 
   [ Dimitri John Ledkov ]
