@@ -59,12 +59,12 @@ class ServicesTest(unittest.TestCase):
                 subprocess.call(['journalctl', '-b', '-u', f])
             self.assertEqual(failed, [])
 
-    def test_lightdm(self):
-        out = subprocess.check_output(['ps', 'u', '-C', 'lightdm'])
-        self.assertIn(b'lightdm --session', out)
+    def test_gdm3(self):
+        out = subprocess.check_output(['ps', 'u', '-C', 'gdm-x-session'])
+        self.assertIn(b'gdm-x-session gnome-session', out)
         out = subprocess.check_output(['ps', 'u', '-C', 'Xorg'])
-        self.assertIn(b':0', out)
-        self.active_unit('lightdm')
+        self.assertIn(b'Xorg vt1', out)
+        self.active_unit('gdm')
 
     def test_dbus(self):
         out = subprocess.check_output(

@@ -1,5 +1,6 @@
 Tests: timedated, hostnamed, localed-locale, localed-x11-keymap
 Depends: systemd,
+  udev,
   libpam-systemd,
   acl,
   locales,
@@ -7,6 +8,7 @@ Restrictions: needs-root, isolation-container
 
 Tests: logind
 Depends: systemd,
+  udev,
   libpam-systemd,
   acl,
   locales,
@@ -15,6 +17,7 @@ Restrictions: needs-root, isolation-container
 
 Tests: unit-config
 Depends: systemd,
+  udev,
   libpam-systemd,
   acl,
   locales,
@@ -25,6 +28,7 @@ Restrictions: needs-root, allow-stderr
 
 Tests: storage
 Depends: systemd,
+  udev,
   libpam-systemd,
   acl,
   locales,
@@ -37,6 +41,7 @@ Restrictions: needs-root, isolation-machine
 Tests: networkd-test.py
 Tests-Directory: test
 Depends: systemd,
+  udev,
   libpam-systemd,
   acl,
   locales,
@@ -51,6 +56,7 @@ Restrictions: needs-root, isolation-container
 
 Tests: build-login
 Depends: systemd,
+  udev,
   libpam-systemd,
   acl,
   locales,
@@ -67,13 +73,14 @@ Restrictions: isolation-container
 
 Tests: boot-and-services
 Depends: systemd-sysv,
+  systemd,
+  udev,
   systemd-container,
   systemd-coredump,
   libpam-systemd,
   xserver-xorg-video-dummy,
   xserver-xorg,
-  lightdm,
-  lightdm-gtk-greeter | lightdm-greeter,
+  gdm3,
   cron,
   network-manager,
   busybox-static,
@@ -84,6 +91,7 @@ Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
 Tests: udev
 Depends: systemd-tests,
+  udev,
   tree,
   perl,
   xz-utils,
@@ -91,6 +99,7 @@ Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: root-unittests
 Depends: systemd-tests,
+  udev,
   tree,
   perl,
   xz-utils,
@@ -151,7 +160,7 @@ Depends: libsystemd-dev,
   systemd-sysv,
   network-manager,
   policykit-1,
-  lightdm,
+  gdm3,
   xserver-xorg-video-dummy,
 Restrictions: needs-recommends, needs-root, isolation-container, allow-stderr, breaks-testbed
 
