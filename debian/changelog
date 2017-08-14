@@ -1,3 +1,9 @@
+systemd (234-2ubuntu3) artful; urgency=medium
+
+  * debian/tests: Switch to gdm, enforce udev upgrade.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 14 Aug 2017 12:02:37 +0100
+
 systemd (234-2ubuntu2) artful; urgency=medium
 
   * Ignore failures to set Nice priority on services in containers.
