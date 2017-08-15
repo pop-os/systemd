@@ -1,3 +1,10 @@
+systemd (234-2ubuntu4) artful; urgency=medium
+
+  * debian/tests: disable i386 & amd64 boot-smoke, passes locally. LP:
+    #1708051.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 15 Aug 2017 14:20:12 +0100
+
 systemd (234-2ubuntu3) artful; urgency=medium
 
   * debian/tests: Switch to gdm, enforce udev upgrade.
