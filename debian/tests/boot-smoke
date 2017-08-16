@@ -7,10 +7,12 @@ set -e
 
 . `dirname $0`/assert.sh
 
-arch=$(dpkg --print-architecture)
-if [ "$arch" = "i386" ] || [ "$arch" = "amd64" ] ; then
-        echo 'Skipping see https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1708051'
-        exit 0
+if [ -z "$FORCE_REBOOT_TEST" ] ; then
+        arch=$(dpkg --print-architecture)
+        if [ "$arch" = "i386" ] || [ "$arch" = "amd64" ] ; then
+                echo 'Skipping see https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1708051'
+                exit 0
+        fi
 fi
 
 if [ -z "$ADT_REBOOT_MARK" ]; then

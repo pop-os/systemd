@@ -1,3 +1,10 @@
+systemd (234-2ubuntu5) artful; urgency=medium
+
+  * debian/tests: disable i386 & amd64 systemd-fsck test, and add environment
+    overrides to allow force execution of those tests locally. LP: #1708051.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 16 Aug 2017 13:04:48 +0100
+
 systemd (234-2ubuntu4) artful; urgency=medium
 
   * debian/tests: disable i386 & amd64 boot-smoke, passes locally. LP:
