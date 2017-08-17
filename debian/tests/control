@@ -134,6 +134,9 @@ Depends: libsystemd-dev,
   systemd-container,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
+Tests: logind-kill-off
+Depends: systemd
+
 Tests: boot-smoke
 Depends: libsystemd-dev,
   tree,
