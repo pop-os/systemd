@@ -1,3 +1,10 @@
+systemd (234-2ubuntu6) artful; urgency=medium
+
+  * Disable KillUserProcesses, yet again, with meson this time.
+  * Re-enable reboot tests.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 17 Aug 2017 15:22:35 +0100
+
 systemd (234-2ubuntu5) artful; urgency=medium
 
   * debian/tests: disable i386 & amd64 systemd-fsck test, and add environment
