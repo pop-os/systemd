@@ -255,10 +255,6 @@ def getAllTests(unitTestClass):
 # we append the previous global return code (0 or 1) to it.
 # Example: ADT_REBOOT_MARK=test_foo:0
 if __name__ == '__main__':
-    arch = subprocess.check_output(['dpkg','--print-architecture'],universal_newlines=True).strip()
-    if not os.environ.get('FORCE_REBOOT_TEST') and arch in ['amd64', 'i386']:
-        print('SKIP: reboot tests broken on amd64/i386')
-        sys.exit(0)
     if os.path.exists('/run/initramfs/fsck-root'):
         print('SKIP: root file system is being checked by initramfs already')
         sys.exit(0)
