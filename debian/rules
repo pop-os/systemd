@@ -75,6 +75,7 @@ CONFFLAGS_deb = \
 	-Dinstall-tests=true \
 	-Defi=true \
 	-Dnss-systemd=true \
+	-Dresolve=true
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS_deb += \
@@ -134,7 +135,7 @@ CONFFLAGS_udeb = \
 	-Dlocaled=false \
 	-Dmyhostname=false \
 	-Dnss-systemd=false \
-	-Dresolved=false \
+	-Dresolve=false \
 	-Dpolkit=false \
 	-Dacl=false \
 	-Dgcrypt=false \
