@@ -73,7 +73,8 @@ CONFFLAGS_deb = \
 	-Dhwdb=true \
 	-Dsysusers=true \
 	-Dinstall-tests=true \
-	-Defi=true
+	-Defi=true \
+	-Dnss-systemd=true \
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS_deb += \
@@ -132,6 +133,7 @@ CONFFLAGS_udeb = \
 	-Dtimesyncd=false \
 	-Dlocaled=false \
 	-Dmyhostname=false \
+	-Dnss-systemd=false \
 	-Dresolved=false \
 	-Dpolkit=false \
 	-Dacl=false \
