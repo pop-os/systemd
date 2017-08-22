@@ -45,8 +45,12 @@ if dpkg --compare-versions "$2" lt "234-1ubuntu2~"; then
 fi
 
 # Use stub resolve.conf by default on new installs
-if [ -z "$2" ] && [ ! -e /etc/resolv.conf ]; then
-    ln -s ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+if [ -z "$2" ]; then
+    mkdir -p /run/systemd/resolve
+    if [ -e /etc/resolv.conf ]; then
+            cp /etc/resolv.conf /run/systemd/resolve/stub-resolv.conf
+    fi
+    ln -snf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 fi
 
 # Enable ondemand by default on new installs installs and upgrades
