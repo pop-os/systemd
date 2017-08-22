@@ -44,6 +44,12 @@ if dpkg --compare-versions "$2" lt "234-1ubuntu2~"; then
     systemctl enable systemd-resolved.service || true
 fi
 
+# Enable resolved by default on new installs installs and upgrades
+if dpkg --compare-versions "$2" lt "234-2ubuntu8~"; then
+    systemctl enable systemd-networkd.service || true
+    systemctl enable systemd-networkd-wait-online.service || true
+fi
+
 # Use stub resolve.conf by default on new installs
 if [ -z "$2" ]; then
     mkdir -p /run/systemd/resolve
