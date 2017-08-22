@@ -1,3 +1,12 @@
+systemd (234-2ubuntu7) artful; urgency=medium
+
+  * Always setup /etc/resolv.conf on new installations.
+    On new installations, /etc/resolv.conf will always exist. Move it to /run
+    and replace it with the desired final symlink. (LP: #1712283)
+  * Create /etc/resolv.conf on resolved start, if it is an empty file.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 22 Aug 2017 16:13:35 +0100
+
 systemd (234-2ubuntu6) artful; urgency=medium
 
   * Disable KillUserProcesses, yet again, with meson this time.
