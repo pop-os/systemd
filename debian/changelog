@@ -1,3 +1,9 @@
+systemd (234-2ubuntu9) artful; urgency=medium
+
+  * boot-and-services: skip gdm3 tests when absent, as it is on s390x.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 23 Aug 2017 11:58:57 +0100
+
 systemd (234-2ubuntu8) artful; urgency=medium
 
   * Enable systemd-networkd by default.
