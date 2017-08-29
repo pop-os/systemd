@@ -56,7 +56,9 @@ if [ -z "$2" ]; then
     if [ -e /etc/resolv.conf ]; then
             cp /etc/resolv.conf /run/systemd/resolve/stub-resolv.conf
     fi
-    ln -snf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    # If /etc/resolv.conf is a bind-mount, moving or replacing
+    # /etc/resolv.conf may fail
+    ln -snf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
 fi
 
 # Enable ondemand by default on new installs installs and upgrades
