@@ -1,3 +1,19 @@
+systemd (234-2ubuntu10) artful; urgency=medium
+
+  * Do not fail debootstrap if /etc/resolv.conf is immutable. (LP: #1713212)
+  * Revert "Create /etc/resolv.conf on resolved start, if it is an empty file."
+    As it is ineffective, and correct creation of /etc/resolv.conf has been fixed.
+    This reverts commit ccba42504f216f6ffbc54eb2c9af347355f8d86b.
+  * initramfs-tools: trigger udevadm add actions with subsystems first.
+    This updates the initramfs-tools init-top udev script to trigger udevadm
+    actions with type specified. This mimicks the
+    systemd-udev-trigger.service. Without type specified only devices are
+    triggered, but triggering subsystems may also be required and should happen
+    before triggering the devices. This is the case for example on s390x with zdev
+    generated udev rules. (LP: #1713536)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 30 Aug 2017 11:22:41 +0100
+
 systemd (234-2ubuntu9) artful; urgency=medium
 
   * boot-and-services: skip gdm3 tests when absent, as it is on s390x.
