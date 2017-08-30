@@ -23,7 +23,8 @@ fi
 
 SYSTEMD_LOG_LEVEL=$log_level /lib/systemd/systemd-udevd --daemon --resolve-names=never
 
-udevadm trigger --action=add
+udevadm trigger --type=subsystems --action=add
+udevadm trigger --type=devices --action=add
 udevadm settle || true
 
 # Leave udev running to process events that come in out-of-band (like USB
