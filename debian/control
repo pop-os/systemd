@@ -53,6 +53,8 @@ Build-Depends: debhelper (>= 10.4~),
                tzdata <!nocheck>,
                libcap2-bin <!nocheck>,
                iproute2 <!nocheck>,
+               gcc-6,
+               g++-6,
 
 Package: systemd
 Architecture: linux-any

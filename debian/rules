@@ -4,6 +4,8 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 export LC_ALL = C.UTF-8
+export CC = gcc-6
+export CXX = g++-6
 
 include /usr/share/dpkg/default.mk
 
