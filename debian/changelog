@@ -1,3 +1,46 @@
+systemd (234-3) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Various fixes for the upstream autopkgtest.
+
+  [ Felipe Sateler ]
+  * Add fdisk to the dependencies of the upstream autopkgtest.
+    The upstream autopkgtest uses sfdisk, which is now in the non-essential
+    fdisk package. (Closes: #872119)
+  * Disable nss-systemd on udeb builds
+  * Correctly disable resolved on udeb builds
+  * Help fix collisions in libsystemd-shared symbols by versioning them.
+    Backport upstream patch to version the symbols provided in the private
+    library, so that they cannot confuse unversioned pam modules or libraries
+    linked into them. (Closes: #873708)
+
+  [ Dimitri John Ledkov ]
+  * Cherrypick upstream networkd-test.py assertion/check fixes.
+    This resolves ADT test suite failures, when running tests under lxc/lxd
+    providers.
+  * Cherrypick arm* seccomp fixes.
+    This should resolve ADT test failures, on arm64, when running as root.
+  * Disable KillUserProcesses, yet again, with meson this time.
+  * initramfs-tools: trigger udevadm add actions with subsystems first.
+    This updates the initramfs-tools init-top udev script to trigger udevadm
+    actions with type specified. This mimics the systemd-udev-trigger.service.
+    Without type specified only devices are triggered, but triggering
+    subsystems may also be required and should happen before triggering the
+    devices. This is the case for example on s390x with zdev generated udev
+    rules. (LP: #1713536)
+
+  [ Michael Biebl ]
+  * (Re)add --quiet flag to addgroup calls.
+    This is now safe with adduser having been fixed to no longer suppress
+    fatal error messages if --quiet is used. (Closes: #837871)
+  * Switch back to default GCC (Closes: #873661)
+  * Drop systemd-timesyncd.service.d/disable-with-time-daemon.conf.
+    All major NTP implementations ship a native service file nowadays with a
+    Conflicts=systemd-timesyncd.service so this drop-in is no longer
+    necessary. (Closes: #873185)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 04 Sep 2017 00:17:00 +0200
+
 systemd (234-2.3) unstable; urgency=high
 
   * Non-maintainer upload.
