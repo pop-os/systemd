@@ -3,6 +3,7 @@ tests-ignore-router-state-in-networkd-test-6390.patch
 seccomp-arm64-x32-do-not-have-_sysctl.patch
 seccomp-arm64-does-not-have-mmap2.patch
 test-seccomp-arm64-does-not-have-access-and-poll.patch
+networkd-change-UseMTU-default-to-true.-6837.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

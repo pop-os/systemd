@@ -1,0 +1,70 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Tue, 19 Sep 2017 12:44:37 +0100
+Subject: networkd: change UseMTU default to true. (#6837)
+
+Typically when DHCP server sets MTU it is a lower one. And a lower than usual
+MTU is then thus required on said network to have operational networking. This
+makes networkd's dhcp client to work in more similar way to other dhcp-clients
+(e.g. isc-dhcp). In particular, in a cloud setting, without this default
+instances have resulted in timing out talking to cloud metadata source and
+failing to provision.
+
+This does not change this default for the Annonymize code path.
+(cherry picked from commit 22043e4317ecd2bc7834b48a6d364de76bb26d91)
+---
+ NEWS                           | 16 ++++++++++++++++
+ man/systemd.network.xml        |  2 +-
+ src/network/networkd-network.c |  1 +
+ 3 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/NEWS b/NEWS
+index d56b7a6..00dd665 100644
+--- a/NEWS
++++ b/NEWS
+@@ -1,5 +1,21 @@
+ systemd System and Service Manager
+ 
++CHANGES WITH 235:
++
++        * modprobe.d drop-in is now shipped by default that sets bonding module
++          option max_bonds=0. This overrides the kernel default, to avoid
++          conflicts and ambiguity as to whether or not bond0 should be managed
++          by networkd or not. This resolves multiple bugs of bond0 properties
++          not being applied, when bond0 is configured with
++          networkd. Distributors may choose to not package this, however in
++          that case users will be prevented from correctly managing bond0
++          interface using networkd.
++
++        * systemd-networkd .network DHCP setting UseMTU default has changed
++          from false to true. Meaning, DHCP server advertised mtu setting is
++          now applied by default. This resolves networking issues on low-mtu
++          networks.
++
+ CHANGES WITH 234:
+ 
+         * Meson is now supported as build system in addition to Automake. It is
+diff --git a/man/systemd.network.xml b/man/systemd.network.xml
+index 6b83a5b..f1592b8 100644
+--- a/man/systemd.network.xml
++++ b/man/systemd.network.xml
+@@ -951,7 +951,7 @@
+           <listitem>
+             <para>When true, the interface maximum transmission unit
+             from the DHCP server will be used on the current link.
+-            Defaults to false.</para>
++            Defaults to true.</para>
+           </listitem>
+         </varlistentry>
+         <varlistentry>
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index 6f2ae66..7144ffe 100644
+--- a/src/network/networkd-network.c
++++ b/src/network/networkd-network.c
+@@ -166,6 +166,7 @@ static int network_load_one(Manager *manager, const char *filename) {
+         network->dhcp_route_metric = DHCP_ROUTE_METRIC;
+         network->dhcp_client_identifier = DHCP_CLIENT_ID_DUID;
+         network->dhcp_route_table = RT_TABLE_MAIN;
++        network->dhcp_use_mtu = true;
+ 
+         network->dhcp_server_emit_dns = true;
+         network->dhcp_server_emit_ntp = true;
