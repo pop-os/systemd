@@ -44,6 +44,16 @@ if dpkg --compare-versions "$2" lt "234-1ubuntu2~"; then
     systemctl enable systemd-resolved.service || true
 fi
 
+# Drop stock /etc/rc.local on upgrades
+if dpkg --compare-versions "$2" lt "234-2ubuntu11~"; then
+        if [ -f /etc/rc.local ]; then
+                if [ "10fd9f051accb6fd1f753f2d48371890" = "$(md5sum /etc/rc.local | cut -d\  -f1)" ]; then
+                        echo Removing empty /etc/rc.local
+                        rm -f /etc/rc.local || true
+                fi
+        fi
+fi
+
 # Use stub resolve.conf by default on new installs
 if [ -z "$2" ]; then
     mkdir -p /run/systemd/resolve
