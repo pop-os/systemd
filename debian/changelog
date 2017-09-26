@@ -1,3 +1,23 @@
+systemd (234-2ubuntu11) artful; urgency=medium
+
+  * Ubuntu/extra: ship dhclient-enter hook.
+    This allows isc-dhcp dhclient to set search domains and nameservers via
+    resolved.
+  * Disable systemd-networkd-wait-online by default.
+    Currently it is not fit for purpose, as it leads to long boot times when
+    networking is unplugged or not yet configured on boot. (LP: #1714301)
+  * networkd: change UseMTU default to true.
+    Cherry-pick upstream change. (LP: #1717471)
+  * postinst: drop empty/stock /etc/rc.local (LP: #1716979)
+  * Imporve resolvconf integration.
+    Make the .path|.service unit that feed resolved data into resolvconf not
+    generate failures if resolvconf is not installed.
+    Add a check to make sure that resolved does not read /etc/resolv.conf when that
+    is symlinked to stub-resolv.conf. (LP: #1717995)
+  * core: gracefully bail out keyring operations when chown fails (LP: #1691096)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 26 Sep 2017 11:38:02 -0400
+
 systemd (234-2ubuntu10) artful; urgency=medium
 
   * Do not fail debootstrap if /etc/resolv.conf is immutable. (LP: #1713212)
