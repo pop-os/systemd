@@ -272,7 +272,8 @@ override_dh_makeshlibs:
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
 
 override_dh_strip:
-	dh_strip --dbgsym-migration='systemd-dbg (<< 229-6~)'
+        # make sure test-copy is not too small for test-copy to fail LP: #1721203
+	dh_strip -X test-copy --dbgsym-migration='systemd-dbg (<< 229-6~)'
 
 override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
