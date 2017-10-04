@@ -1,3 +1,18 @@
+systemd (234-2ubuntu12) artful; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * debian/rules: do not strip test-copy.
+    This insures test-copy is large enough for test-copy tests to pass.
+    (LP: #1721203)
+
+  [ Michael Biebl ]
+  * Drop systemd-timesyncd.service.d/disable-with-time-daemon.conf.
+    All major NTP implementations ship a native service file nowadays with a
+    Conflicts=systemd-timesyncd.service so this drop-in is no longer
+    necessary. (Closes: #873185) (LP: #1721204)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 04 Oct 2017 13:28:34 +0100
+
 systemd (234-2ubuntu11) artful; urgency=medium
 
   * Ubuntu/extra: ship dhclient-enter hook.
