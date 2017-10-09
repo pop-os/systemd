@@ -9,7 +9,6 @@
 Description=Process Core Dump
 Documentation=man:systemd-coredump(8)
 DefaultDependencies=no
-RequiresMountsFor=/var/lib/systemd/coredump
 Conflicts=shutdown.target
 After=systemd-remount-fs.service systemd-journald.socket
 Requires=systemd-journald.socket
@@ -34,4 +33,6 @@ RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX
 SystemCallFilter=~@clock @cpu-emulation @debug @keyring @module @mount @obsolete @raw-io @reboot @swap
 SystemCallArchitectures=native
-ReadWritePaths=/var/lib/systemd/coredump
+LockPersonality=yes
+IPAddressDeny=any
+StateDirectory=systemd/coredump

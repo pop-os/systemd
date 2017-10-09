@@ -72,6 +72,22 @@ typedef enum ExecOutput {
         _EXEC_OUTPUT_INVALID = -1
 } ExecOutput;
 
+typedef enum ExecPreserveMode {
+        EXEC_PRESERVE_NO,
+        EXEC_PRESERVE_YES,
+        EXEC_PRESERVE_RESTART,
+        _EXEC_PRESERVE_MODE_MAX,
+        _EXEC_PRESERVE_MODE_INVALID = -1
+} ExecPreserveMode;
+
+typedef enum ExecKeyringMode {
+        EXEC_KEYRING_INHERIT,
+        EXEC_KEYRING_PRIVATE,
+        EXEC_KEYRING_SHARED,
+        _EXEC_KEYRING_MODE_MAX,
+        _EXEC_KEYRING_MODE_INVALID = -1,
+} ExecKeyringMode;
+
 struct ExecStatus {
         dual_timestamp start_timestamp;
         dual_timestamp exit_timestamp;
@@ -80,13 +96,19 @@ struct ExecStatus {
         int status;   /* as in sigingo_t::si_status */
 };
 
+typedef enum ExecCommandFlags {
+        EXEC_COMMAND_IGNORE_FAILURE = 1,
+        EXEC_COMMAND_FULLY_PRIVILEGED = 2,
+        EXEC_COMMAND_NO_SETUID = 4,
+        EXEC_COMMAND_AMBIENT_MAGIC = 8,
+} ExecCommandFlags;
+
 struct ExecCommand {
         char *path;
         char **argv;
         ExecStatus exec_status;
+        ExecCommandFlags flags;
         LIST_FIELDS(ExecCommand, command); /* useful for chaining commands */
-        bool ignore:1;
-        bool privileged:1;
 };
 
 struct ExecRuntime {
@@ -100,10 +122,26 @@ struct ExecRuntime {
         int netns_storage_socket[2];
 };
 
+typedef enum ExecDirectoryType {
+        EXEC_DIRECTORY_RUNTIME = 0,
+        EXEC_DIRECTORY_STATE,
+        EXEC_DIRECTORY_CACHE,
+        EXEC_DIRECTORY_LOGS,
+        EXEC_DIRECTORY_CONFIGURATION,
+        _EXEC_DIRECTORY_TYPE_MAX,
+        _EXEC_DIRECTORY_TYPE_INVALID = -1,
+} ExecDirectoryType;
+
+typedef struct ExecDirectory {
+        char **paths;
+        mode_t mode;
+} ExecDirectory;
+
 struct ExecContext {
         char **environment;
         char **environment_files;
         char **pass_environment;
+        char **unset_environment;
 
         struct rlimit *rlimit[_RLIMIT_MAX];
         char *working_directory, *root_directory, *root_image;
@@ -159,6 +197,8 @@ struct ExecContext {
         bool smack_process_label_ignore;
         char *smack_process_label;
 
+        ExecKeyringMode keyring_mode;
+
         char **read_write_paths, **read_only_paths, **inaccessible_paths;
         unsigned long mount_flags;
         BindMount *bind_mounts;
@@ -198,6 +238,7 @@ struct ExecContext {
         bool same_pgrp;
 
         unsigned long personality;
+        bool lock_personality;
 
         unsigned long restrict_namespaces; /* The CLONE_NEWxyz flags permitted to the unit's processes */
 
@@ -209,8 +250,8 @@ struct ExecContext {
         Set *address_families;
         bool address_families_whitelist:1;
 
-        char **runtime_directory;
-        mode_t runtime_directory_mode;
+        ExecPreserveMode runtime_directory_preserve_mode;
+        ExecDirectory directories[_EXEC_DIRECTORY_TYPE_MAX];
 
         bool memory_deny_write_execute;
         bool restrict_realtime;
@@ -228,16 +269,20 @@ static inline bool exec_context_restrict_namespaces_set(const ExecContext *c) {
 }
 
 typedef enum ExecFlags {
-        EXEC_APPLY_PERMISSIONS = 1U << 0,
+        EXEC_APPLY_SANDBOXING  = 1U << 0,
         EXEC_APPLY_CHROOT      = 1U << 1,
         EXEC_APPLY_TTY_STDIN   = 1U << 2,
         EXEC_NEW_KEYRING       = 1U << 3,
+        EXEC_PASS_LOG_UNIT     = 1U << 4, /* Whether to pass the unit name to the service's journal stream connection */
+        EXEC_CHOWN_DIRECTORIES = 1U << 5, /* chown() the runtime/state/cache/log directories to the user we run as, under all conditions */
+        EXEC_NSS_BYPASS_BUS    = 1U << 6, /* Set the SYSTEMD_NSS_BYPASS_BUS environment variable, to disable nss-systemd for dbus */
+        EXEC_CGROUP_DELEGATE   = 1U << 7,
 
         /* The following are not used by execute.c, but by consumers internally */
-        EXEC_PASS_FDS          = 1U << 4,
-        EXEC_IS_CONTROL        = 1U << 5,
-        EXEC_SETENV_RESULT     = 1U << 6,
-        EXEC_SET_WATCHDOG      = 1U << 7,
+        EXEC_PASS_FDS          = 1U << 8,
+        EXEC_IS_CONTROL        = 1U << 9,
+        EXEC_SETENV_RESULT     = 1U << 10,
+        EXEC_SET_WATCHDOG      = 1U << 11,
 } ExecFlags;
 
 struct ExecParameters {
@@ -252,11 +297,10 @@ struct ExecParameters {
         ExecFlags flags;
         bool selinux_context_net:1;
 
-        bool cgroup_delegate:1;
         CGroupMask cgroup_supported;
         const char *cgroup_path;
 
-        const char *runtime_prefix;
+        char **prefix;
 
         const char *confirm_spawn;
 
@@ -330,3 +374,12 @@ ExecInput exec_input_from_string(const char *s) _pure_;
 
 const char* exec_utmp_mode_to_string(ExecUtmpMode i) _const_;
 ExecUtmpMode exec_utmp_mode_from_string(const char *s) _pure_;
+
+const char* exec_preserve_mode_to_string(ExecPreserveMode i) _const_;
+ExecPreserveMode exec_preserve_mode_from_string(const char *s) _pure_;
+
+const char* exec_keyring_mode_to_string(ExecKeyringMode i) _const_;
+ExecKeyringMode exec_keyring_mode_from_string(const char *s) _pure_;
+
+const char* exec_directory_type_to_string(ExecDirectoryType i) _const_;
+ExecDirectoryType exec_directory_type_from_string(const char *s) _pure_;

@@ -55,6 +55,7 @@
 #include "terminal-util.h"
 #include "time-util.h"
 #include "util.h"
+#include "path-util.h"
 
 static volatile unsigned cached_columns = 0;
 static volatile unsigned cached_lines = 0;
@@ -244,6 +245,7 @@ int ask_string(char **ret, const char *text, ...) {
 
 int reset_terminal_fd(int fd, bool switch_to_text) {
         struct termios termios;
+        _cleanup_free_ char *utf8 = NULL;
         int r = 0;
 
         /* Set terminal to some sane defaults */
@@ -261,8 +263,8 @@ int reset_terminal_fd(int fd, bool switch_to_text) {
         if (switch_to_text)
                 (void) ioctl(fd, KDSETMODE, KD_TEXT);
 
-        /* Enable console unicode mode */
-        (void) ioctl(fd, KDSKBMODE, K_UNICODE);
+        /* Set default keyboard mode */
+        (void) vt_reset_keyboard(fd);
 
         if (tcgetattr(fd, &termios) < 0) {
                 r = -errno;
@@ -474,7 +476,7 @@ int acquire_terminal(
 
                         l = read(notify, &buffer, sizeof(buffer));
                         if (l < 0) {
-                                if (errno == EINTR || errno == EAGAIN)
+                                if (IN_SET(errno, EINTR, EAGAIN))
                                         continue;
 
                                 r = -errno;
@@ -556,6 +558,7 @@ int terminal_vhangup(const char *name) {
 
 int vt_disallocate(const char *name) {
         _cleanup_close_ int fd = -1;
+        const char *e, *n;
         unsigned u;
         int r;
 
@@ -563,7 +566,8 @@ int vt_disallocate(const char *name) {
          * (i.e. because it is the active one), at least clear it
          * entirely (including the scrollback buffer) */
 
-        if (!startswith(name, "/dev/"))
+        e = path_startswith(name, "/dev/");
+        if (!e)
                 return -EINVAL;
 
         if (!tty_is_vc(name)) {
@@ -582,10 +586,11 @@ int vt_disallocate(const char *name) {
                 return 0;
         }
 
-        if (!startswith(name, "/dev/tty"))
+        n = startswith(e, "tty");
+        if (!n)
                 return -EINVAL;
 
-        r = safe_atou(name+8, &u);
+        r = safe_atou(n, &u);
         if (r < 0)
                 return r;
 
@@ -649,10 +654,7 @@ bool tty_is_vc(const char *tty) {
 bool tty_is_console(const char *tty) {
         assert(tty);
 
-        if (startswith(tty, "/dev/"))
-                tty += 5;
-
-        return streq(tty, "console");
+        return streq(skip_dev_prefix(tty), "console");
 }
 
 int vtnr_from_tty(const char *tty) {
@@ -660,8 +662,7 @@ int vtnr_from_tty(const char *tty) {
 
         assert(tty);
 
-        if (startswith(tty, "/dev/"))
-                tty += 5;
+        tty = skip_dev_prefix(tty);
 
         if (!startswith(tty, "tty") )
                 return -EINVAL;
@@ -775,8 +776,7 @@ bool tty_is_vc_resolve(const char *tty) {
 
         assert(tty);
 
-        if (startswith(tty, "/dev/"))
-                tty += 5;
+        tty = skip_dev_prefix(tty);
 
         if (streq(tty, "console")) {
                 tty = resolve_dev_console(&active);
@@ -918,11 +918,9 @@ int getttyname_malloc(int fd, char **ret) {
 
                 r = ttyname_r(fd, path, sizeof(path));
                 if (r == 0) {
-                        const char *p;
                         char *c;
 
-                        p = startswith(path, "/dev/");
-                        c = strdup(p ?: path);
+                        c = strdup(skip_dev_prefix(path));
                         if (!c)
                                 return -ENOMEM;
 
@@ -1220,7 +1218,7 @@ bool colors_enabled(void) {
                 val = getenv_bool("SYSTEMD_COLORS");
                 if (val >= 0)
                         enabled = val;
-                else if (getpid() == 1)
+                else if (getpid_cached() == 1)
                         /* PID1 outputs to the console without holding it open all the time */
                         enabled = !getenv_terminal_is_dumb();
                 else
@@ -1228,4 +1226,45 @@ bool colors_enabled(void) {
         }
 
         return enabled;
+}
+
+bool underline_enabled(void) {
+        static int enabled = -1;
+
+        if (enabled < 0) {
+
+                /* The Linux console doesn't support underlining, turn it off, but only there. */
+
+                if (!colors_enabled())
+                        enabled = false;
+                else
+                        enabled = !streq_ptr(getenv("TERM"), "linux");
+        }
+
+        return enabled;
+}
+
+int vt_default_utf8(void) {
+        _cleanup_free_ char *b = NULL;
+        int r;
+
+        /* Read the default VT UTF8 setting from the kernel */
+
+        r = read_one_line_file("/sys/module/vt/parameters/default_utf8", &b);
+        if (r < 0)
+                return r;
+
+        return parse_boolean(b);
+}
+
+int vt_reset_keyboard(int fd) {
+        int kb;
+
+        /* If we can't read the default, then default to unicode. It's 2017 after all. */
+        kb = vt_default_utf8() != 0 ? K_UNICODE : K_XLATE;
+
+        if (ioctl(fd, KDSKBMODE, kb) < 0)
+                return -errno;
+
+        return 0;
 }

@@ -314,7 +314,7 @@ int cunescape_length_with_prefix(const char *s, size_t length, const char *prefi
 
         /* Undoes C style string escaping, and optionally prefixes it. */
 
-        pl = prefix ? strlen(prefix) : 0;
+        pl = strlen_ptr(prefix);
 
         r = new(char, pl+length+1);
         if (!r)
@@ -426,7 +426,7 @@ char *octescape(const char *s, size_t len) {
 
         for (f = s, t = r; f < s + len; f++) {
 
-                if (*f < ' ' || *f >= 127 || *f == '\\' || *f == '"') {
+                if (*f < ' ' || *f >= 127 || IN_SET(*f, '\\', '"')) {
                         *(t++) = '\\';
                         *(t++) = '0' + (*f >> 6);
                         *(t++) = '0' + ((*f >> 3) & 8);

@@ -145,7 +145,6 @@ static char *arg_root = NULL;
 static usec_t arg_when = 0;
 static char *argv_cmdline = NULL;
 static enum action {
-        _ACTION_INVALID,
         ACTION_SYSTEMCTL,
         ACTION_HALT,
         ACTION_POWEROFF,
@@ -166,7 +165,8 @@ static enum action {
         ACTION_REEXEC,
         ACTION_RUNLEVEL,
         ACTION_CANCEL_SHUTDOWN,
-        _ACTION_MAX
+        _ACTION_MAX,
+        _ACTION_INVALID = -1
 } arg_action = ACTION_SYSTEMCTL;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static const char *arg_host = NULL;
@@ -1435,39 +1435,36 @@ static void output_unit_file_list(const UnitFileList *units, unsigned c) {
                        ansi_normal());
 
         for (u = units; u < units + c; u++) {
+                const char *on_underline = NULL, *on_color = NULL, *off = NULL, *id;
                 _cleanup_free_ char *e = NULL;
-                const char *on, *off, *on_underline = "", *off_underline = "";
-                const char *id;
-                bool underline = false;
+                bool underline;
 
-                if (u + 1 < units + c &&
-                    !streq(unit_type_suffix(u->path), unit_type_suffix((u + 1)->path))) {
+                underline = u + 1 < units + c &&
+                        !streq(unit_type_suffix(u->path), unit_type_suffix((u + 1)->path));
+
+                if (underline)
                         on_underline = ansi_underline();
-                        off_underline = ansi_normal();
-                        underline = true;
-                }
 
                 if (IN_SET(u->state,
                            UNIT_FILE_MASKED,
                            UNIT_FILE_MASKED_RUNTIME,
                            UNIT_FILE_DISABLED,
                            UNIT_FILE_BAD))
-                        on  = underline ? ansi_highlight_red_underline() : ansi_highlight_red();
+                        on_color = underline ? ansi_highlight_red_underline() : ansi_highlight_red();
                 else if (u->state == UNIT_FILE_ENABLED)
-                        on  = underline ? ansi_highlight_green_underline() : ansi_highlight_green();
-                else
-                        on = on_underline;
-                off = off_underline;
+                        on_color = underline ? ansi_highlight_green_underline() : ansi_highlight_green();
+
+                if (on_underline || on_color)
+                        off = ansi_normal();
 
                 id = basename(u->path);
 
                 e = arg_full ? NULL : ellipsize(id, id_cols, 33);
 
-                printf("%s%-*s %s%-*s%s%s\n",
-                       on_underline,
+                printf("%s%-*s %s%-*s%s\n",
+                       strempty(on_underline),
                        id_cols, e ? e : id,
-                       on, state_cols, unit_file_state_to_string(u->state), off,
-                       off_underline);
+                       strempty(on_color), state_cols, unit_file_state_to_string(u->state), strempty(off));
         }
 
         if (!arg_no_legend)
@@ -2010,7 +2007,7 @@ static void output_machines_list(struct machine_info *machine_infos, unsigned n)
 
         for (m = machine_infos; m < machine_infos + n; m++) {
                 namelen = MAX(namelen, strlen(m->name) + (m->is_host ? sizeof(" (host)") - 1 : 0));
-                statelen = MAX(statelen, m->state ? strlen(m->state) : 0);
+                statelen = MAX(statelen, strlen_ptr(m->state));
                 failedlen = MAX(failedlen, DECIMAL_STR_WIDTH(m->n_failed_units));
                 jobslen = MAX(jobslen, DECIMAL_STR_WIDTH(m->n_jobs));
 
@@ -2480,7 +2477,6 @@ static int unit_file_find_path(LookupPaths *lp, const char *unit_name, char **un
 
         assert(lp);
         assert(unit_name);
-        assert(unit_path);
 
         STRV_FOREACH(p, lp->search_path) {
                 _cleanup_free_ char *path = NULL, *lpath = NULL;
@@ -2498,12 +2494,46 @@ static int unit_file_find_path(LookupPaths *lp, const char *unit_name, char **un
                 if (r < 0)
                         return log_error_errno(r, "Failed to access path '%s': %m", path);
 
-                *unit_path = lpath;
-                lpath = NULL;
+                if (unit_path) {
+                        *unit_path = lpath;
+                        lpath = NULL;
+                }
                 return 1;
         }
 
         return 0;
+}
+
+static int unit_find_template_path(
+                const char *unit_name,
+                LookupPaths *lp,
+                char **fragment_path,
+                char **template) {
+
+        _cleanup_free_ char *_template = NULL;
+        int r;
+
+        /* Returns 1 if a fragment was found, 0 if not found, negative on error. */
+
+        r = unit_file_find_path(lp, unit_name, fragment_path);
+        if (r != 0)
+                return r; /* error or found a real unit */
+
+        r = unit_name_template(unit_name, &_template);
+        if (r == -EINVAL)
+                return 0; /* not a template, does not exist */
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine template name: %m");
+
+        r = unit_file_find_path(lp, _template, fragment_path);
+        if (r < 0)
+                return r;
+
+        if (template) {
+                *template = _template;
+                _template = NULL;
+        }
+        return r;
 }
 
 static int unit_find_paths(
@@ -2561,29 +2591,18 @@ static int unit_find_paths(
                                 return log_error_errno(r, "Failed to get DropInPaths: %s", bus_error_message(&error, r));
                 }
         } else {
-                _cleanup_set_free_ Set *names;
+                _cleanup_set_free_ Set *names = NULL;
                 _cleanup_free_ char *template = NULL;
 
                 names = set_new(NULL);
                 if (!names)
                         return log_oom();
 
-                r = unit_file_find_path(lp, unit_name, &path);
+                r = unit_find_template_path(unit_name, lp, &path, &template);
                 if (r < 0)
                         return r;
 
-                if (r == 0) {
-                        r = unit_name_template(unit_name, &template);
-                        if (r < 0 && r != -EINVAL)
-                                return log_error_errno(r, "Failed to determine template name: %m");
-                        if (r >= 0) {
-                                r = unit_file_find_path(lp, template, &path);
-                                if (r < 0)
-                                        return r;
-                        }
-                }
-
-                if (path)
+                if (r > 0)
                         /* We found the unit file. If we followed symlinks, this name might be
                          * different then the unit_name with started with. Look for dropins matching
                          * that "final" name. */
@@ -3052,7 +3071,7 @@ static const struct {
 static enum action verb_to_action(const char *verb) {
         enum action i;
 
-        for (i = _ACTION_INVALID; i < _ACTION_MAX; i++)
+        for (i = 0; i < _ACTION_MAX; i++)
                 if (streq_ptr(action_table[i].verb, verb))
                         return i;
 
@@ -3068,8 +3087,8 @@ static int start_unit(int argc, char *argv[], void *userdata) {
         char **name;
         int r = 0;
 
-        if (arg_wait && !strstr(argv[0], "start")) {
-                log_error("--wait may only be used with a command that starts units.");
+        if (arg_wait && !STR_IN_SET(argv[0], "start", "restart")) {
+                log_error("--wait may only be used with the 'start' or 'restart' commands.");
                 return -EINVAL;
         }
 
@@ -3085,22 +3104,30 @@ static int start_unit(int argc, char *argv[], void *userdata) {
         if (arg_action == ACTION_SYSTEMCTL) {
                 enum action action;
 
-                method = verb_to_method(argv[0]);
                 action = verb_to_action(argv[0]);
 
-                if (streq(argv[0], "isolate")) {
-                        mode = "isolate";
-                        suffix = ".target";
-                } else
-                        mode = action_table[action].mode ?: arg_job_mode;
+                if (action != _ACTION_INVALID) {
+                        method = "StartUnit";
+                        mode = action_table[action].mode;
+                        one_name = action_table[action].target;
+                } else {
+                        if (streq(argv[0], "isolate")) {
+                                method = "StartUnit";
+                                mode = "isolate";
 
-                one_name = action_table[action].target;
+                                suffix = ".target";
+                        } else {
+                                method = verb_to_method(argv[0]);
+                                mode = arg_job_mode;
+                        }
+                        one_name = NULL;
+                }
         } else {
-                assert(arg_action < ELEMENTSOF(action_table));
+                assert(arg_action >= 0 && arg_action < _ACTION_MAX);
                 assert(action_table[arg_action].target);
+                assert(action_table[arg_action].mode);
 
                 method = "StartUnit";
-
                 mode = action_table[arg_action].mode;
                 one_name = action_table[arg_action].target;
         }
@@ -3192,7 +3219,7 @@ static int start_unit(int argc, char *argv[], void *userdata) {
         return r;
 }
 
-#ifdef ENABLE_LOGIND
+#if ENABLE_LOGIND
 static int logind_set_wall_message(void) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus;
@@ -3228,7 +3255,7 @@ static int logind_set_wall_message(void) {
 /* Ask systemd-logind, which might grant access to unprivileged users
  * through PolicyKit */
 static int logind_reboot(enum action a) {
-#ifdef ENABLE_LOGIND
+#if ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         const char *method, *description;
         sd_bus *bus;
@@ -3240,14 +3267,19 @@ static int logind_reboot(enum action a) {
 
         switch (a) {
 
+        case ACTION_POWEROFF:
+                method = "PowerOff";
+                description = "power off system";
+                break;
+
         case ACTION_REBOOT:
                 method = "Reboot";
                 description = "reboot system";
                 break;
 
-        case ACTION_POWEROFF:
-                method = "PowerOff";
-                description = "power off system";
+        case ACTION_HALT:
+                method = "Halt";
+                description = "halt system";
                 break;
 
         case ACTION_SUSPEND:
@@ -3291,7 +3323,7 @@ static int logind_reboot(enum action a) {
 }
 
 static int logind_check_inhibitors(enum action a) {
-#ifdef ENABLE_LOGIND
+#if ENABLE_LOGIND
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_strv_free_ char **sessions = NULL;
         const char *what, *who, *why, *mode;
@@ -3348,8 +3380,10 @@ static int logind_check_inhibitors(enum action a) {
                 if (!sv)
                         return log_oom();
 
-                if ((pid_t) pid < 0)
-                        return log_error_errno(ERANGE, "Bad PID %"PRIu32": %m", pid);
+                if (!pid_is_valid((pid_t) pid)) {
+                        log_error("Invalid PID "PID_FMT".", (pid_t) pid);
+                        return -ERANGE;
+                }
 
                 if (!strv_contains(sv,
                                    IN_SET(a,
@@ -3410,7 +3444,7 @@ static int logind_check_inhibitors(enum action a) {
 }
 
 static int logind_prepare_firmware_setup(void) {
-#ifdef ENABLE_LOGIND
+#if ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus;
         int r;
@@ -3539,6 +3573,7 @@ static int start_special(int argc, char *argv[], void *userdata) {
                 if (IN_SET(a,
                            ACTION_POWEROFF,
                            ACTION_REBOOT,
+                           ACTION_HALT,
                            ACTION_SUSPEND,
                            ACTION_HIBERNATE,
                            ACTION_HYBRID_SLEEP)) {
@@ -3550,8 +3585,16 @@ static int start_special(int argc, char *argv[], void *userdata) {
                                 /* requested operation is not supported or already in progress */
                                 return r;
 
-                        /* On all other errors, try low-level operation */
-                }
+                        /* On all other errors, try low-level operation. In order to minimize the difference between
+                         * operation with and without logind, we explicitly enable non-blocking mode for this, as
+                         * logind's shutdown operations are always non-blocking. */
+
+                        arg_no_block = true;
+
+                } else if (IN_SET(a, ACTION_EXIT, ACTION_KEXEC))
+                        /* Since exit/kexec are so close in behaviour to power-off/reboot, let's also make them
+                         * asynchronous, in order to not confuse the user needlessly with unexpected behaviour. */
+                        arg_no_block = true;
 
                 r = start_unit(argc, argv, userdata);
         }
@@ -3848,6 +3891,9 @@ typedef struct UnitStatusInfo {
         uint64_t cpu_usage_nsec;
         uint64_t tasks_current;
         uint64_t tasks_max;
+
+        uint64_t ip_ingress_bytes;
+        uint64_t ip_egress_bytes;
 
         LIST_HEAD(ExecStatusInfo, exec);
 } UnitStatusInfo;
@@ -4165,6 +4211,14 @@ static void print_status_info(
         if (i->status_errno > 0)
                 printf("    Error: %i (%s)\n", i->status_errno, strerror(i->status_errno));
 
+        if (i->ip_ingress_bytes != (uint64_t) -1 && i->ip_egress_bytes != (uint64_t) -1) {
+                char buf_in[FORMAT_BYTES_MAX], buf_out[FORMAT_BYTES_MAX];
+
+                printf("       IP: %s in, %s out\n",
+                        format_bytes(buf_in, sizeof(buf_in), i->ip_ingress_bytes),
+                        format_bytes(buf_out, sizeof(buf_out), i->ip_egress_bytes));
+        }
+
         if (i->tasks_current != (uint64_t) -1) {
                 printf("    Tasks: %" PRIu64, i->tasks_current);
 
@@ -4455,6 +4509,10 @@ static int status_property(const char *name, sd_bus_message *m, UnitStatusInfo *
                         i->next_elapse_monotonic = u;
                 else if (streq(name, "NextElapseUSecRealtime"))
                         i->next_elapse_real = u;
+                else if (streq(name, "IPIngressBytes"))
+                        i->ip_ingress_bytes = u;
+                else if (streq(name, "IPEgressBytes"))
+                        i->ip_egress_bytes = u;
 
                 break;
         }
@@ -4969,6 +5027,8 @@ static int show_one(
                 .cpu_usage_nsec = (uint64_t) -1,
                 .tasks_current = (uint64_t) -1,
                 .tasks_max = (uint64_t) -1,
+                .ip_ingress_bytes = (uint64_t) -1,
+                .ip_egress_bytes = (uint64_t) -1,
         };
         int r;
 
@@ -5857,7 +5917,7 @@ static int import_environment(int argc, char *argv[], void *userdata) {
 static int enable_sysv_units(const char *verb, char **args) {
         int r = 0;
 
-#if defined(HAVE_SYSV_COMPAT)
+#if HAVE_SYSV_COMPAT
         _cleanup_lookup_paths_free_ LookupPaths paths = {};
         unsigned f = 0;
 
@@ -6084,7 +6144,7 @@ static int normalize_names(char **names, bool warn_if_path) {
         return 0;
 }
 
-static int unit_exists(const char *unit) {
+static int unit_exists(LookupPaths *lp, const char *unit) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_free_ char *path = NULL;
@@ -6096,6 +6156,9 @@ static int unit_exists(const char *unit) {
         UnitStatusInfo info = {};
         sd_bus *bus;
         int r;
+
+        if (unit_name_is_valid(unit, UNIT_NAME_TEMPLATE))
+                return unit_find_template_path(unit, lp, NULL, NULL);
 
         path = unit_dbus_path_from_name(unit);
         if (!path)
@@ -6201,11 +6264,20 @@ static int enable_unit(int argc, char *argv[], void *userdata) {
                 sd_bus *bus;
 
                 if (STR_IN_SET(verb, "mask", "unmask")) {
-                        r = unit_exists(*names);
+                        char **name;
+                        _cleanup_lookup_paths_free_ LookupPaths lp = {};
+
+                        r = lookup_paths_init(&lp, arg_scope, 0, arg_root);
                         if (r < 0)
                                 return r;
-                        if (r == 0)
-                                log_notice("Unit %s does not exist, proceeding anyway.", *names);
+
+                        STRV_FOREACH(name, names) {
+                                r = unit_exists(&lp, *name);
+                                if (r < 0)
+                                        return r;
+                                if (r == 0)
+                                        log_notice("Unit %s does not exist, proceeding anyway.", *names);
+                        }
                 }
 
                 r = acquire_bus(BUS_MANAGER, &bus);
@@ -7259,11 +7331,6 @@ static void help_states(void) {
                 puts(automount_state_to_string(i));
 
         if (!arg_no_legend)
-                puts("\nAvailable busname unit substates:");
-        for (i = 0; i < _BUSNAME_STATE_MAX; i++)
-                puts(busname_state_to_string(i));
-
-        if (!arg_no_legend)
                 puts("\nAvailable device unit substates:");
         for (i = 0; i < _DEVICE_STATE_MAX; i++)
                 puts(device_state_to_string(i));
@@ -7762,7 +7829,7 @@ static int halt_parse_argv(int argc, char *argv[]) {
         assert(argv);
 
         if (utmp_get_runlevel(&runlevel, NULL) >= 0)
-                if (runlevel == '0' || runlevel == '6')
+                if (IN_SET(runlevel, '0', '6'))
                         arg_force = 2;
 
         while ((c = getopt_long(argc, argv, "pfwdnih", options, NULL)) >= 0)
@@ -8158,7 +8225,7 @@ static int parse_argv(int argc, char *argv[]) {
         return systemctl_parse_argv(argc, argv);
 }
 
-#ifdef HAVE_SYSV_COMPAT
+#if HAVE_SYSV_COMPAT
 _pure_ static int action_to_runlevel(void) {
 
         static const char table[_ACTION_MAX] = {
@@ -8172,14 +8239,14 @@ _pure_ static int action_to_runlevel(void) {
                 [ACTION_RESCUE] =    '1'
         };
 
-        assert(arg_action < _ACTION_MAX);
+        assert(arg_action >= 0 && arg_action < _ACTION_MAX);
 
         return table[arg_action];
 }
 #endif
 
 static int talk_initctl(void) {
-#ifdef HAVE_SYSV_COMPAT
+#if HAVE_SYSV_COMPAT
         struct init_request request = {
                 .magic = INIT_MAGIC,
                 .sleeptime  = 0,
@@ -8373,7 +8440,7 @@ static int halt_now(enum action a) {
 
 static int logind_schedule_shutdown(void) {
 
-#ifdef ENABLE_LOGIND
+#if ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         char date[FORMAT_TIMESTAMP_MAX];
         const char *action;
@@ -8450,7 +8517,7 @@ static int halt_main(void) {
                 /* Try logind if we are a normal user and no special
                  * mode applies. Maybe PolicyKit allows us to shutdown
                  * the machine. */
-                if (IN_SET(arg_action, ACTION_POWEROFF, ACTION_REBOOT)) {
+                if (IN_SET(arg_action, ACTION_POWEROFF, ACTION_REBOOT, ACTION_HALT)) {
                         r = logind_reboot(arg_action);
                         if (r >= 0)
                                 return r;
@@ -8502,7 +8569,7 @@ static int runlevel_main(void) {
 }
 
 static int logind_cancel_shutdown(void) {
-#ifdef ENABLE_LOGIND
+#if ENABLE_LOGIND
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus;
         int r;
@@ -8567,6 +8634,10 @@ int main(int argc, char*argv[]) {
                 r = systemctl_main(argc, argv);
                 break;
 
+        /* Legacy command aliases set arg_action. They provide some fallbacks,
+         * e.g. to tell sysvinit to reboot after you have installed systemd
+         * binaries. */
+
         case ACTION_HALT:
         case ACTION_POWEROFF:
         case ACTION_REBOOT:
@@ -8579,8 +8650,6 @@ int main(int argc, char*argv[]) {
         case ACTION_RUNLEVEL4:
         case ACTION_RUNLEVEL5:
         case ACTION_RESCUE:
-        case ACTION_EMERGENCY:
-        case ACTION_DEFAULT:
                 r = start_with_fallback();
                 break;
 
@@ -8596,6 +8665,15 @@ int main(int argc, char*argv[]) {
         case ACTION_RUNLEVEL:
                 r = runlevel_main();
                 break;
+
+        case ACTION_EXIT:
+        case ACTION_SUSPEND:
+        case ACTION_HIBERNATE:
+        case ACTION_HYBRID_SLEEP:
+        case ACTION_EMERGENCY:
+        case ACTION_DEFAULT:
+                /* systemctl verbs with no equivalent in the legacy commands.
+                 * These cannot appear in arg_action.  Fall through. */
 
         case _ACTION_INVALID:
         default:

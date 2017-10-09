@@ -56,7 +56,7 @@ int sd_dhcp_server_configure_pool(sd_dhcp_server *server, struct in_addr *addres
         assert_return(address->s_addr != INADDR_ANY, -EINVAL);
         assert_return(prefixlen <= 32, -ERANGE);
 
-        assert_se(in_addr_prefixlen_to_netmask(&netmask_addr, prefixlen));
+        assert_se(in4_addr_prefixlen_to_netmask(&netmask_addr, prefixlen));
         netmask = netmask_addr.s_addr;
 
         server_off = be32toh(address->s_addr & ~netmask);
@@ -993,7 +993,7 @@ static int server_receive_message(sd_event_source *s, int fd,
 
         len = recvmsg(fd, &msg, 0);
         if (len < 0) {
-                if (errno == EAGAIN || errno == EINTR)
+                if (IN_SET(errno, EAGAIN, EINTR))
                         return 0;
 
                 return -errno;

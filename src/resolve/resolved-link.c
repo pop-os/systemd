@@ -111,13 +111,30 @@ Link *link_free(Link *l) {
 }
 
 void link_allocate_scopes(Link *l) {
+        bool unicast_relevant;
         int r;
 
         assert(l);
 
-        if (link_relevant(l, AF_UNSPEC, false) &&
-            l->dns_servers) {
+        /* If a link that used to be relevant is no longer, or a link that did not use to be relevant now becomes
+         * relevant, let's reinit the learnt global DNS server information, since we might talk to different servers
+         * now, even if they have the same addresses as before. */
+
+        unicast_relevant = link_relevant(l, AF_UNSPEC, false);
+        if (unicast_relevant != l->unicast_relevant) {
+                l->unicast_relevant = unicast_relevant;
+
+                dns_server_reset_features_all(l->manager->fallback_dns_servers);
+                dns_server_reset_features_all(l->manager->dns_servers);
+        }
+
+        /* And now, allocate all scopes that makes sense now if we didn't have them yet, and drop those which we don't
+         * need anymore */
+
+        if (unicast_relevant && l->dns_servers) {
                 if (!l->unicast_scope) {
+                        dns_server_reset_features_all(l->dns_servers);
+
                         r = dns_scope_new(l->manager, &l->unicast_scope, l, DNS_PROTOCOL_DNS, AF_UNSPEC);
                         if (r < 0)
                                 log_warning_errno(r, "Failed to allocate DNS scope: %m");
@@ -313,8 +330,8 @@ void link_set_dnssec_mode(Link *l, DnssecMode mode) {
 
         assert(l);
 
-#ifndef HAVE_GCRYPT
-        if (mode == DNSSEC_YES || mode == DNSSEC_ALLOW_DOWNGRADE)
+#if ! HAVE_GCRYPT
+        if (IN_SET(mode, DNSSEC_YES, DNSSEC_ALLOW_DOWNGRADE))
                 log_warning("DNSSEC option for the link cannot be enabled or set to allow-downgrade when systemd-resolved is built without gcrypt support. Turning off DNSSEC support.");
         return;
 #endif
@@ -1050,7 +1067,7 @@ int link_save_user(Link *l) {
         if (r < 0)
                 goto fail;
 
-        fputs("# This is private data. Do not parse.\n", f);
+        fputs_unlocked("# This is private data. Do not parse.\n", f);
 
         v = resolve_support_to_string(l->llmnr_support);
         if (v)
@@ -1067,11 +1084,11 @@ int link_save_user(Link *l) {
         if (l->dns_servers) {
                 DnsServer *server;
 
-                fputs("SERVERS=", f);
+                fputs_unlocked("SERVERS=", f);
                 LIST_FOREACH(servers, server, l->dns_servers) {
 
                         if (server != l->dns_servers)
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
                         v = dns_server_string(server);
                         if (!v) {
@@ -1079,26 +1096,26 @@ int link_save_user(Link *l) {
                                 goto fail;
                         }
 
-                        fputs(v, f);
+                        fputs_unlocked(v, f);
                 }
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
         }
 
         if (l->search_domains) {
                 DnsSearchDomain *domain;
 
-                fputs("DOMAINS=", f);
+                fputs_unlocked("DOMAINS=", f);
                 LIST_FOREACH(domains, domain, l->search_domains) {
 
                         if (domain != l->search_domains)
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
                         if (domain->route_only)
-                                fputc('~', f);
+                                fputc_unlocked('~', f);
 
-                        fputs(DNS_SEARCH_DOMAIN_NAME(domain), f);
+                        fputs_unlocked(DNS_SEARCH_DOMAIN_NAME(domain), f);
                 }
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
         }
 
         if (!set_isempty(l->dnssec_negative_trust_anchors)) {
@@ -1106,16 +1123,16 @@ int link_save_user(Link *l) {
                 Iterator i;
                 char *nta;
 
-                fputs("NTAS=", f);
+                fputs_unlocked("NTAS=", f);
                 SET_FOREACH(nta, l->dnssec_negative_trust_anchors, i) {
 
                         if (space)
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(nta, f);
+                        fputs_unlocked(nta, f);
                         space = true;
                 }
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
         }
 
         r = fflush_and_check(f);

@@ -373,7 +373,7 @@ static int manager_adjust_clock(Manager *m, double offset, int leap_sec) {
                 return -errno;
 
         /* If touch fails, there isn't much we can do. Maybe it'll work next time. */
-        (void) touch("/var/lib/systemd/clock");
+        (void) touch("/var/lib/systemd/timesync/clock");
 
         m->drift_ppm = tmx.freq / 65536;
 
@@ -1092,6 +1092,10 @@ static int manager_network_monitor_listen(Manager *m) {
         assert(m);
 
         r = sd_network_monitor_new(&m->network_monitor, NULL);
+        if (r == -ENOENT) {
+                log_info("Systemd does not appear to be running, not listening for systemd-networkd events.");
+                return 0;
+        }
         if (r < 0)
                 return r;
 

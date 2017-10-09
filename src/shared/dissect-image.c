@@ -17,7 +17,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
 #include <libcryptsetup.h>
 #endif
 #include <sys/mount.h>
@@ -43,7 +43,7 @@
 #include "xattr-util.h"
 
 _unused_ static int probe_filesystem(const char *node, char **ret_fstype) {
-#ifdef HAVE_BLKID
+#if HAVE_BLKID
         _cleanup_blkid_free_probe_ blkid_probe b = NULL;
         const char *fstype;
         int r;
@@ -57,7 +57,7 @@ _unused_ static int probe_filesystem(const char *node, char **ret_fstype) {
 
         errno = 0;
         r = blkid_do_safeprobe(b);
-        if (r == -2 || r == 1) {
+        if (IN_SET(r, -2, 1)) {
                 log_debug("Failed to identify any partition type on partition %s", node);
                 goto not_found;
         }
@@ -87,7 +87,7 @@ not_found:
 
 int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectImageFlags flags, DissectedImage **ret) {
 
-#ifdef HAVE_BLKID
+#if HAVE_BLKID
         sd_id128_t root_uuid = SD_ID128_NULL, verity_uuid = SD_ID128_NULL;
         _cleanup_udev_enumerate_unref_ struct udev_enumerate *e = NULL;
         bool is_gpt, is_mbr, generic_rw, multiple_generic = false;
@@ -156,7 +156,7 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
 
         errno = 0;
         r = blkid_do_safeprobe(b);
-        if (r == -2 || r == 1) {
+        if (IN_SET(r, -2, 1)) {
                 log_debug("Failed to identify any partition table.");
                 return -ENOPKG;
         }
@@ -591,6 +591,9 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
 
                 if (streq_ptr(p->fstype, "crypto_LUKS"))
                         m->encrypted = true;
+
+                if (p->fstype && fstype_is_ro(p->fstype))
+                        p->rw = false;
         }
 
         *ret = m;
@@ -681,7 +684,7 @@ static int mount_partition(
                 p = where;
 
         /* If requested, turn on discard support. */
-        if (STR_IN_SET(fstype, "btrfs", "ext4", "vfat", "xfs") &&
+        if (fstype_can_discard(fstype) &&
             ((flags & DISSECT_IMAGE_DISCARD) ||
              ((flags & DISSECT_IMAGE_DISCARD_ON_LOOP) && is_loop_device(m->node))))
                 options = "discard";
@@ -734,7 +737,7 @@ int dissected_image_mount(DissectedImage *m, const char *where, DissectImageFlag
         return 0;
 }
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
 typedef struct DecryptedPartition {
         struct crypt_device *device;
         char *name;
@@ -749,7 +752,7 @@ struct DecryptedImage {
 #endif
 
 DecryptedImage* decrypted_image_unref(DecryptedImage* d) {
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
         size_t i;
         int r;
 
@@ -775,7 +778,7 @@ DecryptedImage* decrypted_image_unref(DecryptedImage* d) {
         return NULL;
 }
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
 
 static int make_dm_name_and_node(const void *original_node, const char *suffix, char **ret_name, char **ret_node) {
         _cleanup_free_ char *name = NULL, *node = NULL;
@@ -838,15 +841,19 @@ static int decrypt_partition(
 
         r = crypt_init(&cd, m->node);
         if (r < 0)
-                return r;
+                return log_debug_errno(r, "Failed to initialize dm-crypt: %m");
 
         r = crypt_load(cd, CRYPT_LUKS1, NULL);
-        if (r < 0)
+        if (r < 0) {
+                log_debug_errno(r, "Failed to load LUKS metadata: %m");
                 goto fail;
+        }
 
         r = crypt_activate_by_passphrase(cd, name, CRYPT_ANY_SLOT, passphrase, strlen(passphrase),
                                          ((flags & DISSECT_IMAGE_READ_ONLY) ? CRYPT_ACTIVATE_READONLY : 0) |
                                          ((flags & DISSECT_IMAGE_DISCARD_ON_CRYPTO) ? CRYPT_ACTIVATE_ALLOW_DISCARDS : 0));
+        if (r < 0)
+                log_debug_errno(r, "Failed to activate LUKS device: %m");
         if (r == -EPERM) {
                 r = -EKEYREJECTED;
                 goto fail;
@@ -945,7 +952,7 @@ int dissected_image_decrypt(
                 DecryptedImage **ret) {
 
         _cleanup_(decrypted_image_unrefp) DecryptedImage *d = NULL;
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
         unsigned i;
         int r;
 #endif
@@ -969,7 +976,7 @@ int dissected_image_decrypt(
                 return 0;
         }
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
         if (m->encrypted && !passphrase)
                 return -ENOKEY;
 
@@ -1051,7 +1058,7 @@ int dissected_image_decrypt_interactively(
         }
 }
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
 static int deferred_remove(DecryptedPartition *p) {
 
         struct dm_ioctl dm = {
@@ -1085,7 +1092,7 @@ static int deferred_remove(DecryptedPartition *p) {
 
 int decrypted_image_relinquish(DecryptedImage *d) {
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
         size_t i;
         int r;
 #endif
@@ -1095,7 +1102,7 @@ int decrypted_image_relinquish(DecryptedImage *d) {
         /* Turns on automatic removal after the last use ended for all DM devices of this image, and sets a boolean so
          * that we don't clean it up ourselves either anymore */
 
-#ifdef HAVE_LIBCRYPTSETUP
+#if HAVE_LIBCRYPTSETUP
         for (i = 0; i < d->n_decrypted; i++) {
                 DecryptedPartition *p = d->decrypted + i;
 

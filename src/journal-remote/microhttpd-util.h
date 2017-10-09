@@ -24,12 +24,10 @@
 
 #include "macro.h"
 
-/* Those defines are added when options are renamed, hence the check for the *old* name. */
-
-/* Compatiblity with libmicrohttpd < 0.9.38 */
-#ifndef MHD_HTTP_NOT_ACCEPTABLE
-#  define MHD_HTTP_NOT_ACCEPTABLE MHD_HTTP_METHOD_NOT_ACCEPTABLE
-#endif
+/* Those defines are added when options are renamed. If the old names
+ * are not '#define'd, then they are not deprecated yet and there are
+ * enum elements with the same name. Hence let's check for the *old* name,
+ * and define the new name by the value of the old name. */
 
 /* Renamed in µhttpd 0.9.51 */
 #ifndef MHD_USE_PIPE_FOR_SHUTDOWN
@@ -41,7 +39,22 @@
 #  define MHD_USE_EPOLL MHD_USE_EPOLL_LINUX_ONLY
 #endif
 
+/* Renamed in µhttpd 0.9.52 */
+#ifndef MHD_USE_SSL
+#  define MHD_USE_TLS MHD_USE_SSL
+#endif
+
+/* Renamed in µhttpd 0.9.53 */
+#ifndef MHD_USE_POLL_INTERNALLY
+#  define MHD_USE_POLL_INTERNAL_THREAD MHD_USE_POLL_INTERNALLY
+#endif
+
 /* Both the old and new names are defines, check for the new one. */
+
+/* Compatiblity with libmicrohttpd < 0.9.38 */
+#ifndef MHD_HTTP_NOT_ACCEPTABLE
+#  define MHD_HTTP_NOT_ACCEPTABLE MHD_HTTP_METHOD_NOT_ACCEPTABLE
+#endif
 
 /* Renamed in µhttpd 0.9.53 */
 #ifndef MHD_HTTP_PAYLOAD_TOO_LARGE

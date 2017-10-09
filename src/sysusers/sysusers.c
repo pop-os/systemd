@@ -233,8 +233,14 @@ static int make_backup(const char *target, const char *x) {
         if (futimens(fileno(dst), ts) < 0)
                 log_warning_errno(errno, "Failed to fix access and modification time of %s: %m", backup);
 
-        if (rename(temp, backup) < 0)
+        r = fflush_sync_and_check(dst);
+        if (r < 0)
                 goto fail;
+
+        if (rename(temp, backup) < 0) {
+                r = -errno;
+                goto fail;
+        }
 
         return 0;
 
@@ -293,7 +299,7 @@ static int putgrent_with_members(const struct group *gr, FILE *group) {
         return 0;
 }
 
-#ifdef ENABLE_GSHADOW
+#if ENABLE_GSHADOW
 static int putsgent_with_members(const struct sgrp *sg, FILE *gshadow) {
         char **a;
 
@@ -532,7 +538,7 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char 
                         return errno ? -errno : -EIO;
         }
 
-        r = fflush_and_check(shadow);
+        r = fflush_sync_and_check(shadow);
         if (r < 0)
                 return r;
 
@@ -616,7 +622,7 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
                 group_changed = true;
         }
 
-        r = fflush_and_check(group);
+        r = fflush_sync_and_check(group);
         if (r < 0)
                 return r;
 
@@ -630,7 +636,7 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
 }
 
 static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, char **tmpfile_path) {
-#ifdef ENABLE_GSHADOW
+#if ENABLE_GSHADOW
         _cleanup_fclose_ FILE *original = NULL, *gshadow = NULL;
         _cleanup_(unlink_and_freep) char *gshadow_tmp = NULL;
         bool group_changed = false;
@@ -693,7 +699,7 @@ static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, ch
                 group_changed = true;
         }
 
-        r = fflush_and_check(gshadow);
+        r = fflush_sync_and_check(gshadow);
         if (r < 0)
                 return r;
 
@@ -1663,7 +1669,7 @@ static int read_config_file(const char *fn, bool ignore_enoent) {
                 v++;
 
                 l = strstrip(line);
-                if (*l == '#' || *l == 0)
+                if (IN_SET(*l, 0, '#'))
                         continue;
 
                 k = parse_line(fn, v, l);
@@ -1792,7 +1798,7 @@ int main(int argc, char *argv[]) {
                 _cleanup_strv_free_ char **files = NULL;
                 char **f;
 
-                r = conf_files_list_nulstr(&files, ".conf", arg_root, conf_file_dirs);
+                r = conf_files_list_nulstr(&files, ".conf", arg_root, 0, conf_file_dirs);
                 if (r < 0) {
                         log_error_errno(r, "Failed to enumerate sysusers.d files: %m");
                         goto finish;
@@ -1803,6 +1809,16 @@ int main(int argc, char *argv[]) {
                         if (k < 0 && r == 0)
                                 r = k;
                 }
+        }
+
+        /* Let's tell nss-systemd not to synthesize the "root" and "nobody" entries for it, so that our detection
+         * whether the names or UID/GID area already used otherwise doesn't get confused. After all, even though
+         * nss-systemd synthesizes these users/groups, they should still appear in /etc/passwd and /etc/group, as the
+         * synthesizing logic is merely supposed to be fallback for cases where we run with a completely unpopulated
+         * /etc. */
+        if (setenv("SYSTEMD_NSS_BYPASS_SYNTHETIC", "1", 1) < 0) {
+                r = log_error_errno(errno, "Failed to set SYSTEMD_NSS_BYPASS_SYNTHETIC environment variable: %m");
+                goto finish;
         }
 
         if (!uid_range) {

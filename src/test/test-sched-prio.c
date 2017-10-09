@@ -34,10 +34,12 @@ int main(int argc, char *argv[]) {
         FDSet *fdset = NULL;
         int r;
 
+        enter_cgroup_subroot();
+
         /* prepare the test */
         assert_se(set_unit_path(get_testdata_dir("")) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
-        r = manager_new(UNIT_FILE_USER, true, &m);
+        r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
         if (MANAGER_SKIP_TEST(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return EXIT_TEST_SKIP;

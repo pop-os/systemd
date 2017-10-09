@@ -29,6 +29,7 @@
 #include "cgroup-util.h"
 #include "fdset.h"
 #include "hashmap.h"
+#include "ip-address-access.h"
 #include "list.h"
 #include "ratelimit.h"
 
@@ -74,6 +75,15 @@ typedef enum StatusType {
 #include "show-status.h"
 #include "unit-name.h"
 
+enum {
+        /* 0 = run normally */
+        MANAGER_TEST_RUN_MINIMAL = 1,        /* run test w/o generators */
+        MANAGER_TEST_RUN_ENV_GENERATORS = 2, /* also run env generators  */
+        MANAGER_TEST_RUN_GENERATORS = 4,     /* also run unit generators */
+        MANAGER_TEST_FULL = MANAGER_TEST_RUN_ENV_GENERATORS | MANAGER_TEST_RUN_GENERATORS,
+};
+assert_cc((MANAGER_TEST_FULL & UINT8_MAX) == MANAGER_TEST_FULL);
+
 struct Manager {
         /* Note that the set of units we know of is allowed to be
          * inconsistent. However the subset of it that is loaded may
@@ -109,7 +119,10 @@ struct Manager {
         LIST_HEAD(Job, gc_job_queue);
 
         /* Units that should be realized */
-        LIST_HEAD(Unit, cgroup_queue);
+        LIST_HEAD(Unit, cgroup_realize_queue);
+
+        /* Units whose cgroup ran empty */
+        LIST_HEAD(Unit, cgroup_empty_queue);
 
         sd_event *event;
 
@@ -219,17 +232,19 @@ struct Manager {
         CGroupMask cgroup_supported;
         char *cgroup_root;
 
-        /* Notifications from cgroups, when the unified hierarchy is
-         * used is done via inotify. */
+        /* Notifications from cgroups, when the unified hierarchy is used is done via inotify. */
         int cgroup_inotify_fd;
         sd_event_source *cgroup_inotify_event_source;
         Hashmap *cgroup_inotify_wd_unit;
+
+        /* A defer event for handling cgroup empty events and processing them after SIGCHLD in all cases. */
+        sd_event_source *cgroup_empty_event_source;
 
         /* Make sure the user cannot accidentally unmount our cgroup
          * file system */
         int pin_cgroupfs_fd;
 
-        int gc_marker;
+        unsigned gc_marker;
 
         /* Flags */
         ManagerExitCode exit_code:5;
@@ -238,7 +253,8 @@ struct Manager {
         bool dispatching_dbus_queue:1;
 
         bool taint_usr:1;
-        bool test_run:1;
+
+        unsigned test_run_flags:8;
 
         /* If non-zero, exit with the following value when the systemd
          * process terminate. Useful for containers: systemd-nspawn could get
@@ -261,6 +277,7 @@ struct Manager {
         bool default_io_accounting;
         bool default_blockio_accounting;
         bool default_tasks_accounting;
+        bool default_ip_accounting;
 
         uint64_t default_tasks_max;
         usec_t default_timer_accuracy_usec;
@@ -316,6 +333,9 @@ struct Manager {
         const char *invocation_log_format_string;
 
         int first_boot; /* tri-state */
+
+        /* prefixes of e.g. RuntimeDirectory= */
+        char *prefix[_EXEC_DIRECTORY_TYPE_MAX];
 };
 
 #define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == UNIT_FILE_SYSTEM)
@@ -323,7 +343,7 @@ struct Manager {
 
 #define MANAGER_IS_RELOADING(m) ((m)->n_reloading > 0)
 
-int manager_new(UnitFileScope scope, bool test_run, Manager **m);
+int manager_new(UnitFileScope scope, unsigned test_run_flags, Manager **m);
 Manager* manager_free(Manager *m);
 
 void manager_enumerate(Manager *m);
@@ -341,6 +361,7 @@ int manager_load_unit_from_dbus_path(Manager *m, const char *s, sd_bus_error *e,
 int manager_add_job(Manager *m, JobType type, Unit *unit, JobMode mode, sd_bus_error *e, Job **_ret);
 int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode mode, sd_bus_error *e, Job **_ret);
 int manager_add_job_by_name_and_warn(Manager *m, JobType type, const char *name, JobMode mode, Job **ret);
+int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error *e);
 
 void manager_dump_units(Manager *s, FILE *f, const char *prefix);
 void manager_dump_jobs(Manager *s, FILE *f, const char *prefix);
@@ -380,7 +401,7 @@ void manager_flip_auto_status(Manager *m, bool enable);
 
 Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path);
 
-const char *manager_get_runtime_prefix(Manager *m);
+void manager_set_exec_params(Manager *m, ExecParameters *p);
 
 ManagerState manager_state(Manager *m);
 

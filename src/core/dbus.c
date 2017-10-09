@@ -92,7 +92,7 @@ int bus_forward_agent_released(Manager *m, const char *path) {
                                "Released",
                                "s", path);
         if (r < 0)
-                return log_warning_errno(r, "Failed to propagate agent release message: %m");
+                return log_debug_errno(r, "Failed to propagate agent release message: %m");
 
         return 1;
 }
@@ -211,7 +211,7 @@ failed:
         return 0;
 }
 
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
 static int mac_selinux_filter(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Manager *m = userdata;
         const char *verb, *path;
@@ -535,7 +535,7 @@ static int bus_setup_api_vtables(Manager *m, sd_bus *bus) {
         assert(m);
         assert(bus);
 
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
         r = sd_bus_add_filter(bus, NULL, mac_selinux_filter, m);
         if (r < 0)
                 return log_error_errno(r, "Failed to add SELinux access filter: %m");
@@ -967,7 +967,7 @@ static int bus_init_private(Manager *m) {
         if (MANAGER_IS_SYSTEM(m)) {
 
                 /* We want the private bus only when running as init */
-                if (getpid() != 1)
+                if (getpid_cached() != 1)
                         return 0;
 
                 strcpy(sa.un.sun_path, "/run/systemd/private");

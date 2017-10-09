@@ -13,6 +13,7 @@ units = [
         ['final.target',                        ''],
         ['getty.target',                        '',
          'multi-user.target.wants/'],
+        ['getty-pre.target',                    ''],
         ['graphical.target',                    '',
          'runlevel5.target default.target'],
         ['halt.target',                         ''],
@@ -47,6 +48,9 @@ units = [
         ['proc-sys-fs-binfmt_misc.mount',       'ENABLE_BINFMT'],
         ['reboot.target',                       '',
          'runlevel6.target ctrl-alt-del.target'],
+        ['remote-cryptsetup-pre.target',        'HAVE_LIBCRYPTSETUP'],
+        ['remote-cryptsetup.target',            'HAVE_LIBCRYPTSETUP',
+         join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
         ['remote-fs-pre.target',                ''],
         ['remote-fs.target',                    '',
          join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
@@ -88,7 +92,7 @@ units = [
          'sockets.target.wants/'],
         ['systemd-journald.socket',             '',
          'sockets.target.wants/'],
-        ['systemd-networkd.socket',             '',
+        ['systemd-networkd.socket',             'ENABLE_NETWORKD',
          join_paths(pkgsysconfdir, 'system/sockets.target.wants/')],
         ['systemd-rfkill.socket',               'ENABLE_RFKILL'],
         ['systemd-tmpfiles-clean.timer',        '',
@@ -99,6 +103,8 @@ units = [
          'sockets.target.wants/'],
         ['time-sync.target',                    ''],
         ['timers.target',                       ''],
+        ['tmp.mount',                           '',
+         'local-fs.target.wants/'],
         ['umount.target',                       ''],
         ['user.slice',                          ''],
         ['var-lib-machines.mount',              'ENABLE_MACHINED',
@@ -161,6 +167,9 @@ in_units = [
          'dbus-org.freedesktop.machine1.service'],
         ['systemd-modules-load.service',         'HAVE_KMOD',
          'sysinit.target.wants/'],
+        ['systemd-networkd.service',             'ENABLE_NETWORKD',
+         join_paths(pkgsysconfdir, 'system/dbus-org.freedesktop.network1.service') + ' ' +
+         join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
         ['systemd-networkd-wait-online.service', 'ENABLE_NETWORKD',
          join_paths(pkgsysconfdir, 'system/network-online.target.wants/')],
         ['systemd-nspawn@.service',              ''],
@@ -171,6 +180,9 @@ in_units = [
         ['systemd-reboot.service',               ''],
         ['systemd-remount-fs.service',           '',
          'local-fs.target.wants/'],
+        ['systemd-resolved.service',             'ENABLE_RESOLVE',
+         join_paths(pkgsysconfdir, 'system/dbus-org.freedesktop.resolve1.service') + ' ' +
+         join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
         ['systemd-rfkill.service',               'ENABLE_RFKILL'],
         ['systemd-suspend.service',              ''],
         ['systemd-sysctl.service',               '',
@@ -193,14 +205,15 @@ in_units = [
          'sysinit.target.wants/'],
         ['systemd-update-done.service',          '',
          'sysinit.target.wants/'],
-        ['systemd-update-utmp-runlevel.service', 'HAVE_UTMP HAVE_SYSV_COMPAT',
+        ['systemd-update-utmp-runlevel.service', 'ENABLE_UTMP HAVE_SYSV_COMPAT',
          'multi-user.target.wants/ graphical.target.wants/ rescue.target.wants/'],
-        ['systemd-update-utmp.service',          'HAVE_UTMP',
+        ['systemd-update-utmp.service',          'ENABLE_UTMP',
          'sysinit.target.wants/'],
         ['systemd-user-sessions.service',        '',
          'multi-user.target.wants/'],
         ['systemd-vconsole-setup.service',       'ENABLE_VCONSOLE'],
         ['systemd-volatile-root.service',        ''],
+        ['user@.service',                        ''],
 ]
 
 m4_units = [
@@ -208,20 +221,11 @@ m4_units = [
          'autovt@.service ' +
          join_paths(pkgsysconfdir, 'system/getty.target.wants/getty@tty1.service')],
         ['serial-getty@.service',              ''],
-        ['tmp.mount',                          '',
-         'local-fs.target.wants/'],
 ]
 
 m4_in_units = [
         ['console-getty.service',              ''],
         ['container-getty@.service',           ''],
-        ['systemd-networkd.service',           'ENABLE_NETWORKD',
-         join_paths(pkgsysconfdir, 'system/dbus-org.freedesktop.network1.service') + ' ' +
-         join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
-        ['systemd-resolved.service',           'ENABLE_RESOLVED',
-         join_paths(pkgsysconfdir, 'system/dbus-org.freedesktop.resolve1.service') + ' ' +
-         join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
-        ['user@.service',                      ''],
 ]
 
 foreach tuple : m4_in_units
@@ -240,8 +244,8 @@ foreach tuple : in_units
 
         # we do this here because install_data does not accept custom_target output
         conds = tuple[1].split(' ')
-        install = ((conds.get(0, '') == '' or conf.get(conds[0], false)) and
-                   (conds.get(1, '') == '' or conf.get(conds[1], false)))
+        install = ((conds.get(0, '') == '' or conf.get(conds[0]) == 1) and
+                   (conds.get(1, '') == '' or conf.get(conds[1]) == 1))
 
         gen1 = configure_file(
                 input : file + '.in',
@@ -269,8 +273,8 @@ foreach tuple : m4_units
 
         # we do this here because install_data does not accept custom_target output
         conds = tuple[1].split(' ')
-        install = ((conds.get(0, '') == '' or conf.get(conds[0], false)) and
-                   (conds.get(1, '') == '' or conf.get(conds[1], false)))
+        install = ((conds.get(0, '') == '' or conf.get(conds[0]) == 1) and
+                   (conds.get(1, '') == '' or conf.get(conds[1]) == 1))
 
         custom_target(
                 file,
@@ -293,8 +297,8 @@ foreach tuple : units
         input = tuple.get(3, file)
 
         conds = tuple[1].split(' ')
-        install = ((conds.get(0, '') == '' or conf.get(conds[0], false)) and
-                   (conds.get(1, '') == '' or conf.get(conds[1], false)))
+        install = ((conds.get(0, '') == '' or conf.get(conds[0]) == 1) and
+                   (conds.get(1, '') == '' or conf.get(conds[1]) == 1))
 
         if install
                 install_data(input,
@@ -317,7 +321,7 @@ meson.add_install_script(meson_make_symlink,
 meson.add_install_script(meson_make_symlink,
                          join_paths(dbussystemservicedir, 'org.freedesktop.systemd1.service'),
                          join_paths(dbussessionservicedir, 'org.freedesktop.systemd1.service'))
-if conf.get('HAVE_SYSV_COMPAT', false)
+if conf.get('HAVE_SYSV_COMPAT') == 1
         foreach i : [1, 2, 3, 4, 5]
                 meson.add_install_script(
                         'sh', '-c',

@@ -36,7 +36,7 @@
 #include "log.h"
 #include "pager.h"
 #include "parse-util.h"
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
 #include "special.h"
@@ -79,6 +79,7 @@ static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static char *arg_host = NULL;
 static bool arg_user = false;
 static bool arg_man = true;
+static bool arg_generators = false;
 
 struct boot_times {
         usec_t firmware_time;
@@ -1253,6 +1254,34 @@ static int set_log_level(sd_bus *bus, char **args) {
         return 0;
 }
 
+static int get_log_level(sd_bus *bus, char **args) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        int r;
+        _cleanup_free_ char *level = NULL;
+
+        assert(bus);
+        assert(args);
+
+        if (!strv_isempty(args)) {
+                log_error("Too many arguments.");
+                return -E2BIG;
+        }
+
+        r = sd_bus_get_property_string(
+                        bus,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "LogLevel",
+                        &error,
+                        &level);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get log level: %s", bus_error_message(&error, r));
+
+        puts(level);
+        return 0;
+}
+
 static int set_log_target(sd_bus *bus, char **args) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
@@ -1280,7 +1309,35 @@ static int set_log_target(sd_bus *bus, char **args) {
         return 0;
 }
 
-#ifdef HAVE_SECCOMP
+static int get_log_target(sd_bus *bus, char **args) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        int r;
+        _cleanup_free_ char *target = NULL;
+
+        assert(bus);
+        assert(args);
+
+        if (!strv_isempty(args)) {
+                log_error("Too many arguments.");
+                return -E2BIG;
+        }
+
+        r = sd_bus_get_property_string(
+                        bus,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "LogTarget",
+                        &error,
+                        &target);
+        if (r < 0)
+                return log_error_errno(r, "Failed to get log target: %s", bus_error_message(&error, r));
+
+        puts(target);
+        return 0;
+}
+
+#if HAVE_SECCOMP
 static void dump_syscall_filter(const SyscallFilterSet *set) {
         const char *syscall;
 
@@ -1357,6 +1414,7 @@ static void help(void) {
                "     --fuzz=SECONDS        Also print also services which finished SECONDS\n"
                "                           earlier than the latest in the branch\n"
                "     --man[=BOOL]          Do [not] check for existence of man pages\n\n"
+               "     --generators[=BOOL]   Do [not] run unit generators (requires privileges)\n\n"
                "Commands:\n"
                "  time                     Print time spent in the kernel\n"
                "  blame                    Print list of running units ordered by time to init\n"
@@ -1365,6 +1423,8 @@ static void help(void) {
                "  dot                      Output dependency graph in man:dot(1) format\n"
                "  set-log-level LEVEL      Set logging threshold for manager\n"
                "  set-log-target TARGET    Set logging target for manager\n"
+               "  get-log-level            Get logging threshold for manager\n"
+               "  get-log-target           Get logging target for manager\n"
                "  dump                     Output state serialization of service manager\n"
                "  syscall-filter [NAME...] Print list of syscalls in seccomp filter\n"
                "  verify FILE...           Check unit files for correctness\n"
@@ -1387,6 +1447,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_FUZZ,
                 ARG_NO_PAGER,
                 ARG_MAN,
+                ARG_GENERATORS,
         };
 
         static const struct option options[] = {
@@ -1401,6 +1462,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "fuzz",         required_argument, NULL, ARG_FUZZ             },
                 { "no-pager",     no_argument,       NULL, ARG_NO_PAGER         },
                 { "man",          optional_argument, NULL, ARG_MAN              },
+                { "generators",   optional_argument, NULL, ARG_GENERATORS       },
                 { "host",         required_argument, NULL, 'H'                  },
                 { "machine",      required_argument, NULL, 'M'                  },
                 {}
@@ -1483,6 +1545,20 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
+                case ARG_GENERATORS:
+                        if (optarg) {
+                                r = parse_boolean(optarg);
+                                if (r < 0) {
+                                        log_error("Failed to parse --generators= argument.");
+                                        return -EINVAL;
+                                }
+
+                                arg_generators = !!r;
+                        } else
+                                arg_generators = true;
+
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -1508,7 +1584,8 @@ int main(int argc, char *argv[]) {
         if (streq_ptr(argv[optind], "verify"))
                 r = verify_units(argv+optind+1,
                                  arg_user ? UNIT_FILE_USER : UNIT_FILE_SYSTEM,
-                                 arg_man);
+                                 arg_man,
+                                 arg_generators);
         else {
                 _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
 
@@ -1532,8 +1609,12 @@ int main(int argc, char *argv[]) {
                         r = dump(bus, argv+optind+1);
                 else if (streq(argv[optind], "set-log-level"))
                         r = set_log_level(bus, argv+optind+1);
+                else if (streq(argv[optind], "get-log-level"))
+                        r = get_log_level(bus, argv+optind+1);
                 else if (streq(argv[optind], "set-log-target"))
                         r = set_log_target(bus, argv+optind+1);
+                else if (streq(argv[optind], "get-log-target"))
+                        r = get_log_target(bus, argv+optind+1);
                 else if (streq(argv[optind], "syscall-filter"))
                         r = dump_syscall_filters(argv+optind+1);
                 else

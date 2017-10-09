@@ -17,7 +17,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
 #include <selinux/selinux.h>
 #endif
 #include <sys/ioctl.h>
@@ -51,6 +51,7 @@
 #include "journal-internal.h"
 #include "journal-vacuum.h"
 #include "journald-audit.h"
+#include "journald-context.h"
 #include "journald-kmsg.h"
 #include "journald-native.h"
 #include "journald-rate-limit.h"
@@ -70,8 +71,8 @@
 #include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
-#include "user-util.h"
 #include "syslog-util.h"
+#include "user-util.h"
 
 #define USER_JOURNALS_MAX 1024
 
@@ -86,6 +87,10 @@
 
 /* The period to insert between posting changes for coalescing */
 #define POST_CHANGE_TIMER_INTERVAL_USEC (250*USEC_PER_MSEC)
+
+/* Pick a good default that is likely to fit into AF_UNIX and AF_INET SOCK_DGRAM datagrams, and even leaves some room
+ * for a bit of additional metadata. */
+#define DEFAULT_LINE_MAX (48*1024)
 
 static int determine_path_usage(Server *s, const char *path, uint64_t *ret_used, uint64_t *ret_free) {
         _cleanup_closedir_ DIR *d = NULL;
@@ -235,12 +240,12 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
 }
 
 static void server_add_acls(JournalFile *f, uid_t uid) {
-#ifdef HAVE_ACL
+#if HAVE_ACL
         int r;
 #endif
         assert(f);
 
-#ifdef HAVE_ACL
+#if HAVE_ACL
         if (uid <= SYSTEM_UID_MAX)
                 return;
 
@@ -312,7 +317,7 @@ static int system_journal_open(Server *s, bool flush_requested) {
                         (void) cache_space_refresh(s, &s->system_storage);
                         patch_min_use(&s->system_storage);
                 } else if (r < 0) {
-                        if (r != -ENOENT && r != -EROFS)
+                        if (!IN_SET(r, -ENOENT, -EROFS))
                                 log_warning_errno(r, "Failed to open system journal: %m");
 
                         r = 0;
@@ -714,354 +719,140 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned
                 server_schedule_sync(s, priority);
 }
 
-static int get_invocation_id(const char *cgroup_root, const char *slice, const char *unit, char **ret) {
-        _cleanup_free_ char *escaped = NULL, *slice_path = NULL, *p = NULL;
-        char *copy, ids[SD_ID128_STRING_MAX];
-        int r;
+#define IOVEC_ADD_NUMERIC_FIELD(iovec, n, value, type, isset, format, field)  \
+        if (isset(value)) {                                             \
+                char *k;                                                \
+                k = newa(char, strlen(field "=") + DECIMAL_STR_MAX(type) + 1); \
+                sprintf(k, field "=" format, value);                    \
+                iovec[n++] = IOVEC_MAKE_STRING(k);                      \
+        }
 
-        /* Read the invocation ID of a unit off a unit. It's stored in the "trusted.invocation_id" extended attribute
-         * on the cgroup path. */
+#define IOVEC_ADD_STRING_FIELD(iovec, n, value, field)                  \
+        if (!isempty(value)) {                                          \
+                char *k;                                                \
+                k = strjoina(field "=", value);                         \
+                iovec[n++] = IOVEC_MAKE_STRING(k);                      \
+        }
 
-        r = cg_slice_to_path(slice, &slice_path);
-        if (r < 0)
-                return r;
+#define IOVEC_ADD_ID128_FIELD(iovec, n, value, field)                   \
+        if (!sd_id128_is_null(value)) {                                 \
+                char *k;                                                \
+                k = newa(char, strlen(field "=") + SD_ID128_STRING_MAX); \
+                sd_id128_to_string(value, stpcpy(k, field "="));        \
+                iovec[n++] = IOVEC_MAKE_STRING(k);                      \
+        }
 
-        escaped = cg_escape(unit);
-        if (!escaped)
-                return -ENOMEM;
-
-        p = strjoin(cgroup_root, "/", slice_path, "/", escaped);
-        if (!p)
-                return -ENOMEM;
-
-        r = cg_get_xattr(SYSTEMD_CGROUP_CONTROLLER, p, "trusted.invocation_id", ids, 32);
-        if (r < 0)
-                return r;
-        if (r != 32)
-                return -EINVAL;
-        ids[32] = 0;
-
-        if (!id128_is_valid(ids))
-                return -EINVAL;
-
-        copy = strdup(ids);
-        if (!copy)
-                return -ENOMEM;
-
-        *ret = copy;
-        return 0;
-}
+#define IOVEC_ADD_SIZED_FIELD(iovec, n, value, value_size, field)       \
+        if (value_size > 0) {                                           \
+                char *k;                                                \
+                k = newa(char, strlen(field "=") + value_size + 1);     \
+                *((char*) mempcpy(stpcpy(k, field "="), value, value_size)) = 0; \
+                iovec[n++] = IOVEC_MAKE_STRING(k);                      \
+        }                                                               \
 
 static void dispatch_message_real(
                 Server *s,
                 struct iovec *iovec, unsigned n, unsigned m,
-                const struct ucred *ucred,
+                const ClientContext *c,
                 const struct timeval *tv,
-                const char *label, size_t label_len,
-                const char *unit_id,
                 int priority,
-                pid_t object_pid,
-                char *cgroup) {
+                pid_t object_pid) {
 
-        char    pid[sizeof("_PID=") + DECIMAL_STR_MAX(pid_t)],
-                uid[sizeof("_UID=") + DECIMAL_STR_MAX(uid_t)],
-                gid[sizeof("_GID=") + DECIMAL_STR_MAX(gid_t)],
-                owner_uid[sizeof("_SYSTEMD_OWNER_UID=") + DECIMAL_STR_MAX(uid_t)],
-                source_time[sizeof("_SOURCE_REALTIME_TIMESTAMP=") + DECIMAL_STR_MAX(usec_t)],
-                o_uid[sizeof("OBJECT_UID=") + DECIMAL_STR_MAX(uid_t)],
-                o_gid[sizeof("OBJECT_GID=") + DECIMAL_STR_MAX(gid_t)],
-                o_owner_uid[sizeof("OBJECT_SYSTEMD_OWNER_UID=") + DECIMAL_STR_MAX(uid_t)];
-        uid_t object_uid;
-        gid_t object_gid;
-        char *x;
-        int r;
-        char *t, *c;
-        uid_t realuid = 0, owner = 0, journal_uid;
-        bool owner_valid = false;
-#ifdef HAVE_AUDIT
-        char    audit_session[sizeof("_AUDIT_SESSION=") + DECIMAL_STR_MAX(uint32_t)],
-                audit_loginuid[sizeof("_AUDIT_LOGINUID=") + DECIMAL_STR_MAX(uid_t)],
-                o_audit_session[sizeof("OBJECT_AUDIT_SESSION=") + DECIMAL_STR_MAX(uint32_t)],
-                o_audit_loginuid[sizeof("OBJECT_AUDIT_LOGINUID=") + DECIMAL_STR_MAX(uid_t)];
-
-        uint32_t audit;
-        uid_t loginuid;
-#endif
+        char source_time[sizeof("_SOURCE_REALTIME_TIMESTAMP=") + DECIMAL_STR_MAX(usec_t)];
+        uid_t journal_uid;
+        ClientContext *o;
 
         assert(s);
         assert(iovec);
         assert(n > 0);
-        assert(n + N_IOVEC_META_FIELDS + (object_pid > 0 ? N_IOVEC_OBJECT_FIELDS : 0) <= m);
+        assert(n + N_IOVEC_META_FIELDS + (pid_is_valid(object_pid) ? N_IOVEC_OBJECT_FIELDS : 0) <= m);
 
-        if (ucred) {
-                realuid = ucred->uid;
+        if (c) {
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->pid, pid_t, pid_is_valid, PID_FMT, "_PID");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->uid, uid_t, uid_is_valid, UID_FMT, "_UID");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->gid, gid_t, gid_is_valid, GID_FMT, "_GID");
 
-                sprintf(pid, "_PID="PID_FMT, ucred->pid);
-                IOVEC_SET_STRING(iovec[n++], pid);
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->comm, "_COMM");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->exe, "_EXE");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->cmdline, "_CMDLINE");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->capeff, "_CAP_EFFECTIVE");
 
-                sprintf(uid, "_UID="UID_FMT, ucred->uid);
-                IOVEC_SET_STRING(iovec[n++], uid);
+                IOVEC_ADD_SIZED_FIELD(iovec, n, c->label, c->label_size, "_SELINUX_CONTEXT");
 
-                sprintf(gid, "_GID="GID_FMT, ucred->gid);
-                IOVEC_SET_STRING(iovec[n++], gid);
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->auditid, uint32_t, audit_session_is_valid, "%" PRIu32, "_AUDIT_SESSION");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->loginuid, uid_t, uid_is_valid, UID_FMT, "_AUDIT_LOGINUID");
 
-                r = get_process_comm(ucred->pid, &t);
-                if (r >= 0) {
-                        x = strjoina("_COMM=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->cgroup, "_SYSTEMD_CGROUP");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->session, "_SYSTEMD_SESSION");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->owner_uid, uid_t, uid_is_valid, UID_FMT, "_SYSTEMD_OWNER_UID");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->unit, "_SYSTEMD_UNIT");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->user_unit, "_SYSTEMD_USER_UNIT");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->slice, "_SYSTEMD_SLICE");
+                IOVEC_ADD_STRING_FIELD(iovec, n, c->user_slice, "_SYSTEMD_USER_SLICE");
 
-                r = get_process_exe(ucred->pid, &t);
-                if (r >= 0) {
-                        x = strjoina("_EXE=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
-
-                r = get_process_cmdline(ucred->pid, 0, false, &t);
-                if (r >= 0) {
-                        x = strjoina("_CMDLINE=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
-
-                r = get_process_capeff(ucred->pid, &t);
-                if (r >= 0) {
-                        x = strjoina("_CAP_EFFECTIVE=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
-
-#ifdef HAVE_AUDIT
-                r = audit_session_from_pid(ucred->pid, &audit);
-                if (r >= 0) {
-                        sprintf(audit_session, "_AUDIT_SESSION=%"PRIu32, audit);
-                        IOVEC_SET_STRING(iovec[n++], audit_session);
-                }
-
-                r = audit_loginuid_from_pid(ucred->pid, &loginuid);
-                if (r >= 0) {
-                        sprintf(audit_loginuid, "_AUDIT_LOGINUID="UID_FMT, loginuid);
-                        IOVEC_SET_STRING(iovec[n++], audit_loginuid);
-                }
-#endif
-
-                r = 0;
-                if (cgroup)
-                        c = cgroup;
-                else
-                        r = cg_pid_get_path_shifted(ucred->pid, s->cgroup_root, &c);
-
-                if (r >= 0) {
-                        _cleanup_free_ char *raw_unit = NULL, *raw_slice = NULL;
-                        char *session = NULL;
-
-                        x = strjoina("_SYSTEMD_CGROUP=", c);
-                        IOVEC_SET_STRING(iovec[n++], x);
-
-                        r = cg_path_get_session(c, &t);
-                        if (r >= 0) {
-                                session = strjoina("_SYSTEMD_SESSION=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], session);
-                        }
-
-                        if (cg_path_get_owner_uid(c, &owner) >= 0) {
-                                owner_valid = true;
-
-                                sprintf(owner_uid, "_SYSTEMD_OWNER_UID="UID_FMT, owner);
-                                IOVEC_SET_STRING(iovec[n++], owner_uid);
-                        }
-
-                        if (cg_path_get_unit(c, &raw_unit) >= 0) {
-                                x = strjoina("_SYSTEMD_UNIT=", raw_unit);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        } else if (unit_id && !session) {
-                                x = strjoina("_SYSTEMD_UNIT=", unit_id);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_user_unit(c, &t) >= 0) {
-                                x = strjoina("_SYSTEMD_USER_UNIT=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        } else if (unit_id && session) {
-                                x = strjoina("_SYSTEMD_USER_UNIT=", unit_id);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_slice(c, &raw_slice) >= 0) {
-                                x = strjoina("_SYSTEMD_SLICE=", raw_slice);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_user_slice(c, &t) >= 0) {
-                                x = strjoina("_SYSTEMD_USER_SLICE=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (raw_slice && raw_unit) {
-                                if (get_invocation_id(s->cgroup_root, raw_slice, raw_unit, &t) >= 0) {
-                                        x = strjoina("_SYSTEMD_INVOCATION_ID=", t);
-                                        free(t);
-                                        IOVEC_SET_STRING(iovec[n++], x);
-                                }
-                        }
-
-                        if (!cgroup)
-                                free(c);
-                } else if (unit_id) {
-                        x = strjoina("_SYSTEMD_UNIT=", unit_id);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
-
-#ifdef HAVE_SELINUX
-                if (mac_selinux_use()) {
-                        if (label) {
-                                x = alloca(strlen("_SELINUX_CONTEXT=") + label_len + 1);
-
-                                *((char*) mempcpy(stpcpy(x, "_SELINUX_CONTEXT="), label, label_len)) = 0;
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        } else {
-                                char *con;
-
-                                if (getpidcon(ucred->pid, &con) >= 0) {
-                                        x = strjoina("_SELINUX_CONTEXT=", con);
-
-                                        freecon(con);
-                                        IOVEC_SET_STRING(iovec[n++], x);
-                                }
-                        }
-                }
-#endif
+                IOVEC_ADD_ID128_FIELD(iovec, n, c->invocation_id, "_SYSTEMD_INVOCATION_ID");
         }
+
         assert(n <= m);
 
-        if (object_pid) {
-                r = get_process_uid(object_pid, &object_uid);
-                if (r >= 0) {
-                        sprintf(o_uid, "OBJECT_UID="UID_FMT, object_uid);
-                        IOVEC_SET_STRING(iovec[n++], o_uid);
-                }
+        if (pid_is_valid(object_pid) && client_context_get(s, object_pid, NULL, NULL, 0, NULL, &o) >= 0) {
 
-                r = get_process_gid(object_pid, &object_gid);
-                if (r >= 0) {
-                        sprintf(o_gid, "OBJECT_GID="GID_FMT, object_gid);
-                        IOVEC_SET_STRING(iovec[n++], o_gid);
-                }
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, o->pid, pid_t, pid_is_valid, PID_FMT, "OBJECT_PID");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, o->uid, uid_t, uid_is_valid, UID_FMT, "OBJECT_UID");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, o->gid, gid_t, gid_is_valid, GID_FMT, "OBJECT_GID");
 
-                r = get_process_comm(object_pid, &t);
-                if (r >= 0) {
-                        x = strjoina("OBJECT_COMM=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->comm, "OBJECT_COMM");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->exe, "OBJECT_EXE");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->cmdline, "OBJECT_CMDLINE");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->capeff, "OBJECT_CAP_EFFECTIVE");
 
-                r = get_process_exe(object_pid, &t);
-                if (r >= 0) {
-                        x = strjoina("OBJECT_EXE=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
+                IOVEC_ADD_SIZED_FIELD(iovec, n, o->label, o->label_size, "OBJECT_SELINUX_CONTEXT");
 
-                r = get_process_cmdline(object_pid, 0, false, &t);
-                if (r >= 0) {
-                        x = strjoina("OBJECT_CMDLINE=", t);
-                        free(t);
-                        IOVEC_SET_STRING(iovec[n++], x);
-                }
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, o->auditid, uint32_t, audit_session_is_valid, "%" PRIu32, "OBJECT_AUDIT_SESSION");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, o->loginuid, uid_t, uid_is_valid, UID_FMT, "OBJECT_AUDIT_LOGINUID");
 
-#ifdef HAVE_AUDIT
-                r = audit_session_from_pid(object_pid, &audit);
-                if (r >= 0) {
-                        sprintf(o_audit_session, "OBJECT_AUDIT_SESSION=%"PRIu32, audit);
-                        IOVEC_SET_STRING(iovec[n++], o_audit_session);
-                }
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->cgroup, "OBJECT_SYSTEMD_CGROUP");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->session, "OBJECT_SYSTEMD_SESSION");
+                IOVEC_ADD_NUMERIC_FIELD(iovec, n, o->owner_uid, uid_t, uid_is_valid, UID_FMT, "OBJECT_SYSTEMD_OWNER_UID");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->unit, "OBJECT_SYSTEMD_UNIT");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->user_unit, "OBJECT_SYSTEMD_USER_UNIT");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->slice, "OBJECT_SYSTEMD_SLICE");
+                IOVEC_ADD_STRING_FIELD(iovec, n, o->user_slice, "OBJECT_SYSTEMD_USER_SLICE");
 
-                r = audit_loginuid_from_pid(object_pid, &loginuid);
-                if (r >= 0) {
-                        sprintf(o_audit_loginuid, "OBJECT_AUDIT_LOGINUID="UID_FMT, loginuid);
-                        IOVEC_SET_STRING(iovec[n++], o_audit_loginuid);
-                }
-#endif
-
-                r = cg_pid_get_path_shifted(object_pid, s->cgroup_root, &c);
-                if (r >= 0) {
-                        x = strjoina("OBJECT_SYSTEMD_CGROUP=", c);
-                        IOVEC_SET_STRING(iovec[n++], x);
-
-                        r = cg_path_get_session(c, &t);
-                        if (r >= 0) {
-                                x = strjoina("OBJECT_SYSTEMD_SESSION=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_owner_uid(c, &owner) >= 0) {
-                                sprintf(o_owner_uid, "OBJECT_SYSTEMD_OWNER_UID="UID_FMT, owner);
-                                IOVEC_SET_STRING(iovec[n++], o_owner_uid);
-                        }
-
-                        if (cg_path_get_unit(c, &t) >= 0) {
-                                x = strjoina("OBJECT_SYSTEMD_UNIT=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_user_unit(c, &t) >= 0) {
-                                x = strjoina("OBJECT_SYSTEMD_USER_UNIT=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_slice(c, &t) >= 0) {
-                                x = strjoina("OBJECT_SYSTEMD_SLICE=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        if (cg_path_get_user_slice(c, &t) >= 0) {
-                                x = strjoina("OBJECT_SYSTEMD_USER_SLICE=", t);
-                                free(t);
-                                IOVEC_SET_STRING(iovec[n++], x);
-                        }
-
-                        free(c);
-                }
+                IOVEC_ADD_ID128_FIELD(iovec, n, o->invocation_id, "OBJECT_SYSTEMD_INVOCATION_ID=");
         }
+
         assert(n <= m);
 
         if (tv) {
                 sprintf(source_time, "_SOURCE_REALTIME_TIMESTAMP=" USEC_FMT, timeval_load(tv));
-                IOVEC_SET_STRING(iovec[n++], source_time);
+                iovec[n++] = IOVEC_MAKE_STRING(source_time);
         }
 
         /* Note that strictly speaking storing the boot id here is
          * redundant since the entry includes this in-line
          * anyway. However, we need this indexed, too. */
         if (!isempty(s->boot_id_field))
-                IOVEC_SET_STRING(iovec[n++], s->boot_id_field);
+                iovec[n++] = IOVEC_MAKE_STRING(s->boot_id_field);
 
         if (!isempty(s->machine_id_field))
-                IOVEC_SET_STRING(iovec[n++], s->machine_id_field);
+                iovec[n++] = IOVEC_MAKE_STRING(s->machine_id_field);
 
         if (!isempty(s->hostname_field))
-                IOVEC_SET_STRING(iovec[n++], s->hostname_field);
+                iovec[n++] = IOVEC_MAKE_STRING(s->hostname_field);
 
         assert(n <= m);
 
-        if (s->split_mode == SPLIT_UID && realuid > 0)
-                /* Split up strictly by any UID */
-                journal_uid = realuid;
-        else if (s->split_mode == SPLIT_LOGIN && realuid > 0 && owner_valid && owner > 0)
+        if (s->split_mode == SPLIT_UID && c && uid_is_valid(c->uid))
+                /* Split up strictly by (non-root) UID */
+                journal_uid = c->uid;
+        else if (s->split_mode == SPLIT_LOGIN && c && c->uid > 0 && uid_is_valid(c->owner_uid))
                 /* Split up by login UIDs.  We do this only if the
                  * realuid is not root, in order not to accidentally
                  * leak privileged information to the user that is
                  * logged by a privileged process that is part of an
                  * unprivileged session. */
-                journal_uid = owner;
+                journal_uid = c->owner_uid;
         else
                 journal_uid = 0;
 
@@ -1069,25 +860,25 @@ static void dispatch_message_real(
 }
 
 void server_driver_message(Server *s, const char *message_id, const char *format, ...) {
+
         struct iovec iovec[N_IOVEC_META_FIELDS + 5 + N_IOVEC_PAYLOAD_FIELDS];
         unsigned n = 0, m;
-        int r;
         va_list ap;
-        struct ucred ucred = {};
+        int r;
 
         assert(s);
         assert(format);
 
         assert_cc(3 == LOG_FAC(LOG_DAEMON));
-        IOVEC_SET_STRING(iovec[n++], "SYSLOG_FACILITY=3");
-        IOVEC_SET_STRING(iovec[n++], "SYSLOG_IDENTIFIER=systemd-journald");
+        iovec[n++] = IOVEC_MAKE_STRING("SYSLOG_FACILITY=3");
+        iovec[n++] = IOVEC_MAKE_STRING("SYSLOG_IDENTIFIER=systemd-journald");
 
-        IOVEC_SET_STRING(iovec[n++], "_TRANSPORT=driver");
+        iovec[n++] = IOVEC_MAKE_STRING("_TRANSPORT=driver");
         assert_cc(6 == LOG_INFO);
-        IOVEC_SET_STRING(iovec[n++], "PRIORITY=6");
+        iovec[n++] = IOVEC_MAKE_STRING("PRIORITY=6");
 
         if (message_id)
-                IOVEC_SET_STRING(iovec[n++], message_id);
+                iovec[n++] = IOVEC_MAKE_STRING(message_id);
         m = n;
 
         va_start(ap, format);
@@ -1095,12 +886,8 @@ void server_driver_message(Server *s, const char *message_id, const char *format
         /* Error handling below */
         va_end(ap);
 
-        ucred.pid = getpid();
-        ucred.uid = getuid();
-        ucred.gid = getgid();
-
         if (r >= 0)
-                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), &ucred, NULL, NULL, 0, NULL, LOG_INFO, 0, NULL);
+                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), s->my_context, NULL, LOG_INFO, 0);
 
         while (m < n)
                 free(iovec[m++].iov_base);
@@ -1112,26 +899,22 @@ void server_driver_message(Server *s, const char *message_id, const char *format
                 xsprintf(buf, "MESSAGE=Entry printing failed: %s", strerror(-r));
 
                 n = 3;
-                IOVEC_SET_STRING(iovec[n++], "PRIORITY=4");
-                IOVEC_SET_STRING(iovec[n++], buf);
-                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), &ucred, NULL, NULL, 0, NULL, LOG_INFO, 0, NULL);
+                iovec[n++] = IOVEC_MAKE_STRING("PRIORITY=4");
+                iovec[n++] = IOVEC_MAKE_STRING(buf);
+                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), s->my_context, NULL, LOG_INFO, 0);
         }
 }
 
 void server_dispatch_message(
                 Server *s,
                 struct iovec *iovec, unsigned n, unsigned m,
-                const struct ucred *ucred,
+                ClientContext *c,
                 const struct timeval *tv,
-                const char *label, size_t label_len,
-                const char *unit_id,
                 int priority,
                 pid_t object_pid) {
 
-        int rl, r;
-        _cleanup_free_ char *path = NULL;
         uint64_t available = 0;
-        char *c = NULL;
+        int rl;
 
         assert(s);
         assert(iovec || n == 0);
@@ -1147,45 +930,21 @@ void server_dispatch_message(
         if (s->storage == STORAGE_NONE)
                 return;
 
-        if (!ucred)
-                goto finish;
+        if (c && c->unit) {
+                (void) determine_space(s, &available, NULL);
 
-        r = cg_pid_get_path_shifted(ucred->pid, s->cgroup_root, &path);
-        if (r < 0)
-                goto finish;
+                rl = journal_rate_limit_test(s->rate_limit, c->unit, priority & LOG_PRIMASK, available);
+                if (rl == 0)
+                        return;
 
-        /* example: /user/lennart/3/foobar
-         *          /system/dbus.service/foobar
-         *
-         * So let's cut of everything past the third /, since that is
-         * where user directories start */
-
-        c = strchr(path, '/');
-        if (c) {
-                c = strchr(c+1, '/');
-                if (c) {
-                        c = strchr(c+1, '/');
-                        if (c)
-                                *c = 0;
-                }
+                /* Write a suppression message if we suppressed something */
+                if (rl > 1)
+                        server_driver_message(s, "MESSAGE_ID=" SD_MESSAGE_JOURNAL_DROPPED_STR,
+                                              LOG_MESSAGE("Suppressed %u messages from %s", rl - 1, c->unit),
+                                              NULL);
         }
 
-        (void) determine_space(s, &available, NULL);
-        rl = journal_rate_limit_test(s->rate_limit, path, priority & LOG_PRIMASK, available);
-        if (rl == 0)
-                return;
-
-        /* Write a suppression message if we suppressed something */
-        if (rl > 1)
-                server_driver_message(s, "MESSAGE_ID=" SD_MESSAGE_JOURNAL_DROPPED_STR,
-                                      LOG_MESSAGE("Suppressed %u messages from %s", rl - 1, path),
-                                      NULL);
-
-finish:
-        /* restore cgroup path for logging */
-        if (c)
-                *c = '/';
-        dispatch_message_real(s, iovec, n, m, ucred, tv, label, label_len, unit_id, priority, object_pid, path);
+        dispatch_message_real(s, iovec, n, m, c, tv, priority, object_pid);
 }
 
 int server_flush_to_var(Server *s, bool require_flag_file) {
@@ -1335,9 +1094,8 @@ int server_process_datagram(sd_event_source *es, int fd, uint32_t revents, void 
                 return -EIO;
         }
 
-        /* Try to get the right size, if we can. (Not all
-         * sockets support SIOCINQ, hence we just try, but
-         * don't rely on it. */
+        /* Try to get the right size, if we can. (Not all sockets support SIOCINQ, hence we just try, but don't rely on
+         * it.) */
         (void) ioctl(fd, SIOCINQ, &v);
 
         /* Fix it up, if it is too small. We use the same fixed value as auditd here. Awful! */
@@ -1353,7 +1111,7 @@ int server_process_datagram(sd_event_source *es, int fd, uint32_t revents, void 
 
         n = recvmsg(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
         if (n < 0) {
-                if (errno == EINTR || errno == EAGAIN)
+                if (IN_SET(errno, EINTR, EAGAIN))
                         return 0;
 
                 return log_error_errno(errno, "recvmsg() failed: %m");
@@ -1862,7 +1620,7 @@ static int server_connect_notify(Server *s) {
         if (!e)
                 return 0;
 
-        if ((e[0] != '@' && e[0] != '/') || e[1] == 0) {
+        if (!IN_SET(e[0], '@', '/') || e[1] == 0) {
                 log_error("NOTIFY_SOCKET set to an invalid value: %s", e);
                 return -EINVAL;
         }
@@ -1915,6 +1673,7 @@ int server_init(Server *s) {
         s->syslog_fd = s->native_fd = s->stdout_fd = s->dev_kmsg_fd = s->audit_fd = s->hostname_fd = s->notify_fd = -1;
         s->compress = true;
         s->seal = true;
+        s->read_kmsg = true;
 
         s->watchdog_usec = USEC_INFINITY;
 
@@ -1933,6 +1692,8 @@ int server_init(Server *s) {
         s->max_level_kmsg = LOG_NOTICE;
         s->max_level_console = LOG_INFO;
         s->max_level_wall = LOG_EMERG;
+
+        s->line_max = DEFAULT_LINE_MAX;
 
         journal_reset_metrics(&s->system_storage.metrics);
         journal_reset_metrics(&s->runtime_storage.metrics);
@@ -2051,7 +1812,7 @@ int server_init(Server *s) {
         if (r < 0)
                 return r;
 
-        /* /dev/ksmg */
+        /* /dev/kmsg */
         r = server_open_dev_kmsg(s);
         if (r < 0)
                 return r;
@@ -2101,11 +1862,13 @@ int server_init(Server *s) {
 
         (void) server_connect_notify(s);
 
+        (void) client_context_acquire_default(s);
+
         return system_journal_open(s, false);
 }
 
 void server_maybe_append_tags(Server *s) {
-#ifdef HAVE_GCRYPT
+#if HAVE_GCRYPT
         JournalFile *f;
         Iterator i;
         usec_t n;
@@ -2131,6 +1894,8 @@ void server_done(Server *s) {
 
         while (s->stdout_streams)
                 stdout_stream_free(s->stdout_streams);
+
+        client_context_flush_all(s);
 
         if (s->system_journal)
                 (void) journal_file_close(s->system_journal);
@@ -2204,3 +1969,55 @@ static const char* const split_mode_table[_SPLIT_MAX] = {
 
 DEFINE_STRING_TABLE_LOOKUP(split_mode, SplitMode);
 DEFINE_CONFIG_PARSE_ENUM(config_parse_split_mode, split_mode, SplitMode, "Failed to parse split mode setting");
+
+int config_parse_line_max(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        size_t *sz = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if (isempty(rvalue))
+                /* Empty assignment means default */
+                *sz = DEFAULT_LINE_MAX;
+        else {
+                uint64_t v;
+
+                r = parse_size(rvalue, 1024, &v);
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse LineMax= value, ignoring: %s", rvalue);
+                        return 0;
+                }
+
+                if (v < 79) {
+                        /* Why specify 79 here as minimum line length? Simply, because the most common traditional
+                         * terminal size is 80ch, and it might make sense to break one character before the natural
+                         * line break would occur on that. */
+                        log_syntax(unit, LOG_WARNING, filename, line, 0, "LineMax= too small, clamping to 79: %s", rvalue);
+                        *sz = 79;
+                } else if (v > (uint64_t) (SSIZE_MAX-1)) {
+                        /* So, why specify SSIZE_MAX-1 here? Because that's one below the largest size value read()
+                         * can return, and we need one extra byte for the trailing NUL byte. Of course IRL such large
+                         * memory allocations will fail anyway, hence this limit is mostly theoretical anyway, as we'll
+                         * fail much earlier anyway. */
+                        log_syntax(unit, LOG_WARNING, filename, line, 0, "LineMax= too large, clamping to %" PRIu64 ": %s", (uint64_t) (SSIZE_MAX-1), rvalue);
+                        *sz = SSIZE_MAX-1;
+                } else
+                        *sz = (size_t) v;
+        }
+
+        return 0;
+}

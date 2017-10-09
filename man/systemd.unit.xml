@@ -209,6 +209,12 @@
     <!-- Note that we do not document .include here, as we consider it mostly obsolete, and want
          people to use .d/ drop-ins instead. -->
 
+    <para>Note that while systemd offers a flexible dependency system
+    between units it is recommended to use this functionality only
+    sparingly and instead rely on techniques such as bus-based or
+    socket-based activation which make dependencies implicit,
+    resulting in a both simpler and more flexible system.</para>
+
     <para>Some unit names reflect paths existing in the file system
     namespace. Example: a device unit
     <filename>dev-sda.device</filename> refers to a device with the
@@ -262,28 +268,39 @@
   </refsect1>
 
   <refsect1>
-    <title>Automatic Dependencies</title>
+    <title>Implicit Dependencies</title>
 
-    <para>Note that while systemd offers a flexible dependency system
-    between units it is recommended to use this functionality only
-    sparingly and instead rely on techniques such as bus-based or
-    socket-based activation which make dependencies implicit,
-    resulting in a both simpler and more flexible system.</para>
+    <para>A number of unit dependencies are implicitly established,
+    depending on unit type and unit configuration. These implicit
+    dependencies can make unit configuration file cleaner. For the
+    implicit dependencies in each unit type, please refer to
+    section "Implicit Dependencies" in respective man pages.</para>
 
-    <para>A number of unit dependencies are automatically established,
-    depending on unit configuration. On top of that, for units with
-    <varname>DefaultDependencies=yes</varname> (the default) a couple
-    of additional dependencies are added. The precise effect of
-    <varname>DefaultDependencies=yes</varname> depends on the unit
-    type (see below).</para>
-
-    <para>If <varname>DefaultDependencies=yes</varname> is set, units
-    that are referenced by other units of type
-    <filename>.target</filename> via a <varname>Wants=</varname> or
-    <varname>Requires=</varname> dependency might automatically gain
-    an <varname>Before=</varname> dependency too. See
-    <citerefentry><refentrytitle>systemd.target</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    <para>For example, service units with <varname>Type=dbus</varname>
+    automatically acquire dependencies of type <varname>Requires=</varname>
+    and <varname>After=</varname> on <filename>dbus.socket</filename>. See
+    <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
     for details.</para>
+  </refsect1>
+
+  <refsect1>
+    <title>Default Dependencies</title>
+
+    <para>Default dependencies are similar to implicit dependencies,
+    but can be turned on and off by setting
+    <varname>DefaultDependencies=</varname> to <varname>yes</varname>
+    (the default) and <varname>no</varname>, while implicit dependencies
+    are always in effect. See section "Default Dependencies" in respective
+    man pages for the effect of enabling
+    <varname>DefaultDependencies=</varname> in each unit types.</para>
+
+    <para>For example, target units will complement all configured
+    dependencies of type type <varname>Wants=</varname> or
+    <varname>Requires=</varname> with dependencies of type
+    <varname>After=</varname>. See
+    <citerefentry><refentrytitle>systemd.target</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    for details. Note that this behavior can be turned off by setting
+    <varname>DefaultDependencies=no</varname>.</para>
   </refsect1>
 
   <refsect1>
@@ -437,8 +454,9 @@
         <term><varname>Requires=</varname></term>
 
         <listitem><para>Configures requirement dependencies on other units. If this unit gets activated, the units
-        listed here will be activated as well. If one of the other units gets deactivated or its activation fails, this
-        unit will be deactivated. This option may be specified more than once or multiple space-separated units may be
+        listed here will be activated as well. If one of the other units fails to activate, and an ordering dependency
+        <varname>After=</varname> on the failing unit is set, this
+        unit will not be started. This option may be specified more than once or multiple space-separated units may be
         specified in one option in which case requirement dependencies for all listed names will be created. Note that
         requirement dependencies do not influence the order in which services are started or stopped.  This has to be
         configured independently with the <varname>After=</varname> or <varname>Before=</varname> options. If a unit
@@ -451,7 +469,7 @@
 
         <para>Note that this dependency type does not imply that the other unit always has to be in active state when
         this unit is running. Specifically: failing condition checks (such as <varname>ConditionPathExists=</varname>,
-        <varname>ConditionPathExists=</varname>, … — see below) do not cause the start job of a unit with a
+        <varname>ConditionPathIsSymbolicLink=</varname>, … — see below) do not cause the start job of a unit with a
         <varname>Requires=</varname> dependency on it to fail. Also, some unit types may deactivate on their own (for
         example, a service process may decide to exit cleanly, or a device may be unplugged by the user), which is not
         propagated to units having a <varname>Requires=</varname> dependency. Use the <varname>BindsTo=</varname>
@@ -651,10 +669,11 @@
       <varlistentry>
         <term><varname>IgnoreOnIsolate=</varname></term>
 
-        <listitem><para>Takes a boolean argument. If
-        <option>true</option>, this unit will not be stopped when
-        isolating another unit. Defaults to
-        <option>false</option>.</para></listitem>
+        <listitem><para>Takes a boolean argument. If <option>true</option>, this unit
+        will not be stopped when isolating another unit. Defaults to
+        <option>false</option> for service, target, socket, busname, timer, and path
+        units, and <option>true</option> for slice, scope, device, swap, mount, and
+        automount units.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -736,18 +755,9 @@
         timeouts are useful to abort unit state changes, and revert them. The job timeout set with this option however
         is useful to abort only the job waiting for the unit state to change.</para>
 
-        <para><varname>JobTimeoutAction=</varname>
-        optionally configures an additional
-        action to take when the time-out is
-        hit. It takes the same values as the
-        per-service
-        <varname>StartLimitAction=</varname>
-        setting, see
-        <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-        for details. Defaults to
-        <option>none</option>. <varname>JobTimeoutRebootArgument=</varname>
-        configures an optional reboot string
-        to pass to the
+        <para><varname>JobTimeoutAction=</varname> optionally configures an additional action to take when the time-out
+        is hit. It takes the same values as <varname>StartLimitAction=</varname>. Defaults to <option>none</option>.
+        <varname>JobTimeoutRebootArgument=</varname> configures an optional reboot string to pass to the
         <citerefentry><refentrytitle>reboot</refentrytitle><manvolnum>2</manvolnum></citerefentry>
         system call.</para></listitem>
       </varlistentry>
@@ -1128,7 +1138,7 @@
         <term><varname>Alias=</varname></term>
 
         <listitem><para>A space-separated list of additional names this unit shall be installed under. The names listed
-        here must have the same suffix (i.e. type) as the unit file name. This option may be specified more than once,
+        here must have the same suffix (i.e. type) as the unit filename. This option may be specified more than once,
         in which case all listed names are used. At installation time, <command>systemctl enable</command> will create
         symlinks from these names to the unit filename. Note that not all unit types support such alias names, and this
         setting is not supported for them. Specifically, mount, slice, swap, and automount units do not support

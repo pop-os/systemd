@@ -17,7 +17,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifdef HAVE_BLKID
+#if HAVE_BLKID
 #include <blkid.h>
 #endif
 #include <errno.h>
@@ -26,7 +26,7 @@
 #include <linux/loop.h>
 #include <pwd.h>
 #include <sched.h>
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
 #include <selinux/selinux.h>
 #endif
 #include <signal.h>
@@ -208,6 +208,8 @@ static unsigned long arg_clone_ns_flags = CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS
 static MountSettingsMask arg_mount_settings = MOUNT_APPLY_APIVFS_RO;
 static void *arg_root_hash = NULL;
 static size_t arg_root_hash_size = 0;
+static char **arg_syscall_whitelist = NULL;
+static char **arg_syscall_blacklist = NULL;
 
 static void help(void) {
         printf("%s [OPTIONS...] [PATH] [ARGUMENTS...]\n\n"
@@ -267,6 +269,8 @@ static void help(void) {
                "     --capability=CAP       In addition to the default, retain specified\n"
                "                            capability\n"
                "     --drop-capability=CAP  Drop the specified capability from the default set\n"
+               "     --system-call-filter=LIST|~LIST\n"
+               "                            Permit/prohibit specific system calls\n"
                "     --kill-signal=SIGNAL   Select signal to use for shutting down PID 1\n"
                "     --link-journal=MODE    Link up guest journal, one of no, auto, guest, \n"
                "                            host, try-guest, try-host\n"
@@ -431,6 +435,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_PRIVATE_USERS_CHOWN,
                 ARG_NOTIFY_READY,
                 ARG_ROOT_HASH,
+                ARG_SYSTEM_CALL_FILTER,
         };
 
         static const struct option options[] = {
@@ -482,6 +487,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "pivot-root",            required_argument, NULL, ARG_PIVOT_ROOT          },
                 { "notify-ready",          required_argument, NULL, ARG_NOTIFY_READY        },
                 { "root-hash",             required_argument, NULL, ARG_ROOT_HASH           },
+                { "system-call-filter",    required_argument, NULL, ARG_SYSTEM_CALL_FILTER  },
                 {}
         };
 
@@ -1051,6 +1057,36 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
                 }
 
+                case ARG_SYSTEM_CALL_FILTER: {
+                        bool negative;
+                        const char *items;
+
+                        negative = optarg[0] == '~';
+                        items = negative ? optarg + 1 : optarg;
+
+                        for (;;) {
+                                _cleanup_free_ char *word = NULL;
+
+                                r = extract_first_word(&items, &word, NULL, 0);
+                                if (r == 0)
+                                        break;
+                                if (r == -ENOMEM)
+                                        return log_oom();
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to parse system call filter: %m");
+
+                                if (negative)
+                                        r = strv_extend(&arg_syscall_blacklist, word);
+                                else
+                                        r = strv_extend(&arg_syscall_whitelist, word);
+                                if (r < 0)
+                                        return log_oom();
+                        }
+
+                        arg_settings_mask |= SETTING_SYSCALL_FILTER;
+                        break;
+                }
+
                 case '?':
                         return -EINVAL;
 
@@ -1198,7 +1234,7 @@ static int verify_arguments(void) {
                 return -EINVAL;
         }
 
-#ifndef HAVE_LIBIPTC
+#if ! HAVE_LIBIPTC
         if (arg_expose_ports) {
                 log_error("--port= is not supported, compiled without libiptc support.");
                 return -EOPNOTSUPP;
@@ -1511,7 +1547,7 @@ static int setup_pts(const char *dest) {
         const char *p;
         int r;
 
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
         if (arg_selinux_apifs_context)
                 (void) asprintf(&options,
                                 "newinstance,ptmxmode=0666,mode=620,gid=" GID_FMT ",context=\"%s\"",
@@ -1578,6 +1614,27 @@ static int setup_dev_console(const char *dest, const char *console) {
                 return log_error_errno(r, "touch() for /dev/console failed: %m");
 
         return mount_verbose(LOG_ERR, console, to, NULL, MS_BIND, NULL);
+}
+
+static int setup_keyring(void) {
+        key_serial_t keyring;
+
+        /* Allocate a new session keyring for the container. This makes sure the keyring of the session systemd-nspawn
+         * was invoked from doesn't leak into the container. Note that by default we block keyctl() and request_key()
+         * anyway via seccomp so doing this operation isn't strictly necessary, but in case people explicitly whitelist
+         * these system calls let's make sure we don't leak anything into the container. */
+
+        keyring = keyctl(KEYCTL_JOIN_SESSION_KEYRING, 0, 0, 0, 0);
+        if (keyring == -1) {
+                if (errno == ENOSYS)
+                        log_debug_errno(errno, "Kernel keyring not supported, ignoring.");
+                else if (IN_SET(errno, EACCES, EPERM))
+                        log_debug_errno(errno, "Kernel keyring access prohibited, ignoring.");
+                else
+                        return log_error_errno(errno, "Setting up kernel keyring failed: %m");
+        }
+
+        return 0;
 }
 
 static int setup_kmsg(const char *dest, int kmsg_socket) {
@@ -1709,8 +1766,7 @@ static int setup_journal(const char *directory) {
 
         r = readlink_and_make_absolute(p, &d);
         if (r >= 0) {
-                if ((arg_link_journal == LINK_GUEST ||
-                     arg_link_journal == LINK_AUTO) &&
+                if (IN_SET(arg_link_journal, LINK_GUEST, LINK_AUTO) &&
                     path_equal(d, q)) {
 
                         r = userns_mkdir(directory, p, 0755, 0, 0);
@@ -2267,14 +2323,16 @@ static int inner_child(
         setup_hostname();
 
         if (arg_personality != PERSONALITY_INVALID) {
-                if (personality(arg_personality) < 0)
-                        return log_error_errno(errno, "personality() failed: %m");
+                r = safe_personality(arg_personality);
+                if (r < 0)
+                        return log_error_errno(r, "personality() failed: %m");
         } else if (secondary) {
-                if (personality(PER_LINUX32) < 0)
-                        return log_error_errno(errno, "personality() failed: %m");
+                r = safe_personality(PER_LINUX32);
+                if (r < 0)
+                        return log_error_errno(r, "personality() failed: %m");
         }
 
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
         if (arg_selinux_context)
                 if (setexeccon(arg_selinux_context) < 0)
                         return log_error_errno(errno, "setexeccon(\"%s\") failed: %m", arg_selinux_context);
@@ -2604,7 +2662,11 @@ static int outer_child(
         if (r < 0)
                 return r;
 
-        r = setup_seccomp(arg_caps_retain);
+        r = setup_keyring();
+        if (r < 0)
+                return r;
+
+        r = setup_seccomp(arg_caps_retain, arg_syscall_whitelist, arg_syscall_blacklist);
         if (r < 0)
                 return r;
 
@@ -2819,7 +2881,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
 
         n = recvmsg(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
         if (n < 0) {
-                if (errno == EAGAIN || errno == EINTR)
+                if (IN_SET(errno, EAGAIN, EINTR))
                         return 0;
 
                 return log_warning_errno(errno, "Couldn't read notification socket: %m");
@@ -2836,7 +2898,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
         }
 
         if (!ucred || ucred->pid != inner_child_pid) {
-                log_warning("Received notify message without valid credentials. Ignoring.");
+                log_debug("Received notify message without valid credentials. Ignoring.");
                 return 0;
         }
 
@@ -3108,6 +3170,21 @@ static int load_settings(void) {
 
         if ((arg_settings_mask & SETTING_NOTIFY_READY) == 0)
                 arg_notify_ready = settings->notify_ready;
+
+        if ((arg_settings_mask & SETTING_SYSCALL_FILTER) == 0) {
+
+                if (!arg_settings_trusted && !strv_isempty(arg_syscall_whitelist))
+                        log_warning("Ignoring SystemCallFilter= settings, file %s is not trusted.", p);
+                else {
+                        strv_free(arg_syscall_whitelist);
+                        strv_free(arg_syscall_blacklist);
+
+                        arg_syscall_whitelist = settings->syscall_whitelist;
+                        arg_syscall_blacklist = settings->syscall_blacklist;
+
+                        settings->syscall_whitelist = settings->syscall_blacklist = NULL;
+                }
+        }
 
         return 0;
 }

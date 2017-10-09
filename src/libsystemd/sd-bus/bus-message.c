@@ -62,22 +62,9 @@ static void message_free_part(sd_bus_message *m, struct bus_body_part *part) {
         assert(m);
         assert(part);
 
-        if (part->memfd >= 0) {
-                /* If we can reuse the memfd, try that. For that it
-                 * can't be sealed yet. */
-
-                if (!part->sealed) {
-                        assert(part->memfd_offset == 0);
-                        assert(part->data == part->mmap_begin);
-                        bus_kernel_push_memfd(m->bus, part->memfd, part->data, part->mapped, part->allocated);
-                } else {
-                        if (part->mapped > 0)
-                                assert_se(munmap(part->mmap_begin, part->mapped) == 0);
-
-                        safe_close(part->memfd);
-                }
-
-        } else if (part->munmap_this)
+        if (part->memfd >= 0)
+                close_and_munmap(part->memfd, part->mmap_begin, part->mapped);
+        else if (part->munmap_this)
                 munmap(part->mmap_begin, part->mapped);
         else if (part->free_this)
                 free(part->data);
@@ -128,12 +115,6 @@ static void message_free(sd_bus_message *m) {
                 free(m->header);
 
         message_reset_parts(m);
-
-        if (m->release_kdbus)
-                bus_kernel_cmd_free(m->bus, (uint8_t *) m->kdbus - (uint8_t *) m->bus->kdbus_buffer);
-
-        if (m->free_kdbus)
-                free(m->kdbus);
 
         sd_bus_unref(m->bus);
 
@@ -606,7 +587,7 @@ static sd_bus_message *message_new(sd_bus *bus, uint8_t type) {
         m->header->endian = BUS_NATIVE_ENDIAN;
         m->header->type = type;
         m->header->version = bus->message_version;
-        m->allow_fds = bus->can_fds || (bus->state != BUS_HELLO && bus->state != BUS_RUNNING);
+        m->allow_fds = bus->can_fds || !IN_SET(bus->state, BUS_HELLO, BUS_RUNNING);
         m->root_container.need_offsets = BUS_MESSAGE_IS_GVARIANT(m);
         m->bus = sd_bus_ref(bus);
 
@@ -1215,7 +1196,6 @@ static int part_make_space(
                 void **q) {
 
         void *n;
-        int r;
 
         assert(m);
         assert(part);
@@ -1224,61 +1204,19 @@ static int part_make_space(
         if (m->poisoned)
                 return -ENOMEM;
 
-        if (!part->data && part->memfd < 0) {
-                part->memfd = bus_kernel_pop_memfd(m->bus, &part->data, &part->mapped, &part->allocated);
-                part->mmap_begin = part->data;
-        }
+        if (part->allocated == 0 || sz > part->allocated) {
+                size_t new_allocated;
 
-        if (part->memfd >= 0) {
-
-                if (part->allocated == 0 || sz > part->allocated) {
-                        uint64_t new_allocated;
-
-                        new_allocated = PAGE_ALIGN(sz > 0 ? 2 * sz : 1);
-                        r = memfd_set_size(part->memfd, new_allocated);
-                        if (r < 0) {
-                                m->poisoned = true;
-                                return r;
-                        }
-
-                        part->allocated = new_allocated;
+                new_allocated = sz > 0 ? 2 * sz : 64;
+                n = realloc(part->data, new_allocated);
+                if (!n) {
+                        m->poisoned = true;
+                        return -ENOMEM;
                 }
 
-                if (!part->data || sz > part->mapped) {
-                        size_t psz;
-
-                        psz = PAGE_ALIGN(sz > 0 ? sz : 1);
-                        if (part->mapped <= 0)
-                                n = mmap(NULL, psz, PROT_READ|PROT_WRITE, MAP_SHARED, part->memfd, 0);
-                        else
-                                n = mremap(part->mmap_begin, part->mapped, psz, MREMAP_MAYMOVE);
-
-                        if (n == MAP_FAILED) {
-                                m->poisoned = true;
-                                return -errno;
-                        }
-
-                        part->mmap_begin = part->data = n;
-                        part->mapped = psz;
-                        part->memfd_offset = 0;
-                }
-
-                part->munmap_this = true;
-        } else {
-                if (part->allocated == 0 || sz > part->allocated) {
-                        size_t new_allocated;
-
-                        new_allocated = sz > 0 ? 2 * sz : 64;
-                        n = realloc(part->data, new_allocated);
-                        if (!n) {
-                                m->poisoned = true;
-                                return -ENOMEM;
-                        }
-
-                        part->data = n;
-                        part->allocated = new_allocated;
-                        part->free_this = true;
-                }
+                part->data = n;
+                part->allocated = new_allocated;
+                part->free_this = true;
         }
 
         if (q)
@@ -1612,7 +1550,7 @@ int message_append_basic(sd_bus_message *m, char type, const void *p, const void
                 if (!a)
                         return -ENOMEM;
 
-                if (type == SD_BUS_TYPE_STRING || type == SD_BUS_TYPE_OBJECT_PATH) {
+                if (IN_SET(type, SD_BUS_TYPE_STRING, SD_BUS_TYPE_OBJECT_PATH)) {
                         *(uint32_t*) a = sz - 5;
                         memcpy((uint8_t*) a + 4, p, sz - 4);
 
@@ -2291,7 +2229,7 @@ _public_ int sd_bus_message_close_container(sd_bus_message *m) {
                 r = bus_message_close_array(m, c);
         else if (c->enclosing == SD_BUS_TYPE_VARIANT)
                 r = bus_message_close_variant(m, c);
-        else if (c->enclosing == SD_BUS_TYPE_STRUCT || c->enclosing == SD_BUS_TYPE_DICT_ENTRY)
+        else if (IN_SET(c->enclosing, SD_BUS_TYPE_STRUCT, SD_BUS_TYPE_DICT_ENTRY))
                 r = bus_message_close_struct(m, c, true);
         else
                 assert_not_reached("Unknown container type");
@@ -3233,9 +3171,7 @@ static int container_next_item(sd_bus_message *m, struct bus_container *c, size_
 
                 c->offset_index++;
 
-        } else if (c->enclosing == 0 ||
-                   c->enclosing == SD_BUS_TYPE_STRUCT ||
-                   c->enclosing == SD_BUS_TYPE_DICT_ENTRY) {
+        } else if (IN_SET(c->enclosing, 0, SD_BUS_TYPE_STRUCT, SD_BUS_TYPE_DICT_ENTRY)) {
 
                 int alignment;
                 size_t n, j;
@@ -4283,8 +4219,7 @@ _public_ int sd_bus_message_peek_type(sd_bus_message *m, char *type, const char 
                 return 1;
         }
 
-        if (c->signature[c->index] == SD_BUS_TYPE_STRUCT_BEGIN ||
-            c->signature[c->index] == SD_BUS_TYPE_DICT_ENTRY_BEGIN) {
+        if (IN_SET(c->signature[c->index], SD_BUS_TYPE_STRUCT_BEGIN, SD_BUS_TYPE_DICT_ENTRY_BEGIN)) {
 
                 if (contents) {
                         size_t l;
@@ -5122,8 +5057,7 @@ static int message_skip_fields(
 
                         (*signature)++;
 
-                } else if (t == SD_BUS_TYPE_STRUCT ||
-                           t == SD_BUS_TYPE_DICT_ENTRY) {
+                } else if (IN_SET(t, SD_BUS_TYPE_STRUCT, SD_BUS_TYPE_DICT_ENTRY)) {
 
                         r = signature_element_length(*signature, &l);
                         if (r < 0)
@@ -5368,7 +5302,7 @@ int bus_message_parse_fields(sd_bus_message *m) {
 
                         r = message_peek_field_string(m, service_name_is_valid, &ri, item_size, &m->sender);
 
-                        if (r >= 0 && m->sender[0] == ':' && m->bus->bus_client && !m->bus->is_kernel) {
+                        if (r >= 0 && m->sender[0] == ':' && m->bus->bus_client) {
                                 m->creds.unique_name = (char*) m->sender;
                                 m->creds.mask |= SD_BUS_CREDS_UNIQUE_NAME & m->bus->creds_mask;
                         }
@@ -5781,9 +5715,7 @@ _public_ int sd_bus_message_copy(sd_bus_message *m, sd_bus_message *source, int 
 
                 assert(r > 0);
 
-                if (type == SD_BUS_TYPE_OBJECT_PATH ||
-                    type == SD_BUS_TYPE_SIGNATURE ||
-                    type == SD_BUS_TYPE_STRING)
+                if (IN_SET(type, SD_BUS_TYPE_OBJECT_PATH, SD_BUS_TYPE_SIGNATURE, SD_BUS_TYPE_STRING))
                         r = sd_bus_message_append_basic(m, type, basic.string);
                 else
                         r = sd_bus_message_append_basic(m, type, &basic);

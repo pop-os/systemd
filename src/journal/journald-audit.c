@@ -49,7 +49,7 @@ static int map_simple_field(const char *field, const char **p, struct iovec **io
                 return -ENOMEM;
 
         memcpy(c, field, l);
-        for (e = *p; *e != ' ' && *e != 0; e++) {
+        for (e = *p; !IN_SET(*e, 0, ' '); e++) {
                 if (!GREEDY_REALLOC(c, allocated, l+2))
                         return -ENOMEM;
 
@@ -110,7 +110,7 @@ static int map_string_field_internal(const char *field, const char **p, struct i
                         return -ENOMEM;
 
                 memcpy(c, field, l);
-                for (e = *p; *e != ' ' && *e != 0; e += 2) {
+                for (e = *p; !IN_SET(*e, 0, ' '); e += 2) {
                         int a, b;
                         uint8_t x;
 
@@ -167,7 +167,7 @@ static int map_generic_field(const char *prefix, const char **p, struct iovec **
 
         for (e = *p; e < *p + 16; e++) {
 
-                if (*e == 0 || *e == ' ')
+                if (IN_SET(*e, 0, ' '))
                         return 0;
 
                 if (*e == '=')
@@ -176,7 +176,7 @@ static int map_generic_field(const char *prefix, const char **p, struct iovec **
                 if (!((*e >= 'a' && *e <= 'z') ||
                       (*e >= 'A' && *e <= 'Z') ||
                       (*e >= '0' && *e <= '9') ||
-                      *e == '_' || *e == '-'))
+                      IN_SET(*e, '_', '-')))
                         return 0;
         }
 
@@ -383,26 +383,26 @@ static void process_audit_string(Server *s, int type, const char *data, size_t s
                 return;
         }
 
-        IOVEC_SET_STRING(iov[n_iov++], "_TRANSPORT=audit");
+        iov[n_iov++] = IOVEC_MAKE_STRING("_TRANSPORT=audit");
 
         sprintf(source_time_field, "_SOURCE_REALTIME_TIMESTAMP=%" PRIu64,
                 (usec_t) seconds * USEC_PER_SEC + (usec_t) msec * USEC_PER_MSEC);
-        IOVEC_SET_STRING(iov[n_iov++], source_time_field);
+        iov[n_iov++] = IOVEC_MAKE_STRING(source_time_field);
 
         sprintf(type_field, "_AUDIT_TYPE=%i", type);
-        IOVEC_SET_STRING(iov[n_iov++], type_field);
+        iov[n_iov++] = IOVEC_MAKE_STRING(type_field);
 
         sprintf(id_field, "_AUDIT_ID=%" PRIu64, id);
-        IOVEC_SET_STRING(iov[n_iov++], id_field);
+        iov[n_iov++] = IOVEC_MAKE_STRING(id_field);
 
         assert_cc(4 == LOG_FAC(LOG_AUTH));
-        IOVEC_SET_STRING(iov[n_iov++], "SYSLOG_FACILITY=4");
-        IOVEC_SET_STRING(iov[n_iov++], "SYSLOG_IDENTIFIER=audit");
+        iov[n_iov++] = IOVEC_MAKE_STRING("SYSLOG_FACILITY=4");
+        iov[n_iov++] = IOVEC_MAKE_STRING("SYSLOG_IDENTIFIER=audit");
 
         type_name = audit_type_name_alloca(type);
 
         m = strjoina("MESSAGE=", type_name, " ", p);
-        IOVEC_SET_STRING(iov[n_iov++], m);
+        iov[n_iov++] = IOVEC_MAKE_STRING(m);
 
         z = n_iov;
 
@@ -413,7 +413,7 @@ static void process_audit_string(Server *s, int type, const char *data, size_t s
                 goto finish;
         }
 
-        server_dispatch_message(s, iov, n_iov, n_iov_allocated, NULL, NULL, NULL, 0, NULL, LOG_NOTICE, 0);
+        server_dispatch_message(s, iov, n_iov, n_iov_allocated, NULL, NULL, LOG_NOTICE, 0);
 
 finish:
         /* free() all entries that map_all_fields() added. All others
@@ -528,7 +528,7 @@ int server_open_audit(Server *s) {
 
                 s->audit_fd = socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK, NETLINK_AUDIT);
                 if (s->audit_fd < 0) {
-                        if (errno == EAFNOSUPPORT || errno == EPROTONOSUPPORT)
+                        if (IN_SET(errno, EAFNOSUPPORT, EPROTONOSUPPORT))
                                 log_debug("Audit not supported in the kernel.");
                         else
                                 log_warning_errno(errno, "Failed to create audit socket, ignoring: %m");

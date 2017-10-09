@@ -11,7 +11,7 @@ rules = files('''
         60-persistent-v4l.rules
         60-sensor.rules
         60-serial.rules
-        64-btrfs.rules
+        70-joystick.rules
         70-mouse.rules
         70-touchpad.rules
         75-net-description.rules
@@ -26,6 +26,7 @@ install_data(rules,
 
 rules_in = '''
         50-udev-default.rules
+        64-btrfs.rules
         99-systemd.rules
 '''.split()
 

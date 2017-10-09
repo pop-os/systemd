@@ -28,10 +28,10 @@
 #include <sys/reboot.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
 #include <seccomp.h>
 #endif
-#ifdef HAVE_VALGRIND_VALGRIND_H
+#if HAVE_VALGRIND_VALGRIND_H
 #include <valgrind/valgrind.h>
 #endif
 
@@ -74,7 +74,7 @@
 #include "process-util.h"
 #include "raw-clone.h"
 #include "rlimit-util.h"
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
 #include "selinux-setup.h"
@@ -128,6 +128,7 @@ static Set* arg_syscall_archs = NULL;
 static FILE* arg_serialization = NULL;
 static bool arg_default_cpu_accounting = false;
 static bool arg_default_io_accounting = false;
+static bool arg_default_ip_accounting = false;
 static bool arg_default_blockio_accounting = false;
 static bool arg_default_memory_accounting = false;
 static bool arg_default_tasks_accounting = true;
@@ -154,7 +155,7 @@ noreturn static void crash(int sig) {
         struct sigaction sa;
         pid_t pid;
 
-        if (getpid() != 1)
+        if (getpid_cached() != 1)
                 /* Pass this on immediately, if this is not PID 1 */
                 (void) raise(sig);
         else if (!arg_dump_core)
@@ -716,7 +717,7 @@ static int parse_config_file(void) {
                 { "Manager", "RuntimeWatchdogSec",        config_parse_sec,              0, &arg_runtime_watchdog                  },
                 { "Manager", "ShutdownWatchdogSec",       config_parse_sec,              0, &arg_shutdown_watchdog                 },
                 { "Manager", "CapabilityBoundingSet",     config_parse_capability_set,   0, &arg_capability_bounding_set           },
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
                 { "Manager", "SystemCallArchitectures",   config_parse_syscall_archs,    0, &arg_syscall_archs                     },
 #endif
                 { "Manager", "TimerSlackNSec",            config_parse_nsec,             0, &arg_timer_slack_nsec                  },
@@ -748,6 +749,7 @@ static int parse_config_file(void) {
                 { "Manager", "DefaultLimitRTTIME",        config_parse_limit,            RLIMIT_RTTIME, arg_default_rlimit         },
                 { "Manager", "DefaultCPUAccounting",      config_parse_bool,             0, &arg_default_cpu_accounting            },
                 { "Manager", "DefaultIOAccounting",       config_parse_bool,             0, &arg_default_io_accounting             },
+                { "Manager", "DefaultIPAccounting",       config_parse_bool,             0, &arg_default_ip_accounting             },
                 { "Manager", "DefaultBlockIOAccounting",  config_parse_bool,             0, &arg_default_blockio_accounting        },
                 { "Manager", "DefaultMemoryAccounting",   config_parse_bool,             0, &arg_default_memory_accounting         },
                 { "Manager", "DefaultTasksAccounting",    config_parse_bool,             0, &arg_default_tasks_accounting          },
@@ -792,6 +794,7 @@ static void manager_set_defaults(Manager *m) {
         m->default_start_limit_burst = arg_default_start_limit_burst;
         m->default_cpu_accounting = arg_default_cpu_accounting;
         m->default_io_accounting = arg_default_io_accounting;
+        m->default_ip_accounting = arg_default_ip_accounting;
         m->default_blockio_accounting = arg_default_blockio_accounting;
         m->default_memory_accounting = arg_default_memory_accounting;
         m->default_tasks_accounting = arg_default_tasks_accounting;
@@ -860,7 +863,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 1);
         assert(argv);
 
-        if (getpid() == 1)
+        if (getpid_cached() == 1)
                 opterr = 0;
 
         while ((c = getopt_long(argc, argv, "hDbsz:", options, NULL)) >= 0)
@@ -1066,7 +1069,7 @@ static int parse_argv(int argc, char *argv[]) {
                          * parse_proc_cmdline_word() or ignore. */
 
                 case '?':
-                        if (getpid() != 1)
+                        if (getpid_cached() != 1)
                                 return -EINVAL;
                         else
                                 return 0;
@@ -1075,7 +1078,7 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option code.");
                 }
 
-        if (optind < argc && getpid() != 1) {
+        if (optind < argc && getpid_cached() != 1) {
                 /* Hmm, when we aren't run as init system
                  * let's complain about excess arguments */
 
@@ -1091,6 +1094,7 @@ static int help(void) {
         printf("%s [OPTIONS...]\n\n"
                "Starts up and maintains the system or user services.\n\n"
                "  -h --help                      Show this help\n"
+               "     --version                   Show version\n"
                "     --test                      Determine startup sequence, dump it and exit\n"
                "     --no-pager                  Do not pipe output into a pager\n"
                "     --dump-configuration-items  Dump understood unit configuration items\n"
@@ -1201,6 +1205,26 @@ static int bump_rlimit_nofile(struct rlimit *saved_rlimit) {
         return 0;
 }
 
+static int bump_rlimit_memlock(struct rlimit *saved_rlimit) {
+        int r;
+
+        assert(saved_rlimit);
+        assert(getuid() == 0);
+
+        /* BPF_MAP_TYPE_LPM_TRIE bpf maps are charged against RLIMIT_MEMLOCK, even though we have CAP_IPC_LOCK which
+         * should normally disable such checks. We need them to implement IPAccessAllow= and IPAccessDeny=, hence let's
+         * bump the value high enough for the root user. */
+
+        if (getrlimit(RLIMIT_MEMLOCK, saved_rlimit) < 0)
+                return log_warning_errno(errno, "Reading RLIMIT_MEMLOCK failed, ignoring: %m");
+
+        r = setrlimit_closest(RLIMIT_MEMLOCK, &RLIMIT_MAKE_CONST(1024ULL*1024ULL*16ULL));
+        if (r < 0)
+                return log_warning_errno(r, "Setting RLIMIT_MEMLOCK failed, ignoring: %m");
+
+        return 0;
+}
+
 static void test_usr(void) {
 
         /* Check that /usr is not a separate fs */
@@ -1240,7 +1264,7 @@ oom:
 }
 
 static int enforce_syscall_archs(Set *archs) {
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         int r;
 
         if (!is_seccomp_available())
@@ -1384,11 +1408,11 @@ int main(int argc, char *argv[]) {
         bool queue_default_job = false;
         bool empty_etc = false;
         char *switch_root_dir = NULL, *switch_root_init = NULL;
-        struct rlimit saved_rlimit_nofile = RLIMIT_MAKE_CONST(0);
+        struct rlimit saved_rlimit_nofile = RLIMIT_MAKE_CONST(0), saved_rlimit_memlock = RLIMIT_MAKE_CONST((rlim_t) -1);
         const char *error_message = NULL;
 
-#ifdef HAVE_SYSV_COMPAT
-        if (getpid() != 1 && strstr(program_invocation_short_name, "init")) {
+#if HAVE_SYSV_COMPAT
+        if (getpid_cached() != 1 && strstr(program_invocation_short_name, "init")) {
                 /* This is compatibility support for SysV, where
                  * calling init as a user is identical to telinit. */
 
@@ -1424,7 +1448,7 @@ int main(int argc, char *argv[]) {
 
         log_set_upgrade_syslog_to_journal(true);
 
-        if (getpid() == 1) {
+        if (getpid_cached() == 1) {
                 /* Disable the umask logic */
                 umask(0);
 
@@ -1435,7 +1459,7 @@ int main(int argc, char *argv[]) {
                 log_set_always_reopen_console(true);
         }
 
-        if (getpid() == 1 && detect_container() <= 0) {
+        if (getpid_cached() == 1 && detect_container() <= 0) {
 
                 /* Running outside of a container as PID 1 */
                 arg_system = true;
@@ -1520,7 +1544,7 @@ int main(int argc, char *argv[]) {
                  * might redirect output elsewhere. */
                 log_set_target(LOG_TARGET_JOURNAL_OR_KMSG);
 
-        } else if (getpid() == 1) {
+        } else if (getpid_cached() == 1) {
                 /* Running inside a container, as PID 1 */
                 arg_system = true;
                 log_set_target(LOG_TARGET_CONSOLE);
@@ -1544,7 +1568,7 @@ int main(int argc, char *argv[]) {
                 kernel_timestamp = DUAL_TIMESTAMP_NULL;
         }
 
-        if (getpid() == 1) {
+        if (getpid_cached() == 1) {
                 /* Don't limit the core dump size, so that coredump handlers such as systemd-coredump (which honour the limit)
                  * will process core dumps for system services by default. */
                 if (setrlimit(RLIMIT_CORE, &RLIMIT_MAKE_CONST(RLIM_INFINITY)) < 0)
@@ -1579,9 +1603,9 @@ int main(int argc, char *argv[]) {
 
         /* Mount /proc, /sys and friends, so that /proc/cmdline and
          * /proc/$PID/fd is available. */
-        if (getpid() == 1) {
+        if (getpid_cached() == 1) {
 
-                /* Load the kernel modules early, so that we kdbus.ko is loaded before kdbusfs shall be mounted */
+                /* Load the kernel modules early. */
                 if (!skip_setup)
                         kmod_setup();
 
@@ -1648,7 +1672,7 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        if (arg_action == ACTION_TEST || arg_action == ACTION_HELP) {
+        if (IN_SET(arg_action, ACTION_TEST, ACTION_HELP)) {
                 pager_open(arg_no_pager, false);
                 skip_setup = true;
         }
@@ -1672,26 +1696,28 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        assert_se(arg_action == ACTION_RUN || arg_action == ACTION_TEST);
+        assert_se(IN_SET(arg_action, ACTION_RUN, ACTION_TEST));
 
         /* Close logging fds, in order not to confuse fdset below */
         log_close();
 
         /* Remember open file descriptors for later deserialization */
-        r = fdset_new_fill(&fds);
-        if (r < 0) {
-                log_emergency_errno(r, "Failed to allocate fd set: %m");
-                error_message = "Failed to allocate fd set";
-                goto finish;
-        } else
-                fdset_cloexec(fds, true);
+        if (arg_action == ACTION_RUN) {
+                r = fdset_new_fill(&fds);
+                if (r < 0) {
+                        log_emergency_errno(r, "Failed to allocate fd set: %m");
+                        error_message = "Failed to allocate fd set";
+                        goto finish;
+                } else
+                        fdset_cloexec(fds, true);
 
-        if (arg_serialization)
-                assert_se(fdset_remove(fds, fileno(arg_serialization)) >= 0);
+                if (arg_serialization)
+                        assert_se(fdset_remove(fds, fileno(arg_serialization)) >= 0);
 
-        if (arg_system)
-                /* Become a session leader if we aren't one yet. */
-                setsid();
+                if (arg_system)
+                        /* Become a session leader if we aren't one yet. */
+                        setsid();
+        }
 
         /* Move out of the way, so that we won't block unmounts */
         assert_se(chdir("/") == 0);
@@ -1705,7 +1731,7 @@ int main(int argc, char *argv[]) {
                  * tty. */
                 release_terminal();
 
-                if (getpid() == 1 && !skip_setup)
+                if (getpid_cached() == 1 && !skip_setup)
                         console_setup();
         }
 
@@ -1717,7 +1743,7 @@ int main(int argc, char *argv[]) {
 
         /* Make sure we leave a core dump without panicing the
          * kernel. */
-        if (getpid() == 1) {
+        if (getpid_cached() == 1) {
                 install_crash_handler();
 
                 r = mount_cgroup_controllers(arg_join_controllers);
@@ -1761,66 +1787,64 @@ int main(int argc, char *argv[]) {
                           arg_action == ACTION_TEST ? " test" : "", getuid(), t);
         }
 
-        if (arg_system && !skip_setup) {
-                if (arg_show_status > 0)
-                        status_welcome();
+        if (arg_action == ACTION_RUN) {
+                if (arg_system && !skip_setup) {
+                        if (arg_show_status > 0)
+                                status_welcome();
 
-                hostname_setup();
-                machine_id_setup(NULL, arg_machine_id, NULL);
-                loopback_setup();
-                bump_unix_max_dgram_qlen();
+                        hostname_setup();
+                        machine_id_setup(NULL, arg_machine_id, NULL);
+                        loopback_setup();
+                        bump_unix_max_dgram_qlen();
 
-                test_usr();
-        }
-
-        if (arg_system && arg_runtime_watchdog > 0 && arg_runtime_watchdog != USEC_INFINITY)
-                watchdog_set_timeout(&arg_runtime_watchdog);
-
-        if (arg_timer_slack_nsec != NSEC_INFINITY)
-                if (prctl(PR_SET_TIMERSLACK, arg_timer_slack_nsec) < 0)
-                        log_error_errno(errno, "Failed to adjust timer slack: %m");
-
-        if (arg_system && !cap_test_all(arg_capability_bounding_set)) {
-                r = capability_bounding_set_drop_usermode(arg_capability_bounding_set);
-                if (r < 0) {
-                        log_emergency_errno(r, "Failed to drop capability bounding set of usermode helpers: %m");
-                        error_message = "Failed to drop capability bounding set of usermode helpers";
-                        goto finish;
+                        test_usr();
                 }
-                r = capability_bounding_set_drop(arg_capability_bounding_set, true);
-                if (r < 0) {
-                        log_emergency_errno(r, "Failed to drop capability bounding set: %m");
-                        error_message = "Failed to drop capability bounding set";
-                        goto finish;
+
+                if (arg_system && arg_runtime_watchdog > 0 && arg_runtime_watchdog != USEC_INFINITY)
+                        watchdog_set_timeout(&arg_runtime_watchdog);
+
+                if (arg_timer_slack_nsec != NSEC_INFINITY)
+                        if (prctl(PR_SET_TIMERSLACK, arg_timer_slack_nsec) < 0)
+                                log_error_errno(errno, "Failed to adjust timer slack: %m");
+
+                if (arg_system && !cap_test_all(arg_capability_bounding_set)) {
+                        r = capability_bounding_set_drop_usermode(arg_capability_bounding_set);
+                        if (r < 0) {
+                                log_emergency_errno(r, "Failed to drop capability bounding set of usermode helpers: %m");
+                                error_message = "Failed to drop capability bounding set of usermode helpers";
+                                goto finish;
+                        }
+                        r = capability_bounding_set_drop(arg_capability_bounding_set, true);
+                        if (r < 0) {
+                                log_emergency_errno(r, "Failed to drop capability bounding set: %m");
+                                error_message = "Failed to drop capability bounding set";
+                                goto finish;
+                        }
                 }
-        }
 
-        if (arg_syscall_archs) {
-                r = enforce_syscall_archs(arg_syscall_archs);
-                if (r < 0) {
-                        error_message = "Failed to set syscall architectures";
-                        goto finish;
+                if (arg_syscall_archs) {
+                        r = enforce_syscall_archs(arg_syscall_archs);
+                        if (r < 0) {
+                                error_message = "Failed to set syscall architectures";
+                                goto finish;
+                        }
                 }
-        }
 
-        if (!arg_system)
-                /* Become reaper of our children */
-                if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0)
-                        log_warning_errno(errno, "Failed to make us a subreaper: %m");
+                if (!arg_system)
+                        /* Become reaper of our children */
+                        if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0)
+                                log_warning_errno(errno, "Failed to make us a subreaper: %m");
 
-        if (arg_system) {
-                (void) bump_rlimit_nofile(&saved_rlimit_nofile);
-
-                if (empty_etc) {
-                        r = unit_file_preset_all(UNIT_FILE_SYSTEM, 0, NULL, UNIT_FILE_PRESET_ENABLE_ONLY, NULL, 0);
-                        if (r < 0)
-                                log_full_errno(r == -EEXIST ? LOG_NOTICE : LOG_WARNING, r, "Failed to populate /etc with preset unit settings, ignoring: %m");
-                        else
-                                log_info("Populated /etc with preset unit settings.");
+                if (arg_system) {
+                        /* Bump up RLIMIT_NOFILE for systemd itself */
+                        (void) bump_rlimit_nofile(&saved_rlimit_nofile);
+                        (void) bump_rlimit_memlock(&saved_rlimit_memlock);
                 }
         }
 
-        r = manager_new(arg_system ? UNIT_FILE_SYSTEM : UNIT_FILE_USER, arg_action == ACTION_TEST, &m);
+        r = manager_new(arg_system ? UNIT_FILE_SYSTEM : UNIT_FILE_USER,
+                        arg_action == ACTION_TEST ? MANAGER_TEST_FULL : 0,
+                        &m);
         if (r < 0) {
                 log_emergency_errno(r, "Failed to allocate manager object: %m");
                 error_message = "Failed to allocate manager object";
@@ -1868,7 +1892,7 @@ int main(int argc, char *argv[]) {
                 r = manager_load_unit(m, arg_default_unit, NULL, &error, &target);
                 if (r < 0)
                         log_error("Failed to load default target: %s", bus_error_message(&error, r));
-                else if (target->load_state == UNIT_ERROR || target->load_state == UNIT_NOT_FOUND)
+                else if (IN_SET(target->load_state, UNIT_ERROR, UNIT_NOT_FOUND))
                         log_error_errno(target->load_error, "Failed to load default target: %m");
                 else if (target->load_state == UNIT_MASKED)
                         log_error("Default target masked.");
@@ -1881,7 +1905,7 @@ int main(int argc, char *argv[]) {
                                 log_emergency("Failed to load rescue target: %s", bus_error_message(&error, r));
                                 error_message = "Failed to load rescue target";
                                 goto finish;
-                        } else if (target->load_state == UNIT_ERROR || target->load_state == UNIT_NOT_FOUND) {
+                        } else if (IN_SET(target->load_state, UNIT_ERROR, UNIT_NOT_FOUND)) {
                                 log_emergency_errno(target->load_error, "Failed to load rescue target: %m");
                                 error_message = "Failed to load rescue target";
                                 goto finish;
@@ -2049,6 +2073,8 @@ finish:
                  * its child processes */
                 if (saved_rlimit_nofile.rlim_cur > 0)
                         (void) setrlimit(RLIMIT_NOFILE, &saved_rlimit_nofile);
+                if (saved_rlimit_memlock.rlim_cur != (rlim_t) -1)
+                        (void) setrlimit(RLIMIT_MEMLOCK, &saved_rlimit_memlock);
 
                 if (switch_root_dir) {
                         /* Kill all remaining processes from the
@@ -2146,12 +2172,12 @@ finish:
         arg_serialization = safe_fclose(arg_serialization);
         fds = fdset_free(fds);
 
-#ifdef HAVE_VALGRIND_VALGRIND_H
+#if HAVE_VALGRIND_VALGRIND_H
         /* If we are PID 1 and running under valgrind, then let's exit
          * here explicitly. valgrind will only generate nice output on
          * exit(), not on exec(), hence let's do the former not the
          * latter here. */
-        if (getpid() == 1 && RUNNING_ON_VALGRIND)
+        if (getpid_cached() == 1 && RUNNING_ON_VALGRIND)
                 return 0;
 #endif
 
@@ -2227,10 +2253,10 @@ finish:
 
                 execve(SYSTEMD_SHUTDOWN_BINARY_PATH, (char **) command_line, env_block);
                 log_error_errno(errno, "Failed to execute shutdown binary, %s: %m",
-                          getpid() == 1 ? "freezing" : "quitting");
+                          getpid_cached() == 1 ? "freezing" : "quitting");
         }
 
-        if (getpid() == 1) {
+        if (getpid_cached() == 1) {
                 if (error_message)
                         manager_status_printf(NULL, STATUS_TYPE_EMERGENCY,
                                               ANSI_HIGHLIGHT_RED "!!!!!!" ANSI_NORMAL,

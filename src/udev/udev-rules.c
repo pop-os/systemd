@@ -36,6 +36,7 @@
 #include "fs-util.h"
 #include "glob-util.h"
 #include "path-util.h"
+#include "proc-cmdline.h"
 #include "stat-util.h"
 #include "stdio-util.h"
 #include "strbuf.h"
@@ -578,7 +579,7 @@ static int import_property_from_string(struct udev_device *dev, char *line) {
                 key++;
 
         /* comment or empty line */
-        if (key[0] == '#' || key[0] == '\0')
+        if (IN_SET(key[0], '#', '\0'))
                 return -1;
 
         /* split key/value */
@@ -612,7 +613,7 @@ static int import_property_from_string(struct udev_device *dev, char *line) {
                 return -1;
 
         /* unquote */
-        if (val[0] == '"' || val[0] == '\'') {
+        if (IN_SET(val[0], '"', '\'')) {
                 if (len == 1 || val[len-1] != val[0]) {
                         log_debug("inconsistent quoting: '%s', skip", line);
                         return -1;
@@ -717,6 +718,7 @@ static void attr_subst_subdir(char *attr, size_t len) {
 static int get_key(struct udev *udev, char **line, char **key, enum operation_type *op, char **value) {
         char *linepos;
         char *temp;
+        unsigned i, j;
 
         linepos = *line;
         if (linepos == NULL || linepos[0] == '\0')
@@ -739,7 +741,7 @@ static int get_key(struct udev *udev, char **line, char **key, enum operation_ty
                         break;
                 if (linepos[0] == '=')
                         break;
-                if ((linepos[0] == '+') || (linepos[0] == '-') || (linepos[0] == '!') || (linepos[0] == ':'))
+                if (IN_SET(linepos[0], '+', '-', '!', ':'))
                         if (linepos[1] == '=')
                                 break;
         }
@@ -792,14 +794,25 @@ static int get_key(struct udev *udev, char **line, char **key, enum operation_ty
         *value = linepos;
 
         /* terminate */
-        temp = strchr(linepos, '"');
-        if (!temp)
-                return -1;
-        temp[0] = '\0';
-        temp++;
+        for (i = 0, j = 0; ; i++, j++) {
+
+                if (linepos[i] == '"')
+                        break;
+
+                if (linepos[i] == '\0')
+                        return -1;
+
+                /* double quotes can be escaped */
+                if (linepos[i] == '\\')
+                        if (linepos[i+1] == '"')
+                                i++;
+
+                linepos[j] = linepos[i];
+        }
+        linepos[j] = '\0';
 
         /* move line to next key */
-        *line = temp;
+        *line = linepos + i + 1;
         return 0;
 }
 
@@ -1533,7 +1546,7 @@ struct udev_rules *udev_rules_new(struct udev *udev, int resolve_names) {
 
         udev_rules_check_timestamp(rules);
 
-        r = conf_files_list_strv(&files, ".rules", NULL, rules_dirs);
+        r = conf_files_list_strv(&files, ".rules", NULL, 0, rules_dirs);
         if (r < 0) {
                 log_error_errno(r, "failed to enumerate rules files: %m");
                 return udev_rules_unref(rules);
@@ -1728,6 +1741,7 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
         struct token *rule;
         enum escape_type esc = ESCAPE_UNSET;
         bool can_set_name;
+        int r;
 
         if (rules->tokens == NULL)
                 return;
@@ -1954,7 +1968,7 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                                 int count;
 
                                 util_remove_trailing_chars(result, '\n');
-                                if (esc == ESCAPE_UNSET || esc == ESCAPE_REPLACE) {
+                                if (IN_SET(esc, ESCAPE_UNSET, ESCAPE_REPLACE)) {
                                         count = util_replace_chars(result, UDEV_ALLOWED_CHARS_INPUT);
                                         if (count > 0)
                                                 log_debug("%i character(s) replaced" , count);
@@ -2038,37 +2052,25 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                         break;
                 }
                 case TK_M_IMPORT_CMDLINE: {
-                        _cleanup_fclose_ FILE *f = NULL;
+                        _cleanup_free_ char *value = NULL;
                         bool imported = false;
+                        const char *key;
 
-                        f = fopen("/proc/cmdline", "re");
-                        if (f != NULL) {
-                                char cmdline[4096];
+                        key = rules_str(rules, cur->key.value_off);
 
-                                if (fgets(cmdline, sizeof(cmdline), f) != NULL) {
-                                        const char *key = rules_str(rules, cur->key.value_off);
-                                        char *pos;
+                        r = proc_cmdline_get_key(key, PROC_CMDLINE_VALUE_OPTIONAL, &value);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read %s from /proc/cmdline, ignoring: %m", key);
+                        else if (r > 0) {
+                                imported = true;
 
-                                        pos = strstr(cmdline, key);
-                                        if (pos != NULL) {
-                                                imported = true;
-                                                pos += strlen(key);
-                                                if (pos[0] == '\0' || isspace(pos[0]))
-                                                        /* we import simple flags as 'FLAG=1' */
-                                                        udev_device_add_property(event->dev, key, "1");
-                                                else if (pos[0] == '=') {
-                                                        const char *value;
-
-                                                        pos++;
-                                                        value = pos;
-                                                        while (pos[0] != '\0' && !isspace(pos[0]))
-                                                                pos++;
-                                                        pos[0] = '\0';
-                                                        udev_device_add_property(event->dev, key, value);
-                                                }
-                                        }
-                                }
+                                if (value)
+                                        udev_device_add_property(event->dev, key, value);
+                                else
+                                        /* we import simple flags as 'FLAG=1' */
+                                        udev_device_add_property(event->dev, key, "1");
                         }
+
                         if (!imported && cur->key.op != OP_NOMATCH)
                                 goto nomatch;
                         break;
@@ -2108,7 +2110,6 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                 case TK_A_OWNER: {
                         char owner[UTIL_NAME_SIZE];
                         const char *ow = owner;
-                        int r;
 
                         if (event->owner_final)
                                 break;
@@ -2130,7 +2131,6 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                 case TK_A_GROUP: {
                         char group[UTIL_NAME_SIZE];
                         const char *gr = group;
-                        int r;
 
                         if (event->group_final)
                                 break;
@@ -2219,7 +2219,7 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                         else
                                 label = rules_str(rules, cur->key.value_off);
 
-                        if (cur->key.op == OP_ASSIGN || cur->key.op == OP_ASSIGN_FINAL)
+                        if (IN_SET(cur->key.op, OP_ASSIGN, OP_ASSIGN_FINAL))
                                 udev_list_cleanup(&event->seclabel_list);
                         udev_list_entry_add(&event->seclabel_list, name, label);
                         log_debug("SECLABEL{%s}='%s' %s:%u",
@@ -2260,13 +2260,13 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                         const char *p;
 
                         udev_event_apply_format(event, rules_str(rules, cur->key.value_off), tag, sizeof(tag), false);
-                        if (cur->key.op == OP_ASSIGN || cur->key.op == OP_ASSIGN_FINAL)
+                        if (IN_SET(cur->key.op, OP_ASSIGN, OP_ASSIGN_FINAL))
                                 udev_device_cleanup_tags_list(event->dev);
                         for (p = tag; *p != '\0'; p++) {
                                 if ((*p >= 'a' && *p <= 'z') ||
                                     (*p >= 'A' && *p <= 'Z') ||
                                     (*p >= '0' && *p <= '9') ||
-                                    *p == '-' || *p == '_')
+                                    IN_SET(*p, '-', '_'))
                                         continue;
                                 log_error("ignoring invalid tag name '%s'", tag);
                                 break;
@@ -2288,7 +2288,7 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                         if (cur->key.op == OP_ASSIGN_FINAL)
                                 event->name_final = true;
                         udev_event_apply_format(event, name, name_str, sizeof(name_str), false);
-                        if (esc == ESCAPE_UNSET || esc == ESCAPE_REPLACE) {
+                        if (IN_SET(esc, ESCAPE_UNSET, ESCAPE_REPLACE)) {
                                 count = util_replace_chars(name_str, "/");
                                 if (count > 0)
                                         log_debug("%i character(s) replaced", count);
@@ -2323,7 +2323,7 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                                 break;
                         if (cur->key.op == OP_ASSIGN_FINAL)
                                 event->devlink_final = true;
-                        if (cur->key.op == OP_ASSIGN || cur->key.op == OP_ASSIGN_FINAL)
+                        if (IN_SET(cur->key.op, OP_ASSIGN, OP_ASSIGN_FINAL))
                                 udev_device_cleanup_devlinks_list(event->dev);
 
                         /* allow  multiple symlinks separated by spaces */
@@ -2381,7 +2381,6 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                 case TK_A_SYSCTL: {
                         char filename[UTIL_PATH_SIZE];
                         char value[UTIL_NAME_SIZE];
-                        int r;
 
                         udev_event_apply_format(event, rules_str(rules, cur->key.attr_off), filename, sizeof(filename), false);
                         sysctl_normalize(filename);
@@ -2397,7 +2396,7 @@ void udev_rules_apply_to_event(struct udev_rules *rules,
                 case TK_A_RUN_PROGRAM: {
                         struct udev_list_entry *entry;
 
-                        if (cur->key.op == OP_ASSIGN || cur->key.op == OP_ASSIGN_FINAL)
+                        if (IN_SET(cur->key.op, OP_ASSIGN, OP_ASSIGN_FINAL))
                                 udev_list_cleanup(&event->run_list);
                         log_debug("RUN '%s' %s:%u",
                                   rules_str(rules, cur->key.value_off),

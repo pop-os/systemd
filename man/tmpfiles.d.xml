@@ -76,7 +76,7 @@
   </refsect1>
 
   <refsect1>
-    <title>Configuration Format</title>
+    <title>Configuration Directories and Precedence</title>
 
     <para>Each configuration file shall be named in the style of
     <filename><replaceable>package</replaceable>.conf</filename> or
@@ -112,6 +112,10 @@
     to <filename>/dev/null</filename> in
     <filename>/etc/tmpfiles.d/</filename> bearing the same filename.
     </para>
+  </refsect1>
+
+  <refsect1>
+    <title>Configuration File Format</title>
 
     <para>The configuration format is one line per path containing
     type, path, mode, ownership, age, and argument fields:</para>
@@ -273,13 +277,14 @@ L     /tmp/foobar -    -    -    -   /dev/null</programlisting>
           <term><varname>L</varname></term>
           <term><varname>L+</varname></term>
           <listitem><para>Create a symlink if it does not exist
-          yet. If suffixed with <varname>+</varname> and a file
-          already exists where the symlink is to be created, it will
-          be removed and be replaced by the symlink. If the argument
-          is omitted, symlinks to files with the same name residing in
-          the directory <filename>/usr/share/factory/</filename> are
-          created. Note that permissions and ownership on symlinks
-          are ignored.</para></listitem>
+          yet. If suffixed with <varname>+</varname> and a file or
+          directory already exists where the symlink is to be created,
+          it will be removed and be replaced by the symlink. If the
+          argument is omitted, symlinks to files with the same name
+          residing in the directory
+          <filename>/usr/share/factory/</filename> are created. Note
+          that permissions and ownership on symlinks are ignored.
+          </para></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -462,10 +467,10 @@ L     /tmp/foobar -    -    -    -   /dev/null</programlisting>
 
       <para>For example:
       <programlisting># Make sure these are created by default so that nobody else can
-      d /tmp/.X11-unix 1777 root root 10d
+d /tmp/.X11-unix 1777 root root 10d
 
-      # Unlink the X11 lock files
-      r! /tmp/.X[0-9]*-lock</programlisting>
+# Unlink the X11 lock files
+r! /tmp/.X[0-9]*-lock</programlisting>
       The second line in contrast to the first one would break a
       running system, and will only be executed with
       <option>--boot</option>.</para>
@@ -677,11 +682,11 @@ d /var/tmp/abrt 0755 abrt abrt -
 r! /var/cache/dnf/*/*/download_lock.pid
 r! /var/cache/dnf/*/*/metadata_lock.pid
 r! /var/lib/dnf/rpmdb_lock.pid
-e  /var/chache/dnf/ - - - 30d
+e  /var/cache/dnf/ - - - 30d
 </programlisting>
 
      <para>The lock files will be removed during boot. Any files and directories in
-     <filename>/var/chache/dnf/</filename> will be removed after they have not been
+     <filename>/var/cache/dnf/</filename> will be removed after they have not been
      accessed in 30 days.</para>
     </example>
 

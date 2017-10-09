@@ -40,7 +40,7 @@
 #include <uchar.h>
 #include <unistd.h>
 
-#ifdef HAVE_AUDIT
+#if HAVE_AUDIT
 #include <libaudit.h>
 #endif
 
@@ -48,11 +48,11 @@
 #include <asm/sgidefs.h>
 #endif
 
-#ifdef HAVE_LINUX_BTRFS_H
+#if HAVE_LINUX_BTRFS_H
 #include <linux/btrfs.h>
 #endif
 
-#ifdef HAVE_LINUX_VM_SOCKETS_H
+#if HAVE_LINUX_VM_SOCKETS_H
 #include <linux/vm_sockets.h>
 #else
 #define VMADDR_CID_ANY -1U
@@ -204,7 +204,7 @@ struct sockaddr_vm {
 #define BTRFS_QGROUP_LEVEL_SHIFT 48
 #endif
 
-#ifndef HAVE_LINUX_BTRFS_H
+#if ! HAVE_LINUX_BTRFS_H
 struct btrfs_ioctl_vol_args {
         int64_t fd;
         char name[BTRFS_PATH_NAME_MAX + 1];
@@ -546,8 +546,8 @@ struct btrfs_ioctl_quota_ctl_args {
 #define MAX_HANDLE_SZ 128
 #endif
 
-#ifndef HAVE_SECURE_GETENV
-#  ifdef HAVE___SECURE_GETENV
+#if ! HAVE_SECURE_GETENV
+#  if HAVE___SECURE_GETENV
 #    define secure_getenv __secure_getenv
 #  else
 #    error "neither secure_getenv nor __secure_getenv are available"
@@ -606,15 +606,14 @@ struct input_mask {
 #else
 #define __O_TMPFILE     020000000
 #endif
+#endif
 
 /* a horrid kludge trying to make sure that this will fail on old kernels */
 #ifndef O_TMPFILE
 #define O_TMPFILE (__O_TMPFILE | O_DIRECTORY)
 #endif
 
-#endif
-
-#if !HAVE_DECL_LO_FLAGS_PARTSCAN
+#if !HAVE_LO_FLAGS_PARTSCAN
 #define LO_FLAGS_PARTSCAN 8
 #endif
 
@@ -626,7 +625,7 @@ struct input_mask {
 #define LOOP_CTL_GET_FREE 0x4C82
 #endif
 
-#if !HAVE_DECL_IFLA_INET6_ADDR_GEN_MODE
+#if !HAVE_IFLA_INET6_ADDR_GEN_MODE
 #define IFLA_INET6_UNSPEC 0
 #define IFLA_INET6_FLAGS 1
 #define IFLA_INET6_CONF 2
@@ -644,11 +643,11 @@ struct input_mask {
 #define IN6_ADDR_GEN_MODE_NONE 1
 #endif
 
-#if !HAVE_DECL_IN6_ADDR_GEN_MODE_STABLE_PRIVACY
+#if !HAVE_IN6_ADDR_GEN_MODE_STABLE_PRIVACY
 #define IN6_ADDR_GEN_MODE_STABLE_PRIVACY 2
 #endif
 
-#if !HAVE_DECL_IFLA_MACVLAN_FLAGS
+#if !HAVE_IFLA_MACVLAN_FLAGS
 #define IFLA_MACVLAN_UNSPEC 0
 #define IFLA_MACVLAN_MODE 1
 #define IFLA_MACVLAN_FLAGS 2
@@ -657,7 +656,7 @@ struct input_mask {
 #define IFLA_MACVLAN_MAX (__IFLA_MACVLAN_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_IPVLAN_MODE
+#if !HAVE_IFLA_IPVLAN_MODE
 #define IFLA_IPVLAN_UNSPEC 0
 #define IFLA_IPVLAN_MODE 1
 #define __IFLA_IPVLAN_MAX 2
@@ -669,7 +668,7 @@ struct input_mask {
 #define IPVLAN_MAX 2
 #endif
 
-#if !HAVE_DECL_IFLA_VTI_REMOTE
+#if !HAVE_IFLA_VTI_REMOTE
 #define IFLA_VTI_UNSPEC 0
 #define IFLA_VTI_LINK 1
 #define IFLA_VTI_IKEY 2
@@ -681,7 +680,7 @@ struct input_mask {
 #define IFLA_VTI_MAX (__IFLA_VTI_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_PHYS_PORT_ID
+#if !HAVE_IFLA_PHYS_PORT_ID
 #define IFLA_EXT_MASK 29
 #undef IFLA_PROMISCUITY
 #define IFLA_PROMISCUITY 30
@@ -694,7 +693,7 @@ struct input_mask {
 #define IFLA_MAX (__IFLA_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_BOND_AD_INFO
+#if !HAVE_IFLA_BOND_AD_INFO
 #define IFLA_BOND_UNSPEC 0
 #define IFLA_BOND_MODE 1
 #define IFLA_BOND_ACTIVE_SLAVE 2
@@ -724,7 +723,7 @@ struct input_mask {
 #define IFLA_BOND_MAX   (__IFLA_BOND_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_VLAN_PROTOCOL
+#if !HAVE_IFLA_VLAN_PROTOCOL
 #define IFLA_VLAN_UNSPEC 0
 #define IFLA_VLAN_ID 1
 #define IFLA_VLAN_FLAGS 2
@@ -736,7 +735,7 @@ struct input_mask {
 #define IFLA_VLAN_MAX   (__IFLA_VLAN_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_VXLAN_GPE
+#if !HAVE_IFLA_VXLAN_GPE
 #define IFLA_VXLAN_UNSPEC 0
 #define IFLA_VXLAN_ID 1
 #define IFLA_VXLAN_GROUP 2
@@ -771,7 +770,7 @@ struct input_mask {
 #define IFLA_VXLAN_MAX  (__IFLA_VXLAN_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_GENEVE_LABEL
+#if !HAVE_IFLA_GENEVE_LABEL
 #define IFLA_GENEVE_UNSPEC 0
 #define IFLA_GENEVE_ID 1
 #define IFLA_GENEVE_REMOTE 2
@@ -790,7 +789,7 @@ struct input_mask {
 #define IFLA_GENEVE_MAX  (__IFLA_GENEVE_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_IPTUN_ENCAP_DPORT
+#if !HAVE_IFLA_IPTUN_ENCAP_DPORT
 #define IFLA_IPTUN_UNSPEC 0
 #define IFLA_IPTUN_LINK 1
 #define IFLA_IPTUN_LOCAL 2
@@ -816,7 +815,7 @@ struct input_mask {
 #define IFLA_IPTUN_MAX  (__IFLA_IPTUN_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_GRE_ENCAP_DPORT
+#if !HAVE_IFLA_GRE_ENCAP_DPORT
 #define IFLA_GRE_UNSPEC 0
 #define IFLA_GRE_LINK 1
 #define IFLA_GRE_IFLAGS 2
@@ -841,7 +840,7 @@ struct input_mask {
 #define IFLA_GRE_MAX  (__IFLA_GRE_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_BRIDGE_VLAN_INFO
+#if !HAVE_IFLA_BRIDGE_VLAN_INFO
 #define IFLA_BRIDGE_FLAGS 0
 #define IFLA_BRIDGE_MODE 1
 #define IFLA_BRIDGE_VLAN_INFO 2
@@ -858,7 +857,7 @@ struct input_mask {
 #define BRIDGE_VLAN_INFO_RANGE_END (1<<4) /* VLAN is end of vlan range */
 #endif
 
-#if !HAVE_DECL_IFLA_BR_VLAN_DEFAULT_PVID
+#if !HAVE_IFLA_BR_VLAN_DEFAULT_PVID
 #define IFLA_BR_UNSPEC 0
 #define IFLA_BR_FORWARD_DELAY 1
 #define IFLA_BR_HELLO_TIME 2
@@ -904,7 +903,7 @@ struct input_mask {
 #define IFLA_BR_MAX (__IFLA_BR_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_BRPORT_LEARNING_SYNC
+#if !HAVE_IFLA_BRPORT_LEARNING_SYNC
 #define IFLA_BRPORT_UNSPEC 0
 #define IFLA_BRPORT_STATE 1
 #define IFLA_BRPORT_PRIORITY 2
@@ -921,15 +920,42 @@ struct input_mask {
 #define IFLA_BRPORT_MAX (__IFLA_BRPORT_MAX - 1)
 #endif
 
-#if !HAVE_DECL_IFLA_BRPORT_PROXYARP
+#if !HAVE_FRA_UID_RANGE
+#define FRA_UNSPEC 0
+#define FRA_DST 1
+#define FRA_SRC 2
+#define FRA_IIFNAME 3
+#define FRA_GOTO 4
+#define FRA_UNUSED2 5
+#define FRA_PRIORITY 6
+#define FRA_UNUSED3 7
+#define FRA_UNUSED4 8
+#define FRA_UNUSED5 9
+#define FRA_FWMARK 10
+#define FRA_FLOW 11
+#define FRA_TUN_ID 12
+#define FRA_SUPPRESS_IFGROUP 13
+#define FRA_SUPPRESS_PREFIXLEN 14
+#define FRA_TABLE 15
+#define FRA_FWMASK 16
+#define FRA_OIFNAME 17
+#define FRA_PAD 18
+#define FRA_L3MDEV 19
+#define FRA_UID_RANGE 20
+#define __FRA_MAX 12
+
+#define FRA_MAX (__FRA_MAX - 1)
+#endif
+
+#if !HAVE_IFLA_BRPORT_PROXYARP
 #define IFLA_BRPORT_PROXYARP 10
 #endif
 
-#if !HAVE_DECL_IFLA_VRF_TABLE
+#if !HAVE_IFLA_VRF_TABLE
 #define IFLA_VRF_TABLE 1
 #endif
 
-#if !HAVE_DECL_NDA_IFINDEX
+#if !HAVE_NDA_IFINDEX
 #define NDA_UNSPEC 0
 #define NDA_DST 1
 #define NDA_LLADDR 2
@@ -1013,7 +1039,7 @@ struct input_mask {
 #define LOOPBACK_IFINDEX 1
 #endif
 
-#if !HAVE_DECL_IFA_FLAGS
+#if !HAVE_IFA_FLAGS
 #define IFA_FLAGS 8
 #endif
 
@@ -1082,7 +1108,7 @@ struct input_mask {
 #define KEY_ALS_TOGGLE 0x230
 #endif
 
-#ifndef HAVE_KEY_SERIAL_T
+#if ! HAVE_KEY_SERIAL_T
 typedef int32_t key_serial_t;
 #endif
 
@@ -1100,6 +1126,10 @@ typedef int32_t key_serial_t;
 
 #ifndef KEYCTL_DESCRIBE
 #define KEYCTL_DESCRIBE 6
+#endif
+
+#ifndef KEYCTL_LINK
+#define KEYCTL_LINK 8
 #endif
 
 #ifndef KEYCTL_READ
@@ -1174,11 +1204,11 @@ typedef int32_t key_serial_t;
 #ifndef IF_OPER_UP
 #define IF_OPER_UP 6
 
-#ifndef HAVE_CHAR32_T
+#if ! HAVE_CHAR32_T
 #define char32_t uint32_t
 #endif
 
-#ifndef HAVE_CHAR16_T
+#if ! HAVE_CHAR16_T
 #define char16_t uint16_t
 #endif
 
@@ -1190,7 +1220,7 @@ typedef int32_t key_serial_t;
 #define IFA_F_MCAUTOJOIN 0x400
 #endif
 
-#ifndef HAVE_STRUCT_ETHTOOL_LINK_SETTINGS
+#if ! HAVE_STRUCT_ETHTOOL_LINK_SETTINGS
 
 #define ETHTOOL_GLINKSETTINGS   0x0000004c /* Get ethtool_link_settings */
 #define ETHTOOL_SLINKSETTINGS   0x0000004d /* Set ethtool_link_settings */
@@ -1213,6 +1243,15 @@ struct ethtool_link_settings {
          * __u32 map_advertising[link_mode_masks_nwords];
          * __u32 map_lp_advertising[link_mode_masks_nwords];
          */
+};
+
+#endif
+
+#if ! HAVE_STRUCT_FIB_RULE_UID_RANGE
+
+struct fib_rule_uid_range {
+        __u32 start;
+        __u32 end;
 };
 
 #endif

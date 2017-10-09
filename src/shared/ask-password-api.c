@@ -49,6 +49,7 @@
 #include "macro.h"
 #include "missing.h"
 #include "mkdir.h"
+#include "process-util.h"
 #include "random-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
@@ -319,7 +320,7 @@ int ask_password_tty(
 
                 n = read(ttyfd >= 0 ? ttyfd : STDIN_FILENO, &c, 1);
                 if (n < 0) {
-                        if (errno == EINTR || errno == EAGAIN)
+                        if (IN_SET(errno, EINTR, EAGAIN))
                                 continue;
 
                         r = -errno;
@@ -336,7 +337,7 @@ int ask_password_tty(
                                 backspace_chars(ttyfd, p);
                         p = 0;
 
-                } else if (c == '\b' || c == 127) {
+                } else if (IN_SET(c, '\b', 127)) {
 
                         if (p > 0) {
 
@@ -519,7 +520,7 @@ int ask_password_agent(
                 "AcceptCached=%i\n"
                 "Echo=%i\n"
                 "NotAfter="USEC_FMT"\n",
-                getpid(),
+                getpid_cached(),
                 socket_name,
                 (flags & ASK_PASSWORD_ACCEPT_CACHED) ? 1 : 0,
                 (flags & ASK_PASSWORD_ECHO) ? 1 : 0,
@@ -612,8 +613,7 @@ int ask_password_agent(
 
                 n = recvmsg(socket_fd, &msghdr, 0);
                 if (n < 0) {
-                        if (errno == EAGAIN ||
-                            errno == EINTR)
+                        if (IN_SET(errno, EAGAIN, EINTR))
                                 continue;
 
                         r = -errno;

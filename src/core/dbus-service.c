@@ -67,6 +67,7 @@ const sd_bus_vtable bus_service_vtable[] = {
         SD_BUS_PROPERTY("USBFunctionStrings", "s", NULL, offsetof(Service, usb_function_strings), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("UID", "u", NULL, offsetof(Unit, ref_uid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("GID", "u", NULL, offsetof(Unit, ref_gid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("NRestarts", "u", bus_property_get_unsigned, offsetof(Service, n_restarts), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
 
         BUS_EXEC_STATUS_VTABLE("ExecMain", offsetof(Service, main_exec_status), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPre", offsetof(Service, exec_command[SERVICE_EXEC_START_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
@@ -279,7 +280,7 @@ static int bus_service_set_transient_property(
                                 c->argv = argv;
                                 argv = NULL;
 
-                                c->ignore = b;
+                                c->flags = b ? EXEC_COMMAND_IGNORE_FAILURE : 0;
 
                                 path_kill_slashes(c->path);
                                 exec_command_append_list(&s->exec_command[SERVICE_EXEC_START], c);
@@ -308,7 +309,7 @@ static int bus_service_set_transient_property(
                         if (!f)
                                 return -ENOMEM;
 
-                        fputs("ExecStart=\n", f);
+                        fputs_unlocked("ExecStart=\n", f);
 
                         LIST_FOREACH(command, c, s->exec_command[SERVICE_EXEC_START]) {
                                 _cleanup_free_ char *a;
@@ -318,7 +319,7 @@ static int bus_service_set_transient_property(
                                         return -ENOMEM;
 
                                 fprintf(f, "ExecStart=%s@%s %s\n",
-                                        c->ignore ? "-" : "",
+                                        c->flags & EXEC_COMMAND_IGNORE_FAILURE ? "-" : "",
                                         c->path,
                                         a);
                         }

@@ -29,8 +29,11 @@
 #include "alloc-util.h"
 #include "macro.h"
 #include "nsflags.h"
+#include "process-util.h"
 #include "seccomp-util.h"
+#include "set.h"
 #include "string-util.h"
+#include "strv.h"
 #include "util.h"
 #include "errno-list.h"
 
@@ -275,31 +278,87 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "execve\0"
                 "exit\0"
                 "exit_group\0"
+                "futex\0"
+                "get_robust_list\0"
+                "get_thread_area\0"
+                "getegid\0"
+                "getegid32\0"
+                "geteuid\0"
+                "geteuid32\0"
+                "getgid\0"
+                "getgid32\0"
+                "getgroups\0"
+                "getgroups32\0"
+                "getpgid\0"
+                "getpgrp\0"
+                "getpid\0"
+                "getppid\0"
+                "getresgid\0"
+                "getresgid32\0"
+                "getresuid\0"
+                "getresuid32\0"
                 "getrlimit\0"      /* make sure processes can query stack size and such */
+                "getsid\0"
+                "gettid\0"
                 "gettimeofday\0"
+                "getuid\0"
+                "getuid32\0"
+                "membarrier\0"
                 "nanosleep\0"
                 "pause\0"
+                "prlimit64\0"
+                "restart_syscall\0"
                 "rt_sigreturn\0"
+                "sched_yield\0"
+                "set_robust_list\0"
+                "set_thread_area\0"
+                "set_tid_address\0"
                 "sigreturn\0"
                 "time\0"
+                "ugetrlimit\0"
+        },
+        [SYSCALL_FILTER_SET_AIO] = {
+                .name = "@aio",
+                .help = "Asynchronous IO",
+                .value =
+                "io_cancel\0"
+                "io_destroy\0"
+                "io_getevents\0"
+                "io_setup\0"
+                "io_submit\0"
         },
         [SYSCALL_FILTER_SET_BASIC_IO] = {
                 .name = "@basic-io",
                 .help = "Basic IO",
                 .value =
+                "_llseek\0"
                 "close\0"
+                "dup\0"
                 "dup2\0"
                 "dup3\0"
-                "dup\0"
                 "lseek\0"
                 "pread64\0"
                 "preadv\0"
+                "preadv2\0"
                 "pwrite64\0"
                 "pwritev\0"
+                "pwritev2\0"
                 "read\0"
                 "readv\0"
                 "write\0"
                 "writev\0"
+        },
+        [SYSCALL_FILTER_SET_CHOWN] = {
+                .name = "@chown",
+                .help = "Change ownership of files and directories",
+                .value =
+                "chown\0"
+                "chown32\0"
+                "fchown\0"
+                "fchown32\0"
+                "fchownat\0"
+                "lchown\0"
+                "lchown32\0"
         },
         [SYSCALL_FILTER_SET_CLOCK] = {
                 .name = "@clock",
@@ -350,24 +409,26 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "fchdir\0"
                 "fchmod\0"
                 "fchmodat\0"
-                "fcntl64\0"
                 "fcntl\0"
+                "fcntl64\0"
                 "fgetxattr\0"
                 "flistxattr\0"
+                "fremovexattr\0"
                 "fsetxattr\0"
-                "fstat64\0"
                 "fstat\0"
+                "fstat64\0"
                 "fstatat64\0"
-                "fstatfs64\0"
                 "fstatfs\0"
-                "ftruncate64\0"
+                "fstatfs64\0"
                 "ftruncate\0"
+                "ftruncate64\0"
                 "futimesat\0"
                 "getcwd\0"
-                "getdents64\0"
                 "getdents\0"
+                "getdents64\0"
                 "getxattr\0"
                 "inotify_add_watch\0"
+                "inotify_init\0"
                 "inotify_init1\0"
                 "inotify_rm_watch\0"
                 "lgetxattr\0"
@@ -377,35 +438,43 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "llistxattr\0"
                 "lremovexattr\0"
                 "lsetxattr\0"
-                "lstat64\0"
                 "lstat\0"
+                "lstat64\0"
                 "mkdir\0"
                 "mkdirat\0"
                 "mknod\0"
                 "mknodat\0"
-                "mmap2\0"
                 "mmap\0"
+                "mmap2\0"
                 "munmap\0"
                 "newfstatat\0"
+                "oldfstat\0"
+                "oldlstat\0"
+                "oldstat\0"
                 "open\0"
                 "openat\0"
                 "readlink\0"
                 "readlinkat\0"
                 "removexattr\0"
                 "rename\0"
-                "renameat2\0"
                 "renameat\0"
+                "renameat2\0"
                 "rmdir\0"
                 "setxattr\0"
-                "stat64\0"
                 "stat\0"
+                "stat64\0"
                 "statfs\0"
+                "statfs64\0"
+#ifdef __PNR_statx
+                "statx\0"
+#endif
                 "symlink\0"
                 "symlinkat\0"
-                "truncate64\0"
                 "truncate\0"
+                "truncate64\0"
                 "unlink\0"
                 "unlinkat\0"
+                "utime\0"
                 "utimensat\0"
                 "utimes\0"
         },
@@ -414,15 +483,15 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 .help = "Event loop system calls",
                 .value =
                 "_newselect\0"
-                "epoll_create1\0"
                 "epoll_create\0"
+                "epoll_create1\0"
                 "epoll_ctl\0"
                 "epoll_ctl_old\0"
                 "epoll_pwait\0"
                 "epoll_wait\0"
                 "epoll_wait_old\0"
-                "eventfd2\0"
                 "eventfd\0"
+                "eventfd2\0"
                 "poll\0"
                 "ppoll\0"
                 "pselect6\0"
@@ -444,8 +513,8 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "msgget\0"
                 "msgrcv\0"
                 "msgsnd\0"
-                "pipe2\0"
                 "pipe\0"
+                "pipe2\0"
                 "process_vm_readv\0"
                 "process_vm_writev\0"
                 "semctl\0"
@@ -465,6 +534,16 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "keyctl\0"
                 "request_key\0"
         },
+        [SYSCALL_FILTER_SET_MEMLOCK] = {
+                .name = "@memlock",
+                .help = "Memory locking control",
+                .value =
+                "mlock\0"
+                "mlock2\0"
+                "mlockall\0"
+                "munlock\0"
+                "munlockall\0"
+        },
         [SYSCALL_FILTER_SET_MODULE] = {
                 .name = "@module",
                 .help = "Loading and unloading of kernel modules",
@@ -480,15 +559,15 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "chroot\0"
                 "mount\0"
                 "pivot_root\0"
-                "umount2\0"
                 "umount\0"
+                "umount2\0"
         },
         [SYSCALL_FILTER_SET_NETWORK_IO] = {
                 .name = "@network-io",
                 .help = "Network or Unix socket IO, should not be needed if not network facing",
                 .value =
-                "accept4\0"
                 "accept\0"
+                "accept4\0"
                 "bind\0"
                 "connect\0"
                 "getpeername\0"
@@ -523,6 +602,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "get_kernel_syms\0"
                 "getpmsg\0"
                 "gtty\0"
+                "idle\0"
                 "lock\0"
                 "mpx\0"
                 "prof\0"
@@ -544,41 +624,32 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 .name = "@privileged",
                 .help = "All system calls which need super-user capabilities",
                 .value =
+                "@chown\0"
                 "@clock\0"
                 "@module\0"
                 "@raw-io\0"
+                "@reboot\0"
+                "@swap\0"
+                "_sysctl\0"
                 "acct\0"
                 "bpf\0"
                 "capset\0"
-                "chown32\0"
-                "chown\0"
                 "chroot\0"
-                "fchown32\0"
-                "fchown\0"
-                "fchownat\0"
-                "kexec_file_load\0"
-                "kexec_load\0"
-                "lchown32\0"
-                "lchown\0"
                 "nfsservctl\0"
                 "pivot_root\0"
                 "quotactl\0"
-                "reboot\0"
                 "setdomainname\0"
-                "setfsuid32\0"
                 "setfsuid\0"
-                "setgroups32\0"
+                "setfsuid32\0"
                 "setgroups\0"
+                "setgroups32\0"
                 "sethostname\0"
-                "setresuid32\0"
                 "setresuid\0"
-                "setreuid32\0"
+                "setresuid32\0"
                 "setreuid\0"
-                "setuid32\0"
+                "setreuid32\0"
                 "setuid\0"
-                "swapoff\0"
-                "swapon\0"
-                "_sysctl\0"
+                "setuid32\0"
                 "vhangup\0"
         },
         [SYSCALL_FILTER_SET_PROCESS] = {
@@ -586,16 +657,24 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 .help = "Process control, execution, namespaceing operations",
                 .value =
                 "arch_prctl\0"
+                "capget\0"      /* Able to query arbitrary processes */
                 "clone\0"
                 "execveat\0"
                 "fork\0"
+                "getrusage\0"
                 "kill\0"
                 "prctl\0"
+                "rt_sigqueueinfo\0"
+                "rt_tgsigqueueinfo\0"
                 "setns\0"
                 "tgkill\0"
+                "times\0"
                 "tkill\0"
                 "unshare\0"
                 "vfork\0"
+                "wait4\0"
+                "waitid\0"
+                "waitpid\0"
         },
         [SYSCALL_FILTER_SET_RAW_IO] = {
                 .name = "@raw-io",
@@ -617,25 +696,63 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 .name = "@reboot",
                 .help = "Reboot and reboot preparation/kexec",
                 .value =
-                "kexec\0"
                 "kexec_file_load\0"
+                "kexec_load\0"
                 "reboot\0"
         },
         [SYSCALL_FILTER_SET_RESOURCES] = {
                 .name = "@resources",
                 .help = "Alter resource settings",
                 .value =
-                "sched_setparam\0"
-                "sched_setscheduler\0"
-                "sched_setaffinity\0"
-                "setpriority\0"
-                "setrlimit\0"
-                "set_mempolicy\0"
+                "ioprio_set\0"
+                "mbind\0"
                 "migrate_pages\0"
                 "move_pages\0"
-                "mbind\0"
+                "nice\0"
+                "sched_setaffinity\0"
                 "sched_setattr\0"
-                "prlimit64\0"
+                "sched_setparam\0"
+                "sched_setscheduler\0"
+                "set_mempolicy\0"
+                "setpriority\0"
+                "setrlimit\0"
+        },
+        [SYSCALL_FILTER_SET_SETUID] = {
+                .name = "@setuid",
+                .help = "Operations for changing user/group credentials",
+                .value =
+                "setgid\0"
+                "setgid32\0"
+                "setgroups\0"
+                "setgroups32\0"
+                "setregid\0"
+                "setregid32\0"
+                "setresgid\0"
+                "setresgid32\0"
+                "setresuid\0"
+                "setresuid32\0"
+                "setreuid\0"
+                "setreuid32\0"
+                "setuid\0"
+                "setuid32\0"
+        },
+        [SYSCALL_FILTER_SET_SIGNAL] = {
+                .name = "@signal",
+                .help = "Process signal handling",
+                .value =
+                "rt_sigaction\0"
+                "rt_sigpending\0"
+                "rt_sigprocmask\0"
+                "rt_sigsuspend\0"
+                "rt_sigtimedwait\0"
+                "sigaction\0"
+                "sigaltstack\0"
+                "signal\0"
+                "signalfd\0"
+                "signalfd4\0"
+                "sigpending\0"
+                "sigprocmask\0"
+                "sigsuspend\0"
         },
         [SYSCALL_FILTER_SET_SWAP] = {
                 .name = "@swap",
@@ -643,6 +760,34 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 .value =
                 "swapoff\0"
                 "swapon\0"
+        },
+        [SYSCALL_FILTER_SET_SYNC] = {
+                .name = "@sync",
+                .help = "Synchronize files and memory to storage",
+                .value =
+                "fdatasync\0"
+                "fsync\0"
+                "msync\0"
+                "sync\0"
+                "sync_file_range\0"
+                "syncfs\0"
+        },
+        [SYSCALL_FILTER_SET_TIMER] = {
+                .name = "@timer",
+                .help = "Schedule operations by time",
+                .value =
+                "alarm\0"
+                "getitimer\0"
+                "setitimer\0"
+                "timer_create\0"
+                "timer_delete\0"
+                "timer_getoverrun\0"
+                "timer_gettime\0"
+                "timer_settime\0"
+                "timerfd_create\0"
+                "timerfd_gettime\0"
+                "timerfd_settime\0"
+                "times\0"
         },
 };
 
@@ -659,11 +804,52 @@ const SyscallFilterSet *syscall_filter_set_find(const char *name) {
         return NULL;
 }
 
+static int seccomp_add_syscall_filter_set(scmp_filter_ctx seccomp, const SyscallFilterSet *set, uint32_t action, char **exclude);
+
+int seccomp_add_syscall_filter_item(scmp_filter_ctx *seccomp, const char *name, uint32_t action, char **exclude) {
+        int r;
+
+        assert(seccomp);
+        assert(name);
+
+        if (strv_contains(exclude, name))
+                return 0;
+
+        if (name[0] == '@') {
+                const SyscallFilterSet *other;
+
+                other = syscall_filter_set_find(name);
+                if (!other) {
+                        log_debug("Filter set %s is not known!", name);
+                        return -EINVAL;
+                }
+
+                r = seccomp_add_syscall_filter_set(seccomp, other, action, exclude);
+                if (r < 0)
+                        return r;
+        } else {
+                int id;
+
+                id = seccomp_syscall_resolve_name(name);
+                if (id == __NR_SCMP_ERROR) {
+                        log_debug("System call %s is not known, ignoring.", name);
+                        return 0;
+                }
+
+                r = seccomp_rule_add_exact(seccomp, action, id, 0);
+                if (r < 0)
+                        /* If the system call is not known on this architecture, then that's fine, let's ignore it */
+                        log_debug_errno(r, "Failed to add rule for system call %s() / %d, ignoring: %m", name, id);
+        }
+
+        return 0;
+}
+
 static int seccomp_add_syscall_filter_set(
                 scmp_filter_ctx seccomp,
-                uint32_t default_action,
                 const SyscallFilterSet *set,
-                uint32_t action) {
+                uint32_t action,
+                char **exclude) {
 
         const char *sys;
         int r;
@@ -672,28 +858,9 @@ static int seccomp_add_syscall_filter_set(
         assert(set);
 
         NULSTR_FOREACH(sys, set->value) {
-                int id;
-
-                if (sys[0] == '@') {
-                        const SyscallFilterSet *other;
-
-                        other = syscall_filter_set_find(sys);
-                        if (!other)
-                                return -EINVAL;
-
-                        r = seccomp_add_syscall_filter_set(seccomp, default_action, other, action);
-                        if (r < 0)
-                                return r;
-                } else {
-                        id = seccomp_syscall_resolve_name(sys);
-                        if (id == __NR_SCMP_ERROR)
-                                return -EINVAL; /* Not known at all? Then that's a real error */
-
-                        r = seccomp_rule_add_exact(seccomp, action, id, 0);
-                        if (r < 0)
-                                /* If the system call is not known on this architecture, then that's fine, let's ignore it */
-                                log_debug_errno(r, "Failed to add rule for system call %s, ignoring: %m", sys);
-                }
+                r = seccomp_add_syscall_filter_item(seccomp, sys, action, exclude);
+                if (r < 0)
+                        return r;
         }
 
         return 0;
@@ -717,7 +884,7 @@ int seccomp_load_syscall_filter_set(uint32_t default_action, const SyscallFilter
                 if (r < 0)
                         return r;
 
-                r = seccomp_add_syscall_filter_set(seccomp, default_action, set, action);
+                r = seccomp_add_syscall_filter_set(seccomp, set, action, NULL);
                 if (r < 0) {
                         log_debug_errno(r, "Failed to add filter set, ignoring: %m");
                         continue;
@@ -761,7 +928,7 @@ int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Set* set, uint3
                                 _cleanup_free_ char *n = NULL;
 
                                 n = seccomp_syscall_resolve_num_arch(arch, PTR_TO_INT(id) - 1);
-                                log_debug_errno(r, "Failed to add rule for system call %s, ignoring: %m", strna(n));
+                                log_debug_errno(r, "Failed to add rule for system call %s() / %d, ignoring: %m", strna(n), PTR_TO_INT(id) - 1);
                         }
                 }
 
@@ -898,6 +1065,10 @@ int seccomp_protect_sysctl(void) {
                 _cleanup_(seccomp_releasep) scmp_filter_ctx seccomp = NULL;
 
                 log_debug("Operating on architecture: %s", seccomp_arch_to_string(arch));
+
+                if (IN_SET(arch, SCMP_ARCH_X32, SCMP_ARCH_AARCH64))
+                        /* No _sysctl syscall */
+                        continue;
 
                 r = seccomp_init_for_arch(&seccomp, arch, SCMP_ACT_ALLOW);
                 if (r < 0)
@@ -1041,7 +1212,6 @@ int seccomp_restrict_address_families(Set *address_families, bool whitelist) {
                                         if (r < 0)
                                                 break;
                                 }
-
                                 if (r < 0) {
                                         log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
                                         continue;
@@ -1066,7 +1236,6 @@ int seccomp_restrict_address_families(Set *address_families, bool whitelist) {
                                 if (r < 0)
                                         break;
                         }
-
                         if (r < 0) {
                                 log_debug_errno(r, "Failed to add socket() rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
                                 continue;
@@ -1219,10 +1388,6 @@ int seccomp_memory_deny_write_execute(void) {
 
                         break;
 
-                case SCMP_ARCH_AARCH64:
-                        block_syscall = SCMP_SYS(mmap);
-                        /* fall through */
-
                 case SCMP_ARCH_ARM:
                         filter_syscall = SCMP_SYS(mmap2); /* arm has only mmap2 */
                         shmat_syscall = SCMP_SYS(shmat);
@@ -1230,7 +1395,8 @@ int seccomp_memory_deny_write_execute(void) {
 
                 case SCMP_ARCH_X86_64:
                 case SCMP_ARCH_X32:
-                        filter_syscall = SCMP_SYS(mmap); /* amd64 and x32 have only mmap */
+                case SCMP_ARCH_AARCH64:
+                        filter_syscall = SCMP_SYS(mmap); /* amd64, x32, and arm64 have only mmap */
                         shmat_syscall = SCMP_SYS(shmat);
                         break;
 
@@ -1310,5 +1476,115 @@ int seccomp_restrict_archs(Set *archs) {
         if (r < 0)
                 return r;
 
-        return seccomp_load(seccomp);
+        r = seccomp_load(seccomp);
+        if (IN_SET(r, -EPERM, -EACCES))
+                return r;
+        if (r < 0)
+                log_debug_errno(r, "Failed to restrict system call architectures, skipping: %m");
+
+        return 0;
+}
+
+int parse_syscall_archs(char **l, Set **archs) {
+        _cleanup_set_free_ Set *_archs;
+        char **s;
+        int r;
+
+        assert(l);
+        assert(archs);
+
+        r = set_ensure_allocated(&_archs, NULL);
+        if (r < 0)
+                return r;
+
+        STRV_FOREACH(s, l) {
+                uint32_t a;
+
+                r = seccomp_arch_from_string(*s, &a);
+                if (r < 0)
+                        return -EINVAL;
+
+                r = set_put(_archs, UINT32_TO_PTR(a + 1));
+                if (r < 0)
+                        return -ENOMEM;
+        }
+
+        *archs = _archs;
+        _archs = NULL;
+
+        return 0;
+}
+
+int seccomp_filter_set_add(Set *filter, bool add, const SyscallFilterSet *set) {
+        const char *i;
+        int r;
+
+        assert(set);
+
+        NULSTR_FOREACH(i, set->value) {
+
+                if (i[0] == '@') {
+                        const SyscallFilterSet *more;
+
+                        more = syscall_filter_set_find(i);
+                        if (!more)
+                                return -ENXIO;
+
+                        r = seccomp_filter_set_add(filter, add, more);
+                        if (r < 0)
+                                return r;
+                } else {
+                        int id;
+
+                        id = seccomp_syscall_resolve_name(i);
+                        if (id == __NR_SCMP_ERROR) {
+                                log_debug("Couldn't resolve system call, ignoring: %s", i);
+                                continue;
+                        }
+
+                        if (add) {
+                                r = set_put(filter, INT_TO_PTR(id + 1));
+                                if (r < 0)
+                                        return r;
+                        } else
+                                (void) set_remove(filter, INT_TO_PTR(id + 1));
+                }
+        }
+
+        return 0;
+}
+
+int seccomp_lock_personality(unsigned long personality) {
+        uint32_t arch;
+        int r;
+
+        if (personality >= PERSONALITY_INVALID)
+                return -EINVAL;
+
+        SECCOMP_FOREACH_LOCAL_ARCH(arch) {
+                _cleanup_(seccomp_releasep) scmp_filter_ctx seccomp = NULL;
+
+                r = seccomp_init_for_arch(&seccomp, arch, SCMP_ACT_ALLOW);
+                if (r < 0)
+                        return r;
+
+                r = seccomp_rule_add_exact(
+                                seccomp,
+                                SCMP_ACT_ERRNO(EPERM),
+                                SCMP_SYS(personality),
+                                1,
+                                SCMP_A0(SCMP_CMP_NE, personality));
+                if (r < 0) {
+                        log_debug_errno(r, "Failed to add scheduler rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+                        continue;
+                }
+
+                r = seccomp_load(seccomp);
+                if (IN_SET(r, -EPERM, -EACCES))
+                        return r;
+                if (r < 0)
+                        log_debug_errno(r, "Failed to enable personality lock for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
+        }
+
+        return 0;
 }

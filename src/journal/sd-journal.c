@@ -69,7 +69,7 @@ static bool journal_pid_changed(sd_journal *j) {
         /* We don't support people creating a journal object and
          * keeping it around over a fork(). Let's complain. */
 
-        return j->original_pid != getpid();
+        return j->original_pid != getpid_cached();
 }
 
 static int journal_put_error(sd_journal *j, int r, const char *path) {
@@ -136,7 +136,7 @@ static void reset_location(sd_journal *j) {
 
 static void init_location(Location *l, LocationType type, JournalFile *f, Object *o) {
         assert(l);
-        assert(type == LOCATION_DISCRETE || type == LOCATION_SEEK);
+        assert(IN_SET(type, LOCATION_DISCRETE, LOCATION_SEEK));
         assert(f);
         assert(o->object.type == OBJECT_ENTRY);
 
@@ -450,7 +450,7 @@ _pure_ static int compare_with_location(JournalFile *f, Location *l) {
         assert(f);
         assert(l);
         assert(f->location_type == LOCATION_SEEK);
-        assert(l->type == LOCATION_DISCRETE || l->type == LOCATION_SEEK);
+        assert(IN_SET(l->type, LOCATION_DISCRETE, LOCATION_SEEK));
 
         if (l->monotonic_set &&
             sd_id128_equal(f->current_boot_id, l->boot_id) &&
@@ -1715,7 +1715,7 @@ static sd_journal *journal_new(int flags, const char *path) {
         if (!j)
                 return NULL;
 
-        j->original_pid = getpid();
+        j->original_pid = getpid_cached();
         j->toplevel_fd = -1;
         j->inotify_fd = -1;
         j->flags = flags;
@@ -2152,7 +2152,7 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
 
                 compression = o->object.flags & OBJECT_COMPRESSION_MASK;
                 if (compression) {
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
+#if HAVE_XZ || HAVE_LZ4
                         r = decompress_startswith(compression,
                                                   o->data.payload, l,
                                                   &f->compress_buffer, &f->compress_buffer_size,
@@ -2216,7 +2216,7 @@ static int return_data(sd_journal *j, JournalFile *f, Object *o, const void **da
 
         compression = o->object.flags & OBJECT_COMPRESSION_MASK;
         if (compression) {
-#if defined(HAVE_XZ) || defined(HAVE_LZ4)
+#if HAVE_XZ || HAVE_LZ4
                 size_t rsize;
                 int r;
 
@@ -2436,7 +2436,7 @@ _public_ int sd_journal_process(sd_journal *j) {
 
                 l = read(j->inotify_fd, &buffer, sizeof(buffer));
                 if (l < 0) {
-                        if (errno == EAGAIN || errno == EINTR)
+                        if (IN_SET(errno, EAGAIN, EINTR))
                                 return got_something ? determine_change(j) : SD_JOURNAL_NOP;
 
                         return -errno;

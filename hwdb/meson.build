@@ -12,12 +12,13 @@ hwdb_files = files('''
         60-evdev.hwdb
         60-keyboard.hwdb
         60-sensor.hwdb
+        70-joystick.hwdb
         70-mouse.hwdb
         70-pointingstick.hwdb
         70-touchpad.hwdb
 '''.split())
 
-if conf.get('ENABLE_HWDB', false)
+if conf.get('ENABLE_HWDB') == 1
         install_data(hwdb_files,
                      install_dir : udevhwdbdir)
 
@@ -39,5 +40,5 @@ test('parse-hwdb',
 ############################################################
 
 run_target(
-        'update',
+        'hwdb-update',
         command : [hwdb_update_sh, meson.current_source_dir()])

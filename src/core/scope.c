@@ -253,6 +253,9 @@ static void scope_enter_dead(Scope *s, ScopeResult f) {
         if (s->result == SCOPE_SUCCESS)
                 s->result = f;
 
+        if (s->result != SCOPE_SUCCESS)
+                log_unit_warning(UNIT(s), "Failed with result '%s'.", scope_result_to_string(s->result));
+
         scope_set_state(s, s->result != SCOPE_SUCCESS ? SCOPE_FAILED : SCOPE_DEAD);
 }
 
@@ -319,8 +322,7 @@ static int scope_start(Unit *u) {
                 return -EPERM;
 
         /* We can't fulfill this right now, please try again later */
-        if (s->state == SCOPE_STOP_SIGTERM ||
-            s->state == SCOPE_STOP_SIGKILL)
+        if (IN_SET(s->state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
                 return -EAGAIN;
 
         assert(s->state == SCOPE_DEAD);
@@ -333,7 +335,8 @@ static int scope_start(Unit *u) {
                 return r;
 
         (void) unit_realize_cgroup(u);
-        (void) unit_reset_cpu_usage(u);
+        (void) unit_reset_cpu_accounting(u);
+        (void) unit_reset_ip_accounting(u);
 
         r = unit_attach_pids_to_cgroup(u);
         if (r < 0) {
@@ -353,12 +356,10 @@ static int scope_stop(Unit *u) {
 
         assert(s);
 
-        if (s->state == SCOPE_STOP_SIGTERM ||
-            s->state == SCOPE_STOP_SIGKILL)
+        if (IN_SET(s->state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
                 return 0;
 
-        assert(s->state == SCOPE_RUNNING ||
-               s->state == SCOPE_ABANDONED);
+        assert(IN_SET(s->state, SCOPE_RUNNING, SCOPE_ABANDONED));
 
         scope_enter_signal(s, SCOPE_STOP_SIGTERM, SCOPE_SUCCESS);
         return 1;
