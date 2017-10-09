@@ -127,7 +127,7 @@ int seat_save(Seat *s) {
         if (s->sessions) {
                 Session *i;
 
-                fputs("SESSIONS=", f);
+                fputs_unlocked("SESSIONS=", f);
                 LIST_FOREACH(sessions_by_seat, i, s->sessions) {
                         fprintf(f,
                                 "%s%c",
@@ -135,7 +135,7 @@ int seat_save(Seat *s) {
                                 i->sessions_by_seat_next ? ' ' : '\n');
                 }
 
-                fputs("UIDS=", f);
+                fputs_unlocked("UIDS=", f);
                 LIST_FOREACH(sessions_by_seat, i, s->sessions)
                         fprintf(f,
                                 UID_FMT"%c",
@@ -663,8 +663,7 @@ static bool seat_name_valid_char(char c) {
                 (c >= 'a' && c <= 'z') ||
                 (c >= 'A' && c <= 'Z') ||
                 (c >= '0' && c <= '9') ||
-                c == '-' ||
-                c == '_';
+                IN_SET(c, '-', '_');
 }
 
 bool seat_name_is_valid(const char *name) {

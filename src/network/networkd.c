@@ -70,13 +70,17 @@ int main(int argc, char *argv[]) {
         if (r < 0)
                 log_warning_errno(r, "Could not create runtime directory 'lldp': %m");
 
-        r = drop_privileges(uid, gid,
-                            (1ULL << CAP_NET_ADMIN) |
-                            (1ULL << CAP_NET_BIND_SERVICE) |
-                            (1ULL << CAP_NET_BROADCAST) |
-                            (1ULL << CAP_NET_RAW));
-        if (r < 0)
-                goto out;
+        /* Drop privileges, but only if we have been started as root. If we are not running as root we assume all
+         * privileges are already dropped. */
+        if (geteuid() == 0) {
+                r = drop_privileges(uid, gid,
+                                    (1ULL << CAP_NET_ADMIN) |
+                                    (1ULL << CAP_NET_BIND_SERVICE) |
+                                    (1ULL << CAP_NET_BROADCAST) |
+                                    (1ULL << CAP_NET_RAW));
+                if (r < 0)
+                        goto out;
+        }
 
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, -1) >= 0);
 
@@ -125,6 +129,12 @@ int main(int argc, char *argv[]) {
         r = manager_rtnl_enumerate_routes(m);
         if (r < 0) {
                 log_error_errno(r, "Could not enumerate routes: %m");
+                goto out;
+        }
+
+        r = manager_rtnl_enumerate_rules(m);
+        if (r < 0) {
+                log_error_errno(r, "Could not enumerate rules: %m");
                 goto out;
         }
 

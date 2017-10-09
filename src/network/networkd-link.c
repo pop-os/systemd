@@ -33,6 +33,7 @@
 #include "networkd-manager.h"
 #include "networkd-ndisc.h"
 #include "networkd-radv.h"
+#include "networkd-routing-policy-rule.h"
 #include "set.h"
 #include "socket-util.h"
 #include "stdio-util.h"
@@ -497,8 +498,8 @@ static int link_new(Manager *manager, sd_netlink_message *message, Link **ret) {
 
 static void link_free(Link *link) {
         Address *address;
-        Iterator i;
         Link *carrier;
+        Iterator i;
 
         if (!link)
                 return;
@@ -1014,6 +1015,7 @@ static int link_set_bridge_fdb(Link *link) {
 }
 
 static int link_enter_set_addresses(Link *link) {
+        RoutingPolicyRule *rule, *rrule = NULL;
         AddressLabel *label;
         Address *ad;
         int r;
@@ -1049,6 +1051,26 @@ static int link_enter_set_addresses(Link *link) {
 
                 link->link_messages++;
         }
+
+        LIST_FOREACH(rules, rule, link->network->rules) {
+                r = routing_policy_rule_get(link->manager, rule->family, &rule->from, rule->from_prefixlen, &rule->to,
+                                            rule->to_prefixlen, rule->tos, rule->fwmark, rule->table, &rrule);
+                if (r == 1) {
+                        (void) routing_policy_rule_make_local(link->manager, rrule);
+                        continue;
+                }
+
+                r = routing_policy_rule_configure(rule, link, link_routing_policy_rule_handler, false);
+                if (r < 0) {
+                        log_link_warning_errno(link, r, "Could not set routing policy rules: %m");
+                        link_enter_failed(link);
+                        return r;
+                }
+
+                link->link_messages++;
+        }
+
+        routing_policy_rule_purge(link->manager, link);
 
         /* now that we can figure out a default address for the dhcp server,
            start it */
@@ -2138,7 +2160,7 @@ static int link_joined(Link *link) {
         /* Skip setting up addresses until it gets carrier,
            or it would try to set addresses twice,
            which is bad for non-idempotent steps. */
-        if (!link_has_carrier(link))
+        if (!link_has_carrier(link) && !link->network->configure_without_carrier)
                 return 0;
 
         return link_enter_set_addresses(link);
@@ -2647,7 +2669,7 @@ static int link_configure(Link *link) {
                         return r;
         }
 
-        if (link_has_carrier(link)) {
+        if (link_has_carrier(link) || link->network->configure_without_carrier) {
                 r = link_acquire_conf(link);
                 if (r < 0)
                         return r;
@@ -2916,7 +2938,7 @@ network_file_fail:
                         goto dhcp4_address_fail;
                 }
 
-                r = sd_dhcp_client_new(&link->dhcp_client);
+                r = sd_dhcp_client_new(&link->dhcp_client, link->network->dhcp_anonymize);
                 if (r < 0)
                         return log_link_error_errno(link, r, "Failed to create DHCPv4 client: %m");
 
@@ -3186,8 +3208,6 @@ int link_update(Link *link, sd_netlink_message *m) {
                         }
 
                         if (link->dhcp_client) {
-                                const DUID *duid = link_duid(link);
-
                                 r = sd_dhcp_client_set_mac(link->dhcp_client,
                                                            (const uint8_t *) &link->mac,
                                                            sizeof (link->mac),
@@ -3195,13 +3215,30 @@ int link_update(Link *link, sd_netlink_message *m) {
                                 if (r < 0)
                                         return log_link_warning_errno(link, r, "Could not update MAC address in DHCP client: %m");
 
-                                r = sd_dhcp_client_set_iaid_duid(link->dhcp_client,
-                                                                 link->network->iaid,
-                                                                 duid->type,
-                                                                 duid->raw_data_len > 0 ? duid->raw_data : NULL,
-                                                                 duid->raw_data_len);
-                                if (r < 0)
-                                        return log_link_warning_errno(link, r, "Could not update DUID/IAID in DHCP client: %m");
+                                switch (link->network->dhcp_client_identifier) {
+                                case DHCP_CLIENT_ID_DUID: {
+                                        const DUID *duid = link_duid(link);
+
+                                        r = sd_dhcp_client_set_iaid_duid(link->dhcp_client,
+                                                                         link->network->iaid,
+                                                                         duid->type,
+                                                                         duid->raw_data_len > 0 ? duid->raw_data : NULL,
+                                                                         duid->raw_data_len);
+                                        if (r < 0)
+                                                return log_link_warning_errno(link, r, "Could not update DUID/IAID in DHCP client: %m");
+                                        break;
+                                }
+                                case DHCP_CLIENT_ID_MAC:
+                                        r = sd_dhcp_client_set_client_id(link->dhcp_client,
+                                                                         ARPHRD_ETHER,
+                                                                         (const uint8_t *)&link->mac,
+                                                                         sizeof(link->mac));
+                                        if(r < 0)
+                                                return log_link_warning_errno(link, r, "Could not update MAC client id in DHCP client: %m");
+                                        break;
+                                default:
+                                        assert_not_reached("Unknown client identifier type.");
+                                }
                         }
 
                         if (link->dhcp6_client) {
@@ -3276,16 +3313,16 @@ static void print_link_hashmap(FILE *f, const char *prefix, Hashmap* h) {
         if (hashmap_isempty(h))
                 return;
 
-        fputs(prefix, f);
+        fputs_unlocked(prefix, f);
         HASHMAP_FOREACH(link, h, i) {
                 if (space)
-                        fputc(' ', f);
+                        fputc_unlocked(' ', f);
 
                 fprintf(f, "%i", link->ifindex);
                 space = true;
         }
 
-        fputc('\n', f);
+        fputc_unlocked('\n', f);
 }
 
 int link_save(Link *link) {
@@ -3343,7 +3380,7 @@ int link_save(Link *link) {
 
                 fprintf(f, "NETWORK_FILE=%s\n", link->network->filename);
 
-                fputs("DNS=", f);
+                fputs_unlocked("DNS=", f);
                 space = false;
 
                 for (j = 0; j < link->network->n_dns; j++) {
@@ -3357,8 +3394,8 @@ int link_save(Link *link) {
                         }
 
                         if (space)
-                                fputc(' ', f);
-                        fputs(b, f);
+                                fputc_unlocked(' ', f);
+                        fputs_unlocked(b, f);
                         space = true;
                 }
 
@@ -3369,7 +3406,7 @@ int link_save(Link *link) {
                         r = sd_dhcp_lease_get_dns(link->dhcp_lease, &addresses);
                         if (r > 0) {
                                 if (space)
-                                        fputc(' ', f);
+                                        fputc_unlocked(' ', f);
                                 serialize_in_addrs(f, addresses, r);
                                 space = true;
                         }
@@ -3381,7 +3418,7 @@ int link_save(Link *link) {
                         r = sd_dhcp6_lease_get_dns(dhcp6_lease, &in6_addrs);
                         if (r > 0) {
                                 if (space)
-                                        fputc(' ', f);
+                                        fputc_unlocked(' ', f);
                                 serialize_in6_addrs(f, in6_addrs, r);
                                 space = true;
                         }
@@ -3395,16 +3432,16 @@ int link_save(Link *link) {
 
                         SET_FOREACH(dd, link->ndisc_rdnss, i) {
                                 if (space)
-                                        fputc(' ', f);
+                                        fputc_unlocked(' ', f);
 
                                 serialize_in6_addrs(f, &dd->address, 1);
                                 space = true;
                         }
                 }
 
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
 
-                fputs("NTP=", f);
+                fputs_unlocked("NTP=", f);
                 space = false;
                 fputstrv(f, link->network->ntp, NULL, &space);
 
@@ -3415,7 +3452,7 @@ int link_save(Link *link) {
                         r = sd_dhcp_lease_get_ntp(link->dhcp_lease, &addresses);
                         if (r > 0) {
                                 if (space)
-                                        fputc(' ', f);
+                                        fputc_unlocked(' ', f);
                                 serialize_in_addrs(f, addresses, r);
                                 space = true;
                         }
@@ -3429,7 +3466,7 @@ int link_save(Link *link) {
                                                          &in6_addrs);
                         if (r > 0) {
                                 if (space)
-                                        fputc(' ', f);
+                                        fputc_unlocked(' ', f);
                                 serialize_in6_addrs(f, in6_addrs, r);
                                 space = true;
                         }
@@ -3439,7 +3476,7 @@ int link_save(Link *link) {
                                 fputstrv(f, hosts, NULL, &space);
                 }
 
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
 
                 if (link->network->dhcp_use_domains != DHCP_USE_DOMAINS_NO) {
                         if (link->dhcp_lease) {
@@ -3450,7 +3487,7 @@ int link_save(Link *link) {
                                 (void) sd_dhcp6_lease_get_domains(dhcp6_lease, &dhcp6_domains);
                 }
 
-                fputs("DOMAINS=", f);
+                fputs_unlocked("DOMAINS=", f);
                 space = false;
                 fputstrv(f, link->network->search_domains, NULL, &space);
 
@@ -3468,9 +3505,9 @@ int link_save(Link *link) {
                                 fputs_with_space(f, NDISC_DNSSL_DOMAIN(dd), NULL, &space);
                 }
 
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
 
-                fputs("ROUTE_DOMAINS=", f);
+                fputs_unlocked("ROUTE_DOMAINS=", f);
                 space = false;
                 fputstrv(f, link->network->route_domains, NULL, &space);
 
@@ -3488,7 +3525,7 @@ int link_save(Link *link) {
                                 fputs_with_space(f, NDISC_DNSSL_DOMAIN(dd), NULL, &space);
                 }
 
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
 
                 fprintf(f, "LLMNR=%s\n",
                         resolve_support_to_string(link->network->llmnr));
@@ -3502,14 +3539,14 @@ int link_save(Link *link) {
                 if (!set_isempty(link->network->dnssec_negative_trust_anchors)) {
                         const char *n;
 
-                        fputs("DNSSEC_NTA=", f);
+                        fputs_unlocked("DNSSEC_NTA=", f);
                         space = false;
                         SET_FOREACH(n, link->network->dnssec_negative_trust_anchors, i)
                                 fputs_with_space(f, n, NULL, &space);
-                        fputc('\n', f);
+                        fputc_unlocked('\n', f);
                 }
 
-                fputs("ADDRESSES=", f);
+                fputs_unlocked("ADDRESSES=", f);
                 space = false;
                 SET_FOREACH(a, link->addresses, i) {
                         _cleanup_free_ char *address_str = NULL;
@@ -3521,9 +3558,9 @@ int link_save(Link *link) {
                         fprintf(f, "%s%s/%u", space ? " " : "", address_str, a->prefixlen);
                         space = true;
                 }
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
 
-                fputs("ROUTES=", f);
+                fputs_unlocked("ROUTES=", f);
                 space = false;
                 SET_FOREACH(route, link->routes, i) {
                         _cleanup_free_ char *route_str = NULL;
@@ -3537,7 +3574,7 @@ int link_save(Link *link) {
                         space = true;
                 }
 
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
         }
 
         print_link_hashmap(f, "CARRIER_BOUND_TO=", link->bound_to_links);
@@ -3555,9 +3592,9 @@ int link_save(Link *link) {
 
                 r = sd_dhcp_lease_get_address(link->dhcp_lease, &address);
                 if (r >= 0) {
-                        fputs("DHCP4_ADDRESS=", f);
+                        fputs_unlocked("DHCP4_ADDRESS=", f);
                         serialize_in_addrs(f, &address, 1);
-                        fputc('\n', f);
+                        fputc_unlocked('\n', f);
                 }
 
                 r = dhcp_lease_save(link->dhcp_lease, link->lease_file);
@@ -3575,9 +3612,9 @@ int link_save(Link *link) {
 
                 r = sd_ipv4ll_get_address(link->ipv4ll, &address);
                 if (r >= 0) {
-                        fputs("IPV4LL_ADDRESS=", f);
+                        fputs_unlocked("IPV4LL_ADDRESS=", f);
                         serialize_in_addrs(f, &address, 1);
-                        fputc('\n', f);
+                        fputc_unlocked('\n', f);
                 }
         }
 

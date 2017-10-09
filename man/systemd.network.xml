@@ -271,7 +271,8 @@
           <listitem>
             <para>Enables DHCPv4 and/or DHCPv6 client support. Accepts
             <literal>yes</literal>, <literal>no</literal>,
-            <literal>ipv4</literal>, or <literal>ipv6</literal>.</para>
+            <literal>ipv4</literal>, or <literal>ipv6</literal>. Defaults
+            to <literal>no</literal>.</para>
 
             <para>Note that DHCPv6 will by default be triggered by Router
             Advertisement, if that is enabled, regardless of this parameter.
@@ -361,7 +362,7 @@
             DNS validation support on the link. When set to
             <literal>allow-downgrade</literal>, compatibility with
             non-DNSSEC capable networks is increased, by automatically
-            turning off DNSEC in this case. This option defines a
+            turning off DNSSEC in this case. This option defines a
             per-interface setting for
             <citerefentry><refentrytitle>resolved.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>'s
             global <varname>DNSSEC=</varname> option. Defaults to
@@ -636,6 +637,13 @@
         </para></listitem>
         </varlistentry>
         <varlistentry>
+          <term><varname>IPv6PrefixDelegation=</varname></term>
+          <listitem><para>Whether to enable or disable Router Advertisement sending on a link.
+          Defaults to <literal>false</literal>. See the <literal>[IPv6PrefixDelegation]</literal>
+          and the <literal>[IPv6Prefix]</literal> sections for configuration options.
+          </para></listitem>
+        </varlistentry>
+        <varlistentry>
           <term><varname>Bridge=</varname></term>
           <listitem>
             <para>The name of the bridge to add the link to. See
@@ -691,6 +699,40 @@
             This option may be specified more than once.</para>
           </listitem>
         </varlistentry>
+      <varlistentry>
+        <term><varname>ActiveSlave=</varname></term>
+        <listitem>
+          <para>A boolean. Specifies the new active slave. The <literal>ActiveSlave=</literal>
+          option is only valid for following modes:
+          <literal>active-backup</literal>,
+          <literal>balance-alb</literal> and
+          <literal>balance-tlb</literal>. Defaults to false.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>PrimarySlave=</varname></term>
+        <listitem>
+          <para>A boolean. Specifies which slave is the primary device. The specified
+          device will always be the active slave while it is available. Only when the
+          primary is off-line will alternate devices be used.  This is useful when
+          one slave is preferred over another, e.g. when one slave has higher throughput
+          than another. The <literal>PrimarySlave=</literal> option is only valid for
+          following modes:
+          <literal>active-backup</literal>,
+          <literal>balance-alb</literal> and
+          <literal>balance-tlb</literal>. Defaults to false.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>ConfigureWithoutCarrier=</varname></term>
+        <listitem>
+          <para>A boolean. Allows networkd to configure a specific link even if it has no carrier.
+          Defaults to false.
+          </para>
+        </listitem>
+      </varlistentry>
       </variablelist>
 
   </refsect1>
@@ -745,6 +787,14 @@
             unless explicitly requested. A setting of PreferredLifetime=0 is useful for
             addresses which are added to be used only by a specific application,
             which is then configured to use them explicitly.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Scope=</varname></term>
+          <listitem>
+            <para>The scope of the address, which can be <literal>global</literal>,
+            <literal>link</literal> or <literal>host</literal> or an unsigned integer ranges 0 to 255.
+            Defaults to <literal>global</literal>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -806,7 +856,7 @@
 
       <para>An <literal>[IPv6AddressLabel]</literal> section accepts the
       following keys. Specify several <literal>[IPv6AddressLabel]</literal>
-      sections to configure several addresse labels. IPv6 address labels are
+      sections to configure several address labels. IPv6 address labels are
       used for address selection. See <ulink url="https://tools.ietf.org/html/rfc3484">RFC 3484</ulink>.
       Precedence is managed by userspace, and only the label itself is stored in the kernel</para>
 
@@ -823,6 +873,55 @@
           <listitem>
             <para>IPv6 prefix is an address with a prefix length, separated by a slash <literal>/</literal> character.
             This key is mandatory. </para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
+
+ <refsect1>
+    <title>[RoutingPolicyRule] Section Options</title>
+
+      <para>An <literal>[RoutingPolicyRule]</literal> section accepts the
+      following keys. Specify several <literal>[RoutingPolicyRule]</literal>
+      sections to configure several rules.</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>TypeOfService=</varname></term>
+          <listitem>
+            <para>Specifies the type of service to match a number between 0 to 255.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>From=</varname></term>
+          <listitem>
+            <para>Specifies the source address prefix to match. Possibly followed by a slash and the prefix length.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>To=</varname></term>
+          <listitem>
+            <para>Specifies the destination address prefix to match. Possibly followed by a slash and the prefix length.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>FirewallMark=</varname></term>
+          <listitem>
+            <para>Specifies the iptables firewall mark value to match (a number between 1 and 4294967295).</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Table=</varname></term>
+          <listitem>
+            <para>Specifies the routing table identifier to lookup if the rule
+            selector matches. The table identifier for a route (a number between 1 and 4294967295).</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Priority=</varname></term>
+          <listitem>
+            <para>Specifies the priority of this rule. <varname>Priority=</varname> is an unsigned
+            integer. Higher number means lower priority, and rules get processed in order of increasing number.</para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -916,6 +1015,19 @@
             </para>
           </listitem>
         </varlistentry>
+        <varlistentry>
+          <term><varname>Type=</varname></term>
+          <listitem>
+            <para>The Type identifier for special route types, which can be
+            <literal>unicast</literal> route to a destination network address which describes the path to the destination,
+            <literal>blackhole</literal> packets are discarded silently,
+            <literal>unreachable</literal> packets are discarded and the ICMP message host unreachable is generated,
+            <literal>prohibit</literal> packets are discarded and the ICMP message communication administratively
+            prohibited is generated. Defaults to <literal>unicast</literal>.
+            </para>
+          </listitem>
+        </varlistentry>
+
       </variablelist>
   </refsect1>
 
@@ -952,6 +1064,27 @@
             <para>When true, the interface maximum transmission unit
             from the DHCP server will be used on the current link.
             Defaults to false.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Anonymize=</varname></term>
+          <listitem>
+            <para>Takes a boolean argument. When true, the options sent to the DHCP server will
+            follow the <ulink url="https://tools.ietf.org/html/rfc7844">RFC 7844</ulink>
+            (Anonymity Profiles for DHCP Clients) to minimize disclosure of identifying information.
+            Defaults to false.</para>
+
+            <para>This option should only be set to true when
+            <varname>MACAddressPolicy=</varname> is set to <literal>random</literal>
+            (see <citerefentry
+            project='man-pages'><refentrytitle>systemd.link</refentrytitle><manvolnum>5</manvolnum></citerefentry>).</para>
+
+            <para>Note that this configuration will overwrite others.
+            In concrete, the following variables will be ignored:
+            <varname>SendHostname=</varname>, <varname>ClientIdentifier=</varname>,
+            <varname>UseRoutes=</varname>, <varname>SendHostname=</varname>,
+            <varname>UseMTU=</varname>, <varname>VendorClassIdentifier=</varname>,
+            <varname>UseTimezone=</varname>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1091,6 +1224,9 @@
           <listitem>
             <para>The table identifier for DHCP routes (a number between 1 and 4294967295, or 0 to unset).
             The table can be retrieved using <command>ip route show table <replaceable>num</replaceable></command>.
+            </para>
+            <para>When used in combination with <varname>VRF=</varname> the
+            VRF's routing table is used unless this parameter is specified.
             </para>
           </listitem>
         </varlistentry>
@@ -1269,6 +1405,125 @@
   </refsect1>
 
   <refsect1>
+    <title>[IPv6PrefixDelegation] Section Options</title>
+    <para>The <literal>[IPv6PrefixDelegation]</literal> section contains
+    settings for sending IPv6 Router Advertisements and whether to act as
+    a router, if enabled via the <varname>IPv6PrefixDelegation=</varname>
+    option described above. IPv6 network prefixes are defined with one or
+    more <literal>[IPv6Prefix]</literal> sections.</para>
+
+    <variablelist class='network-directives'>
+
+      <varlistentry>
+        <term><varname>Managed=</varname></term>
+        <term><varname>OtherInformation=</varname></term>
+
+        <listitem><para>Controls whether a DHCPv6 server is used to acquire IPv6
+        addresses on the network link when <varname>Managed=</varname> boolean
+        is set to <literal>true</literal> or if only additional network
+        information can be obtained via DHCPv6 for the network link when
+        <varname>OtherInformation=</varname> boolean is set to
+        <literal>true</literal>. Both settings default to
+        <literal>false</literal>, which means that a DHCPv6 server is not being
+        used.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RouterLifetimeSec=</varname></term>
+
+        <listitem><para>Configures the IPv6 router lifetime in seconds. If set,
+        this host also announces itself in Router Advertisements as an IPv6
+        router for the network link. Defaults to unset, which means the host is
+        not acting as a router.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RouterPreference=</varname></term>
+
+        <listitem><para>Configures IPv6 router preference if
+        <varname>RouterLifetimeSec=</varname> is non-zero. Valid values are
+        <literal>high</literal>, <literal>medium</literal> and
+        <literal>low</literal>, with <literal>normal</literal> and
+        <literal>default</literal> added as synonyms for
+        <literal>medium</literal> just to make configuration easier. See
+        <ulink url="https://tools.ietf.org/html/rfc4191">RFC 4191</ulink>
+        for details. Defaults to <literal>medium</literal>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DNS=</varname></term>
+
+        <listitem><para>A list of recursive DNS server IPv6 addresses
+        distributed via Router Advertisement messages.
+        </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Domains=</varname></term>
+
+        <listitem><para>A list of DNS search domains distributed via
+        Router Advertisement messages. Defaults to empty, i.e. no search
+        domains are sent.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DNSLifetimeSec=</varname></term>
+
+        <listitem><para>Lifetime in seconds for the DNS server addresses listed
+        in <varname>DNS=</varname> and search domains listed in
+        <varname>Domains=</varname>.</para></listitem>
+      </varlistentry>
+
+    </variablelist>
+    </refsect1>
+
+      <refsect1>
+    <title>[IPv6Prefix] Section Options</title>
+    <para>One or more <literal>[IPv6Prefix]</literal> sections contain the IPv6
+    prefixes that are announced via Router Advertisements. See
+    <ulink url="https://tools.ietf.org/html/rfc4861">RFC 4861</ulink>
+    for further details.</para>
+
+    <variablelist class='network-directives'>
+
+      <varlistentry>
+        <term><varname>AddressAutoconfiguration=</varname></term>
+        <term><varname>OnLink=</varname></term>
+
+        <listitem><para>Boolean values to specify whether IPv6 addresses can be
+        autoconfigured with this prefix and whether the prefix can be used for
+        onlink determination. Both settings default to <literal>true</literal>
+        in order to ease configuration.
+        </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Prefix=</varname></term>
+
+        <listitem><para>The IPv6 prefix that is to be distributed to hosts.
+        Similarly to configuring static IPv6 addresses, the setting is
+        configured as an IPv6 prefix and its prefix length, separated by a
+        <literal>/</literal> character. Use multiple
+        <literal>[IPv6Prefix]</literal> sections to configure multiple IPv6
+        prefixes since prefix lifetimes, address autoconfiguration and onlink
+        status may differ from one prefix to another.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>PreferredLifetimeSec=</varname></term>
+        <term><varname>ValidLifetimeSec=</varname></term>
+
+        <listitem><para>Preferred and valid lifetimes for the prefix measured in
+        seconds. <varname>PreferredLifetimeSec=</varname> defaults to 604800
+        seconds (one week) and <varname>ValidLifetimeSec=</varname> defaults
+        to 2592000 seconds (30 days).</para></listitem>
+      </varlistentry>
+
+    </variablelist>
+    </refsect1>
+
+    <refsect1>
     <title>[Bridge] Section Options</title>
       <para>The <literal>[Bridge]</literal> section accepts the
       following keys.</para>
@@ -1320,7 +1575,7 @@
             <para>Sets the "cost" of sending packets of this interface.
             Each port in a bridge may have a different speed and the cost
             is used to decide which link to use. Faster interfaces
-            should have lower costs. It is an interger value between 1 and
+            should have lower costs. It is an integer value between 1 and
             65535.</para>
           </listitem>
         </varlistentry>
@@ -1330,7 +1585,7 @@
             <para>Sets the "priority" of sending packets on this interface.
             Each port in a bridge may have a different priority which is used
             to decide which link to use. Lower value means higher priority.
-            It is an interger value between 0 to 63. Networkd does not set any
+            It is an integer value between 0 to 63. Networkd does not set any
             default, meaning the kernel default value of 32 is used.</para>
           </listitem>
         </varlistentry>
@@ -1572,8 +1827,9 @@ Bond=bond1
       <title>Virtual Routing and Forwarding (VRF)</title>
       <para>Add the <literal>bond1</literal> interface to the VRF master interface
       <literal>vrf1</literal>. This will redirect routes generated on this interface to be
-      within the routing table defined during VRF creation. Traffic won't be redirected
-      towards the VRFs routing table unless specific ip-rules are added.</para>
+      within the routing table defined during VRF creation. For kernels before 4.8 traffic
+      won't be redirected towards the VRFs routing table unless specific ip-rules are added.
+      </para>
       <programlisting># /etc/systemd/network/25-vrf.network
 [Match]
 Name=bond1

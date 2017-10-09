@@ -47,7 +47,7 @@ option('resolve', type : 'boolean',
        description : 'systemd-resolved stack')
 option('efi', type : 'boolean',
        description : 'enable systemd-boot and bootctl')
-option('tpm', type : 'boolean', value : false,
+option('tpm', type : 'boolean',
        description : 'TPM should be used to log events and extend the registers')
 option('environment-d', type : 'boolean',
        description : 'support for environment.d')
@@ -69,7 +69,7 @@ option('timedated', type : 'boolean',
        description : 'install the systemd-timedated daemon')
 option('timesyncd', type : 'boolean',
        description : 'install the systemd-timesyncd daemon')
-option('remote', type : 'boolean',
+option('remote', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'support for "journal over the network"')
 option('myhostname', type : 'boolean',
        description : 'nss-myhostname support')
@@ -87,7 +87,7 @@ option('sysusers', type : 'boolean',
        description : 'support for the sysusers configuration')
 option('tmpfiles', type : 'boolean',
        description : 'support for tmpfiles.d')
-option('importd', type : 'boolean',
+option('importd', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'install the systemd-importd daemon')
 option('hwdb', type : 'boolean',
        description : 'support for the hardware database')
@@ -120,6 +120,8 @@ option('pamconfdir', type : 'string',
 
 option('fallback-hostname', type : 'string', value : 'localhost',
        description : 'the hostname used if none configured')
+option('compat-gateway-hostname', type : 'boolean', value : 'false',
+       description : 'allow "gateway" as the symbolic name for default gateway')
 option('default-hierarchy', type : 'combo',
        choices : ['legacy', 'hybrid', 'unified'], value : 'hybrid',
        description : 'default cgroup hierarchy')
@@ -252,5 +254,7 @@ option('zshcompletiondir', type : 'string',
 
 option('tests', type : 'combo', choices : ['true', 'unsafe'],
        description : 'enable extra tests with =unsafe')
+option('slow-tests', type : 'boolean', value : 'false',
+       description : 'run the slow tests by default')
 option('install-tests', type : 'boolean', value : 'false',
        description : 'install test executables')

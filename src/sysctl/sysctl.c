@@ -223,7 +223,7 @@ static int parse_argv(int argc, char *argv[]) {
                          * sysctl name available. */
                         sysctl_normalize(optarg);
 
-                        if (startswith(optarg, "/proc/sys"))
+                        if (path_startswith(optarg, "/proc/sys"))
                                 p = strdup(optarg);
                         else
                                 p = strappend("/proc/sys/", optarg);
@@ -280,7 +280,7 @@ int main(int argc, char *argv[]) {
                 _cleanup_strv_free_ char **files = NULL;
                 char **f;
 
-                r = conf_files_list_nulstr(&files, ".conf", NULL, conf_file_dirs);
+                r = conf_files_list_nulstr(&files, ".conf", NULL, 0, conf_file_dirs);
                 if (r < 0) {
                         log_error_errno(r, "Failed to enumerate sysctl.d files: %m");
                         goto finish;

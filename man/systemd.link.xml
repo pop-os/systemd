@@ -79,7 +79,7 @@
     how the device should be configured. The first (in lexical order)
     of the link files that matches a given device is applied. Note
     that a default file <filename>99-default.link</filename> is
-    shipped by the system, any user-supplied
+    shipped by the system. Any user-supplied
     <filename>.link</filename> should hence have a lexically earlier
     name to be considered at all.</para>
 
@@ -332,6 +332,16 @@
           <varname>NamePolicy=</varname> fail, or in case
           <varname>NamePolicy=</varname> is missing or
           disabled.</para>
+
+          <para>Note that specifying a name that the kernel might use for another
+          interface (for example <literal>eth0</literal>) is dangerous because the
+          name assignment done by udev will race with the assignment done by the
+          kernel, and only one interface may use the name. Depending on the order of
+          operations, either udev or the kernel will win, making the naming
+          unpredictable. It is best to use some different prefix, for example
+          <literal>internal0</literal>/<literal>external0</literal> or
+          <literal>lan0</literal>/<literal>lan1</literal>/<literal>lan3</literal>.
+          </para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -386,9 +396,40 @@
               </listitem>
             </varlistentry>
             <varlistentry>
+              <term><literal>unicast</literal></term>
+              <listitem>
+                <para>Wake on unicast messages.</para>
+              </listitem>
+            </varlistentry>
+            <varlistentry>
+              <term><literal>multicast</literal></term>
+              <listitem>
+                <para>Wake on multicast messages.</para>
+              </listitem>
+            </varlistentry>
+            <varlistentry>
+              <term><literal>broadcast</literal></term>
+              <listitem>
+                <para>Wake on broadcast messages.</para>
+              </listitem>
+            </varlistentry>
+            <varlistentry>
+              <term><literal>arp</literal></term>
+              <listitem>
+                <para>Wake on ARP.</para>
+              </listitem>
+            </varlistentry>
+            <varlistentry>
               <term><literal>magic</literal></term>
               <listitem>
                 <para>Wake on receipt of a magic packet.
+                </para>
+              </listitem>
+            </varlistentry>
+            <varlistentry>
+              <term><literal>secureon</literal></term>
+              <listitem>
+                <para>Enable secureon(tm) password for MagicPacket(tm).
                 </para>
               </listitem>
             </varlistentry>
@@ -447,6 +488,14 @@
         <listitem>
           <para>The TCP Segmentation Offload (TSO) when true enables
           TCP segmentation offload. Takes a boolean value.
+          Defaults to "unset".</para>
+        </listitem>
+      </varlistentry>
+       <varlistentry>
+      <term><varname>TCP6SegmentationOffload=</varname></term>
+        <listitem>
+          <para>The TCP6 Segmentation Offload (tx-tcp6-segmentation) when true enables
+          TCP6 segmentation offload. Takes a boolean value.
           Defaults to "unset".</para>
         </listitem>
       </varlistentry>

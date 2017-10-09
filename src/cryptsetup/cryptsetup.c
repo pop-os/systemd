@@ -52,11 +52,13 @@ static bool arg_verify = false;
 static bool arg_discards = false;
 static bool arg_tcrypt_hidden = false;
 static bool arg_tcrypt_system = false;
+#ifdef CRYPT_TCRYPT_VERA_MODES
 static bool arg_tcrypt_veracrypt = false;
+#endif
 static char **arg_tcrypt_keyfiles = NULL;
 static uint64_t arg_offset = 0;
 static uint64_t arg_skip = 0;
-static usec_t arg_timeout = 0;
+static usec_t arg_timeout = USEC_INFINITY;
 
 /* Options Debian's crypttab knows we don't:
 
@@ -658,7 +660,7 @@ int main(int argc, char *argv[]) {
                 crypt_set_log_callback(cd, log_glue, NULL);
 
                 status = crypt_status(cd, argv[2]);
-                if (status == CRYPT_ACTIVE || status == CRYPT_BUSY) {
+                if (IN_SET(status, CRYPT_ACTIVE, CRYPT_BUSY)) {
                         log_info("Volume %s already active.", argv[2]);
                         r = 0;
                         goto finish;
@@ -670,10 +672,10 @@ int main(int argc, char *argv[]) {
                 if (arg_discards)
                         flags |= CRYPT_ACTIVATE_ALLOW_DISCARDS;
 
-                if (arg_timeout > 0)
-                        until = now(CLOCK_MONOTONIC) + arg_timeout;
-                else
+                if (arg_timeout == USEC_INFINITY)
                         until = 0;
+                else
+                        until = now(CLOCK_MONOTONIC) + arg_timeout;
 
                 arg_key_size = (arg_key_size > 0 ? arg_key_size : (256 / 8));
 

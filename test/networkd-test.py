@@ -334,7 +334,7 @@ DHCP=%s
 
             # check networkctl state
             out = subprocess.check_output(['networkctl'])
-            self.assertRegex(out, (r'%s\s+ether\s+routable\s+unmanaged' % self.if_router).encode())
+            self.assertRegex(out, (r'%s\s+ether\s+[a-z-]+\s+unmanaged' % self.if_router).encode())
             self.assertRegex(out, (r'%s\s+ether\s+routable\s+configured' % self.iface).encode())
 
             out = subprocess.check_output(['networkctl', 'status', self.iface])
@@ -752,7 +752,7 @@ DNS=192.168.5.1
 EOF
 
 # run networkd as in systemd-networkd.service
-exec $(systemctl cat systemd-networkd.service | sed -n '/^ExecStart=/ { s/^.*=//; p}')
+exec $(systemctl cat systemd-networkd.service | sed -n '/^ExecStart=/ { s/^.*=//; s/^[@+-]//; s/^!*//; p}')
 ''' % {'ifr': self.if_router, 'ifc': self.iface, 'addr6': ipv6 and 'Address=2600::1/64' or '',
        'dhopts': dhcpserver_opts or ''})
 

@@ -26,11 +26,11 @@
 #include <linux/random.h>
 #include <stdint.h>
 
-#ifdef HAVE_SYS_AUXV_H
+#if HAVE_SYS_AUXV_H
 #  include <sys/auxv.h>
 #endif
 
-#ifdef USE_SYS_RANDOM_H
+#if USE_SYS_RANDOM_H
 #  include <sys/random.h>
 #else
 #  include <linux/random.h>
@@ -64,7 +64,7 @@ int acquire_random_bytes(void *p, size_t n, bool high_quality_required) {
                         if ((size_t) r == n)
                                 return 0;
                         if (!high_quality_required) {
-                                /* Fill in the remaing bytes using pseudorandom values */
+                                /* Fill in the remaining bytes using pseudorandom values */
                                 pseudorandom_bytes((uint8_t*) p + r, n - r);
                                 return 0;
                         }
@@ -100,14 +100,14 @@ int acquire_random_bytes(void *p, size_t n, bool high_quality_required) {
 void initialize_srand(void) {
         static bool srand_called = false;
         unsigned x;
-#ifdef HAVE_SYS_AUXV_H
+#if HAVE_SYS_AUXV_H
         void *auxv;
 #endif
 
         if (srand_called)
                 return;
 
-#ifdef HAVE_SYS_AUXV_H
+#if HAVE_SYS_AUXV_H
         /* The kernel provides us with 16 bytes of entropy in auxv, so let's
          * try to make use of that to seed the pseudo-random generator. It's
          * better than nothing... */

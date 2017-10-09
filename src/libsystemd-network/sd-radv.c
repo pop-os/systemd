@@ -26,12 +26,14 @@
 
 #include "macro.h"
 #include "alloc-util.h"
+#include "dns-domain.h"
 #include "fd-util.h"
 #include "icmp6-util.h"
 #include "in-addr-util.h"
 #include "radv-internal.h"
 #include "socket-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "util.h"
 #include "random-util.h"
 
@@ -126,6 +128,9 @@ _public_ sd_radv *sd_radv_unref(sd_radv *ra) {
                 sd_radv_prefix_unref(p);
         }
 
+        free(ra->rdnss);
+        free(ra->dnssl);
+
         radv_reset(ra);
 
         sd_radv_detach_event(ra);
@@ -155,8 +160,8 @@ static int radv_send(sd_radv *ra, const struct in6_addr *dst,
                 .nd_opt_mtu_type = ND_OPT_MTU,
                 .nd_opt_mtu_len = 1,
         };
-        /* Reserve iov space for RA header, linkaddr, MTU + N prefixes */
-        struct iovec iov[3 + ra->n_prefixes];
+        /* Reserve iov space for RA header, linkaddr, MTU, N prefixes, RDNSS */
+        struct iovec iov[4 + ra->n_prefixes];
         struct msghdr msg = {
                 .msg_name = &dst_addr,
                 .msg_namelen = sizeof(dst_addr),
@@ -193,6 +198,18 @@ static int radv_send(sd_radv *ra, const struct in6_addr *dst,
         LIST_FOREACH(prefix, p, ra->prefixes) {
                 iov[msg.msg_iovlen].iov_base = &p->opt;
                 iov[msg.msg_iovlen].iov_len = sizeof(p->opt);
+                msg.msg_iovlen++;
+        }
+
+        if (ra->rdnss) {
+                iov[msg.msg_iovlen].iov_base = ra->rdnss;
+                iov[msg.msg_iovlen].iov_len = ra->rdnss->length * 8;
+                msg.msg_iovlen++;
+        }
+
+        if (ra->dnssl) {
+                iov[msg.msg_iovlen].iov_base = ra->dnssl;
+                iov[msg.msg_iovlen].iov_len = ra->dnssl->length * 8;
                 msg.msg_iovlen++;
         }
 
@@ -542,6 +559,94 @@ _public_ int sd_radv_add_prefix(sd_radv *ra, sd_radv_prefix *p) {
 
         (void) in_addr_to_string(AF_INET6, (union in_addr_union*) &p->opt.in6_addr, &addr_p);
         log_radv("Added prefix %s/%d", addr_p, p->opt.prefixlen);
+
+        return 0;
+}
+
+_public_ int sd_radv_set_rdnss(sd_radv *ra, uint32_t lifetime,
+                               const struct in6_addr *dns, size_t n_dns) {
+        _cleanup_free_ struct sd_radv_opt_dns *opt_rdnss = NULL;
+        size_t len;
+
+        assert_return(ra, -EINVAL);
+        assert_return(n_dns < 128, -EINVAL);
+
+        if (!dns || n_dns == 0) {
+                ra->rdnss = mfree(ra->rdnss);
+                ra->n_rdnss = 0;
+
+                return 0;
+        }
+
+        len = sizeof(struct sd_radv_opt_dns) + sizeof(struct in6_addr) * n_dns;
+
+        opt_rdnss = malloc0(len);
+        if (!opt_rdnss)
+                return -ENOMEM;
+
+        opt_rdnss->type = SD_RADV_OPT_RDNSS;
+        opt_rdnss->length = len / 8;
+        opt_rdnss->lifetime = htobe32(lifetime);
+
+        memcpy(opt_rdnss + 1, dns, n_dns * sizeof(struct in6_addr));
+
+        free(ra->rdnss);
+        ra->rdnss = opt_rdnss;
+        opt_rdnss = NULL;
+
+        ra->n_rdnss = n_dns;
+
+        return 0;
+}
+
+_public_ int sd_radv_set_dnssl(sd_radv *ra, uint32_t lifetime,
+                               char **search_list) {
+        _cleanup_free_ struct sd_radv_opt_dns *opt_dnssl = NULL;
+        size_t len = 0;
+        char **s;
+        uint8_t *p;
+
+        assert_return(ra, -EINVAL);
+
+        if (!search_list || *search_list == NULL) {
+                ra->dnssl = mfree(ra->dnssl);
+
+                return 0;
+        }
+
+        STRV_FOREACH(s, search_list)
+                len += strlen(*s) + 2;
+
+        len = (sizeof(struct sd_radv_opt_dns) + len + 7) & ~0x7;
+
+        opt_dnssl = malloc0(len);
+        if (!opt_dnssl)
+                return -ENOMEM;
+
+        opt_dnssl->type = SD_RADV_OPT_DNSSL;
+        opt_dnssl->length = len / 8;
+        opt_dnssl->lifetime = htobe32(lifetime);
+
+        p = (uint8_t *)(opt_dnssl + 1);
+        len -= sizeof(struct sd_radv_opt_dns);
+
+        STRV_FOREACH(s, search_list) {
+                int r;
+
+                r = dns_name_to_wire_format(*s, p, len, false);
+                if (r < 0)
+                        return r;
+
+                if (len < (size_t)r)
+                        return -ENOBUFS;
+
+                p += r;
+                len -= r;
+        }
+
+        free(ra->dnssl);
+        ra->dnssl = opt_dnssl;
+        opt_dnssl = NULL;
 
         return 0;
 }

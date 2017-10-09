@@ -74,6 +74,7 @@ static bool show_location = false;
 
 static bool upgrade_syslog_to_journal = false;
 static bool always_reopen_console = false;
+static bool open_when_needed = false;
 
 /* Akin to glibc's __abort_msg; which is private and we hence cannot
  * use here. */
@@ -84,7 +85,7 @@ void log_close_console(void) {
         if (console_fd < 0)
                 return;
 
-        if (getpid() == 1) {
+        if (getpid_cached() == 1) {
                 if (console_fd >= 3)
                         safe_close(console_fd);
 
@@ -140,7 +141,7 @@ static int create_log_socket(int type) {
         /* We need a blocking fd here since we'd otherwise lose
         messages way too early. However, let's not hang forever in the
         unlikely case of a deadlock. */
-        if (getpid() == 1)
+        if (getpid_cached() == 1)
                 timeval_store(&tv, 10 * USEC_PER_MSEC);
         else
                 timeval_store(&tv, 10 * USEC_PER_SEC);
@@ -248,7 +249,7 @@ int log_open(void) {
         }
 
         if (!IN_SET(log_target, LOG_TARGET_AUTO, LOG_TARGET_SAFE) ||
-            getpid() == 1 ||
+            getpid_cached() == 1 ||
             isatty(STDERR_FILENO) <= 0) {
 
                 if (IN_SET(log_target, LOG_TARGET_AUTO,
@@ -351,26 +352,26 @@ static int write_to_console(
 
         if (log_target == LOG_TARGET_CONSOLE_PREFIXED) {
                 xsprintf(prefix, "<%i>", level);
-                IOVEC_SET_STRING(iovec[n++], prefix);
+                iovec[n++] = IOVEC_MAKE_STRING(prefix);
         }
 
         highlight = LOG_PRI(level) <= LOG_ERR && show_color;
 
         if (show_location) {
                 snprintf(location, sizeof(location), "(%s:%i) ", file, line);
-                IOVEC_SET_STRING(iovec[n++], location);
+                iovec[n++] = IOVEC_MAKE_STRING(location);
         }
 
         if (highlight)
-                IOVEC_SET_STRING(iovec[n++], ANSI_HIGHLIGHT_RED);
-        IOVEC_SET_STRING(iovec[n++], buffer);
+                iovec[n++] = IOVEC_MAKE_STRING(ANSI_HIGHLIGHT_RED);
+        iovec[n++] = IOVEC_MAKE_STRING(buffer);
         if (highlight)
-                IOVEC_SET_STRING(iovec[n++], ANSI_NORMAL);
-        IOVEC_SET_STRING(iovec[n++], "\n");
+                iovec[n++] = IOVEC_MAKE_STRING(ANSI_NORMAL);
+        iovec[n++] = IOVEC_MAKE_STRING("\n");
 
         if (writev(console_fd, iovec, n) < 0) {
 
-                if (errno == EIO && getpid() == 1) {
+                if (errno == EIO && getpid_cached() == 1) {
 
                         /* If somebody tried to kick us from our
                          * console tty (via vhangup() or suchlike),
@@ -423,13 +424,13 @@ static int write_to_syslog(
         if (strftime(header_time, sizeof(header_time), "%h %e %T ", tm) <= 0)
                 return -EINVAL;
 
-        xsprintf(header_pid, "["PID_FMT"]: ", getpid());
+        xsprintf(header_pid, "["PID_FMT"]: ", getpid_cached());
 
-        IOVEC_SET_STRING(iovec[0], header_priority);
-        IOVEC_SET_STRING(iovec[1], header_time);
-        IOVEC_SET_STRING(iovec[2], program_invocation_short_name);
-        IOVEC_SET_STRING(iovec[3], header_pid);
-        IOVEC_SET_STRING(iovec[4], buffer);
+        iovec[0] = IOVEC_MAKE_STRING(header_priority);
+        iovec[1] = IOVEC_MAKE_STRING(header_time);
+        iovec[2] = IOVEC_MAKE_STRING(program_invocation_short_name);
+        iovec[3] = IOVEC_MAKE_STRING(header_pid);
+        iovec[4] = IOVEC_MAKE_STRING(buffer);
 
         /* When using syslog via SOCK_STREAM separate the messages by NUL chars */
         if (syslog_is_stream)
@@ -468,13 +469,13 @@ static int write_to_kmsg(
                 return 0;
 
         xsprintf(header_priority, "<%i>", level);
-        xsprintf(header_pid, "["PID_FMT"]: ", getpid());
+        xsprintf(header_pid, "["PID_FMT"]: ", getpid_cached());
 
-        IOVEC_SET_STRING(iovec[0], header_priority);
-        IOVEC_SET_STRING(iovec[1], program_invocation_short_name);
-        IOVEC_SET_STRING(iovec[2], header_pid);
-        IOVEC_SET_STRING(iovec[3], buffer);
-        IOVEC_SET_STRING(iovec[4], "\n");
+        iovec[0] = IOVEC_MAKE_STRING(header_priority);
+        iovec[1] = IOVEC_MAKE_STRING(program_invocation_short_name);
+        iovec[2] = IOVEC_MAKE_STRING(header_pid);
+        iovec[3] = IOVEC_MAKE_STRING(buffer);
+        iovec[4] = IOVEC_MAKE_STRING("\n");
 
         if (writev(kmsg_fd, iovec, ELEMENTSOF(iovec)) < 0)
                 return -errno;
@@ -547,10 +548,10 @@ static int write_to_journal(
 
         log_do_header(header, sizeof(header), level, error, file, line, func, object_field, object, extra_field, extra);
 
-        IOVEC_SET_STRING(iovec[0], header);
-        IOVEC_SET_STRING(iovec[1], "MESSAGE=");
-        IOVEC_SET_STRING(iovec[2], buffer);
-        IOVEC_SET_STRING(iovec[3], "\n");
+        iovec[0] = IOVEC_MAKE_STRING(header);
+        iovec[1] = IOVEC_MAKE_STRING("MESSAGE=");
+        iovec[2] = IOVEC_MAKE_STRING(buffer);
+        iovec[3] = IOVEC_MAKE_STRING("\n");
 
         mh.msg_iov = iovec;
         mh.msg_iovlen = ELEMENTSOF(iovec);
@@ -584,6 +585,9 @@ int log_dispatch_internal(
         /* Patch in LOG_DAEMON facility if necessary */
         if ((level & LOG_FACMASK) == 0)
                 level = log_facility | LOG_PRI(level);
+
+        if (open_when_needed)
+                log_open();
 
         do {
                 char *e;
@@ -639,6 +643,9 @@ int log_dispatch_internal(
 
                 buffer = e;
         } while (buffer);
+
+        if (open_when_needed)
+                log_close();
 
         return -error;
 }
@@ -804,6 +811,7 @@ noreturn void log_assert_failed_realm(
                 const char *file,
                 int line,
                 const char *func) {
+        log_open();
         log_assert(LOG_REALM_PLUS_LEVEL(realm, LOG_CRIT), text, file, line, func,
                    "Assertion '%s' failed at %s:%u, function %s(). Aborting.");
         abort();
@@ -815,6 +823,7 @@ noreturn void log_assert_failed_unreachable_realm(
                 const char *file,
                 int line,
                 const char *func) {
+        log_open();
         log_assert(LOG_REALM_PLUS_LEVEL(realm, LOG_CRIT), text, file, line, func,
                    "Code should not be reached '%s' at %s:%u, function %s(). Aborting.");
         abort();
@@ -832,9 +841,8 @@ void log_assert_failed_return_realm(
 }
 
 int log_oom_internal(LogRealm realm, const char *file, int line, const char *func) {
-        log_internal_realm(LOG_REALM_PLUS_LEVEL(realm, LOG_ERR),
-                           ENOMEM, file, line, func, "Out of memory.");
-        return -ENOMEM;
+        return log_internal_realm(LOG_REALM_PLUS_LEVEL(realm, LOG_ERR),
+                                  ENOMEM, file, line, func, "Out of memory.");
 }
 
 int log_format_iovec(
@@ -870,7 +878,7 @@ int log_format_iovec(
                  * the next format string */
                 VA_FORMAT_ADVANCE(format, ap);
 
-                IOVEC_SET_STRING(iovec[(*n)++], m);
+                iovec[(*n)++] = IOVEC_MAKE_STRING(m);
 
                 if (newline_separator) {
                         iovec[*n].iov_base = (char*) &nl;
@@ -891,9 +899,9 @@ int log_struct_internal(
                 const char *func,
                 const char *format, ...) {
 
+        LogRealm realm = LOG_REALM_REMOVE_LEVEL(level);
         char buf[LINE_MAX];
         bool found = false;
-        LogRealm realm = LOG_REALM_REMOVE_LEVEL(level);
         PROTECT_ERRNO;
         va_list ap;
 
@@ -909,38 +917,48 @@ int log_struct_internal(
         if ((level & LOG_FACMASK) == 0)
                 level = log_facility | LOG_PRI(level);
 
-        if (IN_SET(log_target, LOG_TARGET_AUTO,
-                               LOG_TARGET_JOURNAL_OR_KMSG,
-                               LOG_TARGET_JOURNAL) &&
-            journal_fd >= 0) {
-                char header[LINE_MAX];
-                struct iovec iovec[17] = {};
-                unsigned n = 0, i;
-                int r;
-                struct msghdr mh = {
-                        .msg_iov = iovec,
-                };
-                bool fallback = false;
+        if (IN_SET(log_target,
+                   LOG_TARGET_AUTO,
+                   LOG_TARGET_JOURNAL_OR_KMSG,
+                   LOG_TARGET_JOURNAL)) {
 
-                /* If the journal is available do structured logging */
-                log_do_header(header, sizeof(header), level, error, file, line, func, NULL, NULL, NULL, NULL);
-                IOVEC_SET_STRING(iovec[n++], header);
+                if (open_when_needed)
+                        log_open_journal();
 
-                va_start(ap, format);
-                r = log_format_iovec(iovec, ELEMENTSOF(iovec), &n, true, error, format, ap);
-                if (r < 0)
-                        fallback = true;
-                else {
-                        mh.msg_iovlen = n;
-                        (void) sendmsg(journal_fd, &mh, MSG_NOSIGNAL);
+                if (journal_fd >= 0) {
+                        char header[LINE_MAX];
+                        struct iovec iovec[17] = {};
+                        unsigned n = 0, i;
+                        int r;
+                        struct msghdr mh = {
+                                .msg_iov = iovec,
+                        };
+                        bool fallback = false;
+
+                        /* If the journal is available do structured logging */
+                        log_do_header(header, sizeof(header), level, error, file, line, func, NULL, NULL, NULL, NULL);
+                        iovec[n++] = IOVEC_MAKE_STRING(header);
+
+                        va_start(ap, format);
+                        r = log_format_iovec(iovec, ELEMENTSOF(iovec), &n, true, error, format, ap);
+                        if (r < 0)
+                                fallback = true;
+                        else {
+                                mh.msg_iovlen = n;
+                                (void) sendmsg(journal_fd, &mh, MSG_NOSIGNAL);
+                        }
+
+                        va_end(ap);
+                        for (i = 1; i < n; i += 2)
+                                free(iovec[i].iov_base);
+
+                        if (!fallback) {
+                                if (open_when_needed)
+                                        log_close();
+
+                                return -error;
+                        }
                 }
-
-                va_end(ap);
-                for (i = 1; i < n; i += 2)
-                        free(iovec[i].iov_base);
-
-                if (!fallback)
-                        return -error;
         }
 
         /* Fallback if journal logging is not available or didn't work. */
@@ -967,10 +985,81 @@ int log_struct_internal(
         }
         va_end(ap);
 
-        if (!found)
+        if (!found) {
+                if (open_when_needed)
+                        log_close();
+
                 return -error;
+        }
 
         return log_dispatch_internal(level, error, file, line, func, NULL, NULL, NULL, NULL, buf + 8);
+}
+
+int log_struct_iovec_internal(
+                int level,
+                int error,
+                const char *file,
+                int line,
+                const char *func,
+                const struct iovec input_iovec[],
+                size_t n_input_iovec) {
+
+        LogRealm realm = LOG_REALM_REMOVE_LEVEL(level);
+        PROTECT_ERRNO;
+        size_t i;
+        char *m;
+
+        if (error < 0)
+                error = -error;
+
+        if (_likely_(LOG_PRI(level) > log_max_level[realm]))
+                return -error;
+
+        if (log_target == LOG_TARGET_NULL)
+                return -error;
+
+        if ((level & LOG_FACMASK) == 0)
+                level = log_facility | LOG_PRI(level);
+
+        if (IN_SET(log_target, LOG_TARGET_AUTO,
+                               LOG_TARGET_JOURNAL_OR_KMSG,
+                               LOG_TARGET_JOURNAL) &&
+            journal_fd >= 0) {
+
+                struct iovec iovec[1 + n_input_iovec*2];
+                char header[LINE_MAX];
+                struct msghdr mh = {
+                        .msg_iov = iovec,
+                        .msg_iovlen = 1 + n_input_iovec*2,
+                };
+
+                log_do_header(header, sizeof(header), level, error, file, line, func, NULL, NULL, NULL, NULL);
+                iovec[0] = IOVEC_MAKE_STRING(header);
+
+                for (i = 0; i < n_input_iovec; i++) {
+                        iovec[1+i*2] = input_iovec[i];
+                        iovec[1+i*2+1] = IOVEC_MAKE_STRING("\n");
+                }
+
+                if (sendmsg(journal_fd, &mh, MSG_NOSIGNAL) >= 0)
+                        return -error;
+        }
+
+        for (i = 0; i < n_input_iovec; i++) {
+                if (input_iovec[i].iov_len < strlen("MESSAGE="))
+                        continue;
+
+                if (memcmp(input_iovec[i].iov_base, "MESSAGE=", strlen("MESSAGE=")) == 0)
+                        break;
+        }
+
+        if (_unlikely_(i >= n_input_iovec)) /* Couldn't find MESSAGE=? */
+                return -error;
+
+        m = strndupa(input_iovec[i].iov_base + strlen("MESSAGE="),
+                     input_iovec[i].iov_len - strlen("MESSAGE="));
+
+        return log_dispatch_internal(level, error, file, line, func, NULL, NULL, NULL, NULL, m);
 }
 
 int log_set_target_from_string(const char *e) {
@@ -1152,10 +1241,6 @@ void log_received_signal(int level, const struct signalfd_siginfo *si) {
 
 }
 
-void log_set_upgrade_syslog_to_journal(bool b) {
-        upgrade_syslog_to_journal = b;
-}
-
 int log_syntax_internal(
                 const char *unit,
                 int level,
@@ -1189,7 +1274,7 @@ int log_syntax_internal(
         va_end(ap);
 
         if (unit)
-                unit_fmt = getpid() == 1 ? "UNIT=%s" : "USER_UNIT=%s";
+                unit_fmt = getpid_cached() == 1 ? "UNIT=%s" : "USER_UNIT=%s";
 
         return log_struct_internal(
                         LOG_REALM_PLUS_LEVEL(LOG_REALM_SYSTEMD, level),
@@ -1203,6 +1288,14 @@ int log_syntax_internal(
                         NULL);
 }
 
+void log_set_upgrade_syslog_to_journal(bool b) {
+        upgrade_syslog_to_journal = b;
+}
+
 void log_set_always_reopen_console(bool b) {
         always_reopen_console = b;
+}
+
+void log_set_open_when_needed(bool b) {
+        open_when_needed = b;
 }

@@ -38,7 +38,7 @@ static int node_vtable_get_userdata(
                 sd_bus_error *error) {
 
         sd_bus_slot *s;
-        void *u;
+        void *u, *found_u;
         int r;
 
         assert(bus);
@@ -50,7 +50,7 @@ static int node_vtable_get_userdata(
         if (c->find) {
                 bus->current_slot = sd_bus_slot_ref(s);
                 bus->current_userdata = u;
-                r = c->find(bus, path, c->interface, u, &u, error);
+                r = c->find(bus, path, c->interface, u, &found_u, error);
                 bus->current_userdata = NULL;
                 bus->current_slot = sd_bus_slot_unref(s);
 
@@ -60,10 +60,11 @@ static int node_vtable_get_userdata(
                         return -sd_bus_error_get_errno(error);
                 if (r == 0)
                         return r;
-        }
+        } else
+                found_u = u;
 
         if (userdata)
-                *userdata = u;
+                *userdata = found_u;
 
         return 1;
 }
@@ -752,7 +753,7 @@ static int vtable_append_all_properties(
                 return 1;
 
         for (v = c->vtable+1; v->type != _SD_BUS_VTABLE_END; v++) {
-                if (v->type != _SD_BUS_VTABLE_PROPERTY && v->type != _SD_BUS_VTABLE_WRITABLE_PROPERTY)
+                if (!IN_SET(v->type, _SD_BUS_VTABLE_PROPERTY, _SD_BUS_VTABLE_WRITABLE_PROPERTY))
                         continue;
 
                 if (v->flags & SD_BUS_VTABLE_HIDDEN)
@@ -828,6 +829,9 @@ static int property_get_all_callbacks_run(
                 if (bus->nodes_modified)
                         return 0;
         }
+
+        if (!*found_object)
+                return 0;
 
         if (!found_interface) {
                 r = sd_bus_reply_method_errorf(
@@ -955,7 +959,7 @@ static int process_introspect(
                 if (!streq_ptr(previous_interface, c->interface)) {
 
                         if (previous_interface)
-                                fputs(" </interface>\n", intro.f);
+                                fputs_unlocked(" </interface>\n", intro.f);
 
                         fprintf(intro.f, " <interface name=\"%s\">\n", c->interface);
                 }
@@ -968,7 +972,7 @@ static int process_introspect(
         }
 
         if (previous_interface)
-                fputs(" </interface>\n", intro.f);
+                fputs_unlocked(" </interface>\n", intro.f);
 
         if (empty) {
                 /* Nothing?, let's see if we exist at all, and if not
@@ -1996,7 +2000,7 @@ static int emit_properties_changed_on_interface(
                          * as changing in the message. */
 
                         for (v = c->vtable+1; v->type != _SD_BUS_VTABLE_END; v++) {
-                                if (v->type != _SD_BUS_VTABLE_PROPERTY && v->type != _SD_BUS_VTABLE_WRITABLE_PROPERTY)
+                                if (!IN_SET(v->type, _SD_BUS_VTABLE_PROPERTY, _SD_BUS_VTABLE_WRITABLE_PROPERTY))
                                         continue;
 
                                 if (v->flags & SD_BUS_VTABLE_HIDDEN)
@@ -2067,7 +2071,7 @@ static int emit_properties_changed_on_interface(
                                 const sd_bus_vtable *v;
 
                                 for (v = c->vtable+1; v->type != _SD_BUS_VTABLE_END; v++) {
-                                        if (v->type != _SD_BUS_VTABLE_PROPERTY && v->type != _SD_BUS_VTABLE_WRITABLE_PROPERTY)
+                                        if (!IN_SET(v->type, _SD_BUS_VTABLE_PROPERTY, _SD_BUS_VTABLE_WRITABLE_PROPERTY))
                                                 continue;
 
                                         if (v->flags & SD_BUS_VTABLE_HIDDEN)

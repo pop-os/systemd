@@ -11,6 +11,7 @@ want_html = want_html != 'false' and xsltproc.found()
 xsltproc_flags = [
         '--nonet',
         '--xinclude',
+        '--maxdepth', '9000',
         '--stringparam', 'man.output.quietly', '1',
         '--stringparam', 'funcsynopsis.style', 'ansi',
         '--stringparam', 'man.authors.section.enabled', '0',
@@ -50,7 +51,7 @@ foreach tuple : manpages
 
         mandirn = join_paths(get_option('mandir'), 'man' + section)
 
-        if condition == '' or conf.get(condition, false)
+        if condition == '' or conf.get(condition) == 1
                 p1 = custom_target(
                         man,
                         input : xml,
@@ -170,10 +171,10 @@ man = custom_target(
         depends : man_pages,
         command : ['echo'])
 
-html = run_target(
+html = custom_target(
         'html',
-        depends : html_pages,
         output : 'html',
+        depends : html_pages,
         command : ['echo'])
 
 run_target(
@@ -191,14 +192,15 @@ run_target(
 ############################################################
 
 if git.found()
-        run_target(
+        custom_target(
                 'update-man-rules',
+                output : 'update-man-rules',
                 # slightly strange syntax because of
                 # https://github.com/mesonbuild/meson/issues/1643
                 # and https://github.com/mesonbuild/meson/issues/1512
                 command : ['sh', '-c',
                            'cd @0@ && '.format(meson.build_root()) +
-                           'python3 @0@/tools/make-man-rules.py --meson `git ls-files ":/man/*.xml"` >t && '.format(meson.source_root()) +
+                           'python3 @0@/tools/make-man-rules.py `git ls-files ":/man/*.xml"` >t && '.format(meson.source_root()) +
                            'mv t @0@/rules/meson.build'.format(meson.current_source_dir())],
                 depend_files : custom_entities_ent)
 endif

@@ -66,7 +66,7 @@ static int arg_seal = false;
 static int http_socket = -1, https_socket = -1;
 static char** arg_gnutls_log = NULL;
 
-static JournalWriteSplitMode arg_split_mode = JOURNAL_WRITE_SPLIT_HOST;
+static JournalWriteSplitMode arg_split_mode = _JOURNAL_WRITE_SPLIT_INVALID;
 static char* arg_output = NULL;
 
 static char *arg_key = NULL;
@@ -86,7 +86,7 @@ static int spawn_child(const char* child, char** argv) {
         if (pipe(fd) < 0)
                 return log_error_errno(errno, "Failed to create pager pipe: %m");
 
-        parent_pid = getpid();
+        parent_pid = getpid_cached();
 
         child_pid = fork();
         if (child_pid < 0) {
@@ -644,13 +644,13 @@ static int setup_microhttpd_server(RemoteServer *s,
                 { MHD_OPTION_END},
                 { MHD_OPTION_END},
                 { MHD_OPTION_END},
+                { MHD_OPTION_END},
                 { MHD_OPTION_END}};
         int opts_pos = 4;
         int flags =
                 MHD_USE_DEBUG |
                 MHD_USE_DUAL_STACK |
                 MHD_USE_EPOLL |
-                MHD_USE_PEDANTIC_CHECKS |
                 MHD_USE_ITC;
 
         const union MHD_DaemonInfo *info;
@@ -663,6 +663,20 @@ static int setup_microhttpd_server(RemoteServer *s,
         if (r < 0)
                 return log_error_errno(r, "Failed to make fd:%d nonblocking: %m", fd);
 
+/* MHD_OPTION_STRICT_FOR_CLIENT is introduced in microhttpd 0.9.54,
+ * and MHD_USE_PEDANTIC_CHECKS will be deprecated in future.
+ * If MHD_USE_PEDANTIC_CHECKS is '#define'd, then it is deprecated
+ * and we should use MHD_OPTION_STRICT_FOR_CLIENT. On the other hand,
+ * if MHD_USE_PEDANTIC_CHECKS is not '#define'd, then it is not
+ * deprecated yet and there exists an enum element with the same name.
+ * So we can safely use it. */
+#ifdef MHD_USE_PEDANTIC_CHECKS
+        opts[opts_pos++] = (struct MHD_OptionItem)
+                {MHD_OPTION_STRICT_FOR_CLIENT, 1};
+#else
+        flags |= MHD_USE_PEDANTIC_CHECKS;
+#endif
+
         if (key) {
                 assert(cert);
 
@@ -671,7 +685,7 @@ static int setup_microhttpd_server(RemoteServer *s,
                 opts[opts_pos++] = (struct MHD_OptionItem)
                         {MHD_OPTION_HTTPS_MEM_CERT, 0, (char*) cert};
 
-                flags |= MHD_USE_SSL;
+                flags |= MHD_USE_TLS;
 
                 if (trust)
                         opts[opts_pos++] = (struct MHD_OptionItem)
@@ -1370,7 +1384,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (streq(optarg, "all"))
                                 arg_trust_all = true;
                         else {
-#ifdef HAVE_GNUTLS
+#if HAVE_GNUTLS
                                 arg_trust = strdup(optarg);
                                 if (!arg_trust)
                                         return log_oom();
@@ -1428,7 +1442,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_GNUTLS_LOG: {
-#ifdef HAVE_GNUTLS
+#if HAVE_GNUTLS
                         const char* p = optarg;
                         for (;;) {
                                 _cleanup_free_ char *word = NULL;
@@ -1478,13 +1492,26 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
                 }
 
+                if (!IN_SET(arg_split_mode, JOURNAL_WRITE_SPLIT_NONE, _JOURNAL_WRITE_SPLIT_INVALID)) {
+                        log_error("For active sources, only --split-mode=none is allowed.");
+                        return -EINVAL;
+                }
+
                 arg_split_mode = JOURNAL_WRITE_SPLIT_NONE;
         }
 
-        if (arg_split_mode == JOURNAL_WRITE_SPLIT_NONE
-            && arg_output && is_dir(arg_output, true) > 0) {
-                log_error("For SplitMode=none, output must be a file.");
-                return -EINVAL;
+        if (arg_split_mode == _JOURNAL_WRITE_SPLIT_INVALID)
+                arg_split_mode = JOURNAL_WRITE_SPLIT_HOST;
+
+        if (arg_split_mode == JOURNAL_WRITE_SPLIT_NONE && arg_output) {
+                if (is_dir(arg_output, true) > 0) {
+                        log_error("For SplitMode=none, output must be a file.");
+                        return -EINVAL;
+                }
+                if (!endswith(arg_output, ".journal")) {
+                        log_error("For SplitMode=none, output file name must end with .journal.");
+                        return -EINVAL;
+                }
         }
 
         if (arg_split_mode == JOURNAL_WRITE_SPLIT_HOST
@@ -1564,7 +1591,7 @@ int main(int argc, char **argv) {
                 log_debug("Watchdog is %sd.", enable_disable(r > 0));
 
         log_debug("%s running as pid "PID_FMT,
-                  program_invocation_short_name, getpid());
+                  program_invocation_short_name, getpid_cached());
         sd_notify(false,
                   "READY=1\n"
                   "STATUS=Processing requests...");

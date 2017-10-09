@@ -30,6 +30,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fstab-util.h"
+#include "mount-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -330,7 +331,12 @@ static int parse_argv(int argc, char *argv[]) {
                         return -EINVAL;
                 }
 
-                if (arg_transport == BUS_TRANSPORT_LOCAL) {
+                if (arg_mount_type && (fstype_is_api_vfs(arg_mount_type) || fstype_is_network(arg_mount_type))) {
+                        arg_mount_what = strdup(argv[optind]);
+                        if (!arg_mount_what)
+                                return log_oom();
+
+                } else if (arg_transport == BUS_TRANSPORT_LOCAL) {
                         _cleanup_free_ char *u = NULL, *p = NULL;
 
                         u = fstab_node_to_udev_node(argv[optind]);
@@ -344,9 +350,8 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_mount_what = canonicalize_file_name(p);
                         if (!arg_mount_what)
                                 return log_error_errno(errno, "Failed to canonicalize path: %m");
-
                 } else {
-                        arg_mount_what = strdup(argv[optind+1]);
+                        arg_mount_what = strdup(argv[optind]);
                         if (!arg_mount_what)
                                 return log_oom();
 
@@ -993,14 +998,19 @@ static int action_umount(
 
                 r = path_make_absolute_cwd(u, &a);
                 if (r < 0) {
-                        r2 = log_error_errno(r, "Failed to make path absolute: %m");
+                        r2 = log_error_errno(r, "Failed to make path %s absolute: %m", argv[i]);
                         continue;
                 }
 
                 p = canonicalize_file_name(a);
 
+                if (!p) {
+                        r2 = log_error_errno(errno, "Failed to canonicalize path %s: %m", argv[i]);
+                        continue;
+                }
+
                 if (stat(p, &st) < 0)
-                        return log_error_errno(errno, "Can't stat %s: %m", p);
+                        return log_error_errno(errno, "Can't stat %s (from %s): %m", p, argv[i]);
 
                 if (S_ISBLK(st.st_mode))
                         r = umount_by_device(bus, p);
@@ -1009,7 +1019,7 @@ static int action_umount(
                 else if (S_ISDIR(st.st_mode))
                         r = stop_mounts(bus, p);
                 else {
-                        log_error("Invalid file type: %s", p);
+                        log_error("Invalid file type: %s (from %s)", p, argv[i]);
                         r = -EINVAL;
                 }
 

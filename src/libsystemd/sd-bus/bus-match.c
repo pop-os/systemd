@@ -453,7 +453,7 @@ static int bus_match_add_compare_value(
         int r;
 
         assert(where);
-        assert(where->type == BUS_MATCH_ROOT || where->type == BUS_MATCH_VALUE);
+        assert(IN_SET(where->type, BUS_MATCH_ROOT, BUS_MATCH_VALUE));
         assert(BUS_MATCH_IS_COMPARE(t));
         assert(ret);
 
@@ -567,7 +567,7 @@ static int bus_match_find_compare_value(
         struct bus_match_node *c, *n;
 
         assert(where);
-        assert(where->type == BUS_MATCH_ROOT || where->type == BUS_MATCH_VALUE);
+        assert(IN_SET(where->type, BUS_MATCH_ROOT, BUS_MATCH_VALUE));
         assert(BUS_MATCH_IS_COMPARE(t));
         assert(ret);
 
@@ -601,7 +601,7 @@ static int bus_match_add_leaf(
         struct bus_match_node *n;
 
         assert(where);
-        assert(where->type == BUS_MATCH_ROOT || where->type == BUS_MATCH_VALUE);
+        assert(IN_SET(where->type, BUS_MATCH_ROOT, BUS_MATCH_VALUE));
         assert(callback);
 
         n = new0(struct bus_match_node, 1);
@@ -631,7 +631,7 @@ static int bus_match_find_leaf(
         struct bus_match_node *c;
 
         assert(where);
-        assert(where->type == BUS_MATCH_ROOT || where->type == BUS_MATCH_VALUE);
+        assert(IN_SET(where->type, BUS_MATCH_ROOT, BUS_MATCH_VALUE));
         assert(ret);
 
         for (c = where->child; c; c = c->next) {
@@ -957,18 +957,18 @@ char *bus_match_to_string(struct bus_match_component *components, unsigned n_com
                 char buf[32];
 
                 if (i != 0)
-                        fputc(',', f);
+                        fputc_unlocked(',', f);
 
-                fputs(bus_match_node_type_to_string(components[i].type, buf, sizeof(buf)), f);
-                fputc('=', f);
-                fputc('\'', f);
+                fputs_unlocked(bus_match_node_type_to_string(components[i].type, buf, sizeof(buf)), f);
+                fputc_unlocked('=', f);
+                fputc_unlocked('\'', f);
 
                 if (components[i].type == BUS_MATCH_MESSAGE_TYPE)
-                        fputs(bus_message_type_to_string(components[i].value_u8), f);
+                        fputs_unlocked(bus_message_type_to_string(components[i].value_u8), f);
                 else
-                        fputs(components[i].value_str, f);
+                        fputs_unlocked(components[i].value_str, f);
 
-                fputc('\'', f);
+                fputc_unlocked('\'', f);
         }
 
         r = fflush_and_check(f);

@@ -472,14 +472,14 @@ int bind_remount_recursive_with_mountinfo(const char *prefix, bool ro, char **bl
                 while ((x = set_steal_first(todo))) {
 
                         r = set_consume(done, x);
-                        if (r == -EEXIST || r == 0)
+                        if (IN_SET(r, 0, -EEXIST))
                                 continue;
                         if (r < 0)
                                 return r;
 
                         /* Deal with mount points that are obstructed by a later mount */
                         r = path_is_mount_point(x, NULL, 0);
-                        if (r == -ENOENT || r == 0)
+                        if (IN_SET(r, 0, -ENOENT))
                                 continue;
                         if (r < 0)
                                 return r;
@@ -526,30 +526,67 @@ int mount_move_root(const char *path) {
 }
 
 bool fstype_is_network(const char *fstype) {
-        static const char table[] =
-                "afs\0"
-                "cifs\0"
-                "smbfs\0"
-                "sshfs\0"
-                "ncpfs\0"
-                "ncp\0"
-                "nfs\0"
-                "nfs4\0"
-                "gfs\0"
-                "gfs2\0"
-                "glusterfs\0"
-                "pvfs2\0" /* OrangeFS */
-                "ocfs2\0"
-                "lustre\0"
-                ;
-
         const char *x;
 
         x = startswith(fstype, "fuse.");
         if (x)
                 fstype = x;
 
-        return nulstr_contains(table, fstype);
+        return STR_IN_SET(fstype,
+                          "afs",
+                          "cifs",
+                          "smbfs",
+                          "sshfs",
+                          "ncpfs",
+                          "ncp",
+                          "nfs",
+                          "nfs4",
+                          "gfs",
+                          "gfs2",
+                          "glusterfs",
+                          "pvfs2", /* OrangeFS */
+                          "ocfs2",
+                          "lustre");
+}
+
+bool fstype_is_api_vfs(const char *fstype) {
+        return STR_IN_SET(fstype,
+                          "autofs",
+                          "bpf",
+                          "cgroup",
+                          "cgroup2",
+                          "configfs",
+                          "cpuset",
+                          "debugfs",
+                          "devpts",
+                          "devtmpfs",
+                          "efivarfs",
+                          "fusectl",
+                          "hugetlbfs",
+                          "mqueue",
+                          "proc",
+                          "pstore",
+                          "ramfs",
+                          "securityfs",
+                          "sysfs",
+                          "tmpfs",
+                          "tracefs");
+}
+
+bool fstype_is_ro(const char *fstype) {
+        /* All Linux file systems that are necessarily read-only */
+        return STR_IN_SET(fstype,
+                          "DM_verity_hash",
+                          "iso9660",
+                          "squashfs");
+}
+
+bool fstype_can_discard(const char *fstype) {
+        return STR_IN_SET(fstype,
+                          "btrfs",
+                          "ext4",
+                          "vfat",
+                          "xfs");
 }
 
 int repeat_unmount(const char *path, int flags) {

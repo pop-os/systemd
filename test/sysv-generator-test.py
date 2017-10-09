@@ -26,14 +26,9 @@ import tempfile
 import shutil
 from glob import glob
 import collections
+from configparser import RawConfigParser
 
-try:
-    from configparser import RawConfigParser
-except ImportError:
-    # python 2
-    from ConfigParser import RawConfigParser
-
-sysv_generator = os.path.join(os.environ.get('builddir', '.'), 'systemd-sysv-generator')
+sysv_generator = './systemd-sysv-generator'
 
 class MultiDict(collections.OrderedDict):
     def __setitem__(self, key, value):
@@ -153,7 +148,8 @@ class SysvGeneratorTest(unittest.TestCase):
             link = os.path.join(self.out_dir, '%s.target.wants' % target, unit)
             if target in targets:
                 unit_file = os.readlink(link)
-                self.assertTrue(os.path.exists(unit_file))
+                # os.path.exists() will fail on a dangling symlink
+                self.assertTrue(os.path.exists(link))
                 self.assertEqual(os.path.basename(unit_file), unit)
             else:
                 self.assertFalse(os.path.exists(link),

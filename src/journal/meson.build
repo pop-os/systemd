@@ -20,7 +20,7 @@ journal_internal_sources = files('''
         sd-journal.c
 '''.split())
 
-if conf.get('HAVE_GCRYPT', false)
+if conf.get('HAVE_GCRYPT') == 1
         journal_internal_sources += files('''
                 journal-authenticate.c
                 journal-authenticate.h
@@ -36,7 +36,7 @@ endif
 audit_type_includes = [config_h,
                        missing_h,
                        'linux/audit.h']
-if conf.get('HAVE_AUDIT', false)
+if conf.get('HAVE_AUDIT') == 1
         audit_type_includes += 'libaudit.h'
 endif
 
@@ -59,24 +59,26 @@ journal_internal_sources += [audit_type_to_name]
 ############################################################
 
 libjournal_core_sources = files('''
-        journald-kmsg.c
-        journald-kmsg.h
-        journald-syslog.c
-        journald-syslog.h
-        journald-stream.c
-        journald-stream.h
-        journald-server.c
-        journald-server.h
-        journald-console.c
-        journald-console.h
-        journald-wall.c
-        journald-wall.h
-        journald-native.c
-        journald-native.h
         journald-audit.c
         journald-audit.h
+        journald-console.c
+        journald-console.h
+        journald-context.c
+        journald-context.h
+        journald-kmsg.c
+        journald-kmsg.h
+        journald-native.c
+        journald-native.h
         journald-rate-limit.c
         journald-rate-limit.h
+        journald-server.c
+        journald-server.h
+        journald-stream.c
+        journald-stream.h
+        journald-syslog.c
+        journald-syslog.h
+        journald-wall.c
+        journald-wall.h
         journal-internal.h
 '''.split())
 
@@ -95,7 +97,7 @@ systemd_cat_sources = files('cat.c')
 
 journalctl_sources = files('journalctl.c')
 
-if conf.get('HAVE_QRENCODE', false)
+if conf.get('HAVE_QRENCODE') == 1
         journalctl_sources += files('journal-qrcode.c',
                                     'journal-qrcode.h')
 endif

@@ -42,7 +42,7 @@
 #include "util.h"
 #include "virt.h"
 
-#ifdef ENABLE_EFI
+#if ENABLE_EFI
 
 #define LOAD_OPTION_ACTIVE            0x00000001
 #define MEDIA_DEVICE_PATH                   0x04
@@ -269,7 +269,7 @@ int efi_set_variable(
         _cleanup_close_ int fd = -1;
 
         assert(name);
-        assert(value);
+        assert(value || size == 0);
 
         if (asprintf(&p,
                      "/sys/firmware/efi/efivars/%s-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",

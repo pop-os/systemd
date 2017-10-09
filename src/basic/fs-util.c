@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <linux/magic.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -307,7 +308,7 @@ int fd_warn_permissions(const char *path, int fd) {
         if (st.st_mode & 0002)
                 log_warning("Configuration file %s is marked world-writable. Please remove world writability permission bits. Proceeding anyway.", path);
 
-        if (getpid() == 1 && (st.st_mode & 0044) != 0044)
+        if (getpid_cached() == 1 && (st.st_mode & 0044) != 0044)
                 log_warning("Configuration file %s is marked world-inaccessible. This has no effect as configuration data is accessible via APIs without restrictions. Proceeding anyway.", path);
 
         return 0;
@@ -323,7 +324,7 @@ int touch_file(const char *path, bool parents, usec_t stamp, uid_t uid, gid_t gi
                 mkdir_parents(path, 0755);
 
         fd = open(path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY,
-                        (mode == 0 || mode == MODE_INVALID) ? 0644 : mode);
+                  IN_SET(mode, 0, MODE_INVALID) ? 0644 : mode);
         if (fd < 0)
                 return -errno;
 
@@ -358,22 +359,25 @@ int touch(const char *path) {
 }
 
 int symlink_idempotent(const char *from, const char *to) {
-        _cleanup_free_ char *p = NULL;
         int r;
 
         assert(from);
         assert(to);
 
         if (symlink(from, to) < 0) {
+                _cleanup_free_ char *p = NULL;
+
                 if (errno != EEXIST)
                         return -errno;
 
                 r = readlink_malloc(to, &p);
-                if (r < 0)
+                if (r == -EINVAL) /* Not a symlink? In that case return the original error we encountered: -EEXIST */
+                        return -EEXIST;
+                if (r < 0) /* Any other error? In that case propagate it as is */
                         return r;
 
-                if (!streq(p, from))
-                        return -EINVAL;
+                if (!streq(p, from)) /* Not the symlink we want it to be? In that case, propagate the original -EEXIST */
+                        return -EEXIST;
         }
 
         return 0;
@@ -721,6 +725,9 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
 
                 if (fstat(child, &st) < 0)
                         return -errno;
+                if ((flags & CHASE_NO_AUTOFS) &&
+                    fd_check_fstype(child, AUTOFS_SUPER_MAGIC) > 0)
+                        return -EREMOTE;
 
                 if (S_ISLNK(st.st_mode)) {
                         char *joined;

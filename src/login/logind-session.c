@@ -45,6 +45,7 @@
 #include "terminal-util.h"
 #include "user-util.h"
 #include "util.h"
+#include "process-util.h"
 
 #define RELEASE_USEC (20*USEC_PER_SEC)
 
@@ -82,6 +83,7 @@ Session* session_new(Manager *m, const char *id) {
         s->manager = m;
         s->fifo_fd = -1;
         s->vtfd = -1;
+        s->audit_id = AUDIT_SESSION_INVALID;
 
         return s;
 }
@@ -280,10 +282,10 @@ int session_save(Session *s) {
         if (!s->vtnr)
                 fprintf(f, "POSITION=%u\n", s->position);
 
-        if (s->leader > 0)
+        if (pid_is_valid(s->leader))
                 fprintf(f, "LEADER="PID_FMT"\n", s->leader);
 
-        if (s->audit_id > 0)
+        if (audit_session_is_valid(s->audit_id))
                 fprintf(f, "AUDIT=%"PRIu32"\n", s->audit_id);
 
         if (dual_timestamp_is_set(&s->timestamp))
@@ -459,9 +461,8 @@ int session_load(Session *s) {
         }
 
         if (leader) {
-                k = parse_pid(leader, &s->leader);
-                if (k >= 0)
-                        audit_session_from_pid(s->leader, &s->audit_id);
+                if (parse_pid(leader, &s->leader) >= 0)
+                        (void) audit_session_from_pid(s->leader, &s->audit_id);
         }
 
         if (type) {
@@ -1136,7 +1137,7 @@ void session_restore_vt(Session *s) {
         };
 
         _cleanup_free_ char *utf8 = NULL;
-        int vt, kb, old_fd;
+        int vt, old_fd;
 
         /* We need to get a fresh handle to the virtual terminal,
          * since the old file-descriptor is potentially in a hung-up
@@ -1155,12 +1156,7 @@ void session_restore_vt(Session *s) {
 
         (void) ioctl(vt, KDSETMODE, KD_TEXT);
 
-        if (read_one_line_file("/sys/module/vt/parameters/default_utf8", &utf8) >= 0 && *utf8 == '1')
-                kb = K_UNICODE;
-        else
-                kb = K_XLATE;
-
-        (void) ioctl(vt, KDSKBMODE, kb);
+        (void) vt_reset_keyboard(vt);
 
         (void) ioctl(vt, VT_SETMODE, &mode);
         (void) fchown(vt, 0, (gid_t) -1);

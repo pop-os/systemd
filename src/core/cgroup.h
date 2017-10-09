@@ -21,9 +21,10 @@
 
 #include <stdbool.h>
 
+#include "cgroup-util.h"
+#include "ip-address-access.h"
 #include "list.h"
 #include "time-util.h"
-#include "cgroup-util.h"
 
 typedef struct CGroupContext CGroupContext;
 typedef struct CGroupDeviceAllow CGroupDeviceAllow;
@@ -87,6 +88,7 @@ struct CGroupContext {
         bool blockio_accounting;
         bool memory_accounting;
         bool tasks_accounting;
+        bool ip_accounting;
 
         /* For unified hierarchy */
         uint64_t cpu_weight;
@@ -102,6 +104,9 @@ struct CGroupContext {
         uint64_t memory_high;
         uint64_t memory_max;
         uint64_t memory_swap_max;
+
+        LIST_HEAD(IPAddressAccessItem, ip_address_allow);
+        LIST_HEAD(IPAddressAccessItem, ip_address_deny);
 
         /* For legacy hierarchies */
         uint64_t cpu_shares;
@@ -122,6 +127,16 @@ struct CGroupContext {
 
         bool delegate;
 };
+
+/* Used when querying IP accounting data */
+typedef enum CGroupIPAccountingMetric {
+        CGROUP_IP_INGRESS_BYTES,
+        CGROUP_IP_INGRESS_PACKETS,
+        CGROUP_IP_EGRESS_BYTES,
+        CGROUP_IP_EGRESS_PACKETS,
+        _CGROUP_IP_ACCOUNTING_METRIC_MAX,
+        _CGROUP_IP_ACCOUNTING_METRIC_INVALID = -1,
+} CGroupIPAccountingMetric;
 
 #include "unit.h"
 
@@ -145,6 +160,8 @@ CGroupMask unit_get_subtree_mask(Unit *u);
 CGroupMask unit_get_target_mask(Unit *u);
 CGroupMask unit_get_enable_mask(Unit *u);
 
+bool unit_get_needs_bpf(Unit *u);
+
 void unit_update_cgroup_members_masks(Unit *u);
 
 char *unit_default_cgroup_path(Unit *u);
@@ -155,12 +172,14 @@ void unit_release_cgroup(Unit *u);
 void unit_prune_cgroup(Unit *u);
 int unit_watch_cgroup(Unit *u);
 
+void unit_add_to_cgroup_empty_queue(Unit *u);
+
 int unit_attach_pids_to_cgroup(Unit *u);
 
 int manager_setup_cgroup(Manager *m);
 void manager_shutdown_cgroup(Manager *m, bool delete);
 
-unsigned manager_dispatch_cgroup_queue(Manager *m);
+unsigned manager_dispatch_cgroup_realize_queue(Manager *m);
 
 Unit *manager_get_unit_by_cgroup(Manager *m, const char *cgroup);
 Unit *manager_get_unit_by_pid_cgroup(Manager *m, pid_t pid);
@@ -172,14 +191,21 @@ int unit_watch_all_pids(Unit *u);
 int unit_get_memory_current(Unit *u, uint64_t *ret);
 int unit_get_tasks_current(Unit *u, uint64_t *ret);
 int unit_get_cpu_usage(Unit *u, nsec_t *ret);
-int unit_reset_cpu_usage(Unit *u);
+int unit_get_ip_accounting(Unit *u, CGroupIPAccountingMetric metric, uint64_t *ret);
 
-bool unit_cgroup_delegate(Unit *u);
+int unit_reset_cpu_accounting(Unit *u);
+int unit_reset_ip_accounting(Unit *u);
 
-int unit_notify_cgroup_empty(Unit *u);
+#define UNIT_CGROUP_BOOL(u, name)                       \
+        ({                                              \
+        CGroupContext *cc = unit_get_cgroup_context(u); \
+        cc ? cc->name : false;                          \
+        })
+
 int manager_notify_cgroup_empty(Manager *m, const char *group);
 
 void unit_invalidate_cgroup(Unit *u, CGroupMask m);
+void unit_invalidate_cgroup_bpf(Unit *u);
 
 void manager_invalidate_startup_units(Manager *m);
 

@@ -44,6 +44,9 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(FILE*, endmntent);
 #define _cleanup_endmntent_ _cleanup_(endmntentp)
 
 bool fstype_is_network(const char *fstype);
+bool fstype_is_api_vfs(const char *fstype);
+bool fstype_is_ro(const char *fsype);
+bool fstype_can_discard(const char *fstype);
 
 union file_handle_union {
         struct file_handle handle;

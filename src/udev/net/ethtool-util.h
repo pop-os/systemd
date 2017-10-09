@@ -37,7 +37,12 @@ typedef enum Duplex {
 
 typedef enum WakeOnLan {
         WOL_PHY,
+        WOL_UCAST,
+        WOL_MCAST,
+        WOL_BCAST,
+        WOL_ARP,
         WOL_MAGIC,
+        WOL_MAGICSECURE,
         WOL_OFF,
         _WOL_MAX,
         _WOL_INVALID = -1
@@ -48,6 +53,7 @@ typedef enum NetDevFeature {
         NET_DEV_FEAT_GRO,
         NET_DEV_FEAT_LRO,
         NET_DEV_FEAT_TSO,
+        NET_DEV_FEAT_TSO6,
         NET_DEV_FEAT_UFO,
         _NET_DEV_FEAT_MAX,
         _NET_DEV_FEAT_INVALID = -1

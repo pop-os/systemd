@@ -34,6 +34,7 @@
 #include "networkd-lldp-tx.h"
 #include "networkd-ipv6-proxy-ndp.h"
 #include "networkd-route.h"
+#include "networkd-routing-policy-rule.h"
 #include "networkd-util.h"
 #include "netdev/netdev.h"
 
@@ -43,12 +44,12 @@
 #define BRIDGE_VLAN_BITMAP_MAX 4096
 #define BRIDGE_VLAN_BITMAP_LEN (BRIDGE_VLAN_BITMAP_MAX / 32)
 
-typedef enum DCHPClientIdentifier {
+typedef enum DHCPClientIdentifier {
         DHCP_CLIENT_ID_MAC,
         DHCP_CLIENT_ID_DUID,
         _DHCP_CLIENT_ID_MAX,
         _DHCP_CLIENT_ID_INVALID = -1,
-} DCHPClientIdentifier;
+} DHCPClientIdentifier;
 
 typedef enum IPv6PrivacyExtensions {
         /* The values map to the kernel's /proc/sys/net/ipv6/conf/xxx/use_tempaddr values */
@@ -122,12 +123,13 @@ struct Network {
 
         /* DHCP Client Support */
         AddressFamilyBoolean dhcp;
-        DCHPClientIdentifier dhcp_client_identifier;
+        DHCPClientIdentifier dhcp_client_identifier;
         char *dhcp_vendor_class_identifier;
         char *dhcp_hostname;
         unsigned dhcp_route_metric;
         uint32_t dhcp_route_table;
         uint16_t dhcp_client_port;
+        bool dhcp_anonymize;
         bool dhcp_send_hostname;
         bool dhcp_broadcast;
         bool dhcp_critical;
@@ -137,6 +139,7 @@ struct Network {
         bool dhcp_use_routes;
         bool dhcp_use_timezone;
         bool dhcp_use_hostname;
+        bool dhcp_route_table_set;
         DHCPUseDomains dhcp_use_domains;
 
         /* DHCP Server Support */
@@ -164,6 +167,10 @@ struct Network {
         uint8_t router_preference;
         bool router_managed;
         bool router_other_information;
+        usec_t router_dns_lifetime_usec;
+        struct in6_addr *router_dns;
+        unsigned n_router_dns;
+        char **router_search_domains;
 
         /* Bridge Support */
         bool use_bpdu;
@@ -201,6 +208,7 @@ struct Network {
         size_t mtu;
         int arp;
         bool unmanaged;
+        bool configure_without_carrier;
         uint32_t iaid;
         DUID duid;
 
@@ -213,6 +221,7 @@ struct Network {
         LIST_HEAD(IPv6ProxyNDPAddress, ipv6_proxy_ndp_addresses);
         LIST_HEAD(AddressLabel, address_labels);
         LIST_HEAD(Prefix, static_prefixes);
+        LIST_HEAD(RoutingPolicyRule, rules);
 
         unsigned n_static_addresses;
         unsigned n_static_routes;
@@ -220,12 +229,14 @@ struct Network {
         unsigned n_ipv6_proxy_ndp_addresses;
         unsigned n_address_labels;
         unsigned n_static_prefixes;
+        unsigned n_rules;
 
         Hashmap *addresses_by_section;
         Hashmap *routes_by_section;
         Hashmap *fdb_entries_by_section;
         Hashmap *address_labels_by_section;
         Hashmap *prefixes_by_section;
+        Hashmap *rules_by_section;
 
         struct in_addr_data *dns;
         unsigned n_dns;
@@ -250,6 +261,7 @@ int network_load(Manager *manager);
 int network_get_by_name(Manager *manager, const char *name, Network **ret);
 int network_get(Manager *manager, struct udev_device *device, const char *ifname, const struct ether_addr *mac, Network **ret);
 int network_apply(Network *network, Link *link);
+void network_apply_anonymize_if_set(Network *network);
 
 bool network_has_static_ipv6_addresses(Network *network);
 
@@ -264,6 +276,8 @@ int config_parse_ipv6_privacy_extensions(const char *unit, const char *filename,
 int config_parse_hostname(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_timezone(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_dhcp_server_dns(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+int config_parse_radv_dns(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+int config_parse_radv_search_domains(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_dhcp_server_ntp(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_dnssec_negative_trust_anchors(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
 int config_parse_dhcp_use_domains(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);

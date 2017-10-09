@@ -59,7 +59,7 @@ int parse_pid(const char *s, pid_t* ret_pid) {
         if ((unsigned long) pid != ul)
                 return -ERANGE;
 
-        if (pid <= 0)
+        if (!pid_is_valid(pid))
                 return -ERANGE;
 
         *ret_pid = pid;
@@ -152,7 +152,7 @@ int parse_size(const char *t, uint64_t base, uint64_t *size) {
         unsigned n_entries, start_pos = 0;
 
         assert(t);
-        assert(base == 1000 || base == 1024);
+        assert(IN_SET(base, 1000, 1024));
         assert(size);
 
         if (base == 1000) {

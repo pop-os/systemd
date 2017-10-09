@@ -261,6 +261,7 @@ static void test_make_relative(void) {
 
         assert_se(path_make_relative("some/relative/path", "/some/path", &result) < 0);
         assert_se(path_make_relative("/some/path", "some/relative/path", &result) < 0);
+        assert_se(path_make_relative("/some/dotdot/../path", "/some/path", &result) < 0);
 
 #define test(from_dir, to_path, expected) {                \
                 _cleanup_free_ char *z = NULL;             \
@@ -274,6 +275,7 @@ static void test_make_relative(void) {
         test("/some/path", "/some/path/in/subdir", "in/subdir");
         test("/some/path", "/", "../..");
         test("/some/path", "/some/other/path", "../other/path");
+        test("/some/path/./dot", "/some/further/path", "../../further/path");
         test("//extra/////slashes///won't////fool///anybody//", "////extra///slashes////are/just///fine///", "../../../are/just/fine");
 }
 
@@ -588,6 +590,21 @@ static void test_systemd_installation_has_version(const char *path) {
         }
 }
 
+static void test_skip_dev_prefix(void) {
+
+        assert_se(streq(skip_dev_prefix("/"), "/"));
+        assert_se(streq(skip_dev_prefix("/dev"), ""));
+        assert_se(streq(skip_dev_prefix("/dev/"), ""));
+        assert_se(streq(skip_dev_prefix("/dev/foo"), "foo"));
+        assert_se(streq(skip_dev_prefix("/dev/foo/bar"), "foo/bar"));
+        assert_se(streq(skip_dev_prefix("//dev"), ""));
+        assert_se(streq(skip_dev_prefix("//dev//"), ""));
+        assert_se(streq(skip_dev_prefix("/dev///foo"), "foo"));
+        assert_se(streq(skip_dev_prefix("///dev///foo///bar"), "foo///bar"));
+        assert_se(streq(skip_dev_prefix("//foo"), "//foo"));
+        assert_se(streq(skip_dev_prefix("foo"), "foo"));
+}
+
 int main(int argc, char **argv) {
         log_set_max_level(LOG_DEBUG);
         log_parse_environment();
@@ -607,6 +624,7 @@ int main(int argc, char **argv) {
         test_file_in_same_dir();
         test_filename_is_valid();
         test_hidden_or_backup_file();
+        test_skip_dev_prefix();
 
         test_systemd_installation_has_version(argv[1]); /* NULL is OK */
 

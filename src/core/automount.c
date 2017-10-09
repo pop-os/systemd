@@ -251,8 +251,7 @@ static void automount_set_state(Automount *a, AutomountState state) {
         if (state != AUTOMOUNT_RUNNING)
                 automount_stop_expire(a);
 
-        if (state != AUTOMOUNT_WAITING &&
-            state != AUTOMOUNT_RUNNING)
+        if (!IN_SET(state, AUTOMOUNT_WAITING, AUTOMOUNT_RUNNING))
                 unmount_autofs(a);
 
         if (state != old_state)
@@ -324,6 +323,9 @@ static void automount_enter_dead(Automount *a, AutomountResult f) {
 
         if (a->result == AUTOMOUNT_SUCCESS)
                 a->result = f;
+
+        if (a->result != AUTOMOUNT_SUCCESS)
+                log_unit_warning(UNIT(a), "Failed with result '%s'.", automount_result_to_string(a->result));
 
         automount_set_state(a, a->result != AUTOMOUNT_SUCCESS ? AUTOMOUNT_FAILED : AUTOMOUNT_DEAD);
 }
@@ -529,7 +531,6 @@ static void automount_trigger_notify(Unit *u, Unit *other) {
         if (IN_SET(MOUNT(other)->state,
                    MOUNT_MOUNTING, MOUNT_MOUNTING_DONE,
                    MOUNT_MOUNTED, MOUNT_REMOUNTING,
-                   MOUNT_MOUNTING_SIGTERM, MOUNT_MOUNTING_SIGKILL,
                    MOUNT_REMOUNTING_SIGTERM, MOUNT_REMOUNTING_SIGKILL,
                    MOUNT_UNMOUNTING_SIGTERM, MOUNT_UNMOUNTING_SIGKILL,
                    MOUNT_FAILED)) {
@@ -543,7 +544,6 @@ static void automount_trigger_notify(Unit *u, Unit *other) {
         /* The mount is in some unhappy state now, let's unfreeze any waiting clients */
         if (IN_SET(MOUNT(other)->state,
                    MOUNT_DEAD, MOUNT_UNMOUNTING,
-                   MOUNT_MOUNTING_SIGTERM, MOUNT_MOUNTING_SIGKILL,
                    MOUNT_REMOUNTING_SIGTERM, MOUNT_REMOUNTING_SIGKILL,
                    MOUNT_UNMOUNTING_SIGTERM, MOUNT_UNMOUNTING_SIGKILL,
                    MOUNT_FAILED)) {
@@ -590,7 +590,7 @@ static void automount_enter_waiting(Automount *a) {
         }
 
         xsprintf(options, "fd=%i,pgrp="PID_FMT",minproto=5,maxproto=5,direct", p[1], getpgrp());
-        xsprintf(name, "systemd-"PID_FMT, getpid());
+        xsprintf(name, "systemd-"PID_FMT, getpid_cached());
         if (mount(name, a->where, "autofs", 0, options) < 0) {
                 r = -errno;
                 goto fail;
@@ -803,7 +803,7 @@ static int automount_start(Unit *u) {
         int r;
 
         assert(a);
-        assert(a->state == AUTOMOUNT_DEAD || a->state == AUTOMOUNT_FAILED);
+        assert(IN_SET(a->state, AUTOMOUNT_DEAD, AUTOMOUNT_FAILED));
 
         if (path_is_mount_point(a->where, NULL, 0) > 0) {
                 log_unit_error(u, "Path %s is already a mount point, refusing start.", a->where);
@@ -835,7 +835,7 @@ static int automount_stop(Unit *u) {
         Automount *a = AUTOMOUNT(u);
 
         assert(a);
-        assert(a->state == AUTOMOUNT_WAITING || a->state == AUTOMOUNT_RUNNING);
+        assert(IN_SET(a->state, AUTOMOUNT_WAITING, AUTOMOUNT_RUNNING));
 
         automount_enter_dead(a, AUTOMOUNT_SUCCESS);
         return 1;

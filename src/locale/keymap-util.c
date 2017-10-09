@@ -39,7 +39,7 @@ static bool startswith_comma(const char *s, const char *prefix) {
         if (!s)
                 return false;
 
-        return *s == ',' || *s == '\0';
+        return IN_SET(*s, ',', '\0');
 }
 
 static const char* strnulldash(const char *s) {
@@ -177,7 +177,7 @@ static int x11_read_data(Context *c) {
                 char_array_0(line);
                 l = strstrip(line);
 
-                if (l[0] == 0 || l[0] == '#')
+                if (IN_SET(l[0], 0, '#'))
                         continue;
 
                 if (in_section && first_word(l, "Option")) {
@@ -361,12 +361,12 @@ int x11_write_data(Context *c) {
 
         fchmod(fileno(f), 0644);
 
-        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
-              "# probably wise not to edit this file manually. Use localectl(1) to\n"
-              "# instruct systemd-localed to update it.\n"
-              "Section \"InputClass\"\n"
-              "        Identifier \"system-keyboard\"\n"
-              "        MatchIsKeyboard \"on\"\n", f);
+        fputs_unlocked("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
+                       "# probably wise not to edit this file manually. Use localectl(1) to\n"
+                       "# instruct systemd-localed to update it.\n"
+                       "Section \"InputClass\"\n"
+                       "        Identifier \"system-keyboard\"\n"
+                       "        MatchIsKeyboard \"on\"\n", f);
 
         if (!isempty(c->x11_layout))
                 fprintf(f, "        Option \"XkbLayout\" \"%s\"\n", c->x11_layout);
@@ -380,9 +380,9 @@ int x11_write_data(Context *c) {
         if (!isempty(c->x11_options))
                 fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
 
-        fputs("EndSection\n", f);
+        fputs_unlocked("EndSection\n", f);
 
-        r = fflush_and_check(f);
+        r = fflush_sync_and_check(f);
         if (r < 0)
                 goto fail;
 
@@ -394,8 +394,6 @@ int x11_write_data(Context *c) {
         return 0;
 
 fail:
-        (void) unlink("/etc/X11/xorg.conf.d/00-keyboard.conf");
-
         if (temp_path)
                 (void) unlink(temp_path);
 
@@ -427,7 +425,7 @@ static int read_next_mapping(const char* filename,
                 (*n)++;
 
                 l = strstrip(line);
-                if (l[0] == 0 || l[0] == '#')
+                if (IN_SET(l[0], 0, '#'))
                         continue;
 
                 r = strv_split_extract(&b, l, WHITESPACE, EXTRACT_QUOTES);
