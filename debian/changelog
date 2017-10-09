@@ -1,3 +1,29 @@
+systemd (235-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 235
+    - cryptsetup-generator: use remote-cryptsetup.target when _netdev is
+      present (Closes: #852534)
+    - tmpfiles: change btmp mode 0600 → 0660 (Closes: #870638)
+    - networkd: For IPv6 addresses do not treat IFA_F_DEPRECATED as not ready
+      (Closes: #869995)
+    - exec-util,conf-files: skip non-executable files in execute_directories()
+      (Closes: #867902)
+    - man: update udevadm -y/--sysname-match documentation (Closes: #865081)
+    - tmpfiles: silently ignore any path that passes through autofs
+      (Closes: #805553)
+    - shared: end string with % if one was found at the end of a expandible
+      string (Closes: #865450)
+
+  [ Martin Pitt ]
+  * Merge logind-kill-off autopkgtest into logind test.
+    This was horribly inefficient as a separate test (from commit
+    6bd0dab41e), as that cost two VM resets plus accompanying boots; and
+    this does not change any state thus does not require this kind of
+    isolation.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 10 Oct 2017 00:23:28 +0200
+
 systemd (234-3) unstable; urgency=medium
 
   [ Martin Pitt ]
