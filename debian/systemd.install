@@ -51,6 +51,7 @@ usr/share/systemd/kbd-model-map
 usr/share/systemd/language-fallback-map
 usr/lib/binfmt.d/
 usr/lib/environment.d/
+usr/lib/modprobe.d/
 usr/lib/modules-load.d/
 usr/lib/sysctl.d/
 # FIXME: ship this once we generate a proper Debianized basic.conf
