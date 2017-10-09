@@ -11,7 +11,7 @@ See https://github.com/systemd/systemd/issues/6353
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/timesync/meson.build b/src/timesync/meson.build
-index 4391afa..04022a8 100644
+index 690af95..12ea018 100644
 --- a/src/timesync/meson.build
 +++ b/src/timesync/meson.build
 @@ -38,5 +38,5 @@ tests += [

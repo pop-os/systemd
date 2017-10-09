@@ -14,7 +14,7 @@ Bug-Debian: https://bugs.debian.org/773528
  1 file changed, 5 deletions(-)
 
 diff --git a/src/journal/journald-audit.c b/src/journal/journald-audit.c
-index a433c91..a86f87b 100644
+index 3334418..71825a1 100644
 --- a/src/journal/journald-audit.c
 +++ b/src/journal/journald-audit.c
 @@ -555,10 +555,5 @@ int server_open_audit(Server *s) {
