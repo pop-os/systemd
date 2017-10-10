@@ -23,3 +23,4 @@ debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Mark-test-timesync-as-manual.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
+debian/Revert-tests-when-running-a-manager-object-in-a-test-migr.patch
