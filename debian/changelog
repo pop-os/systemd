@@ -1,4 +1,4 @@
-systemd (235-1) UNRELEASED; urgency=medium
+systemd (235-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 235
@@ -14,6 +14,10 @@ systemd (235-1) UNRELEASED; urgency=medium
       (Closes: #805553)
     - shared: end string with % if one was found at the end of a expandible
       string (Closes: #865450)
+  * Refresh patches
+  * Bump Build-Depends on libmount-dev to (>= 2.30)
+  * Install new modprobe.d config file
+  * Bump Standards-Version to 4.1.1
 
   [ Martin Pitt ]
   * Merge logind-kill-off autopkgtest into logind test.
@@ -22,7 +26,7 @@ systemd (235-1) UNRELEASED; urgency=medium
     this does not change any state thus does not require this kind of
     isolation.
 
- -- Michael Biebl <biebl@debian.org>  Tue, 10 Oct 2017 00:23:28 +0200
+ -- Michael Biebl <biebl@debian.org>  Tue, 10 Oct 2017 18:29:28 +0200
 
 systemd (234-3) unstable; urgency=medium
 
