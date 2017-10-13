@@ -361,7 +361,7 @@ Description: libudev development files
 
 Package: udev-udeb
 Build-Profiles: <!noudeb>
-XC-Package-Type: udeb
+Package-Type: udeb
 Section: debian-installer
 Priority: optional
 Architecture: linux-any
