@@ -217,6 +217,11 @@ override_dh_install:
 	rm -f debian/install/*/lib/systemd/system/*sysusers*.service debian/install/*/lib/systemd/system/*/*sysusers*.service
 	# dropped in upstream master/235
 	-install -D -m 644 debian/install/deb/usr/lib/tmpfiles.d/systemd-remote.conf debian/systemd-journal-remote/usr/lib/tmpfiles.d/systemd-remote.conf
+	# make it work with old and new path to not break CI
+	# https://github.com/systemd/systemd/pull/7149
+	-install -D -m 644 debian/install/deb/usr/lib/modprobe.d/systemd.conf debian/systemd/lib/modprobe.d/systemd.conf
+	-install -D -m 644 debian/install/deb/lib/modprobe.d/systemd.conf debian/systemd/lib/modprobe.d/systemd.conf
+	find debian/install -name modprobe.d | xargs rm -rf
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
