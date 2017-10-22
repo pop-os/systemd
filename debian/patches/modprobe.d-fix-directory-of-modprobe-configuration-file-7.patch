@@ -1,0 +1,28 @@
+From: Michael Biebl <mbiebl@gmail.com>
+Date: Sat, 21 Oct 2017 08:32:50 +0200
+Subject: modprobe.d: fix directory of modprobe configuration file (#7149)
+
+kmod upstream uses /lib/modprobe.d which means we need to use rootprefix
+instead of prefix for installing the modprobe configuration file as
+otherwise split-usr systems are broken.
+
+See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=879191
+
+(cherry picked from commit 02fa054dc44916f4840e2020a5ebac3042d4bf65)
+---
+ meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/meson.build b/meson.build
+index c717707..dcf05f6 100644
+--- a/meson.build
++++ b/meson.build
+@@ -83,7 +83,7 @@ polkitpkladir = join_paths(localstatedir, 'lib/polkit-1/localauthority/10-vendor
+ varlogdir = join_paths(localstatedir, 'log')
+ xinitrcdir = join_paths(sysconfdir, 'X11/xinit/xinitrc.d')
+ rpmmacrosdir = get_option('rpmmacrosdir')
+-modprobedir = join_paths(prefixdir, 'lib/modprobe.d')
++modprobedir = join_paths(rootprefixdir, 'lib/modprobe.d')
+ 
+ # Our own paths
+ pkgdatadir = join_paths(datadir, 'systemd')
