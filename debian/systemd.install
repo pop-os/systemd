@@ -12,6 +12,7 @@ bin/systemd-tmpfiles
 bin/systemd-inhibit
 bin/systemd-escape
 bin/systemd-sysusers
+lib/modprobe.d/
 lib/systemd/
 lib/udev/rules.d/70-uaccess.rules
 lib/udev/rules.d/73-seat-late.rules

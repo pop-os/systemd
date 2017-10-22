@@ -27,3 +27,4 @@ debian/Add-env-variable-for-machine-ID-path.patch
 debian/Mark-test-timesync-as-manual.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
 debian/Revert-tests-when-running-a-manager-object-in-a-test-migr.patch
+modprobe.d-fix-directory-of-modprobe-configuration-file-7.patch
