@@ -37,3 +37,4 @@ debian/Ubuntu-resolved-resolvconf-integration.patch
 debian/Ubuntu-Ship-modprobe.d-drop-in-to-set-bonding-max_bonds-to-0.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
+CVE-2017-15908.patch

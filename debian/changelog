@@ -1,3 +1,12 @@
+systemd (234-2ubuntu12.1) artful-security; urgency=medium
+
+  * SECURITY UPDATE: remote DoS in resolve (LP: #1725351)
+    - debian/patches/CVE-2017-15908.patch: fix loop on packets with pseudo
+      dns types in src/resolve/resolved-dns-packet.c.
+    - CVE-2017-15908
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Thu, 26 Oct 2017 07:56:42 -0400
+
 systemd (234-2ubuntu12) artful; urgency=medium
 
   [ Dimitri John Ledkov ]
