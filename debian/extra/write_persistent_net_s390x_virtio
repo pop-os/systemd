@@ -32,6 +32,7 @@ fi
 
 for interface in /sys/class/net/eth*
 do
+    [ -d $interface ] || continue
     name=$(basename $interface)
     address=$(cat $interface/address)
     cat <<EOF >>$rulesfile
