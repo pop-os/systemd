@@ -13,8 +13,8 @@ Fixes #6281
 (cherry picked from commit e4945f3a577ac9233c0e71349b6c139899e742fc)
 ---
  src/basic/missing.h |  8 ++++++++
- src/core/execute.c  | 15 +++++++++++----
- 2 files changed, 19 insertions(+), 4 deletions(-)
+ src/core/execute.c  | 14 ++++++++++----
+ 2 files changed, 18 insertions(+), 4 deletions(-)
 
 diff --git a/src/basic/missing.h b/src/basic/missing.h
 index 352d2b0..8e1d45e 100644
@@ -36,15 +36,14 @@ index 352d2b0..8e1d45e 100644
  #define KEYCTL_READ 11
  #endif
 diff --git a/src/core/execute.c b/src/core/execute.c
-index 03fff99..46e1c44 100644
+index 03fff99..e6512b9 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
-@@ -2399,12 +2399,16 @@ static int setup_keyring(
+@@ -2399,12 +2399,15 @@ static int setup_keyring(
                  uid_t uid, gid_t gid) {
  
          key_serial_t keyring;
 +        key_serial_t key;
-+        int r;
          int r;
  
          assert(u);
@@ -56,7 +55,7 @@ index 03fff99..46e1c44 100644
          /* Let's set up a new per-service "session" kernel keyring for each system service. This has the benefit that
           * each service runs with its own keyring shared among all processes of the service, but with no hook-up beyond
           * that scope, and in particular no link to the per-UID keyring. If we don't do this the keyring will be
-@@ -2434,8 +2438,6 @@ static int setup_keyring(
+@@ -2434,8 +2437,6 @@ static int setup_keyring(
  
          /* Populate they keyring with the invocation ID by default. */
          if (!sd_id128_is_null(u->invocation_id)) {
@@ -65,17 +64,17 @@ index 03fff99..46e1c44 100644
                  key = add_key("user", "invocation_id", &u->invocation_id, sizeof(u->invocation_id), KEY_SPEC_SESSION_KEYRING);
                  if (key == -1)
                          log_unit_debug_errno(u, errno, "Failed to add invocation ID to keyring, ignoring: %m");
-@@ -2449,8 +2451,13 @@ static int setup_keyring(
+@@ -2449,8 +2450,13 @@ static int setup_keyring(
  
          /* And now, make the keyring owned by the service's user */
          if (uid_is_valid(uid) || gid_is_valid(gid))
 -                if (keyctl(KEYCTL_CHOWN, keyring, uid, gid, 0) < 0)
 -                        return log_unit_error_errno(u, errno, "Failed to change ownership of session keyring: %m");
 +                if (keyctl(KEYCTL_CHOWN, keyring, uid, gid, 0) < 0) {
-+                        log_unit_error_errno(errno, "Failed to change ownership of session keyring: %m");
++                        log_unit_error_errno(u, errno, "Failed to change ownership of session keyring: %m");
 +                        /* well, the kernel didn't - cause the kernel is borked */
 +                        if (keyctl(KEYCTL_UNLINK, key, keyring, 0, 0) < 0)
-+                                log_unit_debug_errno(errno, "Failed to unlink (clean-up) key, after failing to change ownership: %m");
++                                log_unit_debug_errno(u, errno, "Failed to unlink (clean-up) key, after failing to change ownership: %m");
 +                        return 0;
 +                }
  
