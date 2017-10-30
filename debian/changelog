@@ -1,3 +1,43 @@
+systemd (235-2ubuntu1) bionic; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * Merge 235-2 from debian:
+    - Drop all upstream cherry-picks
+    - Drop test-copy dh_strip size override, fixed upstream
+
+  * Remaining delta from Debian:
+    - ship dhclient enter hook for dhclient integration with resolved
+    - ship resolvconf integration via stub-resolv.conf
+    - ship s390x virtio interface names migration
+    - do not disable systemd-resolved upon libnss-resolve removal
+    - do not remote fs in containers, for non-degrated boot
+    - CVE-2017-15908 in resolved fix loop on packets with pseudo dns types
+    - Unlink invocation id key, upon chown failure in containers
+    - Change default to UseDomains by default
+    - Do not treat failure to set Nice= setting as error in containers
+    - Add a condition to systemd-journald-audit.socet to not start in
+      containers (fails)
+    - Build without any built-in/fallback DNS server setting
+    - Enable resolved by default
+    - Update autopkgtests for reliability/raciness, and testing for typical
+      defaults
+    - Always upgrade udev, when running adt tests
+    - Skip test-execute on armhf
+
+  * Fix up write_persistent_net_s390x for nullglob
+
+  * Ship systemd sysctl settings.
+    Patch systemd's default sysctl settings to drop things that are set
+    elsewhere already. The promote secondary IP addresses is required for
+    networkd to successfully renew DHCP leases with a change of an IP address.
+    Set default package scheduler to Fair Queue CoDel. (LP: #1721223)
+
+  [ Michael Biebl ]
+  * Install modprobe configuration file to /lib/modprobe.d.
+    Otherwise it is not read by kmod. (Closes: #879191)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 30 Oct 2017 17:20:54 +0000
+
 systemd (235-2) unstable; urgency=medium
 
   * Revert "tests: when running a manager object in a test, migrate to private
