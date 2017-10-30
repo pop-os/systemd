@@ -79,10 +79,14 @@ enum {
         EXIT_APPARMOR_PROFILE,
         EXIT_ADDRESS_FAMILIES,
         EXIT_RUNTIME_DIRECTORY,
-        EXIT_MAKE_STARTER,
+        _EXIT_RESERVED2, /* used to be used by kdbus, don't reuse */
         EXIT_CHOWN,
         EXIT_SMACK_PROCESS_LABEL,
         EXIT_KEYRING,
+        EXIT_STATE_DIRECTORY,
+        EXIT_CACHE_DIRECTORY,
+        EXIT_LOGS_DIRECTORY, /* 240 */
+        EXIT_CONFIGURATION_DIRECTORY,
 };
 
 typedef enum ExitStatusLevel {

@@ -7,12 +7,16 @@ set -e
 # "Failed to install /usr/libexec/selinux/hll/pp"
 BLACKLIST="TEST-06-SELINUX"
 
-# modify the image build scripts to install systemd from the debs instead of
-# from a "make install" as we don't have a built tree here. Also call
-# systemd-nspawn from the system.
-sed -i '/make.* install/ s%^.*$%    for p in `grep ^Package: '`pwd`'/debian/control | cut -f2 -d\\  |grep -Ev -- "-(udeb|dev)"`; do (cd /tmp; apt-get download $p \&\& dpkg-deb --fsys-tarfile ${p}[._]*deb | tar -C $initdir --dereference -x); done%; s_../../systemd-nspawn_systemd-nspawn_g' test/test-functions
+# quiesce Makefile.guess; not really relevant as systemd/nspawn run from
+# installed packages
+export BUILD_DIR=.
 
-# FIXME: avoid building the entire tree when running tests
+# modify the image build scripts to install systemd from the debs instead of
+# from a "make/ninja install" as we don't have a built tree here. Also call
+# systemd-nspawn from the system.
+sed -i '/DESTDIR.* install/ s%^.*$%    for p in `grep ^Package: '`pwd`'/debian/control | cut -f2 -d\\  |grep -Ev -- "-(udeb|dev)"`; do (cd /tmp; apt-get download $p \&\& dpkg-deb --fsys-tarfile ${p}[._]*deb | tar -C $initdir --dereference -x); done%; s_[^" ]*/systemd-nspawn_systemd-nspawn_g; s/\(_ninja_bin=\).*/\1dummy-ninja/' test/test-functions
+
+# FIXME: avoid building the entire tree when running tests (fixed in master, but not yet 234)
 sed -i '/@make.*all/ d' test/TEST*/Makefile
 
 # adjust path

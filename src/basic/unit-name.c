@@ -305,7 +305,7 @@ static char *do_escape(const char *f, char *t) {
         for (; *f; f++) {
                 if (*f == '/')
                         *(t++) = '-';
-                else if (*f == '-' || *f == '\\' || !strchr(VALID_CHARS, *f))
+                else if (IN_SET(*f, '-', '\\') || !strchr(VALID_CHARS, *f))
                         t = do_escape_char(*f, t);
                 else
                         *(t++) = *f;
@@ -608,7 +608,6 @@ const char* unit_dbus_interface_from_type(UnitType t) {
         static const char *const table[_UNIT_TYPE_MAX] = {
                 [UNIT_SERVICE] = "org.freedesktop.systemd1.Service",
                 [UNIT_SOCKET] = "org.freedesktop.systemd1.Socket",
-                [UNIT_BUSNAME] = "org.freedesktop.systemd1.BusName",
                 [UNIT_TARGET] = "org.freedesktop.systemd1.Target",
                 [UNIT_DEVICE] = "org.freedesktop.systemd1.Device",
                 [UNIT_MOUNT] = "org.freedesktop.systemd1.Mount",
@@ -839,7 +838,6 @@ bool slice_name_is_valid(const char *name) {
 static const char* const unit_type_table[_UNIT_TYPE_MAX] = {
         [UNIT_SERVICE] = "service",
         [UNIT_SOCKET] = "socket",
-        [UNIT_BUSNAME] = "busname",
         [UNIT_TARGET] = "target",
         [UNIT_DEVICE] = "device",
         [UNIT_MOUNT] = "mount",
@@ -884,19 +882,6 @@ static const char* const automount_state_table[_AUTOMOUNT_STATE_MAX] = {
 
 DEFINE_STRING_TABLE_LOOKUP(automount_state, AutomountState);
 
-static const char* const busname_state_table[_BUSNAME_STATE_MAX] = {
-        [BUSNAME_DEAD] = "dead",
-        [BUSNAME_MAKING] = "making",
-        [BUSNAME_REGISTERED] = "registered",
-        [BUSNAME_LISTENING] = "listening",
-        [BUSNAME_RUNNING] = "running",
-        [BUSNAME_SIGTERM] = "sigterm",
-        [BUSNAME_SIGKILL] = "sigkill",
-        [BUSNAME_FAILED] = "failed",
-};
-
-DEFINE_STRING_TABLE_LOOKUP(busname_state, BusNameState);
-
 static const char* const device_state_table[_DEVICE_STATE_MAX] = {
         [DEVICE_DEAD] = "dead",
         [DEVICE_TENTATIVE] = "tentative",
@@ -912,8 +897,6 @@ static const char* const mount_state_table[_MOUNT_STATE_MAX] = {
         [MOUNT_MOUNTED] = "mounted",
         [MOUNT_REMOUNTING] = "remounting",
         [MOUNT_UNMOUNTING] = "unmounting",
-        [MOUNT_MOUNTING_SIGTERM] = "mounting-sigterm",
-        [MOUNT_MOUNTING_SIGKILL] = "mounting-sigkill",
         [MOUNT_REMOUNTING_SIGTERM] = "remounting-sigterm",
         [MOUNT_REMOUNTING_SIGKILL] = "remounting-sigkill",
         [MOUNT_UNMOUNTING_SIGTERM] = "unmounting-sigterm",
@@ -995,8 +978,6 @@ static const char* const swap_state_table[_SWAP_STATE_MAX] = {
         [SWAP_ACTIVATING_DONE] = "activating-done",
         [SWAP_ACTIVE] = "active",
         [SWAP_DEACTIVATING] = "deactivating",
-        [SWAP_ACTIVATING_SIGTERM] = "activating-sigterm",
-        [SWAP_ACTIVATING_SIGKILL] = "activating-sigkill",
         [SWAP_DEACTIVATING_SIGTERM] = "deactivating-sigterm",
         [SWAP_DEACTIVATING_SIGKILL] = "deactivating-sigkill",
         [SWAP_FAILED] = "failed"

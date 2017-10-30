@@ -116,7 +116,7 @@ typedef struct Item {
         char *path;
         char *argument;
         char **xattrs;
-#ifdef HAVE_ACL
+#if HAVE_ACL
         acl_t acl_access;
         acl_t acl_default;
 #endif
@@ -333,7 +333,7 @@ static int dir_is_mount_point(DIR *d, const char *subdir) {
 
         /* got only one handle; assume different mount points if one
          * of both queries was not supported by the filesystem */
-        if (r_p == -ENOSYS || r_p == -EOPNOTSUPP || r == -ENOSYS || r == -EOPNOTSUPP)
+        if (IN_SET(r_p, -ENOSYS, -EOPNOTSUPP) || IN_SET(r, -ENOSYS, -EOPNOTSUPP))
                 return true;
 
         /* return error */
@@ -501,7 +501,7 @@ static int dir_cleanup(
 
                         log_debug("Removing directory \"%s\".", sub_path);
                         if (unlinkat(dirfd(d), dent->d_name, AT_REMOVEDIR) < 0)
-                                if (errno != ENOENT && errno != ENOTEMPTY) {
+                                if (!IN_SET(errno, ENOENT, ENOTEMPTY)) {
                                         log_error_errno(errno, "rmdir(%s): %m", sub_path);
                                         r = -errno;
                                 }
@@ -617,8 +617,20 @@ static int path_set_perms(Item *i, const char *path) {
          * O_PATH. */
 
         fd = open(path, O_NOFOLLOW|O_CLOEXEC|O_PATH);
-        if (fd < 0)
-                return log_error_errno(errno, "Adjusting owner and mode for %s failed: %m", path);
+        if (fd < 0) {
+                int level = LOG_ERR, r = -errno;
+
+                /* Option "e" operates only on existing objects. Do not
+                 * print errors about non-existent files or directories */
+                if (i->type == EMPTY_DIRECTORY && errno == ENOENT) {
+                        level = LOG_DEBUG;
+                        r = 0;
+                }
+
+                log_full_errno(level, errno, "Adjusting owner and mode for %s failed: %m", path);
+
+                return r;
+        }
 
         if (fstatat(fd, "", &st, AT_EMPTY_PATH) < 0)
                 return log_error_errno(errno, "Failed to fstat() file %s: %m", path);
@@ -732,7 +744,7 @@ static int path_set_xattrs(Item *i, const char *path) {
 }
 
 static int parse_acls_from_arg(Item *item) {
-#ifdef HAVE_ACL
+#if HAVE_ACL
         int r;
 
         assert(item);
@@ -750,7 +762,7 @@ static int parse_acls_from_arg(Item *item) {
         return 0;
 }
 
-#ifdef HAVE_ACL
+#if HAVE_ACL
 static int path_set_acl(const char *path, const char *pretty, acl_type_t type, acl_t acl, bool modify) {
         _cleanup_(acl_free_charpp) char *t = NULL;
         _cleanup_(acl_freep) acl_t dup = NULL;
@@ -798,7 +810,7 @@ static int path_set_acl(const char *path, const char *pretty, acl_type_t type, a
 
 static int path_set_acls(Item *item, const char *path) {
         int r = 0;
-#ifdef HAVE_ACL
+#if HAVE_ACL
         char fn[strlen("/proc/self/fd/") + DECIMAL_STR_MAX(int)];
         _cleanup_close_ int fd = -1;
         struct stat st;
@@ -919,7 +931,7 @@ static int parse_attribute_from_arg(Item *item) {
 
                 v = attributes[i].value;
 
-                SET_FLAG(value, v, (mode == MODE_ADD || mode == MODE_SET));
+                SET_FLAG(value, v, IN_SET(mode, MODE_ADD, MODE_SET));
 
                 mask |= v;
         }
@@ -972,7 +984,7 @@ static int path_set_attribute(Item *item, const char *path) {
 
         r = chattr_fd(fd, f, item->attribute_mask);
         if (r < 0)
-                log_full_errno(r == -ENOTTY || r == -EOPNOTSUPP ? LOG_DEBUG : LOG_WARNING,
+                log_full_errno(IN_SET(r, -ENOTTY, -EOPNOTSUPP) ? LOG_DEBUG : LOG_WARNING,
                                r,
                                "Cannot set file attribute for '%s', value=0x%08x, mask=0x%08x: %m",
                                path, item->attribute_value, item->attribute_mask);
@@ -1063,7 +1075,7 @@ static int item_do_children(Item *i, const char *path, action_t action) {
 
         d = opendir_nomod(path);
         if (!d)
-                return errno == ENOENT || errno == ENOTDIR ? 0 : -errno;
+                return IN_SET(errno, ENOENT, ENOTDIR) ? 0 : -errno;
 
         FOREACH_DIRENT_ALL(de, d, r = -errno) {
                 _cleanup_free_ char *p = NULL;
@@ -1241,7 +1253,7 @@ static int create_item(Item *i) {
                 if (r < 0) {
                         int k;
 
-                        if (r != -EEXIST && r != -EROFS)
+                        if (!IN_SET(r, -EEXIST, -EROFS))
                                 return log_error_errno(r, "Failed to create directory or subvolume \"%s\": %m", i->path);
 
                         k = is_dir(i->path, false);
@@ -1353,6 +1365,15 @@ static int create_item(Item *i) {
                                         r = symlink_atomic(resolved, i->path);
                                         mac_selinux_create_file_clear();
 
+                                        if (IN_SET(r, -EEXIST, -ENOTEMPTY)) {
+                                                r = rm_rf(i->path, REMOVE_ROOT|REMOVE_PHYSICAL);
+                                                if (r < 0)
+                                                        return log_error_errno(r, "rm -fr %s failed: %m", i->path);
+
+                                                mac_selinux_create_file_prepare(i->path, S_IFLNK);
+                                                r = symlink(resolved, i->path) < 0 ? -errno : 0;
+                                                mac_selinux_create_file_clear();
+                                        }
                                         if (r < 0)
                                                 return log_error_errno(r, "symlink(%s, %s) failed: %m", resolved, i->path);
 
@@ -1643,6 +1664,9 @@ static int process_item(Item *i) {
                 }
         }
 
+        if (chase_symlinks(i->path, NULL, CHASE_NO_AUTOFS, NULL) == -EREMOTE)
+                return t;
+
         r = arg_create ? create_item(i) : 0;
         q = arg_remove ? remove_item(i) : 0;
         p = arg_clean ? clean_item(i) : 0;
@@ -1674,7 +1698,7 @@ static void item_free_contents(Item *i) {
         free(i->argument);
         strv_free(i->xattrs);
 
-#ifdef HAVE_ACL
+#if HAVE_ACL
         acl_free(i->acl_access);
         acl_free(i->acl_default);
 #endif
@@ -2191,7 +2215,7 @@ static int read_config_file(const char *fn, bool ignore_enoent) {
                 v++;
 
                 l = strstrip(line);
-                if (*l == '#' || *l == 0)
+                if (IN_SET(*l, 0, '#'))
                         continue;
 
                 k = parse_line(fn, v, l);
@@ -2276,7 +2300,7 @@ int main(int argc, char *argv[]) {
                 _cleanup_strv_free_ char **files = NULL;
                 char **f;
 
-                r = conf_files_list_nulstr(&files, ".conf", arg_root, conf_file_dirs);
+                r = conf_files_list_nulstr(&files, ".conf", arg_root, 0, conf_file_dirs);
                 if (r < 0) {
                         log_error_errno(r, "Failed to enumerate tmpfiles.d files: %m");
                         goto finish;

@@ -182,18 +182,18 @@ static int user_save_internal(User *u) {
                 Session *i;
                 bool first;
 
-                fputs("SESSIONS=", f);
+                fputs_unlocked("SESSIONS=", f);
                 first = true;
                 LIST_FOREACH(sessions_by_user, i, u->sessions) {
                         if (first)
                                 first = false;
                         else
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(i->id, f);
+                        fputs_unlocked(i->id, f);
                 }
 
-                fputs("\nSEATS=", f);
+                fputs_unlocked("\nSEATS=", f);
                 first = true;
                 LIST_FOREACH(sessions_by_user, i, u->sessions) {
                         if (!i->seat)
@@ -202,12 +202,12 @@ static int user_save_internal(User *u) {
                         if (first)
                                 first = false;
                         else
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(i->seat->id, f);
+                        fputs_unlocked(i->seat->id, f);
                 }
 
-                fputs("\nACTIVE_SESSIONS=", f);
+                fputs_unlocked("\nACTIVE_SESSIONS=", f);
                 first = true;
                 LIST_FOREACH(sessions_by_user, i, u->sessions) {
                         if (!session_is_active(i))
@@ -216,12 +216,12 @@ static int user_save_internal(User *u) {
                         if (first)
                                 first = false;
                         else
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(i->id, f);
+                        fputs_unlocked(i->id, f);
                 }
 
-                fputs("\nONLINE_SESSIONS=", f);
+                fputs_unlocked("\nONLINE_SESSIONS=", f);
                 first = true;
                 LIST_FOREACH(sessions_by_user, i, u->sessions) {
                         if (session_get_state(i) == SESSION_CLOSING)
@@ -230,12 +230,12 @@ static int user_save_internal(User *u) {
                         if (first)
                                 first = false;
                         else
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(i->id, f);
+                        fputs_unlocked(i->id, f);
                 }
 
-                fputs("\nACTIVE_SEATS=", f);
+                fputs_unlocked("\nACTIVE_SEATS=", f);
                 first = true;
                 LIST_FOREACH(sessions_by_user, i, u->sessions) {
                         if (!session_is_active(i) || !i->seat)
@@ -244,12 +244,12 @@ static int user_save_internal(User *u) {
                         if (first)
                                 first = false;
                         else
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(i->seat->id, f);
+                        fputs_unlocked(i->seat->id, f);
                 }
 
-                fputs("\nONLINE_SEATS=", f);
+                fputs_unlocked("\nONLINE_SEATS=", f);
                 first = true;
                 LIST_FOREACH(sessions_by_user, i, u->sessions) {
                         if (session_get_state(i) == SESSION_CLOSING || !i->seat)
@@ -258,11 +258,11 @@ static int user_save_internal(User *u) {
                         if (first)
                                 first = false;
                         else
-                                fputc(' ', f);
+                                fputc_unlocked(' ', f);
 
-                        fputs(i->seat->id, f);
+                        fputs_unlocked(i->seat->id, f);
                 }
-                fputc('\n', f);
+                fputc_unlocked('\n', f);
         }
 
         r = fflush_and_check(f);
@@ -354,7 +354,7 @@ static int user_mkdir_runtime_path(User *u) {
 
                 r = mount("tmpfs", u->runtime_path, "tmpfs", MS_NODEV|MS_NOSUID, t);
                 if (r < 0) {
-                        if (errno != EPERM && errno != EACCES) {
+                        if (!IN_SET(errno, EPERM, EACCES)) {
                                 r = log_error_errno(errno, "Failed to mount per-user tmpfs directory %s: %m", u->runtime_path);
                                 goto fail;
                         }
@@ -547,7 +547,7 @@ static int user_remove_runtime_path(User *u) {
          * quite possible, if we lacked the permissions to mount
          * something */
         r = umount2(u->runtime_path, MNT_DETACH);
-        if (r < 0 && errno != EINVAL && errno != ENOENT)
+        if (r < 0 && !IN_SET(errno, EINVAL, ENOENT))
                 log_error_errno(errno, "Failed to unmount user runtime directory %s: %m", u->runtime_path);
 
         r = rm_rf(u->runtime_path, REMOVE_ROOT);

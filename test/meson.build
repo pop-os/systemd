@@ -64,6 +64,7 @@ test_data_files = '''
         test-execute/exec-dynamicuser-fixeduser.service
         test-execute/exec-dynamicuser-fixeduser-one-supplementarygroup.service
         test-execute/exec-dynamicuser-supplementarygroups.service
+        test-execute/exec-dynamicuser-state-dir.service
         test-execute/exec-ignoresigpipe-no.service
         test-execute/exec-ignoresigpipe-yes.service
         test-execute/exec-personality-x86-64.service
@@ -94,6 +95,7 @@ test_data_files = '''
         test-execute/exec-systemcallfilter-not-failing.service
         test-execute/exec-systemcallfilter-system-user.service
         test-execute/exec-systemcallfilter-system-user-nfsnobody.service
+        test-execute/exec-unset-environment.service
         test-execute/exec-user.service
         test-execute/exec-user-nfsnobody.service
         test-execute/exec-workingdirectory.service
@@ -126,19 +128,12 @@ test_data_files = '''
         test-execute/exec-read-only-path-succeed.service
         test-execute/exec-privatedevices-yes-capability-sys-rawio.service
         test-execute/exec-privatedevices-no-capability-sys-rawio.service
-        bus-policy/hello.conf
-        bus-policy/methods.conf
-        bus-policy/ownerships.conf
-        bus-policy/signals.conf
-        bus-policy/check-own-rules.conf
-        bus-policy/many-rules.conf
-        bus-policy/test.conf
         hwdb/10-bad.hwdb
         journal-data/journal-1.txt
         journal-data/journal-2.txt
 '''.split()
 
-if conf.get('ENABLE_RESOLVED', false)
+if conf.get('ENABLE_RESOLVE') == 1
         test_data_files += '''
                 test-resolve/_openpgpkey.fedoraproject.org.pkts
                 test-resolve/fedoraproject.org.pkts
@@ -165,3 +160,27 @@ if install_tests
                              install_dir : testsdir + '/testdata/' + subdir)
         endforeach
 endif
+
+############################################################
+
+sysv_generator_test_py = find_program('sysv-generator-test.py')
+test('sysv-generator-test',
+     sysv_generator_test_py)
+
+############################################################
+
+# prepare test/sys tree
+sys_script_py = find_program('sys-script.py')
+custom_target(
+        'sys',
+        command : [sys_script_py, meson.current_build_dir()],
+        output : 'sys',
+        build_by_default : true)
+
+udev_test_pl = find_program('udev-test.pl')
+test('udev-test',
+     udev_test_pl)
+
+hwdb_test_sh = find_program('hwdb-test.sh')
+test('hwdb-test',
+     hwdb_test_sh)

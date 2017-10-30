@@ -21,7 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
-<refentry id="systemd-resolved.service" conditional='ENABLE_RESOLVED'>
+<refentry id="systemd-resolved.service" conditional='ENABLE_RESOLVE'>
 
   <refentryinfo>
     <title>systemd-resolved.service</title>
@@ -138,7 +138,7 @@
       LLMNR.</para></listitem>
 
       <listitem><para>Multi-label names are routed to all local
-      interfaces that have a DNS sever configured, plus the globally
+      interfaces that have a DNS server configured, plus the globally
       configured DNS server if there is one. Address lookups from the
       link-local address range are never routed to
       DNS.</para></listitem>
@@ -202,19 +202,38 @@
       <varlistentry>
         <term><constant>SIGUSR1</constant></term>
 
-        <listitem><para>Upon reception of the SIGUSR1 process signal <command>systemd-resolved</command> will dump the
-        contents of all DNS resource record caches it maintains into the system logs.</para></listitem>
+        <listitem><para>Upon reception of the <constant>SIGUSR1</constant> process signal
+        <command>systemd-resolved</command> will dump the contents of all DNS resource record caches it maintains, as
+        well as all feature level information it learnt about configured DNS servers into the system
+        logs.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><constant>SIGUSR2</constant></term>
 
-        <listitem><para>Upon reception of the SIGUSR2 process signal <command>systemd-resolved</command> will flush all
-        caches it maintains. Note that it should normally not be necessary to request this explicitly – except for
-        debugging purposes – as <command>systemd-resolved</command> flushes the caches automatically anyway any time
-        the host's network configuration changes.</para></listitem>
+        <listitem><para>Upon reception of the <constant>SIGUSR2</constant> process signal
+        <command>systemd-resolved</command> will flush all caches it maintains. Note that it should normally not be
+        necessary to request this explicitly – except for debugging purposes – as <command>systemd-resolved</command>
+        flushes the caches automatically anyway any time the host's network configuration changes. Sending this signal
+        to <command>systemd-resolved</command> is equivalent to the <command>systemd-resolve --flush-caches</command>
+        command, however the latter is recommended since it operates in a synchronous way.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><constant>SIGRTMIN+1</constant></term>
+
+        <listitem><para>Upon reception of the <constant>SIGRTMIN+1</constant> process signal
+        <command>systemd-resolved</command> will forget everything it learnt about the configured DNS
+        servers. Specifically any information about server feature support is flushed out, and the server feature
+        probing logic is restarted on the next request, starting with the most fully featured level. Note that it
+        should normally not be necessary to request this explicitly – except for debugging purposes – as
+        <command>systemd-resolved</command> automatically forgets learnt information any time the DNS server
+        configuration changes. Sending this signal to <command>systemd-resolved</command> is equivalent to the
+        <command>systemd-resolve --reset-server-features</command> command, however the latter is recommended since it
+        operates in a synchronous way.</para></listitem>
       </varlistentry>
     </variablelist>
+
   </refsect1>
 
   <refsect1>

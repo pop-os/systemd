@@ -1,10 +1,3 @@
-test-condition-don-t-assume-that-all-non-root-users-are-n.patch
-tests-ignore-router-state-in-networkd-test-6390.patch
-seccomp-arm64-x32-do-not-have-_sysctl.patch
-seccomp-arm64-does-not-have-mmap2.patch
-test-seccomp-arm64-does-not-have-access-and-poll.patch
-networkd-change-UseMTU-default-to-true.-6837.patch
-core-unlink-the-invocation-id-key-if-cannot-change-keyrin.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
@@ -30,11 +23,11 @@ debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Mark-test-timesync-as-manual.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
-debian/Revert-units-Tell-login-to-preserve-environment.patch
+debian/Revert-tests-when-running-a-manager-object-in-a-test-migr.patch
 debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-resolved-resolvconf-integration.patch
-debian/Ubuntu-Ship-modprobe.d-drop-in-to-set-bonding-max_bonds-to-0.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
-CVE-2017-15908.patch
+debian/UBUNTU-CVE-2017-15908.patch
+debian/UBUNTU-core-unlink-the-invocation-id-key-if-cannot-change-keyrin.patch

@@ -97,7 +97,7 @@ static int print_gaih_addrtuples(const struct gaih_addrtuple *tuples) {
 
                 memcpy(&u, it->addr, 16);
                 r = in_addr_to_string(it->family, &u, &a);
-                assert_se(r == 0 || r == -EAFNOSUPPORT);
+                assert_se(IN_SET(r, 0, -EAFNOSUPPORT));
                 if (r == -EAFNOSUPPORT)
                         assert_se((a = hexmem(it->addr, 16)));
 
@@ -450,13 +450,13 @@ static int parse_argv(int argc, char **argv,
                 modules = strv_new(argv[1], NULL);
         else
                 modules = strv_new(
-#ifdef HAVE_MYHOSTNAME
+#if ENABLE_MYHOSTNAME
                                 "myhostname",
 #endif
-#ifdef HAVE_RESOLVED
+#if ENABLE_RESOLVE
                                 "resolve",
 #endif
-#ifdef HAVE_MACHINED
+#if ENABLE_MACHINED
                                 "mymachines",
 #endif
                                 "dns",
@@ -491,7 +491,7 @@ static int parse_argv(int argc, char **argv,
                 if (!hostname)
                         return -ENOMEM;
 
-                names = strv_new("localhost", "gateway", "foo_no_such_host", hostname, NULL);
+                names = strv_new("localhost", "_gateway", "foo_no_such_host", hostname, NULL);
                 if (!names)
                         return -ENOMEM;
 

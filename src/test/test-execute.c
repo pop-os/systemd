@@ -30,7 +30,7 @@
 #include "mkdir.h"
 #include "path-util.h"
 #include "rm-rf.h"
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
 #include "stat-util.h"
@@ -45,7 +45,7 @@ typedef void (*test_function_t)(Manager *m);
 static void check(Manager *m, Unit *unit, int status_expected, int code_expected) {
         Service *service = NULL;
         usec_t ts;
-        usec_t timeout = 2 * USEC_PER_SEC;
+        usec_t timeout = 2 * USEC_PER_MINUTE;
 
         assert_se(m);
         assert_se(unit);
@@ -54,7 +54,7 @@ static void check(Manager *m, Unit *unit, int status_expected, int code_expected
         printf("%s\n", unit->id);
         exec_context_dump(&service->exec_context, stdout, "\t");
         ts = now(CLOCK_MONOTONIC);
-        while (service->state != SERVICE_DEAD && service->state != SERVICE_FAILED) {
+        while (!IN_SET(service->state, SERVICE_DEAD, SERVICE_FAILED)) {
                 int r;
                 usec_t n;
 
@@ -243,7 +243,7 @@ static void test_exec_inaccessiblepaths_proc(Manager *m) {
 }
 
 static void test_exec_systemcallfilter(Manager *m) {
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         if (!is_seccomp_available())
                 return;
         test(m, "exec-systemcallfilter-not-failing.service", 0, CLD_EXITED);
@@ -255,14 +255,14 @@ static void test_exec_systemcallfilter(Manager *m) {
 }
 
 static void test_exec_systemcallerrornumber(Manager *m) {
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         if (is_seccomp_available())
                 test(m, "exec-systemcallerrornumber.service", 1, CLD_EXITED);
 #endif
 }
 
 static void test_exec_restrict_namespaces(Manager *m) {
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         if (!is_seccomp_available())
                 return;
 
@@ -274,7 +274,7 @@ static void test_exec_restrict_namespaces(Manager *m) {
 }
 
 static void test_exec_systemcall_system_mode_with_user(Manager *m) {
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         if (!is_seccomp_available())
                 return;
         if (getpwnam("nobody"))
@@ -317,6 +317,7 @@ static void test_exec_dynamic_user(Manager *m) {
         test(m, "exec-dynamicuser-fixeduser.service", 0, CLD_EXITED);
         test(m, "exec-dynamicuser-fixeduser-one-supplementarygroup.service", 0, CLD_EXITED);
         test(m, "exec-dynamicuser-supplementarygroups.service", 0, CLD_EXITED);
+        test(m, "exec-dynamicuser-state-dir.service", 0, CLD_EXITED);
 }
 
 static void test_exec_environment(Manager *m) {
@@ -453,6 +454,10 @@ static void test_exec_read_only_path_suceed(Manager *m) {
         test(m, "exec-read-only-path-succeed.service", 0, CLD_EXITED);
 }
 
+static void test_exec_unset_environment(Manager *m) {
+        test(m, "exec-unset-environment.service", 0, CLD_EXITED);
+}
+
 static int run_tests(UnitFileScope scope, const test_function_t *tests) {
         const test_function_t *test = NULL;
         Manager *m = NULL;
@@ -460,7 +465,7 @@ static int run_tests(UnitFileScope scope, const test_function_t *tests) {
 
         assert_se(tests);
 
-        r = manager_new(scope, true, &m);
+        r = manager_new(scope, MANAGER_TEST_RUN_MINIMAL, &m);
         if (MANAGER_SKIP_TEST(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return EXIT_TEST_SKIP;
@@ -496,7 +501,6 @@ int main(int argc, char *argv[]) {
                 test_exec_user,
                 test_exec_group,
                 test_exec_supplementary_groups,
-                test_exec_dynamic_user,
                 test_exec_environment,
                 test_exec_environmentfile,
                 test_exec_passenvironment,
@@ -508,10 +512,12 @@ int main(int argc, char *argv[]) {
                 test_exec_ioschedulingclass,
                 test_exec_spec_interpolation,
                 test_exec_read_only_path_suceed,
+                test_exec_unset_environment,
                 NULL,
         };
         static const test_function_t system_tests[] = {
                 test_exec_systemcall_system_mode_with_user,
+                test_exec_dynamic_user,
                 NULL,
         };
         int r;
@@ -525,6 +531,8 @@ int main(int argc, char *argv[]) {
                 printf("Skipping test: not root\n");
                 return EXIT_TEST_SKIP;
         }
+
+        enter_cgroup_subroot();
 
         assert_se(setenv("XDG_RUNTIME_DIR", "/tmp/", 1) == 0);
         assert_se(set_unit_path(get_testdata_dir("/test-execute")) >= 0);

@@ -19,7 +19,7 @@
 
 #include <fcntl.h>
 #include <linux/magic.h>
-#ifdef HAVE_ACL
+#if HAVE_ACL
 #include <sys/acl.h>
 #endif
 #include <sys/stat.h>
@@ -37,7 +37,7 @@
 #include "strv.h"
 #include "user-util.h"
 
-#ifdef HAVE_ACL
+#if HAVE_ACL
 
 static int get_acl(int fd, const char *name, acl_type_t type, acl_t *ret) {
         char procfs_path[strlen("/proc/self/fd/") + DECIMAL_STR_MAX(int) + 1];
@@ -347,6 +347,8 @@ static int recurse_fd(int fd, bool donate_fd, const struct stat *st, uid_t shift
         }
         if (r < 0)
                 goto finish;
+        if (r > 0)
+                changed = true;
 
         if (S_ISDIR(st->st_mode)) {
                 _cleanup_closedir_ DIR *d = NULL;

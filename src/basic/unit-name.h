@@ -28,7 +28,6 @@
 typedef enum UnitType {
         UNIT_SERVICE = 0,
         UNIT_SOCKET,
-        UNIT_BUSNAME,
         UNIT_TARGET,
         UNIT_DEVICE,
         UNIT_MOUNT,
@@ -73,19 +72,6 @@ typedef enum AutomountState {
         _AUTOMOUNT_STATE_INVALID = -1
 } AutomountState;
 
-typedef enum BusNameState {
-        BUSNAME_DEAD,
-        BUSNAME_MAKING,
-        BUSNAME_REGISTERED,
-        BUSNAME_LISTENING,
-        BUSNAME_RUNNING,
-        BUSNAME_SIGTERM,
-        BUSNAME_SIGKILL,
-        BUSNAME_FAILED,
-        _BUSNAME_STATE_MAX,
-        _BUSNAME_STATE_INVALID = -1
-} BusNameState;
-
 /* We simply watch devices, we cannot plug/unplug them. That
  * simplifies the state engine greatly */
 typedef enum DeviceState {
@@ -103,8 +89,6 @@ typedef enum MountState {
         MOUNT_MOUNTED,
         MOUNT_REMOUNTING,
         MOUNT_UNMOUNTING,
-        MOUNT_MOUNTING_SIGTERM,
-        MOUNT_MOUNTING_SIGKILL,
         MOUNT_REMOUNTING_SIGTERM,
         MOUNT_REMOUNTING_SIGKILL,
         MOUNT_UNMOUNTING_SIGTERM,
@@ -186,8 +170,6 @@ typedef enum SwapState {
         SWAP_ACTIVATING_DONE,          /* /sbin/swapon is running, and the swap is done. */
         SWAP_ACTIVE,
         SWAP_DEACTIVATING,
-        SWAP_ACTIVATING_SIGTERM,
-        SWAP_ACTIVATING_SIGKILL,
         SWAP_DEACTIVATING_SIGTERM,
         SWAP_DEACTIVATING_SIGKILL,
         SWAP_FAILED,
@@ -338,9 +320,6 @@ UnitActiveState unit_active_state_from_string(const char *s) _pure_;
 
 const char* automount_state_to_string(AutomountState i) _const_;
 AutomountState automount_state_from_string(const char *s) _pure_;
-
-const char* busname_state_to_string(BusNameState i) _const_;
-BusNameState busname_state_from_string(const char *s) _pure_;
 
 const char* device_state_to_string(DeviceState i) _const_;
 DeviceState device_state_from_string(const char *s) _pure_;

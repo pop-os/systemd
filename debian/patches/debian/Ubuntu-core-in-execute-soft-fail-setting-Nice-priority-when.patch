@@ -7,19 +7,22 @@ In unpriviledged containers Nice priority setting may not be permitted. Thus
 log and ignore permission failure to set Nice priority in such
 environments. This is similar to how OOMScoreAdjust is treated.
 ---
- src/core/execute.c | 11 +++++++++--
- 1 file changed, 9 insertions(+), 2 deletions(-)
+ src/core/execute.c | 16 +++++++++++-----
+ 1 file changed, 11 insertions(+), 5 deletions(-)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index f24625f..a7f4cd7 100644
+index c4dfac9..03fff99 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
-@@ -2477,11 +2477,18 @@ static int exec_child(
+@@ -2901,11 +2901,17 @@ static int exec_child(
                  }
          }
  
 -        if (context->nice_set)
 -                if (setpriority(PRIO_PROCESS, 0, context->nice) < 0) {
+-                        *exit_status = EXIT_NICE;
+-                        return log_unit_error_errno(unit, errno, "Failed to set up process scheduling priority (nice level): %m");
+-                }
 +        if (context->nice_set) {
 +                r = setpriority(PRIO_PROCESS, 0, context->nice);
 +                if (r == -EPERM || r == -EACCES) {
@@ -27,10 +30,9 @@ index f24625f..a7f4cd7 100644
 +                        log_unit_debug_errno(unit, r, "Failed to adjust Nice setting, assuming containerized execution, ignoring: %m");
 +                        log_close();
 +                } else if (r < 0) {
-                         *exit_status = EXIT_NICE;
-+                        *error_message = strdup("Failed to adjust Nice setting");
-                         return -errno;
-                 }
++                         *exit_status = EXIT_NICE;
++                         return log_unit_error_errno(unit, errno, "Failed to set up process scheduling priority (nice level): %m");
++                 }
 +        }
  
          if (context->cpu_sched_set) {

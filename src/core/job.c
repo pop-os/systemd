@@ -368,19 +368,13 @@ bool job_type_is_redundant(JobType a, UnitActiveState b) {
         switch (a) {
 
         case JOB_START:
-                return
-                        b == UNIT_ACTIVE ||
-                        b == UNIT_RELOADING;
+                return IN_SET(b, UNIT_ACTIVE, UNIT_RELOADING);
 
         case JOB_STOP:
-                return
-                        b == UNIT_INACTIVE ||
-                        b == UNIT_FAILED;
+                return IN_SET(b, UNIT_INACTIVE, UNIT_FAILED);
 
         case JOB_VERIFY_ACTIVE:
-                return
-                        b == UNIT_ACTIVE ||
-                        b == UNIT_RELOADING;
+                return IN_SET(b, UNIT_ACTIVE, UNIT_RELOADING);
 
         case JOB_RELOAD:
                 return
@@ -687,7 +681,7 @@ _pure_ static const char *job_get_status_message_format(Unit *u, JobType t, JobR
         /* Return generic strings */
         if (t == JOB_START)
                 return generic_finished_start_job[result];
-        else if (t == JOB_STOP || t == JOB_RESTART)
+        else if (IN_SET(t, JOB_STOP, JOB_RESTART))
                 return generic_finished_stop_job[result];
         else if (t == JOB_RELOAD)
                 return generic_finished_reload_job[result];
@@ -806,21 +800,26 @@ static void job_log_status_message(Unit *u, JobType t, JobResult result) {
         default:
                 log_struct(job_result_log_level[result],
                            LOG_MESSAGE("%s", buf),
-                           "RESULT=%s", job_result_to_string(result),
+                           "JOB_TYPE=%s", job_type_to_string(t),
+                           "JOB_RESULT=%s", job_result_to_string(result),
                            LOG_UNIT_ID(u),
+                           LOG_UNIT_INVOCATION_ID(u),
                            NULL);
                 return;
         }
 
         log_struct(job_result_log_level[result],
                    LOG_MESSAGE("%s", buf),
-                   "RESULT=%s", job_result_to_string(result),
+                   "JOB_TYPE=%s", job_type_to_string(t),
+                   "JOB_RESULT=%s", job_result_to_string(result),
                    LOG_UNIT_ID(u),
+                   LOG_UNIT_INVOCATION_ID(u),
                    mid,
                    NULL);
 }
 
 static void job_emit_status_message(Unit *u, JobType t, JobResult result) {
+        assert(u);
 
         /* No message if the job did not actually do anything due to failed condition. */
         if (t == JOB_START && result == JOB_DONE && !u->condition_result)
@@ -883,7 +882,7 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
                 goto finish;
         }
 
-        if (result == JOB_FAILED || result == JOB_INVALID)
+        if (IN_SET(result, JOB_FAILED, JOB_INVALID))
                 j->manager->n_failed_jobs++;
 
         job_uninstall(j);
@@ -903,7 +902,7 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
          * the unit itself. We don't treat JOB_CANCELED as failure in
          * this context. And JOB_FAILURE is already handled by the
          * unit itself. */
-        if (result == JOB_TIMEOUT || result == JOB_DEPENDENCY) {
+        if (IN_SET(result, JOB_TIMEOUT, JOB_DEPENDENCY)) {
                 log_struct(LOG_NOTICE,
                            "JOB_TYPE=%s", job_type_to_string(t),
                            "JOB_RESULT=%s", job_result_to_string(result),

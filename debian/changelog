@@ -1,3 +1,112 @@
+systemd (235-2) unstable; urgency=medium
+
+  * Revert "tests: when running a manager object in a test, migrate to private
+    cgroup subroot first"
+    This was causing test suite failures when running inside a chroot.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 11 Oct 2017 00:46:07 +0200
+
+systemd (235-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 235
+    - cryptsetup-generator: use remote-cryptsetup.target when _netdev is
+      present (Closes: #852534)
+    - tmpfiles: change btmp mode 0600 → 0660 (Closes: #870638)
+    - networkd: For IPv6 addresses do not treat IFA_F_DEPRECATED as not ready
+      (Closes: #869995)
+    - exec-util,conf-files: skip non-executable files in execute_directories()
+      (Closes: #867902)
+    - man: update udevadm -y/--sysname-match documentation (Closes: #865081)
+    - tmpfiles: silently ignore any path that passes through autofs
+      (Closes: #805553)
+    - shared: end string with % if one was found at the end of a expandible
+      string (Closes: #865450)
+  * Refresh patches
+  * Bump Build-Depends on libmount-dev to (>= 2.30)
+  * Install new modprobe.d config file
+  * Bump Standards-Version to 4.1.1
+
+  [ Martin Pitt ]
+  * Merge logind-kill-off autopkgtest into logind test.
+    This was horribly inefficient as a separate test (from commit
+    6bd0dab41e), as that cost two VM resets plus accompanying boots; and
+    this does not change any state thus does not require this kind of
+    isolation.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 10 Oct 2017 18:29:28 +0200
+
+systemd (234-3) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Various fixes for the upstream autopkgtest.
+
+  [ Felipe Sateler ]
+  * Add fdisk to the dependencies of the upstream autopkgtest.
+    The upstream autopkgtest uses sfdisk, which is now in the non-essential
+    fdisk package. (Closes: #872119)
+  * Disable nss-systemd on udeb builds
+  * Correctly disable resolved on udeb builds
+  * Help fix collisions in libsystemd-shared symbols by versioning them.
+    Backport upstream patch to version the symbols provided in the private
+    library, so that they cannot confuse unversioned pam modules or libraries
+    linked into them. (Closes: #873708)
+
+  [ Dimitri John Ledkov ]
+  * Cherrypick upstream networkd-test.py assertion/check fixes.
+    This resolves ADT test suite failures, when running tests under lxc/lxd
+    providers.
+  * Cherrypick arm* seccomp fixes.
+    This should resolve ADT test failures, on arm64, when running as root.
+  * Disable KillUserProcesses, yet again, with meson this time.
+  * initramfs-tools: trigger udevadm add actions with subsystems first.
+    This updates the initramfs-tools init-top udev script to trigger udevadm
+    actions with type specified. This mimics the systemd-udev-trigger.service.
+    Without type specified only devices are triggered, but triggering
+    subsystems may also be required and should happen before triggering the
+    devices. This is the case for example on s390x with zdev generated udev
+    rules. (LP: #1713536)
+
+  [ Michael Biebl ]
+  * (Re)add --quiet flag to addgroup calls.
+    This is now safe with adduser having been fixed to no longer suppress
+    fatal error messages if --quiet is used. (Closes: #837871)
+  * Switch back to default GCC (Closes: #873661)
+  * Drop systemd-timesyncd.service.d/disable-with-time-daemon.conf.
+    All major NTP implementations ship a native service file nowadays with a
+    Conflicts=systemd-timesyncd.service so this drop-in is no longer
+    necessary. (Closes: #873185)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 04 Sep 2017 00:17:00 +0200
+
+systemd (234-2.3) unstable; urgency=high
+
+  * Non-maintainer upload.
+  * Also switch to g++-6 temporarily (needed for some tests):
+    - Add g++-6 to Build-Depends
+    - Export CXX = g++-6
+
+ -- Cyril Brulebois <kibi@debian.org>  Thu, 24 Aug 2017 02:40:53 +0200
+
+systemd (234-2.2) unstable; urgency=high
+
+  * Non-maintainer upload.
+  * Switch to gcc-6 on all architectures, working around an FTBFS on mips64el,
+    apparently due to a gcc-7 bug (See: #871514):
+    - Add gcc-6 to Build-Depends in debian/control
+    - Export CC = gcc-6 in debian/rules
+
+ -- Cyril Brulebois <kibi@debian.org>  Wed, 23 Aug 2017 22:53:09 +0000
+
+systemd (234-2.1) unstable; urgency=high
+
+  * Non-maintainer upload.
+  * Fix missing 60-input-id.rules in udev-udeb, which breaks the graphical
+    version of the Debian Installer, as no key presses or mouse events get
+    processed (Closes: #872598).
+
+ -- Cyril Brulebois <kibi@debian.org>  Wed, 23 Aug 2017 20:41:33 +0200
+
 systemd (234-2ubuntu12.1) artful-security; urgency=medium
 
   * SECURITY UPDATE: remote DoS in resolve (LP: #1725351)

@@ -17,7 +17,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#ifdef HAVE_GLIB
+#if HAVE_GLIB
 #include <glib.h>
 #endif
 
@@ -137,7 +137,7 @@ static void test_marshal(void) {
         size_t sz;
         int r;
 
-        r = sd_bus_open_system(&bus);
+        r = sd_bus_open_user(&bus);
         if (r < 0)
                 exit(EXIT_TEST_SKIP);
 
@@ -155,7 +155,7 @@ static void test_marshal(void) {
 
         assert_se(bus_message_seal(m, 4711, 0) >= 0);
 
-#ifdef HAVE_GLIB
+#if HAVE_GLIB
         {
                 GVariant *v;
                 char *t;
@@ -184,7 +184,7 @@ static void test_marshal(void) {
 
         assert_se(bus_message_get_blob(m, &blob, &sz) >= 0);
 
-#ifdef HAVE_GLIB
+#if HAVE_GLIB
         {
                 GVariant *v;
                 char *t;

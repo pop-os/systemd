@@ -90,9 +90,7 @@ static bool hostname_valid_char(char c) {
                 (c >= 'a' && c <= 'z') ||
                 (c >= 'A' && c <= 'Z') ||
                 (c >= '0' && c <= '9') ||
-                c == '-' ||
-                c == '_' ||
-                c == '.';
+                IN_SET(c, '-', '_', '.');
 }
 
 /**
@@ -196,8 +194,11 @@ bool is_gateway_hostname(const char *hostname) {
          * synthetic "gateway" host. */
 
         return
-                strcaseeq(hostname, "gateway") ||
-                strcaseeq(hostname, "gateway.");
+                strcaseeq(hostname, "_gateway") || strcaseeq(hostname, "_gateway.")
+#if ENABLE_COMPAT_GATEWAY_HOSTNAME
+                || strcaseeq(hostname, "gateway") || strcaseeq(hostname, "gateway.")
+#endif
+                ;
 }
 
 int sethostname_idempotent(const char *s) {
@@ -232,7 +233,7 @@ int read_hostname_config(const char *path, char **hostname) {
         /* may have comments, ignore them */
         FOREACH_LINE(l, f, return -errno) {
                 truncate_nl(l);
-                if (l[0] != '\0' && l[0] != '#') {
+                if (!IN_SET(l[0], '\0', '#')) {
                         /* found line with value */
                         name = hostname_cleanup(l);
                         name = strdup(name);

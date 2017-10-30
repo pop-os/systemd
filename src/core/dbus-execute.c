@@ -19,7 +19,7 @@
 
 #include <sys/prctl.h>
 
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
 #include <seccomp.h>
 #endif
 
@@ -27,8 +27,10 @@
 #include "alloc-util.h"
 #include "bus-util.h"
 #include "capability-util.h"
+#include "cap-list.h"
 #include "dbus-execute.h"
 #include "env-util.h"
+#include "errno-list.h"
 #include "execute.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -40,9 +42,10 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "rlimit-util.h"
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
+#include "securebits-util.h"
 #include "strv.h"
 #include "syslog-util.h"
 #include "unit-printf.h"
@@ -50,10 +53,11 @@
 #include "utf8.h"
 
 BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_exec_output, exec_output, ExecOutput);
-
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_exec_input, exec_input, ExecInput);
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_exec_utmp_mode, exec_utmp_mode, ExecUtmpMode);
+static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_exec_preserve_mode, exec_preserve_mode, ExecPreserveMode);
+static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_exec_keyring_mode, exec_keyring_mode, ExecKeyringMode);
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_protect_home, protect_home, ProtectHome);
 static BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_protect_system, protect_system, ProtectSystem);
@@ -372,7 +376,7 @@ static int property_get_syscall_filter(
         _cleanup_strv_free_ char **l = NULL;
         int r;
 
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         Iterator i;
         void *id;
 #endif
@@ -389,7 +393,7 @@ static int property_get_syscall_filter(
         if (r < 0)
                 return r;
 
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         SET_FOREACH(id, c->syscall_filter, i) {
                 char *name;
 
@@ -425,7 +429,7 @@ static int property_get_syscall_archs(
         _cleanup_strv_free_ char **l = NULL;
         int r;
 
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         Iterator i;
         void *id;
 #endif
@@ -434,7 +438,7 @@ static int property_get_syscall_archs(
         assert(reply);
         assert(c);
 
-#ifdef HAVE_SECCOMP
+#if HAVE_SECCOMP
         SET_FOREACH(id, c->syscall_archs, i) {
                 const char *name;
 
@@ -753,6 +757,7 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("Environment", "as", NULL, offsetof(ExecContext, environment), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("EnvironmentFiles", "a(sb)", property_get_environment_files, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("PassEnvironment", "as", NULL, offsetof(ExecContext, pass_environment), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("UnsetEnvironment", "as", NULL, offsetof(ExecContext, unset_environment), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("UMask", "u", bus_property_get_mode, offsetof(ExecContext, umask), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("LimitCPU", "t", bus_property_get_rlimit, offsetof(ExecContext, rlimit[RLIMIT_CPU]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("LimitCPUSoft", "t", bus_property_get_rlimit, offsetof(ExecContext, rlimit[RLIMIT_CPU]), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -848,15 +853,26 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("SystemCallArchitectures", "as", property_get_syscall_archs, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SystemCallErrorNumber", "i", property_get_syscall_errno, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Personality", "s", property_get_personality, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("LockPersonality", "b", bus_property_get_bool, offsetof(ExecContext, lock_personality), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RestrictAddressFamilies", "(bas)", property_get_address_families, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("RuntimeDirectoryMode", "u", bus_property_get_mode, offsetof(ExecContext, runtime_directory_mode), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("RuntimeDirectory", "as", NULL, offsetof(ExecContext, runtime_directory), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("RuntimeDirectoryPreserve", "s", property_get_exec_preserve_mode, offsetof(ExecContext, runtime_directory_preserve_mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("RuntimeDirectoryMode", "u", bus_property_get_mode, offsetof(ExecContext, directories[EXEC_DIRECTORY_RUNTIME].mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("RuntimeDirectory", "as", NULL, offsetof(ExecContext, directories[EXEC_DIRECTORY_RUNTIME].paths), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("StateDirectoryMode", "u", bus_property_get_mode, offsetof(ExecContext, directories[EXEC_DIRECTORY_STATE].mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("StateDirectory", "as", NULL, offsetof(ExecContext, directories[EXEC_DIRECTORY_STATE].paths), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("CacheDirectoryMode", "u", bus_property_get_mode, offsetof(ExecContext, directories[EXEC_DIRECTORY_CACHE].mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("CacheDirectory", "as", NULL, offsetof(ExecContext, directories[EXEC_DIRECTORY_CACHE].paths), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("LogsDirectoryMode", "u", bus_property_get_mode, offsetof(ExecContext, directories[EXEC_DIRECTORY_LOGS].mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("LogsDirectory", "as", NULL, offsetof(ExecContext, directories[EXEC_DIRECTORY_LOGS].paths), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("ConfigurationDirectoryMode", "u", bus_property_get_mode, offsetof(ExecContext, directories[EXEC_DIRECTORY_CONFIGURATION].mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("ConfigurationDirectory", "as", NULL, offsetof(ExecContext, directories[EXEC_DIRECTORY_CONFIGURATION].paths), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("MemoryDenyWriteExecute", "b", bus_property_get_bool, offsetof(ExecContext, memory_deny_write_execute), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RestrictRealtime", "b", bus_property_get_bool, offsetof(ExecContext, restrict_realtime), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RestrictNamespaces", "t", bus_property_get_ulong, offsetof(ExecContext, restrict_namespaces), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("BindPaths", "a(ssbt)", property_get_bind_paths, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("BindReadOnlyPaths", "a(ssbt)", property_get_bind_paths, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("MountAPIVFS", "b", bus_property_get_bool, offsetof(ExecContext, mount_apivfs), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("KeyringMode", "s", property_get_exec_keyring_mode, offsetof(ExecContext, keyring_mode), SD_BUS_VTABLE_PROPERTY_CONST),
 
         /* Obsolete/redundant properties: */
         SD_BUS_PROPERTY("Capabilities", "s", property_get_empty_string, 0, SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
@@ -890,7 +906,7 @@ static int append_exec_command(sd_bus_message *reply, ExecCommand *c) {
                 return r;
 
         r = sd_bus_message_append(reply, "bttttuii",
-                                  c->ignore,
+                                  !!(c->flags & EXEC_COMMAND_IGNORE_FAILURE),
                                   c->exec_status.start_timestamp.realtime,
                                   c->exec_status.start_timestamp.monotonic,
                                   c->exec_status.exit_timestamp.realtime,
@@ -1017,6 +1033,41 @@ int bus_exec_context_set_transient_property(
                 }
 
                 return 1;
+
+        } else if (streq(name, "SupplementaryGroups")) {
+                _cleanup_strv_free_ char **l = NULL;
+                char **p;
+
+                r = sd_bus_message_read_strv(message, &l);
+                if (r < 0)
+                        return r;
+
+                STRV_FOREACH(p, l) {
+                        if (!isempty(*p) && !valid_user_group_name_or_id(*p))
+                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid supplementary group names");
+                }
+
+                if (mode != UNIT_CHECK) {
+                        if (strv_length(l) == 0) {
+                                c->supplementary_groups = strv_free(c->supplementary_groups);
+                                unit_write_drop_in_private_format(u, mode, name, "%s=", name);
+                        } else {
+                                _cleanup_free_ char *joined = NULL;
+
+                                r = strv_extend_strv(&c->supplementary_groups, l, true);
+                                if (r < 0)
+                                        return -ENOMEM;
+
+                                joined = strv_join(c->supplementary_groups, " ");
+                                if (!joined)
+                                        return -ENOMEM;
+
+                                unit_write_drop_in_private_format(u, mode, name, "%s=%s", name, joined);
+                        }
+                }
+
+                return 1;
+
         } else if (streq(name, "SyslogIdentifier")) {
                 const char *id;
 
@@ -1064,6 +1115,361 @@ int bus_exec_context_set_transient_property(
                 if (mode != UNIT_CHECK) {
                         c->syslog_priority = (facility << 3) | LOG_PRI(c->syslog_priority);
                         unit_write_drop_in_private_format(u, mode, name, "SyslogFacility=%i", facility);
+                }
+
+                return 1;
+        } else if (streq(name, "SecureBits")) {
+                int n;
+
+                r = sd_bus_message_read(message, "i", &n);
+                if (r < 0)
+                        return r;
+
+                if (!secure_bits_is_valid(n))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid secure bits");
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *str = NULL;
+
+                        c->secure_bits = n;
+                        r = secure_bits_to_string_alloc(n, &str);
+                        if (r < 0)
+                                return r;
+
+                        unit_write_drop_in_private_format(u, mode, name, "SecureBits=%s", str);
+                }
+
+                return 1;
+        } else if (STR_IN_SET(name, "CapabilityBoundingSet", "AmbientCapabilities")) {
+                uint64_t n;
+
+                r = sd_bus_message_read(message, "t", &n);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *str = NULL;
+
+                        if (streq(name, "CapabilityBoundingSet"))
+                                c->capability_bounding_set = n;
+                        else /* "AmbientCapabilities" */
+                                c->capability_ambient_set = n;
+
+                        r = capability_set_to_string_alloc(n, &str);
+                        if (r < 0)
+                                return r;
+
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%s", name, str);
+                }
+
+                return 1;
+
+        } else if (streq(name, "Personality")) {
+                const char *s;
+                unsigned long p;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                p = personality_from_string(s);
+                if (p == PERSONALITY_INVALID)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid personality");
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *str = NULL;
+
+                        c->personality = p;
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%s", name, s);
+                }
+
+                return 1;
+
+#if HAVE_SECCOMP
+
+        } else if (streq(name, "SystemCallFilter")) {
+                int whitelist;
+                _cleanup_strv_free_ char **l;
+
+                r = sd_bus_message_enter_container(message, 'r', "bas");
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read(message, "b", &whitelist);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read_strv(message, &l);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_exit_container(message);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *joined = NULL;
+
+                        if (strv_length(l) == 0) {
+                                c->syscall_whitelist = false;
+                                c->syscall_filter = set_free(c->syscall_filter);
+                        } else {
+                                char **s;
+
+                                c->syscall_whitelist = whitelist;
+
+                                r = set_ensure_allocated(&c->syscall_filter, NULL);
+                                if (r < 0)
+                                        return r;
+
+                                STRV_FOREACH(s, l) {
+                                        if (**s == '@') {
+                                                const SyscallFilterSet *set;
+                                                const char *i;
+
+                                                set = syscall_filter_set_find(*s);
+                                                if (!set)
+                                                        return -EINVAL;
+
+                                                NULSTR_FOREACH(i, set->value) {
+                                                        int id;
+
+                                                        id = seccomp_syscall_resolve_name(i);
+                                                        if (id == __NR_SCMP_ERROR)
+                                                                return -EINVAL;
+
+                                                        r = set_put(c->address_families, INT_TO_PTR(id + 1));
+                                                        if (r < 0)
+                                                                return r;
+                                                }
+
+                                        } else {
+                                                int id;
+
+                                                id = seccomp_syscall_resolve_name(*s);
+                                                if (id == __NR_SCMP_ERROR)
+                                                        return -EINVAL;
+
+                                                r = set_put(c->address_families, INT_TO_PTR(id + 1));
+                                                if (r < 0)
+                                                        return r;
+                                        }
+                                }
+                        }
+
+                        joined = strv_join(l, " ");
+                        if (!joined)
+                                return -ENOMEM;
+
+                        unit_write_drop_in_private_format(u, mode, name, "SystemCallFilter=%s%s", whitelist ? "" : "~", joined);
+                }
+
+                return 1;
+
+        } else if (streq(name, "SystemCallArchitectures")) {
+                _cleanup_strv_free_ char **l = NULL;
+
+                r = sd_bus_message_read_strv(message, &l);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *joined = NULL;
+
+                        if (strv_length(l) == 0)
+                                c->syscall_archs = set_free(c->syscall_archs);
+                        else {
+                                char **s;
+
+                                r = set_ensure_allocated(&c->syscall_archs, NULL);
+                                if (r < 0)
+                                        return r;
+
+                                STRV_FOREACH(s, l) {
+                                        uint32_t a;
+
+                                        r = seccomp_arch_from_string(*s, &a);
+                                        if (r < 0)
+                                                return r;
+
+                                        r = set_put(c->syscall_archs, UINT32_TO_PTR(a + 1));
+                                        if (r < 0)
+                                                return r;
+                                }
+
+                        }
+
+                        joined = strv_join(l, " ");
+                        if (!joined)
+                                return -ENOMEM;
+
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%s", name, joined);
+                }
+
+                return 1;
+
+        } else if (streq(name, "SystemCallErrorNumber")) {
+                int32_t n;
+                const char *str;
+
+                r = sd_bus_message_read(message, "i", &n);
+                if (r < 0)
+                        return r;
+
+                str = errno_to_name(n);
+                if (!str)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid SystemCallErrorNumber");
+
+                if (mode != UNIT_CHECK) {
+                        c->syscall_errno = n;
+
+                        unit_write_drop_in_private_format(u, mode, name, "SystemCallErrorNumber=%s", str);
+                }
+
+                return 1;
+
+        } else if (streq(name, "RestrictAddressFamilies")) {
+                int whitelist;
+                _cleanup_strv_free_ char **l;
+
+                r = sd_bus_message_enter_container(message, 'r', "bas");
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read(message, "b", &whitelist);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read_strv(message, &l);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_exit_container(message);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *joined = NULL;
+
+                        if (strv_length(l) == 0) {
+                                c->address_families_whitelist = false;
+                                c->address_families = set_free(c->address_families);
+                        } else {
+                                char **s;
+
+                                c->address_families_whitelist = whitelist;
+
+                                r = set_ensure_allocated(&c->address_families, NULL);
+                                if (r < 0)
+                                        return r;
+
+                                STRV_FOREACH(s, l) {
+                                        int af;
+
+                                        af = af_from_name(*s);
+                                        if (af <= 0)
+                                                return -EINVAL;
+
+                                        r = set_put(c->address_families, INT_TO_PTR(af));
+                                        if (r < 0)
+                                                return r;
+                                }
+                        }
+
+                        joined = strv_join(l, " ");
+                        if (!joined)
+                                return -ENOMEM;
+
+                        unit_write_drop_in_private_format(u, mode, name, "RestrictAddressFamilies=%s%s", whitelist ? "" : "~", joined);
+                }
+
+                return 1;
+#endif
+
+        } else if (streq(name, "CPUSchedulingPolicy")) {
+                int32_t n;
+
+                r = sd_bus_message_read(message, "i", &n);
+                if (r < 0)
+                        return r;
+
+                if (!sched_policy_is_valid(n))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid CPU scheduling policy");
+
+                if (mode != UNIT_CHECK) {
+                        _cleanup_free_ char *str = NULL;
+
+                        c->cpu_sched_policy = n;
+                        r = sched_policy_to_string_alloc(n, &str);
+                        if (r < 0)
+                                return r;
+
+                        unit_write_drop_in_private_format(u, mode, name, "CPUSchedulingPolicy=%s", str);
+                }
+
+                return 1;
+
+        } else if (streq(name, "CPUSchedulingPriority")) {
+                int32_t n;
+
+                r = sd_bus_message_read(message, "i", &n);
+                if (r < 0)
+                        return r;
+
+                if (!ioprio_priority_is_valid(n))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid CPU scheduling priority");
+
+                if (mode != UNIT_CHECK) {
+                        c->cpu_sched_priority = n;
+                        unit_write_drop_in_private_format(u, mode, name, "CPUSchedulingPriority=%i", n);
+                }
+
+                return 1;
+
+        } else if (streq(name, "CPUAffinity")) {
+                const void *a;
+                size_t n = 0;
+
+                r = sd_bus_message_read_array(message, 'y', &a, &n);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        if (n == 0) {
+                                c->cpuset = mfree(c->cpuset);
+                                unit_write_drop_in_private_format(u, mode, name, "%s=", name);
+                        } else {
+                                _cleanup_free_ char *str = NULL;
+                                uint8_t *l;
+                                size_t allocated = 0, len = 0, i;
+
+                                c->cpuset = (cpu_set_t*) memdup(a, sizeof(cpu_set_t) * n);
+                                if (c->cpuset)
+                                        return -ENOMEM;
+
+                                l = (uint8_t*) a;
+                                for (i = 0; i < n; i++) {
+                                        _cleanup_free_ char *p = NULL;
+                                        size_t add;
+
+                                        r = asprintf(&p, "%hhi", l[i]);
+                                        if (r < 0)
+                                                return -ENOMEM;
+
+                                        add = strlen(p);
+
+                                        if (GREEDY_REALLOC(str, allocated, len + add + 2))
+                                                return -ENOMEM;
+
+                                        strcpy(mempcpy(str + len, p, add), " ");
+                                        len += add + 1;
+                                }
+
+                                if (len != 0)
+                                        str[len - 1] = '\0';
+
+                                unit_write_drop_in_private_format(u, mode, name, "%s=%s", name, str);
+                        }
                 }
 
                 return 1;
@@ -1286,11 +1692,12 @@ int bus_exec_context_set_transient_property(
                 return 1;
 
         } else if (STR_IN_SET(name,
-                              "IgnoreSIGPIPE", "TTYVHangup", "TTYReset",
+                              "IgnoreSIGPIPE", "TTYVHangup", "TTYReset", "TTYVTDisallocate",
                               "PrivateTmp", "PrivateDevices", "PrivateNetwork", "PrivateUsers",
                               "NoNewPrivileges", "SyslogLevelPrefix", "MemoryDenyWriteExecute",
                               "RestrictRealtime", "DynamicUser", "RemoveIPC", "ProtectKernelTunables",
-                              "ProtectKernelModules", "ProtectControlGroups", "MountAPIVFS")) {
+                              "ProtectKernelModules", "ProtectControlGroups", "MountAPIVFS",
+                              "CPUSchedulingResetOnFork", "NonBlocking", "LockPersonality")) {
                 int b;
 
                 r = sd_bus_message_read(message, "b", &b);
@@ -1304,6 +1711,8 @@ int bus_exec_context_set_transient_property(
                                 c->tty_vhangup = b;
                         else if (streq(name, "TTYReset"))
                                 c->tty_reset = b;
+                        else if (streq(name, "TTYVTDisallocate"))
+                                c->tty_vt_disallocate = b;
                         else if (streq(name, "PrivateTmp"))
                                 c->private_tmp = b;
                         else if (streq(name, "PrivateDevices"))
@@ -1332,6 +1741,12 @@ int bus_exec_context_set_transient_property(
                                 c->protect_control_groups = b;
                         else if (streq(name, "MountAPIVFS"))
                                 c->mount_apivfs = b;
+                        else if (streq(name, "CPUSchedulingResetOnFork"))
+                                c->cpu_sched_reset_on_fork = b;
+                        else if (streq(name, "NonBlocking"))
+                                c->non_blocking = b;
+                        else if (streq(name, "LockPersonality"))
+                                c->lock_personality = b;
 
                         unit_write_drop_in_private_format(u, mode, name, "%s=%s", name, yes_no(b));
                 }
@@ -1402,12 +1817,12 @@ int bus_exec_context_set_transient_property(
                 if (r < 0)
                         return r;
 
-                if (!strv_env_is_valid(l))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid environment block.");
-
                 r = unit_full_printf_strv(u, l, &q);
                 if (r < 0)
                         return r;
+
+                if (!strv_env_is_valid(q))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid environment block.");
 
                 if (mode != UNIT_CHECK) {
                         if (strv_length(q) == 0) {
@@ -1425,11 +1840,52 @@ int bus_exec_context_set_transient_property(
                                 c->environment = e;
 
                                 /* We write just the new settings out to file, with unresolved specifiers */
-                                joined = strv_join_quoted(q);
+                                joined = strv_join_quoted(l);
                                 if (!joined)
                                         return -ENOMEM;
 
                                 unit_write_drop_in_private_format(u, mode, name, "Environment=%s", joined);
+                        }
+                }
+
+                return 1;
+
+        } else if (streq(name, "UnsetEnvironment")) {
+
+                _cleanup_strv_free_ char **l = NULL, **q = NULL;
+
+                r = sd_bus_message_read_strv(message, &l);
+                if (r < 0)
+                        return r;
+
+                r = unit_full_printf_strv(u, l, &q);
+                if (r < 0)
+                        return r;
+
+                if (!strv_env_name_or_assignment_is_valid(q))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid UnsetEnvironment= list.");
+
+                if (mode != UNIT_CHECK) {
+                        if (strv_length(q) == 0) {
+                                c->unset_environment = strv_free(c->unset_environment);
+                                unit_write_drop_in_private_format(u, mode, name, "UnsetEnvironment=");
+                        } else {
+                                _cleanup_free_ char *joined = NULL;
+                                char **e;
+
+                                e = strv_env_merge(2, c->unset_environment, q);
+                                if (!e)
+                                        return -ENOMEM;
+
+                                strv_free(c->unset_environment);
+                                c->unset_environment = e;
+
+                                /* We write just the new settings out to file, with unresolved specifiers */
+                                joined = strv_join_quoted(l);
+                                if (!joined)
+                                        return -ENOMEM;
+
+                                unit_write_drop_in_private_format(u, mode, name, "UnsetEnvironment=%s", joined);
                         }
                 }
 
@@ -1503,7 +1959,7 @@ int bus_exec_context_set_transient_property(
                                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Path %s is not absolute.", path);
 
                         if (mode != UNIT_CHECK) {
-                                char *buf = NULL;
+                                char *buf;
 
                                 buf = strjoin(b ? "-" : "", path);
                                 if (!buf)
@@ -1544,14 +2000,18 @@ int bus_exec_context_set_transient_property(
 
         } else if (streq(name, "PassEnvironment")) {
 
-                _cleanup_strv_free_ char **l = NULL;
+                _cleanup_strv_free_ char **l = NULL, **q = NULL;
 
                 r = sd_bus_message_read_strv(message, &l);
                 if (r < 0)
                         return r;
 
-                if (!strv_env_name_is_valid(l))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid PassEnvironment block.");
+                r = unit_full_printf_strv(u, l, &q);
+                if (r < 0)
+                        return r;
+
+                if (!strv_env_name_is_valid(q))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid PassEnvironment= block.");
 
                 if (mode != UNIT_CHECK) {
                         if (strv_isempty(l)) {
@@ -1560,11 +2020,12 @@ int bus_exec_context_set_transient_property(
                         } else {
                                 _cleanup_free_ char *joined = NULL;
 
-                                r = strv_extend_strv(&c->pass_environment, l, true);
+                                r = strv_extend_strv(&c->pass_environment, q, true);
                                 if (r < 0)
                                         return r;
 
-                                joined = strv_join_quoted(c->pass_environment);
+                                /* We write just the new settings out to file, with unresolved specifiers. */
+                                joined = strv_join_quoted(l);
                                 if (!joined)
                                         return -ENOMEM;
 
@@ -1678,7 +2139,72 @@ int bus_exec_context_set_transient_property(
 
                 return 1;
 
-        } else if (streq(name, "RuntimeDirectory")) {
+        } else if (streq(name, "KeyringMode")) {
+
+                const char *s;
+                ExecKeyringMode m;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                m = exec_keyring_mode_from_string(s);
+                if (m < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid keyring mode");
+
+                if (mode != UNIT_CHECK) {
+                        c->keyring_mode = m;
+
+                        unit_write_drop_in_private_format(u, mode, name, "KeyringMode=%s", exec_keyring_mode_to_string(m));
+                }
+
+                return 1;
+
+        } else if (streq(name, "RuntimeDirectoryPreserve")) {
+                const char *s;
+                ExecPreserveMode m;
+
+                r = sd_bus_message_read(message, "s", &s);
+                if (r < 0)
+                        return r;
+
+                m = exec_preserve_mode_from_string(s);
+                if (m < 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid preserve mode");
+
+                if (mode != UNIT_CHECK) {
+                        c->runtime_directory_preserve_mode = m;
+
+                        unit_write_drop_in_private_format(u, mode, name, "RuntimeDirectoryPreserve=%s", exec_preserve_mode_to_string(m));
+                }
+
+                return 1;
+
+        } else if (STR_IN_SET(name, "RuntimeDirectoryMode", "StateDirectoryMode", "CacheDirectoryMode", "LogsDirectoryMode", "ConfigurationDirectoryMode", "UMask")) {
+                mode_t m;
+
+                r = sd_bus_message_read(message, "u", &m);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        ExecDirectoryType i;
+
+                        if (streq(name, "UMask"))
+                                c->umask = m;
+                        else
+                                for (i = 0; i < _EXEC_DIRECTORY_TYPE_MAX; i++)
+                                        if (startswith(name, exec_directory_type_to_string(i))) {
+                                                c->directories[i].mode = m;
+                                                break;
+                                        }
+
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%040o", name, m);
+                }
+
+                return 1;
+
+        } else if (STR_IN_SET(name, "RuntimeDirectory", "StateDirectory", "CacheDirectory", "LogsDirectory", "ConfigurationDirectory")) {
                 _cleanup_strv_free_ char **l = NULL;
                 char **p;
 
@@ -1687,23 +2213,32 @@ int bus_exec_context_set_transient_property(
                         return r;
 
                 STRV_FOREACH(p, l) {
-                        if (!filename_is_valid(*p))
-                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Runtime directory is not valid %s", *p);
+                        if (!path_is_safe(*p) || path_is_absolute(*p))
+                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "%s= path is not valid: %s", name, *p);
                 }
 
                 if (mode != UNIT_CHECK) {
                         _cleanup_free_ char *joined = NULL;
+                        char ***dirs = NULL;
+                        ExecDirectoryType i;
+
+                        for (i = 0; i < _EXEC_DIRECTORY_TYPE_MAX; i++)
+                                if (streq(name, exec_directory_type_to_string(i))) {
+                                        dirs = &c->directories[i].paths;
+                                        break;
+                                }
+
+                        assert(dirs);
 
                         if (strv_isempty(l)) {
-                                c->runtime_directory = strv_free(c->runtime_directory);
+                                *dirs = strv_free(*dirs);
                                 unit_write_drop_in_private_format(u, mode, name, "%s=", name);
                         } else {
-                                r = strv_extend_strv(&c->runtime_directory, l, true);
-
+                                r = strv_extend_strv(dirs, l, true);
                                 if (r < 0)
                                         return -ENOMEM;
 
-                                joined = strv_join_quoted(c->runtime_directory);
+                                joined = strv_join_quoted(*dirs);
                                 if (!joined)
                                         return -ENOMEM;
 
@@ -1715,7 +2250,6 @@ int bus_exec_context_set_transient_property(
 
         } else if (streq(name, "SELinuxContext")) {
                 const char *s;
-
                 r = sd_bus_message_read(message, "s", &s);
                 if (r < 0)
                         return r;
@@ -1730,6 +2264,45 @@ int bus_exec_context_set_transient_property(
                 }
 
                 return 1;
+
+        } else if (STR_IN_SET(name, "AppArmorProfile", "SmackProcessLabel")) {
+                int ignore;
+                const char *s;
+
+                r = sd_bus_message_enter_container(message, 'r', "bs");
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read(message, "bs", &ignore, &s);
+                if (r < 0)
+                        return r;
+
+                if (mode != UNIT_CHECK) {
+                        char **p;
+                        bool *b;
+
+                        if (streq(name, "AppArmorProfile")) {
+                                p = &c->apparmor_profile;
+                                b = &c->apparmor_profile_ignore;
+                        } else { /* "SmackProcessLabel" */
+                                p = &c->smack_process_label;
+                                b = &c->smack_process_label_ignore;
+                        }
+
+                        if (isempty(s)) {
+                                *p = mfree(*p);
+                                *b = false;
+                        } else {
+                                if (free_and_strdup(p, s) < 0)
+                                        return -ENOMEM;
+                                *b = ignore;
+                        }
+
+                        unit_write_drop_in_private_format(u, mode, name, "%s=%s%s", name, ignore ? "-" : "", strempty(s));
+                }
+
+                return 1;
+
         } else if (streq(name, "RestrictNamespaces")) {
                 uint64_t flags;
 

@@ -72,7 +72,7 @@ static int entry_fill_basics(
         }
         if (source) {
                 entry->ip.src = source->in;
-                in_addr_prefixlen_to_netmask(&entry->ip.smsk, source_prefixlen);
+                in4_addr_prefixlen_to_netmask(&entry->ip.smsk, source_prefixlen);
         }
 
         if (out_interface) {
@@ -84,7 +84,7 @@ static int entry_fill_basics(
         }
         if (destination) {
                 entry->ip.dst = destination->in;
-                in_addr_prefixlen_to_netmask(&entry->ip.dmsk, destination_prefixlen);
+                in4_addr_prefixlen_to_netmask(&entry->ip.dmsk, destination_prefixlen);
         }
 
         return 0;
@@ -110,7 +110,7 @@ int fw_add_masquerade(
         if (af != AF_INET)
                 return -EOPNOTSUPP;
 
-        if (protocol != 0 && protocol != IPPROTO_TCP && protocol != IPPROTO_UDP)
+        if (!IN_SET(protocol, 0, IPPROTO_TCP, IPPROTO_UDP))
                 return -EOPNOTSUPP;
 
         h = iptc_init("nat");
@@ -194,7 +194,7 @@ int fw_add_local_dnat(
         if (af != AF_INET)
                 return -EOPNOTSUPP;
 
-        if (protocol != IPPROTO_TCP && protocol != IPPROTO_UDP)
+        if (!IN_SET(protocol, IPPROTO_TCP, IPPROTO_UDP))
                 return -EOPNOTSUPP;
 
         if (local_port <= 0)

@@ -19,14 +19,14 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 13 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 88e2c92..f7cfcb0 100644
+index b9bc2f6..06aaf39 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1544,18 +1544,6 @@ int main(int argc, char *argv[]) {
+@@ -1568,18 +1568,6 @@ int main(int argc, char *argv[]) {
                  kernel_timestamp = DUAL_TIMESTAMP_NULL;
          }
  
--        if (getpid() == 1) {
+-        if (getpid_cached() == 1) {
 -                /* Don't limit the core dump size, so that coredump handlers such as systemd-coredump (which honour the limit)
 -                 * will process core dumps for system services by default. */
 -                if (setrlimit(RLIMIT_CORE, &RLIMIT_MAKE_CONST(RLIM_INFINITY)) < 0)

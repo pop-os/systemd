@@ -1650,15 +1650,14 @@ static EFI_STATUS image_start(EFI_HANDLE parent_image, const Config *config, con
                 loaded_image->LoadOptions = options;
                 loaded_image->LoadOptionsSize = (StrLen(loaded_image->LoadOptions)+1) * sizeof(CHAR16);
 
-#ifdef SD_BOOT_LOG_TPM
+#if ENABLE_TPM
                 /* Try to log any options to the TPM, especially to catch manually edited options */
                 err = tpm_log_event(SD_TPM_PCR,
                                     (EFI_PHYSICAL_ADDRESS) loaded_image->LoadOptions,
                                     loaded_image->LoadOptionsSize, loaded_image->LoadOptions);
                 if (EFI_ERROR(err)) {
                         Print(L"Unable to add image options measurement: %r", err);
-                        uefi_call_wrapper(BS->Stall, 1, 3 * 1000 * 1000);
-                        return err;
+                        uefi_call_wrapper(BS->Stall, 1, 200 * 1000);
                 }
 #endif
         }

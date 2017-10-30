@@ -615,13 +615,16 @@ static void test_dns_name_apply_idna_one(const char *s, int expected, const char
         log_debug("dns_name_apply_idna: \"%s\" → %d/\"%s\" (expected %d/\"%s\")",
                   s, r, strnull(buf), expected, strnull(result));
 
-        assert_se(r == expected);
+        /* Different libidn2 versions are more and less accepting
+         * of underscore-prefixed names. So let's list the lowest
+         * expected return value. */
+        assert_se(r >= expected);
         if (expected == 1)
                 assert_se(dns_name_equal(buf, result) == 1);
 }
 
 static void test_dns_name_apply_idna(void) {
-#if defined HAVE_LIBIDN2 || defined HAVE_LIBIDN
+#if HAVE_LIBIDN2 || HAVE_LIBIDN
         const int ret = 1;
 #else
         const int ret = 0;
@@ -635,7 +638,7 @@ static void test_dns_name_apply_idna(void) {
          * labels. If registrars follow IDNA2008 we'll just be performing a
          * useless lookup.
          */
-#if defined HAVE_LIBIDN
+#if HAVE_LIBIDN
         const int ret2 = 1;
 #else
         const int ret2 = 0;
@@ -651,6 +654,12 @@ static void test_dns_name_apply_idna(void) {
         test_dns_name_apply_idna_one("föö.bär", ret, "xn--f-1gaa.xn--br-via");
         test_dns_name_apply_idna_one("föö.bär.", ret, "xn--f-1gaa.xn--br-via");
         test_dns_name_apply_idna_one("xn--f-1gaa.xn--br-via", ret, "xn--f-1gaa.xn--br-via");
+
+        test_dns_name_apply_idna_one("_443._tcp.fedoraproject.org", ret2,
+                                     "_443._tcp.fedoraproject.org");
+        test_dns_name_apply_idna_one("_443", ret2, "_443");
+        test_dns_name_apply_idna_one("gateway", ret, "gateway");
+        test_dns_name_apply_idna_one("_gateway", ret2, "_gateway");
 
         test_dns_name_apply_idna_one("r3---sn-ab5l6ne7.googlevideo.com", ret2,
                                      ret2 ? "r3---sn-ab5l6ne7.googlevideo.com" : "");

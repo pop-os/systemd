@@ -131,7 +131,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 }
         }
 
-#ifdef HAVE_SYSV_COMPAT
+#if HAVE_SYSV_COMPAT
         else if (streq(key, "fastboot") && !value) {
                 log_warning("Please pass 'fsck.mode=skip' rather than 'fastboot' on the kernel command line.");
                 arg_skip = true;
@@ -147,7 +147,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
 static void test_files(void) {
 
-#ifdef HAVE_SYSV_COMPAT
+#if HAVE_SYSV_COMPAT
         if (access("/fastboot", F_OK) >= 0) {
                 log_error("Please pass 'fsck.mode=skip' on the kernel command line rather than creating /fastboot on the root file system.");
                 arg_skip = true;
@@ -269,7 +269,7 @@ static int fsck_progress_socket(void) {
                 return log_warning_errno(errno, "socket(): %m");
 
         if (connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0) {
-                r = log_full_errno(errno == ECONNREFUSED || errno == ENOENT ? LOG_DEBUG : LOG_WARNING,
+                r = log_full_errno(IN_SET(errno, ECONNREFUSED, ENOENT) ? LOG_DEBUG : LOG_WARNING,
                                    errno, "Failed to connect to progress socket %s, ignoring: %m", sa.un.sun_path);
                 safe_close(fd);
                 return r;
@@ -462,7 +462,7 @@ int main(int argc, char *argv[]) {
 
         if (status.si_code != CLD_EXITED || (status.si_status & ~1)) {
 
-                if (status.si_code == CLD_KILLED || status.si_code == CLD_DUMPED)
+                if (IN_SET(status.si_code, CLD_KILLED, CLD_DUMPED))
                         log_error("fsck terminated by signal %s.", signal_to_string(status.si_status));
                 else if (status.si_code == CLD_EXITED)
                         log_error("fsck failed with error code %i.", status.si_status);

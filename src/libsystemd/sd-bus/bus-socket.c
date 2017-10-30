@@ -343,7 +343,7 @@ static int bus_socket_auth_write(sd_bus *b, const char *t) {
         assert(t);
 
         /* We only make use of the first iovec */
-        assert(b->auth_index == 0 || b->auth_index == 1);
+        assert(IN_SET(b->auth_index, 0, 1));
 
         l = strlen(t);
         p = malloc(b->auth_iovec[0].iov_len + l);
@@ -593,7 +593,6 @@ void bus_socket_setup(sd_bus *b) {
         fd_inc_rcvbuf(b->input_fd, SNDBUF_SIZE);
         fd_inc_sndbuf(b->output_fd, SNDBUF_SIZE);
 
-        b->is_kernel = false;
         b->message_version = 1;
         b->message_endian = 0;
 }
@@ -661,7 +660,7 @@ int bus_socket_start_auth(sd_bus *b) {
         bus_get_peercred(b);
 
         b->state = BUS_AUTHENTICATING;
-        b->auth_timeout = now(CLOCK_MONOTONIC) + BUS_DEFAULT_TIMEOUT;
+        b->auth_timeout = now(CLOCK_MONOTONIC) + BUS_AUTH_TIMEOUT;
 
         if (sd_is_socket(b->input_fd, AF_UNIX, 0, 0) <= 0)
                 b->hello_flags &= ~KDBUS_HELLO_ACCEPT_FD;
@@ -732,7 +731,7 @@ int bus_socket_exec(sd_bus *b) {
                 assert_se(dup3(s[1], STDIN_FILENO, 0) == STDIN_FILENO);
                 assert_se(dup3(s[1], STDOUT_FILENO, 0) == STDOUT_FILENO);
 
-                if (s[1] != STDIN_FILENO && s[1] != STDOUT_FILENO)
+                if (!IN_SET(s[1], STDIN_FILENO, STDOUT_FILENO))
                         safe_close(s[1]);
 
                 fd_cloexec(STDIN_FILENO, false);
@@ -776,7 +775,7 @@ int bus_socket_write_message(sd_bus *bus, sd_bus_message *m, size_t *idx) {
         assert(bus);
         assert(m);
         assert(idx);
-        assert(bus->state == BUS_RUNNING || bus->state == BUS_HELLO);
+        assert(IN_SET(bus->state, BUS_RUNNING, BUS_HELLO));
 
         if (*idx >= BUS_MESSAGE_SIZE(m))
                 return 0;
@@ -800,7 +799,7 @@ int bus_socket_write_message(sd_bus *bus, sd_bus_message *m, size_t *idx) {
                         .msg_iovlen = m->n_iovec,
                 };
 
-                if (m->n_fds > 0) {
+                if (m->n_fds > 0 && *idx == 0) {
                         struct cmsghdr *control;
 
                         mh.msg_control = control = alloca(CMSG_SPACE(sizeof(int) * m->n_fds));
@@ -831,7 +830,7 @@ static int bus_socket_read_message_need(sd_bus *bus, size_t *need) {
 
         assert(bus);
         assert(need);
-        assert(bus->state == BUS_RUNNING || bus->state == BUS_HELLO);
+        assert(IN_SET(bus->state, BUS_RUNNING, BUS_HELLO));
 
         if (bus->rbuffer_size < sizeof(struct bus_header)) {
                 *need = sizeof(struct bus_header) + 8;
@@ -883,7 +882,7 @@ static int bus_socket_make_message(sd_bus *bus, size_t size) {
 
         assert(bus);
         assert(bus->rbuffer_size >= size);
-        assert(bus->state == BUS_RUNNING || bus->state == BUS_HELLO);
+        assert(IN_SET(bus->state, BUS_RUNNING, BUS_HELLO));
 
         r = bus_rqueue_make_room(bus);
         if (r < 0)
@@ -932,7 +931,7 @@ int bus_socket_read_message(sd_bus *bus) {
         bool handle_cmsg = false;
 
         assert(bus);
-        assert(bus->state == BUS_RUNNING || bus->state == BUS_HELLO);
+        assert(IN_SET(bus->state, BUS_RUNNING, BUS_HELLO));
 
         r = bus_socket_read_message_need(bus, &need);
         if (r < 0)

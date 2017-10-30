@@ -1,0 +1,274 @@
+From: Michael Biebl <biebl@barriere.debian.org>
+Date: Tue, 10 Oct 2017 22:17:41 +0000
+Subject: Revert "tests: when running a manager object in a test,
+ migrate to private cgroup subroot first (#6576)"
+
+This reverts commit 8c759b33a435c6a9390a18ebe9259402e2fc595e.
+
+See https://github.com/systemd/systemd/issues/7053.
+---
+ src/test/meson.build        | 24 ++++++++----------------
+ src/test/test-bpf.c         |  2 --
+ src/test/test-cgroup-mask.c |  2 --
+ src/test/test-engine.c      |  2 --
+ src/test/test-execute.c     |  2 --
+ src/test/test-helper.c      | 41 -----------------------------------------
+ src/test/test-helper.h      |  2 --
+ src/test/test-path.c        |  1 -
+ src/test/test-sched-prio.c  |  2 --
+ src/test/test-unit-file.c   |  2 --
+ src/test/test-unit-name.c   |  2 --
+ 11 files changed, 8 insertions(+), 74 deletions(-)
+ delete mode 100644 src/test/test-helper.c
+
+diff --git a/src/test/meson.build b/src/test/meson.build
+index 1f3db65..356173f 100644
+--- a/src/test/meson.build
++++ b/src/test/meson.build
+@@ -42,8 +42,7 @@ tests += [
+          [],
+          []],
+ 
+-        [['src/test/test-engine.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-engine.c'],
+          [libcore,
+           libudev,
+           libsystemd_internal],
+@@ -106,8 +105,7 @@ tests += [
+          [],
+          'ENABLE_EFI'],
+ 
+-        [['src/test/test-unit-name.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-unit-name.c'],
+          [libcore,
+           libshared],
+          [threads,
+@@ -117,8 +115,7 @@ tests += [
+           libmount,
+           libblkid]],
+ 
+-        [['src/test/test-unit-file.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-unit-file.c'],
+          [libcore,
+           libshared],
+          [threads,
+@@ -339,8 +336,7 @@ tests += [
+          [libbasic],
+          []],
+ 
+-        [['src/test/test-bpf.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-bpf.c'],
+          [libcore,
+           libshared],
+          [libmount,
+@@ -474,8 +470,7 @@ tests += [
+          '', 'manual'],
+ 
+ 
+-        [['src/test/test-cgroup-mask.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-cgroup-mask.c'],
+          [libcore,
+           libshared],
+          [threads,
+@@ -505,8 +500,7 @@ tests += [
+          [],
+          []],
+ 
+-        [['src/test/test-path.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-path.c'],
+          [libcore,
+           libshared],
+          [threads,
+@@ -516,8 +510,7 @@ tests += [
+           libmount,
+           libblkid]],
+ 
+-        [['src/test/test-execute.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-execute.c'],
+          [libcore,
+           libshared],
+          [threads,
+@@ -545,8 +538,7 @@ tests += [
+          [],
+          []],
+ 
+-        [['src/test/test-sched-prio.c',
+-          'src/test/test-helper.c'],
++        [['src/test/test-sched-prio.c'],
+          [libcore,
+           libshared],
+          [threads,
+diff --git a/src/test/test-bpf.c b/src/test/test-bpf.c
+index 74e9d50..7dcabe2 100644
+--- a/src/test/test-bpf.c
++++ b/src/test/test-bpf.c
+@@ -27,7 +27,6 @@
+ #include "manager.h"
+ #include "rm-rf.h"
+ #include "service.h"
+-#include "test-helper.h"
+ #include "tests.h"
+ #include "unit.h"
+ 
+@@ -49,7 +48,6 @@ int main(int argc, char *argv[]) {
+         log_parse_environment();
+         log_open();
+ 
+-        enter_cgroup_subroot();
+         assert_se(set_unit_path(get_testdata_dir("")) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+ 
+diff --git a/src/test/test-cgroup-mask.c b/src/test/test-cgroup-mask.c
+index 02aae84..d1e5d39 100644
+--- a/src/test/test-cgroup-mask.c
++++ b/src/test/test-cgroup-mask.c
+@@ -34,8 +34,6 @@ static int test_cgroup_mask(void) {
+         FDSet *fdset = NULL;
+         int r;
+ 
+-        enter_cgroup_subroot();
+-
+         /* Prepare the manager. */
+         assert_se(set_unit_path(get_testdata_dir("")) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+diff --git a/src/test/test-engine.c b/src/test/test-engine.c
+index 6916f83..590c1df 100644
+--- a/src/test/test-engine.c
++++ b/src/test/test-engine.c
+@@ -37,8 +37,6 @@ int main(int argc, char *argv[]) {
+         Job *j;
+         int r;
+ 
+-        enter_cgroup_subroot();
+-
+         /* prepare the test */
+         assert_se(set_unit_path(get_testdata_dir("")) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 6786d56..ed3b574 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -532,8 +532,6 @@ int main(int argc, char *argv[]) {
+                 return EXIT_TEST_SKIP;
+         }
+ 
+-        enter_cgroup_subroot();
+-
+         assert_se(setenv("XDG_RUNTIME_DIR", "/tmp/", 1) == 0);
+         assert_se(set_unit_path(get_testdata_dir("/test-execute")) >= 0);
+ 
+diff --git a/src/test/test-helper.c b/src/test/test-helper.c
+deleted file mode 100644
+index 5b707c3..0000000
+--- a/src/test/test-helper.c
++++ /dev/null
+@@ -1,41 +0,0 @@
+-/***
+-  This file is part of systemd.
+-
+-  Copyright 2017 Lennart Poettering
+-
+-  systemd is free software; you can redistribute it and/or modify it
+-  under the terms of the GNU Lesser General Public License as published by
+-  the Free Software Foundation; either version 2.1 of the License, or
+-  (at your option) any later version.
+-
+-  systemd is distributed in the hope that it will be useful, but
+-  WITHOUT ANY WARRANTY; without even the implied warranty of
+-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+-  Lesser General Public License for more details.
+-
+-  You should have received a copy of the GNU Lesser General Public License
+-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+-***/
+-
+-#include "test-helper.h"
+-#include "random-util.h"
+-#include "alloc-util.h"
+-#include "cgroup-util.h"
+-
+-void enter_cgroup_subroot(void) {
+-        _cleanup_free_ char *cgroup_root = NULL, *cgroup_subroot = NULL;
+-        CGroupMask supported;
+-
+-        assert_se(cg_pid_get_path(NULL, 0, &cgroup_root) >= 0);
+-        assert_se(asprintf(&cgroup_subroot, "%s/%" PRIx64, cgroup_root, random_u64()) >= 0);
+-        assert_se(cg_mask_supported(&supported) >= 0);
+-
+-        /* If this fails, then we don't mind as the later cgroup operations will fail too, and it's fine if we handle
+-         * any errors at that point. */
+-
+-        if (cg_create_everywhere(supported, _CGROUP_MASK_ALL, cgroup_subroot) < 0)
+-                return;
+-
+-        if (cg_attach_everywhere(supported, cgroup_subroot, 0, NULL, NULL) < 0)
+-                return;
+-}
+diff --git a/src/test/test-helper.h b/src/test/test-helper.h
+index 8af32c8..ddb10f8 100644
+--- a/src/test/test-helper.h
++++ b/src/test/test-helper.h
+@@ -39,5 +39,3 @@
+                -ENOENT,                                         \
+                -ENOMEDIUM /* cannot determine cgroup */         \
+                )
+-
+-void enter_cgroup_subroot(void);
+diff --git a/src/test/test-path.c b/src/test/test-path.c
+index c191501..c1c3270 100644
+--- a/src/test/test-path.c
++++ b/src/test/test-path.c
+@@ -45,7 +45,6 @@ static int setup_test(Manager **m) {
+ 
+         assert_se(m);
+ 
+-        enter_cgroup_subroot();
+ 
+         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &tmp);
+         if (MANAGER_SKIP_TEST(r)) {
+diff --git a/src/test/test-sched-prio.c b/src/test/test-sched-prio.c
+index 9bed4b3..8a5055f 100644
+--- a/src/test/test-sched-prio.c
++++ b/src/test/test-sched-prio.c
+@@ -34,8 +34,6 @@ int main(int argc, char *argv[]) {
+         FDSet *fdset = NULL;
+         int r;
+ 
+-        enter_cgroup_subroot();
+-
+         /* prepare the test */
+         assert_se(set_unit_path(get_testdata_dir("")) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+diff --git a/src/test/test-unit-file.c b/src/test/test-unit-file.c
+index 07f21d0..57f60d2 100644
+--- a/src/test/test-unit-file.c
++++ b/src/test/test-unit-file.c
+@@ -858,8 +858,6 @@ int main(int argc, char *argv[]) {
+         log_parse_environment();
+         log_open();
+ 
+-        enter_cgroup_subroot();
+-
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+ 
+         r = test_unit_file_get_set();
+diff --git a/src/test/test-unit-name.c b/src/test/test-unit-name.c
+index 1992357..14665d6 100644
+--- a/src/test/test-unit-name.c
++++ b/src/test/test-unit-name.c
+@@ -470,8 +470,6 @@ int main(int argc, char* argv[]) {
+         log_parse_environment();
+         log_open();
+ 
+-        enter_cgroup_subroot();
+-
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+ 
+         test_unit_name_is_valid();

@@ -16,16 +16,16 @@ In the future, this may become the default resolv.conf on Ubuntu.
  units/meson.build                                |  2 ++
  units/systemd-resolved-update-resolvconf.path    |  2 ++
  units/systemd-resolved-update-resolvconf.service |  7 +++++
- units/systemd-resolved.service.m4.in             |  1 +
+ units/systemd-resolved.service.in                |  1 +
  6 files changed, 52 insertions(+), 1 deletion(-)
  create mode 100644 units/systemd-resolved-update-resolvconf.path
  create mode 100644 units/systemd-resolved-update-resolvconf.service
 
 diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
-index 3c62550..2fa45d3 100644
+index e3d6a33..bcc935a 100644
 --- a/src/resolve/resolved-resolv-conf.c
 +++ b/src/resolve/resolved-resolv-conf.c
-@@ -65,6 +65,12 @@ int manager_read_resolv_conf(Manager *m) {
+@@ -66,6 +66,12 @@ int manager_read_resolv_conf(Manager *m) {
              st.st_ino == own.st_ino)
                  return 0;
  
@@ -38,7 +38,7 @@ index 3c62550..2fa45d3 100644
          f = fopen("/etc/resolv.conf", "re");
          if (!f) {
                  if (errno == ENOENT)
-@@ -228,11 +234,27 @@ static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *doma
+@@ -234,11 +240,27 @@ static int write_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *doma
          return fflush_and_check(f);
  }
  
@@ -66,7 +66,7 @@ index 3c62550..2fa45d3 100644
          int r;
  
          assert(m);
-@@ -252,8 +274,11 @@ int manager_write_resolv_conf(Manager *m) {
+@@ -258,8 +280,11 @@ int manager_write_resolv_conf(Manager *m) {
          r = fopen_temporary_label(PRIVATE_RESOLV_CONF, PRIVATE_RESOLV_CONF, &f, &temp_path);
          if (r < 0)
                  return log_warning_errno(r, "Failed to open private resolv.conf file for writing: %m");
@@ -79,7 +79,7 @@ index 3c62550..2fa45d3 100644
  
          r = write_resolv_conf_contents(f, dns, domains);
          if (r < 0) {
-@@ -266,11 +291,24 @@ int manager_write_resolv_conf(Manager *m) {
+@@ -272,11 +297,24 @@ int manager_write_resolv_conf(Manager *m) {
                  goto fail;
          }
  
@@ -117,12 +117,12 @@ index 75fa080..e2ddeb6 100644
  int manager_read_resolv_conf(Manager *m);
  int manager_write_resolv_conf(Manager *m);
 diff --git a/units/meson.build b/units/meson.build
-index 05cff0e..37d754a 100644
+index 32dbdcc..5ee5897 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -91,6 +91,8 @@ units = [
+@@ -95,6 +95,8 @@ units = [
           'sockets.target.wants/'],
-         ['systemd-networkd.socket',             '',
+         ['systemd-networkd.socket',             'ENABLE_NETWORKD',
           join_paths(pkgsysconfdir, 'system/sockets.target.wants/')],
 +        ['systemd-resolved-update-resolvconf.path', '',],
 +        ['systemd-resolved-update-resolvconf.service', '',],
@@ -150,15 +150,15 @@ index 0000000..ebec5d8
 +[Service]
 +Type=oneshot
 +ExecStart=+-/bin/sh -c 'cat /run/systemd/resolve/stub-resolv.conf | /sbin/resolvconf -a systemd-resolved'
-diff --git a/units/systemd-resolved.service.m4.in b/units/systemd-resolved.service.m4.in
-index 931156a..8abc04a 100644
---- a/units/systemd-resolved.service.m4.in
-+++ b/units/systemd-resolved.service.m4.in
+diff --git a/units/systemd-resolved.service.in b/units/systemd-resolved.service.in
+index cda83ee..b75030a 100644
+--- a/units/systemd-resolved.service.in
++++ b/units/systemd-resolved.service.in
 @@ -14,6 +14,7 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/writing-resolver
  After=systemd-networkd.service network.target
  Before=network-online.target nss-lookup.target
  Wants=nss-lookup.target
 +Wants=systemd-resolved-update-resolvconf.path
  
- # On kdbus systems we pull in the busname explicitly, because it
- # carries policy that allows the daemon to acquire its name.
+ [Service]
+ Type=notify

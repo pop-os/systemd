@@ -21,7 +21,7 @@
 #include <poll.h>
 #include <sys/ioctl.h>
 
-#ifdef HAVE_LIBIDN2
+#if HAVE_LIBIDN2
 #include <idn2.h>
 #endif
 
@@ -328,9 +328,9 @@ static int manager_network_monitor_listen(Manager *m) {
 
 static int determine_hostname(char **full_hostname, char **llmnr_hostname, char **mdns_hostname) {
         _cleanup_free_ char *h = NULL, *n = NULL;
-#if defined(HAVE_LIBIDN2)
+#if HAVE_LIBIDN2
         _cleanup_free_ char *utf8 = NULL;
-#elif defined(HAVE_LIBIDN)
+#elif HAVE_LIBIDN
         int k;
 #endif
         char label[DNS_LABEL_MAX];
@@ -356,7 +356,7 @@ static int determine_hostname(char **full_hostname, char **llmnr_hostname, char 
                 return -EINVAL;
         }
 
-#if defined(HAVE_LIBIDN2)
+#if HAVE_LIBIDN2
         r = idn2_to_unicode_8z8z(label, &utf8, 0);
         if (r != IDN2_OK)
                 return log_error("Failed to undo IDNA: %s", idn2_strerror(r));
@@ -364,7 +364,7 @@ static int determine_hostname(char **full_hostname, char **llmnr_hostname, char 
 
         r = strlen(utf8);
         decoded = utf8;
-#elif defined(HAVE_LIBIDN)
+#elif HAVE_LIBIDN
         k = dns_label_undo_idna(label, r, label, sizeof label);
         if (k < 0)
                 return log_error_errno(k, "Failed to undo IDNA: %m");
@@ -519,8 +519,11 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
         _cleanup_free_ char *buffer = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         Manager *m = userdata;
+        DnsServer *server;
         size_t size = 0;
         DnsScope *scope;
+        Iterator i;
+        Link *l;
 
         assert(s);
         assert(si);
@@ -532,6 +535,14 @@ static int manager_sigusr1(sd_event_source *s, const struct signalfd_siginfo *si
 
         LIST_FOREACH(scopes, scope, m->dns_scopes)
                 dns_scope_dump(scope, f);
+
+        LIST_FOREACH(servers, server, m->dns_servers)
+                dns_server_dump(server, f);
+        LIST_FOREACH(servers, server, m->fallback_dns_servers)
+                dns_server_dump(server, f);
+        HASHMAP_FOREACH(l, m->links, i)
+                LIST_FOREACH(servers, server, l->dns_servers)
+                        dns_server_dump(server, f);
 
         if (fflush_and_check(f) < 0)
                 return log_oom();
@@ -549,6 +560,17 @@ static int manager_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si
 
         manager_flush_caches(m);
 
+        return 0;
+}
+
+static int manager_sigrtmin1(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
+        Manager *m = userdata;
+
+        assert(s);
+        assert(si);
+        assert(m);
+
+        manager_reset_server_features(m);
         return 0;
 }
 
@@ -616,6 +638,7 @@ int manager_new(Manager **ret) {
 
         (void) sd_event_add_signal(m->event, &m->sigusr1_event_source, SIGUSR1, manager_sigusr1, m);
         (void) sd_event_add_signal(m->event, &m->sigusr2_event_source, SIGUSR2, manager_sigusr2, m);
+        (void) sd_event_add_signal(m->event, &m->sigrtmin1_event_source, SIGRTMIN+1, manager_sigrtmin1, m);
 
         manager_cleanup_saved_user(m);
 
@@ -679,6 +702,7 @@ Manager *manager_free(Manager *m) {
 
         sd_event_source_unref(m->sigusr1_event_source);
         sd_event_source_unref(m->sigusr2_event_source);
+        sd_event_source_unref(m->sigrtmin1_event_source);
 
         sd_event_unref(m->event);
 
@@ -723,7 +747,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         if (ms < 0)
                 return ms;
 
-        r = dns_packet_new(&p, protocol, ms);
+        r = dns_packet_new(&p, protocol, ms, DNS_PACKET_SIZE_MAX);
         if (r < 0)
                 return r;
 
@@ -741,7 +765,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         if (l == 0)
                 return 0;
         if (l < 0) {
-                if (errno == EAGAIN || errno == EINTR)
+                if (IN_SET(errno, EAGAIN, EINTR))
                         return 0;
 
                 return -errno;
@@ -1394,6 +1418,19 @@ void manager_flush_caches(Manager *m) {
                 dns_cache_flush(&scope->cache);
 
         log_info("Flushed all caches.");
+}
+
+void manager_reset_server_features(Manager *m) {
+        Iterator i;
+        Link *l;
+
+        dns_server_reset_features_all(m->dns_servers);
+        dns_server_reset_features_all(m->fallback_dns_servers);
+
+        HASHMAP_FOREACH(l, m->links, i)
+                dns_server_reset_features_all(l->dns_servers);
+
+        log_info("Resetting learnt feature levels on all servers.");
 }
 
 void manager_cleanup_saved_user(Manager *m) {

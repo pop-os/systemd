@@ -632,7 +632,7 @@ int dns_scope_make_reply_packet(
             dns_answer_isempty(soa))
                 return -EINVAL;
 
-        r = dns_packet_new(&p, s->protocol, 0);
+        r = dns_packet_new(&p, s->protocol, 0, DNS_PACKET_SIZE_MAX);
         if (r < 0)
                 return r;
 
@@ -818,7 +818,7 @@ static int dns_scope_make_conflict_packet(
         assert(rr);
         assert(ret);
 
-        r = dns_packet_new(&p, s->protocol, 0);
+        r = dns_packet_new(&p, s->protocol, 0, DNS_PACKET_SIZE_MAX);
         if (r < 0)
                 return r;
 
@@ -904,7 +904,7 @@ int dns_scope_notify_conflict(DnsScope *scope, DnsResourceRecord *rr) {
          * messages, not all of them. That should be enough to
          * indicate where there might be a conflict */
         r = ordered_hashmap_put(scope->conflict_queue, rr->key, rr);
-        if (r == -EEXIST || r == 0)
+        if (IN_SET(r, 0, -EEXIST))
                 return 0;
         if (r < 0)
                 return log_debug_errno(r, "Failed to queue conflicting RR: %m");

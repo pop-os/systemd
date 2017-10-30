@@ -471,7 +471,7 @@ static int lease_parse_routes(
                 struct sd_dhcp_route *route = *routes + *routes_size;
                 int r;
 
-                r = in_addr_default_prefixlen((struct in_addr*) option, &route->dst_prefixlen);
+                r = in4_addr_default_prefixlen((struct in_addr*) option, &route->dst_prefixlen);
                 if (r < 0) {
                         log_debug("Failed to determine destination prefix length from class based IP, ignoring");
                         continue;
@@ -926,16 +926,16 @@ int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file) {
 
         r = sd_dhcp_lease_get_dns(lease, &addresses);
         if (r > 0) {
-                fputs("DNS=", f);
+                fputs_unlocked("DNS=", f);
                 serialize_in_addrs(f, addresses, r);
-                fputs("\n", f);
+                fputs_unlocked("\n", f);
         }
 
         r = sd_dhcp_lease_get_ntp(lease, &addresses);
         if (r > 0) {
-                fputs("NTP=", f);
+                fputs_unlocked("NTP=", f);
                 serialize_in_addrs(f, addresses, r);
-                fputs("\n", f);
+                fputs_unlocked("\n", f);
         }
 
         r = sd_dhcp_lease_get_domainname(lease, &string);
@@ -944,9 +944,9 @@ int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file) {
 
         r = sd_dhcp_lease_get_search_domains(lease, &search_domains);
         if (r > 0) {
-                fputs("DOMAIN_SEARCH_LIST=", f);
+                fputs_unlocked("DOMAIN_SEARCH_LIST=", f);
                 fputstrv(f, search_domains, NULL, NULL);
-                fputs("\n", f);
+                fputs_unlocked("\n", f);
         }
 
         r = sd_dhcp_lease_get_hostname(lease, &string);
@@ -1253,7 +1253,7 @@ int dhcp_lease_set_default_subnet_mask(sd_dhcp_lease *lease) {
         address.s_addr = lease->address;
 
         /* fall back to the default subnet masks based on address class */
-        r = in_addr_default_subnet_mask(&address, &mask);
+        r = in4_addr_default_subnet_mask(&address, &mask);
         if (r < 0)
                 return r;
 

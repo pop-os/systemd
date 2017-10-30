@@ -91,7 +91,7 @@ static void forward_syslog_iovec(Server *s, const struct iovec *iovec, unsigned 
                 return;
         }
 
-        if (ucred && (errno == ESRCH || errno == EPERM)) {
+        if (ucred && IN_SET(errno, ESRCH, EPERM)) {
                 struct ucred u;
 
                 /* Hmm, presumably the sender process vanished
@@ -99,7 +99,7 @@ static void forward_syslog_iovec(Server *s, const struct iovec *iovec, unsigned 
                  * let's fix it as good as we can, and retry */
 
                 u = *ucred;
-                u.pid = getpid();
+                u.pid = getpid_cached();
                 memcpy(CMSG_DATA(cmsg), &u, sizeof(struct ucred));
 
                 if (sendmsg(s->syslog_fd, &msghdr, MSG_NOSIGNAL) >= 0)
@@ -124,7 +124,7 @@ static void forward_syslog_raw(Server *s, int priority, const char *buffer, cons
         if (LOG_PRI(priority) > s->max_level_syslog)
                 return;
 
-        IOVEC_SET_STRING(iovec, buffer);
+        iovec = IOVEC_MAKE_STRING(buffer);
         forward_syslog_iovec(s, &iovec, 1, ucred, tv);
 }
 
@@ -135,7 +135,7 @@ void server_forward_syslog(Server *s, int priority, const char *identifier, cons
         int n = 0;
         time_t t;
         struct tm *tm;
-        char *ident_buf = NULL;
+        _cleanup_free_ char *ident_buf = NULL;
 
         assert(s);
         assert(priority >= 0);
@@ -147,7 +147,7 @@ void server_forward_syslog(Server *s, int priority, const char *identifier, cons
 
         /* First: priority field */
         xsprintf(header_priority, "<%i>", priority);
-        IOVEC_SET_STRING(iovec[n++], header_priority);
+        iovec[n++] = IOVEC_MAKE_STRING(header_priority);
 
         /* Second: timestamp */
         t = tv ? tv->tv_sec : ((time_t) (now(CLOCK_REALTIME) / USEC_PER_SEC));
@@ -156,7 +156,7 @@ void server_forward_syslog(Server *s, int priority, const char *identifier, cons
                 return;
         if (strftime(header_time, sizeof(header_time), "%h %e %T ", tm) <= 0)
                 return;
-        IOVEC_SET_STRING(iovec[n++], header_time);
+        iovec[n++] = IOVEC_MAKE_STRING(header_time);
 
         /* Third: identifier and PID */
         if (ucred) {
@@ -168,20 +168,18 @@ void server_forward_syslog(Server *s, int priority, const char *identifier, cons
                 xsprintf(header_pid, "["PID_FMT"]: ", ucred->pid);
 
                 if (identifier)
-                        IOVEC_SET_STRING(iovec[n++], identifier);
+                        iovec[n++] = IOVEC_MAKE_STRING(identifier);
 
-                IOVEC_SET_STRING(iovec[n++], header_pid);
+                iovec[n++] = IOVEC_MAKE_STRING(header_pid);
         } else if (identifier) {
-                IOVEC_SET_STRING(iovec[n++], identifier);
-                IOVEC_SET_STRING(iovec[n++], ": ");
+                iovec[n++] = IOVEC_MAKE_STRING(identifier);
+                iovec[n++] = IOVEC_MAKE_STRING(": ");
         }
 
         /* Fourth: message */
-        IOVEC_SET_STRING(iovec[n++], message);
+        iovec[n++] = IOVEC_MAKE_STRING(message);
 
         forward_syslog_iovec(s, iovec, n, ucred, tv);
-
-        free(ident_buf);
 }
 
 int syslog_fixup_facility(int priority) {
@@ -325,11 +323,12 @@ void server_process_syslog_message(
         char syslog_priority[sizeof("PRIORITY=") + DECIMAL_STR_MAX(int)],
              syslog_facility[sizeof("SYSLOG_FACILITY=") + DECIMAL_STR_MAX(int)];
         const char *message = NULL, *syslog_identifier = NULL, *syslog_pid = NULL;
-        struct iovec iovec[N_IOVEC_META_FIELDS + 6];
-        unsigned n = 0;
-        int priority = LOG_USER | LOG_INFO;
         _cleanup_free_ char *identifier = NULL, *pid = NULL;
+        struct iovec iovec[N_IOVEC_META_FIELDS + 6];
+        int priority = LOG_USER | LOG_INFO, r;
+        ClientContext *context = NULL;
         const char *orig;
+        unsigned n = 0;
 
         assert(s);
         assert(buf);
@@ -352,31 +351,37 @@ void server_process_syslog_message(
         if (s->forward_to_wall)
                 server_forward_wall(s, priority, identifier, buf, ucred);
 
-        IOVEC_SET_STRING(iovec[n++], "_TRANSPORT=syslog");
+        iovec[n++] = IOVEC_MAKE_STRING("_TRANSPORT=syslog");
 
         xsprintf(syslog_priority, "PRIORITY=%i", priority & LOG_PRIMASK);
-        IOVEC_SET_STRING(iovec[n++], syslog_priority);
+        iovec[n++] = IOVEC_MAKE_STRING(syslog_priority);
 
         if (priority & LOG_FACMASK) {
                 xsprintf(syslog_facility, "SYSLOG_FACILITY=%i", LOG_FAC(priority));
-                IOVEC_SET_STRING(iovec[n++], syslog_facility);
+                iovec[n++] = IOVEC_MAKE_STRING(syslog_facility);
         }
 
         if (identifier) {
                 syslog_identifier = strjoina("SYSLOG_IDENTIFIER=", identifier);
-                IOVEC_SET_STRING(iovec[n++], syslog_identifier);
+                iovec[n++] = IOVEC_MAKE_STRING(syslog_identifier);
         }
 
         if (pid) {
                 syslog_pid = strjoina("SYSLOG_PID=", pid);
-                IOVEC_SET_STRING(iovec[n++], syslog_pid);
+                iovec[n++] = IOVEC_MAKE_STRING(syslog_pid);
         }
 
         message = strjoina("MESSAGE=", buf);
         if (message)
-                IOVEC_SET_STRING(iovec[n++], message);
+                iovec[n++] = IOVEC_MAKE_STRING(message);
 
-        server_dispatch_message(s, iovec, n, ELEMENTSOF(iovec), ucred, tv, label, label_len, NULL, priority, 0);
+        if (ucred && pid_is_valid(ucred->pid)) {
+                r = client_context_get(s, ucred->pid, ucred, label, label_len, NULL, &context);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to retrieve credentials for PID " PID_FMT ", ignoring: %m", ucred->pid);
+        }
+
+        server_dispatch_message(s, iovec, n, ELEMENTSOF(iovec), context, tv, priority, 0);
 }
 
 int server_open_syslog_socket(Server *s) {
@@ -409,7 +414,7 @@ int server_open_syslog_socket(Server *s) {
         if (r < 0)
                 return log_error_errno(errno, "SO_PASSCRED failed: %m");
 
-#ifdef HAVE_SELINUX
+#if HAVE_SELINUX
         if (mac_selinux_use()) {
                 r = setsockopt(s->syslog_fd, SOL_SOCKET, SO_PASSSEC, &one, sizeof(one));
                 if (r < 0)
