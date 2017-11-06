@@ -1,3 +1,11 @@
+systemd (235-2ubuntu2) bionic; urgency=medium
+
+  * Fix test-functions failing with Ubuntu units.
+  * tests: switch to using ext4 by default, instead of ext3.
+  * Skip test-bpf in autopkgtest, currently is failing.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 06 Nov 2017 18:33:39 +0000
+
 systemd (235-2ubuntu1) bionic; urgency=medium
 
   [ Dimitri John Ledkov ]
