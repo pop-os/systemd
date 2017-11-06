@@ -1,0 +1,48 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Mon, 6 Nov 2017 16:16:12 +0000
+Subject: test: switch to using ext4 instead of ext3 as default fallback fs
+
+Using ext3 is not representative anymore, and Ubuntu has stopped shipping
+fsck.ext3 in the initramfs.
+
+(cherry picked from commit 82b8298db25490de3a485d37bfcfe49ffdfefadc)
+---
+ test/TEST-02-CRYPTSETUP/test.sh | 4 ++--
+ test/test-functions             | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/test/TEST-02-CRYPTSETUP/test.sh b/test/TEST-02-CRYPTSETUP/test.sh
+index 1280148..545602e 100755
+--- a/test/TEST-02-CRYPTSETUP/test.sh
++++ b/test/TEST-02-CRYPTSETUP/test.sh
+@@ -31,7 +31,7 @@ test_setup() {
+     echo -n test >$TESTDIR/keyfile
+     cryptsetup -q luksFormat ${LOOPDEV}p2 $TESTDIR/keyfile
+     cryptsetup luksOpen ${LOOPDEV}p2 varcrypt <$TESTDIR/keyfile
+-    mkfs.ext3 -L var /dev/mapper/varcrypt
++    mkfs.ext4 -L var /dev/mapper/varcrypt
+     mkdir -p $TESTDIR/root
+     mount ${LOOPDEV}p1 $TESTDIR/root
+     mkdir -p $TESTDIR/root/var
+@@ -67,7 +67,7 @@ EOF
+         cat $initdir/etc/crypttab | ddebug
+ 
+         cat >>$initdir/etc/fstab <<EOF
+-/dev/mapper/varcrypt    /var    ext3    defaults 0 1
++/dev/mapper/varcrypt    /var    ext4    defaults 0 1
+ EOF
+     ) || return 1
+ 
+diff --git a/test/test-functions b/test/test-functions
+index 2957de5..92388dc 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -12,7 +12,7 @@ KERNEL_MODS="/lib/modules/$KERNEL_VER/"
+ QEMU_TIMEOUT="${QEMU_TIMEOUT:-infinity}"
+ NSPAWN_TIMEOUT="${NSPAWN_TIMEOUT:-infinity}"
+ TIMED_OUT=  # will be 1 after run_* if *_TIMEOUT is set and test timed out
+-[[ "$LOOKS_LIKE_SUSE" ]] && FSTYPE="${FSTYPE:-btrfs}" || FSTYPE="${FSTYPE:-ext3}"
++[[ "$LOOKS_LIKE_SUSE" ]] && FSTYPE="${FSTYPE:-btrfs}" || FSTYPE="${FSTYPE:-ext4}"
+ UNIFIED_CGROUP_HIERARCHY="${UNIFIED_CGROUP_HIERARCHY:-default}"
+ 
+ if ! ROOTLIBDIR=$(pkg-config --variable=systemdutildir systemd); then
