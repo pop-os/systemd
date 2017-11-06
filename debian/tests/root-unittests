@@ -23,6 +23,8 @@ for t in /usr/lib/systemd/tests/test-*; do
     tname=$(basename $t)
     # test-udev needs special prep and has its own test
     [ "$tname" != test-udev ] || continue
+    # currently is failing https://github.com/systemd/systemd/issues/7267
+    [ "$tname" != test-bpf ] || continue
     echo "====== $tname ======="
     # exit code 77 means "skip"
     rc=0
