@@ -1,0 +1,45 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Mon, 6 Nov 2017 16:00:13 +0000
+Subject: test/test-functions: drop all prefixes
+
+When parsing and installing binaries mentioned in Exec*= lines the
+5ed0dcf4d552271115d96d8d22b1a25494b85277 commit added parsing logic to drop
+prefixes, including handling duplicate exclamation marks. But this did not
+handle arbitrary combination of multiple prefixes, ie. StartExec=+-/bin/sh was
+parsed as -/bin/sh which then would fail to install.
+
+Instead of using egrep and shell replacements, replace both with sed command
+that does it all. This sed script extract a group of characters starting with a
+/ up to the first space (if any) after the equals sign. This correctly handles
+existing non-prefixed, prefixed, multiple-prefixed commands.
+
+About half commands seem to repeat themself, thus sort -u cuts the list of
+binaries to install about in half.
+
+To validate change of behaviour both old and new functions were modified to
+echo parsed binaries into separate files, and then diffed. The incorrect
+-/bin/sh was missing in the new output.
+
+Without this patch tests fail on default Ubuntu installs.
+
+(cherry picked from commit 84c0a34987d00158e943e3151a1fe21caa78d40c)
+---
+ test/test-functions | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 745c0a9..2957de5 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -424,9 +424,8 @@ install_execs() {
+     export PKG_CONFIG_PATH=$BUILD_DIR/src/core/
+     systemdsystemunitdir=$(pkg-config --variable=systemdsystemunitdir systemd)
+     systemduserunitdir=$(pkg-config --variable=systemduserunitdir systemd)
+-    egrep -ho '^Exec[^ ]*=[^ ]+' $initdir/{$systemdsystemunitdir,$systemduserunitdir}/*.service \
+-         | while read i; do
+-         i=${i##Exec*=}; i=${i##[@+\!-]}; i=${i##\!}
++    sed -n 's|^Exec[a-zA-Z]*=[^/]*\(/[^ ]*\).*|\1|gp' $initdir/{$systemdsystemunitdir,$systemduserunitdir}/*.service \
++         | sort -u | while read i; do
+          # some {rc,halt}.local scripts and programs are okay to not exist, the rest should
+          inst $i || [ "${i%.local}" != "$i" ] || [ "${i%systemd-update-done}" != "$i" ]
+      done
