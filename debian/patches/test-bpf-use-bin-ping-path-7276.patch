@@ -1,0 +1,28 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Wed, 8 Nov 2017 14:04:55 -0500
+Subject: test-bpf: use /bin/ping path (#7276)
+
+This path to ping is compatible with both debian-like and usr-merged
+distros. This keeps the test simple, and should thus pass everywhere.
+
+Fixes: #7267
+(cherry picked from commit 02ec6e04fdb047a354b6b3dc8c5f2b3f803e05ab)
+---
+ src/test/test-bpf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/test/test-bpf.c b/src/test/test-bpf.c
+index 74e9d50..d284583 100644
+--- a/src/test/test-bpf.c
++++ b/src/test/test-bpf.c
+@@ -104,8 +104,8 @@ int main(int argc, char *argv[]) {
+         assert(cc->ip_address_deny->items_next);
+         assert(!cc->ip_address_deny->items_next->items_next);
+ 
+-        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/usr/bin/ping -c 1 127.0.0.2 -W 5", SERVICE(u)->exec_command, u) == 0);
+-        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/usr/bin/ping -c 1 127.0.0.3 -W 5", SERVICE(u)->exec_command, u) == 0);
++        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/bin/ping -c 1 127.0.0.2 -W 5", SERVICE(u)->exec_command, u) == 0);
++        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/bin/ping -c 1 127.0.0.3 -W 5", SERVICE(u)->exec_command, u) == 0);
+ 
+         assert_se(SERVICE(u)->exec_command[SERVICE_EXEC_START]);
+         assert_se(SERVICE(u)->exec_command[SERVICE_EXEC_START]->command_next);
