@@ -1,0 +1,26 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Wed, 8 Nov 2017 16:25:45 +0000
+Subject: test-process-util: fails to verify cmdline changes in unpriv
+ user-namespace.
+
+Thus skip these asserts when running $ sudo ./test-process-util in an
+unpriviledged user namespaced containers.
+
+(cherry picked from commit 86a4129d308602a1d2ba80b47863b32bec2059df)
+---
+ src/test/test-process-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/test/test-process-util.c b/src/test/test-process-util.c
+index 0f0e2cb..10ffcf8 100644
+--- a/src/test/test-process-util.c
++++ b/src/test/test-process-util.c
+@@ -379,7 +379,7 @@ static void test_rename_process_now(const char *p, int ret) {
+ 
+         assert_se(get_process_cmdline(0, 0, false, &cmdline) >= 0);
+         /* we cannot expect cmdline to be renamed properly without privileges */
+-        if (geteuid() == 0) {
++        if (geteuid() == 0 && !running_in_userns()) {
+                 log_info("cmdline = <%s>", cmdline);
+                 assert_se(strneq(p, cmdline, strlen("test-process-util")));
+                 assert_se(startswith(p, cmdline));
