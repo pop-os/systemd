@@ -1,3 +1,12 @@
+systemd (235-2ubuntu3) bionic; urgency=medium
+
+  * Revert "Skip test-bpf in autopkgtest, currently is failing."
+    This reverts commit 75cf986e450e062a3d5780d1976e9efef41e6c4c.
+  * Fix test-bpf test case on ubuntu.
+  * Skip rename tests in containers, crude fix for now.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 13 Nov 2017 00:06:42 +0000
+
 systemd (235-2ubuntu2) bionic; urgency=medium
 
   * Fix test-functions failing with Ubuntu units.
