@@ -102,8 +102,6 @@ adduser --quiet --system --group --no-create-home --home /run/systemd/netif \
     --gecos "systemd Network Management" systemd-network
 adduser --quiet --system --group --no-create-home --home /run/systemd/resolve \
     --gecos "systemd Resolver" systemd-resolve
-adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Bus Proxy" systemd-bus-proxy
 
 # Initial update of the Message Catalogs database
 _update_catalog
@@ -141,6 +139,11 @@ if dpkg --compare-versions "$2" lt-nl "228-5~"; then
        rm -f /etc/systemd/system/${t}.target.wants/hwclock-save.service
        rmdir --ignore-fail-on-non-empty /etc/systemd/system/${t}.target.wants 2> /dev/null || true
    done
+fi
+
+if dpkg --compare-versions "$2" lt-nl "235-3~"; then
+    # systemd-bus-proxyd got dropped before stretch, and never created any file
+    deluser --system systemd-bus-proxy || true
 fi
 
 #DEBHELPER#
