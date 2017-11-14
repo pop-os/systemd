@@ -3,6 +3,7 @@ dynamic-user-permit-the-case-static-uid-and-gid-are-diffe.patch
 core-fix-invalid-error-message.patch
 core-dynamic-user-use-_cleanup_-in-dynamic-user-locking.patch
 core-dynamic-user-use-gid-from-pwnam-if-a-static-user-was.patch
+resolved-fix-loop-on-packets-with-pseudo-dns-types.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
