@@ -4,11 +4,6 @@ set -e
 
 adduser --quiet --system \
         --home /run/systemd --no-create-home \
-        --gecos "systemd Journal Gateway" \
-        --group systemd-journal-gateway
-
-adduser --quiet --system \
-        --home /run/systemd --no-create-home \
         --gecos "systemd Journal Remote" \
         --group systemd-journal-remote
 
