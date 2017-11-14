@@ -1,0 +1,32 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 13 Nov 2017 09:35:49 +0100
+Subject: shared/seccomp: skip pkey_mprotect protections if the syscall is
+ unknown
+
+When compiling with an old kernel on architectures for which the
+number is not defined in missing.h, a warning is generated in missing.h.
+Let's just skip the protection in this case, to allow build to proceed.
+
+(cherry picked from commit 91691f1d3e3c66122fd0fc564ea3f20f566c2698)
+---
+ src/shared/seccomp-util.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/shared/seccomp-util.c b/src/shared/seccomp-util.c
+index 2661895..b61bd08 100644
+--- a/src/shared/seccomp-util.c
++++ b/src/shared/seccomp-util.c
+@@ -1433,11 +1433,13 @@ int seccomp_memory_deny_write_execute(void) {
+                 if (r < 0)
+                         continue;
+ 
++#ifdef __NR_pkey_mprotect
+                 r = add_seccomp_syscall_filter(seccomp, arch, SCMP_SYS(pkey_mprotect),
+                                                1,
+                                                SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC, PROT_EXEC));
+                 if (r < 0)
+                         continue;
++#endif
+ 
+                 if (shmat_syscall != 0) {
+                         r = add_seccomp_syscall_filter(seccomp, arch, SCMP_SYS(shmat),

@@ -1,0 +1,56 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 13 Nov 2017 09:27:53 +0100
+Subject: basic/missing: add numbers for pkey_mprotect
+
+Follow-up for b835eeb4ec1dd122b6feff2b70881265c529fcdd.
+
+(cherry picked from commit 213f2883c006d785e033597d2f46a110d85eb54b)
+---
+ src/basic/missing_syscall.h | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/src/basic/missing_syscall.h b/src/basic/missing_syscall.h
+index 3322e4e..ecb3fa5 100644
+--- a/src/basic/missing_syscall.h
++++ b/src/basic/missing_syscall.h
+@@ -319,6 +319,8 @@ static inline ssize_t copy_file_range(int fd_in, loff_t *off_in,
+ }
+ #endif
+ 
++/* ======================================================================= */
++
+ #if !HAVE_BPF
+ #  ifndef __NR_bpf
+ #    if defined __i386__
+@@ -348,3 +350,31 @@ static inline int bpf(int cmd, union bpf_attr *attr, size_t size) {
+ }
+ 
+ #endif
++
++/* ======================================================================= */
++
++#ifndef __IGNORE_pkey_mprotect
++#  ifndef __NR_pkey_mprotect
++#    if defined __i386__
++#      define __NR_pkey_mprotect 380
++#    elif defined __x86_64__
++#      define __NR_pkey_mprotect 329
++#    elif defined __arm__
++#      define __NR_pkey_mprotect 394
++#    elif defined __aarch64__
++#      define __NR_pkey_mprotect 394
++#    elif defined _MIPS_SIM
++#      if _MIPS_SIM == _MIPS_SIM_ABI32
++#        define __NR_pkey_mprotect 4363
++#      endif
++#      if _MIPS_SIM == _MIPS_SIM_NABI32
++#        define __NR_pkey_mprotect 6327
++#      endif
++#      if _MIPS_SIM == _MIPS_SIM_ABI64
++#        define __NR_pkey_mprotect 5323
++#      endif
++#    elif ! defined(__IGNORE_pkey_mprotect)
++#      warning "__NR_pkey_mprotect not defined for your architecture"
++#    endif
++#  endif
++#endif
