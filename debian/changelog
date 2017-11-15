@@ -1,3 +1,43 @@
+systemd (235-3) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Switch from XC-Package-Type to Package-Type. As of dpkg-dev 1.15.7
+    Package-Type is recognized as an official field name.
+  * Install modprobe configuration file to /lib/modprobe.d.
+    Otherwise it is not read by kmod. (Closes: #879191)
+
+  [ Felipe Sateler ]
+  * Backport upstream (partial) fix for combined DynamicUser= + User=
+    UID was not allowed to be different to GID, which is normally the case in
+    debian, due to the group users being allocated the GID 100 without an
+    equivalent UID 100 being allocated.
+  * Backport upstream patches to fully make DynamicUser=yes + static,
+    pre-existing User= work.
+
+  [ Martin Pitt ]
+  * Add missing python3-minimal dependency to systemd-tests
+  * Drop long-obsolete systemd-bus-proxy system user
+    systemd-bus-proxy hasn't been shipped since before stretch and never
+    created any files. Thus clean up the obsolete system user on upgrades.
+    (Closes: #878182)
+  * Drop static systemd-journal-gateway system user
+    systemd-journal-gatewayd.service now uses DynamicUser=, so we don't need
+    to create this statically any more. Don't remove the user on upgrades
+    though, as there is likely still be a running process. (Closes: #878183)
+  * Use DynamicUser= for systemd-journal-upload.service.
+  * Add Recommends: libnss-systemd to systemd-sysv.
+    This is useful to actually be able to resolve dynamically created system
+    users with DynamicUser=true. This concept is going to be used much more
+    in future versions and (hopefully) third-party .services, so pulling it
+    into the default installation seems prudent now.
+  * resolved: Fix loop on packets with pseudo dns types.
+    (CVE-2017-15908, Closes: #880026, LP: #1725351)
+  * bpf-firewall: Properly handle kernels without BPF cgroup but with TRIE maps.
+    Fixes "Detaching egress BPF: Invalid argument" log spam. (Closes: #878965)
+  * Fix MemoryDenyWriteExecution= bypass with pkey_mprotect() (LP: #1725348)
+
+ -- Martin Pitt <mpitt@debian.org>  Wed, 15 Nov 2017 09:34:00 +0100
+
 systemd (235-2) unstable; urgency=medium
 
   * Revert "tests: when running a manager object in a test, migrate to private
