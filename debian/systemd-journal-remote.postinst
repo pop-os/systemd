@@ -7,9 +7,4 @@ adduser --quiet --system \
         --gecos "systemd Journal Remote" \
         --group systemd-journal-remote
 
-adduser --quiet --system \
-        --home /run/systemd --no-create-home \
-        --gecos "systemd Journal Upload" \
-        --group systemd-journal-upload
-
 #DEBHELPER#
