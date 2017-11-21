@@ -1,3 +1,32 @@
+systemd (235-3ubuntu1) bionic; urgency=medium
+
+  * Merge 235-3 from debian:
+    - Drop UBUNTU-CVE-2017-15908 included in Debian.
+
+  * Remaining delta from Debian:
+    - ship dhclient enter hook for dhclient integration with resolved
+    - ship resolvconf integration via stub-resolv.conf
+    - ship s390x virtio interface names migration
+    - do not disable systemd-resolved upon libnss-resolve removal
+    - do not remote fs in containers, for non-degrated boot
+    - CVE-2017-15908 in resolved fix loop on packets with pseudo dns types
+    - Unlink invocation id key, upon chown failure in containers
+    - Change default to UseDomains by default
+    - Do not treat failure to set Nice= setting as error in containers
+    - Add a condition to systemd-journald-audit.socet to not start in
+      containers (fails)
+    - Build without any built-in/fallback DNS server setting
+    - Enable resolved by default
+    - Update autopkgtests for reliability/raciness, and testing for typical
+      defaults
+    - Always upgrade udev, when running adt tests
+    - Skip test-execute on armhf
+    - Cherry-pick a few testsuite fixes
+
+  * UBUNTU Do not use nested kvm during ADT tests.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 21 Nov 2017 09:34:14 +0000
+
 systemd (235-3) unstable; urgency=medium
 
   [ Michael Biebl ]
