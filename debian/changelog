@@ -1,3 +1,9 @@
+systemd (235-3ubuntu2) bionic; urgency=medium
+
+  * systemd-fsckd: Fix ADT tests to work on s390x too.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 21 Nov 2017 16:41:15 +0000
+
 systemd (235-3ubuntu1) bionic; urgency=medium
 
   * Merge 235-3 from debian:
