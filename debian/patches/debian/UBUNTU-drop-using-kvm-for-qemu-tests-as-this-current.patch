@@ -1,0 +1,24 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Tue, 21 Nov 2017 09:06:31 +0000
+Subject: UBUNTU: drop using kvm for qemu tests,
+ as this currently results in unreliable nested kvm.
+
+---
+ test/test-functions | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 92388dc..095c6d7 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -136,10 +136,6 @@ $KERNEL_APPEND \
+         QEMU_OPTIONS="$QEMU_OPTIONS -initrd $INITRD"
+     fi
+ 
+-    if [ -c /dev/kvm ]; then
+-        QEMU_OPTIONS="$QEMU_OPTIONS -machine accel=kvm -enable-kvm -cpu host"
+-    fi
+-
+     if [[ "$QEMU_TIMEOUT" != "infinity" ]]; then
+         QEMU_BIN="timeout --foreground $QEMU_TIMEOUT $QEMU_BIN"
+     fi
