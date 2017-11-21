@@ -110,6 +110,7 @@ Replaces: sysvinit (<< 2.88dsf-44~),
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
          ${misc:Depends}
+Recommends: libnss-systemd
 Description: system and service manager - SysV links
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
@@ -186,6 +187,7 @@ Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
+         python3-minimal,
 Description: tests for systemd
  This package contains the test binaries. Those binaries are primarily used
  for autopkgtest and not meant to be installed on regular user systems.
@@ -362,7 +364,7 @@ Description: libudev development files
 
 Package: udev-udeb
 Build-Profiles: <!noudeb>
-XC-Package-Type: udeb
+Package-Type: udeb
 Section: debian-installer
 Priority: optional
 Architecture: linux-any

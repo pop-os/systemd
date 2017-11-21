@@ -1,0 +1,26 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 6 Oct 2017 16:06:21 +0900
+Subject: unit: enable DynamicUser= for journal-upload
+
+(cherry picked from commit 941afc4b902af21b0675e9e5d417c2ee6b202f30)
+---
+ units/systemd-journal-upload.service.in | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/units/systemd-journal-upload.service.in b/units/systemd-journal-upload.service.in
+index 98a4b2b..b666ef3 100644
+--- a/units/systemd-journal-upload.service.in
++++ b/units/systemd-journal-upload.service.in
+@@ -14,11 +14,10 @@ After=network-online.target
+ [Service]
+ ExecStart=@rootlibexecdir@/systemd-journal-upload --save-state
+ User=systemd-journal-upload
++DynamicUser=yes
+ SupplementaryGroups=systemd-journal
+ WatchdogSec=3min
+-PrivateTmp=yes
+ PrivateDevices=yes
+-ProtectSystem=strict
+ ProtectHome=yes
+ ProtectControlGroups=yes
+ ProtectKernelTunables=yes

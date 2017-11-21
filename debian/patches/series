@@ -1,4 +1,14 @@
-modprobe.d-fix-directory-of-modprobe-configuration-file-7.patch
+dynamic-user-label-functions-not-necessary-to-export-as-s.patch
+dynamic-user-permit-the-case-static-uid-and-gid-are-diffe.patch
+core-fix-invalid-error-message.patch
+core-dynamic-user-use-_cleanup_-in-dynamic-user-locking.patch
+core-dynamic-user-use-gid-from-pwnam-if-a-static-user-was.patch
+resolved-fix-loop-on-packets-with-pseudo-dns-types.patch
+bpf-firewall-properly-handle-kernels-where-BPF-cgroup-is-.patch
+shared-seccomp-disallow-pkey_mprotect-the-same-as-mprotec.patch
+basic-missing-add-numbers-for-pkey_mprotect.patch
+shared-seccomp-skip-pkey_mprotect-protections-if-the-sysc.patch
+unit-enable-DynamicUser-for-journal-upload.patch
 test-test-functions-drop-all-prefixes.patch
 test-switch-to-using-ext4-instead-of-ext3-as-default-fall.patch
 test-bpf-use-bin-ping-path-7276.patch
@@ -29,6 +39,7 @@ debian/Add-env-variable-for-machine-ID-path.patch
 debian/Mark-test-timesync-as-manual.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
 debian/Revert-tests-when-running-a-manager-object-in-a-test-migr.patch
+modprobe.d-fix-directory-of-modprobe-configuration-file-7.patch
 debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-resolved-resolvconf-integration.patch
