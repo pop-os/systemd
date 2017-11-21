@@ -7,6 +7,7 @@ from contextlib import suppress
 import inspect
 import fileinput
 import os
+import platform
 import subprocess
 import shutil
 import stat
@@ -219,7 +220,7 @@ WantedBy=systemd-fsck-root.service'''.format(PROCESS_KILLER_PATH,
         subprocess.check_call(['systemctl', 'enable', 'process-killer'], stderr=subprocess.DEVNULL)
 
 
-def enable_plymouth(enable=True):
+def enable_plymouth_grub(enable=True):
     '''ensure plymouth is enabled in grub config (doesn't reboot)'''
     plymouth_enabled = 'splash' in open('/boot/grub/grub.cfg').read()
     if enable and not plymouth_enabled:
@@ -236,6 +237,23 @@ def enable_plymouth(enable=True):
         with suppress(FileNotFoundError):
             os.remove(TEST_AUTOPKGTEST_CONFIG_PATH)
     subprocess.check_call(['update-grub'], stderr=subprocess.DEVNULL)
+
+
+def enable_plymouth_zipl(enable=True, ziplconf='/etc/zipl.conf'):
+    '''ensure plymouth is enabled in zipl config (doesn't reboot)'''
+    plymouth_enabled = 'splash' in open(ziplconf).read()
+    if enable and not plymouth_enabled:
+        subprocess.check_call(['sed', '-i', 's/^\(parameters.*\)/\\1 splash quiet/', ziplconf], stderr=subprocess.DEVNULL)
+    elif not enable and plymouth_enabled:
+        subprocess.check_call(['sed', '-i', 's/ splash quiet//g', ziplconf], stderr=subprocess.DEVNULL)
+    subprocess.check_call(['zipl'], stderr=subprocess.DEVNULL)
+
+
+def enable_plymouth(enable=True):
+    if platform.processor() == 's390x':
+        enable_plymouth_zipl(enable)
+    else:
+        enable_plymouth_grub(enable)
 
 
 def boot_with_systemd_distro():
