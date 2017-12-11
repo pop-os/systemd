@@ -1,0 +1,189 @@
+From: Mathieu Trudel-Lapierre <mathieu.tl@gmail.com>
+Date: Thu, 30 Nov 2017 12:03:50 -0500
+Subject: Add a "RequiredForOnline=" Link attribute for .network files (#7347)
+
+RequiredForOnline= denotes a link/network that does/does not require being up
+for systemd-networkd-wait-online to consider the system online; this makes it
+possible to ignore devices without modifying parameters to wait-online.
+(cherry picked from commit c1a3890410f043fe09af8b139eb6bfe2832089be)
+---
+ man/systemd.network.xml                  | 15 +++++++++++++++
+ src/libsystemd/sd-network/sd-network.c   | 15 +++++++++++++++
+ src/network/networkd-link.c              |  3 +++
+ src/network/networkd-network-gperf.gperf |  1 +
+ src/network/networkd-network.c           |  1 +
+ src/network/networkd-network.h           |  2 ++
+ src/network/wait-online/link.c           |  2 ++
+ src/network/wait-online/link.h           |  2 +-
+ src/network/wait-online/manager.c        |  3 +++
+ src/systemd/sd-network.h                 |  8 ++++++++
+ 10 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd.network.xml b/man/systemd.network.xml
+index b175967..ba7631c 100644
+--- a/man/systemd.network.xml
++++ b/man/systemd.network.xml
+@@ -250,6 +250,21 @@
+           controlled by other applications.</para>
+         </listitem>
+       </varlistentry>
++      <varlistentry>
++        <term><varname>RequiredForOnline=</varname></term>
++        <listitem>
++          <para>A boolean. When <literal>yes</literal>, the network is deemed
++          required when determining whether the system is online when running
++          <literal>systemd-networkd-wait-online</literal>.
++          When <literal>no</literal>, the network is ignored when checking for
++          online state. Defaults to <literal>yes</literal>.</para>
++          <para>The network will be brought up normally in all cases, but in
++          the event that there is no address being assigned by DHCP or the
++          cable is not plugged in, the link will simply remain offline and be
++          skipped automatically by <literal>systemd-networkd-wait-online</literal>
++          if <literal>RequiredForOnline=true</literal>.</para>
++        </listitem>
++      </varlistentry>
+     </variablelist>
+   </refsect1>
+ 
+diff --git a/src/libsystemd/sd-network/sd-network.c b/src/libsystemd/sd-network/sd-network.c
+index 41b97ca..ca23687 100644
+--- a/src/libsystemd/sd-network/sd-network.c
++++ b/src/libsystemd/sd-network/sd-network.c
+@@ -171,6 +171,21 @@ _public_ int sd_network_link_get_operational_state(int ifindex, char **state) {
+         return network_link_get_string(ifindex, "OPER_STATE", state);
+ }
+ 
++_public_ int sd_network_link_get_required_for_online(int ifindex) {
++        _cleanup_free_ char *s = NULL;
++        int r;
++
++        r = network_link_get_string(ifindex, "REQUIRED_FOR_ONLINE", &s);
++        if (r < 0) {
++                /* Handle -ENODATA as RequiredForOnline=yes, for compatibility */
++                if (r == -ENODATA)
++                        return true;
++                return r;
++        }
++
++        return parse_boolean(s);
++}
++
+ _public_ int sd_network_link_get_llmnr(int ifindex, char **llmnr) {
+         return network_link_get_string(ifindex, "LLMNR", llmnr);
+ }
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 6b59127..f356d37 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -3372,6 +3372,9 @@ int link_save(Link *link) {
+                 char **dhcp_domains = NULL;
+                 unsigned j;
+ 
++                fprintf(f, "REQUIRED_FOR_ONLINE=%s\n",
++                        yes_no(link->network->required_for_online));
++
+                 if (link->dhcp6_client) {
+                         r = sd_dhcp6_client_get_lease(link->dhcp6_client, &dhcp6_lease);
+                         if (r < 0 && r != -ENOMSG)
+diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
+index af39d77..ee58fb5 100644
+--- a/src/network/networkd-network-gperf.gperf
++++ b/src/network/networkd-network-gperf.gperf
+@@ -30,6 +30,7 @@ Link.MACAddress,                        config_parse_hwaddr,
+ Link.MTUBytes,                          config_parse_iec_size,                          0,                             offsetof(Network, mtu)
+ Link.ARP,                               config_parse_tristate,                          0,                             offsetof(Network, arp)
+ Link.Unmanaged,                         config_parse_bool,                              0,                             offsetof(Network, unmanaged)
++Link.RequiredForOnline,                 config_parse_bool,                              0,                             offsetof(Network, required_for_online)
+ Network.Description,                    config_parse_string,                            0,                             offsetof(Network, description)
+ Network.Bridge,                         config_parse_netdev,                            0,                             offsetof(Network, bridge)
+ Network.Bond,                           config_parse_netdev,                            0,                             offsetof(Network, bond)
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index 3a7eb2c..1738b5e 100644
+--- a/src/network/networkd-network.c
++++ b/src/network/networkd-network.c
+@@ -204,6 +204,7 @@ static int network_load_one(Manager *manager, const char *filename) {
+ 
+         *d = '\0';
+ 
++        network->required_for_online = true;
+         network->dhcp = ADDRESS_FAMILY_NO;
+         network->dhcp_use_ntp = true;
+         network->dhcp_use_dns = true;
+diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
+index 9fb0eae..aa12e18 100644
+--- a/src/network/networkd-network.h
++++ b/src/network/networkd-network.h
+@@ -212,6 +212,8 @@ struct Network {
+         uint32_t iaid;
+         DUID duid;
+ 
++        bool required_for_online; /* Is this network required to be considered online? */
++
+         LLDPMode lldp_mode; /* LLDP reception */
+         LLDPEmit lldp_emit; /* LLDP transmission */
+ 
+diff --git a/src/network/wait-online/link.c b/src/network/wait-online/link.c
+index bd8578c..49975e6 100644
+--- a/src/network/wait-online/link.c
++++ b/src/network/wait-online/link.c
+@@ -120,6 +120,8 @@ int link_update_rtnl(Link *l, sd_netlink_message *m) {
+ int link_update_monitor(Link *l) {
+         assert(l);
+ 
++        l->required_for_online = sd_network_link_get_required_for_online(l->ifindex) != 0;
++
+         l->operational_state = mfree(l->operational_state);
+ 
+         sd_network_link_get_operational_state(l->ifindex, &l->operational_state);
+diff --git a/src/network/wait-online/link.h b/src/network/wait-online/link.h
+index c846e60..5933d6d 100644
+--- a/src/network/wait-online/link.h
++++ b/src/network/wait-online/link.h
+@@ -32,6 +32,7 @@ struct Link {
+         char *ifname;
+         unsigned flags;
+ 
++        bool required_for_online;
+         char *operational_state;
+         char *state;
+ };
+@@ -40,6 +41,5 @@ int link_new(Manager *m, Link **ret, int ifindex, const char *ifname);
+ Link *link_free(Link *l);
+ int link_update_rtnl(Link *l, sd_netlink_message *m);
+ int link_update_monitor(Link *l);
+-bool link_relevant(Link *l);
+ 
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Link*, link_free);
+diff --git a/src/network/wait-online/manager.c b/src/network/wait-online/manager.c
+index d51b0a5..1f621f6 100644
+--- a/src/network/wait-online/manager.c
++++ b/src/network/wait-online/manager.c
+@@ -41,6 +41,9 @@ bool manager_ignore_link(Manager *m, Link *link) {
+         if (m->interfaces && !strv_contains(m->interfaces, link->ifname))
+                 return true;
+ 
++        if (!link->required_for_online)
++                return true;
++
+         /* ignore interfaces we explicitly are asked to ignore */
+         return strv_fnmatch(m->ignore, link->ifname, 0);
+ }
+diff --git a/src/systemd/sd-network.h b/src/systemd/sd-network.h
+index 0f13e2b..2a3495a 100644
+--- a/src/systemd/sd-network.h
++++ b/src/systemd/sd-network.h
+@@ -94,6 +94,14 @@ int sd_network_link_get_setup_state(int ifindex, char **state);
+  */
+ int sd_network_link_get_operational_state(int ifindex, char **state);
+ 
++/* Indicates whether the network is relevant to being online.
++ * Possible return codes:
++ *   0: the connection is not required
++ *   1: the connection is required to consider the system online
++ *   <0: networkd is not aware of the link
++ */
++int sd_network_link_get_required_for_online(int ifindex);
++
+ /* Get path to .network file applied to link */
+ int sd_network_link_get_network_file(int ifindex, char **filename);
+ 
