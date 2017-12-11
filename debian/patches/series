@@ -14,6 +14,7 @@ test-switch-to-using-ext4-instead-of-ext3-as-default-fall.patch
 test-bpf-use-bin-ping-path-7276.patch
 test-process-util-fails-to-verify-cmdline-changes-in-unpr.patch
 Add-a-RequiredForOnline-Link-attribute-for-.network-files.patch
+resolved.service-set-DefaultDependencies-no.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

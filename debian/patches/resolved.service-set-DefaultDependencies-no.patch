@@ -1,0 +1,30 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Mon, 11 Dec 2017 18:27:49 +0000
+Subject: resolved.service: set DefaultDependencies=no
+
+On systems that only use resolved for name resolution, there are usecases that
+require resolved to be started before sysinit target, such that network name
+resolution is available before network-online/sysinit targets. For example,
+cloud-init for some datasources hooks into the boot process ahead of sysinit
+target and may need network name resolution at that point already.
+
+systemd-resolved already starts pretty early in the process, thus starting it
+slightly earlier should not have negative side effects.
+
+(cherry picked from commit db8b78afec7f52219ef0646c1988431c78dd6d24)
+---
+ units/systemd-resolved.service.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/units/systemd-resolved.service.in b/units/systemd-resolved.service.in
+index cda83ee..4b5cc83 100644
+--- a/units/systemd-resolved.service.in
++++ b/units/systemd-resolved.service.in
+@@ -11,6 +11,7 @@ Documentation=man:systemd-resolved.service(8)
+ Documentation=https://www.freedesktop.org/wiki/Software/systemd/resolved
+ Documentation=https://www.freedesktop.org/wiki/Software/systemd/writing-network-configuration-managers
+ Documentation=https://www.freedesktop.org/wiki/Software/systemd/writing-resolver-clients
++DefaultDependencies=no
+ After=systemd-networkd.service network.target
+ Before=network-online.target nss-lookup.target
+ Wants=nss-lookup.target
