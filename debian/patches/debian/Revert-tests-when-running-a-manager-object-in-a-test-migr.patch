@@ -106,7 +106,7 @@ index 1f3db65..356173f 100644
            libshared],
           [threads,
 diff --git a/src/test/test-bpf.c b/src/test/test-bpf.c
-index 74e9d50..7dcabe2 100644
+index d284583..a2b8c2f 100644
 --- a/src/test/test-bpf.c
 +++ b/src/test/test-bpf.c
 @@ -27,7 +27,6 @@

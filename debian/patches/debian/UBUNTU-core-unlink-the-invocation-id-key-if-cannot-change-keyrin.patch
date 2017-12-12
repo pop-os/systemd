@@ -36,7 +36,7 @@ index 352d2b0..8e1d45e 100644
  #define KEYCTL_READ 11
  #endif
 diff --git a/src/core/execute.c b/src/core/execute.c
-index 03fff99..e6512b9 100644
+index 749ed32..e1b31b9 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
 @@ -2399,12 +2399,15 @@ static int setup_keyring(

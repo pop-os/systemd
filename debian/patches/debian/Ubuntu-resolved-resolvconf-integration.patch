@@ -151,10 +151,10 @@ index 0000000..ebec5d8
 +Type=oneshot
 +ExecStart=+-/bin/sh -c 'cat /run/systemd/resolve/stub-resolv.conf | /sbin/resolvconf -a systemd-resolved'
 diff --git a/units/systemd-resolved.service.in b/units/systemd-resolved.service.in
-index cda83ee..b75030a 100644
+index 4b5cc83..f77427d 100644
 --- a/units/systemd-resolved.service.in
 +++ b/units/systemd-resolved.service.in
-@@ -14,6 +14,7 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/writing-resolver
+@@ -15,6 +15,7 @@ DefaultDependencies=no
  After=systemd-networkd.service network.target
  Before=network-online.target nss-lookup.target
  Wants=nss-lookup.target

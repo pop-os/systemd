@@ -23,10 +23,10 @@ Users may override this setting in the .network files by specifying
  2 files changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index b175967..2e3f6d7 100644
+index ba7631c..56a925d 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
-@@ -282,7 +282,7 @@
+@@ -297,7 +297,7 @@
              <literal>IPv6AcceptRA=</literal>.</para>
  
              <para>Furthermore, note that by default the domain name
@@ -35,7 +35,7 @@ index b175967..2e3f6d7 100644
              See option <option>UseDomains=</option> below.</para>
  
              <para>See the <literal>[DHCP]</literal> section below for further configuration options for the DHCP client
-@@ -1117,7 +1117,7 @@
+@@ -1132,7 +1132,7 @@
              the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name received from
              the DHCP server will be used for routing DNS queries only, but not for searching, similar to the effect of
              the <option>Domains=</option> setting when the argument is prefixed with <literal>~</literal>. Defaults to
@@ -44,7 +44,7 @@ index b175967..2e3f6d7 100644
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-@@ -1266,7 +1266,7 @@
+@@ -1281,7 +1281,7 @@
              the effect of the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name
              received via IPv6 RA will be used for routing DNS queries only, but not for searching, similar to the
              effect of the <option>Domains=</option> setting when the argument is prefixed with
@@ -54,10 +54,10 @@ index b175967..2e3f6d7 100644
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 3a7eb2c..cab7d02 100644
+index 1738b5e..348a8a2 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -212,6 +212,7 @@ static int network_load_one(Manager *manager, const char *filename) {
+@@ -213,6 +213,7 @@ static int network_load_one(Manager *manager, const char *filename) {
          network->dhcp_use_routes = true;
          /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
          network->dhcp_send_hostname = true;
@@ -65,7 +65,7 @@ index 3a7eb2c..cab7d02 100644
          /* To enable/disable RFC7844 Anonymity Profiles */
          network->dhcp_anonymize = false;
          network->dhcp_route_metric = DHCP_ROUTE_METRIC;
-@@ -255,6 +256,7 @@ static int network_load_one(Manager *manager, const char *filename) {
+@@ -256,6 +257,7 @@ static int network_load_one(Manager *manager, const char *filename) {
          network->proxy_arp = -1;
          network->arp = -1;
          network->ipv6_accept_ra_use_dns = true;
