@@ -1,0 +1,22 @@
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Fri, 24 Nov 2017 21:05:16 +0100
+Subject: core: remove empty cgroups (#7457)
+
+When we skip an unwritable cgroup also remove the empty mountpoint.
+(cherry picked from commit 1ff654e28b7b8e7d0a0be33522a84069ac6b07c0)
+---
+ src/core/mount-setup.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/core/mount-setup.c b/src/core/mount-setup.c
+index fe1f987..d930a2f 100644
+--- a/src/core/mount-setup.c
++++ b/src/core/mount-setup.c
+@@ -207,6 +207,7 @@ static int mount_one(const MountPoint *p, bool relabel) {
+                 r = access(p->where, W_OK);
+                 if (r < 0) {
+                         (void) umount(p->where);
++                        (void) rmdir(p->where);
+                         return (p->mode & MNT_FATAL) ? r : 0;
+                 }
+         }

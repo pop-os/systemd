@@ -1,0 +1,27 @@
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Wed, 22 Nov 2017 17:27:03 +0100
+Subject: cgroup: test whether pure unified hierarchy is writable
+
+If it is not writable we should not mount it.
+
+(cherry picked from commit 2d56b80a1855836abf1d7458394c345ad9d55382)
+---
+ src/core/mount-setup.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/mount-setup.c b/src/core/mount-setup.c
+index 48acae4..fe1f987 100644
+--- a/src/core/mount-setup.c
++++ b/src/core/mount-setup.c
+@@ -98,9 +98,9 @@ static const MountPoint mount_table[] = {
+         { "tmpfs",       "/run",                      "tmpfs",      "mode=755",                MS_NOSUID|MS_NODEV|MS_STRICTATIME,
+           NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+         { "cgroup",      "/sys/fs/cgroup",            "cgroup2",    "nsdelegate",              MS_NOSUID|MS_NOEXEC|MS_NODEV,
+-          cg_is_unified_wanted, MNT_IN_CONTAINER },
++          cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
+         { "cgroup",      "/sys/fs/cgroup",            "cgroup2",    NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+-          cg_is_unified_wanted, MNT_IN_CONTAINER },
++          cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
+         { "tmpfs",       "/sys/fs/cgroup",            "tmpfs",      "mode=755",                MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
+           cg_is_legacy_wanted, MNT_FATAL|MNT_IN_CONTAINER },
+         { "cgroup",      "/sys/fs/cgroup/unified",    "cgroup2",    "nsdelegate",              MS_NOSUID|MS_NOEXEC|MS_NODEV,

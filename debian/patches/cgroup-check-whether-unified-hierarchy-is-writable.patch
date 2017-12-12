@@ -1,0 +1,74 @@
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Wed, 22 Nov 2017 17:20:35 +0100
+Subject: cgroup: check whether unified hierarchy is writable
+
+When systemd is running inside a container employing user
+namespaces it currently mounts the unified cgroup hierarchy
+without being able to write to it. This causes systemd to
+freeze during boot.
+This patch checks whether the unified cgroup hierarchy
+is writable. If it is not it will not mount it.
+
+This solution is based on a patch by Evgeny Vereshchagin.
+
+Closes #6408.
+Closes https://github.com/lxc/lxc/issues/1678 .
+
+(cherry picked from commit e07aefbd675b651f8d45b5fb458f2747b04d6e04)
+---
+ src/core/mount-setup.c | 20 +++++++++++++++-----
+ 1 file changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/mount-setup.c b/src/core/mount-setup.c
+index 3d7831d..48acae4 100644
+--- a/src/core/mount-setup.c
++++ b/src/core/mount-setup.c
+@@ -28,6 +28,7 @@
+ #include "cgroup-util.h"
+ #include "dev-setup.h"
+ #include "efivars.h"
++#include "fileio.h"
+ #include "fs-util.h"
+ #include "label.h"
+ #include "log.h"
+@@ -45,9 +46,10 @@
+ #include "virt.h"
+ 
+ typedef enum MountMode {
+-        MNT_NONE  =        0,
+-        MNT_FATAL =        1 <<  0,
+-        MNT_IN_CONTAINER = 1 <<  1,
++        MNT_NONE  =           0,
++        MNT_FATAL =           1 <<  0,
++        MNT_IN_CONTAINER =    1 <<  1,
++        MNT_CHECK_WRITABLE  = 1 <<  2,
+ } MountMode;
+ 
+ typedef struct MountPoint {
+@@ -102,9 +104,9 @@ static const MountPoint mount_table[] = {
+         { "tmpfs",       "/sys/fs/cgroup",            "tmpfs",      "mode=755",                MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
+           cg_is_legacy_wanted, MNT_FATAL|MNT_IN_CONTAINER },
+         { "cgroup",      "/sys/fs/cgroup/unified",    "cgroup2",    "nsdelegate",              MS_NOSUID|MS_NOEXEC|MS_NODEV,
+-          cg_is_hybrid_wanted, MNT_IN_CONTAINER },
++          cg_is_hybrid_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
+         { "cgroup",      "/sys/fs/cgroup/unified",    "cgroup2",    NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+-          cg_is_hybrid_wanted, MNT_IN_CONTAINER },
++          cg_is_hybrid_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
+         { "cgroup",      "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd,xattr", MS_NOSUID|MS_NOEXEC|MS_NODEV,
+           cg_is_legacy_wanted, MNT_IN_CONTAINER     },
+         { "cgroup",      "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd",       MS_NOSUID|MS_NOEXEC|MS_NODEV,
+@@ -201,6 +203,14 @@ static int mount_one(const MountPoint *p, bool relabel) {
+         if (relabel)
+                 (void) label_fix(p->where, false, false);
+ 
++        if (p->mode & MNT_CHECK_WRITABLE) {
++                r = access(p->where, W_OK);
++                if (r < 0) {
++                        (void) umount(p->where);
++                        return (p->mode & MNT_FATAL) ? r : 0;
++                }
++        }
++
+         return 1;
+ }
+ 

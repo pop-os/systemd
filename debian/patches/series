@@ -15,6 +15,9 @@ test-bpf-use-bin-ping-path-7276.patch
 test-process-util-fails-to-verify-cmdline-changes-in-unpr.patch
 Add-a-RequiredForOnline-Link-attribute-for-.network-files.patch
 resolved.service-set-DefaultDependencies-no.patch
+cgroup-check-whether-unified-hierarchy-is-writable.patch
+cgroup-test-whether-pure-unified-hierarchy-is-writable.patch
+core-remove-empty-cgroups-7457.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
