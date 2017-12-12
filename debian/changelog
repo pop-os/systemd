@@ -1,3 +1,13 @@
+systemd (235-3ubuntu3) bionic; urgency=medium
+
+  * netwokrd: add support for RequiredForOnline stanza. (LP: #1737570)
+  * resolved.service: set DefaultDependencies=no (LP: #1734167)
+  * systemd.postinst: enable persistent journal. (LP: #1618188)
+  * core: add support for non-writable unified cgroup hierarchy for container support.
+    (LP: #1734410)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 12 Dec 2017 13:25:32 +0000
+
 systemd (235-3ubuntu2) bionic; urgency=medium
 
   * systemd-fsckd: Fix ADT tests to work on s390x too.
