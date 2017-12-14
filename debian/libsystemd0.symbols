@@ -18,6 +18,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_232@LIBSYSTEMD_232 232
  LIBSYSTEMD_233@LIBSYSTEMD_233 233
  LIBSYSTEMD_234@LIBSYSTEMD_234 234
+ LIBSYSTEMD_236@LIBSYSTEMD_236 236
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -173,6 +174,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_is_method_call@LIBSYSTEMD_221 221
  sd_bus_message_is_method_error@LIBSYSTEMD_221 221
  sd_bus_message_is_signal@LIBSYSTEMD_221 221
+ sd_bus_message_new@LIBSYSTEMD_236 236
  sd_bus_message_new_method_call@LIBSYSTEMD_221 221
  sd_bus_message_new_method_errno@LIBSYSTEMD_221 221
  sd_bus_message_new_method_errnof@LIBSYSTEMD_221 221
@@ -188,6 +190,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_read_strv@LIBSYSTEMD_221 221
  sd_bus_message_ref@LIBSYSTEMD_221 221
  sd_bus_message_rewind@LIBSYSTEMD_221 221
+ sd_bus_message_seal@LIBSYSTEMD_236 236
  sd_bus_message_set_allow_interactive_authorization@LIBSYSTEMD_221 221
  sd_bus_message_set_auto_start@LIBSYSTEMD_221 221
  sd_bus_message_set_destination@LIBSYSTEMD_221 221
