@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -19,6 +20,8 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include "string-util.h"
+
 typedef int (*SpecifierCallback)(char specifier, void *data, void *userdata, char **ret);
 
 typedef struct Specifier {
@@ -35,3 +38,14 @@ int specifier_machine_id(char specifier, void *data, void *userdata, char **ret)
 int specifier_boot_id(char specifier, void *data, void *userdata, char **ret);
 int specifier_host_name(char specifier, void *data, void *userdata, char **ret);
 int specifier_kernel_release(char specifier, void *data, void *userdata, char **ret);
+
+int specifier_user_name(char specifier, void *data, void *userdata, char **ret);
+int specifier_user_id(char specifier, void *data, void *userdata, char **ret);
+int specifier_user_home(char specifier, void *data, void *userdata, char **ret);
+int specifier_user_shell(char specifier, void *data, void *userdata, char **ret);
+
+static inline char* specifier_escape(const char *string) {
+        return strreplace(string, "%", "%%");
+}
+
+int specifier_escape_strv(char **l, char ***ret);

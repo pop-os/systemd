@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Copyright (C) IBM Corp. 2003
  *
@@ -371,7 +372,7 @@ resend:
         switch (retval) {
                 case SG_ERR_CAT_NOTSUPPORTED:
                         buf[1] = 0;
-                        /* Fallthrough */
+                        _fallthrough_;
                 case SG_ERR_CAT_CLEAN:
                 case SG_ERR_CAT_RECOVERED:
                         retval = 0;

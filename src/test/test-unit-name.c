@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -206,7 +207,7 @@ static int test_unit_printf(void) {
         assert_se(specifier_machine_id('m', NULL, NULL, &mid) >= 0 && mid);
         assert_se(specifier_boot_id('b', NULL, NULL, &bid) >= 0 && bid);
         assert_se(host = gethostname_malloc());
-        assert_se(user = getusername_malloc());
+        assert_se(user = uid_to_name(getuid()));
         assert_se(asprintf(&uid, UID_FMT, getuid()));
         assert_se(get_home_dir(&home) >= 0);
         assert_se(get_shell(&shell) >= 0);
@@ -465,12 +466,16 @@ static void test_unit_name_path_unescape(void) {
 
 int main(int argc, char* argv[]) {
         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
-        int rc = 0;
+        int r, rc = 0;
 
         log_parse_environment();
         log_open();
 
-        enter_cgroup_subroot();
+        r = enter_cgroup_subroot();
+        if (r == -ENOMEDIUM) {
+                log_notice_errno(r, "Skipping test: cgroupfs not available");
+                return EXIT_TEST_SKIP;
+        }
 
         assert_se(runtime_dir = setup_fake_runtime_dir());
 

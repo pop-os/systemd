@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -167,6 +168,8 @@ struct Network {
         uint8_t router_preference;
         bool router_managed;
         bool router_other_information;
+        bool router_emit_dns;
+        bool router_emit_domains;
         usec_t router_dns_lifetime_usec;
         struct in6_addr *router_dns;
         unsigned n_router_dns;
@@ -211,6 +214,8 @@ struct Network {
         bool configure_without_carrier;
         uint32_t iaid;
         DUID duid;
+
+        bool required_for_online; /* Is this network required to be considered online? */
 
         LLDPMode lldp_mode; /* LLDP reception */
         LLDPEmit lldp_emit; /* LLDP transmission */

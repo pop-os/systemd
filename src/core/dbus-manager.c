@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -26,7 +27,6 @@
 #include "architecture.h"
 #include "build.h"
 #include "bus-common-errors.h"
-#include "clock-util.h"
 #include "dbus-execute.h"
 #include "dbus-job.h"
 #include "dbus-manager.h"
@@ -139,27 +139,18 @@ static int property_get_tainted(
                 void *userdata,
                 sd_bus_error *error) {
 
-        char buf[sizeof("split-usr:cgroups-missing:local-hwclock:")] = "", *e = buf;
+        _cleanup_free_ char *s = NULL;
         Manager *m = userdata;
 
         assert(bus);
         assert(reply);
         assert(m);
 
-        if (m->taint_usr)
-                e = stpcpy(e, "split-usr:");
+        s = manager_taint_string(m);
+        if (!s)
+                return log_oom();
 
-        if (access("/proc/cgroups", F_OK) < 0)
-                e = stpcpy(e, "cgroups-missing:");
-
-        if (clock_is_localtime(NULL) > 0)
-                e = stpcpy(e, "local-hwclock:");
-
-        /* remove the last ':' */
-        if (e != buf)
-                e[-1] = 0;
-
-        return sd_bus_message_append(reply, "s", buf);
+        return sd_bus_message_append(reply, "s", s);
 }
 
 static int property_get_log_target(
@@ -316,7 +307,7 @@ static int property_get_progress(
         assert(reply);
         assert(m);
 
-        if (dual_timestamp_is_set(&m->finish_timestamp))
+        if (MANAGER_IS_FINISHED(m))
                 d = 1.0;
         else
                 d = 1.0 - ((double) hashmap_size(m->jobs) / (double) m->n_installed_jobs);
@@ -1282,9 +1273,7 @@ static int method_unsubscribe(sd_bus_message *message, void *userdata, sd_bus_er
 
 static int method_dump(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_free_ char *dump = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
         Manager *m = userdata;
-        size_t size;
         int r;
 
         assert(message);
@@ -1296,14 +1285,7 @@ static int method_dump(sd_bus_message *message, void *userdata, sd_bus_error *er
         if (r < 0)
                 return r;
 
-        f = open_memstream(&dump, &size);
-        if (!f)
-                return -ENOMEM;
-
-        manager_dump_units(m, f, NULL);
-        manager_dump_jobs(m, f, NULL);
-
-        r = fflush_and_check(f);
+        r = manager_get_dump_string(m, &dump);
         if (r < 0)
                 return r;
 
@@ -2406,18 +2388,18 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("Virtualization", "s", property_get_virtualization, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Architecture", "s", property_get_architecture, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Tainted", "s", property_get_tainted, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("FirmwareTimestamp", offsetof(Manager, firmware_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("LoaderTimestamp", offsetof(Manager, loader_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("KernelTimestamp", offsetof(Manager, kernel_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDTimestamp", offsetof(Manager, initrd_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("UserspaceTimestamp", offsetof(Manager, userspace_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("FinishTimestamp", offsetof(Manager, finish_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("SecurityStartTimestamp", offsetof(Manager, security_start_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("SecurityFinishTimestamp", offsetof(Manager, security_finish_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("GeneratorsStartTimestamp", offsetof(Manager, generators_start_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("GeneratorsFinishTimestamp", offsetof(Manager, generators_finish_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("UnitsLoadStartTimestamp", offsetof(Manager, units_load_start_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
-        BUS_PROPERTY_DUAL_TIMESTAMP("UnitsLoadFinishTimestamp", offsetof(Manager, units_load_finish_timestamp), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("FirmwareTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_FIRMWARE]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("LoaderTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_LOADER]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("KernelTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_KERNEL]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("UserspaceTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_USERSPACE]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("FinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("SecurityStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_SECURITY_START]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("SecurityFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_SECURITY_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("GeneratorsStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_GENERATORS_START]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("GeneratorsFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_GENERATORS_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("UnitsLoadStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_UNITS_LOAD_START]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("UnitsLoadFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_UNITS_LOAD_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_WRITABLE_PROPERTY("LogLevel", "s", property_get_log_level, property_set_log_level, 0, 0),
         SD_BUS_WRITABLE_PROPERTY("LogTarget", "s", property_get_log_target, property_set_log_target, 0, 0),
         SD_BUS_PROPERTY("NNames", "u", property_get_n_names, 0, 0),

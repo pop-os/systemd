@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -202,7 +203,7 @@ int icmp6_bind_router_advertisement(int index) {
 
 int icmp6_receive(int fd, void *iov_base, size_t iov_len,
                   struct in6_addr *dst, triple_timestamp *timestamp) {
-        assert (read (fd, iov_base, iov_len) == (ssize_t)iov_len);
+        assert_se(read (fd, iov_base, iov_len) == (ssize_t)iov_len);
 
         if (timestamp)
                 triple_timestamp_get(timestamp);

@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   systemd is free software; you can redistribute it and/or modify it
@@ -50,6 +52,9 @@
       <command>bootctl <arg choice="opt" rep="repeat">OPTIONS</arg> status</command>
     </cmdsynopsis>
     <cmdsynopsis>
+      <command>bootctl <arg choice="opt" rep="repeat">OPTIONS</arg> list</command>
+    </cmdsynopsis>
+    <cmdsynopsis>
       <command>bootctl <arg choice="opt" rep="repeat">OPTIONS</arg> update</command>
     </cmdsynopsis>
     <cmdsynopsis>
@@ -70,6 +75,9 @@
     <para><command>bootctl status</command> checks and prints the
     currently installed versions of the boot loader binaries and
     all current EFI boot variables.</para>
+
+    <para><command>bootctl list</command> displays all configured boot loader entries.
+    </para>
 
     <para><command>bootctl update</command> updates all installed versions of systemd-boot, if the current version is
     newer than the version installed in the EFI system partition. This also includes the EFI default/fallback loader at
@@ -103,6 +111,14 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>-p</option></term>
+        <term><option>--print-path</option></term>
+        <listitem><para>This option modifies the behaviour of <command>status</command>.
+        Just print the path to the EFI System Partition (ESP) to standard output and
+        exit.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><option>--no-variables</option></term>
         <listitem><para>Do not touch the EFI boot variables.</para></listitem>
       </varlistentry>
@@ -119,7 +135,7 @@
     <title>See Also</title>
     <para>
       <ulink url="https://www.freedesktop.org/wiki/Specifications/BootLoaderSpec">Boot loader specification</ulink>
-      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/BootLoaderInterface">Systemd boot loader interface</ulink>
+      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/BootLoaderInterface">systemd boot loader interface</ulink>
     </para>
   </refsect1>
 </refentry>

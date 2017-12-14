@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -219,7 +220,8 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
         format_bytes(fb5, sizeof(fb5), storage->space.limit);
         format_bytes(fb6, sizeof(fb6), storage->space.available);
 
-        server_driver_message(s, "MESSAGE_ID=" SD_MESSAGE_JOURNAL_USAGE_STR,
+        server_driver_message(s, 0,
+                              "MESSAGE_ID=" SD_MESSAGE_JOURNAL_USAGE_STR,
                               LOG_MESSAGE("%s (%s) is %s, max %s, %s free.",
                                           storage->name, storage->path, fb1, fb5, fb6),
                               "JOURNAL_NAME=%s", storage->name,
@@ -246,7 +248,7 @@ static void server_add_acls(JournalFile *f, uid_t uid) {
         assert(f);
 
 #if HAVE_ACL
-        if (uid <= SYSTEM_UID_MAX)
+        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY)
                 return;
 
         r = add_acls_for_user(f->fd, uid);
@@ -404,7 +406,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
         if (s->runtime_journal)
                 return s->runtime_journal;
 
-        if (uid <= SYSTEM_UID_MAX || uid_is_dynamic(uid))
+        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY)
                 return s->system_journal;
 
         r = sd_id128_get_machine(&machine);
@@ -722,7 +724,7 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned
 #define IOVEC_ADD_NUMERIC_FIELD(iovec, n, value, type, isset, format, field)  \
         if (isset(value)) {                                             \
                 char *k;                                                \
-                k = newa(char, strlen(field "=") + DECIMAL_STR_MAX(type) + 1); \
+                k = newa(char, STRLEN(field "=") + DECIMAL_STR_MAX(type) + 1); \
                 sprintf(k, field "=" format, value);                    \
                 iovec[n++] = IOVEC_MAKE_STRING(k);                      \
         }
@@ -737,7 +739,7 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned
 #define IOVEC_ADD_ID128_FIELD(iovec, n, value, field)                   \
         if (!sd_id128_is_null(value)) {                                 \
                 char *k;                                                \
-                k = newa(char, strlen(field "=") + SD_ID128_STRING_MAX); \
+                k = newa(char, STRLEN(field "=") + SD_ID128_STRING_MAX); \
                 sd_id128_to_string(value, stpcpy(k, field "="));        \
                 iovec[n++] = IOVEC_MAKE_STRING(k);                      \
         }
@@ -745,14 +747,14 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, unsigned
 #define IOVEC_ADD_SIZED_FIELD(iovec, n, value, value_size, field)       \
         if (value_size > 0) {                                           \
                 char *k;                                                \
-                k = newa(char, strlen(field "=") + value_size + 1);     \
+                k = newa(char, STRLEN(field "=") + value_size + 1);     \
                 *((char*) mempcpy(stpcpy(k, field "="), value, value_size)) = 0; \
                 iovec[n++] = IOVEC_MAKE_STRING(k);                      \
         }                                                               \
 
 static void dispatch_message_real(
                 Server *s,
-                struct iovec *iovec, unsigned n, unsigned m,
+                struct iovec *iovec, size_t n, size_t m,
                 const ClientContext *c,
                 const struct timeval *tv,
                 int priority,
@@ -765,7 +767,10 @@ static void dispatch_message_real(
         assert(s);
         assert(iovec);
         assert(n > 0);
-        assert(n + N_IOVEC_META_FIELDS + (pid_is_valid(object_pid) ? N_IOVEC_OBJECT_FIELDS : 0) <= m);
+        assert(n +
+               N_IOVEC_META_FIELDS +
+               (pid_is_valid(object_pid) ? N_IOVEC_OBJECT_FIELDS : 0) +
+               client_context_extra_fields_n_iovec(c) <= m);
 
         if (c) {
                 IOVEC_ADD_NUMERIC_FIELD(iovec, n, c->pid, pid_t, pid_is_valid, PID_FMT, "_PID");
@@ -791,6 +796,11 @@ static void dispatch_message_real(
                 IOVEC_ADD_STRING_FIELD(iovec, n, c->user_slice, "_SYSTEMD_USER_SLICE");
 
                 IOVEC_ADD_ID128_FIELD(iovec, n, c->invocation_id, "_SYSTEMD_INVOCATION_ID");
+
+                if (c->extra_fields_n_iovec > 0) {
+                        memcpy(iovec + n, c->extra_fields_iovec, c->extra_fields_n_iovec * sizeof(struct iovec));
+                        n += c->extra_fields_n_iovec;
+                }
         }
 
         assert(n <= m);
@@ -859,15 +869,18 @@ static void dispatch_message_real(
         write_to_journal(s, journal_uid, iovec, n, priority);
 }
 
-void server_driver_message(Server *s, const char *message_id, const char *format, ...) {
+void server_driver_message(Server *s, pid_t object_pid, const char *message_id, const char *format, ...) {
 
-        struct iovec iovec[N_IOVEC_META_FIELDS + 5 + N_IOVEC_PAYLOAD_FIELDS];
-        unsigned n = 0, m;
+        struct iovec *iovec;
+        size_t n = 0, k, m;
         va_list ap;
         int r;
 
         assert(s);
         assert(format);
+
+        m = N_IOVEC_META_FIELDS + 5 + N_IOVEC_PAYLOAD_FIELDS + client_context_extra_fields_n_iovec(s->my_context) + N_IOVEC_OBJECT_FIELDS;
+        iovec = newa(struct iovec, m);
 
         assert_cc(3 == LOG_FAC(LOG_DAEMON));
         iovec[n++] = IOVEC_MAKE_STRING("SYSLOG_FACILITY=3");
@@ -879,18 +892,18 @@ void server_driver_message(Server *s, const char *message_id, const char *format
 
         if (message_id)
                 iovec[n++] = IOVEC_MAKE_STRING(message_id);
-        m = n;
+        k = n;
 
         va_start(ap, format);
-        r = log_format_iovec(iovec, ELEMENTSOF(iovec), &n, false, 0, format, ap);
+        r = log_format_iovec(iovec, m, &n, false, 0, format, ap);
         /* Error handling below */
         va_end(ap);
 
         if (r >= 0)
-                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), s->my_context, NULL, LOG_INFO, 0);
+                dispatch_message_real(s, iovec, n, m, s->my_context, NULL, LOG_INFO, object_pid);
 
-        while (m < n)
-                free(iovec[m++].iov_base);
+        while (k < n)
+                free(iovec[k++].iov_base);
 
         if (r < 0) {
                 /* We failed to format the message. Emit a warning instead. */
@@ -901,13 +914,13 @@ void server_driver_message(Server *s, const char *message_id, const char *format
                 n = 3;
                 iovec[n++] = IOVEC_MAKE_STRING("PRIORITY=4");
                 iovec[n++] = IOVEC_MAKE_STRING(buf);
-                dispatch_message_real(s, iovec, n, ELEMENTSOF(iovec), s->my_context, NULL, LOG_INFO, 0);
+                dispatch_message_real(s, iovec, n, m, s->my_context, NULL, LOG_INFO, object_pid);
         }
 }
 
 void server_dispatch_message(
                 Server *s,
-                struct iovec *iovec, unsigned n, unsigned m,
+                struct iovec *iovec, size_t n, size_t m,
                 ClientContext *c,
                 const struct timeval *tv,
                 int priority,
@@ -939,8 +952,10 @@ void server_dispatch_message(
 
                 /* Write a suppression message if we suppressed something */
                 if (rl > 1)
-                        server_driver_message(s, "MESSAGE_ID=" SD_MESSAGE_JOURNAL_DROPPED_STR,
-                                              LOG_MESSAGE("Suppressed %u messages from %s", rl - 1, c->unit),
+                        server_driver_message(s, c->pid,
+                                              "MESSAGE_ID=" SD_MESSAGE_JOURNAL_DROPPED_STR,
+                                              LOG_MESSAGE("Suppressed %i messages from %s", rl - 1, c->unit),
+                                              "N_DROPPED=%i", rl - 1,
                                               NULL);
         }
 
@@ -1038,7 +1053,7 @@ finish:
 
         sd_journal_close(j);
 
-        server_driver_message(s, NULL,
+        server_driver_message(s, 0, NULL,
                               LOG_MESSAGE("Time spent on flushing to /var is %s for %u entries.",
                                           format_timespan(ts, sizeof(ts), now(CLOCK_MONOTONIC) - start, 0),
                                           n),
@@ -1398,7 +1413,7 @@ static int server_parse_config_file(Server *s) {
                                         CONF_PATHS_NULSTR("systemd/journald.conf.d"),
                                         "Journal\0",
                                         config_item_perf_lookup, journald_gperf_lookup,
-                                        false, s);
+                                        CONFIG_PARSE_WARN, s);
 }
 
 static int server_dispatch_sync(sd_event_source *es, usec_t t, void *userdata) {
@@ -1884,13 +1899,9 @@ void server_maybe_append_tags(Server *s) {
 }
 
 void server_done(Server *s) {
-        JournalFile *f;
         assert(s);
 
-        if (s->deferred_closes) {
-                journal_file_close_set(s->deferred_closes);
-                set_free(s->deferred_closes);
-        }
+        set_free_with_destructor(s->deferred_closes, journal_file_close);
 
         while (s->stdout_streams)
                 stdout_stream_free(s->stdout_streams);
@@ -1903,10 +1914,7 @@ void server_done(Server *s) {
         if (s->runtime_journal)
                 (void) journal_file_close(s->runtime_journal);
 
-        while ((f = ordered_hashmap_steal_first(s->user_journals)))
-                (void) journal_file_close(f);
-
-        ordered_hashmap_free(s->user_journals);
+        ordered_hashmap_free_with_destructor(s->user_journals, journal_file_close);
 
         sd_event_source_unref(s->syslog_event_source);
         sd_event_source_unref(s->native_event_source);

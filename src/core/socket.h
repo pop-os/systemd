@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -160,8 +161,6 @@ struct Socket {
         bool selinux_context_from_net;
 
         char *user, *group;
-
-        bool reset_accounting:1;
 
         char *fdname;
 

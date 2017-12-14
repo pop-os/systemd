@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -19,6 +20,7 @@
 
 #include <dwarf.h>
 #include <elfutils/libdwfl.h>
+#include <stdio_ext.h>
 
 #include "alloc-util.h"
 #include "fd-util.h"
@@ -107,7 +109,7 @@ static int thread_callback(Dwfl_Thread *thread, void *userdata) {
                 return DWARF_CB_ABORT;
 
         if (c->n_thread != 0)
-                fputc_unlocked('\n', c->f);
+                fputc('\n', c->f);
 
         c->n_frame = 0;
 
@@ -143,6 +145,8 @@ int coredump_make_stack_trace(int fd, const char *executable, char **ret) {
         c.f = open_memstream(&buf, &sz);
         if (!c.f)
                 return -ENOMEM;
+
+        (void) __fsetlocking(c.f, FSETLOCKING_BYCALLER);
 
         elf_version(EV_CURRENT);
 

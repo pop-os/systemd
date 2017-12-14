@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -151,7 +152,7 @@ static void address_hash_func(const void *b, struct siphash *state) {
                         siphash24_compress(&prefix, sizeof(prefix), state);
                 }
 
-                /* fallthrough */
+                _fallthrough_;
         case AF_INET6:
                 /* local address */
                 siphash24_compress(&a->in_addr, FAMILY_ADDRESS_SIZE(a->family), state);
@@ -201,7 +202,7 @@ static int address_compare_func(const void *c1, const void *c2) {
                                 return 1;
                 }
 
-                /* fall-through */
+                _fallthrough_;
         case AF_INET6:
                 return memcmp(&a1->in_addr, &a2->in_addr, FAMILY_ADDRESS_SIZE(a1->family));
         default:
@@ -513,7 +514,10 @@ static int address_acquire(Link *link, Address *original, Address **ret) {
                 in_addr.in.s_addr = in_addr.in.s_addr | htobe32(1);
 
                 /* .. and use last as broadcast address */
-                broadcast.s_addr = in_addr.in.s_addr | htobe32(0xFFFFFFFFUL >> original->prefixlen);
+                if (original->prefixlen > 30)
+                        broadcast.s_addr = 0;
+                else
+                        broadcast.s_addr = in_addr.in.s_addr | htobe32(0xFFFFFFFFUL >> original->prefixlen);
         } else if (original->family == AF_INET6)
                 in_addr.in6.s6_addr[15] |= 1;
 
@@ -628,9 +632,11 @@ int address_configure(
                         return log_error_errno(r, "Could not append IFA_ADDRESS attribute: %m");
         } else {
                 if (address->family == AF_INET) {
-                        r = sd_netlink_message_append_in_addr(req, IFA_BROADCAST, &address->broadcast);
-                        if (r < 0)
-                                return log_error_errno(r, "Could not append IFA_BROADCAST attribute: %m");
+                        if (address->prefixlen <= 30) {
+                                r = sd_netlink_message_append_in_addr(req, IFA_BROADCAST, &address->broadcast);
+                                if (r < 0)
+                                        return log_error_errno(r, "Could not append IFA_BROADCAST attribute: %m");
+                        }
                 }
         }
 
@@ -973,7 +979,10 @@ int config_parse_address_scope(const char *unit,
 bool address_is_ready(const Address *a) {
         assert(a);
 
-        return !(a->flags & (IFA_F_TENTATIVE | IFA_F_DEPRECATED));
+        if (a->family == AF_INET6)
+                return !(a->flags & IFA_F_TENTATIVE);
+        else
+                return !(a->flags & (IFA_F_TENTATIVE | IFA_F_DEPRECATED));
 }
 
 int config_parse_router_preference(const char *unit,
@@ -1026,7 +1035,7 @@ void prefix_free(Prefix *prefix) {
 }
 
 int prefix_new(Prefix **ret) {
-        Prefix *prefix = NULL;
+        _cleanup_prefix_free_ Prefix *prefix = NULL;
 
         prefix = new0(Prefix, 1);
         if (!prefix)

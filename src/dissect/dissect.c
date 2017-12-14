@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -27,6 +28,8 @@
 #include "log.h"
 #include "loop-util.h"
 #include "string-util.h"
+#include "strv.h"
+#include "user-util.h"
 #include "util.h"
 
 static enum {
@@ -216,6 +219,10 @@ int main(int argc, char *argv[]) {
                 log_error_errno(r, "No suitable root partition found in image %s.", arg_image);
                 goto finish;
         }
+        if (r == -EPROTONOSUPPORT) {
+                log_error_errno(r, "Device %s is loopback block device with partition scanning turned off, please turn it on.", arg_image);
+                goto finish;
+        }
         if (r < 0) {
                 log_error_errno(r, "Failed to dissect image: %m");
                 goto finish;
@@ -259,6 +266,36 @@ int main(int argc, char *argv[]) {
                         putchar('\n');
                 }
 
+                r = dissected_image_acquire_metadata(m);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to acquire image metadata: %m");
+                        goto finish;
+                }
+
+                if (m->hostname)
+                        printf("  Hostname: %s\n", m->hostname);
+
+                if (!sd_id128_is_null(m->machine_id))
+                        printf("Machine ID: " SD_ID128_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(m->machine_id));
+
+                if (!strv_isempty(m->machine_info)) {
+                        char **p, **q;
+
+                        STRV_FOREACH_PAIR(p, q, m->machine_info)
+                                printf("%s %s=%s\n",
+                                       p == m->machine_info ? "Mach. Info:" : "           ",
+                                       *p, *q);
+                }
+
+                if (!strv_isempty(m->os_release)) {
+                        char **p, **q;
+
+                        STRV_FOREACH_PAIR(p, q, m->os_release)
+                                printf("%s %s=%s\n",
+                                       p == m->os_release ? "OS Release:" : "           ",
+                                       *p, *q);
+                }
+
                 break;
         }
 
@@ -267,7 +304,7 @@ int main(int argc, char *argv[]) {
                 if (r < 0)
                         goto finish;
 
-                r = dissected_image_mount(m, arg_path, arg_flags);
+                r = dissected_image_mount(m, arg_path, UID_INVALID, arg_flags);
                 if (r < 0) {
                         log_error_errno(r, "Failed to mount image: %m");
                         goto finish;

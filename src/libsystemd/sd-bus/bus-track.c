@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -62,7 +63,7 @@ struct sd_bus_track {
         ({                                                              \
                 char *_x;                                               \
                 size_t _l = strlen(name);                               \
-                _x = alloca(strlen(MATCH_PREFIX)+_l+strlen(MATCH_SUFFIX)+1); \
+                _x = alloca(STRLEN(MATCH_PREFIX)+_l+STRLEN(MATCH_SUFFIX)+1); \
                 strcpy(stpcpy(stpcpy(_x, MATCH_PREFIX), name), MATCH_SUFFIX); \
                 _x;                                                     \
         })
@@ -183,8 +184,6 @@ _public_ sd_bus_track* sd_bus_track_ref(sd_bus_track *track) {
 }
 
 _public_ sd_bus_track* sd_bus_track_unref(sd_bus_track *track) {
-        struct track_item *i;
-
         if (!track)
                 return NULL;
 
@@ -195,14 +194,11 @@ _public_ sd_bus_track* sd_bus_track_unref(sd_bus_track *track) {
                 return NULL;
         }
 
-        while ((i = hashmap_steal_first(track->names)))
-                track_item_free(i);
-
         if (track->in_list)
                 LIST_REMOVE(tracks, track->bus->tracks, track);
 
         bus_track_remove_from_queue(track);
-        hashmap_free(track->names);
+        hashmap_free_with_destructor(track->names, track_item_free);
         sd_bus_unref(track->bus);
         return mfree(track);
 }
@@ -428,8 +424,6 @@ void bus_track_dispatch(sd_bus_track *track) {
 }
 
 void bus_track_close(sd_bus_track *track) {
-        struct track_item *i;
-
         assert(track);
 
         /* Called whenever our bus connected is closed. If so, and our track object is non-empty, dispatch it
@@ -447,8 +441,7 @@ void bus_track_close(sd_bus_track *track) {
                 return;
 
         /* Let's flush out all names */
-        while ((i = hashmap_steal_first(track->names)))
-                track_item_free(i);
+        hashmap_clear_with_destructor(track->names, track_item_free);
 
         /* Invoke handler */
         if (track->handler)

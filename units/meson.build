@@ -1,3 +1,20 @@
+# SPDX-License-Identifier: LGPL-2.1+
+#
+# Copyright 2017 Zbigniew Jędrzejewski-Szmek
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <http://www.gnu.org/licenses/>.
+
 units = [
         ['basic.target',                        ''],
         ['bluetooth.target',                    ''],
@@ -48,7 +65,6 @@ units = [
         ['proc-sys-fs-binfmt_misc.mount',       'ENABLE_BINFMT'],
         ['reboot.target',                       '',
          'runlevel6.target ctrl-alt-del.target'],
-        ['remote-cryptsetup-pre.target',        'HAVE_LIBCRYPTSETUP'],
         ['remote-cryptsetup.target',            'HAVE_LIBCRYPTSETUP',
          join_paths(pkgsysconfdir, 'system/multi-user.target.wants/')],
         ['remote-fs-pre.target',                ''],
@@ -209,7 +225,7 @@ in_units = [
          'multi-user.target.wants/ graphical.target.wants/ rescue.target.wants/'],
         ['systemd-update-utmp.service',          'ENABLE_UTMP',
          'sysinit.target.wants/'],
-        ['systemd-user-sessions.service',        '',
+        ['systemd-user-sessions.service',        'HAVE_PAM',
          'multi-user.target.wants/'],
         ['systemd-vconsole-setup.service',       'ENABLE_VCONSOLE'],
         ['systemd-volatile-root.service',        ''],

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -45,6 +46,13 @@ typedef enum KillOperation {
         _KILL_OPERATION_INVALID = -1
 } KillOperation;
 
+typedef enum CollectMode {
+        COLLECT_INACTIVE,
+        COLLECT_INACTIVE_OR_FAILED,
+        _COLLECT_MODE_MAX,
+        _COLLECT_MODE_INVALID = -1,
+} CollectMode;
+
 static inline bool UNIT_IS_ACTIVE_OR_RELOADING(UnitActiveState t) {
         return IN_SET(t, UNIT_ACTIVE, UNIT_RELOADING);
 }
@@ -60,6 +68,53 @@ static inline bool UNIT_IS_INACTIVE_OR_DEACTIVATING(UnitActiveState t) {
 static inline bool UNIT_IS_INACTIVE_OR_FAILED(UnitActiveState t) {
         return IN_SET(t, UNIT_INACTIVE, UNIT_FAILED);
 }
+
+/* Stores the 'reason' a dependency was created as a bit mask, i.e. due to which configuration source it came to be. We
+ * use this so that we can selectively flush out parts of dependencies again. Note that the same dependency might be
+ * created as a result of multiple "reasons", hence the bitmask. */
+typedef enum UnitDependencyMask {
+        /* Configured directly by the unit file, .wants/.requries symlink or drop-in, or as an immediate result of a
+         * non-dependency option configured that way.  */
+        UNIT_DEPENDENCY_FILE               = 1 << 0,
+
+        /* As unconditional implicit dependency (not affected by unit configuration — except by the unit name and
+         * type) */
+        UNIT_DEPENDENCY_IMPLICIT           = 1 << 1,
+
+        /* A dependency effected by DefaultDependencies=yes. Note that dependencies marked this way are conceptually
+         * just a subset of UNIT_DEPENDENCY_FILE, as DefaultDependencies= is itself a unit file setting that can only
+         * be set in unit files. We make this two separate bits only to help debugging how dependencies came to be. */
+        UNIT_DEPENDENCY_DEFAULT            = 1 << 2,
+
+        /* A dependency created from udev rules */
+        UNIT_DEPENDENCY_UDEV               = 1 << 3,
+
+        /* A dependency created because of some unit's RequiresMountsFor= setting */
+        UNIT_DEPENDENCY_PATH               = 1 << 4,
+
+        /* A dependency created because of data read from /proc/self/mountinfo and no other configuration source */
+        UNIT_DEPENDENCY_MOUNTINFO_IMPLICIT = 1 << 5,
+
+        /* A dependency created because of data read from /proc/self/mountinfo, but conditionalized by
+         * DefaultDependencies= and thus also involving configuration from UNIT_DEPENDENCY_FILE sources */
+        UNIT_DEPENDENCY_MOUNTINFO_DEFAULT  = 1 << 6,
+
+        /* A dependency created because of data read from /proc/swaps and no other configuration source */
+        UNIT_DEPENDENCY_PROC_SWAP          = 1 << 7,
+
+        _UNIT_DEPENDENCY_MASK_FULL = (1 << 8) - 1,
+} UnitDependencyMask;
+
+/* The Unit's dependencies[] hashmaps use this structure as value. It has the same size as a void pointer, and thus can
+ * be stored directly as hashmap value, without any indirection. Note that this stores two masks, as both the origin
+ * and the destination of a dependency might have created it. */
+typedef union UnitDependencyInfo {
+        void *data;
+        struct {
+                UnitDependencyMask origin_mask:16;
+                UnitDependencyMask destination_mask:16;
+        } _packed_;
+} UnitDependencyInfo;
 
 #include "job.h"
 
@@ -89,9 +144,13 @@ struct Unit {
         char *instance;
 
         Set *names;
-        Set *dependencies[_UNIT_DEPENDENCY_MAX];
 
-        char **requires_mounts_for;
+        /* For each dependency type we maintain a Hashmap whose key is the Unit* object, and the value encodes why the
+         * dependency exists, using the UnitDependencyInfo type */
+        Hashmap *dependencies[_UNIT_DEPENDENCY_MAX];
+
+        /* Similar, for RequiresMountsFor= path dependencies. The key is the path, the value the UnitDependencyInfo type */
+        Hashmap *requires_mounts_for;
 
         char *description;
         char **documentation;
@@ -189,6 +248,9 @@ struct Unit {
         /* Put a ratelimit on unit starting */
         RateLimit start_limit;
         EmergencyAction start_limit_action;
+
+        EmergencyAction failure_action;
+        EmergencyAction success_action;
         char *reboot_arg;
 
         /* Make sure we never enter endless loops with the check unneeded logic, or the BindsTo= logic */
@@ -230,6 +292,9 @@ struct Unit {
 
         /* How to start OnFailure units */
         JobMode on_failure_job_mode;
+
+        /* Tweaking the GC logic */
+        CollectMode collect_mode;
 
         /* The current invocation ID */
         sd_id128_t invocation_id;
@@ -280,6 +345,9 @@ struct Unit {
 
         UnitCGroupBPFState cgroup_bpf_state:2;
 
+        /* Reset cgroup accounting next time we fork something off */
+        bool reset_accounting:1;
+
         bool start_limit_hit:1;
 
         /* Did we already invoke unit_coldplug() for this unit? */
@@ -287,6 +355,15 @@ struct Unit {
 
         /* For transient units: whether to add a bus track reference after creating the unit */
         bool bus_track_add:1;
+
+        /* Remember which unit state files we created */
+        bool exported_invocation_id:1;
+        bool exported_log_level_max:1;
+        bool exported_log_extra_fields:1;
+
+        /* When writing transient unit files, stores which section we stored last. If < 0, we didn't write any yet. If
+         * == 0 we are in the [Unit] section, if > 0 we are in the unit type-specific section. */
+        int last_section_private:2;
 };
 
 struct UnitStatusMessageFormats {
@@ -295,11 +372,26 @@ struct UnitStatusMessageFormats {
         const char *finished_stop_job[_JOB_RESULT_MAX];
 };
 
-typedef enum UnitSetPropertiesMode {
-        UNIT_CHECK = 0,
-        UNIT_RUNTIME = 1,
-        UNIT_PERSISTENT = 2,
-} UnitSetPropertiesMode;
+/* Flags used when writing drop-in files or transient unit files */
+typedef enum UnitWriteFlags {
+        /* Write a runtime unit file or drop-in (i.e. one below /run) */
+        UNIT_RUNTIME           = 1 << 0,
+
+        /* Write a persistent drop-in (i.e. one below /etc) */
+        UNIT_PERSISTENT        = 1 << 1,
+
+        /* Place this item in the per-unit-type private section, instead of [Unit] */
+        UNIT_PRIVATE           = 1 << 2,
+
+        /* Apply specifier escaping before writing */
+        UNIT_ESCAPE_SPECIFIERS = 1 << 3,
+
+        /* Apply C escaping before writing */
+        UNIT_ESCAPE_C          = 1 << 4,
+} UnitWriteFlags;
+
+/* Returns true if neither persistent, nor runtime storage is requested, i.e. this is a check invocation only */
+#define UNIT_WRITE_FLAGS_NOOP(flags) (((flags) & (UNIT_RUNTIME|UNIT_PERSISTENT)) == 0)
 
 #include "automount.h"
 #include "device.h"
@@ -392,14 +484,16 @@ struct UnitVTable {
          * unit is in. */
         const char* (*sub_state_to_string)(Unit *u);
 
+        /* Additionally to UnitActiveState determine whether unit is to be restarted. */
+        bool (*will_restart)(Unit *u);
+
         /* Return true when there is reason to keep this entry around
          * even nothing references it and it isn't active in any
          * way */
         bool (*check_gc)(Unit *u);
 
-        /* When the unit is not running and no job for it queued we
-         * shall release its runtime resources */
-        void (*release_resources)(Unit *u, bool inactive);
+        /* When the unit is not running and no job for it queued we shall release its runtime resources */
+        void (*release_resources)(Unit *u);
 
         /* Invoked on every child that died */
         void (*sigchld_event)(Unit *u, pid_t pid, int code, int status);
@@ -418,7 +512,7 @@ struct UnitVTable {
         void (*bus_name_owner_change)(Unit *u, const char *name, const char *old_owner, const char *new_owner);
 
         /* Called for each property that is being set */
-        int (*bus_set_property)(Unit *u, const char *name, sd_bus_message *message, UnitSetPropertiesMode mode, sd_bus_error *error);
+        int (*bus_set_property)(Unit *u, const char *name, sd_bus_message *message, UnitWriteFlags flags, sd_bus_error *error);
 
         /* Called after at least one property got changed to apply the necessary change */
         int (*bus_commit_properties)(Unit *u);
@@ -492,7 +586,7 @@ extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
 #define UNIT_HAS_CGROUP_CONTEXT(u) (UNIT_VTABLE(u)->cgroup_context_offset > 0)
 #define UNIT_HAS_KILL_CONTEXT(u) (UNIT_VTABLE(u)->kill_context_offset > 0)
 
-#define UNIT_TRIGGER(u) ((Unit*) set_first((u)->dependencies[UNIT_TRIGGERS]))
+#define UNIT_TRIGGER(u) ((Unit*) hashmap_first_key((u)->dependencies[UNIT_TRIGGERS]))
 
 DEFINE_CAST(SERVICE, Service);
 DEFINE_CAST(SOCKET, Socket);
@@ -512,11 +606,11 @@ void unit_free(Unit *u);
 int unit_new_for_name(Manager *m, size_t size, const char *name, Unit **ret);
 int unit_add_name(Unit *u, const char *name);
 
-int unit_add_dependency(Unit *u, UnitDependency d, Unit *other, bool add_reference);
-int unit_add_two_dependencies(Unit *u, UnitDependency d, UnitDependency e, Unit *other, bool add_reference);
+int unit_add_dependency(Unit *u, UnitDependency d, Unit *other, bool add_reference, UnitDependencyMask mask);
+int unit_add_two_dependencies(Unit *u, UnitDependency d, UnitDependency e, Unit *other, bool add_reference, UnitDependencyMask mask);
 
-int unit_add_dependency_by_name(Unit *u, UnitDependency d, const char *name, const char *filename, bool add_reference);
-int unit_add_two_dependencies_by_name(Unit *u, UnitDependency d, UnitDependency e, const char *name, const char *path, bool add_reference);
+int unit_add_dependency_by_name(Unit *u, UnitDependency d, const char *name, const char *filename, bool add_reference, UnitDependencyMask mask);
+int unit_add_two_dependencies_by_name(Unit *u, UnitDependency d, UnitDependency e, const char *name, const char *path, bool add_reference, UnitDependencyMask mask);
 
 int unit_add_exec_dependencies(Unit *u, ExecContext *c);
 
@@ -596,7 +690,7 @@ int unit_serialize_item_escaped(Unit *u, FILE *f, const char *key, const char *v
 int unit_serialize_item_fd(Unit *u, FILE *f, FDSet *fds, const char *key, int fd);
 void unit_serialize_item_format(Unit *u, FILE *f, const char *key, const char *value, ...) _printf_(4,5);
 
-int unit_add_node_link(Unit *u, const char *what, bool wants, UnitDependency d);
+int unit_add_node_dependency(Unit *u, const char *what, bool wants, UnitDependency d, UnitDependencyMask mask);
 
 int unit_coldplug(Unit *u);
 
@@ -615,6 +709,7 @@ const char *unit_slice_name(Unit *u);
 bool unit_stop_pending(Unit *u) _pure_;
 bool unit_inactive_or_pending(Unit *u) _pure_;
 bool unit_active_or_pending(Unit *u);
+bool unit_will_restart(Unit *u);
 
 int unit_add_default_target_dependency(Unit *u, Unit *target);
 
@@ -641,17 +736,17 @@ ExecRuntime *unit_get_exec_runtime(Unit *u) _pure_;
 int unit_setup_exec_runtime(Unit *u);
 int unit_setup_dynamic_creds(Unit *u);
 
-int unit_write_drop_in(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *data);
-int unit_write_drop_in_format(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *format, ...) _printf_(4,5);
+char* unit_escape_setting(const char *s, UnitWriteFlags flags, char **buf);
+char* unit_concat_strv(char **l, UnitWriteFlags flags);
 
-int unit_write_drop_in_private(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *data);
-int unit_write_drop_in_private_format(Unit *u, UnitSetPropertiesMode mode, const char *name, const char *format, ...) _printf_(4,5);
+int unit_write_setting(Unit *u, UnitWriteFlags flags, const char *name, const char *data);
+int unit_write_settingf(Unit *u, UnitWriteFlags mode, const char *name, const char *format, ...) _printf_(4,5);
 
 int unit_kill_context(Unit *u, KillContext *c, KillOperation k, pid_t main_pid, pid_t control_pid, bool main_pid_alien);
 
 int unit_make_transient(Unit *u);
 
-int unit_require_mounts_for(Unit *u, const char *path);
+int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask);
 
 bool unit_type_supported(UnitType t);
 
@@ -689,6 +784,15 @@ void unit_set_exec_params(Unit *s, ExecParameters *p);
 
 int unit_fork_helper_process(Unit *u, pid_t *ret);
 
+void unit_remove_dependencies(Unit *u, UnitDependencyMask mask);
+
+void unit_export_state_files(Unit *u);
+void unit_unlink_state_files(Unit *u);
+
+int unit_prepare_exec(Unit *u);
+
+void unit_warn_leftover_processes(Unit *u);
+
 /* Macros which append UNIT= or USER_UNIT= to the message */
 
 #define log_unit_full(unit, level, error, ...)                          \
@@ -713,3 +817,6 @@ int unit_fork_helper_process(Unit *u, pid_t *ret);
 #define LOG_UNIT_MESSAGE(unit, fmt, ...) "MESSAGE=%s: " fmt, (unit)->id, ##__VA_ARGS__
 #define LOG_UNIT_ID(unit) (unit)->manager->unit_log_format_string, (unit)->id
 #define LOG_UNIT_INVOCATION_ID(unit) (unit)->manager->invocation_log_format_string, (unit)->invocation_id_string
+
+const char* collect_mode_to_string(CollectMode m) _const_;
+CollectMode collect_mode_from_string(const char *s) _pure_;

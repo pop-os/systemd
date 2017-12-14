@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -26,6 +27,7 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include "sd-daemon.h"
 
@@ -299,6 +301,9 @@ static int dispatch_raw_connection_event(sd_event_source *event,
                                          int fd,
                                          uint32_t revents,
                                          void *userdata);
+static int null_timer_event_handler(sd_event_source *s,
+                                uint64_t usec,
+                                void *userdata);
 static int dispatch_http_event(sd_event_source *event,
                                int fd,
                                uint32_t revents,
@@ -417,7 +422,7 @@ static int add_source(RemoteServer *s, int fd, char* name, bool own_name) {
 static int add_raw_socket(RemoteServer *s, int fd) {
         int r;
         _cleanup_close_ int fd_ = fd;
-        char name[sizeof("raw-socket-")-1 + DECIMAL_STR_MAX(int) + 1];
+        char name[STRLEN("raw-socket-") + DECIMAL_STR_MAX(int) + 1];
 
         assert(fd >= 0);
 
@@ -727,7 +732,7 @@ static int setup_microhttpd_server(RemoteServer *s,
                 goto error;
         }
 
-        r = sd_event_add_io(s->events, &d->event,
+        r = sd_event_add_io(s->events, &d->io_event,
                             epoll_fd, EPOLLIN,
                             dispatch_http_event, d);
         if (r < 0) {
@@ -735,7 +740,21 @@ static int setup_microhttpd_server(RemoteServer *s,
                 goto error;
         }
 
-        r = sd_event_source_set_description(d->event, "epoll-fd");
+        r = sd_event_source_set_description(d->io_event, "io_event");
+        if (r < 0) {
+                log_error_errno(r, "Failed to set source name: %m");
+                goto error;
+        }
+
+        r = sd_event_add_time(s->events, &d->timer_event,
+                              CLOCK_MONOTONIC, UINT64_MAX, 0,
+                              null_timer_event_handler, d);
+        if (r < 0) {
+                log_error_errno(r, "Failed to add timer_event: %m");
+                goto error;
+        }
+
+        r = sd_event_source_set_description(d->timer_event, "timer_event");
         if (r < 0) {
                 log_error_errno(r, "Failed to set source name: %m");
                 goto error;
@@ -777,12 +796,19 @@ static int setup_microhttpd_socket(RemoteServer *s,
         return setup_microhttpd_server(s, fd, key, cert, trust);
 }
 
+static int null_timer_event_handler(sd_event_source *timer_event,
+                                    uint64_t usec,
+                                    void *userdata) {
+        return dispatch_http_event(timer_event, 0, 0, userdata);
+}
+
 static int dispatch_http_event(sd_event_source *event,
                                int fd,
                                uint32_t revents,
                                void *userdata) {
         MHDDaemonWrapper *d = userdata;
         int r;
+        MHD_UNSIGNED_LONG_LONG timeout = ULONG_LONG_MAX;
 
         assert(d);
 
@@ -792,6 +818,18 @@ static int dispatch_http_event(sd_event_source *event,
                 // XXX: unregister daemon
                 return -EINVAL;
         }
+        if (MHD_get_timeout(d->daemon, &timeout) == MHD_NO)
+                timeout = ULONG_LONG_MAX;
+
+        r = sd_event_source_set_time(d->timer_event, timeout);
+        if (r < 0) {
+                log_warning_errno(r, "Unable to set event loop timeout: %m, this may result in indefinite blocking!");
+                return 1;
+        }
+
+        r = sd_event_source_set_enabled(d->timer_event, SD_EVENT_ON);
+        if (r < 0)
+                log_warning_errno(r, "Unable to enable timer_event: %m, this may result in indefinite blocking!");
 
         return 1; /* work to do */
 }
@@ -1005,17 +1043,17 @@ static int remoteserver_init(RemoteServer *s,
         return 0;
 }
 
+static void MHDDaemonWrapper_free(MHDDaemonWrapper *d) {
+        MHD_stop_daemon(d->daemon);
+        sd_event_source_unref(d->io_event);
+        sd_event_source_unref(d->timer_event);
+        free(d);
+}
+
 static void server_destroy(RemoteServer *s) {
         size_t i;
-        MHDDaemonWrapper *d;
 
-        while ((d = hashmap_steal_first(s->daemons))) {
-                MHD_stop_daemon(d->daemon);
-                sd_event_source_unref(d->event);
-                free(d);
-        }
-
-        hashmap_free(s->daemons);
+        hashmap_free_with_destructor(s->daemons, MHDDaemonWrapper_free);
 
         assert(s->sources_size == 0 || s->sources);
         for (i = 0; i < s->sources_size; i++)
@@ -1216,7 +1254,7 @@ static int parse_config(void) {
         return config_parse_many_nulstr(PKGSYSCONFDIR "/journal-remote.conf",
                                         CONF_PATHS_NULSTR("systemd/journal-remote.conf.d"),
                                         "Remote\0", config_item_table_lookup, items,
-                                        false, NULL);
+                                        CONFIG_PARSE_WARN, NULL);
 }
 
 static void help(void) {

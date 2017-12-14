@@ -3,6 +3,8 @@
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2012 Zbigniew Jędrzejewski-Szmek
@@ -98,6 +100,13 @@
         <listitem><para>Specify the path to a file containing a server
         key in PEM format corresponding to the certificate specified
         with <option>--cert=</option>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--trust=</option></term>
+
+        <listitem><para>Specify the path to a file containing a
+        CA certificate in PEM format.</para></listitem>
       </varlistentry>
 
       <varlistentry>

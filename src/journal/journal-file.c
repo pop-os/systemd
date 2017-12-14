@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -90,6 +91,10 @@
 /* The mmap context to use for the header we pick as one above the last defined typed */
 #define CONTEXT_HEADER _OBJECT_TYPE_MAX
 
+#ifdef __clang__
+#  pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+#endif
+
 /* This may be called from a separate thread to prevent blocking the caller for the duration of fsync().
  * As a result we use atomic operations on f->offline_state for inter-thread communications with
  * journal_file_set_offline() and journal_file_set_online(). */
@@ -128,8 +133,7 @@ static void journal_file_set_offline_internal(JournalFile *f) {
                 case OFFLINE_OFFLINING:
                         if (!__sync_bool_compare_and_swap(&f->offline_state, OFFLINE_OFFLINING, OFFLINE_DONE))
                                 continue;
-                        /* fall through */
-
+                        _fallthrough_;
                 case OFFLINE_DONE:
                         return;
 
@@ -285,8 +289,7 @@ static int journal_file_set_online(JournalFile *f) {
                         if (!__sync_bool_compare_and_swap(&f->offline_state, OFFLINE_AGAIN_FROM_OFFLINING, OFFLINE_CANCEL))
                                 continue;
                         /* Canceled restart from offlining, must wait for offlining to complete however. */
-
-                        /* fall through */
+                        _fallthrough_;
                 default: {
                         int r;
 
@@ -395,15 +398,6 @@ JournalFile* journal_file_close(JournalFile *f) {
 #endif
 
         return mfree(f);
-}
-
-void journal_file_close_set(Set *s) {
-        JournalFile *f;
-
-        assert(s);
-
-        while ((f = set_steal_first(s)))
-                (void) journal_file_close(f);
 }
 
 static int journal_file_init_header(JournalFile *f, JournalFile *template) {
@@ -2578,7 +2572,7 @@ static int find_data_object_by_boot_id(
                 Object **o,
                 uint64_t *b) {
 
-        char t[sizeof("_BOOT_ID=")-1 + 32 + 1] = "_BOOT_ID=";
+        char t[STRLEN("_BOOT_ID=") + 32 + 1] = "_BOOT_ID=";
 
         sd_id128_to_string(boot_id, t + 9);
         return journal_file_find_data_object(f, t, sizeof(t) - 1, o, b);
@@ -3368,8 +3362,7 @@ int journal_file_open(
         f->header = h;
 
         if (!newly_created) {
-                if (deferred_closes)
-                        journal_file_close_set(deferred_closes);
+                set_clear_with_destructor(deferred_closes, journal_file_close);
 
                 r = journal_file_verify_header(f);
                 if (r < 0)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -59,7 +60,7 @@ int sysctl_write(const char *property, const char *value) {
         log_debug("Setting '%s' to '%s'", property, value);
 
         p = strjoina("/proc/sys/", property);
-        return write_string_file(p, value, 0);
+        return write_string_file(p, value, WRITE_STRING_FILE_DISABLE_BUFFER);
 }
 
 int sysctl_read(const char *property, char **content) {

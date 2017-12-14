@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -59,9 +60,7 @@ int settings_load(FILE *f, const char *path, Settings **ret) {
                          "Network\0"
                          "Files\0",
                          config_item_perf_lookup, nspawn_gperf_lookup,
-                         false,
-                         false,
-                         true,
+                         CONFIG_PARSE_WARN,
                          s);
         if (r < 0)
                 return r;
@@ -202,7 +201,7 @@ int config_parse_capability(
                         continue;
                 }
 
-                u |= 1 << ((uint64_t) cap);
+                u |= UINT64_C(1) << cap;
         }
 
         if (u == 0)
@@ -404,9 +403,7 @@ int config_parse_network_zone(
                 return 0;
         }
 
-        free(settings->network_zone);
-        settings->network_zone = j;
-        j = NULL;
+        free_and_replace(settings->network_zone, j);
 
         return 0;
 }

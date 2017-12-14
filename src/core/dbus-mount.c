@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -36,7 +37,7 @@ static int property_get_what(
                 sd_bus_error *error) {
 
         Mount *m = userdata;
-        const char *d;
+        const char *d = NULL;
 
         assert(bus);
         assert(reply);
@@ -46,8 +47,6 @@ static int property_get_what(
                 d = m->parameters_proc_self_mountinfo.what;
         else if (m->from_fragment && m->parameters_fragment.what)
                 d = m->parameters_fragment.what;
-        else
-                d = "";
 
         return sd_bus_message_append(reply, "s", d);
 }
@@ -62,7 +61,7 @@ static int property_get_options(
                 sd_bus_error *error) {
 
         Mount *m = userdata;
-        const char *d;
+        const char *d = NULL;
 
         assert(bus);
         assert(reply);
@@ -72,8 +71,6 @@ static int property_get_options(
                 d = m->parameters_proc_self_mountinfo.options;
         else if (m->from_fragment && m->parameters_fragment.options)
                 d = m->parameters_fragment.options;
-        else
-                d = "";
 
         return sd_bus_message_append(reply, "s", d);
 }
@@ -87,21 +84,19 @@ static int property_get_type(
                 void *userdata,
                 sd_bus_error *error) {
 
+        const char *fstype = NULL;
         Mount *m = userdata;
-        const char *d;
 
         assert(bus);
         assert(reply);
         assert(m);
 
         if (m->from_proc_self_mountinfo && m->parameters_proc_self_mountinfo.fstype)
-                d = m->parameters_proc_self_mountinfo.fstype;
+                fstype = m->parameters_proc_self_mountinfo.fstype;
         else if (m->from_fragment && m->parameters_fragment.fstype)
-                d = m->parameters_fragment.fstype;
-        else
-                d = "";
+                fstype = m->parameters_fragment.fstype;
 
-        return sd_bus_message_append(reply, "s", d);
+        return sd_bus_message_append(reply, "s", fstype);
 }
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_result, mount_result, MountResult);
@@ -131,17 +126,18 @@ static int bus_mount_set_transient_property(
                 Mount *m,
                 const char *name,
                 sd_bus_message *message,
-                UnitSetPropertiesMode mode,
+                UnitWriteFlags flags,
                 sd_bus_error *error) {
 
         const char *new_property;
         char **property;
-        char *p;
         int r;
 
         assert(m);
         assert(name);
         assert(message);
+
+        flags |= UNIT_PRIVATE;
 
         if (streq(name, "What"))
                 property = &m->parameters_fragment.what;
@@ -156,16 +152,13 @@ static int bus_mount_set_transient_property(
         if (r < 0)
                 return r;
 
-        if (mode != UNIT_CHECK) {
-                p = strdup(new_property);
-                if (!p)
-                        return -ENOMEM;
+        if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
 
-                unit_write_drop_in_format(UNIT(m), mode, name, "[Mount]\n%s=%s\n",
-                        name, new_property);
+                r = free_and_strdup(property, new_property);
+                if (r < 0)
+                        return r;
 
-                free(*property);
-                *property = p;
+                unit_write_settingf(UNIT(m), flags|UNIT_ESCAPE_SPECIFIERS, name, "%s=%s", name, new_property);
         }
 
         return 1;
@@ -175,7 +168,7 @@ int bus_mount_set_property(
                 Unit *u,
                 const char *name,
                 sd_bus_message *message,
-                UnitSetPropertiesMode mode,
+                UnitWriteFlags flags,
                 sd_bus_error *error) {
 
         Mount *m = MOUNT(u);
@@ -185,22 +178,22 @@ int bus_mount_set_property(
         assert(name);
         assert(message);
 
-        r = bus_cgroup_set_property(u, &m->cgroup_context, name, message, mode, error);
+        r = bus_cgroup_set_property(u, &m->cgroup_context, name, message, flags, error);
         if (r != 0)
                 return r;
 
         if (u->transient && u->load_state == UNIT_STUB) {
                 /* This is a transient unit, let's load a little more */
 
-                r = bus_mount_set_transient_property(m, name, message, mode, error);
+                r = bus_mount_set_transient_property(m, name, message, flags, error);
                 if (r != 0)
                         return r;
 
-                r = bus_exec_context_set_transient_property(u, &m->exec_context, name, message, mode, error);
+                r = bus_exec_context_set_transient_property(u, &m->exec_context, name, message, flags, error);
                 if (r != 0)
                         return r;
 
-                r = bus_kill_context_set_transient_property(u, &m->kill_context, name, message, mode, error);
+                r = bus_kill_context_set_transient_property(u, &m->kill_context, name, message, flags, error);
                 if (r != 0)
                         return r;
         }

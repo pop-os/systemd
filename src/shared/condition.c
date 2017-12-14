@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -54,6 +55,7 @@
 #include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "tomoyo-util.h"
 #include "user-util.h"
 #include "util.h"
 #include "virt.h"
@@ -76,8 +78,7 @@ Condition* condition_new(ConditionType type, const char *parameter, bool trigger
 
         r = free_and_strdup(&c->parameter, parameter);
         if (r < 0) {
-                free(c);
-                return NULL;
+                return mfree(c);
         }
 
         return c;
@@ -156,7 +157,7 @@ static int condition_test_user(Condition *c) {
                 return id == getuid() || id == geteuid();
 
         if (streq("@system", c->parameter))
-                return getuid() <= SYSTEM_UID_MAX || geteuid() <= SYSTEM_UID_MAX;
+                return uid_is_system(getuid()) || uid_is_system(geteuid());
 
         username = getusername_malloc();
         if (!username)
@@ -301,6 +302,8 @@ static int condition_test_security(Condition *c) {
                 return use_audit();
         if (streq(c->parameter, "ima"))
                 return use_ima();
+        if (streq(c->parameter, "tomoyo"))
+                return mac_tomoyo_use();
 
         return false;
 }

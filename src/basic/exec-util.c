@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -255,7 +256,7 @@ int execute_directories(
 static int gather_environment_generate(int fd, void *arg) {
         char ***env = arg, **x, **y;
         _cleanup_fclose_ FILE *f = NULL;
-        _cleanup_strv_free_ char **new;
+        _cleanup_strv_free_ char **new = NULL;
         int r;
 
         /* Read a series of VAR=value assignments from fd, use them to update the list of

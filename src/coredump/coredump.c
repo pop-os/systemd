@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -19,6 +20,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdio_ext.h>
 #include <sys/prctl.h>
 #include <sys/xattr.h>
 #include <unistd.h>
@@ -147,7 +149,7 @@ static int parse_config(void) {
                                         CONF_PATHS_NULSTR("systemd/coredump.conf.d"),
                                         "Coredump\0",
                                         config_item_table_lookup, items,
-                                        false, NULL);
+                                        CONFIG_PARSE_WARN, NULL);
 }
 
 static inline uint64_t storage_size_max(void) {
@@ -164,7 +166,7 @@ static int fix_acl(int fd, uid_t uid) {
 
         assert(fd >= 0);
 
-        if (uid <= SYSTEM_UID_MAX)
+        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY)
                 return 0;
 
         /* Make sure normal users can read (but not write or delete)
@@ -539,6 +541,8 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
         if (!stream)
                 return -ENOMEM;
 
+        (void) __fsetlocking(stream, FSETLOCKING_BYCALLER);
+
         FOREACH_DIRENT(dent, proc_fd_dir, return -errno) {
                 _cleanup_fclose_ FILE *fdinfo = NULL;
                 _cleanup_free_ char *fdname = NULL;
@@ -558,13 +562,13 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
                         continue;
 
                 fdinfo = fdopen(fd, "re");
-                if (fdinfo == NULL) {
-                        close(fd);
+                if (!fdinfo) {
+                        safe_close(fd);
                         continue;
                 }
 
                 FOREACH_LINE(line, fdinfo, break) {
-                        fputs_unlocked(line, stream);
+                        fputs(line, stream);
                         if (!endswith(line, "\n"))
                                 fputc('\n', stream);
                 }
@@ -1214,7 +1218,7 @@ static int gather_pid_metadata(
         if (get_process_environ(pid, &t) >= 0)
                 set_iovec_field_free(iovec, n_iovec, "COREDUMP_ENVIRON=", t);
 
-        t = strjoin("COREDUMP_TIMESTAMP=", context[CONTEXT_TIMESTAMP], "000000", NULL);
+        t = strjoin("COREDUMP_TIMESTAMP=", context[CONTEXT_TIMESTAMP], "000000");
         if (t)
                 iovec[(*n_iovec)++] = IOVEC_MAKE_STRING(t);
 

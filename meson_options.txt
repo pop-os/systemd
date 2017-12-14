@@ -1,4 +1,20 @@
 # -*- mode: meson -*-
+# SPDX-License-Identifier: LGPL-2.1+
+#
+# Copyright 2017 Zbigniew Jędrzejewski-Szmek
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 option('split-usr', type : 'boolean', value : false,
        description : '''assume that /bin, /sbin aren't symlinks into /usr''')
@@ -131,9 +147,23 @@ option('system-uid-max', type : 'string',
        description : 'maximum system UID')
 option('system-gid-max', type : 'string',
        description : 'maximum system GID')
+option('dynamic-uid-min', type : 'string',
+       description : 'minimum dynamic UID',
+       value : '61184') # That's → 0x0000EF00 in hex
+option('dynamic-uid-max', type : 'string',
+       description : 'maximum dynamic UID',
+       value : '65519') # That's → 0x0000FFEF in hex
+option('container-uid-base-min', type : 'string',
+       description : 'minimum container UID base',
+       value : '524288') # That's → 0x00080000 in hex
+option('container-uid-base-max', type : 'string',
+       description : 'maximum container UID base',
+       value : '1878982656') # That's → 0x6FFF0000 in hex
 option('tty-gid', type : 'string',
        description : 'the numeric GID of the "tty" group',
        value : '5')
+option('users-gid', type : 'string',
+       description : 'the numeric GID of the "users" group')
 option('adm-group', type : 'boolean',
        description : 'the ACL for adm group should be added')
 option('wheel-group', type : 'boolean',
@@ -144,8 +174,10 @@ option('nobody-user', type : 'string',
 option('nobody-group', type : 'string',
        description : 'The name of the nobody group (the one with GID 65534)',
        value : 'nobody')
-option('dev-kvm-mode', type : 'string', value : '0660',
+option('dev-kvm-mode', type : 'string', value : '0666',
        description : '/dev/kvm access mode')
+option('group-render-mode', type : 'string', value : '0666',
+       description : 'Access mode for devices owned by render group (e.g. /dev/dri/renderD*, /dev/kfd).')
 option('default-kill-user-processes', type : 'boolean',
        description : 'the default value for KillUserProcesses= setting')
 option('gshadow', type : 'boolean',

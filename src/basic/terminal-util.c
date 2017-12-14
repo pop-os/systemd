@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -245,7 +246,6 @@ int ask_string(char **ret, const char *text, ...) {
 
 int reset_terminal_fd(int fd, bool switch_to_text) {
         struct termios termios;
-        _cleanup_free_ char *utf8 = NULL;
         int r = 0;
 
         /* Set terminal to some sane defaults */
@@ -992,7 +992,7 @@ int get_ctty_devnr(pid_t pid, dev_t *d) {
 }
 
 int get_ctty(pid_t pid, dev_t *_devnr, char **r) {
-        char fn[sizeof("/dev/char/")-1 + 2*DECIMAL_STR_MAX(unsigned) + 1 + 1], *b = NULL;
+        char fn[STRLEN("/dev/char/") + 2*DECIMAL_STR_MAX(unsigned) + 1 + 1], *b = NULL;
         _cleanup_free_ char *s = NULL;
         const char *p;
         dev_t devnr;

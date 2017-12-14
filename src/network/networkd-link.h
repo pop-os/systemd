@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -85,7 +86,11 @@ typedef struct Link {
         LinkState state;
         LinkOperationalState operstate;
 
-        unsigned link_messages;
+        unsigned address_messages;
+        unsigned address_label_messages;
+        unsigned route_messages;
+        unsigned routing_policy_rule_messages;
+        unsigned routing_policy_rule_remove_messages;
         unsigned enslaving;
 
         Set *addresses;
@@ -108,7 +113,9 @@ typedef struct Link {
         bool ipv4ll_address:1;
         bool ipv4ll_route:1;
 
-        bool static_configured;
+        bool static_routes_configured;
+        bool routing_policy_rules_configured;
+        bool setting_mtu;
 
         LIST_HEAD(Address, pool_addresses);
 
@@ -168,6 +175,7 @@ int link_set_mtu(Link *link, uint32_t mtu);
 
 int ipv4ll_configure(Link *link);
 int dhcp4_configure(Link *link);
+int dhcp4_set_promote_secondaries(Link *link);
 int dhcp6_configure(Link *link);
 int dhcp6_request_address(Link *link, int ir);
 

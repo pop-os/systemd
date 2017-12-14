@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -148,17 +149,6 @@ size_t util_path_encode(const char *src, char *dest, size_t size)
         }
         dest[j] = '\0';
         return j;
-}
-
-void util_remove_trailing_chars(char *path, char c)
-{
-        size_t len;
-
-        if (path == NULL)
-                return;
-        len = strlen(path);
-        while (len > 0 && path[len-1] == c)
-                path[--len] = '\0';
 }
 
 /*

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Collect variables across events.
  *
@@ -93,7 +94,7 @@ static int prepare(char *dir, char *filename)
         if (r < 0 && errno != EEXIST)
                 return -errno;
 
-        snprintf(buf, sizeof buf, "%s/%s", dir, filename);
+        xsprintf(buf, "%s/%s", dir, filename);
 
         fd = open(buf, O_RDWR|O_CREAT|O_CLOEXEC, S_IRUSR|S_IWUSR);
         if (fd < 0)
@@ -134,7 +135,8 @@ static int prepare(char *dir, char *filename)
 static int checkout(int fd)
 {
         int len;
-        char *buf, *ptr, *word = NULL;
+        _cleanup_free_ char *buf = NULL;
+        char *ptr, *word = NULL;
         struct _mate *him;
 
  restart:
@@ -154,26 +156,22 @@ static int checkout(int fd)
                                 bufsize = bufsize << 1;
                                 if (debug)
                                         fprintf(stderr, "ID overflow, restarting with size %zu\n", bufsize);
-                                free(buf);
                                 lseek(fd, 0, SEEK_SET);
                                 goto restart;
                         }
                         if (ptr) {
                                 *ptr = '\0';
                                 ptr++;
-                                if (!strlen(word))
+                                if (isempty(word))
                                         continue;
 
                                 if (debug)
                                         fprintf(stderr, "Found word %s\n", word);
                                 him = malloc(sizeof (struct _mate));
-                                if (!him) {
-                                        free(buf);
+                                if (!him)
                                         return log_oom();
-                                }
                                 him->name = strdup(word);
                                 if (!him->name) {
-                                        free(buf);
                                         free(him);
                                         return log_oom();
                                 }
@@ -187,12 +185,9 @@ static int checkout(int fd)
 
                 if (!ptr)
                         ptr = word;
-                if (!ptr)
-                        break;
                 ptr -= len;
         }
 
-        free(buf);
         return 0;
 }
 

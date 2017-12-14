@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -126,9 +127,7 @@ khash* khash_unref(khash *h) {
 
         safe_close(h->fd);
         free(h->algorithm);
-        free(h);
-
-        return NULL;
+        return mfree(h);
 }
 
 int khash_dup(khash *h, khash **ret) {

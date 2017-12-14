@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -18,6 +19,7 @@
 ***/
 
 #include <sys/prctl.h>
+#include <sys/wait.h>
 
 #include "sd-bus.h"
 
@@ -250,7 +252,7 @@ static void transfer_send_logs(Transfer *t, bool flush) {
                 n = strndup(t->log_message, e - t->log_message);
 
                 /* Skip over NUL and newlines */
-                while ((e < t->log_message + t->log_message_size) && IN_SET(*e, 0, '\n'))
+                while (e < t->log_message + t->log_message_size && (*e == 0 || *e == '\n'))
                         e++;
 
                 memmove(t->log_message, e, t->log_message + sizeof(t->log_message) - e);

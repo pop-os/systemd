@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -66,8 +67,6 @@ struct Mount {
         bool is_mounted:1;
         bool just_mounted:1;
         bool just_changed:1;
-
-        bool reset_accounting:1;
 
         bool sloppy_options;
 

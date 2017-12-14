@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -25,8 +26,6 @@
 #include "list.h"
 #include "sparse-endian.h"
 
-#define SD_RADV_DEFAULT_MIN_TIMEOUT_USEC        (200*USEC_PER_SEC)
-#define SD_RADV_DEFAULT_MAX_TIMEOUT_USEC        (600*USEC_PER_SEC)
 assert_cc(SD_RADV_DEFAULT_MIN_TIMEOUT_USEC <= SD_RADV_DEFAULT_MAX_TIMEOUT_USEC)
 
 #define SD_RADV_MAX_INITIAL_RTR_ADVERT_INTERVAL_USEC (16*USEC_PER_SEC)

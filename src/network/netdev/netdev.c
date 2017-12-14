@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -47,6 +48,7 @@
 #include "netdev/dummy.h"
 #include "netdev/vrf.h"
 #include "netdev/vcan.h"
+#include "netdev/vxcan.h"
 
 const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_BRIDGE] = &bridge_vtable,
@@ -72,6 +74,7 @@ const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_VRF] = &vrf_vtable,
         [NETDEV_KIND_VCAN] = &vcan_vtable,
         [NETDEV_KIND_GENEVE] = &geneve_vtable,
+        [NETDEV_KIND_VXCAN] = &vxcan_vtable,
 };
 
 static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
@@ -98,6 +101,7 @@ static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_VRF] = "vrf",
         [NETDEV_KIND_VCAN] = "vcan",
         [NETDEV_KIND_GENEVE] = "geneve",
+        [NETDEV_KIND_VXCAN] = "vxcan",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(netdev_kind, NetDevKind);
@@ -630,7 +634,7 @@ static int netdev_load_one(Manager *manager, const char *filename) {
         r = config_parse_many(filename, network_dirs, dropin_dirname,
                               "Match\0NetDev\0",
                               config_item_perf_lookup, network_netdev_gperf_lookup,
-                              true, netdev_raw);
+                              CONFIG_PARSE_WARN, netdev_raw);
         if (r < 0)
                 return r;
 
@@ -671,7 +675,7 @@ static int netdev_load_one(Manager *manager, const char *filename) {
         r = config_parse(NULL, filename, file,
                          NETDEV_VTABLE(netdev)->sections,
                          config_item_perf_lookup, network_netdev_gperf_lookup,
-                         false, false, false, netdev);
+                         CONFIG_PARSE_WARN, netdev);
         if (r < 0)
                 return r;
 

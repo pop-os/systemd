@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- Mode: python; coding: utf-8; indent-tabs-mode: nil -*- */
+#  SPDX-License-Identifier: MIT
 #
 # This file is part of systemd. It is distrubuted under the MIT license, see
 # below.
@@ -65,6 +66,7 @@ UDEV_TAG = Word(string.ascii_uppercase, alphanums + '_')
 
 TYPES = {'mouse':    ('usb', 'bluetooth', 'ps2', '*'),
          'evdev':    ('name', 'atkbd', 'input'),
+         'id-input': ('modalias'),
          'touchpad': ('i8042', 'rmi', 'bluetooth', 'usb'),
          'joystick': ('i8042', 'rmi', 'bluetooth', 'usb'),
          'keyboard': ('name', ),
@@ -105,6 +107,18 @@ def property_grammar():
              ('MOUSE_WHEEL_CLICK_ANGLE_HORIZONTAL', INTEGER),
              ('MOUSE_WHEEL_CLICK_COUNT', INTEGER),
              ('MOUSE_WHEEL_CLICK_COUNT_HORIZONTAL', INTEGER),
+             ('ID_INPUT', Literal('1')),
+             ('ID_INPUT_ACCELEROMETER', Literal('1')),
+             ('ID_INPUT_JOYSTICK', Literal('1')),
+             ('ID_INPUT_KEY', Literal('1')),
+             ('ID_INPUT_KEYBOARD', Literal('1')),
+             ('ID_INPUT_MOUSE', Literal('1')),
+             ('ID_INPUT_POINTINGSTICK', Literal('1')),
+             ('ID_INPUT_SWITCH', Literal('1')),
+             ('ID_INPUT_TABLET', Literal('1')),
+             ('ID_INPUT_TABLET_PAD', Literal('1')),
+             ('ID_INPUT_TOUCHPAD', Literal('1')),
+             ('ID_INPUT_TOUCHSCREEN', Literal('1')),
              ('ID_INPUT_TRACKBALL', Literal('1')),
              ('MOUSE_WHEEL_TILT_HORIZONTAL', Literal('1')),
              ('MOUSE_WHEEL_TILT_VERTICAL', Literal('1')),

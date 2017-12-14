@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -165,7 +166,7 @@ int bus_socket_set_property(
                 Unit *u,
                 const char *name,
                 sd_bus_message *message,
-                UnitSetPropertiesMode mode,
+                UnitWriteFlags flags,
                 sd_bus_error *error) {
 
         Socket *s = SOCKET(u);
@@ -174,7 +175,7 @@ int bus_socket_set_property(
         assert(name);
         assert(message);
 
-        return bus_cgroup_set_property(u, &s->cgroup_context, name, message, mode, error);
+        return bus_cgroup_set_property(u, &s->cgroup_context, name, message, flags, error);
 }
 
 int bus_socket_commit_properties(Unit *u) {

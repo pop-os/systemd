@@ -3,6 +3,8 @@
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2016 Lennart Poettering
@@ -262,6 +264,21 @@
         <command>systemd-mount --umount /path/to/umount /dev/sda1 UUID=xxxxxx-xxxx LABEL=xxxxx /path/to/disk.img</command>.
         Note that when <option>-H</option> or <option>-M</option> is specified, only absolute paths to mount points are
         supported.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-G</option></term>
+        <term><option>--collect</option></term>
+
+        <listitem><para>Unload the transient unit after it completed, even if it failed. Normally, without this option,
+        all mount units that mount and failed are kept in memory until the user explicitly resets their failure state with
+        <command>systemctl reset-failed</command> or an equivalent command. On the other hand, units that stopped
+        successfully are unloaded immediately. If this option is turned on the "garbage collection" of units is more
+        agressive, and unloads units regardless if they exited successfully or failed. This option is a shortcut for
+        <command>--property=CollectMode=inactive-or-failed</command>, see the explanation for
+        <varname>CollectMode=</varname> in
+        <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry> for further
+        information.</para></listitem>
       </varlistentry>
 
       <xi:include href="user-system-options.xml" xpointer="user" />

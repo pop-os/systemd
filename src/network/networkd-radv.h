@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -21,4 +22,5 @@
 
 #include "networkd-link.h"
 
+int radv_emit_dns(Link *link);
 int radv_configure(Link *link);

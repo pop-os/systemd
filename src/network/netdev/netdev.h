@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -58,6 +59,7 @@ typedef enum NetDevKind {
         NETDEV_KIND_VRF,
         NETDEV_KIND_VCAN,
         NETDEV_KIND_GENEVE,
+        NETDEV_KIND_VXCAN,
         _NETDEV_KIND_MAX,
         _NETDEV_KIND_INVALID = -1
 } NetDevKind;

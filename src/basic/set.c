@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -38,7 +39,7 @@ int set_make(Set **ret, const struct hash_ops *hash_ops HASHMAP_DEBUG_PARAMS, vo
 
                 va_start(ap, add);
 
-                for(;;) {
+                for (;;) {
                         void *arg = va_arg(ap, void*);
 
                         if (!arg)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -666,7 +667,7 @@ int decompress_stream_lz4(int in, int out, uint64_t max_bytes) {
 
         log_debug("LZ4 decompression finished (%zu -> %zu bytes, %.1f%%)",
                   total_in, total_out,
-                  (double) total_out / total_in * 100);
+                  total_in > 0 ? (double) total_out / total_in * 100 : 0.0);
  cleanup:
         munmap(src, st.st_size);
         return r;

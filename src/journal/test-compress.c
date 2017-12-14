@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd
 
@@ -26,6 +27,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "macro.h"
+#include "path-util.h"
 #include "random-util.h"
 #include "util.h"
 
@@ -156,8 +158,14 @@ static void test_compress_stream(int compression,
         char pattern[] = "/tmp/systemd-test.compressed.XXXXXX",
              pattern2[] = "/tmp/systemd-test.compressed.XXXXXX";
         int r;
-        _cleanup_free_ char *cmd = NULL, *cmd2;
+        _cleanup_free_ char *cmd = NULL, *cmd2 = NULL;
         struct stat st = {};
+
+        r = find_binary(cat, NULL);
+        if (r < 0) {
+                log_error_errno(r, "Skipping %s, could not find %s binary: %m", __func__, cat);
+                return;
+        }
 
         log_debug("/* testing %s compression */",
                   object_compressed_to_string(compression));

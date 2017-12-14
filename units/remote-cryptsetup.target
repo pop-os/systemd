@@ -1,3 +1,5 @@
+#  SPDX-License-Identifier: LGPL-2.1+
+#
 #  This file is part of systemd.
 #
 #  systemd is free software; you can redistribute it and/or modify it
@@ -8,3 +10,9 @@
 [Unit]
 Description=Remote Encrypted Volumes
 Documentation=man:systemd.special(7)
+After=remote-fs-pre.target cryptsetup-pre.target
+DefaultDependencies=no
+Conflicts=shutdown.target
+
+[Install]
+WantedBy=multi-user.target

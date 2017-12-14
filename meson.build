@@ -1,5 +1,22 @@
+# SPDX-License-Identifier: LGPL-2.1+
+#
+# Copyright 2017 Zbigniew Jędrzejewski-Szmek
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <http://www.gnu.org/licenses/>.
+
 project('systemd', 'c',
-        version : '235',
+        version : '236',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu99',
@@ -7,11 +24,11 @@ project('systemd', 'c',
                 'sysconfdir=/etc',
                 'localstatedir=/var',
         ],
-        meson_version : '>= 0.40',
+        meson_version : '>= 0.41',
        )
 
-libsystemd_version = '0.19.1'
-libudev_version = '1.6.7'
+libsystemd_version = '0.20.0'
+libudev_version = '1.6.8'
 
 # We need the same data in three different formats, ugh!
 # Also, for hysterical reasons, we use different variable
@@ -37,12 +54,15 @@ endif
 
 #####################################################################
 
+split_usr = get_option('split-usr')
+conf.set10('HAVE_SPLIT_USR', split_usr)
+
 rootprefixdir = get_option('rootprefix')
-conf.set10('HAVE_SPLIT_USR', get_option('split-usr'))
-if get_option('split-usr')
-        rootprefixdir = rootprefixdir != '' ? rootprefixdir : '/'
-else
-        rootprefixdir = rootprefixdir != '' ? rootprefixdir : '/usr'
+# Unusual rootprefixdir values are used by some distros
+# (see https://github.com/systemd/systemd/pull/7461).
+rootprefix_default = get_option('split-usr') ? '/' : '/usr'
+if rootprefixdir == ''
+        rootprefixdir = rootprefix_default
 endif
 
 sysvinit_path = get_option('sysvinit-path')
@@ -83,7 +103,10 @@ polkitpkladir = join_paths(localstatedir, 'lib/polkit-1/localauthority/10-vendor
 varlogdir = join_paths(localstatedir, 'log')
 xinitrcdir = join_paths(sysconfdir, 'X11/xinit/xinitrc.d')
 rpmmacrosdir = get_option('rpmmacrosdir')
-modprobedir = join_paths(prefixdir, 'lib/modprobe.d')
+if rpmmacrosdir != 'no'
+        rpmmacrosdir = join_paths(prefixdir, rpmmacrosdir)
+endif
+modprobedir = join_paths(rootprefixdir, 'lib/modprobe.d')
 
 # Our own paths
 pkgdatadir = join_paths(datadir, 'systemd')
@@ -159,6 +182,8 @@ conf.set_quoted('CATALOG_DATABASE',                           join_paths(catalog
 conf.set_quoted('SYSTEMD_CGROUP_AGENT_PATH',                  join_paths(rootlibexecdir, 'systemd-cgroups-agent'))
 conf.set_quoted('SYSTEMD_BINARY_PATH',                        join_paths(rootlibexecdir, 'systemd'))
 conf.set_quoted('SYSTEMD_FSCK_PATH',                          join_paths(rootlibexecdir, 'systemd-fsck'))
+conf.set_quoted('SYSTEMD_MAKEFS_PATH',                        join_paths(rootlibexecdir, 'systemd-makefs'))
+conf.set_quoted('SYSTEMD_GROWFS_PATH',                        join_paths(rootlibexecdir, 'systemd-growfs'))
 conf.set_quoted('SYSTEMD_SHUTDOWN_BINARY_PATH',               join_paths(rootlibexecdir, 'systemd-shutdown'))
 conf.set_quoted('SYSTEMD_SLEEP_BINARY_PATH',                  join_paths(rootlibexecdir, 'systemd-sleep'))
 conf.set_quoted('SYSTEMCTL_BINARY_PATH',                      join_paths(rootbindir, 'systemctl'))
@@ -260,6 +285,7 @@ foreach arg : ['-Wextra',
                '-Wstrict-prototypes',
                '-Wredundant-decls',
                '-Wmissing-noreturn',
+               '-Wimplicit-fallthrough=5',
                '-Wshadow',
                '-Wendif-labels',
                '-Wstrict-aliasing=2',
@@ -415,6 +441,7 @@ foreach decl : [['IFLA_INET6_ADDR_GEN_MODE',         'linux/if_link.h'],
                 ['IFA_FLAGS',                        'linux/if_addr.h'],
                 ['FRA_UID_RANGE',                    'linux/fib_rules.h'],
                 ['LO_FLAGS_PARTSCAN',                'linux/loop.h'],
+                ['VXCAN_INFO_PEER',                  'linux/can/vxcan.h'],
                ]
         prefix = decl.length() > 2 ? decl[2] : ''
         have = cc.has_header_symbol(decl[1], decl[0], prefix : prefix)
@@ -426,7 +453,8 @@ foreach ident : ['secure_getenv', '__secure_getenv']
 endforeach
 
 foreach ident : [
-        ['memfd_create',      '''#include <sys/memfd.h>'''],
+        ['memfd_create',      '''#define _GNU_SOURCE
+                                 #include <sys/mman.h>'''],
         ['gettid',            '''#include <sys/types.h>'''],
         ['pivot_root',        '''#include <stdlib.h>'''],     # no known header declares pivot_root
         ['name_to_handle_at', '''#define _GNU_SOURCE
@@ -462,7 +490,6 @@ endif
 #####################################################################
 
 sed = find_program('sed')
-grep = find_program('grep')
 awk = find_program('awk')
 m4 = find_program('m4')
 stat = find_program('stat')
@@ -587,9 +614,6 @@ conf.set('SYSTEM_UID_MAX', system_uid_max)
 substs.set('systemuidmax', system_uid_max)
 message('maximum system UID is @0@'.format(system_uid_max))
 
-conf.set_quoted('NOBODY_USER_NAME', get_option('nobody-user'))
-conf.set_quoted('NOBODY_GROUP_NAME', get_option('nobody-group'))
-
 system_gid_max = get_option('system-gid-max')
 if system_gid_max == ''
         system_gid_max = run_command(
@@ -602,9 +626,82 @@ conf.set('SYSTEM_GID_MAX', system_gid_max)
 substs.set('systemgidmax', system_gid_max)
 message('maximum system GID is @0@'.format(system_gid_max))
 
+dynamic_uid_min = get_option('dynamic-uid-min').to_int()
+dynamic_uid_max = get_option('dynamic-uid-max').to_int()
+conf.set('DYNAMIC_UID_MIN', dynamic_uid_min)
+conf.set('DYNAMIC_UID_MAX', dynamic_uid_max)
+substs.set('dynamicuidmin', dynamic_uid_min)
+substs.set('dynamicuidmax', dynamic_uid_max)
+
+container_uid_base_min = get_option('container-uid-base-min').to_int()
+container_uid_base_max = get_option('container-uid-base-max').to_int()
+conf.set('CONTAINER_UID_BASE_MIN', container_uid_base_min)
+conf.set('CONTAINER_UID_BASE_MAX', container_uid_base_max)
+substs.set('containeruidbasemin', container_uid_base_min)
+substs.set('containeruidbasemax', container_uid_base_max)
+
+nobody_user = get_option('nobody-user')
+nobody_group = get_option('nobody-group')
+
+getent_result = run_command('getent', 'passwd', '65534')
+if getent_result.returncode() == 0
+        name = getent_result.stdout().split(':')[0]
+        if name != nobody_user
+                message('WARNING:\n' +
+                        '        The local user with the UID 65534 does not match the configured user name "@0@" of the nobody user (its name is @1@).\n'.format(nobody_user, name) +
+                        '        Your build will result in an user table setup that is incompatible with the local system.')
+        endif
+endif
+id_result = run_command('id', '-u', nobody_user)
+if id_result.returncode() == 0
+        id = id_result.stdout().to_int()
+        if id != 65534
+                message('WARNING:\n' +
+                        '        The local user with the configured user name "@0@" of the nobody user does not have UID 65534 (it has @1@).\n'.format(nobody_user, id) +
+                        '        Your build will result in an user table setup that is incompatible with the local system.')
+        endif
+endif
+
+getent_result = run_command('getent', 'group', '65534')
+if getent_result.returncode() == 0
+        name = getent_result.stdout().split(':')[0]
+        if name != nobody_group
+                message('WARNING:\n' +
+                        '        The local group with the GID 65534 does not match the configured group name "@0@" of the nobody group (its name is @1@).\n'.format(nobody_group, name) +
+                        '        Your build will result in an group table setup that is incompatible with the local system.')
+        endif
+endif
+id_result = run_command('id', '-g', nobody_group)
+if id_result.returncode() == 0
+        id = id_result.stdout().to_int()
+        if id != 65534
+                message('WARNING:\n' +
+                        '        The local group with the configured group name "@0@" of the nobody group does not have UID 65534 (it has @1@).\n'.format(nobody_group, id) +
+                        '        Your build will result in an group table setup that is incompatible with the local system.')
+        endif
+endif
+if nobody_user != nobody_group and not (nobody_user == 'nobody' and nobody_group == 'nogroup')
+        message('WARNING:\n' +
+                '        The configured user name "@0@" and group name "@0@" of the nobody user/group are not equivalent.\n'.format(nobody_user, nobody_group) +
+                '        Please re-check that both "nobody-user" and "nobody-group" options are correctly set.')
+endif
+
+conf.set_quoted('NOBODY_USER_NAME', nobody_user)
+conf.set_quoted('NOBODY_GROUP_NAME', nobody_group)
+substs.set('NOBODY_USER_NAME', nobody_user)
+substs.set('NOBODY_GROUP_NAME', nobody_group)
+
 tty_gid = get_option('tty-gid')
 conf.set('TTY_GID', tty_gid)
 substs.set('TTY_GID', tty_gid)
+
+# Ensure provided GID argument is numeric, otherwise fallback to default assignment
+if get_option('users-gid') != ''
+        users_gid = get_option('users-gid').to_int()
+else
+        users_gid = '-'
+endif
+substs.set('USERS_GID', users_gid)
 
 if get_option('adm-group')
         m4_defines += ['-DENABLE_ADM_GROUP']
@@ -615,6 +712,7 @@ if get_option('wheel-group')
 endif
 
 substs.set('DEV_KVM_MODE', get_option('dev-kvm-mode'))
+substs.set('GROUP_RENDER_MODE', get_option('group-render-mode'))
 
 kill_user_processes = get_option('default-kill-user-processes')
 conf.set10('KILL_USER_PROCESSES', kill_user_processes)
@@ -1201,10 +1299,10 @@ subdir('src/resolve')
 subdir('src/timedate')
 subdir('src/timesync')
 subdir('src/vconsole')
-subdir('src/sulogin-shell')
 subdir('src/boot/efi')
 
 subdir('src/test')
+subdir('rules')
 subdir('test')
 
 ############################################################
@@ -1235,7 +1333,9 @@ foreach tuple : [['myhostname', 'ENABLE_MYHOSTNAME'],
                         'src/nss-@0@/nss-@0@.c'.format(module),
                         version : '2',
                         include_directories : includes,
-                        link_args : ['-shared',
+                        # Note that we link NSS modules with '-z nodelete' so that mempools never get orphaned
+                        link_args : ['-Wl,-z,nodelete',
+                                     '-shared',
                                      '-Wl,--version-script=' + version_script_arg,
                                      '-Wl,--undefined'],
                         link_with : [libsystemd_internal,
@@ -1909,6 +2009,23 @@ executable('systemd-fsck',
            install : true,
            install_dir : rootlibexecdir)
 
+executable('systemd-growfs',
+           'src/partition/growfs.c',
+           include_directories : includes,
+           link_with : [libshared],
+           dependencies : [libcryptsetup],
+           install_rpath : rootlibexecdir,
+           install : true,
+           install_dir : rootlibexecdir)
+
+executable('systemd-makefs',
+           'src/partition/makefs.c',
+           include_directories : includes,
+           link_with : [libshared],
+           install_rpath : rootlibexecdir,
+           install : true,
+           install_dir : rootlibexecdir)
+
 executable('systemd-sleep',
            'src/sleep/sleep.c',
            include_directories : includes,
@@ -2100,6 +2217,11 @@ if conf.get('ENABLE_TMPFILES') == 1
                          install : true,
                          install_dir : rootbindir)
         public_programs += [exe]
+
+        test('test-systemd-tmpfiles',
+             test_systemd_tmpfiles_py,
+             args : exe.full_path())
+        # https://github.com/mesonbuild/meson/issues/2681
 endif
 
 if conf.get('ENABLE_HWDB') == 1
@@ -2256,6 +2378,15 @@ if conf.get('ENABLE_NETWORKD') == 1
                    install_dir : rootbindir)
         public_programs += [exe]
 endif
+
+executable('systemd-sulogin-shell',
+           ['src/sulogin-shell/sulogin-shell.c'],
+           include_directories : includes,
+           link_with : [libshared],
+           install_rpath : rootlibexecdir,
+           install : true,
+           install_dir : rootlibexecdir)
+
 ############################################################
 
 foreach tuple : tests
@@ -2332,7 +2463,7 @@ subdir('units')
 subdir('sysctl.d')
 subdir('sysusers.d')
 subdir('tmpfiles.d')
-subdir('rules')
+subdir('presets')
 subdir('hwdb')
 subdir('network')
 subdir('man')
@@ -2349,8 +2480,6 @@ install_subdir('factory/etc',
 
 install_data('xorg/50-systemd-user.sh',
              install_dir : xinitrcdir)
-install_data('system-preset/90-systemd.preset',
-             install_dir : systempresetdir)
 install_data('modprobe.d/systemd.conf',
              install_dir : modprobedir)
 install_data('README',
@@ -2428,35 +2557,41 @@ endif
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
-        'prefix:                            @0@'.format(prefixdir),
-        'rootprefix:                        @0@'.format(rootprefixdir),
-        'sysconf dir:                       @0@'.format(sysconfdir),
-        'includedir:                        @0@'.format(includedir),
-        'lib dir:                           @0@'.format(libdir),
-        'rootlib dir:                       @0@'.format(rootlibdir),
+        'prefix directory:                  @0@'.format(prefixdir),
+        'rootprefix directory:              @0@'.format(rootprefixdir),
+        'sysconf directory:                 @0@'.format(sysconfdir),
+        'include directory:                 @0@'.format(includedir),
+        'lib directory:                     @0@'.format(libdir),
+        'rootlib directory:                 @0@'.format(rootlibdir),
         'SysV init scripts:                 @0@'.format(sysvinit_path),
         'SysV rc?.d directories:            @0@'.format(sysvrcnd_path),
-        'PAM modules dir:                   @0@'.format(pamlibdir),
-        'PAM configuration dir:             @0@'.format(pamconfdir),
-        'RPM macros dir:                    @0@'.format(rpmmacrosdir),
-        'modprobe.d dir:                    @0@'.format(modprobedir),
-        'D-Bus policy dir:                  @0@'.format(dbuspolicydir),
-        'D-Bus session dir:                 @0@'.format(dbussessionservicedir),
-        'D-Bus system dir:                  @0@'.format(dbussystemservicedir),
-        'bash completions dir:              @0@'.format(bashcompletiondir),
-        'zsh completions dir:               @0@'.format(zshcompletiondir),
+        'PAM modules directory:             @0@'.format(pamlibdir),
+        'PAM configuration directory:       @0@'.format(pamconfdir),
+        'RPM macros directory:              @0@'.format(rpmmacrosdir),
+        'modprobe.d directory:              @0@'.format(modprobedir),
+        'D-Bus policy directory:            @0@'.format(dbuspolicydir),
+        'D-Bus session directory:           @0@'.format(dbussessionservicedir),
+        'D-Bus system directory:            @0@'.format(dbussystemservicedir),
+        'bash completions directory:        @0@'.format(bashcompletiondir),
+        'zsh completions directory:         @0@'.format(zshcompletiondir),
         'extra start script:                @0@'.format(get_option('rc-local')),
         'extra stop script:                 @0@'.format(get_option('halt-local')),
         'debug shell:                       @0@ @ @1@'.format(get_option('debug-shell'),
                                                               get_option('debug-tty')),
         'TTY GID:                           @0@'.format(tty_gid),
+        'users GID:                         @0@'.format(users_gid),
         'maximum system UID:                @0@'.format(system_uid_max),
         'maximum system GID:                @0@'.format(system_gid_max),
+        'minimum dynamic UID:               @0@'.format(dynamic_uid_min),
+        'maximum dynamic UID:               @0@'.format(dynamic_uid_max),
+        'minimum container UID base:        @0@'.format(container_uid_base_min),
+        'maximum container UID base:        @0@'.format(container_uid_base_max),
         '/dev/kvm access mode:              @0@'.format(get_option('dev-kvm-mode')),
-        'certificate root:                  @0@'.format(get_option('certificate-root')),
+        'render group access mode:          @0@'.format(get_option('group-render-mode')),
+        'certificate root directory:        @0@'.format(get_option('certificate-root')),
         'support URL:                       @0@'.format(support_url),
-        'nobody user name:                  @0@'.format(get_option('nobody-user')),
-        'nobody group name:                 @0@'.format(get_option('nobody-group')),
+        'nobody user name:                  @0@'.format(nobody_user),
+        'nobody group name:                 @0@'.format(nobody_group),
         'fallback hostname:                 @0@'.format(get_option('fallback-hostname')),
         'symbolic gateway hostnames:        @0@'.format(', '.join(gateway_hostnames)),
 
@@ -2488,9 +2623,9 @@ if conf.get('ENABLE_EFI') == 1
                 status += [
                         'EFI machine type:                  @0@'.format(EFI_MACHINE_TYPE_NAME),
                         'EFI CC                             @0@'.format(efi_cc),
-                        'EFI libdir:                        @0@'.format(efi_libdir),
-                        'EFI ldsdir:                        @0@'.format(efi_ldsdir),
-                        'EFI includedir:                    @0@'.format(efi_incdir)]
+                        'EFI lib directory:                 @0@'.format(efi_libdir),
+                        'EFI lds directory:                 @0@'.format(efi_ldsdir),
+                        'EFI include directory:             @0@'.format(efi_incdir)]
         endif
 endif
 
@@ -2589,3 +2724,10 @@ status += [
         'disabled features: @0@'.format(', '.join(missing)),
         '']
 message('\n         '.join(status))
+
+if rootprefixdir != rootprefix_default
+        message('WARNING:\n' +
+                '        Note that the installation prefix was changed to "@0@".\n'.format(rootprefixdir) +
+                '        systemd used fixed names for unit file directories and other paths, so anything\n' +
+                '        except the default ("@0@") is strongly discouraged.'.format(rootprefix_default))
+endif

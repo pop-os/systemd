@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -48,6 +49,7 @@
 #include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "strv.h"
 #include "terminal-util.h"
 #include "time-util.h"
 #include "utf8.h"
@@ -79,35 +81,74 @@ static int print_catalog(FILE *f, sd_journal *j) {
         return 0;
 }
 
-static int parse_field(const void *data, size_t length, const char *field, char **target, size_t *target_size) {
-        size_t fl, nl;
+static int parse_field(const void *data, size_t length, const char *field, size_t field_len, char **target, size_t *target_len) {
+        size_t nl;
         char *buf;
 
         assert(data);
         assert(field);
         assert(target);
 
-        fl = strlen(field);
-        if (length < fl)
+        if (length < field_len)
                 return 0;
 
-        if (memcmp(data, field, fl))
+        if (memcmp(data, field, field_len))
                 return 0;
 
-        nl = length - fl;
+        nl = length - field_len;
 
 
-        buf = newdup_suffix0(char, (const char*) data + fl, nl);
+        buf = newdup_suffix0(char, (const char*) data + field_len, nl);
         if (!buf)
                 return log_oom();
 
         free(*target);
         *target = buf;
 
-        if (target_size)
-                *target_size = nl;
+        if (target_len)
+                *target_len = nl;
 
         return 1;
+}
+
+typedef struct ParseFieldVec {
+        const char *field;
+        size_t field_len;
+        char **target;
+        size_t *target_len;
+} ParseFieldVec;
+
+#define PARSE_FIELD_VEC_ENTRY(_field, _target, _target_len) \
+        { .field = _field, .field_len = strlen(_field), .target = _target, .target_len = _target_len }
+
+static int parse_fieldv(const void *data, size_t length, const ParseFieldVec *fields, unsigned n_fields) {
+        unsigned i;
+
+        for (i = 0; i < n_fields; i++) {
+                const ParseFieldVec *f = &fields[i];
+                int r;
+
+                r = parse_field(data, length, f->field, f->field_len, f->target, f->target_len);
+                if (r < 0)
+                        return r;
+                else if (r > 0)
+                        break;
+        }
+
+        return 0;
+}
+
+static int field_set_test(Set *fields, const char *name, size_t n) {
+        char *s = NULL;
+
+        if (!fields)
+                return 1;
+
+        s = strndupa(name, n);
+        if (!s)
+                return log_oom();
+
+        return set_get(fields, s) ? 1 : 0;
 }
 
 static bool shall_print(const char *p, size_t l, OutputFlags flags) {
@@ -327,7 +368,8 @@ static int output_short(
                 sd_journal *j,
                 OutputMode mode,
                 unsigned n_columns,
-                OutputFlags flags) {
+                OutputFlags flags,
+                Set *output_fields) {
 
         int r;
         const void *data;
@@ -337,6 +379,17 @@ static int output_short(
         size_t hostname_len = 0, identifier_len = 0, comm_len = 0, pid_len = 0, fake_pid_len = 0, message_len = 0, realtime_len = 0, monotonic_len = 0, priority_len = 0;
         int p = LOG_INFO;
         bool ellipsized = false;
+        const ParseFieldVec fields[] = {
+                PARSE_FIELD_VEC_ENTRY("_PID=", &pid, &pid_len),
+                PARSE_FIELD_VEC_ENTRY("_COMM=", &comm, &comm_len),
+                PARSE_FIELD_VEC_ENTRY("MESSAGE=", &message, &message_len),
+                PARSE_FIELD_VEC_ENTRY("PRIORITY=", &priority, &priority_len),
+                PARSE_FIELD_VEC_ENTRY("_HOSTNAME=", &hostname, &hostname_len),
+                PARSE_FIELD_VEC_ENTRY("SYSLOG_PID=", &fake_pid, &fake_pid_len),
+                PARSE_FIELD_VEC_ENTRY("SYSLOG_IDENTIFIER=", &identifier, &identifier_len),
+                PARSE_FIELD_VEC_ENTRY("_SOURCE_REALTIME_TIMESTAMP=", &realtime, &realtime_len),
+                PARSE_FIELD_VEC_ENTRY("_SOURCE_MONOTONIC_TIMESTAMP=", &monotonic, &monotonic_len),
+        };
 
         assert(f);
         assert(j);
@@ -351,55 +404,7 @@ static int output_short(
 
         JOURNAL_FOREACH_DATA_RETVAL(j, data, length, r) {
 
-                r = parse_field(data, length, "PRIORITY=", &priority, &priority_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "_HOSTNAME=", &hostname, &hostname_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "SYSLOG_IDENTIFIER=", &identifier, &identifier_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "_COMM=", &comm, &comm_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "_PID=", &pid, &pid_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "SYSLOG_PID=", &fake_pid, &fake_pid_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "_SOURCE_REALTIME_TIMESTAMP=", &realtime, &realtime_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "_SOURCE_MONOTONIC_TIMESTAMP=", &monotonic, &monotonic_len);
-                if (r < 0)
-                        return r;
-                else if (r > 0)
-                        continue;
-
-                r = parse_field(data, length, "MESSAGE=", &message, &message_len);
+                r = parse_fieldv(data, length, fields, ELEMENTSOF(fields));
                 if (r < 0)
                         return r;
         }
@@ -477,7 +482,8 @@ static int output_verbose(
                 sd_journal *j,
                 OutputMode mode,
                 unsigned n_columns,
-                OutputFlags flags) {
+                OutputFlags flags,
+                Set *output_fields) {
 
         const void *data;
         size_t length;
@@ -500,7 +506,9 @@ static int output_verbose(
         else {
                 _cleanup_free_ char *value = NULL;
 
-                r = parse_field(data, length, "_SOURCE_REALTIME_TIMESTAMP=", &value, NULL);
+                r = parse_field(data, length, "_SOURCE_REALTIME_TIMESTAMP=",
+                                STRLEN("_SOURCE_REALTIME_TIMESTAMP="), &value,
+                                NULL);
                 if (r < 0)
                         return r;
                 assert(r > 0);
@@ -537,6 +545,12 @@ static int output_verbose(
                         return -EINVAL;
                 }
                 fieldlen = c - (const char*) data;
+
+                r = field_set_test(output_fields, data, fieldlen);
+                if (r < 0)
+                        return r;
+                if (!r)
+                        continue;
 
                 if (flags & OUTPUT_COLOR && startswith(data, "MESSAGE=")) {
                         on = ANSI_HIGHLIGHT;
@@ -575,7 +589,8 @@ static int output_export(
                 sd_journal *j,
                 OutputMode mode,
                 unsigned n_columns,
-                OutputFlags flags) {
+                OutputFlags flags,
+                Set *output_fields) {
 
         sd_id128_t boot_id;
         char sid[33];
@@ -612,6 +627,7 @@ static int output_export(
                 sd_id128_to_string(boot_id, sid));
 
         JOURNAL_FOREACH_DATA_RETVAL(j, data, length, r) {
+                const char *c;
 
                 /* We already printed the boot id, from the data in
                  * the header, hence let's suppress it here */
@@ -619,17 +635,22 @@ static int output_export(
                     startswith(data, "_BOOT_ID="))
                         continue;
 
+                c = memchr(data, '=', length);
+                if (!c) {
+                        log_error("Invalid field.");
+                        return -EINVAL;
+                }
+
+                r = field_set_test(output_fields, data, c - (const char *) data);
+                if (r < 0)
+                        return r;
+                if (!r)
+                        continue;
+
                 if (utf8_is_printable_newline(data, length, false))
                         fwrite(data, length, 1, f);
                 else {
-                        const char *c;
                         uint64_t le64;
-
-                        c = memchr(data, '=', length);
-                        if (!c) {
-                                log_error("Invalid field.");
-                                return -EINVAL;
-                        }
 
                         fwrite(data, c - (const char*) data, 1, f);
                         fputc('\n', f);
@@ -706,7 +727,8 @@ static int output_json(
                 sd_journal *j,
                 OutputMode mode,
                 unsigned n_columns,
-                OutputFlags flags) {
+                OutputFlags flags,
+                Set *output_fields) {
 
         uint64_t realtime, monotonic;
         _cleanup_free_ char *cursor = NULL;
@@ -825,19 +847,24 @@ static int output_json(
                         if (!eq)
                                 continue;
 
-                        if (separator) {
-                                if (mode == OUTPUT_JSON_PRETTY)
-                                        fputs(",\n\t", f);
-                                else
-                                        fputs(", ", f);
-                        }
-
                         m = eq - (const char*) data;
 
                         n = strndup(data, m);
                         if (!n) {
                                 r = log_oom();
                                 goto finish;
+                        }
+
+                        if (output_fields && !set_get(output_fields, n)) {
+                                free(n);
+                                continue;
+                        }
+
+                        if (separator) {
+                                if (mode == OUTPUT_JSON_PRETTY)
+                                        fputs(",\n\t", f);
+                                else
+                                        fputs(", ", f);
                         }
 
                         u = PTR_TO_UINT(hashmap_get2(h, n, (void**) &kk));
@@ -924,7 +951,8 @@ static int output_cat(
                 sd_journal *j,
                 OutputMode mode,
                 unsigned n_columns,
-                OutputFlags flags) {
+                OutputFlags flags,
+                Set *output_fields) {
 
         const void *data;
         size_t l;
@@ -957,7 +985,8 @@ static int (*output_funcs[_OUTPUT_MODE_MAX])(
                 sd_journal*j,
                 OutputMode mode,
                 unsigned n_columns,
-                OutputFlags flags) = {
+                OutputFlags flags,
+                Set *output_fields) = {
 
         [OUTPUT_SHORT] = output_short,
         [OUTPUT_SHORT_ISO] = output_short,
@@ -980,16 +1009,28 @@ int output_journal(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
+                char **output_fields,
                 bool *ellipsized) {
 
         int ret;
+        _cleanup_set_free_free_ Set *fields = NULL;
         assert(mode >= 0);
         assert(mode < _OUTPUT_MODE_MAX);
 
         if (n_columns <= 0)
                 n_columns = columns();
 
-        ret = output_funcs[mode](f, j, mode, n_columns, flags);
+        if (output_fields) {
+                fields = set_new(&string_hash_ops);
+                if (!fields)
+                        return log_oom();
+
+                ret = set_put_strdupv(fields, output_fields);
+                if (ret < 0)
+                        return ret;
+        }
+
+        ret = output_funcs[mode](f, j, mode, n_columns, flags, fields);
 
         if (ellipsized && ret > 0)
                 *ellipsized = true;
@@ -1071,7 +1112,7 @@ static int show_journal(FILE *f,
                         line++;
                         maybe_print_begin_newline(f, &flags);
 
-                        r = output_journal(f, j, mode, n_columns, flags, ellipsized);
+                        r = output_journal(f, j, mode, n_columns, flags, NULL, ellipsized);
                         if (r < 0)
                                 return r;
                 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -29,6 +30,7 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "fs-util.h"
 #include "fstab-util.h"
 #include "mount-util.h"
 #include "pager.h"
@@ -68,18 +70,7 @@ static bool arg_timeout_idle_set = false;
 static char **arg_automount_property = NULL;
 static int arg_bind_device = -1;
 static bool arg_fsck = true;
-
-static void polkit_agent_open_if_enabled(void) {
-
-        /* Open the polkit agent as a child process if necessary */
-        if (!arg_ask_password)
-                return;
-
-        if (arg_transport != BUS_TRANSPORT_LOCAL)
-                return;
-
-        polkit_agent_open();
-}
+static bool arg_aggressive_gc = false;
 
 static void help(void) {
         printf("systemd-mount [OPTIONS...] WHAT [WHERE]\n"
@@ -107,7 +98,8 @@ static void help(void) {
                "                                  Set automount unit property\n"
                "     --bind-device                Bind automount unit to device\n"
                "     --list                       List mountable block devices\n"
-               "  -u --umount                     Unmount mount points\n",
+               "  -u --umount                     Unmount mount points\n"
+               "  -G --collect                    Unload unit after it stopped, even when failed\n",
                program_invocation_short_name,
                streq(program_invocation_short_name, "systemd-umount") ? "" : "--umount ");
 }
@@ -157,6 +149,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "list",               no_argument,       NULL, ARG_LIST               },
                 { "umount",             no_argument,       NULL, 'u'                    },
                 { "unmount",            no_argument,       NULL, 'u'                    },
+                { "collect",            no_argument,       NULL, 'G'                    },
                 {},
         };
 
@@ -168,7 +161,7 @@ static int parse_argv(int argc, char *argv[]) {
         if (strstr(program_invocation_short_name, "systemd-umount"))
                         arg_action = ACTION_UMOUNT;
 
-        while ((c = getopt_long(argc, argv, "hqH:M:t:o:p:Au", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hqH:M:t:o:p:AuG", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -283,6 +276,10 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_action = ACTION_UMOUNT;
                         break;
 
+                case 'G':
+                        arg_aggressive_gc = true;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -337,19 +334,15 @@ static int parse_argv(int argc, char *argv[]) {
                                 return log_oom();
 
                 } else if (arg_transport == BUS_TRANSPORT_LOCAL) {
-                        _cleanup_free_ char *u = NULL, *p = NULL;
+                        _cleanup_free_ char *u = NULL;
 
                         u = fstab_node_to_udev_node(argv[optind]);
                         if (!u)
                                 return log_oom();
 
-                        r = path_make_absolute_cwd(u, &p);
+                        r = chase_symlinks(u, NULL, 0, &arg_mount_what);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to make path absolute: %m");
-
-                        arg_mount_what = canonicalize_file_name(p);
-                        if (!arg_mount_what)
-                                return log_error_errno(errno, "Failed to canonicalize path: %m");
+                                return log_error_errno(r, "Failed to make path %s absolute: %m", u);
                 } else {
                         arg_mount_what = strdup(argv[optind]);
                         if (!arg_mount_what)
@@ -365,16 +358,9 @@ static int parse_argv(int argc, char *argv[]) {
 
                 if (argc > optind+1) {
                         if (arg_transport == BUS_TRANSPORT_LOCAL) {
-                                _cleanup_free_ char *p = NULL;
-
-                                r = path_make_absolute_cwd(argv[optind+1], &p);
+                                r = chase_symlinks(argv[optind+1], NULL, CHASE_NONEXISTENT, &arg_mount_where);
                                 if (r < 0)
-                                        return log_error_errno(r, "Failed to make path absolute: %m");
-
-                                arg_mount_where = canonicalize_file_name(p);
-                                if (!arg_mount_where)
-                                        return log_error_errno(errno, "Failed to canonicalize path: %m");
-
+                                        return log_error_errno(r, "Failed to make path %s absolute: %m", argv[optind+1]);
                         } else {
                                 arg_mount_where = strdup(argv[optind+1]);
                                 if (!arg_mount_where)
@@ -418,6 +404,12 @@ static int transient_unit_set_properties(sd_bus_message *m, char **properties) {
                 r = sd_bus_message_append(m, "(sv)(sv)",
                                           "After", "as", 1, device_unit,
                                           "BindsTo", "as", 1, device_unit);
+                if (r < 0)
+                        return r;
+        }
+
+        if (arg_aggressive_gc) {
+                r = sd_bus_message_append(m, "(sv)", "CollectMode", "s", "inactive-or-failed");
                 if (r < 0)
                         return r;
         }
@@ -549,7 +541,7 @@ static int start_transient_mount(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
         if (r < 0)
@@ -664,7 +656,7 @@ static int start_transient_automount(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
         if (r < 0)
@@ -827,7 +819,7 @@ static int stop_mount(
 
         r = unit_name_from_path(where, suffix, &mount_unit);
         if (r < 0)
-                return log_error_errno(r, "Failed to make mount unit name from path %s: %m", where);
+                return log_error_errno(r, "Failed to make %s unit name from path %s: %m", suffix + 1, where);
 
         r = sd_bus_message_new_method_call(
                         bus,
@@ -848,11 +840,15 @@ static int stop_mount(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
-        if (r < 0)
-                return log_error_errno(r, "Failed to stop mount unit: %s", bus_error_message(&error, r));
+        if (r < 0) {
+                if (streq(suffix, ".automount") &&
+                    sd_bus_error_has_name(&error, "org.freedesktop.systemd1.NoSuchUnit"))
+                        return 0;
+                return log_error_errno(r, "Failed to stop %s unit: %s", suffix + 1, bus_error_message(&error, r));
+        }
 
         if (w) {
                 const char *object;
@@ -885,8 +881,8 @@ static int stop_mounts(
                 return -EINVAL;
         }
 
-        if (!path_is_safe(where)) {
-                log_error("Path contains unsafe components: %s", where);
+        if (!path_is_normalized(where)) {
+                log_error("Path contains non-normalized components: %s", where);
                 return -EINVAL;
         }
 
@@ -989,23 +985,16 @@ static int action_umount(
         }
 
         for (i = optind; i < argc; i++) {
-                _cleanup_free_ char *u = NULL, *a = NULL, *p = NULL;
+                _cleanup_free_ char *u = NULL, *p = NULL;
                 struct stat st;
 
                 u = fstab_node_to_udev_node(argv[i]);
                 if (!u)
                         return log_oom();
 
-                r = path_make_absolute_cwd(u, &a);
+                r = chase_symlinks(u, NULL, 0, &p);
                 if (r < 0) {
                         r2 = log_error_errno(r, "Failed to make path %s absolute: %m", argv[i]);
-                        continue;
-                }
-
-                p = canonicalize_file_name(a);
-
-                if (!p) {
-                        r2 = log_error_errno(errno, "Failed to canonicalize path %s: %m", argv[i]);
                         continue;
                 }
 
@@ -1567,8 +1556,8 @@ int main(int argc, char* argv[]) {
                 goto finish;
         }
 
-        if (!path_is_safe(arg_mount_what)) {
-                log_error("Path contains unsafe components: %s", arg_mount_what);
+        if (!path_is_normalized(arg_mount_what)) {
+                log_error("Path contains non-normalized components: %s", arg_mount_what);
                 r = -EINVAL;
                 goto finish;
         }
@@ -1591,8 +1580,8 @@ int main(int argc, char* argv[]) {
                 goto finish;
         }
 
-        if (!path_is_safe(arg_mount_where)) {
-                log_error("Path contains unsafe components: %s", arg_mount_where);
+        if (!path_is_normalized(arg_mount_where)) {
+                log_error("Path contains non-normalized components: %s", arg_mount_where);
                 r = -EINVAL;
                 goto finish;
         }
@@ -1631,8 +1620,6 @@ int main(int argc, char* argv[]) {
         }
 
 finish:
-        bus = sd_bus_flush_close_unref(bus);
-
         pager_close();
 
         free(arg_mount_what);

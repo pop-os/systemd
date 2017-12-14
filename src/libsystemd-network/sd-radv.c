@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -160,8 +161,9 @@ static int radv_send(sd_radv *ra, const struct in6_addr *dst,
                 .nd_opt_mtu_type = ND_OPT_MTU,
                 .nd_opt_mtu_len = 1,
         };
-        /* Reserve iov space for RA header, linkaddr, MTU, N prefixes, RDNSS */
-        struct iovec iov[4 + ra->n_prefixes];
+        /* Reserve iov space for RA header, linkaddr, MTU, N prefixes, RDNSS
+           and DNSSL */
+        struct iovec iov[5 + ra->n_prefixes];
         struct msghdr msg = {
                 .msg_name = &dst_addr,
                 .msg_namelen = sizeof(dst_addr),

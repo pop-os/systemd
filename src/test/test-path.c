@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -45,7 +46,11 @@ static int setup_test(Manager **m) {
 
         assert_se(m);
 
-        enter_cgroup_subroot();
+        r = enter_cgroup_subroot();
+        if (r == -ENOMEDIUM) {
+                log_notice_errno(r, "Skipping test: cgroupfs not available");
+                return -EXIT_TEST_SKIP;
+        }
 
         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &tmp);
         if (MANAGER_SKIP_TEST(r)) {

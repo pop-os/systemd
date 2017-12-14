@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -32,6 +33,7 @@
 #include "sd-resolve.h"
 
 #include "alloc-util.h"
+#include "dns-domain.h"
 #include "fd-util.h"
 #include "io-util.h"
 #include "list.h"
@@ -811,25 +813,36 @@ static int handle_response(sd_resolve *resolve, const Packet *packet, size_t len
                 assert(length >= sizeof(NameInfoResponse));
                 assert(q->type == REQUEST_NAMEINFO);
 
-                q->ret = ni_resp->ret;
-                q->_errno = ni_resp->_errno;
-                q->_h_errno = ni_resp->_h_errno;
+                if (ni_resp->hostlen > DNS_HOSTNAME_MAX ||
+                    ni_resp->servlen > DNS_HOSTNAME_MAX ||
+                    sizeof(NameInfoResponse) + ni_resp->hostlen + ni_resp->servlen > length + 2) {
+                        q->ret = EAI_SYSTEM;
+                        q->_errno = -EIO;
+                        q->_h_errno = 0;
 
-                if (ni_resp->hostlen > 0) {
-                        q->host = strndup((const char*) ni_resp + sizeof(NameInfoResponse), ni_resp->hostlen-1);
-                        if (!q->host) {
-                                q->ret = EAI_MEMORY;
-                                q->_errno = ENOMEM;
-                                q->_h_errno = 0;
+                } else {
+                        q->ret = ni_resp->ret;
+                        q->_errno = ni_resp->_errno;
+                        q->_h_errno = ni_resp->_h_errno;
+
+                        if (ni_resp->hostlen > 0) {
+                                q->host = strndup((const char*) ni_resp + sizeof(NameInfoResponse),
+                                                  ni_resp->hostlen-1);
+                                if (!q->host) {
+                                        q->ret = EAI_MEMORY;
+                                        q->_errno = ENOMEM;
+                                        q->_h_errno = 0;
+                                }
                         }
-                }
 
-                if (ni_resp->servlen > 0) {
-                        q->serv = strndup((const char*) ni_resp + sizeof(NameInfoResponse) + ni_resp->hostlen, ni_resp->servlen-1);
-                        if (!q->serv) {
-                                q->ret = EAI_MEMORY;
-                                q->_errno = ENOMEM;
-                                q->_h_errno = 0;
+                        if (ni_resp->servlen > 0) {
+                                q->serv = strndup((const char*) ni_resp + sizeof(NameInfoResponse) + ni_resp->hostlen,
+                                                  ni_resp->servlen-1);
+                                if (!q->serv) {
+                                        q->ret = EAI_MEMORY;
+                                        q->_errno = ENOMEM;
+                                        q->_h_errno = 0;
+                                }
                         }
                 }
 
@@ -889,6 +902,8 @@ _public_ int sd_resolve_wait(sd_resolve *resolve, uint64_t timeout_usec) {
 
         if (r < 0)
                 return r;
+        if (r == 0)
+                return -ETIMEDOUT;
 
         return sd_resolve_process(resolve);
 }

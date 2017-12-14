@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -367,7 +368,7 @@ int route_add(
         return 0;
 }
 
-int route_update(Route *route,
+void route_update(Route *route,
                  const union in_addr_union *src,
                  unsigned char src_prefixlen,
                  const union in_addr_union *gw,
@@ -388,8 +389,6 @@ int route_update(Route *route,
         route->scope = scope;
         route->protocol = protocol;
         route->type = type;
-
-        return 0;
 }
 
 int route_remove(Route *route, Link *link,
@@ -460,10 +459,6 @@ int route_remove(Route *route, Link *link,
         r = sd_netlink_message_append_u32(req, RTA_PRIORITY, route->priority);
         if (r < 0)
                 return log_error_errno(r, "Could not append RTA_PRIORITY attribute: %m");
-
-        r = sd_rtnl_message_route_set_type(req, route->type);
-        if (r < 0)
-                return log_error_errno(r, "Could not set route type: %m");
 
         if (!IN_SET(route->type, RTN_UNREACHABLE, RTN_PROHIBIT, RTN_BLACKHOLE)) {
                 r = sd_netlink_message_append_u32(req, RTA_OIF, link->ifindex);

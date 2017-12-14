@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -358,7 +359,7 @@ static int write_to_console(
         highlight = LOG_PRI(level) <= LOG_ERR && show_color;
 
         if (show_location) {
-                snprintf(location, sizeof(location), "(%s:%i) ", file, line);
+                xsprintf(location, "(%s:%i) ", file, line);
                 iovec[n++] = IOVEC_MAKE_STRING(location);
         }
 
@@ -797,7 +798,7 @@ static void log_assert(
                 return;
 
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        snprintf(buffer, sizeof buffer, format, text, file, line, func);
+        xsprintf(buffer, format, text, file, line, func);
         REENABLE_WARNING;
 
         log_abort_msg = buffer;
@@ -847,8 +848,8 @@ int log_oom_internal(LogRealm realm, const char *file, int line, const char *fun
 
 int log_format_iovec(
                 struct iovec *iovec,
-                unsigned iovec_len,
-                unsigned *n,
+                size_t iovec_len,
+                size_t *n,
                 bool newline_separator,
                 int error,
                 const char *format,
@@ -928,7 +929,7 @@ int log_struct_internal(
                 if (journal_fd >= 0) {
                         char header[LINE_MAX];
                         struct iovec iovec[17] = {};
-                        unsigned n = 0, i;
+                        size_t n = 0, i;
                         int r;
                         struct msghdr mh = {
                                 .msg_iov = iovec,
@@ -1046,18 +1047,18 @@ int log_struct_iovec_internal(
         }
 
         for (i = 0; i < n_input_iovec; i++) {
-                if (input_iovec[i].iov_len < strlen("MESSAGE="))
+                if (input_iovec[i].iov_len < STRLEN("MESSAGE="))
                         continue;
 
-                if (memcmp(input_iovec[i].iov_base, "MESSAGE=", strlen("MESSAGE=")) == 0)
+                if (memcmp(input_iovec[i].iov_base, "MESSAGE=", STRLEN("MESSAGE=")) == 0)
                         break;
         }
 
         if (_unlikely_(i >= n_input_iovec)) /* Couldn't find MESSAGE=? */
                 return -error;
 
-        m = strndupa(input_iovec[i].iov_base + strlen("MESSAGE="),
-                     input_iovec[i].iov_len - strlen("MESSAGE="));
+        m = strndupa(input_iovec[i].iov_base + STRLEN("MESSAGE="),
+                     input_iovec[i].iov_len - STRLEN("MESSAGE="));
 
         return log_dispatch_internal(level, error, file, line, func, NULL, NULL, NULL, NULL, m);
 }

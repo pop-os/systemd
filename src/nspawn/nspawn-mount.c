@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -367,7 +368,7 @@ static int tmpfs_patch_options(
                 assert(uid_shift != UID_INVALID);
 
                 if (asprintf(&buf, "%s%suid=" UID_FMT ",gid=" UID_FMT,
-                             options ?: "", options ? "," : "",
+                             strempty(options), options ? "," : "",
                              uid_shift, uid_shift) < 0)
                         return -ENOMEM;
 
@@ -378,7 +379,7 @@ static int tmpfs_patch_options(
         if (selinux_apifs_context) {
                 char *t;
 
-                t = strjoin(options ?: "", options ? "," : "",
+                t = strjoin(strempty(options), options ? "," : "",
                             "context=\"", selinux_apifs_context, "\"");
                 free(buf);
                 if (!t)
@@ -404,7 +405,7 @@ int mount_sysfs(const char *dest, MountSettingsMask mount_settings) {
         unsigned long extra_flags = 0;
 
         top = prefix_roota(dest, "/sys");
-        r = path_check_fstype(top, SYSFS_MAGIC);
+        r = path_is_fs_type(top, SYSFS_MAGIC);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine filesystem type of %s: %m", top);
         /* /sys might already be mounted as sysfs by the outer child in the
@@ -598,11 +599,15 @@ int mount_all(const char *dest,
 
                 r = mkdir_userns_p(dest, where, 0755, mount_settings, uid_shift);
                 if (r < 0 && r != -EEXIST) {
-                        if (fatal)
+                        if (fatal && r != -EROFS)
                                 return log_error_errno(r, "Failed to create directory %s: %m", where);
 
                         log_debug_errno(r, "Failed to create directory %s: %m", where);
-                        continue;
+                        /* If we failed mkdir() or chown() due to the root
+                         * directory being read only, attempt to mount this fs
+                         * anyway and let mount_verbose log any errors */
+                        if (r != -EROFS)
+                                continue;
                 }
 
                 o = mount_table[k].options;
@@ -862,19 +867,30 @@ int mount_custom(
 /* Retrieve existing subsystems. This function is called in a new cgroup
  * namespace.
  */
-static int get_controllers(Set *subsystems) {
+static int get_process_controllers(Set **ret) {
+        _cleanup_set_free_free_ Set *controllers = NULL;
         _cleanup_fclose_ FILE *f = NULL;
-        char line[LINE_MAX];
+        int r;
 
-        assert(subsystems);
+        assert(ret);
+
+        controllers = set_new(&string_hash_ops);
+        if (!controllers)
+                return -ENOMEM;
 
         f = fopen("/proc/self/cgroup", "re");
         if (!f)
                 return errno == ENOENT ? -ESRCH : -errno;
 
-        FOREACH_LINE(line, f, return -errno) {
-                int r;
-                char *e, *l, *p;
+        for (;;) {
+                _cleanup_free_ char *line = NULL;
+                char *e, *l;
+
+                r = read_line(f, LONG_LINE_MAX, &line);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
 
                 l = strchr(line, ':');
                 if (!l)
@@ -890,14 +906,13 @@ static int get_controllers(Set *subsystems) {
                 if (STR_IN_SET(l, "", "name=systemd", "name=unified"))
                         continue;
 
-                p = strdup(l);
-                if (!p)
-                        return -ENOMEM;
-
-                r = set_consume(subsystems, p);
+                r = set_put_strdup(controllers, l);
                 if (r < 0)
                         return r;
         }
+
+        *ret = controllers;
+        controllers = NULL;
 
         return 0;
 }
@@ -994,11 +1009,7 @@ static int mount_legacy_cgns_supported(
         if (r > 0)
                 goto skip_controllers;
 
-        controllers = set_new(&string_hash_ops);
-        if (!controllers)
-                return log_oom();
-
-        r = get_controllers(controllers);
+        r = get_process_controllers(&controllers);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine cgroup controllers: %m");
 
@@ -1027,12 +1038,12 @@ static int mount_legacy_cgns_supported(
                         if (r == 0)
                                 break;
 
-                        target = prefix_root("/sys/fs/cgroup", tok);
-                        if (!target)
-                                return log_oom();
-
                         if (streq(controller, tok))
                                 break;
+
+                        target = prefix_root("/sys/fs/cgroup/", tok);
+                        if (!target)
+                                return log_oom();
 
                         r = symlink_idempotent(controller, target);
                         if (r == -EINVAL)
@@ -1100,11 +1111,7 @@ static int mount_legacy_cgns_unsupported(
         if (r > 0)
                 goto skip_controllers;
 
-        controllers = set_new(&string_hash_ops);
-        if (!controllers)
-                return log_oom();
-
-        r = cg_kernel_controllers(controllers);
+        r = cg_kernel_controllers(&controllers);
         if (r < 0)
                 return log_error_errno(r, "Failed to determine cgroup controllers: %m");
 
@@ -1208,23 +1215,25 @@ int mount_cgroups(
 
         if (unified_requested >= CGROUP_UNIFIED_ALL)
                 return mount_unified_cgroups(dest);
-        else if (use_cgns)
+        if (use_cgns)
                 return mount_legacy_cgns_supported(dest, unified_requested, userns, uid_shift, uid_range, selinux_apifs_context);
 
         return mount_legacy_cgns_unsupported(dest, unified_requested, userns, uid_shift, uid_range, selinux_apifs_context);
 }
 
-static int mount_systemd_cgroup_writable_one(const char *systemd_own, const char *systemd_root)
-{
+static int mount_systemd_cgroup_writable_one(const char *root, const char *own) {
         int r;
 
+        assert(root);
+        assert(own);
+
         /* Make our own cgroup a (writable) bind mount */
-        r = mount_verbose(LOG_ERR, systemd_own, systemd_own,  NULL, MS_BIND, NULL);
+        r = mount_verbose(LOG_ERR, own, own, NULL, MS_BIND, NULL);
         if (r < 0)
                 return r;
 
         /* And then remount the systemd cgroup root read-only */
-        return mount_verbose(LOG_ERR, NULL, systemd_root, NULL,
+        return mount_verbose(LOG_ERR, NULL, root, NULL,
                              MS_BIND|MS_REMOUNT|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_RDONLY, NULL);
 }
 
@@ -1233,6 +1242,7 @@ int mount_systemd_cgroup_writable(
                 CGroupUnified unified_requested) {
 
         _cleanup_free_ char *own_cgroup_path = NULL;
+        const char *root, *own;
         int r;
 
         assert(dest);
@@ -1245,19 +1255,27 @@ int mount_systemd_cgroup_writable(
         if (path_equal(own_cgroup_path, "/"))
                 return 0;
 
-        if (unified_requested >= CGROUP_UNIFIED_ALL)
-                return mount_systemd_cgroup_writable_one(strjoina(dest, "/sys/fs/cgroup", own_cgroup_path),
-                                                         prefix_roota(dest, "/sys/fs/cgroup"));
+        if (unified_requested >= CGROUP_UNIFIED_ALL) {
 
-        if (unified_requested >= CGROUP_UNIFIED_SYSTEMD) {
-                r = mount_systemd_cgroup_writable_one(strjoina(dest, "/sys/fs/cgroup/unified", own_cgroup_path),
-                                                      prefix_roota(dest, "/sys/fs/cgroup/unified"));
-                if (r < 0)
-                        return r;
+                root = prefix_roota(dest, "/sys/fs/cgroup");
+                own = strjoina(root, own_cgroup_path);
+
+        } else {
+
+                if (unified_requested >= CGROUP_UNIFIED_SYSTEMD) {
+                        root = prefix_roota(dest, "/sys/fs/cgroup/unified");
+                        own = strjoina(root, own_cgroup_path);
+
+                        r = mount_systemd_cgroup_writable_one(root, own);
+                        if (r < 0)
+                                return r;
+                }
+
+                root = prefix_roota(dest, "/sys/fs/cgroup/systemd");
+                own = strjoina(root, own_cgroup_path);
         }
 
-        return mount_systemd_cgroup_writable_one(strjoina(dest, "/sys/fs/cgroup/systemd", own_cgroup_path),
-                                                 prefix_roota(dest, "/sys/fs/cgroup/systemd"));
+        return mount_systemd_cgroup_writable_one(root, own);
 }
 
 int setup_volatile_state(

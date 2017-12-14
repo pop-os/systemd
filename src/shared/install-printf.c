@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -93,40 +94,12 @@ static int specifier_instance(char specifier, void *data, void *userdata, char *
                 return r;
 
         if (isempty(instance)) {
-                r = free_and_strdup(&instance, i->default_instance ?: "");
+                r = free_and_strdup(&instance, strempty(i->default_instance));
                 if (r < 0)
                         return r;
         }
 
         *ret = instance;
-        return 0;
-}
-
-static int specifier_user_name(char specifier, void *data, void *userdata, char **ret) {
-        char *t;
-
-        /* If we are UID 0 (root), this will not result in NSS,
-         * otherwise it might. This is good, as we want to be able to
-         * run this in PID 1, where our user ID is 0, but where NSS
-         * lookups are not allowed.
-
-         * We don't user getusername_malloc() here, because we don't want to look
-         * at $USER, to remain consistent with specifer_user_id() below.
-         */
-
-        t = uid_to_name(getuid());
-        if (!t)
-                return -ENOMEM;
-
-        *ret = t;
-        return 0;
-}
-
-static int specifier_user_id(char specifier, void *data, void *userdata, char **ret) {
-
-        if (asprintf(ret, UID_FMT, getuid()) < 0)
-                return -ENOMEM;
-
         return 0;
 }
 

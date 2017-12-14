@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -72,7 +73,7 @@ int clock_set_hwclock(const struct tm *tm) {
 int clock_is_localtime(const char* adjtime_path) {
         _cleanup_fclose_ FILE *f;
 
-        if (adjtime_path == NULL)
+        if (!adjtime_path)
                 adjtime_path = "/etc/adjtime";
 
         /*

@@ -6,6 +6,8 @@
 ]>
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -350,6 +352,19 @@
           is specified, the locks are ignored and not printed, and the
           operation attempted anyway, possibly requiring additional
           privileges.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--dry-run</option></term>
+
+        <listitem>
+          <para>Just print what would be done. Currently supported by verbs
+          <command>halt</command>, <command>poweroff</command>, <command>reboot</command>,
+          <command>kexec</command>, <command>suspend</command>,
+          <command>hibernate</command>, <command>hybrid-sleep</command>,
+          <command>default</command>, <command>rescue</command>,
+          <command>emergency</command>, and <command>exit</command>.</para>
         </listitem>
       </varlistentry>
 
@@ -777,9 +792,17 @@ Sun 2017-02-26 20:57:49 EST  2h 3min left  Sun 2017-02-26 11:56:36 EST  6h ago  
           <term><command>restart <replaceable>PATTERN</replaceable>…</command></term>
 
           <listitem>
-            <para>Stop and then start one or more units specified on the
-            command line. If the units are not running yet, they will
-            be started.</para>
+            <para>Stop and then start one or more units specified on the command line. If the units are not running
+            yet, they will be started.</para>
+
+            <para>Note that restarting a unit with this command does not necessarily flush out all of the unit's
+            resources before it is started again. For example, the per-service file descriptor storage facility (see
+            <varname>FileDescriptoreStoreMax=</varname> in
+            <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>) will
+            remain intact as long as the unit has a job pending, and is only cleared when the unit is fully stopped and
+            no jobs are pending anymore. If it is intended that the file descriptor store is flushed out, too, during a
+            restart operation an explicit <command>systemctl stop</command> command followed by <command>systemctl
+            start</command> should be issued.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -797,18 +820,16 @@ Sun 2017-02-26 20:57:49 EST  2h 3min left  Sun 2017-02-26 11:56:36 EST  6h ago  
           <term><command>reload-or-restart <replaceable>PATTERN</replaceable>…</command></term>
 
           <listitem>
-            <para>Reload one or more units if they support it. If not,
-            restart them instead. If the units are not running yet, they
-            will be started.</para>
+            <para>Reload one or more units if they support it. If not, stop and then start them instead. If the units
+            are not running yet, they will be started.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><command>try-reload-or-restart <replaceable>PATTERN</replaceable>…</command></term>
 
           <listitem>
-            <para>Reload one or more units if they support it. If not,
-            restart them instead. This does nothing if the units are not
-            running.</para>
+            <para>Reload one or more units if they support it. If not, stop and then start them instead. This does
+            nothing if the units are not running.</para>
             <!-- Note that we don't document force-reload here, as that is just compatibility support, and we generally
                  don't document that. -->
           </listitem>
@@ -896,7 +917,7 @@ Sun 2017-02-26 20:57:49 EST  2h 3min left  Sun 2017-02-26 11:56:36 EST  6h ago  
             convenient.
             </para>
 
-            <para>Systemd implicitly loads units as necessary, so just running the <command>status</command> will
+            <para>systemd implicitly loads units as necessary, so just running the <command>status</command> will
             attempt to load a file. The command is thus not useful for determining if something was already loaded or
             not.  The units may possibly also be quickly unloaded after the operation is completed if there's no reason
             to keep it in memory thereafter.
@@ -1027,14 +1048,11 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
           <term><command>reset-failed [<replaceable>PATTERN</replaceable>…]</command></term>
 
           <listitem>
-            <para>Reset the <literal>failed</literal> state of the
-            specified units, or if no unit name is passed, reset the state of all
-            units. When a unit fails in some way (i.e. process exiting
-            with non-zero error code, terminating abnormally or timing
-            out), it will automatically enter the
-            <literal>failed</literal> state and its exit code and status
-            is recorded for introspection by the administrator until the
-            service is restarted or reset with this command.</para>
+            <para>Reset the <literal>failed</literal> state of the specified units, or if no unit name is passed, reset
+            the state of all units. When a unit fails in some way (i.e. process exiting with non-zero error code,
+            terminating abnormally or timing out), it will automatically enter the <literal>failed</literal> state and
+            its exit code and status is recorded for introspection by the administrator until the service is
+            stopped/re-started or reset with this command.</para>
           </listitem>
         </varlistentry>
 
@@ -1795,7 +1813,7 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
             <command>poweroff</command> otherwise. This command is asynchronous; it will return after the exit
             operation is enqueued, without waiting for it to complete.</para>
 
-            <para>The service manager will exit with the the specified exit code, if
+            <para>The service manager will exit with the specified exit code, if
             <replaceable>EXIT_CODE</replaceable> is passed.</para>
           </listitem>
         </varlistentry>

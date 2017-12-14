@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -17,49 +18,67 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-#if HAVE_LIBCRYPTSETUP
-#include <libcryptsetup.h>
-#endif
 #include <sys/mount.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
 
 #include "architecture.h"
 #include "ask-password-api.h"
 #include "blkid-util.h"
+#include "copy.h"
+#include "crypt-util.h"
+#include "def.h"
+#include "device-nodes.h"
 #include "dissect-image.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "gpt.h"
 #include "hexdecoct.h"
+#include "hostname-util.h"
+#include "id128-util.h"
 #include "linux-3.13/dm-ioctl.h"
 #include "mount-util.h"
 #include "path-util.h"
+#include "process-util.h"
+#include "raw-clone.h"
+#include "signal-util.h"
 #include "stat-util.h"
 #include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "udev-util.h"
+#include "user-util.h"
 #include "xattr-util.h"
 
-_unused_ static int probe_filesystem(const char *node, char **ret_fstype) {
+int probe_filesystem(const char *node, char **ret_fstype) {
+        /* Try to find device content type and return it in *ret_fstype. If nothing is found,
+         * 0/NULL will be returned. -EUCLEAN will be returned for ambigous results, and an
+         * different error otherwise. */
+
 #if HAVE_BLKID
         _cleanup_blkid_free_probe_ blkid_probe b = NULL;
         const char *fstype;
         int r;
 
+        errno = 0;
         b = blkid_new_probe_from_filename(node);
         if (!b)
-                return -ENOMEM;
+                return -errno ?: -ENOMEM;
 
         blkid_probe_enable_superblocks(b, 1);
         blkid_probe_set_superblocks_flags(b, BLKID_SUBLKS_TYPE);
 
         errno = 0;
         r = blkid_do_safeprobe(b);
-        if (IN_SET(r, -2, 1)) {
-                log_debug("Failed to identify any partition type on partition %s", node);
+        if (r == 1) {
+                log_debug("No type detected on partition %s", node);
                 goto not_found;
+        }
+        if (r == -2) {
+                log_debug("Results ambiguous for partition %s", node);
+                return -EUCLEAN;
         }
         if (r != 0)
                 return -errno ?: -EIO;
@@ -266,18 +285,34 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
                         return -EIO;
                 }
                 if (n < z + 1) {
-                        unsigned j;
+                        unsigned j = 0;
 
                         /* The kernel has probed fewer partitions than blkid? Maybe the kernel prober is still running
                          * or it got EBUSY because udev already opened the device. Let's reprobe the device, which is a
                          * synchronous call that waits until probing is complete. */
 
-                        for (j = 0; j < 20; j++) {
+                        for (;;) {
+                                if (j++ > 20)
+                                        return -EBUSY;
 
-                                r = ioctl(fd, BLKRRPART, 0);
-                                if (r < 0)
+                                if (ioctl(fd, BLKRRPART, 0) < 0) {
                                         r = -errno;
-                                if (r >= 0 || r != -EBUSY)
+
+                                        if (r == -EINVAL) {
+                                                struct loop_info64 info;
+
+                                                /* If we are running on a loop device that has partition scanning off,
+                                                 * return an explicit recognizable error about this, so that callers
+                                                 * can generate a proper message explaining the situation. */
+
+                                                if (ioctl(fd, LOOP_GET_STATUS64, &info) >= 0 && (info.lo_flags & LO_FLAGS_PARTSCAN) == 0) {
+                                                        log_debug("Device is loop device and partition scanning is off!");
+                                                        return -EPROTONOSUPPORT;
+                                                }
+                                        }
+                                        if (r != -EBUSY)
+                                                return r;
+                                } else
                                         break;
 
                                 /* If something else has the device open, such as an udev rule, the ioctl will return
@@ -286,11 +321,8 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
                                  *
                                  * This is really something they should fix in the kernel! */
 
-                                usleep(50 * USEC_PER_MSEC);
+                                (void) usleep(50 * USEC_PER_MSEC);
                         }
-
-                        if (r < 0)
-                                return r;
                 }
 
                 e = udev_enumerate_unref(e);
@@ -585,7 +617,7 @@ int dissect_image(int fd, const void *root_hash, size_t root_hash_size, DissectI
 
                 if (!p->fstype && p->node) {
                         r = probe_filesystem(p->node, &p->fstype);
-                        if (r < 0)
+                        if (r < 0 && r != -EUCLEAN)
                                 return r;
                 }
 
@@ -618,12 +650,15 @@ DissectedImage* dissected_image_unref(DissectedImage *m) {
                 free(m->partitions[i].decrypted_node);
         }
 
-        free(m);
-        return NULL;
+        free(m->hostname);
+        strv_free(m->machine_info);
+        strv_free(m->os_release);
+
+        return mfree(m);
 }
 
 static int is_loop_device(const char *path) {
-        char s[strlen("/sys/dev/block/") + DECIMAL_STR_MAX(dev_t) + 1 + DECIMAL_STR_MAX(dev_t) + strlen("/../loop/")];
+        char s[SYS_BLOCK_PATH_MAX("/../loop/")];
         struct stat st;
 
         assert(path);
@@ -634,13 +669,13 @@ static int is_loop_device(const char *path) {
         if (!S_ISBLK(st.st_mode))
                 return -ENOTBLK;
 
-        xsprintf(s, "/sys/dev/block/%u:%u/loop/", major(st.st_rdev), minor(st.st_rdev));
+        xsprintf_sys_block_path(s, "/loop/", st.st_dev);
         if (access(s, F_OK) < 0) {
                 if (errno != ENOENT)
                         return -errno;
 
                 /* The device itself isn't a loop device, but maybe it's a partition and its parent is? */
-                xsprintf(s, "/sys/dev/block/%u:%u/../loop/", major(st.st_rdev), minor(st.st_rdev));
+                xsprintf_sys_block_path(s, "/../loop/", st.st_dev);
                 if (access(s, F_OK) < 0)
                         return errno == ENOENT ? false : -errno;
         }
@@ -652,10 +687,11 @@ static int mount_partition(
                 DissectedPartition *m,
                 const char *where,
                 const char *directory,
+                uid_t uid_shift,
                 DissectImageFlags flags) {
 
-        const char *p, *options = NULL, *node, *fstype;
-        _cleanup_free_ char *chased = NULL;
+        _cleanup_free_ char *chased = NULL, *options = NULL;
+        const char *p, *node, *fstype;
         bool rw;
         int r;
 
@@ -686,13 +722,26 @@ static int mount_partition(
         /* If requested, turn on discard support. */
         if (fstype_can_discard(fstype) &&
             ((flags & DISSECT_IMAGE_DISCARD) ||
-             ((flags & DISSECT_IMAGE_DISCARD_ON_LOOP) && is_loop_device(m->node))))
-                options = "discard";
+             ((flags & DISSECT_IMAGE_DISCARD_ON_LOOP) && is_loop_device(m->node)))) {
+                options = strdup("discard");
+                if (!options)
+                        return -ENOMEM;
+        }
+
+        if (uid_is_valid(uid_shift) && uid_shift != 0 && fstype_can_uid_gid(fstype)) {
+                _cleanup_free_ char *uid_option = NULL;
+
+                if (asprintf(&uid_option, "uid=" UID_FMT ",gid=" GID_FMT, uid_shift, (gid_t) uid_shift) < 0)
+                        return -ENOMEM;
+
+                if (!strextend_with_separator(&options, ",", uid_option, NULL))
+                        return -ENOMEM;
+        }
 
         return mount_verbose(LOG_DEBUG, node, p, fstype, MS_NODEV|(rw ? 0 : MS_RDONLY), options);
 }
 
-int dissected_image_mount(DissectedImage *m, const char *where, DissectImageFlags flags) {
+int dissected_image_mount(DissectedImage *m, const char *where, uid_t uid_shift, DissectImageFlags flags) {
         int r;
 
         assert(m);
@@ -701,15 +750,20 @@ int dissected_image_mount(DissectedImage *m, const char *where, DissectImageFlag
         if (!m->partitions[PARTITION_ROOT].found)
                 return -ENXIO;
 
-        r = mount_partition(m->partitions + PARTITION_ROOT, where, NULL, flags);
+        if ((flags & DISSECT_IMAGE_MOUNT_NON_ROOT_ONLY) == 0) {
+                r = mount_partition(m->partitions + PARTITION_ROOT, where, NULL, uid_shift, flags);
+                if (r < 0)
+                        return r;
+        }
+
+        if ((flags & DISSECT_IMAGE_MOUNT_ROOT_ONLY))
+                return 0;
+
+        r = mount_partition(m->partitions + PARTITION_HOME, where, "/home", uid_shift, flags);
         if (r < 0)
                 return r;
 
-        r = mount_partition(m->partitions + PARTITION_HOME, where, "/home", flags);
-        if (r < 0)
-                return r;
-
-        r = mount_partition(m->partitions + PARTITION_SRV, where, "/srv", flags);
+        r = mount_partition(m->partitions + PARTITION_SRV, where, "/srv", uid_shift, flags);
         if (r < 0)
                 return r;
 
@@ -727,7 +781,7 @@ int dissected_image_mount(DissectedImage *m, const char *where, DissectImageFlag
 
                         r = dir_is_empty(p);
                         if (r > 0) {
-                                r = mount_partition(m->partitions + PARTITION_ESP, where, mp, flags);
+                                r = mount_partition(m->partitions + PARTITION_ESP, where, mp, uid_shift, flags);
                                 if (r < 0)
                                         return r;
                         }
@@ -820,7 +874,7 @@ static int decrypt_partition(
                 DecryptedImage *d) {
 
         _cleanup_free_ char *node = NULL, *name = NULL;
-        struct crypt_device *cd;
+        _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         int r;
 
         assert(m);
@@ -831,6 +885,9 @@ static int decrypt_partition(
 
         if (!streq(m->fstype, "crypto_LUKS"))
                 return 0;
+
+        if (!passphrase)
+                return -ENOKEY;
 
         r = make_dm_name_and_node(m->node, "-decrypted", &name, &node);
         if (r < 0)
@@ -843,38 +900,29 @@ static int decrypt_partition(
         if (r < 0)
                 return log_debug_errno(r, "Failed to initialize dm-crypt: %m");
 
-        r = crypt_load(cd, CRYPT_LUKS1, NULL);
-        if (r < 0) {
-                log_debug_errno(r, "Failed to load LUKS metadata: %m");
-                goto fail;
-        }
+        r = crypt_load(cd, CRYPT_LUKS, NULL);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to load LUKS metadata: %m");
 
         r = crypt_activate_by_passphrase(cd, name, CRYPT_ANY_SLOT, passphrase, strlen(passphrase),
                                          ((flags & DISSECT_IMAGE_READ_ONLY) ? CRYPT_ACTIVATE_READONLY : 0) |
                                          ((flags & DISSECT_IMAGE_DISCARD_ON_CRYPTO) ? CRYPT_ACTIVATE_ALLOW_DISCARDS : 0));
-        if (r < 0)
+        if (r < 0) {
                 log_debug_errno(r, "Failed to activate LUKS device: %m");
-        if (r == -EPERM) {
-                r = -EKEYREJECTED;
-                goto fail;
+                return r == -EPERM ? -EKEYREJECTED : r;
         }
-        if (r < 0)
-                goto fail;
 
         d->decrypted[d->n_decrypted].name = name;
         name = NULL;
 
         d->decrypted[d->n_decrypted].device = cd;
+        cd = NULL;
         d->n_decrypted++;
 
         m->decrypted_node = node;
         node = NULL;
 
         return 0;
-
-fail:
-        crypt_free(cd);
-        return r;
 }
 
 static int verity_partition(
@@ -886,7 +934,7 @@ static int verity_partition(
                 DecryptedImage *d) {
 
         _cleanup_free_ char *node = NULL, *name = NULL;
-        struct crypt_device *cd;
+        _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         int r;
 
         assert(m);
@@ -916,30 +964,27 @@ static int verity_partition(
 
         r = crypt_load(cd, CRYPT_VERITY, NULL);
         if (r < 0)
-                goto fail;
+                return r;
 
         r = crypt_set_data_device(cd, m->node);
         if (r < 0)
-                goto fail;
+                return r;
 
         r = crypt_activate_by_volume_key(cd, name, root_hash, root_hash_size, CRYPT_ACTIVATE_READONLY);
         if (r < 0)
-                goto fail;
+                return r;
 
         d->decrypted[d->n_decrypted].name = name;
         name = NULL;
 
         d->decrypted[d->n_decrypted].device = cd;
+        cd = NULL;
         d->n_decrypted++;
 
         m->decrypted_node = node;
         node = NULL;
 
         return 0;
-
-fail:
-        crypt_free(cd);
-        return r;
 }
 #endif
 
@@ -951,8 +996,8 @@ int dissected_image_decrypt(
                 DissectImageFlags flags,
                 DecryptedImage **ret) {
 
-        _cleanup_(decrypted_image_unrefp) DecryptedImage *d = NULL;
 #if HAVE_LIBCRYPTSETUP
+        _cleanup_(decrypted_image_unrefp) DecryptedImage *d = NULL;
         unsigned i;
         int r;
 #endif
@@ -977,9 +1022,6 @@ int dissected_image_decrypt(
         }
 
 #if HAVE_LIBCRYPTSETUP
-        if (m->encrypted && !passphrase)
-                return -ENOKEY;
-
         d = new0(DecryptedImage, 1);
         if (!d)
                 return -ENOMEM;
@@ -1004,7 +1046,7 @@ int dissected_image_decrypt(
 
                 if (!p->decrypted_fstype && p->decrypted_node) {
                         r = probe_filesystem(p->decrypted_node, &p->decrypted_fstype);
-                        if (r < 0)
+                        if (r < 0 && r != -EUCLEAN)
                                 return r;
                 }
         }
@@ -1144,7 +1186,7 @@ int root_hash_load(const char *image, void **ret, size_t *ret_size) {
                 if (!IN_SET(r, -ENODATA, -EOPNOTSUPP, -ENOENT))
                         return r;
 
-                fn = newa(char, strlen(image) + strlen(".roothash") + 1);
+                fn = newa(char, strlen(image) + STRLEN(".roothash") + 1);
                 n = stpcpy(fn, image);
                 e = endswith(fn, ".raw");
                 if (e)
@@ -1174,6 +1216,174 @@ int root_hash_load(const char *image, void **ret, size_t *ret_size) {
         k = NULL;
 
         return 1;
+}
+
+int dissected_image_acquire_metadata(DissectedImage *m) {
+
+        enum {
+                META_HOSTNAME,
+                META_MACHINE_ID,
+                META_MACHINE_INFO,
+                META_OS_RELEASE,
+                _META_MAX,
+        };
+
+        static const char *const paths[_META_MAX] = {
+                [META_HOSTNAME]     = "/etc/hostname\0",
+                [META_MACHINE_ID]   = "/etc/machine-id\0",
+                [META_MACHINE_INFO] = "/etc/machine-info\0",
+                [META_OS_RELEASE]   = "/etc/os-release\0/usr/lib/os-release\0",
+        };
+
+        _cleanup_strv_free_ char **machine_info = NULL, **os_release = NULL;
+        _cleanup_(rmdir_and_freep) char *t = NULL;
+        _cleanup_(sigkill_waitp) pid_t child = 0;
+        sd_id128_t machine_id = SD_ID128_NULL;
+        _cleanup_free_ char *hostname = NULL;
+        unsigned n_meta_initialized = 0, k;
+        int fds[2 * _META_MAX], r;
+        siginfo_t si;
+
+        BLOCK_SIGNALS(SIGCHLD);
+
+        assert(m);
+
+        for (; n_meta_initialized < _META_MAX; n_meta_initialized ++)
+                if (pipe2(fds + 2*n_meta_initialized, O_CLOEXEC) < 0) {
+                        r = -errno;
+                        goto finish;
+                }
+
+        r = mkdtemp_malloc("/tmp/dissect-XXXXXX", &t);
+        if (r < 0)
+                goto finish;
+
+        child = raw_clone(SIGCHLD|CLONE_NEWNS);
+        if (child < 0) {
+                r = -errno;
+                goto finish;
+        }
+
+        if (child == 0) {
+
+                (void) reset_all_signal_handlers();
+                (void) reset_signal_mask();
+                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
+
+                /* Make sure we never propagate to the host */
+                if (mount(NULL, "/", NULL, MS_SLAVE | MS_REC, NULL) < 0)
+                        _exit(EXIT_FAILURE);
+
+                r = dissected_image_mount(m, t, UID_INVALID, DISSECT_IMAGE_READ_ONLY);
+                if (r < 0)
+                        _exit(EXIT_FAILURE);
+
+                for (k = 0; k < _META_MAX; k++) {
+                        _cleanup_close_ int fd = -1;
+                        const char *p;
+
+                        fds[2*k] = safe_close(fds[2*k]);
+
+                        NULSTR_FOREACH(p, paths[k]) {
+                                _cleanup_free_ char *q = NULL;
+
+                                r = chase_symlinks(p, t, CHASE_PREFIX_ROOT, &q);
+                                if (r < 0)
+                                        continue;
+
+                                fd = open(q, O_RDONLY|O_CLOEXEC|O_NOCTTY);
+                                if (fd >= 0)
+                                        break;
+                        }
+                        if (fd < 0)
+                                continue;
+
+                        r = copy_bytes(fd, fds[2*k+1], (uint64_t) -1, 0);
+                        if (r < 0)
+                                _exit(EXIT_FAILURE);
+
+                        fds[2*k+1] = safe_close(fds[2*k+1]);
+                }
+
+                _exit(EXIT_SUCCESS);
+        }
+
+        for (k = 0; k < _META_MAX; k++) {
+                _cleanup_fclose_ FILE *f = NULL;
+
+                fds[2*k+1] = safe_close(fds[2*k+1]);
+
+                f = fdopen(fds[2*k], "re");
+                if (!f) {
+                        r = -errno;
+                        goto finish;
+                }
+
+                fds[2*k] = -1;
+
+                switch (k) {
+
+                case META_HOSTNAME:
+                        r = read_etc_hostname_stream(f, &hostname);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read /etc/hostname: %m");
+
+                        break;
+
+                case META_MACHINE_ID: {
+                        _cleanup_free_ char *line = NULL;
+
+                        r = read_line(f, LONG_LINE_MAX, &line);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read /etc/machine-id: %m");
+                        else if (r == 33) {
+                                r = sd_id128_from_string(line, &machine_id);
+                                if (r < 0)
+                                        log_debug_errno(r, "Image contains invalid /etc/machine-id: %s", line);
+                        } else if (r == 0)
+                                log_debug("/etc/machine-id file is empty.");
+                        else
+                                log_debug("/etc/machine-id has unexpected length %i.", r);
+
+                        break;
+                }
+
+                case META_MACHINE_INFO:
+                        r = load_env_file_pairs(f, "machine-info", NULL, &machine_info);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read /etc/machine-info: %m");
+
+                        break;
+
+                case META_OS_RELEASE:
+                        r = load_env_file_pairs(f, "os-release", NULL, &os_release);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read OS release file: %m");
+
+                        break;
+                }
+        }
+
+        r = wait_for_terminate(child, &si);
+        if (r < 0)
+                goto finish;
+        child = 0;
+
+        if (si.si_code != CLD_EXITED || si.si_status != EXIT_SUCCESS) {
+                r = -EPROTO;
+                goto finish;
+        }
+
+        free_and_replace(m->hostname, hostname);
+        m->machine_id = machine_id;
+        strv_free_and_replace(m->machine_info, machine_info);
+        strv_free_and_replace(m->os_release, os_release);
+
+finish:
+        for (k = 0; k < n_meta_initialized; k++)
+                safe_close_pair(fds + 2*k);
+
+        return r;
 }
 
 static const char *const partition_designator_table[] = {

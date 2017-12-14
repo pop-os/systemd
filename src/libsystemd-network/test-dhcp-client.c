@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -75,6 +76,12 @@ static void test_request_basic(sd_event *e) {
         assert_se(sd_dhcp_client_set_ifindex(client, 0) == -EINVAL);
         assert_se(sd_dhcp_client_set_ifindex(client, 1) == 0);
 
+        assert_se(sd_dhcp_client_set_hostname(client, "host") == 1);
+        assert_se(sd_dhcp_client_set_hostname(client, "host.domain") == 1);
+        assert_se(sd_dhcp_client_set_hostname(client, NULL) == 1);
+        assert_se(sd_dhcp_client_set_hostname(client, "~host") == -EINVAL);
+        assert_se(sd_dhcp_client_set_hostname(client, "~host.domain") == -EINVAL);
+
         assert_se(sd_dhcp_client_set_request_option(client,
                                         SD_DHCP_OPTION_SUBNET_MASK) == -EEXIST);
         assert_se(sd_dhcp_client_set_request_option(client,
@@ -102,8 +109,8 @@ static void test_request_basic(sd_event *e) {
 
         /* RFC7844: option 33 (SD_DHCP_OPTION_STATIC_ROUTE) is set in the
          * default PRL when using Anonymize, so it is changed to other option
-         * that is not set by default, to check that it succed setting it.
-         * Ooptions not set by default (using or not anonymize) are option 17
+         * that is not set by default, to check that it was set successfully.
+         * Options not set by default (using or not anonymize) are option 17
          * (SD_DHCP_OPTION_ROOT_PATH) and 42 (SD_DHCP_OPTION_NTP_SERVER) */
         assert_se(sd_dhcp_client_set_request_option(client, 17) == 0);
         assert_se(sd_dhcp_client_set_request_option(client, 17) == -EEXIST);

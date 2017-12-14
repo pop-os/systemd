@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -313,6 +314,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "set_robust_list\0"
                 "set_thread_area\0"
                 "set_tid_address\0"
+                "set_tls\0"
                 "sigreturn\0"
                 "time\0"
                 "ugetrlimit\0"
@@ -465,7 +467,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "stat64\0"
                 "statfs\0"
                 "statfs64\0"
-#ifdef __PNR_statx
+#ifdef __NR_statx
                 "statx\0"
 #endif
                 "symlink\0"
@@ -900,20 +902,20 @@ int seccomp_load_syscall_filter_set(uint32_t default_action, const SyscallFilter
         return 0;
 }
 
-int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Set* set, uint32_t action) {
+int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Hashmap* set, uint32_t action) {
         uint32_t arch;
         int r;
 
         /* Similar to seccomp_load_syscall_filter_set(), but takes a raw Set* of syscalls, instead of a
          * SyscallFilterSet* table. */
 
-        if (set_isempty(set) && default_action == SCMP_ACT_ALLOW)
+        if (hashmap_isempty(set) && default_action == SCMP_ACT_ALLOW)
                 return 0;
 
         SECCOMP_FOREACH_LOCAL_ARCH(arch) {
                 _cleanup_(seccomp_releasep) scmp_filter_ctx seccomp = NULL;
                 Iterator i;
-                void *id;
+                void *id, *val;
 
                 log_debug("Operating on architecture: %s", seccomp_arch_to_string(arch));
 
@@ -921,8 +923,14 @@ int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Set* set, uint3
                 if (r < 0)
                         return r;
 
-                SET_FOREACH(id, set, i) {
-                        r = seccomp_rule_add_exact(seccomp, action, PTR_TO_INT(id) - 1, 0);
+                HASHMAP_FOREACH_KEY(val, id, set, i) {
+                        uint32_t a = action;
+                        int e = PTR_TO_INT(val);
+
+                        if (action != SCMP_ACT_ALLOW && e >= 0)
+                                a = SCMP_ACT_ERRNO(e);
+
+                        r = seccomp_rule_add_exact(seccomp, a, PTR_TO_INT(id) - 1, 0);
                         if (r < 0) {
                                 /* If the system call is not known on this architecture, then that's fine, let's ignore it */
                                 _cleanup_free_ char *n = NULL;
@@ -1433,6 +1441,14 @@ int seccomp_memory_deny_write_execute(void) {
                 if (r < 0)
                         continue;
 
+#ifdef __NR_pkey_mprotect
+                r = add_seccomp_syscall_filter(seccomp, arch, SCMP_SYS(pkey_mprotect),
+                                               1,
+                                               SCMP_A2(SCMP_CMP_MASKED_EQ, PROT_EXEC, PROT_EXEC));
+                if (r < 0)
+                        continue;
+#endif
+
                 if (shmat_syscall != 0) {
                         r = add_seccomp_syscall_filter(seccomp, arch, SCMP_SYS(shmat),
                                                        1,
@@ -1515,7 +1531,7 @@ int parse_syscall_archs(char **l, Set **archs) {
         return 0;
 }
 
-int seccomp_filter_set_add(Set *filter, bool add, const SyscallFilterSet *set) {
+int seccomp_filter_set_add(Hashmap *filter, bool add, const SyscallFilterSet *set) {
         const char *i;
         int r;
 
@@ -1543,11 +1559,11 @@ int seccomp_filter_set_add(Set *filter, bool add, const SyscallFilterSet *set) {
                         }
 
                         if (add) {
-                                r = set_put(filter, INT_TO_PTR(id + 1));
+                                r = hashmap_put(filter, INT_TO_PTR(id + 1), INT_TO_PTR(-1));
                                 if (r < 0)
                                         return r;
                         } else
-                                (void) set_remove(filter, INT_TO_PTR(id + 1));
+                                (void) hashmap_remove(filter, INT_TO_PTR(id + 1));
                 }
         }
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -40,6 +41,7 @@ struct SessionDevice {
         int fd;
         bool active;
         DeviceType type;
+        bool pushed_fd;
 
         LIST_FIELDS(struct SessionDevice, sd_by_device);
 };

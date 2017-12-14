@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -18,6 +19,7 @@
 ***/
 
 #include <getopt.h>
+#include <stdio_ext.h>
 
 #include "sd-bus.h"
 
@@ -691,12 +693,7 @@ static void member_free(Member *m) {
 DEFINE_TRIVIAL_CLEANUP_FUNC(Member*, member_free);
 
 static void member_set_free(Set *s) {
-        Member *m;
-
-        while ((m = set_steal_first(s)))
-                member_free(m);
-
-        set_free(s);
+        set_free_with_destructor(s, member_free);
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Set*, member_set_free);
@@ -863,7 +860,7 @@ static int introspect(sd_bus *bus, char **argv) {
                 .on_property = on_property,
         };
 
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply_xml = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(member_set_freep) Set *members = NULL;
         Iterator i;
@@ -889,13 +886,11 @@ static int introspect(sd_bus *bus, char **argv) {
         if (!members)
                 return log_oom();
 
-        r = sd_bus_call_method(bus, argv[1], argv[2], "org.freedesktop.DBus.Introspectable", "Introspect", &error, &reply, "");
-        if (r < 0) {
-                log_error("Failed to introspect object %s of service %s: %s", argv[2], argv[1], bus_error_message(&error, r));
-                return r;
-        }
+        r = sd_bus_call_method(bus, argv[1], argv[2], "org.freedesktop.DBus.Introspectable", "Introspect", &error, &reply_xml, "");
+        if (r < 0)
+                return log_error_errno(r, "Failed to introspect object %s of service %s: %s", argv[2], argv[1], bus_error_message(&error, r));
 
-        r = sd_bus_message_read(reply, "s", &xml);
+        r = sd_bus_message_read(reply_xml, "s", &xml);
         if (r < 0)
                 return bus_log_parse_error(r);
 
@@ -906,6 +901,7 @@ static int introspect(sd_bus *bus, char **argv) {
 
         /* Second, find the current values for them */
         SET_FOREACH(m, members, i) {
+                _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
 
                 if (!streq(m->type, "property"))
                         continue;
@@ -917,10 +913,8 @@ static int introspect(sd_bus *bus, char **argv) {
                         continue;
 
                 r = sd_bus_call_method(bus, argv[1], argv[2], "org.freedesktop.DBus.Properties", "GetAll", &error, &reply, "s", m->interface);
-                if (r < 0) {
-                        log_error("%s", bus_error_message(&error, r));
-                        return r;
-                }
+                if (r < 0)
+                        return log_error_errno(r, "%s", bus_error_message(&error, r));
 
                 r = sd_bus_message_enter_container(reply, 'a', "{sv}");
                 if (r < 0)
@@ -952,22 +946,20 @@ static int introspect(sd_bus *bus, char **argv) {
                         if (!mf)
                                 return log_oom();
 
+                        (void) __fsetlocking(mf, FSETLOCKING_BYCALLER);
+
                         r = format_cmdline(reply, mf, false);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
-                        fclose(mf);
-                        mf = NULL;
+                        mf = safe_fclose(mf);
 
                         z = set_get(members, &((Member) {
                                                 .type = "property",
                                                 .interface = m->interface,
                                                 .name = (char*) name }));
-                        if (z) {
-                                free(z->value);
-                                z->value = buf;
-                                buf = NULL;
-                        }
+                        if (z)
+                                free_and_replace(z->value, buf);
 
                         r = sd_bus_message_exit_container(reply);
                         if (r < 0)
@@ -985,10 +977,10 @@ static int introspect(sd_bus *bus, char **argv) {
 
         pager_open(arg_no_pager, false);
 
-        name_width = strlen("NAME");
-        type_width = strlen("TYPE");
-        signature_width = strlen("SIGNATURE");
-        result_width = strlen("RESULT/VALUE");
+        name_width = STRLEN("NAME");
+        type_width = STRLEN("TYPE");
+        signature_width = STRLEN("SIGNATURE");
+        result_width = STRLEN("RESULT/VALUE");
 
         sorted = newa(Member*, set_size(members));
 
@@ -1736,7 +1728,7 @@ static int help(void) {
                "     --match=MATCH        Only show matching messages\n"
                "     --size=SIZE          Maximum length of captured packet\n"
                "     --list               Don't show tree, but simple object path list\n"
-               "     --quiet              Don't show method call reply\n"
+               "  -q --quiet              Don't show method call reply\n"
                "     --verbose            Show result values in long format\n"
                "     --expect-reply=BOOL  Expect a method call reply\n"
                "     --auto-start=BOOL    Auto-start destination service\n"
@@ -2010,7 +2002,7 @@ static int busctl_main(sd_bus *bus, int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-        sd_bus *bus = NULL;
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
         log_parse_environment();
@@ -2100,7 +2092,6 @@ int main(int argc, char *argv[]) {
         r = busctl_main(bus, argc, argv);
 
 finish:
-        sd_bus_flush_close_unref(bus);
         pager_close();
 
         strv_free(arg_matches);

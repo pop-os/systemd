@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -21,6 +22,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -392,9 +394,7 @@ static int lease_parse_domain(const uint8_t *option, size_t len, char **ret) {
         if (dns_name_is_root(normalized))
                 return -EINVAL;
 
-        free(*ret);
-        *ret = normalized;
-        normalized = NULL;
+        free_and_replace(*ret, normalized);
 
         return 0;
 }
@@ -683,9 +683,7 @@ int dhcp_lease_parse_options(uint8_t code, uint8_t len, const void *option, void
                         return 0;
                 }
 
-                free(lease->timezone);
-                lease->timezone = tz;
-                tz = NULL;
+                free_and_replace(lease->timezone, tz);
 
                 break;
         }
@@ -879,7 +877,8 @@ int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file) {
         if (r < 0)
                 goto fail;
 
-        fchmod(fileno(f), 0644);
+        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
+        (void) fchmod(fileno(f), 0644);
 
         fprintf(f,
                 "# This is private data. Do not parse.\n");
@@ -926,16 +925,16 @@ int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file) {
 
         r = sd_dhcp_lease_get_dns(lease, &addresses);
         if (r > 0) {
-                fputs_unlocked("DNS=", f);
+                fputs("DNS=", f);
                 serialize_in_addrs(f, addresses, r);
-                fputs_unlocked("\n", f);
+                fputs("\n", f);
         }
 
         r = sd_dhcp_lease_get_ntp(lease, &addresses);
         if (r > 0) {
-                fputs_unlocked("NTP=", f);
+                fputs("NTP=", f);
                 serialize_in_addrs(f, addresses, r);
-                fputs_unlocked("\n", f);
+                fputs("\n", f);
         }
 
         r = sd_dhcp_lease_get_domainname(lease, &string);
@@ -944,9 +943,9 @@ int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file) {
 
         r = sd_dhcp_lease_get_search_domains(lease, &search_domains);
         if (r > 0) {
-                fputs_unlocked("DOMAIN_SEARCH_LIST=", f);
+                fputs("DOMAIN_SEARCH_LIST=", f);
                 fputstrv(f, search_domains, NULL, NULL);
-                fputs_unlocked("\n", f);
+                fputs("\n", f);
         }
 
         r = sd_dhcp_lease_get_hostname(lease, &string);
@@ -990,7 +989,7 @@ int dhcp_lease_save(sd_dhcp_lease *lease, const char *lease_file) {
         }
 
         LIST_FOREACH(options, option, lease->private_options) {
-                char key[strlen("OPTION_000")+1];
+                char key[STRLEN("OPTION_000")+1];
 
                 xsprintf(key, "OPTION_%" PRIu8, option->tag);
                 r = serialize_dhcp_option(f, key, option->data, option->length);

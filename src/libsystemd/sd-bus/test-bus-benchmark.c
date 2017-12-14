@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -228,7 +229,7 @@ int main(int argc, char *argv[]) {
         } mode = MODE_BISECT;
         Type type = TYPE_LEGACY;
         int i, pair[2] = { -1, -1 };
-        _cleanup_free_ char *name = NULL, *bus_name = NULL, *address = NULL, *server_name = NULL;
+        _cleanup_free_ char *address = NULL, *server_name = NULL;
         _cleanup_close_ int bus_ref = -1;
         const char *unique;
         cpu_set_t cpuset;

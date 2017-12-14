@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -130,7 +131,20 @@ static void automount_done(Unit *u) {
         a->expire_event_source = sd_event_source_unref(a->expire_event_source);
 }
 
-static int automount_add_mount_links(Automount *a) {
+static int automount_add_trigger_dependencies(Automount *a) {
+        Unit *x;
+        int r;
+
+        assert(a);
+
+        r = unit_load_related_unit(UNIT(a), ".mount", &x);
+        if (r < 0)
+                return r;
+
+        return unit_add_two_dependencies(UNIT(a), UNIT_BEFORE, UNIT_TRIGGERS, x, true, UNIT_DEPENDENCY_IMPLICIT);
+}
+
+static int automount_add_mount_dependencies(Automount *a) {
         _cleanup_free_ char *parent = NULL;
 
         assert(a);
@@ -139,7 +153,7 @@ static int automount_add_mount_links(Automount *a) {
         if (!parent)
                 return -ENOMEM;
 
-        return unit_require_mounts_for(UNIT(a), parent);
+        return unit_require_mounts_for(UNIT(a), parent, UNIT_DEPENDENCY_IMPLICIT);
 }
 
 static int automount_add_default_dependencies(Automount *a) {
@@ -153,7 +167,7 @@ static int automount_add_default_dependencies(Automount *a) {
         if (!MANAGER_IS_SYSTEM(UNIT(a)->manager))
                 return 0;
 
-        r = unit_add_two_dependencies_by_name(UNIT(a), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, NULL, true);
+        r = unit_add_two_dependencies_by_name(UNIT(a), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 
@@ -210,26 +224,20 @@ static int automount_load(Unit *u) {
         assert(u->load_state == UNIT_STUB);
 
         /* Load a .automount file */
-        r = unit_load_fragment_and_dropin_optional(u);
+        r = unit_load_fragment_and_dropin(u);
         if (r < 0)
                 return r;
 
         if (u->load_state == UNIT_LOADED) {
-                Unit *x;
-
                 r = automount_set_where(a);
                 if (r < 0)
                         return r;
 
-                r = unit_load_related_unit(u, ".mount", &x);
+                r = automount_add_trigger_dependencies(a);
                 if (r < 0)
                         return r;
 
-                r = unit_add_two_dependencies(u, UNIT_BEFORE, UNIT_TRIGGERS, x, true);
-                if (r < 0)
-                        return r;
-
-                r = automount_add_mount_links(a);
+                r = automount_add_mount_dependencies(a);
                 if (r < 0)
                         return r;
 
@@ -557,8 +565,8 @@ static void automount_trigger_notify(Unit *u, Unit *other) {
 static void automount_enter_waiting(Automount *a) {
         _cleanup_close_ int ioctl_fd = -1;
         int p[2] = { -1, -1 };
-        char name[sizeof("systemd-")-1 + DECIMAL_STR_MAX(pid_t) + 1];
-        char options[sizeof("fd=,pgrp=,minproto=5,maxproto=5,direct")-1
+        char name[STRLEN("systemd-") + DECIMAL_STR_MAX(pid_t) + 1];
+        char options[STRLEN("fd=,pgrp=,minproto=5,maxproto=5,direct")
                      + DECIMAL_STR_MAX(int) + DECIMAL_STR_MAX(gid_t) + 1];
         bool mounted = false;
         int r, dev_autofs_fd;

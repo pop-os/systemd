@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -465,7 +466,7 @@ static void test_write_string_file_no_create(void) {
         assert_se(write_string_file("/a/file/which/does/not/exists/i/guess", "boohoo", 0) < 0);
         assert_se(write_string_file(fn, "boohoo", 0) == 0);
 
-        assert_se(read(fd, buf, sizeof(buf)) == strlen("boohoo\n"));
+        assert_se(read(fd, buf, sizeof(buf)) == STRLEN("boohoo\n"));
         assert_se(streq(buf, "boohoo\n"));
 
         unlink(fn);
@@ -704,7 +705,6 @@ static void test_read_line_one_file(FILE *f) {
 
 static void test_read_line(void) {
         _cleanup_fclose_ FILE *f = NULL;
-        _cleanup_free_ char *line = NULL;
 
         f = fmemopen((void*) buffer, sizeof(buffer), "re");
         assert_se(f);
