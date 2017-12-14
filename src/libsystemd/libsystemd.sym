@@ -1,4 +1,6 @@
 /***
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   systemd is free software; you can redistribute it and/or modify it
@@ -522,3 +524,9 @@ LIBSYSTEMD_234 {
 global:
         sd_bus_message_appendv;
 } LIBSYSTEMD_233;
+
+LIBSYSTEMD_236 {
+global:
+        sd_bus_message_new;
+        sd_bus_message_seal;
+} LIBSYSTEMD_234;

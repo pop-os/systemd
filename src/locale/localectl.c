@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -45,18 +46,6 @@ static bool arg_ask_password = true;
 static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static char *arg_host = NULL;
 static bool arg_convert = true;
-
-static void polkit_agent_open_if_enabled(void) {
-
-        /* Open the polkit agent as a child process if necessary */
-        if (!arg_ask_password)
-                return;
-
-        if (arg_transport != BUS_TRANSPORT_LOCAL)
-                return;
-
-        polkit_agent_open();
-}
 
 typedef struct StatusInfo {
         char **locale;
@@ -195,7 +184,7 @@ static int set_locale(sd_bus *bus, char **args, unsigned n) {
         assert(bus);
         assert(args);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_message_new_method_call(
                         bus,
@@ -253,7 +242,7 @@ static int set_vconsole_keymap(sd_bus *bus, char **args, unsigned n) {
                 return -EINVAL;
         }
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         map = args[1];
         toggle_map = n > 2 ? args[2] : "";
@@ -273,68 +262,15 @@ static int set_vconsole_keymap(sd_bus *bus, char **args, unsigned n) {
         return r;
 }
 
-static Set *keymaps = NULL;
-
-static int nftw_cb(
-                const char *fpath,
-                const struct stat *sb,
-                int tflag,
-                struct FTW *ftwbuf) {
-
-        char *p, *e;
-        int r;
-
-        if (tflag != FTW_F)
-                return 0;
-
-        if (!endswith(fpath, ".map") &&
-            !endswith(fpath, ".map.gz"))
-                return 0;
-
-        p = strdup(basename(fpath));
-        if (!p)
-                return log_oom();
-
-        e = endswith(p, ".map");
-        if (e)
-                *e = 0;
-
-        e = endswith(p, ".map.gz");
-        if (e)
-                *e = 0;
-
-        r = set_consume(keymaps, p);
-        if (r < 0 && r != -EEXIST)
-                return log_error_errno(r, "Can't add keymap: %m");
-
-        return 0;
-}
-
 static int list_vconsole_keymaps(sd_bus *bus, char **args, unsigned n) {
         _cleanup_strv_free_ char **l = NULL;
-        const char *dir;
+        int r;
 
-        keymaps = set_new(&string_hash_ops);
-        if (!keymaps)
-                return log_oom();
+        assert(args);
 
-        NULSTR_FOREACH(dir, KBD_KEYMAP_DIRS)
-                nftw(dir, nftw_cb, 20, FTW_MOUNT|FTW_PHYS);
-
-        l = set_get_strv(keymaps);
-        if (!l) {
-                set_free_free(keymaps);
-                return log_oom();
-        }
-
-        set_free(keymaps);
-
-        if (strv_isempty(l)) {
-                log_error("Couldn't find any console keymaps.");
-                return -ENOENT;
-        }
-
-        strv_sort(l);
+        r = get_keymaps(&l);
+        if (r < 0)
+                return log_error_errno(r, "Failed to read list of keymaps: %m");
 
         pager_open(arg_no_pager, false);
 
@@ -356,7 +292,7 @@ static int set_x11_keymap(sd_bus *bus, char **args, unsigned n) {
                 return -EINVAL;
         }
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         layout = args[1];
         model = n > 2 ? args[2] : "";
@@ -659,7 +595,7 @@ static int localectl_main(sd_bus *bus, int argc, char *argv[]) {
 }
 
 int main(int argc, char*argv[]) {
-        sd_bus *bus = NULL;
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -679,7 +615,6 @@ int main(int argc, char*argv[]) {
         r = localectl_main(bus, argc, argv);
 
 finish:
-        sd_bus_flush_close_unref(bus);
         pager_close();
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;

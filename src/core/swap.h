@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -69,8 +70,6 @@ struct Swap {
          * from/to /proc/swaps */
         bool is_active:1;
         bool just_activated:1;
-
-        bool reset_accounting:1;
 
         SwapResult result;
 

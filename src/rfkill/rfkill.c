@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -88,7 +89,8 @@ static int find_device(
 
         device = udev_device_new_from_subsystem_sysname(udev, "rfkill", sysname);
         if (!device)
-                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno, "Failed to open device: %m");
+                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno,
+                                      "Failed to open device %s: %m", sysname);
 
         name = udev_device_get_sysattr_value(device, "name");
         if (!name) {
@@ -146,7 +148,8 @@ static int wait_for_initialized(
         /* Check again, maybe things changed */
         d = udev_device_new_from_subsystem_sysname(udev, "rfkill", sysname);
         if (!d)
-                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno, "Failed to open device: %m");
+                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno,
+                                      "Failed to open device %s: %m", sysname);
 
         if (udev_device_get_is_initialized(d) != 0) {
                 *ret = d;

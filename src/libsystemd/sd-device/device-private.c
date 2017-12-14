@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -677,13 +678,9 @@ static int device_update_properties_bufs(sd_device *device) {
                 i++;
         }
 
-        free(device->properties_nulstr);
-        device->properties_nulstr = buf_nulstr;
-        buf_nulstr = NULL;
+        free_and_replace(device->properties_nulstr, buf_nulstr);
         device->properties_nulstr_len = nulstr_len;
-        free(device->properties_strv);
-        device->properties_strv = buf_strv;
-        buf_strv = NULL;
+        free_and_replace(device->properties_strv, buf_strv);
 
         device->properties_buf_outdated = false;
 
@@ -1053,7 +1050,7 @@ int device_update_db(sd_device *device) {
                         const char *devlink;
 
                         FOREACH_DEVICE_DEVLINK(device, devlink)
-                                fprintf(f, "S:%s\n", devlink + strlen("/dev/"));
+                                fprintf(f, "S:%s\n", devlink + STRLEN("/dev/"));
 
                         if (device->devlink_priority != 0)
                                 fprintf(f, "L:%i\n", device->devlink_priority);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -38,6 +39,7 @@
 #include "path-util.h"
 #include "set.h"
 #include "special.h"
+#include "specifier.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -94,12 +96,7 @@ static void free_sysvstub(SysvStub *s) {
 DEFINE_TRIVIAL_CLEANUP_FUNC(SysvStub*, free_sysvstub);
 
 static void free_sysvstub_hashmapp(Hashmap **h) {
-        SysvStub *stub;
-
-        while ((stub = hashmap_steal_first(*h)))
-                free_sysvstub(stub);
-
-        hashmap_free(*h);
+        hashmap_free_with_destructor(*h, free_sysvstub);
 }
 
 static int add_alias(const char *service, const char *alias) {
@@ -123,6 +120,7 @@ static int add_alias(const char *service, const char *alias) {
 }
 
 static int generate_unit_file(SysvStub *s) {
+        _cleanup_free_ char *path_escaped = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         const char *unit;
         char **p;
@@ -132,6 +130,10 @@ static int generate_unit_file(SysvStub *s) {
 
         if (!s->loaded)
                 return 0;
+
+        path_escaped = specifier_escape(s->path);
+        if (!path_escaped)
+                return log_oom();
 
         unit = strjoina(arg_dest, "/", s->name);
 
@@ -152,10 +154,17 @@ static int generate_unit_file(SysvStub *s) {
                 "[Unit]\n"
                 "Documentation=man:systemd-sysv-generator(8)\n"
                 "SourcePath=%s\n",
-                s->path);
+                path_escaped);
 
-        if (s->description)
-                fprintf(f, "Description=%s\n", s->description);
+        if (s->description) {
+                _cleanup_free_ char *t;
+
+                t = specifier_escape(s->description);
+                if (!t)
+                        return log_oom();
+
+                fprintf(f, "Description=%s\n", t);
+        }
 
         STRV_FOREACH(p, s->before)
                 fprintf(f, "Before=%s\n", *p);
@@ -175,8 +184,15 @@ static int generate_unit_file(SysvStub *s) {
                 "RemainAfterExit=%s\n",
                 yes_no(!s->pid_file));
 
-        if (s->pid_file)
-                fprintf(f, "PIDFile=%s\n", s->pid_file);
+        if (s->pid_file) {
+                _cleanup_free_ char *t;
+
+                t = specifier_escape(s->pid_file);
+                if (!t)
+                        return log_oom();
+
+                fprintf(f, "PIDFile=%s\n", t);
+        }
 
         /* Consider two special LSB exit codes a clean exit */
         if (s->has_lsb)
@@ -188,10 +204,10 @@ static int generate_unit_file(SysvStub *s) {
         fprintf(f,
                 "ExecStart=%s start\n"
                 "ExecStop=%s stop\n",
-                s->path, s->path);
+                path_escaped, path_escaped);
 
         if (s->reload)
-                fprintf(f, "ExecReload=%s reload\n", s->path);
+                fprintf(f, "ExecReload=%s reload\n", path_escaped);
 
         r = fflush_and_check(f);
         if (r < 0)

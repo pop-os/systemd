@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -47,6 +48,11 @@
 #define _weakref_(x) __attribute__((weakref(#x)))
 #define _alignas_(x) __attribute__((aligned(__alignof(x))))
 #define _cleanup_(x) __attribute__((cleanup(x)))
+#if __GNUC__ >= 7
+#define _fallthrough_ __attribute__((fallthrough))
+#else
+#define _fallthrough_
+#endif
 
 /* Temporarily disable some warnings */
 #define DISABLE_WARNING_DECLARATION_AFTER_STATEMENT                     \
@@ -138,6 +144,14 @@ static inline unsigned long ALIGN_POWER2(unsigned long u) {
                 !__builtin_types_compatible_p(typeof(x), typeof(&*(x))), \
                 sizeof(x)/sizeof((x)[0]),                                \
                 (void)0))
+
+/*
+ * STRLEN - return the length of a string literal, minus the trailing NUL byte.
+ *          Contrary to strlen(), this is a constant expression.
+ * @x: a string literal.
+ */
+#define STRLEN(x) (sizeof(""x"") - 1)
+
 /*
  * container_of - cast a member of a structure out to the containing structure
  * @ptr: the pointer to the member.

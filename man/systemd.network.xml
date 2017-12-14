@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2013 Tom Gundersen
@@ -248,6 +250,21 @@
           <para>This is useful for preventing later matching network
           files from interfering with certain interfaces that are fully
           controlled by other applications.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>RequiredForOnline=</varname></term>
+        <listitem>
+          <para>A boolean. When <literal>yes</literal>, the network is deemed
+          required when determining whether the system is online when running
+          <literal>systemd-networkd-wait-online</literal>.
+          When <literal>no</literal>, the network is ignored when checking for
+          online state. Defaults to <literal>yes</literal>.</para>
+          <para>The network will be brought up normally in all cases, but in
+          the event that there is no address being assigned by DHCP or the
+          cable is not plugged in, the link will simply remain offline and be
+          skipped automatically by <literal>systemd-networkd-wait-online</literal>
+          if <literal>RequiredForOnline=true</literal>.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -924,6 +941,18 @@
             integer. Higher number means lower priority, and rules get processed in order of increasing number.</para>
           </listitem>
         </varlistentry>
+        <varlistentry>
+          <term><varname>IncomingInterface=</varname></term>
+          <listitem>
+            <para>Specifies incoming device to match. If the interface is loopback, the rule only matches packets originating from this host.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>OutgoingInterface=</varname></term>
+          <listitem>
+            <para>Specifies the outgoing device to match. The outgoing interface is only available for packets originating from local sockets that are bound to a device.</para>
+          </listitem>
+        </varlistentry>
       </variablelist>
   </refsect1>
 
@@ -1452,19 +1481,36 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>EmitDNS=</varname></term>
         <term><varname>DNS=</varname></term>
 
-        <listitem><para>A list of recursive DNS server IPv6 addresses
-        distributed via Router Advertisement messages.
+        <listitem><para><varname>DNS=</varname> specifies a list of recursive
+        DNS server IPv6 addresses that distributed via Router Advertisement
+        messages when <varname>EmitDNS=</varname> is true. If <varname>DNS=
+        </varname> is empty, DNS servers are read from the
+        <literal>[Network]</literal> section. If the
+        <literal>[Network]</literal> section does not contain any DNS servers
+        either, DNS servers from the uplink with the highest priority default
+        route are used. When <varname>EmitDNS=</varname> is false, no DNS server
+        information is sent in Router Advertisement messages.
+        <varname>EmitDNS=</varname> defaults to true.
         </para></listitem>
       </varlistentry>
 
       <varlistentry>
+        <term><varname>EmitDomains=</varname></term>
         <term><varname>Domains=</varname></term>
 
-        <listitem><para>A list of DNS search domains distributed via
-        Router Advertisement messages. Defaults to empty, i.e. no search
-        domains are sent.</para></listitem>
+        <listitem><para>A list of DNS search domains distributed via Router
+        Advertisement messages when <varname>EmitDomains=</varname> is true. If
+        <varname>Domains=</varname> is empty, DNS search domains are read from the
+        <literal>[Network]</literal> section. If the <literal>[Network]</literal>
+        section does not contain any DNS search domains either, DNS search
+        domains from the uplink with the highest priority default route are
+        used. When <varname>EmitDomains=</varname> is false, no DNS search domain
+        information is sent in Router Advertisement messages.
+        <varname>EmitDomains=</varname> defaults to true.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1610,7 +1656,7 @@
           <term><varname>VLANId=</varname></term>
           <listitem>
             <para>The VLAN ID for the new static MAC table entry. If
-            omitted, no VLAN ID info is appended to the new static MAC
+            omitted, no VLAN ID information is appended to the new static MAC
             table entry.</para>
           </listitem>
         </varlistentry>

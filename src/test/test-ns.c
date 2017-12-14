@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -46,7 +47,7 @@ int main(int argc, char *argv[]) {
                 NULL
         };
 
-        static const NameSpaceInfo ns_info = {
+        static const NamespaceInfo ns_info = {
                 .private_dev = true,
                 .protect_control_groups = true,
                 .protect_kernel_tunables = true,

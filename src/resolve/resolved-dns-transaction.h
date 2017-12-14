@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -107,6 +108,8 @@ struct DnsTransaction {
         usec_t next_attempt_after;
         sd_event_source *timeout_event_source;
         unsigned n_attempts;
+
+        unsigned n_picked_servers;
 
         /* UDP connection logic, if we need it */
         int dns_udp_fd;

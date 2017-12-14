@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -49,7 +50,12 @@ int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
 
-        enter_cgroup_subroot();
+        r = enter_cgroup_subroot();
+        if (r == -ENOMEDIUM) {
+                log_notice("cgroupfs not available, skipping tests");
+                return EXIT_TEST_SKIP;
+        }
+
         assert_se(set_unit_path(get_testdata_dir("")) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
 
@@ -104,8 +110,8 @@ int main(int argc, char *argv[]) {
         assert(cc->ip_address_deny->items_next);
         assert(!cc->ip_address_deny->items_next->items_next);
 
-        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/usr/bin/ping -c 1 127.0.0.2 -W 5", SERVICE(u)->exec_command, u) == 0);
-        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/usr/bin/ping -c 1 127.0.0.3 -W 5", SERVICE(u)->exec_command, u) == 0);
+        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/bin/ping -c 1 127.0.0.2 -W 5", SERVICE(u)->exec_command, u) == 0);
+        assert_se(config_parse_exec(u->id, "filename", 1, "Service", 1, "ExecStart", SERVICE_EXEC_START, "/bin/ping -c 1 127.0.0.3 -W 5", SERVICE(u)->exec_command, u) == 0);
 
         assert_se(SERVICE(u)->exec_command[SERVICE_EXEC_START]);
         assert_se(SERVICE(u)->exec_command[SERVICE_EXEC_START]->command_next);
@@ -145,7 +151,7 @@ int main(int argc, char *argv[]) {
 
         assert(r >= 0);
 
-        assert(unit_start(u) >= 0);
+        assert_se(unit_start(u) >= 0);
 
         while (!IN_SET(SERVICE(u)->state, SERVICE_DEAD, SERVICE_FAILED))
                 assert_se(sd_event_run(m->event, UINT64_MAX) >= 0);

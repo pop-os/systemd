@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -22,6 +23,7 @@
 
 #include "sd-dhcp6-client.h"
 
+#include "hostname-util.h"
 #include "network-internal.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -147,7 +149,7 @@ static void dhcp6_handler(sd_dhcp6_client *client, int event, void *userdata) {
                         return;
                 }
 
-                /* fall through */
+                _fallthrough_;
         case SD_DHCP6_CLIENT_EVENT_INFORMATION_REQUEST:
                 r = dhcp6_lease_information_acquired(client, link);
                 if (r < 0) {
@@ -211,6 +213,28 @@ int dhcp6_request_address(Link *link, int ir) {
         return 0;
 }
 
+static int dhcp6_set_hostname(sd_dhcp6_client *client, Link *link) {
+        _cleanup_free_ char *hostname = NULL;
+        const char *hn;
+        int r;
+
+        assert(link);
+
+        if (!link->network->dhcp_send_hostname)
+                hn = NULL;
+        else if (link->network->dhcp_hostname)
+                hn = link->network->dhcp_hostname;
+        else {
+                r = gethostname_strict(&hostname);
+                if (r < 0 && r != -ENXIO) /* ENXIO: no hostname set or hostname is "localhost" */
+                        return r;
+
+                hn = hostname;
+        }
+
+        return sd_dhcp6_client_set_fqdn(client, hn);
+}
+
 int dhcp6_configure(Link *link) {
         sd_dhcp6_client *client = NULL;
         int r;
@@ -244,6 +268,10 @@ int dhcp6_configure(Link *link) {
                                      duid->type,
                                      duid->raw_data_len > 0 ? duid->raw_data : NULL,
                                      duid->raw_data_len);
+        if (r < 0)
+                goto error;
+
+        r = dhcp6_set_hostname(client, link);
         if (r < 0)
                 goto error;
 

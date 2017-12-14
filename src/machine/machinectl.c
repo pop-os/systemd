@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -52,15 +53,16 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "ptyfwd.h"
+#include "sigbus.h"
 #include "signal-util.h"
 #include "spawn-polkit-agent.h"
+#include "stdio-util.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "unit-name.h"
 #include "util.h"
 #include "verbs.h"
 #include "web-util.h"
-#include "stdio-util.h"
 
 #define ALL_IP_ADDRESSES -1
 
@@ -89,24 +91,10 @@ static int arg_addrs = 1;
 
 static int print_addresses(sd_bus *bus, const char *name, int, const char *pr1, const char *pr2, int n_addr);
 
-static void polkit_agent_open_if_enabled(void) {
-
-        /* Open the polkit agent as a child process if necessary */
-
-        if (!arg_ask_password)
-                return;
-
-        if (arg_transport != BUS_TRANSPORT_LOCAL)
-                return;
-
-        polkit_agent_open();
-}
-
 static OutputFlags get_output_flags(void) {
         return
                 arg_all * OUTPUT_SHOW_ALL |
-                arg_full * OUTPUT_FULL_WIDTH |
-                (!on_tty() || pager_have()) * OUTPUT_FULL_WIDTH |
+                (arg_full || !on_tty() || pager_have()) * OUTPUT_FULL_WIDTH |
                 colors_enabled() * OUTPUT_COLOR |
                 !arg_quiet * OUTPUT_WARN_CUTOFF;
 }
@@ -206,8 +194,8 @@ static int call_get_os_release(sd_bus *bus, const char *method, const char *name
 
 static int list_machines(int argc, char *argv[], void *userdata) {
 
-        size_t max_name = strlen("MACHINE"), max_class = strlen("CLASS"),
-               max_service = strlen("SERVICE"), max_os = strlen("OS"), max_version_id = strlen("VERSION");
+        size_t max_name = STRLEN("MACHINE"), max_class = STRLEN("CLASS"),
+               max_service = STRLEN("SERVICE"), max_os = STRLEN("OS"), max_version_id = STRLEN("VERSION");
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ char *prefix = NULL;
@@ -296,13 +284,13 @@ static int list_machines(int argc, char *argv[], void *userdata) {
 
         qsort_safe(machines, n_machines, sizeof(MachineInfo), compare_machine_info);
 
-        /* Allocate for prefix max characters for all fields + spaces between them + strlen(",\n") */
+        /* Allocate for prefix max characters for all fields + spaces between them + STRLEN(",\n") */
         r = asprintf(&prefix, "%-*s",
                         (int) (max_name +
                         max_class +
                         max_service +
                         max_os +
-                        max_version_id + 5 + strlen(",\n")),
+                        max_version_id + 5 + STRLEN(",\n")),
                         ",\n");
         if (r < 0) {
                 r = log_oom();
@@ -364,7 +352,7 @@ static int compare_image_info(const void *a, const void *b) {
 static int list_images(int argc, char *argv[], void *userdata) {
 
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-        size_t max_name = strlen("NAME"), max_type = strlen("TYPE"), max_size = strlen("USAGE"), max_crtime = strlen("CREATED"), max_mtime = strlen("MODIFIED");
+        size_t max_name = STRLEN("NAME"), max_type = STRLEN("TYPE"), max_size = STRLEN("USAGE"), max_crtime = STRLEN("CREATED"), max_mtime = STRLEN("MODIFIED");
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ ImageInfo *images = NULL;
         size_t n_images = 0, n_allocated = 0, j;
@@ -912,6 +900,99 @@ static int show_machine(int argc, char *argv[], void *userdata) {
         return r;
 }
 
+static int print_image_hostname(sd_bus *bus, const char *name) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        const char *hn;
+        int r;
+
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.machine1",
+                        "/org/freedesktop/machine1",
+                        "org.freedesktop.machine1.Manager",
+                        "GetImageHostname",
+                        NULL, &reply, "s", name);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_read(reply, "s", &hn);
+        if (r < 0)
+                return r;
+
+        if (!isempty(hn))
+                printf("\tHostname: %s\n", hn);
+
+        return 0;
+}
+
+static int print_image_machine_id(sd_bus *bus, const char *name) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        sd_id128_t id = SD_ID128_NULL;
+        const void *p;
+        size_t size;
+        int r;
+
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.machine1",
+                        "/org/freedesktop/machine1",
+                        "org.freedesktop.machine1.Manager",
+                        "GetImageMachineID",
+                        NULL, &reply, "s", name);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_read_array(reply, 'y', &p, &size);
+        if (r < 0)
+                return r;
+
+        if (size == sizeof(sd_id128_t))
+                memcpy(&id, p, size);
+
+        if (!sd_id128_is_null(id))
+                printf("      Machine ID: " SD_ID128_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(id));
+
+        return 0;
+}
+
+static int print_image_machine_info(sd_bus *bus, const char *name) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        int r;
+
+        r = sd_bus_call_method(
+                        bus,
+                        "org.freedesktop.machine1",
+                        "/org/freedesktop/machine1",
+                        "org.freedesktop.machine1.Manager",
+                        "GetImageMachineInfo",
+                        NULL, &reply, "s", name);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_enter_container(reply, 'a', "{ss}");
+        if (r < 0)
+                return r;
+
+        for (;;) {
+                const char *p, *q;
+
+                r = sd_bus_message_read(reply, "{ss}", &p, &q);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
+
+                if (streq(p, "DEPLOYMENT"))
+                        printf("      Deployment: %s\n", q);
+        }
+
+        r = sd_bus_message_exit_container(reply);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
 typedef struct ImageStatusInfo {
         char *name;
         char *path;
@@ -926,12 +1007,13 @@ typedef struct ImageStatusInfo {
 } ImageStatusInfo;
 
 static void image_status_info_clear(ImageStatusInfo *info) {
-        if (info) {
-                free(info->name);
-                free(info->path);
-                free(info->type);
-                zero(*info);
-        }
+        if (!info)
+                return;
+
+        free(info->name);
+        free(info->path);
+        free(info->type);
+        zero(*info);
 }
 
 static void print_image_status_info(sd_bus *bus, ImageStatusInfo *i) {
@@ -953,6 +1035,10 @@ static void print_image_status_info(sd_bus *bus, ImageStatusInfo *i) {
 
         if (i->path)
                 printf("\t    Path: %s\n", i->path);
+
+        (void) print_image_hostname(bus, i->name);
+        (void) print_image_machine_id(bus, i->name);
+        (void) print_image_machine_info(bus, i->name);
 
         print_os_release(bus, "GetImageOSRelease", i->name, "\t      OS: ");
 
@@ -1179,7 +1265,7 @@ static int kill_machine(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         if (!arg_kill_who)
                 arg_kill_who = "all";
@@ -1224,7 +1310,7 @@ static int terminate_machine(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         for (i = 1; i < argc; i++) {
                 r = sd_bus_call_method(
@@ -1256,7 +1342,7 @@ static int copy_files(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         copy_from = streq(argv[0], "copy-from");
         dest = argv[3] ?: argv[2];
@@ -1305,7 +1391,7 @@ static int bind_mount(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call_method(
                         bus,
@@ -1463,7 +1549,7 @@ static int login_machine(int argc, char *argv[], void *userdata) {
                 return -EOPNOTSUPP;
         }
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_event_default(&event);
         if (r < 0)
@@ -1536,7 +1622,7 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
                 }
         }
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_event_default(&event);
         if (r < 0)
@@ -1604,7 +1690,7 @@ static int remove_image(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         for (i = 1; i < argc; i++) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -1638,7 +1724,7 @@ static int rename_image(int argc, char *argv[], void *userdata) {
         sd_bus *bus = userdata;
         int r;
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call_method(
                         bus,
@@ -1663,7 +1749,7 @@ static int clone_image(int argc, char *argv[], void *userdata) {
         sd_bus *bus = userdata;
         int r;
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_message_new_method_call(
                         bus,
@@ -1700,7 +1786,7 @@ static int read_only_image(int argc, char *argv[], void *userdata) {
                 }
         }
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call_method(
                         bus,
@@ -1771,7 +1857,7 @@ static int start_machine(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = bus_wait_for_jobs_new(bus, &w);
         if (r < 0)
@@ -1836,7 +1922,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         method = streq(argv[0], "enable") ? "EnableUnitFiles" : "DisableUnitFiles";
 
@@ -1991,7 +2077,7 @@ static int transfer_image_common(sd_bus *bus, sd_bus_message *m) {
         assert(bus);
         assert(m);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_event_default(&event);
         if (r < 0)
@@ -2441,7 +2527,7 @@ static int compare_transfer_info(const void *a, const void *b) {
 }
 
 static int list_transfers(int argc, char *argv[], void *userdata) {
-        size_t max_type = strlen("TYPE"), max_local = strlen("LOCAL"), max_remote = strlen("REMOTE");
+        size_t max_type = STRLEN("TYPE"), max_local = STRLEN("LOCAL"), max_remote = STRLEN("REMOTE");
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_free_ TransferInfo *transfers = NULL;
@@ -2542,7 +2628,7 @@ static int cancel_transfer(int argc, char *argv[], void *userdata) {
 
         assert(bus);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         for (i = 1; i < argc; i++) {
                 uint32_t id;
@@ -3058,12 +3144,13 @@ static int machinectl_main(int argc, char *argv[], sd_bus *bus) {
 }
 
 int main(int argc, char*argv[]) {
-        sd_bus *bus = NULL;
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
         log_parse_environment();
         log_open();
+        sigbus_install();
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -3080,7 +3167,6 @@ int main(int argc, char*argv[]) {
         r = machinectl_main(argc, argv, bus);
 
 finish:
-        sd_bus_flush_close_unref(bus);
         pager_close();
         polkit_agent_close();
 

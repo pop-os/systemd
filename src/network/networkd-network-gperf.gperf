@@ -1,4 +1,7 @@
 %{
+#if __GNUC__ >= 7
+_Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
+#endif
 #include <stddef.h>
 #include "conf-parser.h"
 #include "networkd-conf.h"
@@ -30,6 +33,7 @@ Link.MACAddress,                        config_parse_hwaddr,                    
 Link.MTUBytes,                          config_parse_iec_size,                          0,                             offsetof(Network, mtu)
 Link.ARP,                               config_parse_tristate,                          0,                             offsetof(Network, arp)
 Link.Unmanaged,                         config_parse_bool,                              0,                             offsetof(Network, unmanaged)
+Link.RequiredForOnline,                 config_parse_bool,                              0,                             offsetof(Network, required_for_online)
 Network.Description,                    config_parse_string,                            0,                             offsetof(Network, description)
 Network.Bridge,                         config_parse_netdev,                            0,                             offsetof(Network, bridge)
 Network.Bond,                           config_parse_netdev,                            0,                             offsetof(Network, bond)
@@ -90,6 +94,8 @@ RoutingPolicyRule.Table,                config_parse_routing_policy_rule_table, 
 RoutingPolicyRule.FirewallMark,         config_parse_routing_policy_rule_fwmark_mask,   0,                             0
 RoutingPolicyRule.From,                 config_parse_routing_policy_rule_prefix,        0,                             0
 RoutingPolicyRule.To,                   config_parse_routing_policy_rule_prefix,        0,                             0
+RoutingPolicyRule.IncomingInterface,    config_parse_routing_policy_rule_device,        0,                             0
+RoutingPolicyRule.OutgoingInterface,    config_parse_routing_policy_rule_device,        0,                             0
 Route.Gateway,                          config_parse_gateway,                           0,                             0
 Route.Destination,                      config_parse_destination,                       0,                             0
 Route.Source,                           config_parse_destination,                       0,                             0
@@ -123,7 +129,7 @@ DHCP.IAID,                              config_parse_iaid,                      
 DHCP.ListenPort,                        config_parse_uint16,                            0,                             offsetof(Network, dhcp_client_port)
 IPv6AcceptRA.UseDNS,                    config_parse_bool,                              0,                             offsetof(Network, ipv6_accept_ra_use_dns)
 IPv6AcceptRA.UseDomains,                config_parse_dhcp_use_domains,                  0,                             offsetof(Network, ipv6_accept_ra_use_domains)
-IPv6AcceptRA.RouteTable,                config_parse_dhcp_route_table,                  0,                             offsetof(Network, ipv6_accept_ra_route_table)
+IPv6AcceptRA.RouteTable,                config_parse_uint32,                            0,                             offsetof(Network, ipv6_accept_ra_route_table)
 DHCPServer.MaxLeaseTimeSec,             config_parse_sec,                               0,                             offsetof(Network, dhcp_server_max_lease_time_usec)
 DHCPServer.DefaultLeaseTimeSec,         config_parse_sec,                               0,                             offsetof(Network, dhcp_server_default_lease_time_usec)
 DHCPServer.EmitDNS,                     config_parse_bool,                              0,                             offsetof(Network, dhcp_server_emit_dns)
@@ -152,7 +158,9 @@ IPv6PrefixDelegation.RouterLifetimeSec, config_parse_sec,                       
 IPv6PrefixDelegation.Managed,           config_parse_bool,                              0,                             offsetof(Network, router_managed)
 IPv6PrefixDelegation.OtherInformation,  config_parse_bool,                              0,                             offsetof(Network, router_other_information)
 IPv6PrefixDelegation.RouterPreference,  config_parse_router_preference,                 0,                             0
+IPv6PrefixDelegation.EmitDNS,           config_parse_bool,                              0,                             offsetof(Network, router_emit_dns)
 IPv6PrefixDelegation.DNS,               config_parse_radv_dns,                          0,                             0
+IPv6PrefixDelegation.EmitDomains,       config_parse_bool,                              0,                             offsetof(Network, router_emit_domains)
 IPv6PrefixDelegation.Domains,           config_parse_radv_search_domains,               0,                             0
 IPv6PrefixDelegation.DNSLifetimeSec,    config_parse_sec,                               0,                             offsetof(Network, router_dns_lifetime_usec)
 IPv6Prefix.Prefix,                      config_parse_prefix,                            0,                             0

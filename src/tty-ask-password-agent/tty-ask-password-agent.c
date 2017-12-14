@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -310,7 +311,7 @@ static int parse_password(const char *filename, char **wall) {
         r = config_parse(NULL, filename, NULL,
                          NULL,
                          config_item_table_lookup, items,
-                         true, false, true, NULL);
+                         CONFIG_PARSE_RELAXED|CONFIG_PARSE_WARN, NULL);
         if (r < 0)
                 return r;
 
@@ -720,7 +721,7 @@ static int ask_on_this_console(const char *tty, pid_t *pid, int argc, char *argv
 
                 for (ac = 0; ac < argc; ac++) {
                         if (streq(argv[ac], "--console")) {
-                                argv[ac] = strjoina("--console=", tty, NULL);
+                                argv[ac] = strjoina("--console=", tty);
                                 break;
                         }
                 }

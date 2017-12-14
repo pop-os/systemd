@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -41,6 +42,7 @@
 #include "btrfs-util.h"
 #include "chattr-util.h"
 #include "copy.h"
+#include "device-nodes.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "io-util.h"
@@ -909,7 +911,8 @@ int btrfs_subvol_set_subtree_quota_limit(const char *path, uint64_t subvol_id, u
 
 int btrfs_resize_loopback_fd(int fd, uint64_t new_size, bool grow_only) {
         struct btrfs_ioctl_vol_args args = {};
-        _cleanup_free_ char *p = NULL, *loop = NULL, *backing = NULL;
+        char p[SYS_BLOCK_PATH_MAX("/loop/backing_file")];
+        _cleanup_free_ char *backing = NULL;
         _cleanup_close_ int loop_fd = -1, backing_fd = -1;
         struct stat st;
         dev_t dev = 0;
@@ -929,8 +932,7 @@ int btrfs_resize_loopback_fd(int fd, uint64_t new_size, bool grow_only) {
         if (r == 0)
                 return -ENODEV;
 
-        if (asprintf(&p, "/sys/dev/block/%u:%u/loop/backing_file", major(dev), minor(dev)) < 0)
-                return -ENOMEM;
+        xsprintf_sys_block_path(p, "/loop/backing_file", dev);
         r = read_one_line_file(p, &backing);
         if (r == -ENOENT)
                 return -ENODEV;
@@ -954,9 +956,8 @@ int btrfs_resize_loopback_fd(int fd, uint64_t new_size, bool grow_only) {
         if (grow_only && new_size < (uint64_t) st.st_size)
                 return -EINVAL;
 
-        if (asprintf(&loop, "/dev/block/%u:%u", major(dev), minor(dev)) < 0)
-                return -ENOMEM;
-        loop_fd = open(loop, O_RDWR|O_CLOEXEC|O_NOCTTY);
+        xsprintf_sys_block_path(p, NULL, dev);
+        loop_fd = open(p, O_RDWR|O_CLOEXEC|O_NOCTTY);
         if (loop_fd < 0)
                 return -errno;
 
@@ -1212,7 +1213,7 @@ static int subvol_remove_children(int fd, const char *subvolume, uint64_t subvol
         if (!S_ISDIR(st.st_mode))
                 return -EINVAL;
 
-        subvol_fd = openat(fd, subvolume, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+        subvol_fd = openat(fd, subvolume, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW);
         if (subvol_fd < 0)
                 return -errno;
 
@@ -1292,7 +1293,7 @@ static int subvol_remove_children(int fd, const char *subvolume, uint64_t subvol
                                  * hence we need to open the
                                  * containing directory first */
 
-                                child_fd = openat(subvol_fd, ino_args.name, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+                                child_fd = openat(subvol_fd, ino_args.name, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW);
                                 if (child_fd < 0)
                                         return -errno;
 
@@ -1641,7 +1642,7 @@ static int subvol_snapshot_children(int old_fd, int new_fd, const char *subvolum
                         if (!c)
                                 return -ENOMEM;
 
-                        old_child_fd = openat(old_fd, c, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+                        old_child_fd = openat(old_fd, c, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW);
                         if (old_child_fd < 0)
                                 return -errno;
 
@@ -1649,7 +1650,7 @@ static int subvol_snapshot_children(int old_fd, int new_fd, const char *subvolum
                         if (!np)
                                 return -ENOMEM;
 
-                        new_child_fd = openat(new_fd, np, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+                        new_child_fd = openat(new_fd, np, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW);
                         if (new_child_fd < 0)
                                 return -errno;
 
@@ -1660,7 +1661,7 @@ static int subvol_snapshot_children(int old_fd, int new_fd, const char *subvolum
                                  * into place. */
 
                                 if (subvolume_fd < 0) {
-                                        subvolume_fd = openat(new_fd, subvolume, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY);
+                                        subvolume_fd = openat(new_fd, subvolume, O_RDONLY|O_NOCTTY|O_CLOEXEC|O_DIRECTORY|O_NOFOLLOW);
                                         if (subvolume_fd < 0)
                                                 return -errno;
                                 }

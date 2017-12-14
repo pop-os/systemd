@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -119,6 +120,8 @@ int link_update_rtnl(Link *l, sd_netlink_message *m) {
 
 int link_update_monitor(Link *l) {
         assert(l);
+
+        l->required_for_online = sd_network_link_get_required_for_online(l->ifindex) != 0;
 
         l->operational_state = mfree(l->operational_state);
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -52,5 +53,7 @@ bool pty_forward_is_done(PTYForward *f);
 void pty_forward_set_handler(PTYForward *f, PTYForwardHandler handler, void *userdata);
 
 bool pty_forward_drain(PTYForward *f);
+
+int pty_forward_set_priority(PTYForward *f, int64_t priority);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(PTYForward*, pty_forward_free);

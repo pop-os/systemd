@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -89,6 +90,7 @@ typedef enum NLUnionLinkInfoData {
         NL_UNION_LINK_INFO_DATA_VRF,
         NL_UNION_LINK_INFO_DATA_VCAN,
         NL_UNION_LINK_INFO_DATA_GENEVE,
+        NL_UNION_LINK_INFO_DATA_VXCAN,
         _NL_UNION_LINK_INFO_DATA_MAX,
         _NL_UNION_LINK_INFO_DATA_INVALID = -1
 } NLUnionLinkInfoData;

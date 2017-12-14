@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -114,7 +115,7 @@ int config_parse_ip_address_access(
 
                         a->family = AF_INET6;
                         a->address.in6 = (struct in6_addr) {
-                                .__in6_u.__u6_addr32[0] = htobe32(0xfe800000)
+                                .s6_addr32[0] = htobe32(0xfe800000)
                         };
                         a->prefixlen = 64;
 
@@ -133,7 +134,7 @@ int config_parse_ip_address_access(
 
                         a->family = AF_INET6;
                         a->address.in6 = (struct in6_addr) {
-                                .__in6_u.__u6_addr32[0] = htobe32(0xff000000)
+                                .s6_addr32[0] = htobe32(0xff000000)
                         };
                         a->prefixlen = 8;
 
@@ -155,9 +156,15 @@ int config_parse_ip_address_access(
                 r = bpf_firewall_supported();
                 if (r < 0)
                         return r;
-                if (r == 0)
-                        log_warning("File %s:%u configures an IP firewall (%s=%s), but the local system does not support BPF/cgroup based firewalling.\n"
-                                    "Proceeding WITHOUT firewalling in effect!", filename, line, lvalue, rvalue);
+                if (r == 0) {
+                        static bool warned = false;
+
+                        log_full(warned ? LOG_DEBUG : LOG_WARNING,
+                                 "File %s:%u configures an IP firewall (%s=%s), but the local system does not support BPF/cgroup based firewalling.\n"
+                                 "Proceeding WITHOUT firewalling in effect! (This warning is only shown for the first loaded unit using IP firewalling.)", filename, line, lvalue, rvalue);
+
+                        warned = true;
+                }
         }
 
         return 0;

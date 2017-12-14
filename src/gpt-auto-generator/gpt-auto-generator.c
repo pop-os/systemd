@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -43,6 +44,7 @@
 #include "path-util.h"
 #include "proc-cmdline.h"
 #include "special.h"
+#include "specifier.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "udev-util.h"
@@ -56,7 +58,7 @@ static bool arg_root_enabled = true;
 static bool arg_root_rw = false;
 
 static int add_cryptsetup(const char *id, const char *what, bool rw, bool require, char **device) {
-        _cleanup_free_ char *e = NULL, *n = NULL, *p = NULL, *d = NULL, *to = NULL;
+        _cleanup_free_ char *e = NULL, *n = NULL, *p = NULL, *d = NULL, *id_escaped = NULL, *what_escaped = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         char *ret;
         int r;
@@ -75,6 +77,14 @@ static int add_cryptsetup(const char *id, const char *what, bool rw, bool requir
         r = unit_name_build("systemd-cryptsetup", e, ".service", &n);
         if (r < 0)
                 return log_error_errno(r, "Failed to generate unit name: %m");
+
+        id_escaped = specifier_escape(id);
+        if (!id_escaped)
+                return log_oom();
+
+        what_escaped = specifier_escape(what);
+        if (!what_escaped)
+                return log_oom();
 
         p = strjoin(arg_dest, "/", n);
         if (!p)
@@ -103,8 +113,8 @@ static int add_cryptsetup(const char *id, const char *what, bool rw, bool requir
                 "ExecStart=" SYSTEMD_CRYPTSETUP_PATH " attach '%s' '%s' '' '%s'\n"
                 "ExecStop=" SYSTEMD_CRYPTSETUP_PATH " detach '%s'\n",
                 d, d,
-                id, what, rw ? "" : "read-only",
-                id);
+                id_escaped, what_escaped, rw ? "" : "read-only",
+                id_escaped);
 
         r = fflush_and_check(f);
         if (r < 0)
@@ -163,6 +173,10 @@ static int add_mount(
         _cleanup_free_ char *unit = NULL, *crypto_what = NULL, *p = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
+
+        /* Note that we don't apply specifier escaping on the input strings here, since we know they are not configured
+         * externally, but all originate from our own sources here, and hence we know they contain no % characters that
+         * could potentially be understood as specifiers. */
 
         assert(id);
         assert(what);
@@ -688,7 +702,7 @@ static int add_mounts(void) {
 }
 
 int main(int argc, char *argv[]) {
-        int r = 0, k;
+        int r, k;
 
         if (argc > 1 && argc != 4) {
                 log_error("This program takes three or no arguments.");
@@ -720,6 +734,8 @@ int main(int argc, char *argv[]) {
 
         if (arg_root_enabled)
                 r = add_root_mount();
+        else
+                r = 0;
 
         if (!in_initrd()) {
                 k = add_mounts();

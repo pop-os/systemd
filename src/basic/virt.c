@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -200,8 +201,6 @@ static int detect_vm_dmi(void) {
                         return r;
                 }
 
-
-
                 for (j = 0; j < ELEMENTSOF(dmi_vendor_table); j++)
                         if (startswith(s, dmi_vendor_table[j].vendor)) {
                                 log_debug("Virtualization %s found in DMI (%s)", s, dmi_vendors[i]);
@@ -216,27 +215,48 @@ static int detect_vm_dmi(void) {
 }
 
 static int detect_vm_xen(void) {
+
         /* Check for Dom0 will be executed later in detect_vm_xen_dom0
-           Thats why we dont check the content of /proc/xen/capabilities here. */
-        if (access("/proc/xen/capabilities", F_OK) < 0) {
-                log_debug("Virtualization XEN not found, /proc/xen/capabilities does not exist");
+           The presence of /proc/xen indicates some form of a Xen domain */
+        if (access("/proc/xen", F_OK) < 0) {
+                log_debug("Virtualization XEN not found, /proc/xen does not exist");
                 return VIRTUALIZATION_NONE;
         }
 
-        log_debug("Virtualization XEN found (/proc/xen/capabilities exists)");
-        return  VIRTUALIZATION_XEN;
-
+        log_debug("Virtualization XEN found (/proc/xen exists)");
+        return VIRTUALIZATION_XEN;
 }
 
-static bool detect_vm_xen_dom0(void) {
+#define XENFEAT_dom0 11 /* xen/include/public/features.h */
+#define PATH_FEATURES "/sys/hypervisor/properties/features"
+/* Returns -errno, or 0 for domU, or 1 for dom0 */
+static int detect_vm_xen_dom0(void) {
         _cleanup_free_ char *domcap = NULL;
         char *cap, *i;
         int r;
 
+        r = read_one_line_file(PATH_FEATURES, &domcap);
+        if (r < 0 && r != -ENOENT)
+                return r;
+        if (r == 0) {
+                unsigned long features;
+
+                r = safe_atolu(domcap, &features);
+                if (r == 0) {
+                        r = !!(features & (1U << XENFEAT_dom0));
+                        log_debug("Virtualization XEN, found %s with value %08lx, "
+                                  "XENFEAT_dom0 (indicating the 'hardware domain') is%s set.",
+                                  PATH_FEATURES, features, r ? "" : " not");
+                        return r;
+                }
+                log_debug("Virtualization XEN, found %s, unhandled content '%s'",
+                          PATH_FEATURES, domcap);
+        }
+
         r = read_one_line_file("/proc/xen/capabilities", &domcap);
         if (r == -ENOENT) {
-                log_debug("Virtualization XEN not found, /proc/xen/capabilities does not exist");
-                return false;
+                log_debug("Virtualization XEN because /proc/xen/capabilities does not exist");
+                return 0;
         }
         if (r < 0)
                 return r;
@@ -247,11 +267,11 @@ static bool detect_vm_xen_dom0(void) {
                         break;
         if (!cap) {
                 log_debug("Virtualization XEN DomU found (/proc/xen/capabilites)");
-                return false;
+                return 0;
         }
 
         log_debug("Virtualization XEN Dom0 ignored (/proc/xen/capabilities)");
-        return true;
+        return 1;
 }
 
 static int detect_vm_hypervisor(void) {
@@ -317,6 +337,7 @@ static int detect_vm_zvm(void) {
 int detect_vm(void) {
         static thread_local int cached_found = _VIRTUALIZATION_INVALID;
         int r, dmi;
+        bool other = false;
 
         if (cached_found >= 0)
                 return cached_found;
@@ -337,45 +358,68 @@ int detect_vm(void) {
         r = detect_vm_cpuid();
         if (r < 0)
                 return r;
-        if (r != VIRTUALIZATION_NONE)
-                goto finish;
+        if (r != VIRTUALIZATION_NONE) {
+                if (r == VIRTUALIZATION_VM_OTHER)
+                        other = true;
+                else
+                        goto finish;
+        }
 
         r = dmi;
         if (r < 0)
                 return r;
-        if (r != VIRTUALIZATION_NONE)
-                goto finish;
+        if (r != VIRTUALIZATION_NONE) {
+                if (r == VIRTUALIZATION_VM_OTHER)
+                        other = true;
+                else
+                        goto finish;
+        }
 
         /* x86 xen will most likely be detected by cpuid. If not (most likely
-         * because we're not an x86 guest), then we should try the xen capabilities
-         * file next. If that's not found, then we check for the high-level
-         * hypervisor sysfs file:
-         *
-         * https://bugs.freedesktop.org/show_bug.cgi?id=77271 */
+         * because we're not an x86 guest), then we should try the /proc/xen
+         * directory next. If that's not found, then we check for the high-level
+         * hypervisor sysfs file.
+	 */
 
         r = detect_vm_xen();
         if (r < 0)
                 return r;
-        if (r != VIRTUALIZATION_NONE)
-                goto finish;
+        if (r != VIRTUALIZATION_NONE) {
+                if (r == VIRTUALIZATION_VM_OTHER)
+                        other = true;
+                else
+                        goto finish;
+        }
 
         r = detect_vm_hypervisor();
         if (r < 0)
                 return r;
-        if (r != VIRTUALIZATION_NONE)
-                goto finish;
+        if (r != VIRTUALIZATION_NONE) {
+                if (r == VIRTUALIZATION_VM_OTHER)
+                        other = true;
+                else
+                        goto finish;
+        }
 
         r = detect_vm_device_tree();
         if (r < 0)
                 return r;
-        if (r != VIRTUALIZATION_NONE)
-                goto finish;
+        if (r != VIRTUALIZATION_NONE) {
+                if (r == VIRTUALIZATION_VM_OTHER)
+                        other = true;
+                else
+                        goto finish;
+        }
 
         r = detect_vm_uml();
         if (r < 0)
                 return r;
-        if (r != VIRTUALIZATION_NONE)
-                goto finish;
+        if (r != VIRTUALIZATION_NONE) {
+                if (r == VIRTUALIZATION_VM_OTHER)
+                        other = true;
+                else
+                        goto finish;
+        }
 
         r = detect_vm_zvm();
         if (r < 0)
@@ -385,8 +429,14 @@ finish:
         /* x86 xen Dom0 is detected as XEN in hypervisor and maybe others.
          * In order to detect the Dom0 as not virtualization we need to
          * double-check it */
-        if (r == VIRTUALIZATION_XEN && detect_vm_xen_dom0())
-                r = VIRTUALIZATION_NONE;
+        if (r == VIRTUALIZATION_XEN) {
+                int ret = detect_vm_xen_dom0();
+                if (ret < 0)
+                        return ret;
+                if (ret > 0)
+                        r = VIRTUALIZATION_NONE;
+        } else if (r == VIRTUALIZATION_NONE && other)
+                r = VIRTUALIZATION_VM_OTHER;
 
         cached_found = r;
         log_debug("Found VM virtualization %s", virtualization_to_string(r));

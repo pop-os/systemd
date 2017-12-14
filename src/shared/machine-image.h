@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -33,6 +34,7 @@ typedef enum ImageType {
         IMAGE_DIRECTORY,
         IMAGE_SUBVOLUME,
         IMAGE_RAW,
+        IMAGE_BLOCK,
         _IMAGE_TYPE_MAX,
         _IMAGE_TYPE_INVALID = -1
 } ImageType;
@@ -51,11 +53,20 @@ typedef struct Image {
         uint64_t limit;
         uint64_t limit_exclusive;
 
+        char *hostname;
+        sd_id128_t machine_id;
+        char **machine_info;
+        char **os_release;
+
+        bool metadata_valid;
+
         void *userdata;
 } Image;
 
 Image *image_unref(Image *i);
-void image_hashmap_free(Hashmap *map);
+static inline Hashmap* image_hashmap_free(Hashmap *map) {
+        return hashmap_free_with_destructor(map, image_unref);
+}
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Image*, image_unref);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Hashmap*, image_hashmap_free);
@@ -77,6 +88,8 @@ int image_path_lock(const char *path, int operation, LockFile *global, LockFile 
 int image_name_lock(const char *name, int operation, LockFile *ret);
 
 int image_set_limit(Image *i, uint64_t referenced_max);
+
+int image_read_metadata(Image *i);
 
 static inline bool IMAGE_IS_HIDDEN(const struct Image *i) {
         assert(i);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -61,7 +62,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* Always create the directory where resolv.conf will live */
-        r = mkdir_safe_label("/run/systemd/resolve", 0755, uid, gid);
+        r = mkdir_safe_label("/run/systemd/resolve", 0755, uid, gid, false);
         if (r < 0) {
                 log_error_errno(r, "Could not create runtime directory: %m");
                 goto finish;
@@ -117,10 +118,6 @@ int main(int argc, char *argv[]) {
         sd_event_get_exit_code(m->event, &r);
 
 finish:
-        /* systemd-nspawn checks for private resolv.conf to decide whether
-           or not to mount it into the container. So just delete it. */
-        (void) unlink(PRIVATE_RESOLV_CONF);
-
         sd_notify(false,
                   "STOPPING=1\n"
                   "STATUS=Shutting down...");

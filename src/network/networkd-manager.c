@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -20,6 +21,7 @@
 #include <sys/socket.h>
 #include <linux/if.h>
 #include <linux/fib_rules.h>
+#include <stdio_ext.h>
 
 #include "sd-daemon.h"
 #include "sd-netlink.h"
@@ -149,9 +151,6 @@ int manager_connect_bus(Manager *m) {
 
                 return 0;
         }
-
-        if (r < 0)
-                return r;
 
         r = sd_bus_add_match(m->bus, &m->prepare_for_sleep_slot,
                              "type='signal',"
@@ -470,7 +469,7 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
                                 return 0;
                 }
 
-                route_update(route, &src, src_prefixlen, &gw, &prefsrc, scope, rt_type, protocol);
+                route_update(route, &src, src_prefixlen, &gw, &prefsrc, scope, protocol, rt_type);
 
                 break;
 
@@ -605,7 +604,7 @@ int manager_rtnl_process_address(sd_netlink *rtnl, sd_netlink_message *message, 
         case RTM_NEWADDR:
                 if (address)
                         log_link_debug(link, "Updating address: %s/%u (valid %s%s)", buf, prefixlen,
-                                       valid_str ? "for " : "forever", valid_str ?: "");
+                                       valid_str ? "for " : "forever", strempty(valid_str));
                 else {
                         /* An address appeared that we did not request */
                         r = address_add_foreign(link, family, &in_addr, prefixlen, &address);
@@ -614,7 +613,7 @@ int manager_rtnl_process_address(sd_netlink *rtnl, sd_netlink_message *message, 
                                 return 0;
                         } else
                                 log_link_debug(link, "Adding address: %s/%u (valid %s%s)", buf, prefixlen,
-                                               valid_str ? "for " : "forever", valid_str ?: "");
+                                               valid_str ? "for " : "forever", strempty(valid_str));
                 }
 
                 address_update(address, flags, scope, &cinfo);
@@ -625,11 +624,11 @@ int manager_rtnl_process_address(sd_netlink *rtnl, sd_netlink_message *message, 
 
                 if (address) {
                         log_link_debug(link, "Removing address: %s/%u (valid %s%s)", buf, prefixlen,
-                                       valid_str ? "for " : "forever", valid_str ?: "");
+                                       valid_str ? "for " : "forever", strempty(valid_str));
                         address_drop(address);
                 } else
                         log_link_warning(link, "Removing non-existent address: %s/%u (valid %s%s)", buf, prefixlen,
-                                         valid_str ? "for " : "forever", valid_str ?: "");
+                                         valid_str ? "for " : "forever", strempty(valid_str));
 
                 break;
         default:
@@ -731,6 +730,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
         union in_addr_union to, from;
         uint32_t fwmark = 0, table = 0;
         Manager *m = userdata;
+        char *iif, *oif;
         uint16_t type;
         int family;
         int r;
@@ -810,13 +810,15 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
         (void) sd_netlink_message_read_u32(message, FRA_FWMARK, &fwmark);
         (void) sd_netlink_message_read_u32(message, FRA_TABLE, &table);
         (void) sd_rtnl_message_routing_policy_rule_get_tos(message, &tos);
+        (void) sd_netlink_message_read_string(message, FRA_IIFNAME, (const char **) &iif);
+        (void) sd_netlink_message_read_string(message, FRA_OIFNAME, (const char **) &oif);
 
-        (void) routing_policy_rule_get(m, family, &from, from_prefixlen, &to, to_prefixlen, tos, fwmark, table, &rule);
+        (void) routing_policy_rule_get(m, family, &from, from_prefixlen, &to, to_prefixlen, tos, fwmark, table, iif, oif, &rule);
 
         switch (type) {
         case RTM_NEWRULE:
-                if(!rule) {
-                        r = routing_policy_rule_add_foreign(m, family, &from, from_prefixlen, &to, to_prefixlen, tos, fwmark, table, &rule);
+                if (!rule) {
+                        r = routing_policy_rule_add_foreign(m, family, &from, from_prefixlen, &to, to_prefixlen, tos, fwmark, table, iif, oif, &rule);
                         if (r < 0) {
                                 log_warning_errno(r, "Could not add rule: %m");
                                 return 0;
@@ -990,18 +992,16 @@ static void print_string_set(FILE *f, const char *field, OrderedSet *s) {
         if (ordered_set_isempty(s))
                 return;
 
-        fputs_unlocked(field, f);
+        fputs(field, f);
 
         ORDERED_SET_FOREACH(p, s, i)
                 fputs_with_space(f, p, NULL, &space);
 
-        fputc_unlocked('\n', f);
+        fputc('\n', f);
 }
 
 static int manager_save(Manager *m) {
         _cleanup_ordered_set_free_free_ OrderedSet *dns = NULL, *ntp = NULL, *search_domains = NULL, *route_domains = NULL;
-        RoutingPolicyRule *rule = NULL;
-        bool space = false;
         Link *link;
         Iterator i;
         _cleanup_free_ char *temp_path = NULL;
@@ -1115,6 +1115,7 @@ static int manager_save(Manager *m) {
         if (r < 0)
                 return r;
 
+        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
         (void) fchmod(fileno(f), 0644);
 
         fprintf(f,
@@ -1126,27 +1127,9 @@ static int manager_save(Manager *m) {
         print_string_set(f, "DOMAINS=", search_domains);
         print_string_set(f, "ROUTE_DOMAINS=", route_domains);
 
-        SET_FOREACH(rule, m->rules, i) {
-                _cleanup_free_ char *from_str = NULL, *to_str = NULL;
-                fputs("RULE=", f);
-
-                if (!in_addr_is_null(rule->family, &rule->from)) {
-                        r = in_addr_to_string(rule->family, &rule->from, &from_str);
-                        if (r < 0)
-                                goto fail;
-                }
-
-                if (!in_addr_is_null(rule->family, &rule->to)) {
-                        r = in_addr_to_string(rule->family, &rule->to, &to_str);
-                        if (r < 0)
-                                goto fail;
-                }
-
-                fprintf(f, "from=%s%s/%hhu to=%s%s/%hhu tos=%hhu fwmark=%"PRIu32"/%"PRIu32" table=%hhu", space ? " " : "", from_str,
-                        rule->from_prefixlen, space ? " " : "", to_str, rule->to_prefixlen, rule->tos, rule->fwmark, rule->fwmask, rule->table);
-
-                fputc('\n', f);
-        }
+        r = routing_policy_serialize_rules(m->rules, f);
+        if (r < 0)
+                goto fail;
 
         r = fflush_and_check(f);
         if (r < 0)
@@ -1233,7 +1216,7 @@ int manager_new(Manager **ret, sd_event *event) {
 
         m->duid.type = DUID_TYPE_EN;
 
-        (void) routing_policy_rule_load(m);
+        (void) routing_policy_load_rules(m->state_file, &m->rules_saved);
 
         *ret = m;
         m = NULL;
@@ -1242,7 +1225,6 @@ int manager_new(Manager **ret, sd_event *event) {
 }
 
 void manager_free(Manager *m) {
-        RoutingPolicyRule *rule;
         Network *network;
         NetDev *netdev;
         Link *link;
@@ -1272,10 +1254,7 @@ void manager_free(Manager *m) {
         set_free(m->rules);
         set_free(m->rules_foreign);
 
-        while ((rule = set_steal_first(m->rules_saved)))
-                free(rule);
-
-        set_free(m->rules_saved);
+        set_free_with_destructor(m->rules_saved, routing_policy_rule_free);
 
         sd_netlink_unref(m->rtnl);
         sd_event_unref(m->event);
@@ -1454,8 +1433,14 @@ int manager_rtnl_enumerate_rules(Manager *m) {
                 return r;
 
         r = sd_netlink_call(m->rtnl, req, 0, &reply);
-        if (r < 0)
+        if (r < 0) {
+                if (r == -EOPNOTSUPP) {
+                        log_debug("FIB Rules are not supported by the kernel. Ignoring.");
+                        return 0;
+                }
+
                 return r;
+        }
 
         for (rule = reply; rule; rule = sd_netlink_message_next(rule)) {
                 int k;

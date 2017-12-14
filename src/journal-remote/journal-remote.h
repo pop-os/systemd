@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -32,7 +33,8 @@ struct MHDDaemonWrapper {
         uint64_t fd;
         struct MHD_Daemon *daemon;
 
-        sd_event_source *event;
+        sd_event_source *io_event;
+        sd_event_source *timer_event;
 };
 
 struct RemoteServer {

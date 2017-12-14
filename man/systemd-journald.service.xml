@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -90,17 +92,19 @@
     for more information about the collected metadata.
     </para>
 
-    <para>Log data collected by the journal is primarily text-based
-    but can also include binary data where necessary. All objects
-    stored in the journal can be up to 2^64-1 bytes in size.</para>
+    <para>Log data collected by the journal is primarily text-based but can also include binary data where
+    necessary. Individual fields making up a log record stored in the journal may be up to 2^64-1 bytes in size.</para>
 
-    <para>By default, the journal stores log data in
-    <filename>/run/log/journal/</filename>. Since
-    <filename>/run/</filename> is volatile, log data is lost at
-    reboot. To make the data persistent, it is sufficient to create
-    <filename>/var/log/journal/</filename> where
-    <filename>systemd-journald</filename> will then store the
-    data:</para>
+    <para>The journal service stores log data either persistently below <filename>/var/log/journal</filename> or in a
+    volatile way below <filename>/run/log/journal/</filename> (in the latter case it is lost at reboot). By default, log
+    data is stored persistently if <filename>/var/log/journal/</filename> exists during boot, with an implicit fallback
+    to volatile storage otherwise. Use <varname>Storage=</varname> in
+    <citerefentry><refentrytitle>journald.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry> to configure
+    where log data is placed, independently of the existence of <filename>/var/log/journal/</filename>.</para>
+
+    <para>On systems where <filename>/var/log/journal/</filename> does not exist yet but where persistent logging is
+    desired (and the default <filename>journald.conf</filename> is used), it is sufficient to create the directory, and
+    ensure it has the correct access modes and ownership:</para>
 
     <programlisting>mkdir -p /var/log/journal
 systemd-tmpfiles --create --prefix /var/log/journal</programlisting>
@@ -123,7 +127,7 @@ systemd-tmpfiles --create --prefix /var/log/journal</programlisting>
     <para>If <filename>systemd-journald.service</filename> is stopped, the stream connections associated with all
     services are terminated. Further writes to those streams by the service will result in <constant>EPIPE</constant>
     errors. In order to react gracefully in this case it is recommended that programs logging to standard output/error
-    ignore such errors. If the the <constant>SIGPIPE</constant> UNIX signal handler is not blocked or turned off, such
+    ignore such errors. If the <constant>SIGPIPE</constant> UNIX signal handler is not blocked or turned off, such
     write attempts will also result in such process signals being generated, see
     <citerefentry><refentrytitle>signal</refentrytitle><manvolnum>7</manvolnum></citerefentry>. To mitigate this issue,
     systemd service manager explicitly turns off the <constant>SIGPIPE</constant> signal for all invoked processes by
@@ -145,12 +149,12 @@ systemd-tmpfiles --create --prefix /var/log/journal</programlisting>
     transports listed above, which are inherently record based and where the metadata is always associated with the
     individual record.</para>
 
-    <para>In addition to the the implicit standard output/error logging of services, stream logging is also available
+    <para>In addition to the implicit standard output/error logging of services, stream logging is also available
     via the <citerefentry><refentrytitle>systemd-cat</refentrytitle><manvolnum>1</manvolnum></citerefentry> command
     line tool.</para>
 
     <para>Currently, the number of parallel log streams <filename>systemd-journald</filename> will accept is limited to
-    4096. When this limit is reached further log streams may be established but will receieve
+    4096. When this limit is reached further log streams may be established but will receive
     <constant>EPIPE</constant> right from the beginning.</para>
   </refsect1>
 

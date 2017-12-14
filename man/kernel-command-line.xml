@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2012 Lennart Poettering
@@ -377,6 +379,15 @@
         <listitem>
           <para>Overwrites the default start job timeout <varname>DefaultTimeoutStartSec=</varname> at boot. For details,
           see <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.watchdog_device=</varname></term>
+
+        <listitem>
+          <para>Overwrites the watchdog device path <varname>WatchdogDevice=</varname>. For details, see
+          <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
         </listitem>
       </varlistentry>
 

@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -81,7 +83,6 @@
     <filename>poweroff.target</filename>,
     <filename>printer.target</filename>,
     <filename>reboot.target</filename>,
-    <filename>remote-cryptsetup-pre.target</filename>,
     <filename>remote-cryptsetup.target</filename>,
     <filename>remote-fs-pre.target</filename>,
     <filename>remote-fs.target</filename>,
@@ -444,6 +445,10 @@
           it. Note that networking daemons that simply provide
           functionality to other hosts generally do not need to pull
           this in.</para>
+
+          <para>Note that this unit is only useful during the original system start-up logic. After the system has
+          completed booting up, it will not track the online state of the system anymore. Due to this it cannot be used
+          as a network connection monitor concept, it is purely a one-time system start-up concept.</para>
           </listitem>
       </varlistentry>
       <varlistentry>
@@ -495,18 +500,6 @@
         </listitem>
       </varlistentry>
       <varlistentry>
-        <term><filename>remote-cryptsetup-pre.target</filename></term>
-        <listitem>
-          <para>This target unit is automatically ordered before all cryptsetup devices
-          marked with the <option>_netdev</option>. It can be used to execute additional
-          units before such devices are set up.</para>
-
-          <para>It is ordered after <filename>network.target</filename> and
-          <filename>network-online.target</filename>, and also pulls the latter in as a
-          <varname>Wants=</varname> dependency.</para>
-        </listitem>
-      </varlistentry>
-      <varlistentry>
         <term><filename>remote-cryptsetup.target</filename></term>
         <listitem>
           <para>Similar to <filename>cryptsetup.target</filename>, but for encrypted
@@ -534,7 +527,8 @@
           shell. Isolate to this target in order to administer the system in single-user mode with all file systems
           mounted but with no services running, except for the most basic. Compare with
           <filename>emergency.target</filename>, which is much more reduced and does not provide the file systems or
-          most basic services.</para>
+          most basic services. Compare with <filename>multi-user.target</filename>, this target could be seen as
+          <filename>single-user.target</filename>.</para>
 
           <para><filename>runlevel1.target</filename> is an alias for this target unit, for compatibility with
           SysV.</para>
@@ -906,9 +900,10 @@
         <term><filename>remote-fs-pre.target</filename></term>
         <listitem>
           <para>This target unit is automatically ordered before all
-          remote mount point units (see above). It can be used to run
-          certain units before the remote mounts are established. Note
-          that this unit is generally not part of the initial
+          mount point units (see above) and cryptsetup devices
+          marked with the <option>_netdev</option>. It can be used to run
+          certain units before remote encrypted devices and mounts are established.
+          Note that this unit is generally not part of the initial
           transaction, unless the unit that wants to be ordered before
           all remote mounts pulls it in via a
           <varname>Wants=</varname> type dependency. If the unit wants
@@ -1026,7 +1021,7 @@ PartOf=graphical-session.target
 
     <para>There are four <literal>.slice</literal> units which form the basis of the hierarchy for assignment of
     resources for services, users, and virtual machines or containers. See
-    <citerefentry><refentrytitle>-.slice</refentrytitle><manvolnum>7</manvolnum></citerefentry> for details about slice
+    <citerefentry><refentrytitle>systemd.slice</refentrytitle><manvolnum>7</manvolnum></citerefentry> for details about slice
     units.</para>
 
     <variablelist>
@@ -1077,7 +1072,7 @@ PartOf=graphical-session.target
         <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.target</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.slice</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry project='man-pages'><refentrytitle>bootup</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+        <citerefentry><refentrytitle>bootup</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
       </para>
   </refsect1>

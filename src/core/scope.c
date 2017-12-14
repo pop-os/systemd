@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -58,7 +59,8 @@ static void scope_done(Unit *u) {
 
         assert(u);
 
-        free(s->controller);
+        s->controller = mfree(s->controller);
+        s->controller_track = sd_bus_track_unref(s->controller_track);
 
         s->timer_event_source = sd_event_source_unref(s->timer_event_source);
 }
@@ -124,7 +126,8 @@ static int scope_add_default_dependencies(Scope *s) {
         r = unit_add_two_dependencies_by_name(
                         UNIT(s),
                         UNIT_BEFORE, UNIT_CONFLICTS,
-                        SPECIAL_SHUTDOWN_TARGET, NULL, true);
+                        SPECIAL_SHUTDOWN_TARGET, NULL, true,
+                        UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 
@@ -227,6 +230,8 @@ static int scope_coldplug(Unit *u) {
         if (!IN_SET(s->deserialized_state, SCOPE_DEAD, SCOPE_FAILED))
                 unit_watch_all_pids(UNIT(s));
 
+        bus_scope_track_controller(s);
+
         scope_set_state(s, s->deserialized_state);
         return 0;
 }
@@ -270,9 +275,8 @@ static void scope_enter_signal(Scope *s, ScopeState state, ScopeResult f) {
 
         unit_watch_all_pids(UNIT(s));
 
-        /* If we have a controller set let's ask the controller nicely
-         * to terminate the scope, instead of us going directly into
-         * SIGTERM berserk mode */
+        /* If we have a controller set let's ask the controller nicely to terminate the scope, instead of us going
+         * directly into SIGTERM berserk mode */
         if (state == SCOPE_STOP_SIGTERM)
                 skip_signal = bus_scope_send_request_stop(s) > 0;
 
@@ -330,6 +334,8 @@ static int scope_start(Unit *u) {
         if (!u->transient && !MANAGER_IS_RELOADING(u->manager))
                 return -ENOENT;
 
+        (void) bus_scope_track_controller(s);
+
         r = unit_acquire_invocation_id(u);
         if (r < 0)
                 return r;
@@ -337,6 +343,8 @@ static int scope_start(Unit *u) {
         (void) unit_realize_cgroup(u);
         (void) unit_reset_cpu_accounting(u);
         (void) unit_reset_ip_accounting(u);
+
+        unit_export_state_files(UNIT(s));
 
         r = unit_attach_pids_to_cgroup(u);
         if (r < 0) {
@@ -407,11 +415,16 @@ static int scope_serialize(Unit *u, FILE *f, FDSet *fds) {
 
         unit_serialize_item(u, f, "state", scope_state_to_string(s->state));
         unit_serialize_item(u, f, "was-abandoned", yes_no(s->was_abandoned));
+
+        if (s->controller)
+                unit_serialize_item(u, f, "controller", s->controller);
+
         return 0;
 }
 
 static int scope_deserialize_item(Unit *u, const char *key, const char *value, FDSet *fds) {
         Scope *s = SCOPE(u);
+        int r;
 
         assert(u);
         assert(key);
@@ -435,22 +448,16 @@ static int scope_deserialize_item(Unit *u, const char *key, const char *value, F
                         log_unit_debug(u, "Failed to parse boolean value: %s", value);
                 else
                         s->was_abandoned = k;
+        } else if (streq(key, "controller")) {
+
+                r = free_and_strdup(&s->controller, value);
+                if (r < 0)
+                        log_oom();
+
         } else
                 log_unit_debug(u, "Unknown serialization key: %s", key);
 
         return 0;
-}
-
-static bool scope_check_gc(Unit *u) {
-        assert(u);
-
-        /* Never clean up scopes that still have a process around,
-         * even if the scope is formally dead. */
-
-        if (!u->cgroup_path)
-                return false;
-
-        return cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path) <= 0;
 }
 
 static void scope_notify_cgroup_empty_event(Unit *u) {
@@ -521,7 +528,11 @@ int scope_abandon(Scope *s) {
                 return -ESTALE;
 
         s->was_abandoned = true;
+
         s->controller = mfree(s->controller);
+        s->controller_track = sd_bus_track_unref(s->controller_track);
+
+        scope_set_state(s, SCOPE_ABANDONED);
 
         /* The client is no longer watching the remaining processes,
          * so let's step in here, under the assumption that the
@@ -530,12 +541,6 @@ int scope_abandon(Scope *s) {
 
         unit_tidy_watch_pids(UNIT(s), 0, 0);
         unit_watch_all_pids(UNIT(s));
-
-        /* If the PID set is empty now, then let's finish this off */
-        if (set_isempty(UNIT(s)->pids))
-                scope_notify_cgroup_empty_event(UNIT(s));
-        else
-                scope_set_state(s, SCOPE_ABANDONED);
 
         return 0;
 }
@@ -621,8 +626,6 @@ const UnitVTable scope_vtable = {
 
         .active_state = scope_active_state,
         .sub_state_to_string = scope_sub_state_to_string,
-
-        .check_gc = scope_check_gc,
 
         .sigchld_event = scope_sigchld_event,
 

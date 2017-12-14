@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
     This file is part of systemd.
 
@@ -243,7 +244,6 @@ static int netdev_vti_fill_message_create(NetDev *netdev, Link *link, sd_netlink
         int r;
 
         assert(netdev);
-        assert(link);
         assert(m);
         assert(t);
         assert(t->family == AF_INET);

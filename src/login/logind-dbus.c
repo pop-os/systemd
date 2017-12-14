@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -50,27 +51,47 @@
 #include "user-util.h"
 #include "utmp-wtmp.h"
 
-int manager_get_session_from_creds(Manager *m, sd_bus_message *message, const char *name, sd_bus_error *error, Session **ret) {
+static int get_sender_session(Manager *m, sd_bus_message *message, sd_bus_error *error, Session **ret) {
+
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
+        const char *name;
         Session *session;
         int r;
+
+        /* Get client login session.  This is not what you are looking for these days,
+         * as apps may instead belong to a user service unit.  This includes terminal
+         * emulators and hence command-line apps. */
+        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_SESSION|SD_BUS_CREDS_AUGMENT, &creds);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_creds_get_session(creds, &name);
+        if (r == -ENXIO)
+                goto err_no_session;
+        if (r < 0)
+                return r;
+
+        session = hashmap_get(m->sessions, name);
+        if (!session)
+                goto err_no_session;
+
+        *ret = session;
+        return 0;
+
+err_no_session:
+        return sd_bus_error_setf(error, BUS_ERROR_NO_SESSION_FOR_PID,
+                                 "Caller does not belong to any known session");
+}
+
+int manager_get_session_from_creds(Manager *m, sd_bus_message *message, const char *name, sd_bus_error *error, Session **ret) {
+        Session *session;
 
         assert(m);
         assert(message);
         assert(ret);
 
-        if (isempty(name)) {
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_SESSION|SD_BUS_CREDS_AUGMENT, &creds);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_creds_get_session(creds, &name);
-                if (r == -ENXIO)
-                        return sd_bus_error_setf(error, BUS_ERROR_NO_SESSION_FOR_PID,
-                                                 "Caller does not belong to any known session");
-                if (r < 0)
-                        return r;
-        }
+        if (isempty(name))
+                return get_sender_session(m, message, error, ret);
 
         session = hashmap_get(m->sessions, name);
         if (!session)
@@ -80,30 +101,48 @@ int manager_get_session_from_creds(Manager *m, sd_bus_message *message, const ch
         return 0;
 }
 
-int manager_get_user_from_creds(Manager *m, sd_bus_message *message, uid_t uid, sd_bus_error *error, User **ret) {
+static int get_sender_user(Manager *m, sd_bus_message *message, sd_bus_error *error, User **ret) {
+
+        _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
+        uid_t uid;
         User *user;
         int r;
+
+        /* Note that we get the owner UID of the session, not the actual client UID here! */
+        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_OWNER_UID|SD_BUS_CREDS_AUGMENT, &creds);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_creds_get_owner_uid(creds, &uid);
+        if (r == -ENXIO)
+                goto err_no_user;
+        if (r < 0)
+                return r;
+
+        user = hashmap_get(m->users, UID_TO_PTR(uid));
+        if (!user)
+                goto err_no_user;
+
+        *ret = user;
+        return 0;
+
+err_no_user:
+        return sd_bus_error_setf(error, BUS_ERROR_NO_USER_FOR_PID, "Caller does not belong to any logged in user or lingering user");
+}
+
+int manager_get_user_from_creds(Manager *m, sd_bus_message *message, uid_t uid, sd_bus_error *error, User **ret) {
+        User *user;
 
         assert(m);
         assert(message);
         assert(ret);
 
-        if (!uid_is_valid(uid)) {
-                _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-
-                /* Note that we get the owner UID of the session, not the actual client UID here! */
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_OWNER_UID|SD_BUS_CREDS_AUGMENT, &creds);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_creds_get_owner_uid(creds, &uid);
-                if (r < 0)
-                        return r;
-        }
+        if (!uid_is_valid(uid))
+                return get_sender_user(m, message, error, ret);
 
         user = hashmap_get(m->users, UID_TO_PTR(uid));
         if (!user)
-                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER, "No user "UID_FMT" known or logged in", uid);
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER, "User ID "UID_FMT" is not logged in or lingering", uid);
 
         *ret = user;
         return 0;
@@ -329,6 +368,9 @@ static int method_get_session(sd_bus_message *message, void *userdata, sd_bus_er
         return sd_bus_reply_method_return(message, "o", p);
 }
 
+/* Get login session of a process.  This is not what you are looking for these days,
+ * as apps may instead belong to a user service unit.  This includes terminal
+ * emulators and hence command-line apps. */
 static int method_get_session_by_pid(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_free_ char *p = NULL;
         Session *session = NULL;
@@ -419,7 +461,9 @@ static int method_get_user_by_pid(sd_bus_message *message, void *userdata, sd_bu
                 if (r < 0)
                         return r;
                 if (!user)
-                        return sd_bus_error_setf(error, BUS_ERROR_NO_USER_FOR_PID, "PID "PID_FMT" does not belong to any known or logged in user", pid);
+                        return sd_bus_error_setf(error, BUS_ERROR_NO_USER_FOR_PID,
+                                                 "PID "PID_FMT" does not belong to any logged in user or lingering user",
+                                                 pid);
         }
 
         p = user_bus_path(user);
@@ -1117,13 +1161,13 @@ static int method_terminate_seat(sd_bus_message *message, void *userdata, sd_bus
 }
 
 static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
         _cleanup_free_ char *cc = NULL;
         Manager *m = userdata;
         int r, b, interactive;
         struct passwd *pw;
         const char *path;
-        uint32_t uid;
-        bool self = false;
+        uint32_t uid, auth_uid;
 
         assert(message);
         assert(m);
@@ -1132,22 +1176,23 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
         if (r < 0)
                 return r;
 
+        r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_EUID |
+                                               SD_BUS_CREDS_OWNER_UID|SD_BUS_CREDS_AUGMENT, &creds);
+        if (r < 0)
+                return r;
+
         if (!uid_is_valid(uid)) {
-                _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-
-                /* Note that we get the owner UID of the session, not the actual client UID here! */
-                r = sd_bus_query_sender_creds(message, SD_BUS_CREDS_OWNER_UID|SD_BUS_CREDS_AUGMENT, &creds);
-                if (r < 0)
-                        return r;
-
+                /* Note that we get the owner UID of the session or user unit,
+                 * not the actual client UID here! */
                 r = sd_bus_creds_get_owner_uid(creds, &uid);
                 if (r < 0)
                         return r;
+        }
 
-                self = true;
-
-        } else if (!uid_is_valid(uid))
-                return -EINVAL;
+        /* owner_uid is racy, so for authorization we must use euid */
+        r = sd_bus_creds_get_euid(creds, &auth_uid);
+        if (r < 0)
+                return r;
 
         errno = 0;
         pw = getpwuid(uid);
@@ -1157,7 +1202,8 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
         r = bus_verify_polkit_async(
                         message,
                         CAP_SYS_ADMIN,
-                        self ? "org.freedesktop.login1.set-self-linger" : "org.freedesktop.login1.set-user-linger",
+                        uid == auth_uid ? "org.freedesktop.login1.set-self-linger" :
+                                          "org.freedesktop.login1.set-user-linger",
                         NULL,
                         interactive,
                         UID_INVALID,
@@ -1170,7 +1216,7 @@ static int method_set_user_linger(sd_bus_message *message, void *userdata, sd_bu
 
         mkdir_p_label("/var/lib/systemd", 0755);
 
-        r = mkdir_safe_label("/var/lib/systemd/linger", 0755, 0, 0);
+        r = mkdir_safe_label("/var/lib/systemd/linger", 0755, 0, 0, false);
         if (r < 0)
                 return r;
 
@@ -1236,7 +1282,7 @@ static int trigger_device(Manager *m, struct udev_device *d) {
                 if (!t)
                         return -ENOMEM;
 
-                write_string_file(t, "change", WRITE_STRING_FILE_CREATE);
+                (void) write_string_file(t, "change", 0);
         }
 
         return 0;
@@ -1555,7 +1601,7 @@ static int execute_shutdown_or_sleep(
 
 error:
         /* Tell people that they now may take a lock again */
-        send_prepare_for(m, m->action_what, false);
+        (void) send_prepare_for(m, w, false);
 
         return r;
 }
@@ -1666,7 +1712,7 @@ int bus_manager_shutdown_or_sleep_now_or_later(
         assert(!m->action_job);
 
         /* Tell everybody to prepare for shutdown/sleep */
-        send_prepare_for(m, w, true);
+        (void) send_prepare_for(m, w, true);
 
         delayed =
                 m->inhibit_delay_max > 0 &&
@@ -1904,7 +1950,7 @@ static int update_schedule_file(Manager *m) {
 
         assert(m);
 
-        r = mkdir_safe_label("/run/systemd/shutdown", 0755, 0, 0);
+        r = mkdir_safe_label("/run/systemd/shutdown", 0755, 0, 0, false);
         if (r < 0)
                 return log_error_errno(r, "Failed to create shutdown subdirectory: %m");
 
@@ -2351,7 +2397,7 @@ static int property_get_reboot_to_firmware_setup(
 
         r = efi_get_reboot_to_firmware();
         if (r < 0 && r != -EOPNOTSUPP)
-                return r;
+                log_warning_errno(r, "Failed to determine reboot-to-firmware state: %m");
 
         return sd_bus_message_append(reply, "b", r > 0);
 }
@@ -2405,10 +2451,12 @@ static int method_can_reboot_to_firmware_setup(
         assert(m);
 
         r = efi_reboot_to_firmware_supported();
-        if (r == -EOPNOTSUPP)
+        if (r < 0) {
+                if (r != -EOPNOTSUPP)
+                        log_warning_errno(errno, "Failed to determine whether reboot to firmware is supported: %m");
+
                 return sd_bus_reply_method_return(message, "s", "na");
-        else if (r < 0)
-                return r;
+        }
 
         r = bus_test_polkit(message,
                             CAP_SYS_ADMIN,
@@ -2719,7 +2767,7 @@ int match_job_removed(sd_bus_message *message, void *userdata, sd_bus_error *err
                 log_info("Operation '%s' finished.", inhibit_what_to_string(m->action_what));
 
                 /* Tell people that they now may take a lock again */
-                send_prepare_for(m, m->action_what, false);
+                (void) send_prepare_for(m, m->action_what, false);
 
                 m->action_job = mfree(m->action_job);
                 m->action_unit = NULL;

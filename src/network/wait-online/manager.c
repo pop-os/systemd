@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -39,6 +40,9 @@ bool manager_ignore_link(Manager *m, Link *link) {
 
         /* if interfaces are given on the command line, ignore all others */
         if (m->interfaces && !strv_contains(m->interfaces, link->ifname))
+                return true;
+
+        if (!link->required_for_online)
                 return true;
 
         /* ignore interfaces we explicitly are asked to ignore */

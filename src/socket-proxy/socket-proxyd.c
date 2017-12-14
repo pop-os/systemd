@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -91,19 +92,10 @@ static void connection_free(Connection *c) {
 }
 
 static void context_free(Context *context) {
-        sd_event_source *es;
-        Connection *c;
-
         assert(context);
 
-        while ((es = set_steal_first(context->listen)))
-                sd_event_source_unref(es);
-
-        while ((c = set_first(context->connections)))
-                connection_free(c);
-
-        set_free(context->listen);
-        set_free(context->connections);
+        set_free_with_destructor(context->listen, sd_event_source_unref);
+        set_free_with_destructor(context->connections, connection_free);
 
         sd_event_unref(context->event);
         sd_resolve_unref(context->resolve);

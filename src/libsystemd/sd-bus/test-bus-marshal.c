@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -196,7 +197,7 @@ int main(int argc, char *argv[]) {
         r = sd_bus_message_append(m, "a(stdo)", 1, "foo", 815ULL, 47.0, "/");
         assert_se(r >= 0);
 
-        r = bus_message_seal(m, 4711, 0);
+        r = sd_bus_message_seal(m, 4711, 0);
         assert_se(r >= 0);
 
         bus_message_dump(m, stdout, BUS_MESSAGE_DUMP_WITH_HEADER);
@@ -359,7 +360,7 @@ int main(int argc, char *argv[]) {
         r = sd_bus_message_copy(copy, m, true);
         assert_se(r >= 0);
 
-        r = bus_message_seal(copy, 4712, 0);
+        r = sd_bus_message_seal(copy, 4712, 0);
         assert_se(r >= 0);
 
         fclose(ms);

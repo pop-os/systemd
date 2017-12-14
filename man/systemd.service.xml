@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -342,7 +344,7 @@
               <row>
                 <entry><literal>!!</literal></entry>
 
-                <entry>This prefix is very similar to <literal>!!</literal>, however it only has an effect on systems lacking support for ambient process capabilities, i.e. without support for <varname>AmbientCapabilities=</varname>. It's intended to be used for unit files that take benefit of ambient capabilities to run processes with minimal privileges wherever possible while remaining compatible with systems that lack ambient capabilities support. Note that when <literal>!!</literal> is used, and a system lacking ambient capability support is detected any configured <varname>SystemCallFilter=</varname> and <varname>CapabilityBoundingSet=</varname> stanzas are implicitly modified, in order to permit spawned processes to drop credentials and capabilities themselves, even if this is configured to not be allowed. Moreover, if this prefix is used and a system lacking ambient capability support is detected <varname>AmbientCapabilities=</varname> will be skipped and not be applied. On systems supporting ambient capabilities, <literal>!!</literal> has no effect and is redundant.</entry>
+                <entry>This prefix is very similar to <literal>!</literal>, however it only has an effect on systems lacking support for ambient process capabilities, i.e. without support for <varname>AmbientCapabilities=</varname>. It's intended to be used for unit files that take benefit of ambient capabilities to run processes with minimal privileges wherever possible while remaining compatible with systems that lack ambient capabilities support. Note that when <literal>!!</literal> is used, and a system lacking ambient capability support is detected any configured <varname>SystemCallFilter=</varname> and <varname>CapabilityBoundingSet=</varname> stanzas are implicitly modified, in order to permit spawned processes to drop credentials and capabilities themselves, even if this is configured to not be allowed. Moreover, if this prefix is used and a system lacking ambient capability support is detected <varname>AmbientCapabilities=</varname> will be skipped and not be applied. On systems supporting ambient capabilities, <literal>!!</literal> has no effect and is redundant.</entry>
               </row>
             </tbody>
           </tgroup>
@@ -352,7 +354,7 @@
         <literal>+</literal>/<literal>!</literal>/<literal>!!</literal> may be used together and they can appear in any
         order. However, only one of <literal>+</literal>, <literal>!</literal>, <literal>!!</literal> may be used at a
         time. Note that these prefixes are also supported for the other command line settings,
-        i.e. <varname>ExecStartPre=</varname>, <varname>ExecStartPost=</varname>, <varname>ExecReload</varname>,
+        i.e. <varname>ExecStartPre=</varname>, <varname>ExecStartPost=</varname>, <varname>ExecReload=</varname>,
         <varname>ExecStop=</varname> and <varname>ExecStopPost=</varname>.</para>
 
         <para>If more than one command is specified, the commands are
@@ -461,7 +463,9 @@
         start-up failed, for example because any of the commands specified in <varname>ExecStart=</varname>,
         <varname>ExecStartPre=</varname> or <varname>ExecStartPost=</varname> failed (and weren't prefixed with
         <literal>-</literal>, see above) or timed out. Use <varname>ExecStopPost=</varname> to invoke commands when a
-        service failed to start up correctly and is shut down again.</para>
+        service failed to start up correctly and is shut down again. Also note that, service restart requests are
+        implemented as stop operations followed by start operations. This means that <varname>ExecStop=</varname> and
+        <varname>ExecStopPost=</varname> are executed during a service restart operation.</para>
 
         <para>It is recommended to use this setting for commands that communicate with the service requesting clean
         termination. When the commands specified with this option are executed it should be assumed that the service is
@@ -513,6 +517,15 @@
         <varname>Type=oneshot</varname> is used, in which case the
         timeout is disabled by default (see
         <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>).
+        </para>
+
+        <para>If a service of <varname>Type=notify</varname> sends <literal>EXTEND_TIMEOUT_USEC=…</literal>, this may cause
+        the start time to be extended beyond <varname>TimeoutStartSec=</varname>. The first receipt of this message
+        must occur before <varname>TimeoutStartSec=</varname> is exceeded, and once the start time has exended beyond
+        <varname>TimeoutStartSec=</varname>, the service manager will allow the service to continue to start, provided
+        the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified until the service
+        startup status is finished by <literal>READY=1</literal>. (see
+        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>).
         </para></listitem>
       </varlistentry>
 
@@ -531,6 +544,14 @@
         <varname>DefaultTimeoutStopSec=</varname> from the manager
         configuration file (see
         <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>).
+        </para>
+
+        <para>If a service of <varname>Type=notify</varname> sends <literal>EXTEND_TIMEOUT_USEC=…</literal>, this may cause
+        the stop time to be extended beyond <varname>TimeoutStopSec=</varname>. The first receipt of this message
+        must occur before <varname>TimeoutStopSec=</varname> is exceeded, and once the stop time has exended beyond
+        <varname>TimeoutStopSec=</varname>, the service manager will allow the service to continue to stop, provided
+        the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified, or terminates itself
+        (see <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>).
         </para></listitem>
       </varlistentry>
 
@@ -549,7 +570,16 @@
         active for longer than the specified time it is terminated and put into a failure state. Note that this setting
         does not have any effect on <varname>Type=oneshot</varname> services, as they terminate immediately after
         activation completed. Pass <literal>infinity</literal> (the default) to configure no runtime
-        limit.</para></listitem>
+        limit.</para>
+
+        <para>If a service of <varname>Type=notify</varname> sends <literal>EXTEND_TIMEOUT_USEC=…</literal>, this may cause
+        the runtime to be extended beyond <varname>RuntimeMaxSec=</varname>. The first receipt of this message
+        must occur before <varname>RuntimeMaxSec=</varname> is exceeded, and once the runtime has exended beyond
+        <varname>RuntimeMaxSec=</varname>, the service manager will allow the service to continue to run, provided
+        the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified until the service
+        shutdown is acheived by <literal>STOPPING=1</literal> (or termination). (see
+        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>).
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -887,14 +917,6 @@
         assigned to this option, the list of sockets is reset, and all
         prior uses of this setting will have no
         effect.</para></listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>FailureAction=</varname></term>
-        <listitem><para>Configure the action to take when the service enters a failed state. Takes the same values as
-        the unit setting <varname>StartLimitAction=</varname> and executes the same actions (see
-        <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>). Defaults to
-        <option>none</option>. </para></listitem>
       </varlistentry>
 
       <varlistentry>

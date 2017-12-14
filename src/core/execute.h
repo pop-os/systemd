@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -37,6 +38,8 @@ typedef struct ExecParameters ExecParameters;
 #include "namespace.h"
 #include "nsflags.h"
 
+#define EXEC_STDIN_DATA_MAX (64U*1024U*1024U)
+
 typedef enum ExecUtmpMode {
         EXEC_UTMP_INIT,
         EXEC_UTMP_LOGIN,
@@ -52,6 +55,8 @@ typedef enum ExecInput {
         EXEC_INPUT_TTY_FAIL,
         EXEC_INPUT_SOCKET,
         EXEC_INPUT_NAMED_FD,
+        EXEC_INPUT_DATA,
+        EXEC_INPUT_FILE,
         _EXEC_INPUT_MAX,
         _EXEC_INPUT_INVALID = -1
 } ExecInput;
@@ -68,6 +73,7 @@ typedef enum ExecOutput {
         EXEC_OUTPUT_JOURNAL_AND_CONSOLE,
         EXEC_OUTPUT_SOCKET,
         EXEC_OUTPUT_NAMED_FD,
+        EXEC_OUTPUT_FILE,
         _EXEC_OUTPUT_MAX,
         _EXEC_OUTPUT_INVALID = -1
 } ExecOutput;
@@ -162,6 +168,10 @@ struct ExecContext {
         ExecOutput std_output;
         ExecOutput std_error;
         char *stdio_fdname[3];
+        char *stdio_file[3];
+
+        void *stdin_data;
+        size_t stdin_data_size;
 
         nsec_t timer_slack_nsec;
 
@@ -212,6 +222,11 @@ struct ExecContext {
         char *syslog_identifier;
         bool syslog_level_prefix;
 
+        int log_level_max;
+
+        struct iovec* log_extra_fields;
+        size_t n_log_extra_fields;
+
         bool cpu_sched_reset_on_fork;
         bool non_blocking;
         bool private_tmp;
@@ -242,7 +257,7 @@ struct ExecContext {
 
         unsigned long restrict_namespaces; /* The CLONE_NEWxyz flags permitted to the unit's processes */
 
-        Set *syscall_filter;
+        Hashmap *syscall_filter;
         Set *syscall_archs;
         int syscall_errno;
         bool syscall_whitelist:1;
@@ -352,6 +367,8 @@ bool exec_context_may_touch_console(ExecContext *c);
 bool exec_context_maintains_privileges(ExecContext *c);
 
 int exec_context_get_effective_ioprio(ExecContext *c);
+
+void exec_context_free_log_extra_fields(ExecContext *c);
 
 void exec_status_start(ExecStatus *s, pid_t pid);
 void exec_status_exit(ExecStatus *s, ExecContext *context, pid_t pid, int code, int status);

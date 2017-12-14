@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -553,12 +554,7 @@ int bus_verify_polkit_async(
 
 void bus_verify_polkit_async_registry_free(Hashmap *registry) {
 #if ENABLE_POLKIT
-        AsyncPolkitQuery *q;
-
-        while ((q = hashmap_steal_first(registry)))
-                async_polkit_query_free(q);
-
-        hashmap_free(registry);
+        hashmap_free_with_destructor(registry, async_polkit_query_free);
 #endif
 }
 
@@ -664,7 +660,7 @@ int bus_connect_user_systemd(sd_bus **_bus) {
                         printf(fmt "\n", __VA_ARGS__);                  \
                 else                                                    \
                         printf("%s=" fmt "\n", name, __VA_ARGS__);      \
-        } while(0)
+        } while (0)
 
 int bus_print_property(const char *name, sd_bus_message *property, bool value, bool all) {
         char type;

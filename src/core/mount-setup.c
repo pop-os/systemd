@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -28,6 +29,7 @@
 #include "cgroup-util.h"
 #include "dev-setup.h"
 #include "efivars.h"
+#include "fileio.h"
 #include "fs-util.h"
 #include "label.h"
 #include "log.h"
@@ -45,9 +47,10 @@
 #include "virt.h"
 
 typedef enum MountMode {
-        MNT_NONE  =        0,
-        MNT_FATAL =        1 <<  0,
-        MNT_IN_CONTAINER = 1 <<  1,
+        MNT_NONE  =           0,
+        MNT_FATAL =           1 <<  0,
+        MNT_IN_CONTAINER =    1 <<  1,
+        MNT_CHECK_WRITABLE  = 1 <<  2,
 } MountMode;
 
 typedef struct MountPoint {
@@ -96,15 +99,15 @@ static const MountPoint mount_table[] = {
         { "tmpfs",       "/run",                      "tmpfs",      "mode=755",                MS_NOSUID|MS_NODEV|MS_STRICTATIME,
           NULL,          MNT_FATAL|MNT_IN_CONTAINER },
         { "cgroup",      "/sys/fs/cgroup",            "cgroup2",    "nsdelegate",              MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          cg_is_unified_wanted, MNT_IN_CONTAINER },
+          cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup",      "/sys/fs/cgroup",            "cgroup2",    NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          cg_is_unified_wanted, MNT_IN_CONTAINER },
+          cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "tmpfs",       "/sys/fs/cgroup",            "tmpfs",      "mode=755",                MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME,
           cg_is_legacy_wanted, MNT_FATAL|MNT_IN_CONTAINER },
         { "cgroup",      "/sys/fs/cgroup/unified",    "cgroup2",    "nsdelegate",              MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          cg_is_hybrid_wanted, MNT_IN_CONTAINER },
+          cg_is_hybrid_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup",      "/sys/fs/cgroup/unified",    "cgroup2",    NULL,                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          cg_is_hybrid_wanted, MNT_IN_CONTAINER },
+          cg_is_hybrid_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup",      "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd,xattr", MS_NOSUID|MS_NOEXEC|MS_NODEV,
           cg_is_legacy_wanted, MNT_IN_CONTAINER     },
         { "cgroup",      "/sys/fs/cgroup/systemd",    "cgroup",     "none,name=systemd",       MS_NOSUID|MS_NOEXEC|MS_NODEV,
@@ -201,6 +204,15 @@ static int mount_one(const MountPoint *p, bool relabel) {
         if (relabel)
                 (void) label_fix(p->where, false, false);
 
+        if (p->mode & MNT_CHECK_WRITABLE) {
+                r = access(p->where, W_OK);
+                if (r < 0) {
+                        (void) umount(p->where);
+                        (void) rmdir(p->where);
+                        return (p->mode & MNT_FATAL) ? r : 0;
+                }
+        }
+
         return 1;
 }
 
@@ -236,11 +248,7 @@ int mount_cgroup_controllers(char ***join_controllers) {
 
         /* Mount all available cgroup controllers that are built into the kernel. */
 
-        controllers = set_new(&string_hash_ops);
-        if (!controllers)
-                return log_oom();
-
-        r = cg_kernel_controllers(controllers);
+        r = cg_kernel_controllers(&controllers);
         if (r < 0)
                 return log_error_errno(r, "Failed to enumerate cgroup controllers: %m");
 
@@ -382,9 +390,19 @@ int mount_setup(bool loaded_policy) {
                 nftw("/dev/shm", nftw_cb, 64, FTW_MOUNT|FTW_PHYS|FTW_ACTIONRETVAL);
                 nftw("/run", nftw_cb, 64, FTW_MOUNT|FTW_PHYS|FTW_ACTIONRETVAL);
 
+                /* Temporarily remount the root cgroup filesystem to give it a proper label. */
+                r = cg_all_unified();
+                if (r == 0) {
+                        (void) mount(NULL, "/sys/fs/cgroup", NULL, MS_REMOUNT, NULL);
+                        label_fix("/sys/fs/cgroup", false, false);
+                        nftw("/sys/fs/cgroup", nftw_cb, 64, FTW_MOUNT|FTW_PHYS|FTW_ACTIONRETVAL);
+                        (void) mount(NULL, "/sys/fs/cgroup", NULL, MS_REMOUNT|MS_RDONLY, NULL);
+                } else if (r < 0)
+                        return log_error_errno(r, "Failed to determine whether we are in all unified mode: %m");
+
                 after_relabel = now(CLOCK_MONOTONIC);
 
-                log_info("Relabelled /dev and /run in %s.",
+                log_info("Relabelled /dev, /run and /sys/fs/cgroup in %s.",
                          format_timespan(timespan, sizeof(timespan), after_relabel - before_relabel, 0));
         }
 #endif

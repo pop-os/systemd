@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -505,10 +507,10 @@
 
   </refsect1>
   <refsect1>
-    <title>Integration with Systemd</title>
+    <title>Integration with systemd</title>
 
     <refsect2>
-      <title>Writing Systemd Unit Files</title>
+      <title>Writing systemd Unit Files</title>
 
       <para>When writing systemd unit files, it is recommended to
       consider the following suggestions:</para>
@@ -560,7 +562,7 @@
     </refsect2>
 
     <refsect2>
-      <title>Installing Systemd Service Files</title>
+      <title>Installing systemd Service Files</title>
 
       <para>At the build installation time (e.g. <command>make
       install</command> during package build), packages are

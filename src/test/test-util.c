@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -104,6 +105,11 @@ static void test_max(void) {
         assert_se(CLAMP(CLAMP(0, -10, 10), CLAMP(-5, 10, 20), CLAMP(100, -5, 20)) == 10);
 }
 
+#pragma GCC diagnostic push
+#ifdef __clang__
+#  pragma GCC diagnostic ignored "-Waddress-of-packed-member"
+#endif
+
 static void test_container_of(void) {
         struct mytype {
                 uint8_t pad1[3];
@@ -121,6 +127,8 @@ static void test_container_of(void) {
                                struct mytype,
                                v1) == &myval);
 }
+
+#pragma GCC diagnostic pop
 
 static void test_div_round_up(void) {
         int div;

@@ -1,4 +1,7 @@
 %{
+#if __GNUC__ >= 7
+_Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
+#endif
 #include <stddef.h>
 #include "conf-parser.h"
 #include "load-fragment.h"
@@ -37,9 +40,12 @@ $1.EnvironmentFile,              config_parse_unit_env_file,         0,         
 $1.PassEnvironment,              config_parse_pass_environ,          0,                             offsetof($1, exec_context.pass_environment)
 $1.UnsetEnvironment,             config_parse_unset_environ,         0,                             offsetof($1, exec_context.unset_environment)
 $1.DynamicUser,                  config_parse_bool,                  true,                          offsetof($1, exec_context.dynamic_user)
+$1.RemoveIPC,                    config_parse_bool,                  0,                             offsetof($1, exec_context.remove_ipc)
 $1.StandardInput,                config_parse_exec_input,            0,                             offsetof($1, exec_context)
 $1.StandardOutput,               config_parse_exec_output,           0,                             offsetof($1, exec_context)
 $1.StandardError,                config_parse_exec_output,           0,                             offsetof($1, exec_context)
+$1.StandardInputText,            config_parse_exec_input_text,       0,                             offsetof($1, exec_context)
+$1.StandardInputData,            config_parse_exec_input_data,       0,                             offsetof($1, exec_context)
 $1.TTYPath,                      config_parse_unit_path_printf,      0,                             offsetof($1, exec_context.tty_path)
 $1.TTYReset,                     config_parse_bool,                  0,                             offsetof($1, exec_context.tty_reset)
 $1.TTYVHangup,                   config_parse_bool,                  0,                             offsetof($1, exec_context.tty_vhangup)
@@ -48,6 +54,8 @@ $1.SyslogIdentifier,             config_parse_unit_string_printf,    0,         
 $1.SyslogFacility,               config_parse_log_facility,          0,                             offsetof($1, exec_context.syslog_priority)
 $1.SyslogLevel,                  config_parse_log_level,             0,                             offsetof($1, exec_context.syslog_priority)
 $1.SyslogLevelPrefix,            config_parse_bool,                  0,                             offsetof($1, exec_context.syslog_level_prefix)
+$1.LogLevelMax,                  config_parse_log_level,             0,                             offsetof($1, exec_context.log_level_max)
+$1.LogExtraFields,               config_parse_log_extra_fields,      0,                             offsetof($1, exec_context)
 $1.Capabilities,                 config_parse_warn_compat,           DISABLED_LEGACY,               offsetof($1, exec_context)
 $1.SecureBits,                   config_parse_exec_secure_bits,      0,                             offsetof($1, exec_context)
 $1.CapabilityBoundingSet,        config_parse_capability_set,        0,                             offsetof($1, exec_context.capability_bounding_set)
@@ -173,7 +181,7 @@ $1.BlockIOReadBandwidth,         config_parse_blockio_bandwidth,     0,         
 $1.BlockIOWriteBandwidth,        config_parse_blockio_bandwidth,     0,                             offsetof($1, cgroup_context)
 $1.TasksAccounting,              config_parse_bool,                  0,                             offsetof($1, cgroup_context.tasks_accounting)
 $1.TasksMax,                     config_parse_tasks_max,             0,                             offsetof($1, cgroup_context.tasks_max)
-$1.Delegate,                     config_parse_bool,                  0,                             offsetof($1, cgroup_context.delegate)
+$1.Delegate,                     config_parse_delegate,              0,                             offsetof($1, cgroup_context)
 $1.IPAccounting,                 config_parse_bool,                  0,                             offsetof($1, cgroup_context.ip_accounting)
 $1.IPAddressAllow,               config_parse_ip_address_access,     0,                             offsetof($1, cgroup_context.ip_address_allow)
 $1.IPAddressDeny,                config_parse_ip_address_access,     0,                             offsetof($1, cgroup_context.ip_address_deny)
@@ -181,7 +189,7 @@ $1.NetClass,                     config_parse_warn_compat,           DISABLED_LE
 )m4_dnl
 Unit.Description,                config_parse_unit_string_printf,    0,                             offsetof(Unit, description)
 Unit.Documentation,              config_parse_documentation,         0,                             offsetof(Unit, documentation)
-Unit.SourcePath,                 config_parse_path,                  0,                             offsetof(Unit, source_path)
+Unit.SourcePath,                 config_parse_unit_path_printf,      0,                             offsetof(Unit, source_path)
 Unit.Requires,                   config_parse_unit_deps,             UNIT_REQUIRES,                 0
 Unit.Requisite,                  config_parse_unit_deps,             UNIT_REQUISITE,                0
 Unit.Wants,                      config_parse_unit_deps,             UNIT_WANTS,                    0
@@ -198,7 +206,7 @@ Unit.PropagateReloadFrom,        config_parse_unit_deps,             UNIT_RELOAD
 Unit.PartOf,                     config_parse_unit_deps,             UNIT_PART_OF,                  0
 Unit.JoinsNamespaceOf,           config_parse_unit_deps,             UNIT_JOINS_NAMESPACE_OF,       0
 Unit.RequiresOverridable,        config_parse_obsolete_unit_deps,    UNIT_REQUIRES,                 0
-Unit.RequisiteOverridable,       config_parse_obsolete_unit_deps,    UNIT_REQUISITE,    0
+Unit.RequisiteOverridable,       config_parse_obsolete_unit_deps,    UNIT_REQUISITE,                0
 Unit.RequiresMountsFor,          config_parse_unit_requires_mounts_for, 0,                          0
 Unit.StopWhenUnneeded,           config_parse_bool,                  0,                             offsetof(Unit, stop_when_unneeded)
 Unit.RefuseManualStart,          config_parse_bool,                  0,                             offsetof(Unit, refuse_manual_start)
@@ -218,6 +226,8 @@ m4_dnl The following is a legacy alias name for compatibility
 Unit.StartLimitInterval,         config_parse_sec,                   0,                             offsetof(Unit, start_limit.interval)
 Unit.StartLimitBurst,            config_parse_unsigned,              0,                             offsetof(Unit, start_limit.burst)
 Unit.StartLimitAction,           config_parse_emergency_action,      0,                             offsetof(Unit, start_limit_action)
+Unit.FailureAction,              config_parse_emergency_action,      0,                             offsetof(Unit, failure_action)
+Unit.SuccessAction,              config_parse_emergency_action,      0,                             offsetof(Unit, success_action)
 Unit.RebootArgument,             config_parse_unit_string_printf,    0,                             offsetof(Unit, reboot_arg)
 Unit.ConditionPathExists,        config_parse_unit_condition_path,   CONDITION_PATH_EXISTS,         offsetof(Unit, conditions)
 Unit.ConditionPathExistsGlob,    config_parse_unit_condition_path,   CONDITION_PATH_EXISTS_GLOB,    offsetof(Unit, conditions)
@@ -261,6 +271,7 @@ Unit.AssertACPower,              config_parse_unit_condition_string, CONDITION_A
 Unit.AssertUser,                 config_parse_unit_condition_string, CONDITION_USER,                offsetof(Unit, asserts)
 Unit.AssertGroup,                config_parse_unit_condition_string, CONDITION_GROUP,               offsetof(Unit, asserts)
 Unit.AssertNull,                 config_parse_unit_condition_null,   0,                             offsetof(Unit, asserts)
+Unit.CollectMode,                config_parse_collect_mode,          0,                             offsetof(Unit, collect_mode)
 m4_dnl
 Service.PIDFile,                 config_parse_unit_path_printf,      0,                             offsetof(Service, pid_file)
 Service.ExecStartPre,            config_parse_exec,                  SERVICE_EXEC_START_PRE,        offsetof(Service, exec_command)
@@ -275,12 +286,12 @@ Service.TimeoutStartSec,         config_parse_service_timeout,       0,         
 Service.TimeoutStopSec,          config_parse_service_timeout,       0,                             0
 Service.RuntimeMaxSec,           config_parse_sec,                   0,                             offsetof(Service, runtime_max_usec)
 Service.WatchdogSec,             config_parse_sec,                   0,                             offsetof(Service, watchdog_usec)
-m4_dnl The following three only exist for compatibility, they moved into Unit, see above
+m4_dnl The following five only exist for compatibility, they moved into Unit, see above
 Service.StartLimitInterval,      config_parse_sec,                   0,                             offsetof(Unit, start_limit.interval)
 Service.StartLimitBurst,         config_parse_unsigned,              0,                             offsetof(Unit, start_limit.burst)
 Service.StartLimitAction,        config_parse_emergency_action,      0,                             offsetof(Unit, start_limit_action)
-Service.RebootArgument,          config_parse_unit_path_printf,      0,                             offsetof(Unit, reboot_arg)
-Service.FailureAction,           config_parse_emergency_action,      0,                             offsetof(Service, emergency_action)
+Service.FailureAction,           config_parse_emergency_action,      0,                             offsetof(Unit, failure_action)
+Service.RebootArgument,          config_parse_unit_string_printf,    0,                             offsetof(Unit, reboot_arg)
 Service.Type,                    config_parse_service_type,          0,                             offsetof(Service, type)
 Service.Restart,                 config_parse_service_restart,       0,                             offsetof(Service, restart)
 Service.PermissionsStartOnly,    config_parse_bool,                  0,                             offsetof(Service, permissions_start_only)
@@ -371,9 +382,9 @@ CGROUP_CONTEXT_CONFIG_ITEMS(Socket)m4_dnl
 KILL_CONTEXT_CONFIG_ITEMS(Socket)m4_dnl
 m4_dnl
 Mount.What,                      config_parse_unit_string_printf,    0,                             offsetof(Mount, parameters_fragment.what)
-Mount.Where,                     config_parse_path,                  0,                             offsetof(Mount, where)
+Mount.Where,                     config_parse_unit_path_printf,      0,                             offsetof(Mount, where)
 Mount.Options,                   config_parse_unit_string_printf,    0,                             offsetof(Mount, parameters_fragment.options)
-Mount.Type,                      config_parse_string,                0,                             offsetof(Mount, parameters_fragment.fstype)
+Mount.Type,                      config_parse_unit_string_printf,    0,                             offsetof(Mount, parameters_fragment.fstype)
 Mount.TimeoutSec,                config_parse_sec_fix_0,             0,                             offsetof(Mount, timeout_usec)
 Mount.DirectoryMode,             config_parse_mode,                  0,                             offsetof(Mount, directory_mode)
 Mount.SloppyOptions,             config_parse_bool,                  0,                             offsetof(Mount, sloppy_options)
@@ -383,11 +394,11 @@ EXEC_CONTEXT_CONFIG_ITEMS(Mount)m4_dnl
 CGROUP_CONTEXT_CONFIG_ITEMS(Mount)m4_dnl
 KILL_CONTEXT_CONFIG_ITEMS(Mount)m4_dnl
 m4_dnl
-Automount.Where,                 config_parse_path,                  0,                             offsetof(Automount, where)
+Automount.Where,                 config_parse_unit_path_printf,      0,                             offsetof(Automount, where)
 Automount.DirectoryMode,         config_parse_mode,                  0,                             offsetof(Automount, directory_mode)
 Automount.TimeoutIdleSec,        config_parse_sec_fix_0,             0,                             offsetof(Automount, timeout_idle_usec)
 m4_dnl
-Swap.What,                       config_parse_path,                  0,                             offsetof(Swap, parameters_fragment.what)
+Swap.What,                       config_parse_unit_path_printf,      0,                             offsetof(Swap, parameters_fragment.what)
 Swap.Priority,                   config_parse_int,                   0,                             offsetof(Swap, parameters_fragment.priority)
 Swap.Options,                    config_parse_unit_string_printf,    0,                             offsetof(Swap, parameters_fragment.options)
 Swap.TimeoutSec,                 config_parse_sec_fix_0,             0,                             offsetof(Swap, timeout_usec)

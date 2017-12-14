@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -191,7 +192,7 @@ int pull_make_path(const char *url, const char *etag, const char *image_root, co
         }
 
         path = strjoin(image_root, "/", strempty(prefix), escaped_url, escaped_etag ? "." : "",
-                       strempty(escaped_etag), strempty(suffix), NULL);
+                       strempty(escaped_etag), strempty(suffix));
         if (!path)
                 return -ENOMEM;
 
@@ -209,7 +210,7 @@ int pull_make_path(const char *url, const char *etag, const char *image_root, co
                         return r;
 
                 path = strjoin(image_root, "/", strempty(prefix), hash, escaped_etag ? "." : "",
-                               strempty(escaped_etag), strempty(suffix), NULL);
+                               strempty(escaped_etag), strempty(suffix));
                 if (!path)
                         return -ENOMEM;
         }
@@ -492,13 +493,11 @@ int pull_verify(PullJob *main_job,
 
                 gpg_pipe[1] = safe_close(gpg_pipe[1]);
 
-                if (dup2(gpg_pipe[0], STDIN_FILENO) != STDIN_FILENO) {
-                        log_error_errno(errno, "Failed to dup2() fd: %m");
+                r = move_fd(gpg_pipe[0], STDIN_FILENO, false);
+                if (r < 0) {
+                        log_error_errno(errno, "Failed to move fd: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                if (gpg_pipe[0] != STDIN_FILENO)
-                        gpg_pipe[0] = safe_close(gpg_pipe[0]);
 
                 null_fd = open("/dev/null", O_WRONLY|O_NOCTTY);
                 if (null_fd < 0) {
@@ -506,13 +505,11 @@ int pull_verify(PullJob *main_job,
                         _exit(EXIT_FAILURE);
                 }
 
-                if (dup2(null_fd, STDOUT_FILENO) != STDOUT_FILENO) {
-                        log_error_errno(errno, "Failed to dup2() fd: %m");
+                r = move_fd(null_fd, STDOUT_FILENO, false);
+                if (r < 0) {
+                        log_error_errno(errno, "Failed to move fd: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                if (null_fd != STDOUT_FILENO)
-                        null_fd = safe_close(null_fd);
 
                 cmd[k++] = strjoina("--homedir=", gpg_home);
 

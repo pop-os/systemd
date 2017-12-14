@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -40,18 +41,6 @@ static BusTransport arg_transport = BUS_TRANSPORT_LOCAL;
 static char *arg_host = NULL;
 static bool arg_adjust_system_clock = false;
 
-static void polkit_agent_open_if_enabled(void) {
-
-        /* Open the polkit agent as a child process if necessary */
-        if (!arg_ask_password)
-                return;
-
-        if (arg_transport != BUS_TRANSPORT_LOCAL)
-                return;
-
-        polkit_agent_open();
-}
-
 typedef struct StatusInfo {
         usec_t time;
         char *timezone;
@@ -72,12 +61,13 @@ static void status_info_clear(StatusInfo *info) {
 }
 
 static void print_status_info(const StatusInfo *i) {
-        char a[FORMAT_TIMESTAMP_MAX];
+        char a[LINE_MAX];
         struct tm tm;
         time_t sec;
         bool have_time = false;
         const char *old_tz = NULL, *tz;
         int r;
+        size_t n;
 
         assert(i);
 
@@ -102,11 +92,11 @@ static void print_status_info(const StatusInfo *i) {
                 log_warning("Could not get time from timedated and not operating locally, ignoring.");
 
         if (have_time) {
-                xstrftime(a, "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&sec, &tm));
-                printf("                      Local time: %.*s\n", (int) sizeof(a), a);
+                n = strftime(a, sizeof a, "%a %Y-%m-%d %H:%M:%S %Z", localtime_r(&sec, &tm));
+                printf("                      Local time: %s\n", n > 0 ? a : "n/a");
 
-                xstrftime(a, "%a %Y-%m-%d %H:%M:%S UTC", gmtime_r(&sec, &tm));
-                printf("                  Universal time: %.*s\n", (int) sizeof(a), a);
+                n = strftime(a, sizeof a, "%a %Y-%m-%d %H:%M:%S UTC", gmtime_r(&sec, &tm));
+                printf("                  Universal time: %s\n", n > 0 ? a : "n/a");
         } else {
                 printf("                      Local time: %s\n", "n/a");
                 printf("                  Universal time: %s\n", "n/a");
@@ -116,13 +106,13 @@ static void print_status_info(const StatusInfo *i) {
                 time_t rtc_sec;
 
                 rtc_sec = (time_t) (i->rtc_time / USEC_PER_SEC);
-                xstrftime(a, "%a %Y-%m-%d %H:%M:%S", gmtime_r(&rtc_sec, &tm));
-                printf("                        RTC time: %.*s\n", (int) sizeof(a), a);
+                n = strftime(a, sizeof a, "%a %Y-%m-%d %H:%M:%S", gmtime_r(&rtc_sec, &tm));
+                printf("                        RTC time: %s\n", n > 0 ? a : "n/a");
         } else
                 printf("                        RTC time: %s\n", "n/a");
 
         if (have_time)
-                xstrftime(a, "%Z, %z", localtime_r(&sec, &tm));
+                n = strftime(a, sizeof a, "%Z, %z", localtime_r(&sec, &tm));
 
         /* Restore the $TZ */
         if (old_tz)
@@ -134,11 +124,11 @@ static void print_status_info(const StatusInfo *i) {
         else
                 tzset();
 
-        printf("                       Time zone: %s (%.*s)\n"
+        printf("                       Time zone: %s (%s)\n"
                "       System clock synchronized: %s\n"
                "systemd-timesyncd.service active: %s\n"
                "                 RTC in local TZ: %s\n",
-               strna(i->timezone), (int) sizeof(a), have_time ? a : "n/a",
+               strna(i->timezone), have_time && n > 0 ? a : "n/a",
                i->ntp_capable ? yes_no(i->ntp_enabled) : "n/a",
                yes_no(i->ntp_synced),
                yes_no(i->rtc_local));
@@ -194,7 +184,7 @@ static int set_time(sd_bus *bus, char **args, unsigned n) {
         assert(args);
         assert(n == 2);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = parse_timestamp(args[1], &t);
         if (r < 0) {
@@ -223,7 +213,7 @@ static int set_timezone(sd_bus *bus, char **args, unsigned n) {
         assert(args);
         assert(n == 2);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call_method(bus,
                                "org.freedesktop.timedate1",
@@ -246,7 +236,7 @@ static int set_local_rtc(sd_bus *bus, char **args, unsigned n) {
         assert(args);
         assert(n == 2);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         b = parse_boolean(args[1]);
         if (b < 0) {
@@ -275,7 +265,7 @@ static int set_ntp(sd_bus *bus, char **args, unsigned n) {
         assert(args);
         assert(n == 2);
 
-        polkit_agent_open_if_enabled();
+        polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         b = parse_boolean(args[1]);
         if (b < 0) {
@@ -483,7 +473,7 @@ static int timedatectl_main(sd_bus *bus, int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-        sd_bus *bus = NULL;
+        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
         setlocale(LC_ALL, "");
@@ -503,7 +493,6 @@ int main(int argc, char *argv[]) {
         r = timedatectl_main(bus, argc, argv);
 
 finish:
-        sd_bus_flush_close_unref(bus);
         pager_close();
 
         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;

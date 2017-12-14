@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -26,4 +27,4 @@
 
 extern const sd_bus_vtable bus_kill_vtable[];
 
-int bus_kill_context_set_transient_property(Unit *u, KillContext *c, const char *name, sd_bus_message *message, UnitSetPropertiesMode mode, sd_bus_error *error);
+int bus_kill_context_set_transient_property(Unit *u, KillContext *c, const char *name, sd_bus_message *message, UnitWriteFlags flags, sd_bus_error *error);

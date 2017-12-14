@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -123,6 +124,7 @@ static const char *arg_machine = NULL;
 static uint64_t arg_vacuum_size = 0;
 static uint64_t arg_vacuum_n_files = 0;
 static usec_t arg_vacuum_time = 0;
+static char **arg_output_fields = NULL;
 
 static enum {
         ACTION_SHOW,
@@ -302,6 +304,7 @@ static void help(void) {
                "                             short-iso, short-iso-precise, short-full,\n"
                "                             short-monotonic, short-unix, verbose, export,\n"
                "                             json, json-pretty, json-sse, cat)\n"
+               "     --output-fields=LIST  Select fields to print in verbose/export/json modes\n"
                "     --utc                 Express time in Coordinated Universal Time (UTC)\n"
                "  -x --catalog             Add message explanations where available\n"
                "     --no-full             Ellipsize fields\n"
@@ -377,6 +380,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_VACUUM_FILES,
                 ARG_VACUUM_TIME,
                 ARG_NO_HOSTNAME,
+                ARG_OUTPUT_FIELDS,
         };
 
         static const struct option options[] = {
@@ -435,6 +439,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "vacuum-files",   required_argument, NULL, ARG_VACUUM_FILES   },
                 { "vacuum-time",    required_argument, NULL, ARG_VACUUM_TIME    },
                 { "no-hostname",    no_argument,       NULL, ARG_NO_HOSTNAME    },
+                { "output-fields",  required_argument, NULL, ARG_OUTPUT_FIELDS  },
                 {}
         };
 
@@ -841,6 +846,24 @@ static int parse_argv(int argc, char *argv[]) {
                 case ARG_SYNC:
                         arg_action = ACTION_SYNC;
                         break;
+
+                case ARG_OUTPUT_FIELDS: {
+                        _cleanup_strv_free_ char **v = NULL;
+
+                        v = strv_split(optarg, ",");
+                        if (!v)
+                                return log_oom();
+
+                        if (!arg_output_fields) {
+                                arg_output_fields = v;
+                                v = NULL;
+                        } else {
+                                r = strv_extend_strv(&arg_output_fields, v, true);
+                                if (r < 0)
+                                        return log_oom();
+                        }
+                        break;
+                }
 
                 case '?':
                         return -EINVAL;
@@ -1320,7 +1343,8 @@ static int add_dmesg(sd_journal *j) {
         if (!arg_dmesg)
                 return 0;
 
-        r = sd_journal_add_match(j, "_TRANSPORT=kernel", strlen("_TRANSPORT=kernel"));
+        r = sd_journal_add_match(j, "_TRANSPORT=kernel",
+                                 STRLEN("_TRANSPORT=kernel"));
         if (r < 0)
                 return log_error_errno(r, "Failed to add match: %m");
 
@@ -2452,7 +2476,7 @@ int main(int argc, char *argv[]) {
                                 arg_utc * OUTPUT_UTC |
                                 arg_no_hostname * OUTPUT_NO_HOSTNAME;
 
-                        r = output_journal(stdout, j, arg_output, 0, flags, &ellipsized);
+                        r = output_journal(stdout, j, arg_output, 0, flags, arg_output_fields, &ellipsized);
                         need_seek = true;
                         if (r == -EADDRNOTAVAIL)
                                 break;
@@ -2498,6 +2522,7 @@ finish:
         strv_free(arg_syslog_identifier);
         strv_free(arg_system_units);
         strv_free(arg_user_units);
+        strv_free(arg_output_fields);
 
         free(arg_root);
         free(arg_verify_key);

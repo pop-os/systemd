@@ -3,6 +3,8 @@
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2013 Zbigniew Jędrzejewski-Szmek
@@ -244,7 +246,15 @@
 
         <para>When both <option>--pipe</option> and <option>--pty</option> are used in combination the more appropriate
         option is automatically determined and used. Specifically, when invoked with standard input, output and error
-        connected to a TTY <option>--pty</option> is used, and otherwise <option>--pipe</option>.</para></listitem>
+        connected to a TTY <option>--pty</option> is used, and otherwise <option>--pipe</option>.</para>
+
+        <para>When this option is used the original file descriptors <command>systemd-run</command> receives are passed
+        to the service processes as-is. If the service runs with different privileges than
+        <command>systemd-run</command>, this means the service might not be able to re-open the passed file
+        descriptors, due to normal file descriptor access restrictions. If the invoked process is a shell script that
+        uses the <command>echo "hello" > /dev/stderr</command> construct for writing messages to stderr, this might
+        cause problems, as this only works if stderr can be re-opened. To mitigate this use the construct <command>echo
+        "hello" >&amp;2</command> instead, which is mostly equivalent and avoids this pitfall.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -314,6 +324,21 @@
         CPU usage, if <option>--property=CPUAccounting=1</option> was set) and the exit code and status of the main
         process. This output may be suppressed with <option>--quiet</option>. This option may not be combined with
         <option>--no-block</option>, <option>--scope</option> or the various timer options.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>-G</option></term>
+        <term><option>--collect</option></term>
+
+        <listitem><para>Unload the transient unit after it completed, even if it failed. Normally, without this option,
+        all units that ran and failed are kept in memory until the user explicitly resets their failure state with
+        <command>systemctl reset-failed</command> or an equivalent command. On the other hand, units that ran
+        successfully are unloaded immediately. If this option is turned on the "garbage collection" of units is more
+        aggressive, and unloads units regardless if they exited successfully or failed. This option is a shortcut for
+        <command>--property=CollectMode=inactive-or-failed</command>, see the explanation for
+        <varname>CollectMode=</varname> in
+        <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry> for further
+        information.</para></listitem>
       </varlistentry>
 
       <xi:include href="user-system-options.xml" xpointer="user" />

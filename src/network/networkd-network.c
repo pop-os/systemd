@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -113,9 +114,9 @@ void network_apply_anonymize_if_set(Network *network) {
         * (to use the MTU sent by the server but to do not send
         * the option in the PRL). */
         network->dhcp_use_mtu = false;
-        /* RFC7844 section 3.6.
-        * same comments as previous option */
-        network->dhcp_use_routes = false;
+        /* NOTE: when Anonymize=yes, the PRL route options are sent by default,
+         * but this is needed to use them. */
+        network->dhcp_use_routes = true;
         /* RFC7844 section 3.6.
         * same comments as previous option */
         network->dhcp_use_timezone = false;
@@ -204,11 +205,11 @@ static int network_load_one(Manager *manager, const char *filename) {
 
         *d = '\0';
 
+        network->required_for_online = true;
         network->dhcp = ADDRESS_FAMILY_NO;
         network->dhcp_use_ntp = true;
         network->dhcp_use_dns = true;
         network->dhcp_use_hostname = true;
-        /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
         network->dhcp_use_routes = true;
         /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
         network->dhcp_send_hostname = true;
@@ -232,6 +233,9 @@ static int network_load_one(Manager *manager, const char *filename) {
         network->dhcp_server_emit_ntp = true;
         network->dhcp_server_emit_router = true;
         network->dhcp_server_emit_timezone = true;
+
+        network->router_emit_dns = true;
+        network->router_emit_domains = true;
 
         network->use_bpdu = true;
         network->allow_port_to_be_root = true;
@@ -278,7 +282,7 @@ static int network_load_one(Manager *manager, const char *filename) {
                               "IPv6PrefixDelegation\0"
                               "IPv6Prefix\0",
                               config_item_perf_lookup, network_network_gperf_lookup,
-                              false, network);
+                              CONFIG_PARSE_WARN, network);
         if (r < 0)
                 return r;
 

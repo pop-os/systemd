@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -153,7 +154,7 @@ static void test_marshal(void) {
                                         4712, "second-string-parameter", "(a(si))", 2, "Y", 5, "Z", 6,
                                         4713, "third-string-parameter", "(uu)", 1, 2) >= 0);
 
-        assert_se(bus_message_seal(m, 4711, 0) >= 0);
+        assert_se(sd_bus_message_seal(m, 4711, 0) >= 0);
 
 #if HAVE_GLIB
         {
@@ -209,7 +210,7 @@ static void test_marshal(void) {
 
         assert_se(sd_bus_message_append(m, "as", 0) >= 0);
 
-        assert_se(bus_message_seal(m, 4712, 0) >= 0);
+        assert_se(sd_bus_message_seal(m, 4712, 0) >= 0);
         assert_se(bus_message_dump(m, NULL, BUS_MESSAGE_DUMP_WITH_HEADER) >= 0);
 }
 

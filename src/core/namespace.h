@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -20,7 +21,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
-typedef struct NameSpaceInfo NameSpaceInfo;
+typedef struct NamespaceInfo NamespaceInfo;
 typedef struct BindMount BindMount;
 
 #include <stdbool.h>
@@ -36,6 +37,18 @@ typedef enum ProtectHome {
         _PROTECT_HOME_INVALID = -1
 } ProtectHome;
 
+typedef enum NamespaceType {
+        NAMESPACE_MOUNT,
+        NAMESPACE_CGROUP,
+        NAMESPACE_UTS,
+        NAMESPACE_IPC,
+        NAMESPACE_USER,
+        NAMESPACE_PID,
+        NAMESPACE_NET,
+        _NAMESPACE_TYPE_MAX,
+        _NAMESPACE_TYPE_INVALID = -1,
+} NamespaceType;
+
 typedef enum ProtectSystem {
         PROTECT_SYSTEM_NO,
         PROTECT_SYSTEM_YES,
@@ -45,7 +58,7 @@ typedef enum ProtectSystem {
         _PROTECT_SYSTEM_INVALID = -1
 } ProtectSystem;
 
-struct NameSpaceInfo {
+struct NamespaceInfo {
         bool ignore_protect_paths:1;
         bool private_dev:1;
         bool protect_control_groups:1;
@@ -65,7 +78,7 @@ struct BindMount {
 int setup_namespace(
                 const char *root_directory,
                 const char *root_image,
-                const NameSpaceInfo *ns_info,
+                const NamespaceInfo *ns_info,
                 char **read_write_paths,
                 char **read_only_paths,
                 char **inaccessible_paths,
@@ -94,3 +107,8 @@ ProtectSystem protect_system_from_string(const char *s) _pure_;
 
 void bind_mount_free_many(BindMount *b, unsigned n);
 int bind_mount_add(BindMount **b, unsigned *n, const BindMount *item);
+
+const char* namespace_type_to_string(NamespaceType t) _const_;
+NamespaceType namespace_type_from_string(const char *s) _pure_;
+
+bool ns_type_supported(NamespaceType type);

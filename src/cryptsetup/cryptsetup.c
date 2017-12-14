@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -18,7 +19,6 @@
 ***/
 
 #include <errno.h>
-#include <libcryptsetup.h>
 #include <mntent.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -27,6 +27,7 @@
 
 #include "alloc-util.h"
 #include "ask-password-api.h"
+#include "crypt-util.h"
 #include "device-util.h"
 #include "escape.h"
 #include "fileio.h"
@@ -38,7 +39,10 @@
 #include "strv.h"
 #include "util.h"
 
-static const char *arg_type = NULL; /* CRYPT_LUKS1, CRYPT_TCRYPT or CRYPT_PLAIN */
+/* internal helper */
+#define ANY_LUKS "LUKS"
+
+static const char *arg_type = NULL; /* ANY_LUKS, CRYPT_LUKS1, CRYPT_LUKS2, CRYPT_TCRYPT or CRYPT_PLAIN */
 static char *arg_cipher = NULL;
 static unsigned arg_key_size = 0;
 static int arg_key_slot = CRYPT_ANY_SLOT;
@@ -77,7 +81,7 @@ static int parse_one_option(const char *option) {
         assert(option);
 
         /* Handled outside of this tool */
-        if (STR_IN_SET(option, "noauto", "auto", "nofail", "fail"))
+        if (STR_IN_SET(option, "noauto", "auto", "nofail", "fail", "_netdev"))
                 return 0;
 
         if ((val = startswith(option, "cipher="))) {
@@ -102,7 +106,7 @@ static int parse_one_option(const char *option) {
 
         } else if ((val = startswith(option, "key-slot="))) {
 
-                arg_type = CRYPT_LUKS1;
+                arg_type = ANY_LUKS;
                 r = safe_atoi(val, &arg_key_slot);
                 if (r < 0) {
                         log_error_errno(r, "Failed to parse %s, ignoring: %m", option);
@@ -140,7 +144,7 @@ static int parse_one_option(const char *option) {
                         return log_oom();
 
         } else if ((val = startswith(option, "header="))) {
-                arg_type = CRYPT_LUKS1;
+                arg_type = ANY_LUKS;
 
                 if (!path_is_absolute(val)) {
                         log_error("Header path \"%s\" is not absolute, refusing.", val);
@@ -171,7 +175,7 @@ static int parse_one_option(const char *option) {
         else if (STR_IN_SET(option, "allow-discards", "discard"))
                 arg_discards = true;
         else if (streq(option, "luks"))
-                arg_type = CRYPT_LUKS1;
+                arg_type = ANY_LUKS;
         else if (streq(option, "tcrypt"))
                 arg_type = CRYPT_TCRYPT;
         else if (streq(option, "tcrypt-hidden")) {
@@ -245,27 +249,6 @@ static int parse_options(const char *options) {
         return 0;
 }
 
-static void log_glue(int level, const char *msg, void *usrptr) {
-        log_debug("%s", msg);
-}
-
-static int disk_major_minor(const char *path, char **ret) {
-        struct stat st;
-
-        assert(path);
-
-        if (stat(path, &st) < 0)
-                return -errno;
-
-        if (!S_ISBLK(st.st_mode))
-                return -EINVAL;
-
-        if (asprintf(ret, "/dev/block/%d:%d", major(st.st_rdev), minor(st.st_rdev)) < 0)
-                return -errno;
-
-        return 0;
-}
-
 static char* disk_description(const char *path) {
 
         static const char name_fields[] =
@@ -324,7 +307,7 @@ static char *disk_mount_point(const char *label) {
 }
 
 static int get_password(const char *vol, const char *src, usec_t until, bool accept_cached, char ***ret) {
-        _cleanup_free_ char *description = NULL, *name_buffer = NULL, *mount_point = NULL, *maj_min = NULL, *text = NULL, *escaped_name = NULL;
+        _cleanup_free_ char *description = NULL, *name_buffer = NULL, *mount_point = NULL, *text = NULL, *disk_path = NULL;
         _cleanup_strv_free_erase_ char **passwords = NULL;
         const char *name = NULL;
         char **p, *id;
@@ -336,6 +319,10 @@ static int get_password(const char *vol, const char *src, usec_t until, bool acc
 
         description = disk_description(src);
         mount_point = disk_mount_point(vol);
+
+        disk_path = cescape(src);
+        if (!disk_path)
+                return log_oom();
 
         if (description && streq(vol, description))
                 /* If the description string is simply the
@@ -358,19 +345,7 @@ static int get_password(const char *vol, const char *src, usec_t until, bool acc
         if (asprintf(&text, "Please enter passphrase for disk %s!", name) < 0)
                 return log_oom();
 
-        if (src)
-                (void) disk_major_minor(src, &maj_min);
-
-        if (maj_min) {
-                escaped_name = maj_min;
-                maj_min = NULL;
-        } else
-                escaped_name = cescape(name);
-
-        if (!escaped_name)
-                return log_oom();
-
-        id = strjoina("cryptsetup:", escaped_name);
+        id = strjoina("cryptsetup:", disk_path);
 
         r = ask_password_auto(text, "drive-harddisk", id, "cryptsetup", until,
                               ASK_PASSWORD_PUSH_CACHE | (accept_cached*ASK_PASSWORD_ACCEPT_CACHED),
@@ -386,7 +361,7 @@ static int get_password(const char *vol, const char *src, usec_t until, bool acc
                 if (asprintf(&text, "Please enter passphrase for disk %s! (verification)", name) < 0)
                         return log_oom();
 
-                id = strjoina("cryptsetup-verification:", escaped_name);
+                id = strjoina("cryptsetup-verification:", disk_path);
 
                 r = ask_password_auto(text, "drive-harddisk", id, "cryptsetup", until, ASK_PASSWORD_PUSH_CACHE, &passwords2);
                 if (r < 0)
@@ -491,8 +466,8 @@ static int attach_luks_or_plain(struct crypt_device *cd,
         assert(name);
         assert(key_file || passwords);
 
-        if (!arg_type || streq(arg_type, CRYPT_LUKS1)) {
-                r = crypt_load(cd, CRYPT_LUKS1, NULL);
+        if (!arg_type || STR_IN_SET(arg_type, ANY_LUKS, CRYPT_LUKS1)) {
+                r = crypt_load(cd, CRYPT_LUKS, NULL);
                 if (r < 0) {
                         log_error("crypt_load() failed on device %s.\n", crypt_get_device_name(cd));
                         return r;
@@ -595,7 +570,7 @@ static int help(void) {
 }
 
 int main(int argc, char *argv[]) {
-        struct crypt_device *cd = NULL;
+        _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         int r = -EINVAL;
 
         if (argc <= 1) {
@@ -657,7 +632,7 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
-                crypt_set_log_callback(cd, log_glue, NULL);
+                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
 
                 status = crypt_status(cd, argv[2]);
                 if (IN_SET(status, CRYPT_ACTIVE, CRYPT_BUSY)) {
@@ -741,7 +716,7 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
-                crypt_set_log_callback(cd, log_glue, NULL);
+                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
 
                 r = crypt_deactivate(cd, argv[2]);
                 if (r < 0) {
@@ -757,9 +732,6 @@ int main(int argc, char *argv[]) {
         r = 0;
 
 finish:
-        if (cd)
-                crypt_free(cd);
-
         free(arg_cipher);
         free(arg_hash);
         free(arg_header);

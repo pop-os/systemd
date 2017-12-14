@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -151,9 +152,7 @@ LoopDevice* loop_device_unref(LoopDevice *d) {
         }
 
         free(d->node);
-        free(d);
-
-        return NULL;
+        return mfree(d);
 }
 
 void loop_device_relinquish(LoopDevice *d) {
