@@ -12,10 +12,10 @@ activatable via D-Bus.
  4 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/src/hostname/org.freedesktop.hostname1.service b/src/hostname/org.freedesktop.hostname1.service
-index 6041ed6..7d923a5 100644
+index 421a8c6..51cc38b 100644
 --- a/src/hostname/org.freedesktop.hostname1.service
 +++ b/src/hostname/org.freedesktop.hostname1.service
-@@ -7,6 +7,6 @@
+@@ -9,6 +9,6 @@
  
  [D-BUS Service]
  Name=org.freedesktop.hostname1
@@ -24,10 +24,10 @@ index 6041ed6..7d923a5 100644
  User=root
  SystemdService=dbus-org.freedesktop.hostname1.service
 diff --git a/src/locale/org.freedesktop.locale1.service b/src/locale/org.freedesktop.locale1.service
-index 025f9a0..8abbbfe 100644
+index b15d395..390de05 100644
 --- a/src/locale/org.freedesktop.locale1.service
 +++ b/src/locale/org.freedesktop.locale1.service
-@@ -7,6 +7,6 @@
+@@ -9,6 +9,6 @@
  
  [D-BUS Service]
  Name=org.freedesktop.locale1
@@ -36,10 +36,10 @@ index 025f9a0..8abbbfe 100644
  User=root
  SystemdService=dbus-org.freedesktop.locale1.service
 diff --git a/src/login/org.freedesktop.login1.service b/src/login/org.freedesktop.login1.service
-index 762dae2..057409b 100644
+index 68f1ed0..6914109 100644
 --- a/src/login/org.freedesktop.login1.service
 +++ b/src/login/org.freedesktop.login1.service
-@@ -7,6 +7,6 @@
+@@ -9,6 +9,6 @@
  
  [D-BUS Service]
  Name=org.freedesktop.login1
@@ -48,10 +48,10 @@ index 762dae2..057409b 100644
  User=root
  SystemdService=dbus-org.freedesktop.login1.service
 diff --git a/src/timedate/org.freedesktop.timedate1.service b/src/timedate/org.freedesktop.timedate1.service
-index 875f4be..198777d 100644
+index d5f3a6e..1a15dcd 100644
 --- a/src/timedate/org.freedesktop.timedate1.service
 +++ b/src/timedate/org.freedesktop.timedate1.service
-@@ -7,6 +7,6 @@
+@@ -9,6 +9,6 @@
  
  [D-BUS Service]
  Name=org.freedesktop.timedate1

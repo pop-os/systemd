@@ -7,10 +7,10 @@ Subject: Include additional directories in ProtectSystem
  1 file changed, 8 insertions(+)
 
 diff --git a/src/core/namespace.c b/src/core/namespace.c
-index 6d74b8d..7e583ef 100644
+index a3262fc..0ac2f2b 100644
 --- a/src/core/namespace.c
 +++ b/src/core/namespace.c
-@@ -133,6 +133,10 @@ static const MountEntry protect_home_yes_table[] = {
+@@ -134,6 +134,10 @@ static const MountEntry protect_home_yes_table[] = {
  /* ProtectSystem=yes table */
  static const MountEntry protect_system_yes_table[] = {
          { "/usr",                READONLY,     false },
@@ -21,7 +21,7 @@ index 6d74b8d..7e583ef 100644
          { "/boot",               READONLY,     true  },
          { "/efi",                READONLY,     true  },
  };
-@@ -140,6 +144,10 @@ static const MountEntry protect_system_yes_table[] = {
+@@ -141,6 +145,10 @@ static const MountEntry protect_system_yes_table[] = {
  /* ProtectSystem=full includes ProtectSystem=yes */
  static const MountEntry protect_system_full_table[] = {
          { "/usr",                READONLY,     false },

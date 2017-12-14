@@ -1,14 +1,3 @@
-dynamic-user-label-functions-not-necessary-to-export-as-s.patch
-dynamic-user-permit-the-case-static-uid-and-gid-are-diffe.patch
-core-fix-invalid-error-message.patch
-core-dynamic-user-use-_cleanup_-in-dynamic-user-locking.patch
-core-dynamic-user-use-gid-from-pwnam-if-a-static-user-was.patch
-resolved-fix-loop-on-packets-with-pseudo-dns-types.patch
-bpf-firewall-properly-handle-kernels-where-BPF-cgroup-is-.patch
-shared-seccomp-disallow-pkey_mprotect-the-same-as-mprotec.patch
-basic-missing-add-numbers-for-pkey_mprotect.patch
-shared-seccomp-skip-pkey_mprotect-protections-if-the-sysc.patch
-unit-enable-DynamicUser-for-journal-upload.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
@@ -32,7 +21,4 @@ debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
-debian/Mark-test-timesync-as-manual.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
-debian/Revert-tests-when-running-a-manager-object-in-a-test-migr.patch
-modprobe.d-fix-directory-of-modprobe-configuration-file-7.patch

@@ -20,10 +20,10 @@ Bug: https://bugs.freedesktop.org/show_bug.cgi?id=62344
  2 files changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
-index d44d75e..7bfd69d 100644
+index 561bcdf..f7b28da 100644
 --- a/src/libsystemd/sd-id128/sd-id128.c
 +++ b/src/libsystemd/sd-id128/sd-id128.c
-@@ -105,7 +105,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+@@ -106,7 +106,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
          assert_return(ret, -EINVAL);
  
          if (sd_id128_is_null(saved_machine_id)) {
@@ -33,15 +33,15 @@ index d44d75e..7bfd69d 100644
                          return r;
  
 diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
-index 9e964a8..81aee43 100644
+index 86d963c..09b3fed 100644
 --- a/src/test/test-fs-util.c
 +++ b/src/test/test-fs-util.c
-@@ -146,7 +146,7 @@ static void test_chase_symlinks(void) {
-         assert_se(r > 0 && path_equal(result, "/etc"));
- 
+@@ -188,7 +188,7 @@ static void test_chase_symlinks(void) {
+         assert_se(streq(result, "/test-chase.fsldajfl"));
          result = mfree(result);
+ 
 -        r = chase_symlinks("/etc/machine-id/foo", NULL, 0, &result);
 +        r = chase_symlinks("/etc/issue/foo", NULL, 0, &result);
          assert_se(r == -ENOTDIR);
+         result = mfree(result);
  
-         /* Path that loops back to self */
