@@ -1,3 +1,17 @@
+systemd (236-1) UNRELEASED; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/upstream: Only show ≥ warning in journal dumps.
+    Showing the entire debug log is too hard to scan visually, and most of
+    the time the warnings and errors are sufficient to explain a failure.
+    Put the journal files into the artifacts though, in case the debug
+    information is necessary.
+
+  [ Michael Biebl ]
+  * New upstream version 236
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 14 Dec 2017 23:22:33 +0100
+
 systemd (235-3) unstable; urgency=medium
 
   [ Michael Biebl ]
