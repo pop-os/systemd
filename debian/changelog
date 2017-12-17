@@ -1,4 +1,4 @@
-systemd (236-1) UNRELEASED; urgency=medium
+systemd (236-1) unstable; urgency=medium
 
   [ Martin Pitt ]
   * debian/tests/upstream: Only show ≥ warning in journal dumps.
@@ -9,8 +9,41 @@ systemd (236-1) UNRELEASED; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 236
+    - nspawn: Adjust path to static resolv.conf to support split usr.
+      (Closes: #881310)
+    - networkd: Don't stop networkd if CONFIG_FIB_RULES=n in kernel.
+      (Closes: #881823)
+    - core: Fix segfault in compile_bind_mounts() when BindPaths= or
+      BindReadOnlyPaths= is set. (Closes: #883380)
+    - meson: Link NSS modules with -z nodelete to fix memory leak in
+      nss-systemd. (Closes: #883407)
+    - logind: Make sure we don't acces m->action_what if it's not initialized.
+      (Closes: #882270)
+    - systemctl: Ignore shutdown's "-t" argument. (Closes: #882245)
+    - core: Be more defensive if we can't determine per-connection socket
+      peer. (Closes: #879603)
+    - bpf-firewall: Actually invoke BPF_PROG_ATTACH to check whether
+      cgroup/bpf is available. (Closes: #878965)
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * Bump Standards-Version to 4.1.2
+  * Clean up old /var/lib/systemd/clock on upgrade.
+    The clock file used by systemd-timesyncd is now stored in
+    StateDirectory=systemd/timesync. (Closes: #883605)
+  * Stop creating systemd-timesync system user.
+    DynamicUser=yes has been enabled for systemd-timesyncd.service so
+    allocating a system user statically is no longer necessary.
+  * Document removal of systemd-{timesync,journal-gateway,journal-upload} user.
+    We no longer create those system users as the corresponding services now
+    use DynamicUser=yes. Removing those system users automatically is tricky,
+    as the relevant services might be running during upgrade. Add a NEWS
+    entry instead which documents this change.
+  * Revert "udev-rules: Permission changes for /dev/dri/renderD*"
+    This would introduce a new system group "render". As the name is rather
+    generic, this needs further discussion first, so revert this change for
+    now.
 
- -- Michael Biebl <biebl@debian.org>  Thu, 14 Dec 2017 23:22:33 +0100
+ -- Michael Biebl <biebl@debian.org>  Sun, 17 Dec 2017 21:45:51 +0100
 
 systemd (235-3) unstable; urgency=medium
 
