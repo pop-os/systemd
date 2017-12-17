@@ -22,3 +22,4 @@ debian/Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Avoid-requiring-a-kvm-system-group.patch
+debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
