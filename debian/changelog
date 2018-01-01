@@ -1,3 +1,26 @@
+systemd (236-2) unstable; urgency=medium
+
+  * Downgrade priority of libudev1 to optional.
+    This makes it compliant with recent versions of debian-policy which
+    recommends to use priority optional for library packages.
+  * Clarify NEWS entry about removal of system users.
+    Mention in the recent NEWS entry that the associated system groups
+    should be removed as well. (Closes: #885061)
+  * cryptsetup-generator: Don't mistake NULL input as OOM.
+    Fixes systemd-cryptsetup-generator failing to run during boot.
+    (Closes: #885201)
+  * analyze: Use normal bus connection for "plot" verb.
+    Fixes "systemd-analyze plot" failing to run as root. (Closes: #884506)
+  * Stop re-enabling systemd services on every upgrade.
+    This was done so changes to the [Install] section would be applied on
+    upgrades. Forcefully re-enabling a service might overwrite local
+    modifications though and thus far, none of the affected services did
+    actually change its [Install] section. So remove this code from the
+    maintainer scripts as it was apparently doing more harm then good.
+    (Closes: #869354)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 02 Jan 2018 00:35:14 +0100
+
 systemd (236-1) unstable; urgency=medium
 
   [ Martin Pitt ]
