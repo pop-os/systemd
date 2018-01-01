@@ -104,23 +104,6 @@ adduser --quiet --system --group --no-create-home --home /run/systemd/resolve \
 # Initial update of the Message Catalogs database
 _update_catalog
 
-# Re-run systemctl enable for any service that was enabled when preinst was run.
-if [ -e /run/systemd/was-enabled ]; then
-    while read UNIT ; do
-        # 220-6 stopped shipping tmp.mount, transition it on machines which had
-        # it enabled
-        if [ "$UNIT" = tmp.mount ] && dpkg --compare-versions "$2" lt-nl "220-6~"; then
-            if [ ! -e /etc/systemd/system/tmp.mount ]; then
-                echo "moving enabled tmp.mount to /etc/systemd/system/..."
-                cp /usr/share/systemd/tmp.mount /etc/systemd/system/tmp.mount
-                # clean up the symlink, to have it re-created below
-                systemctl disable $UNIT
-            fi
-        fi
-        systemctl enable $UNIT || true
-    done </run/systemd/was-enabled || true
-fi
-
 if [ -n "$2" ]; then
     _systemctl daemon-reexec || true
     # don't restart logind; this can be done again once this gets implemented:
