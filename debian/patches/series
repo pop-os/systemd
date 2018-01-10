@@ -1,5 +1,7 @@
 cryptsetup-generator-Don-t-mistake-NULL-input-as-OOM-7688.patch
 analyze-use-normal-bus-connection-for-plot-verb-7685.patch
+Revert-core-execute-RuntimeDirectory-or-friends-requires-.patch
+core-RuntimeDirectory-does-not-request-new-mount-namespac.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

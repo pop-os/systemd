@@ -1,0 +1,46 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 4 Jan 2018 00:16:53 +0900
+Subject: Revert "core/execute: RuntimeDirectory= or friends requires mount
+ namespace"
+
+This reverts commit 652bb2637aee54e3503a22d2928a929ecd7a84b3.
+
+Fixes #7761.
+
+(cherry picked from commit 42b1d8e0f5c025d3c85a4a60fda73d98bf725da5)
+---
+ src/core/execute.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/execute.c b/src/core/execute.c
+index f202467..99eece9 100644
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -1797,12 +1797,7 @@ static bool exec_needs_mount_namespace(
+             !strv_isempty(context->inaccessible_paths))
+                 return true;
+ 
+-        if (context->n_bind_mounts > 0 ||
+-            !strv_isempty(context->directories[EXEC_DIRECTORY_RUNTIME].paths) ||
+-            !strv_isempty(context->directories[EXEC_DIRECTORY_STATE].paths) ||
+-            !strv_isempty(context->directories[EXEC_DIRECTORY_CACHE].paths) ||
+-            !strv_isempty(context->directories[EXEC_DIRECTORY_LOGS].paths) ||
+-            !strv_isempty(context->directories[EXEC_DIRECTORY_CONFIGURATION].paths))
++        if (context->n_bind_mounts > 0)
+                 return true;
+ 
+         if (context->mount_flags != 0)
+@@ -1822,6 +1817,13 @@ static bool exec_needs_mount_namespace(
+         if (context->mount_apivfs && (context->root_image || context->root_directory))
+                 return true;
+ 
++        if (context->dynamic_user &&
++            (!strv_isempty(context->directories[EXEC_DIRECTORY_RUNTIME].paths) ||
++             !strv_isempty(context->directories[EXEC_DIRECTORY_STATE].paths) ||
++             !strv_isempty(context->directories[EXEC_DIRECTORY_CACHE].paths) ||
++             !strv_isempty(context->directories[EXEC_DIRECTORY_LOGS].paths)))
++                return true;
++
+         return false;
+ }
+ 

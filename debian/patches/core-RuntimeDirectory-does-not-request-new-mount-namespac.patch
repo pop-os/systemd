@@ -1,0 +1,28 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 4 Jan 2018 00:20:44 +0900
+Subject: core: RuntimeDirectory= does not request new mount namespace
+
+Now RuntimeDirectory= does not create 'private' directory.
+Thus, it is not neccessary to request new mount namespace.
+
+Follow-up for 8092a48cc1d1fb20b66371576754df831d30a43b.
+
+(cherry picked from commit b43ee82fc1366489963b319dd5f1f22d2833883c)
+---
+ src/core/execute.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/core/execute.c b/src/core/execute.c
+index 99eece9..12bae1a 100644
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -1818,8 +1818,7 @@ static bool exec_needs_mount_namespace(
+                 return true;
+ 
+         if (context->dynamic_user &&
+-            (!strv_isempty(context->directories[EXEC_DIRECTORY_RUNTIME].paths) ||
+-             !strv_isempty(context->directories[EXEC_DIRECTORY_STATE].paths) ||
++            (!strv_isempty(context->directories[EXEC_DIRECTORY_STATE].paths) ||
+              !strv_isempty(context->directories[EXEC_DIRECTORY_CACHE].paths) ||
+              !strv_isempty(context->directories[EXEC_DIRECTORY_LOGS].paths)))
+                 return true;
