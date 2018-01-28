@@ -1313,13 +1313,14 @@ static int userns_lchown(const char *p, uid_t uid, gid_t gid) {
 
 static int userns_mkdir(const char *root, const char *path, mode_t mode, uid_t uid, gid_t gid) {
         const char *q;
+        int r;
 
         q = prefix_roota(root, path);
-        if (mkdir(q, mode) < 0) {
-                if (errno == EEXIST)
-                        return 0;
-                return -errno;
-        }
+        r = mkdir_errno_wrapper(q, mode);
+        if (r == -EEXIST)
+                return 0;
+        if (r < 0)
+                return r;
 
         return userns_lchown(q, uid, gid);
 }
@@ -1599,8 +1600,10 @@ static int setup_pts(const char *dest) {
 
         /* Mount /dev/pts itself */
         p = prefix_roota(dest, "/dev/pts");
-        if (mkdir(p, 0755) < 0)
-                return log_error_errno(errno, "Failed to create /dev/pts: %m");
+        r = mkdir_errno_wrapper(p, 0755);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create /dev/pts: %m");
+
         r = mount_verbose(LOG_ERR, "devpts", p, "devpts", MS_NOSUID|MS_NOEXEC, options);
         if (r < 0)
                 return r;
@@ -1846,12 +1849,13 @@ static int setup_journal(const char *directory) {
                 /* don't create parents here — if the host doesn't have
                  * permanent journal set up, don't force it here */
 
-                if (mkdir(p, 0755) < 0 && errno != EEXIST) {
+                r = mkdir_errno_wrapper(p, 0755);
+                if (r < 0 && r != -EEXIST) {
                         if (try) {
-                                log_debug_errno(errno, "Failed to create %s, skipping journal setup: %m", p);
+                                log_debug_errno(r, "Failed to create %s, skipping journal setup: %m", p);
                                 return 0;
                         } else
-                                return log_error_errno(errno, "Failed to create %s: %m", p);
+                                return log_error_errno(r, "Failed to create %s: %m", p);
                 }
 
         } else if (access(p, F_OK) < 0)
@@ -2159,8 +2163,11 @@ static int determine_names(void) {
 
                         if (!arg_ephemeral)
                                 arg_read_only = arg_read_only || i->read_only;
-                } else
-                        arg_directory = get_current_dir_name();
+                } else {
+                        r = safe_getcwd(&arg_directory);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to determine current directory: %m");
+                }
 
                 if (!arg_directory && !arg_image) {
                         log_error("Failed to determine path, please use -D or -i.");
@@ -3512,9 +3519,11 @@ static int run(int master,
         }
 
         /* Wait for the outer child. */
-        r = wait_for_terminate_and_warn("namespace helper", *pid, NULL);
-        if (r != 0)
-                return r < 0 ? r : -EIO;
+        r = wait_for_terminate_and_check("(sd-namespace)", *pid, WAIT_LOG_ABNORMAL);
+        if (r < 0)
+                return r;
+        if (r != EXIT_SUCCESS)
+                return -EIO;
 
         /* And now retrieve the PID of the inner child. */
         l = recv(pid_socket_pair[0], pid, sizeof *pid, 0);
@@ -3616,14 +3625,16 @@ static int run(int master,
                  * case PID 1 will send us a friendly RequestStop signal, when it is asked to terminate the
                  * scope. Let's hook into that, and cleanly shut down the container, and print a friendly message. */
 
-                r = sd_bus_add_match(bus, NULL,
-                                     "type='signal',"
-                                     "sender='org.freedesktop.systemd1',"
-                                     "interface='org.freedesktop.systemd1.Scope',"
-                                     "member='RequestStop'",
-                                     on_request_stop, PID_TO_PTR(*pid));
+                r = sd_bus_match_signal_async(
+                                bus,
+                                NULL,
+                                "org.freedesktop.systemd1",
+                                NULL,
+                                "org.freedesktop.systemd1.Scope",
+                                "RequestStop",
+                                on_request_stop, NULL, PID_TO_PTR(*pid));
                 if (r < 0)
-                        return log_error_errno(r, "Failed to install request stop match: %m");
+                        return log_error_errno(r, "Failed to request RequestStop match: %m");
         }
 
         if (arg_register) {

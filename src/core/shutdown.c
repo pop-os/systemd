@@ -31,10 +31,11 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "async.h"
 #include "cgroup-util.h"
-#include "fd-util.h"
 #include "def.h"
 #include "exec-util.h"
+#include "fd-util.h"
 #include "fileio.h"
 #include "killall.h"
 #include "log.h"
@@ -57,6 +58,7 @@
 
 static char* arg_verb;
 static uint8_t arg_exit_code;
+static usec_t arg_timeout = DEFAULT_TIMEOUT_USEC;
 
 static int parse_argv(int argc, char *argv[]) {
         enum {
@@ -65,6 +67,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_LOG_COLOR,
                 ARG_LOG_LOCATION,
                 ARG_EXIT_CODE,
+                ARG_TIMEOUT,
         };
 
         static const struct option options[] = {
@@ -73,6 +76,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "log-color",     optional_argument, NULL, ARG_LOG_COLOR    },
                 { "log-location",  optional_argument, NULL, ARG_LOG_LOCATION },
                 { "exit-code",     required_argument, NULL, ARG_EXIT_CODE    },
+                { "timeout",       required_argument, NULL, ARG_TIMEOUT      },
                 {}
         };
 
@@ -125,6 +129,13 @@ static int parse_argv(int argc, char *argv[]) {
                         r = safe_atou8(optarg, &arg_exit_code);
                         if (r < 0)
                                 log_error("Failed to parse exit code %s, ignoring", optarg);
+
+                        break;
+
+                case ARG_TIMEOUT:
+                        r = parse_sec(optarg, &arg_timeout);
+                        if (r < 0)
+                                log_error("Failed to parse shutdown timeout %s, ignoring", optarg);
 
                         break;
 
@@ -211,26 +222,20 @@ static bool sync_making_progress(unsigned long long *prev_dirty) {
 }
 
 static void sync_with_progress(void) {
+        unsigned long long dirty = ULONG_LONG_MAX;
         unsigned checks;
         pid_t pid;
         int r;
-        unsigned long long dirty = ULONG_LONG_MAX;
 
         BLOCK_SIGNALS(SIGCHLD);
 
-        /* Due to the possiblity of the sync operation hanging, we fork
-         * a child process and monitor the progress. If the timeout
-         * lapses, the assumption is that that particular sync stalled. */
-        pid = fork();
-        if (pid < 0) {
-                log_error_errno(errno, "Failed to fork: %m");
-                return;
-        }
+        /* Due to the possiblity of the sync operation hanging, we fork a child process and monitor the progress. If
+         * the timeout lapses, the assumption is that that particular sync stalled. */
 
-        if (pid == 0) {
-                /* Start the sync operation here in the child */
-                sync();
-                _exit(EXIT_SUCCESS);
+        r = asynchronous_sync(&pid);
+        if (r < 0) {
+                log_error_errno(r, "Failed to fork sync(): %m");
+                return;
         }
 
         log_info("Syncing filesystems and block devices.");
@@ -279,7 +284,7 @@ int main(int argc, char *argv[]) {
         /* journald will die if not gone yet. The log target defaults
          * to console, but may have been changed by command line options. */
 
-        log_close_console(); /* force reopen of /dev/console */
+        log_set_prohibit_ipc(true);
         log_open();
 
         umask(0022);
@@ -328,11 +333,13 @@ int main(int argc, char *argv[]) {
         if (!in_container)
                 sync_with_progress();
 
+        disable_coredumps();
+
         log_info("Sending SIGTERM to remaining processes...");
-        broadcast_signal(SIGTERM, true, true);
+        broadcast_signal(SIGTERM, true, true, arg_timeout);
 
         log_info("Sending SIGKILL to remaining processes...");
-        broadcast_signal(SIGKILL, true, false);
+        broadcast_signal(SIGKILL, true, false, arg_timeout);
 
         need_umount = !in_container;
         need_swapoff = !in_container;
@@ -488,15 +495,10 @@ int main(int argc, char *argv[]) {
 
                 if (!in_container) {
                         /* We cheat and exec kexec to avoid doing all its work */
-                        pid_t pid;
-
                         log_info("Rebooting with kexec.");
 
-                        pid = fork();
-                        if (pid < 0)
-                                log_error_errno(errno, "Failed to fork: %m");
-                        else if (pid == 0) {
-
+                        r = safe_fork("(sd-kexec)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG|FORK_WAIT, NULL);
+                        if (r == 0) {
                                 const char * const args[] = {
                                         KEXEC, "-e", NULL
                                 };
@@ -505,8 +507,9 @@ int main(int argc, char *argv[]) {
 
                                 execv(args[0], (char * const *) args);
                                 _exit(EXIT_FAILURE);
-                        } else
-                                wait_for_terminate_and_warn("kexec", pid, true);
+                        }
+
+                        /* If we are still running, then the kexec can't have worked, let's fall through */
                 }
 
                 cmd = RB_AUTOBOOT;
@@ -548,7 +551,7 @@ int main(int argc, char *argv[]) {
                  * CAP_SYS_BOOT just exit, this will kill our
                  * container for good. */
                 log_info("Exiting container.");
-                exit(0);
+                exit(EXIT_SUCCESS);
         }
 
         r = log_error_errno(errno, "Failed to invoke reboot(): %m");

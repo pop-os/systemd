@@ -133,7 +133,7 @@ static int determine_path_usage(Server *s, const char *path, uint64_t *ret_used,
 }
 
 static void cache_space_invalidate(JournalStorageSpace *space) {
-        memset(space, 0, sizeof(*space));
+        zero(*space);
 }
 
 static int cache_space_refresh(Server *s, JournalStorage *storage) {
@@ -241,6 +241,13 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
                               NULL);
 }
 
+static bool uid_for_system_journal(uid_t uid) {
+
+        /* Returns true if the specified UID shall get its data stored in the system journal*/
+
+        return uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY;
+}
+
 static void server_add_acls(JournalFile *f, uid_t uid) {
 #if HAVE_ACL
         int r;
@@ -248,7 +255,7 @@ static void server_add_acls(JournalFile *f, uid_t uid) {
         assert(f);
 
 #if HAVE_ACL
-        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY)
+        if (uid_for_system_journal(uid))
                 return;
 
         r = add_acls_for_user(f->fd, uid);
@@ -406,7 +413,7 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
         if (s->runtime_journal)
                 return s->runtime_journal;
 
-        if (uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY)
+        if (uid_for_system_journal(uid))
                 return s->system_journal;
 
         r = sd_id128_get_machine(&machine);
@@ -457,13 +464,14 @@ static int do_rotate(
                 return -EINVAL;
 
         r = journal_file_rotate(f, s->compress, seal, s->deferred_closes);
-        if (r < 0)
+        if (r < 0) {
                 if (*f)
-                        log_error_errno(r, "Failed to rotate %s: %m", (*f)->path);
+                        return log_error_errno(r, "Failed to rotate %s: %m", (*f)->path);
                 else
-                        log_error_errno(r, "Failed to create new %s journal: %m", name);
-        else
-                server_add_acls(*f, uid);
+                        return log_error_errno(r, "Failed to create new %s journal: %m", name);
+        }
+
+        server_add_acls(*f, uid);
 
         return r;
 }
@@ -1489,7 +1497,8 @@ static int server_open_hostname(Server *s) {
 
         assert(s);
 
-        s->hostname_fd = open("/proc/sys/kernel/hostname", O_RDONLY|O_CLOEXEC|O_NDELAY|O_NOCTTY);
+        s->hostname_fd = open("/proc/sys/kernel/hostname",
+                              O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
         if (s->hostname_fd < 0)
                 return log_error_errno(errno, "Failed to open /proc/sys/kernel/hostname: %m");
 

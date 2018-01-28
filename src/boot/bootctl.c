@@ -36,6 +36,8 @@
 #include <sys/statfs.h>
 #include <unistd.h>
 
+#include "sd-id128.h"
+
 #include "alloc-util.h"
 #include "blkid-util.h"
 #include "bootspec.h"
@@ -294,7 +296,7 @@ static int status_entries(const char *esp_path, sd_id128_t partition) {
                                        esp_path);
 
         if (config.default_entry < 0)
-                printf("%zu entries, no entry suitable as default", config.n_entries);
+                printf("%zu entries, no entry suitable as default\n", config.n_entries);
         else {
                 const BootEntry *e = &config.entries[config.default_entry];
 
@@ -948,12 +950,13 @@ static int verb_status(int argc, char *argv[], void *userdata) {
                 * can show */
 
         if (is_efi_boot()) {
-                _cleanup_free_ char *fw_type = NULL, *fw_info = NULL, *loader = NULL, *loader_path = NULL;
+                _cleanup_free_ char *fw_type = NULL, *fw_info = NULL, *loader = NULL, *loader_path = NULL, *stub = NULL;
                 sd_id128_t loader_part_uuid = SD_ID128_NULL;
 
                 read_loader_efi_var("LoaderFirmwareType", &fw_type);
                 read_loader_efi_var("LoaderFirmwareInfo", &fw_info);
                 read_loader_efi_var("LoaderInfo", &loader);
+                read_loader_efi_var("StubInfo", &stub);
                 read_loader_efi_var("LoaderImageIdentifier", &loader_path);
 
                 if (loader_path)
@@ -981,6 +984,8 @@ static int verb_status(int argc, char *argv[], void *userdata) {
 
                 printf("Current Loader:\n");
                 printf("      Product: %s\n", strna(loader));
+                if (stub)
+                        printf("         Stub: %s\n", stub);
                 if (!sd_id128_is_null(loader_part_uuid))
                         printf("          ESP: /dev/disk/by-partuuid/%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",
                                SD_ID128_FORMAT_VAL(loader_part_uuid));
@@ -1043,7 +1048,7 @@ static int verb_list(int argc, char *argv[], void *userdata) {
                        boot_entry_title(e),
                        ansi_normal(),
                        ansi_highlight_green(),
-                       n == config.default_entry ? " (default)" : "",
+                       n == (unsigned) config.default_entry ? " (default)" : "",
                        ansi_normal());
                 if (e->version)
                         printf("      version: %s\n", e->version);
@@ -1139,12 +1144,12 @@ static int verb_remove(int argc, char *argv[], void *userdata) {
 static int bootctl_main(int argc, char *argv[]) {
 
         static const Verb verbs[] = {
-                { "help",            VERB_ANY, VERB_ANY, 0,               help         },
-                { "status",          VERB_ANY, 1,        VERB_DEFAULT,    verb_status  },
-                { "list",            VERB_ANY, 1,        0,               verb_list    },
-                { "install",         VERB_ANY, 1,        VERB_MUSTBEROOT, verb_install },
-                { "update",          VERB_ANY, 1,        VERB_MUSTBEROOT, verb_install },
-                { "remove",          VERB_ANY, 1,        VERB_MUSTBEROOT, verb_remove  },
+                { "help",            VERB_ANY, VERB_ANY, 0,                 help         },
+                { "status",          VERB_ANY, 1,        VERB_DEFAULT,      verb_status  },
+                { "list",            VERB_ANY, 1,        0,                 verb_list    },
+                { "install",         VERB_ANY, 1,        VERB_MUST_BE_ROOT, verb_install },
+                { "update",          VERB_ANY, 1,        VERB_MUST_BE_ROOT, verb_install },
+                { "remove",          VERB_ANY, 1,        VERB_MUST_BE_ROOT, verb_remove  },
                 {}
         };
 

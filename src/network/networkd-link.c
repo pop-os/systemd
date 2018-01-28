@@ -92,6 +92,9 @@ static bool link_ipv4ll_enabled(Link *link) {
         if (!link->network)
                 return false;
 
+        if (streq_ptr(link->kind, "wireguard"))
+                return false;
+
         return link->network->link_local & ADDRESS_FAMILY_IPV4;
 }
 
@@ -105,6 +108,9 @@ static bool link_ipv6ll_enabled(Link *link) {
                 return false;
 
         if (!link->network)
+                return false;
+
+        if (streq_ptr(link->kind, "wireguard"))
                 return false;
 
         return link->network->link_local & ADDRESS_FAMILY_IPV6;
@@ -129,7 +135,7 @@ static bool link_radv_enabled(Link *link) {
         if (!link_ipv6ll_enabled(link))
                 return false;
 
-        return link->network->router_prefix_delegation;
+        return link->network->router_prefix_delegation != RADV_PREFIX_DELEGATION_NONE;
 }
 
 static bool link_lldp_rx_enabled(Link *link) {
@@ -849,6 +855,8 @@ static int link_enter_set_routes(Link *link) {
         assert(link->network);
         assert(link->state == LINK_STATE_SETTING_ADDRESSES);
 
+        (void) link_set_routing_policy_rule(link);
+
         link_set_state(link, LINK_STATE_SETTING_ROUTES);
 
         LIST_FOREACH(routes, rt, link->network->static_routes) {
@@ -861,8 +869,6 @@ static int link_enter_set_routes(Link *link) {
 
                 link->route_messages++;
         }
-
-        (void) link_set_routing_policy_rule(link);
 
         if (link->route_messages == 0) {
                 link->static_routes_configured = true;
@@ -3316,6 +3322,12 @@ int link_update(Link *link, sd_netlink_message *m) {
                                 r = sd_radv_set_mac(link->radv, &link->mac);
                                 if (r < 0)
                                         return log_link_warning_errno(link, r, "Could not update MAC for Router Advertisement: %m");
+                        }
+
+                        if (link->ndisc) {
+                                r = sd_ndisc_set_mac(link->ndisc, &link->mac);
+                                if (r < 0)
+                                        return log_link_warning_errno(link, r, "Could not update MAC for ndisc: %m");
                         }
                 }
         }
