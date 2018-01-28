@@ -1,3 +1,21 @@
+systemd (236-4) unstable; urgency=medium
+
+  [ Felipe Sateler ]
+  * Allow systemd-timesyncd to start when libnss-systemd is not installed.
+    Pick upstream patch requiring the existence of the systemd-timesync user
+    only when running as root, which is not the case for the system unit.
+    (Closes: #887343)
+
+  [ Nicolas Braud-Santoni ]
+  * debian/copyright: Refer to the CC0 license file (Closes: #882629)
+
+  [ Michael Biebl ]
+  * Add Build-Depends on python3-evdev <!nocheck>
+    This is used by hwdb/parse_hwdb.py to perform additional validation on
+    hwdb files.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 28 Jan 2018 22:29:32 +0100
+
 systemd (236-3) unstable; urgency=medium
 
   * Revert "core/execute: RuntimeDirectory= or friends requires mount
