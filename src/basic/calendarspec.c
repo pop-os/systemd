@@ -35,6 +35,7 @@
 #include "fileio.h"
 #include "macro.h"
 #include "parse-util.h"
+#include "process-util.h"
 #include "string-util.h"
 #include "time-util.h"
 
@@ -155,6 +156,11 @@ static void fix_year(CalendarComponent *c) {
 
 int calendar_spec_normalize(CalendarSpec *c) {
         assert(c);
+
+        if (streq_ptr(c->timezone, "UTC")) {
+                c->utc = true;
+                c->timezone = mfree(c->timezone);
+        }
 
         if (c->weekdays_bits <= 0 || c->weekdays_bits >= BITS_WEEKDAYS)
                 c->weekdays_bits = -1;
@@ -1348,9 +1354,7 @@ typedef struct SpecNextResult {
 } SpecNextResult;
 
 int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *next) {
-        pid_t pid;
-        SpecNextResult *shared;
-        SpecNextResult tmp;
+        SpecNextResult *shared, tmp;
         int r;
 
         if (isempty(spec->timezone))
@@ -1360,15 +1364,12 @@ int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *next)
         if (shared == MAP_FAILED)
                 return negative_errno();
 
-        pid = fork();
-
-        if (pid == -1) {
-                int fork_errno = errno;
+        r = safe_fork("(sd-calendar)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_WAIT, NULL);
+        if (r < 0) {
                 (void) munmap(shared, sizeof *shared);
-                return -fork_errno;
+                return r;
         }
-
-        if (pid == 0) {
+        if (r == 0) {
                 if (setenv("TZ", spec->timezone, 1) != 0) {
                         shared->return_value = negative_errno();
                         _exit(EXIT_FAILURE);
@@ -1381,14 +1382,8 @@ int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *next)
                 _exit(EXIT_SUCCESS);
         }
 
-        r = wait_for_terminate(pid, NULL);
-        if (r < 0) {
-                (void) munmap(shared, sizeof *shared);
-                return r;
-        }
-
         tmp = *shared;
-        if (munmap(shared, sizeof *shared) != 0)
+        if (munmap(shared, sizeof *shared) < 0)
                 return negative_errno();
 
         if (tmp.return_value == 0)

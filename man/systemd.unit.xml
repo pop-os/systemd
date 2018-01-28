@@ -505,8 +505,8 @@
         <listitem><para>Configures requirement dependencies on other units. If this unit gets activated, the units
         listed here will be activated as well. If one of the other units fails to activate, and an ordering dependency
         <varname>After=</varname> on the failing unit is set, this unit will not be started. Besides, with or without
-        specifying <varname>After=</varname>, this unit will be deactivated if one of the other units get deactivated.
-        This option may be specified more than once or multiple space-separated units may be
+        specifying <varname>After=</varname>, this unit will be stopped if one of the other units is explicitly
+        stopped. This option may be specified more than once or multiple space-separated units may be
         specified in one option in which case requirement dependencies for all listed names will be created. Note that
         requirement dependencies do not influence the order in which services are started or stopped.  This has to be
         configured independently with the <varname>After=</varname> or <varname>Before=</varname> options. If a unit
@@ -665,7 +665,9 @@
 
         <listitem><para>A space-separated list of one or more units
         that are activated when this unit enters the
-        <literal>failed</literal> state.</para></listitem>
+        <literal>failed</literal> state.  A service unit using
+        <varname>Restart=</varname> enters the failed state only after
+        the start limits are reached.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -921,6 +923,7 @@
         <term><varname>ConditionVirtualization=</varname></term>
         <term><varname>ConditionHost=</varname></term>
         <term><varname>ConditionKernelCommandLine=</varname></term>
+        <term><varname>ConditionKernelVersion=</varname></term>
         <term><varname>ConditionSecurity=</varname></term>
         <term><varname>ConditionCapability=</varname></term>
         <term><varname>ConditionACPower=</varname></term>
@@ -937,6 +940,7 @@
         <term><varname>ConditionFileIsExecutable=</varname></term>
         <term><varname>ConditionUser=</varname></term>
         <term><varname>ConditionGroup=</varname></term>
+        <term><varname>ConditionControlGroupController=</varname></term>
 
         <!-- We do not document ConditionNull=
              here, as it is not particularly
@@ -1046,6 +1050,17 @@
         is, or as left hand side of an assignment. In the latter case,
         the exact assignment is looked for with right and left hand
         side matching.</para>
+
+        <para><varname>ConditionKernelVersion=</varname> may be used to check whether the kernel version (as reported
+        by <command>uname -r</command>) matches a certain expression (or if prefixed with the exclamation mark does not
+        match it). The argument must be a single string. If the string starts with one of <literal>&lt;</literal>,
+        <literal>&lt;=</literal>, <literal>=</literal>, <literal>&gt;=</literal>, <literal>&gt;</literal> a relative
+        version comparison is done, otherwise the specified string is matched with shell-style globs.</para>
+
+        <para>Note that using the kernel version string is an unreliable way to determine which features are supported
+        by a kernel, because of the widespread practice of backporting drivers, features, and fixes from newer upstream
+        kernels into older versions provided by distributions. Hence, this check is inherently unportable and should
+        not be used for units which may be used on different distributions.</para>
 
         <para><varname>ConditionSecurity=</varname> may be used to
         check whether the given security module is enabled on the
@@ -1164,6 +1179,18 @@
         auxiliary groups match the specified group or GID. This setting
         does not have a special value <literal>@system</literal>.</para>
 
+        <para><varname>ConditionControlGroupController=</varname> takes a
+        cgroup controller name (eg. <option>cpu</option>), verifying that it is
+        available for use on the system. For example, a particular controller
+        may not be available if it was disabled on the kernel command line with
+        <literal>cgroup_disable=</literal><replaceable>controller</replaceable>.
+        Multiple controllers may be passed with a space separating them; in
+        this case the condition will only pass if all listed controllers are
+        available for use. Controllers unknown to systemd are ignored. Valid
+        controllers are <option>cpu</option>, <option>cpuacct</option>,
+        <option>io</option>, <option>blkio</option>, <option>memory</option>,
+        <option>devices</option>, and <option>pids</option>.</para>
+
         <para>If multiple conditions are specified, the unit will be
         executed if all of them apply (i.e. a logical AND is applied).
         Condition checks can be prefixed with a pipe symbol (|) in
@@ -1186,6 +1213,7 @@
         <term><varname>AssertVirtualization=</varname></term>
         <term><varname>AssertHost=</varname></term>
         <term><varname>AssertKernelCommandLine=</varname></term>
+        <term><varname>AssertKernelVersion=</varname></term>
         <term><varname>AssertSecurity=</varname></term>
         <term><varname>AssertCapability=</varname></term>
         <term><varname>AssertACPower=</varname></term>
@@ -1202,6 +1230,7 @@
         <term><varname>AssertFileIsExecutable=</varname></term>
         <term><varname>AssertUser=</varname></term>
         <term><varname>AssertGroup=</varname></term>
+        <term><varname>AssertControlGroupController=</varname></term>
 
         <listitem><para>Similar to the <varname>ConditionArchitecture=</varname>,
         <varname>ConditionVirtualization=</varname>, …, condition settings described above, these settings add

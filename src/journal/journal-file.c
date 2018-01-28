@@ -147,6 +147,8 @@ static void journal_file_set_offline_internal(JournalFile *f) {
 static void * journal_file_set_offline_thread(void *arg) {
         JournalFile *f = arg;
 
+        (void) pthread_setname_np(pthread_self(), "journal-offline");
+
         journal_file_set_offline_internal(f);
 
         return NULL;
@@ -245,11 +247,25 @@ int journal_file_set_offline(JournalFile *f, bool wait) {
         if (wait) /* Without using a thread if waiting. */
                 journal_file_set_offline_internal(f);
         else {
+                sigset_t ss, saved_ss;
+                int k;
+
+                if (sigfillset(&ss) < 0)
+                        return -errno;
+
+                r = pthread_sigmask(SIG_BLOCK, &ss, &saved_ss);
+                if (r > 0)
+                        return -r;
+
                 r = pthread_create(&f->offline_thread, NULL, journal_file_set_offline_thread, f);
+
+                k = pthread_sigmask(SIG_SETMASK, &saved_ss, NULL);
                 if (r > 0) {
                         f->offline_state = OFFLINE_JOINED;
                         return -r;
                 }
+                if (k > 0)
+                        return -k;
         }
 
         return 0;
@@ -3237,11 +3253,8 @@ int journal_file_open(
         if (!IN_SET((flags & O_ACCMODE), O_RDONLY, O_RDWR))
                 return -EINVAL;
 
-        if (fname) {
-                if (!endswith(fname, ".journal") &&
-                    !endswith(fname, ".journal~"))
-                        return -EINVAL;
-        }
+        if (fname && (flags & O_CREAT) && !endswith(fname, ".journal"))
+                return -EINVAL;
 
         f = new0(JournalFile, 1);
         if (!f)

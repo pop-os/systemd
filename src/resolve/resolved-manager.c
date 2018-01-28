@@ -488,7 +488,8 @@ static int manager_watch_hostname(Manager *m) {
 
         assert(m);
 
-        m->hostname_fd = open("/proc/sys/kernel/hostname", O_RDONLY|O_CLOEXEC|O_NDELAY|O_NOCTTY);
+        m->hostname_fd = open("/proc/sys/kernel/hostname",
+                              O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
         if (m->hostname_fd < 0) {
                 log_warning_errno(errno, "Failed to watch hostname: %m");
                 return 0;
@@ -1410,7 +1411,7 @@ void manager_dnssec_verdict(Manager *m, DnssecVerdict verdict, const DnsResource
         assert(verdict >= 0);
         assert(verdict < _DNSSEC_VERDICT_MAX);
 
-        if (log_get_max_level() >= LOG_DEBUG) {
+        if (DEBUG_LOGGING) {
                 char s[DNS_RESOURCE_KEY_STRING_MAX];
 
                 log_debug("Found verdict for lookup %s: %s",
