@@ -15,18 +15,18 @@ Closes: #810748
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index 22c4ae9..c3bdb79 100644
+index f392f89..daa467b 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
-@@ -329,6 +329,7 @@ static int add_mount(
-         const char *unit;
+@@ -318,6 +318,7 @@ static int add_mount(
+                 *where_escaped = NULL;
          _cleanup_fclose_ FILE *f = NULL;
          int r;
 +        struct stat sb;
  
          assert(what);
          assert(where);
-@@ -415,9 +416,13 @@ static int add_mount(
+@@ -395,9 +396,13 @@ static int add_mount(
          }
  
          if (passno != 0) {

@@ -9,10 +9,10 @@ Closes: #726466
  1 file changed, 6 insertions(+)
 
 diff --git a/src/login/logind-core.c b/src/login/logind-core.c
-index adeba74..959060d 100644
+index e338682..3064748 100644
 --- a/src/login/logind-core.c
 +++ b/src/login/logind-core.c
-@@ -35,6 +35,7 @@
+@@ -36,6 +36,7 @@
  #include "terminal-util.h"
  #include "udev-util.h"
  #include "user-util.h"
@@ -20,7 +20,7 @@ index adeba74..959060d 100644
  
  int manager_add_device(Manager *m, const char *sysfs, bool master, Device **_device) {
          Device *d;
-@@ -458,6 +459,11 @@ int manager_spawn_autovt(Manager *m, unsigned int vtnr) {
+@@ -459,6 +460,11 @@ int manager_spawn_autovt(Manager *m, unsigned int vtnr) {
              vtnr != m->reserve_vt)
                  return 0;
  
