@@ -2,7 +2,7 @@ systemd (237-1ubuntu1) bionic; urgency=medium
 
   * Remaining delta from Debian:
     - ship dhclient enter hook for dhclient integration with resolved
-    - ship resolvconf integration via stub-resolv.conf
+    - Use stub-resolv.conf as the default provider of /etc/resolv.conf
     - ship s390x virtio interface names migration
     - do not disable systemd-resolved upon libnss-resolve removal
     - do not remount fs in containers, for non-degrated boot

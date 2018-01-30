@@ -11,16 +11,14 @@ unpriviledged user namespaced containers.
  src/test/test-process-util.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/src/test/test-process-util.c b/src/test/test-process-util.c
-index 0f0e2cb..10ffcf8 100644
 --- a/src/test/test-process-util.c
 +++ b/src/test/test-process-util.c
-@@ -379,7 +379,7 @@ static void test_rename_process_now(const char *p, int ret) {
+@@ -381,7 +381,7 @@
  
          assert_se(get_process_cmdline(0, 0, false, &cmdline) >= 0);
          /* we cannot expect cmdline to be renamed properly without privileges */
 -        if (geteuid() == 0) {
 +        if (geteuid() == 0 && !running_in_userns()) {
                  log_info("cmdline = <%s>", cmdline);
-                 assert_se(strneq(p, cmdline, strlen("test-process-util")));
+                 assert_se(strneq(p, cmdline, STRLEN("test-process-util")));
                  assert_se(startswith(p, cmdline));

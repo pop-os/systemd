@@ -25,7 +25,6 @@ debian/Avoid-requiring-a-kvm-system-group.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
 debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
 debian/Ubuntu-UseDomains-by-default.patch
-debian/Ubuntu-resolved-resolvconf-integration.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
 debian/UBUNTU-core-unlink-the-invocation-id-key-if-cannot-change-keyrin.patch
