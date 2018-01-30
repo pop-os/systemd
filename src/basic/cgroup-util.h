@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -31,14 +32,18 @@
 #include "macro.h"
 #include "set.h"
 
+#define SYSTEMD_CGROUP_CONTROLLER_LEGACY "name=systemd"
+#define SYSTEMD_CGROUP_CONTROLLER_HYBRID "name=unified"
+#define SYSTEMD_CGROUP_CONTROLLER "_systemd"
+
 /* An enum of well known cgroup controllers */
 typedef enum CGroupController {
         CGROUP_CONTROLLER_CPU,
-        CGROUP_CONTROLLER_CPUACCT,
-        CGROUP_CONTROLLER_IO,
-        CGROUP_CONTROLLER_BLKIO,
+        CGROUP_CONTROLLER_CPUACCT,    /* v1 only */
+        CGROUP_CONTROLLER_IO,         /* v2 only */
+        CGROUP_CONTROLLER_BLKIO,      /* v1 only */
         CGROUP_CONTROLLER_MEMORY,
-        CGROUP_CONTROLLER_DEVICES,
+        CGROUP_CONTROLLER_DEVICES,    /* v1 only */
         CGROUP_CONTROLLER_PIDS,
         _CGROUP_CONTROLLER_MAX,
         _CGROUP_CONTROLLER_INVALID = -1,
@@ -183,8 +188,7 @@ int cg_set_attribute(const char *controller, const char *path, const char *attri
 int cg_get_attribute(const char *controller, const char *path, const char *attribute, char **ret);
 int cg_get_keyed_attribute(const char *controller, const char *path, const char *attribute, const char **keys, char **values);
 
-int cg_set_group_access(const char *controller, const char *path, mode_t mode, uid_t uid, gid_t gid);
-int cg_set_task_access(const char *controller, const char *path, mode_t mode, uid_t uid, gid_t gid);
+int cg_set_access(const char *controller, const char *path, uid_t uid, gid_t gid);
 
 int cg_set_xattr(const char *controller, const char *path, const char *name, const void *value, size_t size, int flags);
 int cg_get_xattr(const char *controller, const char *path, const char *name, void *value, size_t size);
@@ -238,7 +242,7 @@ int cg_mask_supported(CGroupMask *ret);
 int cg_mask_from_string(const char *s, CGroupMask *ret);
 int cg_mask_to_string(CGroupMask mask, char **ret);
 
-int cg_kernel_controllers(Set *controllers);
+int cg_kernel_controllers(Set **controllers);
 
 bool cg_ns_supported(void);
 

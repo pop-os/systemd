@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd
 
@@ -37,6 +38,29 @@ static void test_set_steal_first(void) {
         assert_se(seen[0] == 1 && seen[1] == 1 && seen[2] == 1);
 
         assert_se(set_isempty(m));
+}
+
+typedef struct Item {
+        int seen;
+} Item;
+static void item_seen(Item *item) {
+        item->seen++;
+}
+
+static void test_set_free_with_destructor(void) {
+        Set *m;
+        struct Item items[4] = {};
+        unsigned i;
+
+        assert_se(m = set_new(NULL));
+        for (i = 0; i < ELEMENTSOF(items) - 1; i++)
+                assert_se(set_put(m, items + i) == 1);
+
+        m = set_free_with_destructor(m, item_seen);
+        assert_se(items[0].seen == 1);
+        assert_se(items[1].seen == 1);
+        assert_se(items[2].seen == 1);
+        assert_se(items[3].seen == 0);
 }
 
 static void test_set_put(void) {
@@ -101,6 +125,7 @@ static void test_set_make(void) {
 
 int main(int argc, const char *argv[]) {
         test_set_steal_first();
+        test_set_free_with_destructor();
         test_set_put();
         test_set_make();
 

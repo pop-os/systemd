@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -21,10 +22,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#if HAVE_KMOD
-#include <libkmod.h>
-#endif
-
 #include "alloc-util.h"
 #include "bus-util.h"
 #include "capability-util.h"
@@ -34,6 +31,9 @@
 #include "string-util.h"
 
 #if HAVE_KMOD
+#include <libkmod.h>
+#include "module-util.h"
+
 static void systemd_kmod_log(
                 void *data,
                 int priority,
@@ -110,7 +110,7 @@ int kmod_setup(void) {
                 /* virtio_rng would be loaded by udev later, but real entropy might be needed very early */
                 { "virtio_rng", NULL,                       false,  false,   has_virtio_rng },
         };
-        struct kmod_ctx *ctx = NULL;
+        _cleanup_(kmod_unrefp) struct kmod_ctx *ctx = NULL;
         unsigned int i;
         int r;
 
@@ -118,7 +118,7 @@ int kmod_setup(void) {
                 return 0;
 
         for (i = 0; i < ELEMENTSOF(kmod_table); i++) {
-                struct kmod_module *mod;
+                _cleanup_(kmod_module_unrefp) struct kmod_module *mod = NULL;
 
                 if (kmod_table[i].path && access(kmod_table[i].path, F_OK) >= 0)
                         continue;
@@ -157,12 +157,7 @@ int kmod_setup(void) {
                         log_full_errno(print_warning ? LOG_WARNING : LOG_DEBUG, r,
                                        "Failed to insert module '%s': %m", kmod_module_get_name(mod));
                 }
-
-                kmod_module_unref(mod);
         }
-
-        if (ctx)
-                kmod_unref(ctx);
 
 #endif
         return 0;

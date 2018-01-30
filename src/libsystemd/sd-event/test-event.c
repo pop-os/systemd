@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -26,6 +27,7 @@
 #include "macro.h"
 #include "signal-util.h"
 #include "util.h"
+#include "process-util.h"
 
 static int prepare_handler(sd_event_source *s, void *userdata) {
         log_info("preparing %c", PTR_TO_INT(userdata));
@@ -96,7 +98,7 @@ static int signal_handler(sd_event_source *s, const struct signalfd_siginfo *si,
         assert_se(pid >= 0);
 
         if (pid == 0)
-                _exit(0);
+                _exit(EXIT_SUCCESS);
 
         assert_se(sd_event_add_child(sd_event_source_get_event(s), &p, pid, WEXITED, child_handler, INT_TO_PTR('f')) >= 0);
         assert_se(sd_event_source_set_enabled(p, SD_EVENT_ONESHOT) >= 0);
@@ -317,11 +319,11 @@ static void test_rtqueue(void) {
 
         assert_se(sd_event_source_set_priority(v, -10) >= 0);
 
-        assert(sigqueue(getpid_cached(), SIGRTMIN+2, (union sigval) { .sival_int = 1 }) >= 0);
-        assert(sigqueue(getpid_cached(), SIGRTMIN+3, (union sigval) { .sival_int = 2 }) >= 0);
-        assert(sigqueue(getpid_cached(), SIGUSR2, (union sigval) { .sival_int = 3 }) >= 0);
-        assert(sigqueue(getpid_cached(), SIGRTMIN+3, (union sigval) { .sival_int = 4 }) >= 0);
-        assert(sigqueue(getpid_cached(), SIGUSR2, (union sigval) { .sival_int = 5 }) >= 0);
+        assert_se(sigqueue(getpid_cached(), SIGRTMIN+2, (union sigval) { .sival_int = 1 }) >= 0);
+        assert_se(sigqueue(getpid_cached(), SIGRTMIN+3, (union sigval) { .sival_int = 2 }) >= 0);
+        assert_se(sigqueue(getpid_cached(), SIGUSR2, (union sigval) { .sival_int = 3 }) >= 0);
+        assert_se(sigqueue(getpid_cached(), SIGRTMIN+3, (union sigval) { .sival_int = 4 }) >= 0);
+        assert_se(sigqueue(getpid_cached(), SIGUSR2, (union sigval) { .sival_int = 5 }) >= 0);
 
         assert_se(n_rtqueue == 0);
         assert_se(last_rtqueue_sigval == 0);

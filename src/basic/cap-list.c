@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -53,8 +54,12 @@ int capability_from_name(const char *name) {
 
         /* Try to parse numeric capability */
         r = safe_atoi(name, &i);
-        if (r >= 0 && i >= 0)
-                return i;
+        if (r >= 0) {
+                if (i >= 0 && i < (int) ELEMENTSOF(capability_names))
+                        return i;
+                else
+                        return -EINVAL;
+        }
 
         /* Try to parse string capability */
         sc = lookup_capability(name, strlen(name));

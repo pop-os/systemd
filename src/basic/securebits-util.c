@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -18,6 +19,7 @@
 ***/
 
 #include <errno.h>
+#include <stdio.h>
 
 #include "alloc-util.h"
 #include "extract-word.h"

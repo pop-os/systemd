@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -18,6 +19,7 @@
 ***/
 
 #include <sys/prctl.h>
+#include <sys/wait.h>
 
 #include "sd-bus.h"
 
@@ -250,7 +252,7 @@ static void transfer_send_logs(Transfer *t, bool flush) {
                 n = strndup(t->log_message, e - t->log_message);
 
                 /* Skip over NUL and newlines */
-                while ((e < t->log_message + t->log_message_size) && IN_SET(*e, 0, '\n'))
+                while (e < t->log_message + t->log_message_size && (*e == 0 || *e == '\n'))
                         e++;
 
                 memmove(t->log_message, e, t->log_message + sizeof(t->log_message) - e);
@@ -369,10 +371,10 @@ static int transfer_start(Transfer *t) {
         if (pipe2(pipefd, O_CLOEXEC) < 0)
                 return -errno;
 
-        t->pid = fork();
-        if (t->pid < 0)
-                return -errno;
-        if (t->pid == 0) {
+        r = safe_fork("(sd-transfer)", FORK_RESET_SIGNALS|FORK_DEATHSIG, &t->pid);
+        if (r < 0)
+                return r;
+        if (r == 0) {
                 const char *cmd[] = {
                         NULL, /* systemd-import, systemd-export or systemd-pull */
                         NULL, /* tar, raw  */
@@ -390,10 +392,6 @@ static int transfer_start(Transfer *t) {
                 unsigned k = 0;
 
                 /* Child */
-
-                (void) reset_all_signal_handlers();
-                (void) reset_signal_mask();
-                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
 
                 pipefd[0] = safe_close(pipefd[0]);
 
@@ -1151,9 +1149,9 @@ static int manager_add_bus_objects(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to add transfer enumerator: %m");
 
-        r = sd_bus_request_name(m->bus, "org.freedesktop.import1", 0);
+        r = sd_bus_request_name_async(m->bus, NULL, "org.freedesktop.import1", 0, NULL, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to register name: %m");
+                return log_error_errno(r, "Failed to request name: %m");
 
         r = sd_bus_attach_event(m->bus, m->event, 0);
         if (r < 0)

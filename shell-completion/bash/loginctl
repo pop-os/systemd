@@ -1,4 +1,5 @@
 # loginctl(1) completion                                  -*- shell-script -*-
+# SPDX-License-Identifier: LGPL-2.1+
 #
 # This file is part of systemd.
 #
@@ -33,10 +34,11 @@ _loginctl () {
         local i verb comps
 
         local -A OPTS=(
-               [STANDALONE]='--all -a --help -h --no-pager --privileged -P --version
-                             --no-legend --no-ask-password -l --full'
-                      [ARG]='--host -H --kill-who --property -p --signal -s --machine'
-                      )
+               [STANDALONE]='--all -a --help -h --no-pager --version
+                             --no-legend --no-ask-password -l --full --value'
+                      [ARG]='--host -H --kill-who --property -p --signal -s -M --machine
+                             -n --lines -o --output'
+        )
 
         if __contains_word "$prev" ${OPTS[ARG]}; then
                 case $prev in
@@ -68,7 +70,7 @@ _loginctl () {
                 [SESSIONS]='session-status show-session activate lock-session unlock-session terminate-session kill-session'
                 [USERS]='user-status show-user enable-linger disable-linger terminate-user kill-user'
                 [SEATS]='seat-status show-seat terminate-seat'
-                [STANDALONE]='list-sessions list-users list-seats flush-devices'
+                [STANDALONE]='list-sessions lock-sessions unlock-sessions list-users list-seats flush-devices'
                 [ATTACH]='attach'
         )
 

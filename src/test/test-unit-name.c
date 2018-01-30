@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -31,6 +32,7 @@
 #include "manager.h"
 #include "path-util.h"
 #include "rm-rf.h"
+#include "special.h"
 #include "specifier.h"
 #include "string-util.h"
 #include "test-helper.h"
@@ -206,7 +208,7 @@ static int test_unit_printf(void) {
         assert_se(specifier_machine_id('m', NULL, NULL, &mid) >= 0 && mid);
         assert_se(specifier_boot_id('b', NULL, NULL, &bid) >= 0 && bid);
         assert_se(host = gethostname_malloc());
-        assert_se(user = getusername_malloc());
+        assert_se(user = uid_to_name(getuid()));
         assert_se(asprintf(&uid, UID_FMT, getuid()));
         assert_se(get_home_dir(&home) >= 0);
         assert_se(get_shell(&shell) >= 0);
@@ -337,7 +339,7 @@ static void test_unit_name_build(void) {
 }
 
 static void test_slice_name_is_valid(void) {
-        assert_se(slice_name_is_valid("-.slice"));
+        assert_se(slice_name_is_valid(SPECIAL_ROOT_SLICE));
         assert_se(slice_name_is_valid("foo.slice"));
         assert_se(slice_name_is_valid("foo-bar.slice"));
         assert_se(slice_name_is_valid("foo-bar-baz.slice"));
@@ -355,7 +357,7 @@ static void test_build_subslice(void) {
         char *a;
         char *b;
 
-        assert_se(slice_build_subslice("-.slice", "foo", &a) >= 0);
+        assert_se(slice_build_subslice(SPECIAL_ROOT_SLICE, "foo", &a) >= 0);
         assert_se(slice_build_subslice(a, "bar", &b) >= 0);
         free(a);
         assert_se(slice_build_subslice(b, "barfoo", &a) >= 0);
@@ -377,8 +379,8 @@ static void test_build_parent_slice_one(const char *name, const char *expect, in
 }
 
 static void test_build_parent_slice(void) {
-        test_build_parent_slice_one("-.slice", NULL, 0);
-        test_build_parent_slice_one("foo.slice", "-.slice", 1);
+        test_build_parent_slice_one(SPECIAL_ROOT_SLICE, NULL, 0);
+        test_build_parent_slice_one("foo.slice", SPECIAL_ROOT_SLICE, 1);
         test_build_parent_slice_one("foo-bar.slice", "foo.slice", 1);
         test_build_parent_slice_one("foo-bar-baz.slice", "foo-bar.slice", 1);
         test_build_parent_slice_one("foo-bar--baz.slice", NULL, -EINVAL);
@@ -465,12 +467,16 @@ static void test_unit_name_path_unescape(void) {
 
 int main(int argc, char* argv[]) {
         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
-        int rc = 0;
+        int r, rc = 0;
 
         log_parse_environment();
         log_open();
 
-        enter_cgroup_subroot();
+        r = enter_cgroup_subroot();
+        if (r == -ENOMEDIUM) {
+                log_notice_errno(r, "Skipping test: cgroupfs not available");
+                return EXIT_TEST_SKIP;
+        }
 
         assert_se(runtime_dir = setup_fake_runtime_dir());
 

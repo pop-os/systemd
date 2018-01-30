@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -339,7 +340,7 @@ static int list_links(int argc, char *argv[], void *userdata) {
 /* IEEE Organizationally Unique Identifier vendor string */
 static int ieee_oui(sd_hwdb *hwdb, const struct ether_addr *mac, char **ret) {
         const char *description;
-        char modalias[strlen("OUI:XXYYXXYYXXYY") + 1], *desc;
+        char modalias[STRLEN("OUI:XXYYXXYYXXYY") + 1], *desc;
         int r;
 
         assert(ret);

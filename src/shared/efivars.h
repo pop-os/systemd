@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -19,6 +20,9 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#if ! ENABLE_EFI
+#include <errno.h>
+#endif
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

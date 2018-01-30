@@ -1,8 +1,23 @@
+# SPDX-License-Identifier: LGPL-2.1+
+#
+# Copyright 2017 Zbigniew Jędrzejewski-Szmek
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <http://www.gnu.org/licenses/>.
+
 sd_login_c = files('sd-login/sd-login.c')
 
-libsystemd_internal_sources = files('''
-        sd-bus/bus-bloom.c
-        sd-bus/bus-bloom.h
+libsystemd_sources = files('''
         sd-bus/bus-common-errors.c
         sd-bus/bus-common-errors.h
         sd-bus/bus-container.c
@@ -57,6 +72,7 @@ libsystemd_internal_sources = files('''
         sd-id128/id128-util.c
         sd-id128/id128-util.h
         sd-id128/sd-id128.c
+        sd-netlink/generic-netlink.c
         sd-netlink/local-addresses.c
         sd-netlink/local-addresses.h
         sd-netlink/netlink-internal.h
@@ -76,14 +92,15 @@ libsystemd_internal_sources = files('''
         sd-utf8/sd-utf8.c
 '''.split()) + sd_login_c
 
-libsystemd_internal = static_library(
+libsystemd_static = static_library(
         'systemd',
-        libsystemd_internal_sources,
+        libsystemd_sources,
         install : false,
         include_directories : includes,
         link_with : libbasic,
         dependencies : [threads,
-                        librt])
+                        librt],
+        c_args : ['-fvisibility=default'])
 
 libsystemd_sym = 'src/libsystemd/libsystemd.sym'
 

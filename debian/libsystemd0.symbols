@@ -18,11 +18,14 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_232@LIBSYSTEMD_232 232
  LIBSYSTEMD_233@LIBSYSTEMD_233 233
  LIBSYSTEMD_234@LIBSYSTEMD_234 234
+ LIBSYSTEMD_236@LIBSYSTEMD_236 236
+ LIBSYSTEMD_237@LIBSYSTEMD_237 237
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
  sd_bus_add_filter@LIBSYSTEMD_221 221
  sd_bus_add_match@LIBSYSTEMD_221 221
+ sd_bus_add_match_async@LIBSYSTEMD_237 237
  sd_bus_add_node_enumerator@LIBSYSTEMD_221 221
  sd_bus_add_object@LIBSYSTEMD_221 221
  sd_bus_add_object_manager@LIBSYSTEMD_221 221
@@ -104,6 +107,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_get_address@LIBSYSTEMD_221 221
  sd_bus_get_allow_interactive_authorization@LIBSYSTEMD_221 221
  sd_bus_get_bus_id@LIBSYSTEMD_221 221
+ sd_bus_get_connected_signal@LIBSYSTEMD_237 237
  sd_bus_get_creds_mask@LIBSYSTEMD_221 221
  sd_bus_get_current_handler@LIBSYSTEMD_221 221
  sd_bus_get_current_message@LIBSYSTEMD_221 221
@@ -122,16 +126,21 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_get_property_strv@LIBSYSTEMD_221 221
  sd_bus_get_property_trivial@LIBSYSTEMD_221 221
  sd_bus_get_scope@LIBSYSTEMD_221 221
+ sd_bus_get_sender@LIBSYSTEMD_237 237
  sd_bus_get_tid@LIBSYSTEMD_221 221
  sd_bus_get_timeout@LIBSYSTEMD_221 221
  sd_bus_get_unique_name@LIBSYSTEMD_221 221
+ sd_bus_get_watch_bind@LIBSYSTEMD_237 237
  sd_bus_is_anonymous@LIBSYSTEMD_221 221
  sd_bus_is_bus_client@LIBSYSTEMD_221 221
  sd_bus_is_monitor@LIBSYSTEMD_221 221
  sd_bus_is_open@LIBSYSTEMD_221 221
+ sd_bus_is_ready@LIBSYSTEMD_237 237
  sd_bus_is_server@LIBSYSTEMD_221 221
  sd_bus_is_trusted@LIBSYSTEMD_221 221
  sd_bus_list_names@LIBSYSTEMD_221 221
+ sd_bus_match_signal@LIBSYSTEMD_237 237
+ sd_bus_match_signal_async@LIBSYSTEMD_237 237
  sd_bus_message_append@LIBSYSTEMD_221 221
  sd_bus_message_append_array@LIBSYSTEMD_221 221
  sd_bus_message_append_array_iovec@LIBSYSTEMD_221 221
@@ -173,6 +182,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_is_method_call@LIBSYSTEMD_221 221
  sd_bus_message_is_method_error@LIBSYSTEMD_221 221
  sd_bus_message_is_signal@LIBSYSTEMD_221 221
+ sd_bus_message_new@LIBSYSTEMD_236 236
  sd_bus_message_new_method_call@LIBSYSTEMD_221 221
  sd_bus_message_new_method_errno@LIBSYSTEMD_221 221
  sd_bus_message_new_method_errnof@LIBSYSTEMD_221 221
@@ -188,11 +198,13 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_read_strv@LIBSYSTEMD_221 221
  sd_bus_message_ref@LIBSYSTEMD_221 221
  sd_bus_message_rewind@LIBSYSTEMD_221 221
+ sd_bus_message_seal@LIBSYSTEMD_236 236
  sd_bus_message_set_allow_interactive_authorization@LIBSYSTEMD_221 221
  sd_bus_message_set_auto_start@LIBSYSTEMD_221 221
  sd_bus_message_set_destination@LIBSYSTEMD_221 221
  sd_bus_message_set_expect_reply@LIBSYSTEMD_221 221
  sd_bus_message_set_priority@LIBSYSTEMD_221 221
+ sd_bus_message_set_sender@LIBSYSTEMD_237 237
  sd_bus_message_skip@LIBSYSTEMD_221 221
  sd_bus_message_unref@LIBSYSTEMD_221 221
  sd_bus_message_verify_type@LIBSYSTEMD_221 221
@@ -215,26 +227,31 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_query_sender_privilege@LIBSYSTEMD_221 221
  sd_bus_ref@LIBSYSTEMD_221 221
  sd_bus_release_name@LIBSYSTEMD_221 221
+ sd_bus_release_name_async@LIBSYSTEMD_237 237
  sd_bus_reply_method_errno@LIBSYSTEMD_221 221
  sd_bus_reply_method_errnof@LIBSYSTEMD_221 221
  sd_bus_reply_method_error@LIBSYSTEMD_221 221
  sd_bus_reply_method_errorf@LIBSYSTEMD_221 221
  sd_bus_reply_method_return@LIBSYSTEMD_221 221
  sd_bus_request_name@LIBSYSTEMD_221 221
+ sd_bus_request_name_async@LIBSYSTEMD_237 237
  sd_bus_send@LIBSYSTEMD_221 221
  sd_bus_send_to@LIBSYSTEMD_221 221
  sd_bus_set_address@LIBSYSTEMD_221 221
  sd_bus_set_allow_interactive_authorization@LIBSYSTEMD_221 221
  sd_bus_set_anonymous@LIBSYSTEMD_221 221
  sd_bus_set_bus_client@LIBSYSTEMD_221 221
+ sd_bus_set_connected_signal@LIBSYSTEMD_237 237
  sd_bus_set_description@LIBSYSTEMD_221 221
  sd_bus_set_exec@LIBSYSTEMD_221 221
  sd_bus_set_exit_on_disconnect@LIBSYSTEMD_232 232
  sd_bus_set_fd@LIBSYSTEMD_221 221
  sd_bus_set_monitor@LIBSYSTEMD_221 221
  sd_bus_set_property@LIBSYSTEMD_221 221
+ sd_bus_set_sender@LIBSYSTEMD_237 237
  sd_bus_set_server@LIBSYSTEMD_221 221
  sd_bus_set_trusted@LIBSYSTEMD_221 221
+ sd_bus_set_watch_bind@LIBSYSTEMD_237 237
  sd_bus_slot_get_bus@LIBSYSTEMD_221 221
  sd_bus_slot_get_current_handler@LIBSYSTEMD_221 221
  sd_bus_slot_get_current_message@LIBSYSTEMD_221 221
@@ -296,6 +313,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_get_event@LIBSYSTEMD_221 221
  sd_event_source_get_io_events@LIBSYSTEMD_221 221
  sd_event_source_get_io_fd@LIBSYSTEMD_221 221
+ sd_event_source_get_io_fd_own@LIBSYSTEMD_237 237
  sd_event_source_get_io_revents@LIBSYSTEMD_221 221
  sd_event_source_get_pending@LIBSYSTEMD_221 221
  sd_event_source_get_priority@LIBSYSTEMD_221 221
@@ -309,6 +327,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_set_enabled@LIBSYSTEMD_221 221
  sd_event_source_set_io_events@LIBSYSTEMD_221 221
  sd_event_source_set_io_fd@LIBSYSTEMD_221 221
+ sd_event_source_set_io_fd_own@LIBSYSTEMD_237 237
  sd_event_source_set_prepare@LIBSYSTEMD_221 221
  sd_event_source_set_priority@LIBSYSTEMD_221 221
  sd_event_source_set_time@LIBSYSTEMD_221 221

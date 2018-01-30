@@ -3,6 +3,8 @@
         "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2014 Zbigniew Jędrzejewski-Szmek
@@ -144,6 +146,9 @@
       </varlistentry>
     </variablelist>
 
+    <para>The defaults for all values are listed as comments in the
+    template <filename>/etc/systemd/coredump.conf</filename> file that
+    is installed by default.</para>
   </refsect1>
 
   <refsect1>

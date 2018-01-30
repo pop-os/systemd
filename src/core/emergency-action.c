@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -31,7 +32,7 @@
 static void log_and_status(Manager *m, const char *message, const char *reason) {
         log_warning("%s: %s", message, reason);
         manager_status_printf(m, STATUS_TYPE_EMERGENCY,
-                              ANSI_HIGHLIGHT_RED " !!  " ANSI_NORMAL,
+                              ANSI_HIGHLIGHT_RED "  !!  " ANSI_NORMAL,
                               "%s: %s", message, reason);
 }
 
@@ -47,6 +48,11 @@ int emergency_action(
 
         if (action == EMERGENCY_ACTION_NONE)
                 return -ECANCELED;
+
+        if (!m->service_watchdogs) {
+                log_warning("Watchdog disabled! Not acting on: %s", reason);
+                return -ECANCELED;
+        }
 
         if (!MANAGER_IS_SYSTEM(m)) {
                 /* Downgrade all options to simply exiting if we run

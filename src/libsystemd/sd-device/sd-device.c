@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -165,23 +166,36 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
         }
 
         if (verify) {
-                r = readlink_and_canonicalize(_syspath, NULL, &syspath);
+                r = chase_symlinks(_syspath, NULL, 0, &syspath);
                 if (r == -ENOENT)
                         /* the device does not exist (any more?) */
                         return -ENODEV;
-                else if (r == -EINVAL) {
-                        /* not a symlink */
-                        syspath = canonicalize_file_name(_syspath);
-                        if (!syspath) {
-                                if (errno == ENOENT)
-                                        /* the device does not exist (any more?) */
-                                        return -ENODEV;
-
-                                return log_debug_errno(errno, "sd-device: could not canonicalize '%s': %m", _syspath);
-                        }
-                } else if (r < 0) {
+                else if (r < 0) {
                         log_debug_errno(r, "sd-device: could not get target of '%s': %m", _syspath);
                         return r;
+                }
+
+                if (!path_startswith(syspath, "/sys")) {
+                        _cleanup_free_ char *real_sys = NULL, *new_syspath = NULL;
+                        char *p;
+
+                        /* /sys is a symlink to somewhere sysfs is mounted on? In that case, we convert the path to real sysfs to "/sys". */
+                        r = chase_symlinks("/sys", NULL, 0, &real_sys);
+                        if (r < 0)
+                                return log_debug_errno(r, "sd-device: could not chase symlink /sys: %m");
+
+                        p = path_startswith(syspath, real_sys);
+                        if (!p) {
+                                log_debug("sd-device: canonicalized path '%s' does not starts with sysfs mount point '%s'", syspath, real_sys);
+                                return -ENODEV;
+                        }
+
+                        new_syspath = strjoin("/sys/", p);
+                        if (!new_syspath)
+                                return log_oom();
+
+                        free_and_replace(syspath, new_syspath);
+                        path_kill_slashes(syspath);
                 }
 
                 if (path_startswith(syspath,  "/sys/devices/")) {
@@ -208,15 +222,13 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
                         return -ENOMEM;
         }
 
-        devpath = syspath + strlen("/sys");
+        devpath = syspath + STRLEN("/sys");
 
         r = device_add_property_internal(device, "DEVPATH", devpath);
         if (r < 0)
                 return r;
 
-        free(device->syspath);
-        device->syspath = syspath;
-        syspath = NULL;
+        free_and_replace(device->syspath, syspath);
 
         device->devpath = devpath;
 
@@ -346,9 +358,7 @@ int device_set_devtype(sd_device *device, const char *_devtype) {
         if (r < 0)
                 return r;
 
-        free(device->devtype);
-        device->devtype = devtype;
-        devtype = NULL;
+        free_and_replace(device->devtype, devtype);
 
         return 0;
 }
@@ -393,9 +403,7 @@ int device_set_devname(sd_device *device, const char *_devname) {
         if (r < 0)
                 return r;
 
-        free(device->devname);
-        device->devname = devname;
-        devname = NULL;
+        free_and_replace(device->devname, devname);
 
         return 0;
 }
@@ -563,7 +571,7 @@ int device_read_uevent_file(sd_device *device) {
                         value = &uevent[i];
                         state = VALUE;
 
-                        /* fall through */ /* to handle empty property */
+                        _fallthrough_; /* to handle empty property */
                 case VALUE:
                         if (strchr(NEWLINE, uevent[i])) {
                                 uevent[i] = '\0';
@@ -705,7 +713,7 @@ static int device_new_from_child(sd_device **ret, sd_device *child) {
         path = strdup(syspath);
         if (!path)
                 return -ENOMEM;
-        subdir = path + strlen("/sys");
+        subdir = path + STRLEN("/sys");
 
         for (;;) {
                 char *pos;
@@ -760,9 +768,7 @@ int device_set_subsystem(sd_device *device, const char *_subsystem) {
         if (r < 0)
                 return r;
 
-        free(device->subsystem);
-        device->subsystem = subsystem;
-        subsystem = NULL;
+        free_and_replace(device->subsystem, subsystem);
 
         device->subsystem_set = true;
 
@@ -785,9 +791,7 @@ static int device_set_drivers_subsystem(sd_device *device, const char *_subsyste
         if (r < 0)
                 return r;
 
-        free(device->driver_subsystem);
-        device->driver_subsystem = subsystem;
-        subsystem = NULL;
+        free_and_replace(device->driver_subsystem, subsystem);
 
         return 0;
 }
@@ -935,9 +939,7 @@ int device_set_driver(sd_device *device, const char *_driver) {
         if (r < 0)
                 return r;
 
-        free(device->driver);
-        device->driver = driver;
-        driver = NULL;
+        free_and_replace(device->driver, driver);
 
         device->driver_set = true;
 
@@ -1044,9 +1046,7 @@ static int device_set_sysname(sd_device *device) {
         if (len == 0)
                 sysnum = NULL;
 
-        free(device->sysname);
-        device->sysname = sysname;
-        sysname = NULL;
+        free_and_replace(device->sysname, sysname);
 
         device->sysnum = sysnum;
 

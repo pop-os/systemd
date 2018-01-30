@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -261,7 +262,7 @@ static int radv_recv(sd_event_source *s, int fd, uint32_t revents, void *userdat
         unsigned char buf[168];
         size_t i;
 
-        read(test_fd[0], &buf, sizeof(buf));
+        assert_se(read(test_fd[0], &buf, sizeof(buf)) == sizeof(buf));
 
         /* router lifetime must be zero when test is stopped */
         if (test_stopped) {
@@ -341,8 +342,8 @@ static void test_ra(void) {
                 if (prefix[i].preferred)
                         assert_se(sd_radv_prefix_set_preferred_lifetime(p, prefix[i].preferred) >= 0);
 
-                assert_se((sd_radv_add_prefix(ra, p) >= 0) == prefix[i].succesful);
-                assert_se(sd_radv_add_prefix(ra, p) < 0);
+                assert_se((sd_radv_add_prefix(ra, p, false) >= 0) == prefix[i].succesful);
+                assert_se(sd_radv_add_prefix(ra, p, false) < 0);
 
                 p = sd_radv_prefix_unref(p);
                 assert_se(!p);

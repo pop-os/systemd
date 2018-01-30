@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -22,6 +23,7 @@
 
 #include "macro.h"
 #include "signal-util.h"
+#include "process-util.h"
 
 static void test_block_signals(void) {
         sigset_t ss;

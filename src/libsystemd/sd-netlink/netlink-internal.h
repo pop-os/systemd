@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -61,6 +62,8 @@ struct sd_netlink {
                 struct sockaddr_nl nl;
         } sockaddr;
 
+        int protocol;
+
         Hashmap *broadcast_group_refs;
         bool broadcast_group_dont_leave:1; /* until we can rely on 4.2 */
 
@@ -110,6 +113,8 @@ struct sd_netlink_message {
 
         sd_netlink *rtnl;
 
+        int protocol;
+
         struct nlmsghdr *hdr;
         struct netlink_container containers[RTNL_CONTAINER_DEPTH];
         unsigned n_containers; /* number of containers */
@@ -121,6 +126,8 @@ struct sd_netlink_message {
 
 int message_new(sd_netlink *rtnl, sd_netlink_message **ret, uint16_t type);
 int message_new_empty(sd_netlink *rtnl, sd_netlink_message **ret);
+
+int netlink_open_family(sd_netlink **ret, int family);
 
 int socket_open(int family);
 int socket_bind(sd_netlink *nl);

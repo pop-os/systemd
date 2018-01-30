@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -20,6 +21,7 @@
 #include "automount.h"
 #include "bus-util.h"
 #include "dbus-automount.h"
+#include "dbus-util.h"
 #include "string-util.h"
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_result, automount_result, AutomountResult);
@@ -37,52 +39,44 @@ static int bus_automount_set_transient_property(
                 Automount *a,
                 const char *name,
                 sd_bus_message *message,
-                UnitSetPropertiesMode mode,
+                UnitWriteFlags flags,
                 sd_bus_error *error) {
 
-        int r;
+        Unit *u = UNIT(a);
 
         assert(a);
         assert(name);
         assert(message);
 
-        if (streq(name, "TimeoutIdleUSec")) {
-                usec_t timeout_idle_usec;
-                r = sd_bus_message_read(message, "t", &timeout_idle_usec);
-                if (r < 0)
-                        return r;
+        flags |= UNIT_PRIVATE;
 
-                if (mode != UNIT_CHECK) {
-                        char time[FORMAT_TIMESPAN_MAX];
+        if (streq(name, "Where"))
+                return bus_set_transient_path(u, name, &a->where, message, flags, error);
 
-                        a->timeout_idle_usec = timeout_idle_usec;
-                        unit_write_drop_in_format(UNIT(a), mode, name, "[Automount]\nTimeoutIdleSec=%s\n",
-                                format_timespan(time, sizeof(time), timeout_idle_usec, USEC_PER_MSEC));
-                }
-        } else
-                return 0;
+        if (streq(name, "TimeoutIdleUSec"))
+                return bus_set_transient_usec_fix_0(u, name, &a->timeout_idle_usec, message, flags, error);
 
-        return 1;
+        if (streq(name, "DirectoryMode"))
+                return bus_set_transient_mode_t(u, name, &a->directory_mode, message, flags, error);
+
+        return 0;
 }
 
 int bus_automount_set_property(
                 Unit *u,
                 const char *name,
                 sd_bus_message *message,
-                UnitSetPropertiesMode mode,
+                UnitWriteFlags flags,
                 sd_bus_error *error) {
 
         Automount *a = AUTOMOUNT(u);
-        int r = 0;
 
         assert(a);
         assert(name);
         assert(message);
 
-        if (u->transient && u->load_state == UNIT_STUB)
-                /* This is a transient unit, let's load a little more */
+        if (u->transient && u->load_state == UNIT_STUB) /* This is a transient unit? let's load a little more */
+                return bus_automount_set_transient_property(a, name, message, flags, error);
 
-                r = bus_automount_set_transient_property(a, name, message, mode, error);
-
-        return r;
+        return 0;
 }

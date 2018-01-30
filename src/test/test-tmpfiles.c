@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -28,6 +29,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "log.h"
+#include "process-util.h"
 #include "string-util.h"
 #include "util.h"
 

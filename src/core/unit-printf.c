@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -143,58 +144,18 @@ static int specifier_cgroup_slice(char specifier, void *data, void *userdata, ch
         return 0;
 }
 
-static int specifier_runtime(char specifier, void *data, void *userdata, char **ret) {
+static int specifier_special_directory(char specifier, void *data, void *userdata, char **ret) {
         Unit *u = userdata;
         char *n = NULL;
 
         assert(u);
 
-        n = strdup(u->manager->prefix[EXEC_DIRECTORY_RUNTIME]);
+        n = strdup(u->manager->prefix[PTR_TO_UINT(data)]);
         if (!n)
                 return -ENOMEM;
 
         *ret = n;
         return 0;
-}
-
-static int specifier_user_name(char specifier, void *data, void *userdata, char **ret) {
-        char *t;
-
-        /* If we are UID 0 (root), this will not result in NSS,
-         * otherwise it might. This is good, as we want to be able to
-         * run this in PID 1, where our user ID is 0, but where NSS
-         * lookups are not allowed. */
-
-        t = getusername_malloc();
-        if (!t)
-                return -ENOMEM;
-
-        *ret = t;
-        return 0;
-}
-
-static int specifier_user_id(char specifier, void *data, void *userdata, char **ret) {
-
-        if (asprintf(ret, UID_FMT, getuid()) < 0)
-                return -ENOMEM;
-
-        return 0;
-}
-
-static int specifier_user_home(char specifier, void *data, void *userdata, char **ret) {
-
-        /* On PID 1 (which runs as root) this will not result in NSS,
-         * which is good. See above */
-
-        return get_home_dir(ret);
-}
-
-static int specifier_user_shell(char specifier, void *data, void *userdata, char **ret) {
-
-        /* On PID 1 (which runs as root) this will not result in NSS,
-         * which is good. See above */
-
-        return get_shell(ret);
 }
 
 int unit_name_printf(Unit *u, const char* format, char **ret) {
@@ -244,10 +205,15 @@ int unit_full_printf(Unit *u, const char *format, char **ret) {
          * (which are likely not suitable for unescaped inclusion in unit names):
          *
          * %f: the unescaped instance if set, otherwise the id unescaped as path
+         *
          * %c: cgroup path of unit (deprecated)
          * %r: where units in this slice are placed in the cgroup tree (deprecated)
          * %R: the root of this systemd's instance tree (deprecated)
-         * %t: the runtime directory to place sockets in (e.g. "/run" or $XDG_RUNTIME_DIR)
+         *
+         * %t: the runtime directory root (e.g. /run or $XDG_RUNTIME_DIR)
+         * %S: the state directory root (e.g. /var/lib or $XDG_CONFIG_HOME)
+         * %C: the cache directory root (e.g. /var/cache or $XDG_CACHE_HOME)
+         * %L: the log directory root (e.g. /var/log or $XDG_CONFIG_HOME/log)
          *
          * %h: the homedir of the running user
          * %s: the shell of the running user
@@ -271,7 +237,10 @@ int unit_full_printf(Unit *u, const char *format, char **ret) {
                 { 'c', specifier_cgroup,              NULL },
                 { 'r', specifier_cgroup_slice,        NULL },
                 { 'R', specifier_cgroup_root,         NULL },
-                { 't', specifier_runtime,             NULL },
+                { 't', specifier_special_directory,   UINT_TO_PTR(EXEC_DIRECTORY_RUNTIME) },
+                { 'S', specifier_special_directory,   UINT_TO_PTR(EXEC_DIRECTORY_STATE) },
+                { 'C', specifier_special_directory,   UINT_TO_PTR(EXEC_DIRECTORY_CACHE) },
+                { 'L', specifier_special_directory,   UINT_TO_PTR(EXEC_DIRECTORY_LOGS) },
 
                 { 'U', specifier_user_id,             NULL },
                 { 'u', specifier_user_name,           NULL },

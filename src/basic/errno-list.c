@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -17,6 +18,7 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <errno.h>
 #include <string.h>
 
 #include "errno-list.h"
@@ -50,8 +52,4 @@ int errno_from_name(const char *name) {
 
         assert(sc->id > 0);
         return sc->id;
-}
-
-int errno_max(void) {
-        return ELEMENTSOF(errno_names);
 }

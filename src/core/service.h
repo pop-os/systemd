@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -163,17 +164,15 @@ struct Service {
         bool main_pid_alien:1;
         bool bus_name_good:1;
         bool forbid_restart:1;
+        /* Keep restart intention between UNIT_FAILED and UNIT_ACTIVATING */
+        bool will_auto_restart:1;
         bool start_timeout_defined:1;
-
-        bool reset_accounting:1;
 
         char *bus_name;
         char *bus_name_owner; /* unique name of the current owner */
 
         char *status_text;
         int status_errno;
-
-        EmergencyAction emergency_action;
 
         UnitRef accept_socket;
 
@@ -186,6 +185,7 @@ struct Service {
         ServiceFDStore *fd_store;
         unsigned n_fd_store;
         unsigned n_fd_store_max;
+        unsigned n_keep_fd_store;
 
         char *usb_function_descriptors;
         char *usb_function_strings;

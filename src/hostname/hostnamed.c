@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -95,7 +96,7 @@ static int context_read_data(Context *c) {
         if (!c->data[PROP_HOSTNAME])
                 return -ENOMEM;
 
-        r = read_hostname_config("/etc/hostname", &c->data[PROP_STATIC_HOSTNAME]);
+        r = read_etc_hostname(NULL, &c->data[PROP_STATIC_HOSTNAME]);
         if (r < 0 && r != -ENOENT)
                 return r;
 
@@ -679,9 +680,9 @@ static int connect_bus(Context *c, sd_event *event, sd_bus **_bus) {
         if (r < 0)
                 return log_error_errno(r, "Failed to register object: %m");
 
-        r = sd_bus_request_name(bus, "org.freedesktop.hostname1", 0);
+        r = sd_bus_request_name_async(bus, NULL, "org.freedesktop.hostname1", 0, NULL, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to register name: %m");
+                return log_error_errno(r, "Failed to request name: %m");
 
         r = sd_bus_attach_event(bus, event, 0);
         if (r < 0)

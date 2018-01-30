@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -37,6 +38,8 @@ int output_journal(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
+                char **output_fields,
+                size_t highlight[2],
                 bool *ellipsized);
 
 int add_match_this_boot(sd_journal *j, const char *machine);

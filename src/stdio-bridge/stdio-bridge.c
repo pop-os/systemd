@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -43,7 +44,7 @@ static int help(void) {
                "STDIO or socket-activatable proxy to a given DBus endpoint.\n\n"
                "  -h --help              Show this help\n"
                "     --version           Show package version\n"
-               "     --bus-path=PATH     Path to the kernel bus (default: %s)\n",
+               "  -p --bus-path=PATH     Path to the kernel bus (default: %s)\n",
                program_invocation_short_name, DEFAULT_BUS_PATH);
 
         return 0;
@@ -56,9 +57,10 @@ static int parse_argv(int argc, char *argv[]) {
         };
 
         static const struct option options[] = {
-                { "help",            no_argument,       NULL, 'h'     },
-                { "bus-path",        required_argument, NULL, 'p'     },
-                { NULL,              0,                 NULL, 0       }
+                { "help",            no_argument,       NULL, 'h'         },
+                { "version",         no_argument,       NULL, ARG_VERSION },
+                { "bus-path",        required_argument, NULL, 'p'         },
+                {},
         };
 
         int c;

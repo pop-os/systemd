@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -112,8 +114,13 @@
         <term><option>-f</option></term>
         <term><option>--force</option></term>
 
-        <listitem><para>Force immediate halt, power-off, reboot. Do
-        not contact the init system.</para></listitem>
+        <listitem><para>Force immediate halt, power-off, or reboot. When
+        specified once, this results in an immediate but clean shutdown
+        by the system manager. When specified twice, this results in an
+        immediate shutdown without contacting the system manager. See the
+        description of <option>--force</option> in
+        <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        for more details.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -159,8 +166,12 @@
   <refsect1>
     <title>Notes</title>
 
-    <para>These are legacy commands available for compatibility
-    only.</para>
+    <para>These commands are implemented in a way that preserves compatiblity with
+    the original SysV commands.
+    <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+    verbs <command>halt</command>, <command>poweroff</command>,
+    <command>reboot</command> provide the same functionality with some additional
+    features.</para>
   </refsect1>
 
   <refsect1>

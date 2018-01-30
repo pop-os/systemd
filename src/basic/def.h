@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -36,10 +37,6 @@
 /* The default value for the net.unix.max_dgram_qlen sysctl */
 #define DEFAULT_UNIX_MAX_DGRAM_QLEN 512UL
 
-#define SYSTEMD_CGROUP_CONTROLLER_LEGACY "name=systemd"
-#define SYSTEMD_CGROUP_CONTROLLER_HYBRID "name=unified"
-#define SYSTEMD_CGROUP_CONTROLLER "_systemd"
-
 #define SIGNALS_CRASH_HANDLER SIGSEGV,SIGILL,SIGFPE,SIGBUS,SIGQUIT,SIGABRT
 #define SIGNALS_IGNORE SIGPIPE
 
@@ -56,9 +53,10 @@
         "/usr/lib/kbd/keymaps/\0"
 #endif
 
-#define UNIX_SYSTEM_BUS_ADDRESS "unix:path=/var/run/dbus/system_bus_socket"
-#define DEFAULT_SYSTEM_BUS_ADDRESS UNIX_SYSTEM_BUS_ADDRESS
-#define UNIX_USER_BUS_ADDRESS_FMT "unix:path=%s/bus"
+/* Note that we use the new /run prefix here (instead of /var/run) since we require them to be aliases and that way we
+ * become independent of /var being mounted */
+#define DEFAULT_SYSTEM_BUS_ADDRESS "unix:path=/run/dbus/system_bus_socket"
+#define DEFAULT_USER_BUS_ADDRESS_FMT "unix:path=%s/bus"
 
 #define PLYMOUTH_SOCKET {                                       \
                 .un.sun_family = AF_UNIX,                       \

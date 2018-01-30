@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -39,10 +40,8 @@ static int ndisc_netlink_handler(sd_netlink *rtnl, sd_netlink_message *m, void *
         link->ndisc_messages--;
 
         r = sd_netlink_message_get_errno(m);
-        if (r < 0 && r != -EEXIST) {
+        if (r < 0 && r != -EEXIST)
                 log_link_error_errno(link, r, "Could not set NDisc route or address: %m");
-                link_enter_failed(link);
-        }
 
         if (link->ndisc_messages == 0) {
                 link->ndisc_configured = true;
@@ -185,6 +184,10 @@ static void ndisc_router_process_autonomous_prefix(Link *link, sd_ndisc_router *
                 log_link_error_errno(link, r, "Failed to get prefix preferred lifetime: %m");
                 return;
         }
+
+        /* The preferred lifetime is never greater than the valid lifetime */
+        if (lifetime_preferred > lifetime_valid)
+                return;
 
         r = address_new(&address);
         if (r < 0) {

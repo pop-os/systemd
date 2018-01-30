@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -34,12 +35,13 @@ typedef enum MountExecCommand {
 
 typedef enum MountResult {
         MOUNT_SUCCESS,
-        MOUNT_FAILURE_RESOURCES,
+        MOUNT_FAILURE_RESOURCES, /* a bit of a misnomer, just our catch-all error for errnos we didn't expect */
         MOUNT_FAILURE_TIMEOUT,
         MOUNT_FAILURE_EXIT_CODE,
         MOUNT_FAILURE_SIGNAL,
         MOUNT_FAILURE_CORE_DUMP,
         MOUNT_FAILURE_START_LIMIT_HIT,
+        MOUNT_FAILURE_PROTOCOL,
         _MOUNT_RESULT_MAX,
         _MOUNT_RESULT_INVALID = -1
 } MountResult;
@@ -66,8 +68,6 @@ struct Mount {
         bool is_mounted:1;
         bool just_mounted:1;
         bool just_changed:1;
-
-        bool reset_accounting:1;
 
         bool sloppy_options;
 

@@ -1,3 +1,20 @@
+# SPDX-License-Identifier: LGPL-2.1+
+#
+# Copyright 2017 Zbigniew Jędrzejewski-Szmek
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <http://www.gnu.org/licenses/>.
+
 shared_sources = '''
         acl-util.h
         acpi-fpdt.c
@@ -10,6 +27,8 @@ shared_sources = '''
         base-filesystem.h
         boot-timestamps.c
         boot-timestamps.h
+        bootspec.c
+        bootspec.h
         bus-unit-util.c
         bus-unit-util.h
         bus-util.c
@@ -37,8 +56,6 @@ shared_sources = '''
         firewall-util.h
         fstab-util.c
         fstab-util.h
-        gcrypt-util.c
-        gcrypt-util.h
         generator.c
         generator.h
         gpt.h
@@ -88,6 +105,8 @@ shared_sources = '''
         sysctl-util.h
         tests.c
         tests.h
+        tomoyo-util.c
+        tomoyo-util.h
         udev-util.h
         udev-util.c
         uid-range.c
@@ -99,6 +118,7 @@ shared_sources = '''
         volatile-util.h
         watchdog.c
         watchdog.h
+        wireguard-netlink.h
 '''.split()
 
 test_tables_h = files('test-tables.h')
@@ -138,24 +158,25 @@ libshared_deps = [threads,
 
 libshared_sym_path = '@0@/libshared.sym'.format(meson.current_source_dir())
 
-libshared = shared_library(
+libshared_static = static_library(
         libshared_name,
         shared_sources,
-        basic_sources,
-        journal_internal_sources,
-        libsystemd_internal_sources,
+        include_directories : includes,
+        dependencies : libshared_deps,
+        c_args : ['-fvisibility=default'])
+
+libshared = shared_library(
+        libshared_name,
         libudev_sources,
         include_directories : includes,
         link_args : ['-shared',
-                    '-Wl,--version-script=' + libshared_sym_path],
+                     '-Wl,--version-script=' + libshared_sym_path],
+        link_whole : [libshared_static,
+                      libbasic,
+                      libbasic_gcrypt,
+                      libsystemd_static,
+                      libjournal_client],
         c_args : ['-fvisibility=default'],
         dependencies : libshared_deps,
         install : true,
         install_dir : rootlibexecdir)
-
-libshared_static = static_library(
-        libshared_name,
-        shared_sources,
-        basic_sources,
-        include_directories : includes,
-        dependencies : libshared_deps)

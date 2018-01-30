@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -73,6 +74,7 @@ int route_new(Route **ret) {
         route->type = RTN_UNICAST;
         route->table = RT_TABLE_MAIN;
         route->lifetime = USEC_INFINITY;
+        route->quickack = -1;
 
         *ret = route;
         route = NULL;
@@ -367,7 +369,7 @@ int route_add(
         return 0;
 }
 
-int route_update(Route *route,
+void route_update(Route *route,
                  const union in_addr_union *src,
                  unsigned char src_prefixlen,
                  const union in_addr_union *gw,
@@ -388,8 +390,6 @@ int route_update(Route *route,
         route->scope = scope;
         route->protocol = protocol;
         route->type = type;
-
-        return 0;
 }
 
 int route_remove(Route *route, Link *link,
@@ -460,10 +460,6 @@ int route_remove(Route *route, Link *link,
         r = sd_netlink_message_append_u32(req, RTA_PRIORITY, route->priority);
         if (r < 0)
                 return log_error_errno(r, "Could not append RTA_PRIORITY attribute: %m");
-
-        r = sd_rtnl_message_route_set_type(req, route->type);
-        if (r < 0)
-                return log_error_errno(r, "Could not set route type: %m");
 
         if (!IN_SET(route->type, RTN_UNREACHABLE, RTN_PROHIBIT, RTN_BLACKHOLE)) {
                 r = sd_netlink_message_append_u32(req, RTA_OIF, link->ifindex);
@@ -639,6 +635,24 @@ int route_configure(
                 r = sd_netlink_message_append_u32(req, RTAX_MTU, route->mtu);
                 if (r < 0)
                         return log_error_errno(r, "Could not append RTAX_MTU attribute: %m");
+        }
+
+        if (route->initcwnd > 0) {
+                r = sd_netlink_message_append_u32(req, RTAX_INITCWND, route->initcwnd);
+                if (r < 0)
+                        return log_error_errno(r, "Could not append RTAX_INITCWND attribute: %m");
+        }
+
+        if (route->initrwnd > 0) {
+                r = sd_netlink_message_append_u32(req, RTAX_INITRWND, route->initrwnd);
+                if (r < 0)
+                        return log_error_errno(r, "Could not append RTAX_INITRWND attribute: %m");
+        }
+
+        if (route->quickack != -1) {
+                r = sd_netlink_message_append_u32(req, RTAX_QUICKACK, route->quickack);
+                if (r < 0)
+                        return log_error_errno(r, "Could not append RTAX_QUICKACK attribute: %m");
         }
 
         r = sd_netlink_message_close_container(req);
@@ -1070,6 +1084,88 @@ int config_parse_route_type(const char *unit,
                 return 0;
         }
 
+        n = NULL;
+
+        return 0;
+}
+
+int config_parse_tcp_window(const char *unit,
+                             const char *filename,
+                             unsigned line,
+                             const char *section,
+                             unsigned section_line,
+                             const char *lvalue,
+                             int ltype,
+                             const char *rvalue,
+                             void *data,
+                             void *userdata) {
+        _cleanup_route_free_ Route *n = NULL;
+        Network *network = userdata;
+        uint64_t k;
+        int r;
+
+        assert(filename);
+        assert(section);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r < 0)
+                return r;
+
+        r = parse_size(rvalue, 1024, &k);
+        if (r < 0 || k > UINT32_MAX)  {
+                log_syntax(unit, LOG_ERR, filename, line, r,
+                           "Could not parse TCP %s \"%s\" bytes, ignoring assignment: %m", rvalue, lvalue);
+                return 0;
+        }
+
+        if (streq(lvalue, "InitialCongestionWindow"))
+                n->initcwnd = k;
+        else if (streq(lvalue, "InitialAdvertisedReceiveWindow"))
+                n->initrwnd = k;
+        else {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse TCP %s: %s", lvalue, rvalue);
+                return 0;
+        }
+
+        n = NULL;
+
+        return 0;
+}
+
+int config_parse_quickack(const char *unit,
+                          const char *filename,
+                          unsigned line,
+                          const char *section,
+                          unsigned section_line,
+                          const char *lvalue,
+                          int ltype,
+                          const char *rvalue,
+                          void *data,
+                          void *userdata) {
+        _cleanup_route_free_ Route *n = NULL;
+        Network *network = userdata;
+        int k, r;
+
+        assert(filename);
+        assert(section);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        r = route_new_static(network, filename, section_line, &n);
+        if (r < 0)
+                return r;
+
+        k = parse_boolean(rvalue);
+        if (k < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, k, "Failed to parse TCP quickack, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        n->quickack = !!k;
         n = NULL;
 
         return 0;

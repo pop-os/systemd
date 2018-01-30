@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -38,6 +39,7 @@
 #include "mkdir.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "process-util.h"
 #include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
@@ -103,7 +105,6 @@ int rmdir_parents(const char *path, const char *stop) {
 
         return 0;
 }
-
 
 int rename_noreplace(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) {
         struct stat buf;
@@ -315,43 +316,60 @@ int fd_warn_permissions(const char *path, int fd) {
 }
 
 int touch_file(const char *path, bool parents, usec_t stamp, uid_t uid, gid_t gid, mode_t mode) {
-        _cleanup_close_ int fd;
-        int r;
+        char fdpath[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(int)];
+        _cleanup_close_ int fd = -1;
+        int r, ret = 0;
 
         assert(path);
 
+        /* Note that touch_file() does not follow symlinks: if invoked on an existing symlink, then it is the symlink
+         * itself which is updated, not its target
+         *
+         * Returns the first error we encounter, but tries to apply as much as possible. */
+
         if (parents)
-                mkdir_parents(path, 0755);
+                (void) mkdir_parents(path, 0755);
 
-        fd = open(path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY,
-                  IN_SET(mode, 0, MODE_INVALID) ? 0644 : mode);
-        if (fd < 0)
-                return -errno;
+        /* Initially, we try to open the node with O_PATH, so that we get a reference to the node. This is useful in
+         * case the path refers to an existing device or socket node, as we can open it successfully in all cases, and
+         * won't trigger any driver magic or so. */
+        fd = open(path, O_PATH|O_CLOEXEC|O_NOFOLLOW);
+        if (fd < 0) {
+                if (errno != ENOENT)
+                        return -errno;
 
-        if (mode != MODE_INVALID) {
-                r = fchmod(fd, mode);
-                if (r < 0)
+                /* if the node doesn't exist yet, we create it, but with O_EXCL, so that we only create a regular file
+                 * here, and nothing else */
+                fd = open(path, O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, IN_SET(mode, 0, MODE_INVALID) ? 0644 : mode);
+                if (fd < 0)
                         return -errno;
         }
 
-        if (uid != UID_INVALID || gid != GID_INVALID) {
-                r = fchown(fd, uid, gid);
-                if (r < 0)
-                        return -errno;
-        }
+        /* Let's make a path from the fd, and operate on that. With this logic, we can adjust the access mode,
+         * ownership and time of the file node in all cases, even if the fd refers to an O_PATH object — which is
+         * something fchown(), fchmod(), futimensat() don't allow. */
+        xsprintf(fdpath, "/proc/self/fd/%i", fd);
+
+        if (mode != MODE_INVALID)
+                if (chmod(fdpath, mode) < 0)
+                        ret = -errno;
+
+        if (uid_is_valid(uid) || gid_is_valid(gid))
+                if (chown(fdpath, uid, gid) < 0 && ret >= 0)
+                        ret = -errno;
 
         if (stamp != USEC_INFINITY) {
                 struct timespec ts[2];
 
                 timespec_store(&ts[0], stamp);
                 ts[1] = ts[0];
-                r = futimens(fd, ts);
+                r = utimensat(AT_FDCWD, fdpath, ts, 0);
         } else
-                r = futimens(fd, NULL);
-        if (r < 0)
+                r = utimensat(AT_FDCWD, fdpath, NULL, 0);
+        if (r < 0 && ret >= 0)
                 return -errno;
 
-        return 0;
+        return ret;
 }
 
 int touch(const char *path) {
@@ -509,7 +527,7 @@ static int getenv_tmp_dir(const char **ret_path) {
                         r = -ENOTDIR;
                         goto next;
                 }
-                if (!path_is_safe(e)) {
+                if (!path_is_normalized(e)) {
                         r = -EPERM;
                         goto next;
                 }
@@ -580,7 +598,7 @@ int tmp_dir(const char **ret) {
 }
 
 int inotify_add_watch_fd(int fd, int what, uint32_t mask) {
-        char path[strlen("/proc/self/fd/") + DECIMAL_STR_MAX(int) + 1];
+        char path[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(int) + 1];
         int r;
 
         /* This is like inotify_add_watch(), except that the file to watch is not referenced by a path, but by an fd */
@@ -593,15 +611,34 @@ int inotify_add_watch_fd(int fd, int what, uint32_t mask) {
         return r;
 }
 
+static bool safe_transition(const struct stat *a, const struct stat *b) {
+        /* Returns true if the transition from a to b is safe, i.e. that we never transition from unprivileged to
+         * privileged files or directories. Why bother? So that unprivileged code can't symlink to privileged files
+         * making us believe we read something safe even though it isn't safe in the specific context we open it in. */
+
+        if (a->st_uid == 0) /* Transitioning from privileged to unprivileged is always fine */
+                return true;
+
+        return a->st_uid == b->st_uid; /* Otherwise we need to stay within the same UID */
+}
+
 int chase_symlinks(const char *path, const char *original_root, unsigned flags, char **ret) {
         _cleanup_free_ char *buffer = NULL, *done = NULL, *root = NULL;
         _cleanup_close_ int fd = -1;
         unsigned max_follow = 32; /* how many symlinks to follow before giving up and returning ELOOP */
+        struct stat previous_stat;
         bool exists = true;
         char *todo;
         int r;
 
         assert(path);
+
+        /* Either the file may be missing, or we return an fd to the final object, but both make no sense */
+        if ((flags & (CHASE_NONEXISTENT|CHASE_OPEN)) == (CHASE_NONEXISTENT|CHASE_OPEN))
+                return -EINVAL;
+
+        if (isempty(path))
+                return -EINVAL;
 
         /* This is a lot like canonicalize_file_name(), but takes an additional "root" parameter, that allows following
          * symlinks relative to a root directory, instead of the root of the host.
@@ -621,18 +658,25 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
          * Suggested usage: whenever you want to canonicalize a path, use this function. Pass the absolute path you got
          * as-is: fully qualified and relative to your host's root. Optionally, specify the root parameter to tell this
          * function what to do when encountering a symlink with an absolute path as directory: prefix it by the
-         * specified path.
-         *
-         * Note: there's also chase_symlinks_prefix() (see below), which as first step prefixes the passed path by the
-         * passed root. */
+         * specified path. */
+
+        /* A root directory of "/" or "" is identical to none */
+        if (isempty(original_root) || path_equal(original_root, "/"))
+                original_root = NULL;
 
         if (original_root) {
                 r = path_make_absolute_cwd(original_root, &root);
                 if (r < 0)
                         return r;
 
-                if (flags & CHASE_PREFIX_ROOT)
+                if (flags & CHASE_PREFIX_ROOT) {
+
+                        /* We don't support relative paths in combination with a root directory */
+                        if (!path_is_absolute(path))
+                                return -EINVAL;
+
                         path = prefix_roota(root, path);
+                }
         }
 
         r = path_make_absolute_cwd(path, &buffer);
@@ -642,6 +686,11 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
         fd = open("/", O_CLOEXEC|O_NOFOLLOW|O_PATH);
         if (fd < 0)
                 return -errno;
+
+        if (flags & CHASE_SAFE) {
+                if (fstat(fd, &previous_stat) < 0)
+                        return -errno;
+        }
 
         todo = buffer;
         for (;;) {
@@ -661,9 +710,18 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
 
                 todo += m;
 
-                /* Just a single slash? Then we reached the end. */
-                if (isempty(first) || path_equal(first, "/"))
+                /* Empty? Then we reached the end. */
+                if (isempty(first))
                         break;
+
+                /* Just a single slash? Then we reached the end. */
+                if (path_equal(first, "/")) {
+                        /* Preserve the trailing slash */
+                        if (!strextend(&done, "/", NULL))
+                                return -ENOMEM;
+
+                        break;
+                }
 
                 /* Just a dot? Then let's eat this up. */
                 if (path_equal(first, "/."))
@@ -672,7 +730,7 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                 /* Two dots? Then chop off the last bit of what we already found out. */
                 if (path_equal(first, "/..")) {
                         _cleanup_free_ char *parent = NULL;
-                        int fd_parent = -1;
+                        _cleanup_close_ int fd_parent = -1;
 
                         /* If we already are at the top, then going up will not change anything. This is in-line with
                          * how the kernel handles this. */
@@ -695,8 +753,19 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                         if (fd_parent < 0)
                                 return -errno;
 
+                        if (flags & CHASE_SAFE) {
+                                if (fstat(fd_parent, &st) < 0)
+                                        return -errno;
+
+                                if (!safe_transition(&previous_stat, &st))
+                                        return -EPERM;
+
+                                previous_stat = st;
+                        }
+
                         safe_close(fd);
                         fd = fd_parent;
+                        fd_parent = -1;
 
                         continue;
                 }
@@ -707,11 +776,15 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
 
                         if (errno == ENOENT &&
                             (flags & CHASE_NONEXISTENT) &&
-                            (isempty(todo) || path_is_safe(todo))) {
+                            (isempty(todo) || path_is_normalized(todo))) {
 
                                 /* If CHASE_NONEXISTENT is set, and the path does not exist, then that's OK, return
                                  * what we got so far. But don't allow this if the remaining path contains "../ or "./"
                                  * or something else weird. */
+
+                                /* If done is "/", as first also contains slash at the head, then remove this redundant slash. */
+                                if (streq_ptr(done, "/"))
+                                        *done = '\0';
 
                                 if (!strextend(&done, first, todo, NULL))
                                         return -ENOMEM;
@@ -725,8 +798,14 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
 
                 if (fstat(child, &st) < 0)
                         return -errno;
+                if ((flags & CHASE_SAFE) &&
+                    !safe_transition(&previous_stat, &st))
+                        return -EPERM;
+
+                previous_stat = st;
+
                 if ((flags & CHASE_NO_AUTOFS) &&
-                    fd_check_fstype(child, AUTOFS_SUPER_MAGIC) > 0)
+                    fd_is_fs_type(child, AUTOFS_SUPER_MAGIC) > 0)
                         return -EREMOTE;
 
                 if (S_ISLNK(st.st_mode)) {
@@ -755,6 +834,16 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                                 if (fd < 0)
                                         return -errno;
 
+                                if (flags & CHASE_SAFE) {
+                                        if (fstat(fd, &st) < 0)
+                                                return -errno;
+
+                                        if (!safe_transition(&previous_stat, &st))
+                                                return -EPERM;
+
+                                        previous_stat = st;
+                                }
+
                                 free(done);
 
                                 /* Note that we do not revalidate the root, we take it as is. */
@@ -766,12 +855,11 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                                                 return -ENOMEM;
                                 }
 
-                        }
-
-                        /* Prefix what's left to do with what we just read, and start the loop again,
-                         * but remain in the current directory. */
-
-                        joined = strjoin("/", destination, todo);
+                                /* Prefix what's left to do with what we just read, and start the loop again, but
+                                 * remain in the current directory. */
+                                joined = strjoin(destination, todo);
+                        } else
+                                joined = strjoin("/", destination, todo);
                         if (!joined)
                                 return -ENOMEM;
 
@@ -786,6 +874,10 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                         done = first;
                         first = NULL;
                 } else {
+                        /* If done is "/", as first also contains slash at the head, then remove this redundant slash. */
+                        if (streq(done, "/"))
+                                *done = '\0';
+
                         if (!strextend(&done, first, NULL))
                                 return -ENOMEM;
                 }
@@ -808,5 +900,33 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                 done = NULL;
         }
 
+        if (flags & CHASE_OPEN) {
+                int q;
+
+                /* Return the O_PATH fd we currently are looking to the caller. It can translate it to a proper fd by
+                 * opening /proc/self/fd/xyz. */
+
+                assert(fd >= 0);
+                q = fd;
+                fd = -1;
+
+                return q;
+        }
+
         return exists;
+}
+
+int access_fd(int fd, int mode) {
+        char p[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(fd) + 1];
+        int r;
+
+        /* Like access() but operates on an already open fd */
+
+        xsprintf(p, "/proc/self/fd/%i", fd);
+
+        r = access(p, mode);
+        if (r < 0)
+                r = -errno;
+
+        return r;
 }

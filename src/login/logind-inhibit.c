@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -86,7 +87,7 @@ int inhibitor_save(Inhibitor *i) {
 
         assert(i);
 
-        r = mkdir_safe_label("/run/systemd/inhibit", 0755, 0, 0);
+        r = mkdir_safe_label("/run/systemd/inhibit", 0755, 0, 0, false);
         if (r < 0)
                 goto fail;
 
@@ -290,7 +291,7 @@ int inhibitor_create_fifo(Inhibitor *i) {
 
         /* Create FIFO */
         if (!i->fifo_path) {
-                r = mkdir_safe_label("/run/systemd/inhibit", 0755, 0, 0);
+                r = mkdir_safe_label("/run/systemd/inhibit", 0755, 0, 0, false);
                 if (r < 0)
                         return r;
 
@@ -304,7 +305,7 @@ int inhibitor_create_fifo(Inhibitor *i) {
 
         /* Open reading side */
         if (i->fifo_fd < 0) {
-                i->fifo_fd = open(i->fifo_path, O_RDONLY|O_CLOEXEC|O_NDELAY);
+                i->fifo_fd = open(i->fifo_path, O_RDONLY|O_CLOEXEC|O_NONBLOCK);
                 if (i->fifo_fd < 0)
                         return -errno;
         }
@@ -320,7 +321,7 @@ int inhibitor_create_fifo(Inhibitor *i) {
         }
 
         /* Open writing side */
-        r = open(i->fifo_path, O_WRONLY|O_CLOEXEC|O_NDELAY);
+        r = open(i->fifo_path, O_WRONLY|O_CLOEXEC|O_NONBLOCK);
         if (r < 0)
                 return -errno;
 
@@ -357,6 +358,8 @@ static int pid_is_active(Manager *m, pid_t pid) {
         Session *s;
         int r;
 
+        /* Get client session.  This is not what you are looking for these days.
+         * FIXME #6852 */
         r = manager_get_session_by_pid(m, pid, &s);
         if (r < 0)
                 return r;

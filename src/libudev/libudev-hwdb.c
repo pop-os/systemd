@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -112,8 +113,7 @@ _public_ struct udev_hwdb *udev_hwdb_unref(struct udev_hwdb *hwdb) {
                 return NULL;
         sd_hwdb_unref(hwdb->hwdb);
         udev_list_cleanup(&hwdb->properties_list);
-        free(hwdb);
-        return NULL;
+        return mfree(hwdb);
 }
 
 /**

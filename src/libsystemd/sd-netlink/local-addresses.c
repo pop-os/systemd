@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -224,6 +225,8 @@ int local_gateways(sd_netlink *context, int ifindex, int af, struct local_addres
                         continue;
 
                 r = sd_netlink_message_read_u32(m, RTA_OIF, &ifi);
+                if (r == -ENODATA) /* Not all routes have an RTA_OIF attribute (for example nexthop ones) */
+                        continue;
                 if (r < 0)
                         return r;
                 if (ifindex > 0 && (int) ifi != ifindex)

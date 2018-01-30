@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
  This file is part of systemd.
 
@@ -97,13 +98,13 @@ int rtnl_set_link_properties(sd_netlink **rtnl, int ifindex, const char *alias,
         return 0;
 }
 
-int rtnl_message_new_synthetic_error(int error, uint32_t serial, sd_netlink_message **ret) {
+int rtnl_message_new_synthetic_error(sd_netlink *rtnl, int error, uint32_t serial, sd_netlink_message **ret) {
         struct nlmsgerr *err;
         int r;
 
         assert(error <= 0);
 
-        r = message_new(NULL, ret, NLMSG_ERROR);
+        r = message_new(rtnl, ret, NLMSG_ERROR);
         if (r < 0)
                 return r;
 

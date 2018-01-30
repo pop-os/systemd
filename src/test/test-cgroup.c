@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -22,6 +23,7 @@
 
 #include "cgroup-util.h"
 #include "path-util.h"
+#include "process-util.h"
 #include "string-util.h"
 #include "util.h"
 

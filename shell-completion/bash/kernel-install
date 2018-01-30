@@ -1,4 +1,5 @@
 # kernel-install(8) completion                                   -*- shell-script -*-
+# SPDX-License-Identifier: LGPL-2.1+
 #
 # This file is part of systemd.
 #
@@ -37,7 +38,7 @@ _kernel_install() {
                 fi
                 ;;
             3)
-                [[ "$cur" ]] || cur=/boot/vmlinuz-${COMP_WORDS[2]}
+                [[ "$cur" ]] || cur=/lib/modules/${COMP_WORDS[2]}/vmlinuz
                 comps=$(compgen -f -- "$cur")
                 compopt -o filenames
                 ;;

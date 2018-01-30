@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -78,7 +79,8 @@ int main(int argc, char *argv[]) {
         if (argc > 1)
                 arg_dest = argv[2];
 
-        log_set_target(LOG_TARGET_SAFE);
+        log_set_prohibit_ipc(true);
+        log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
         log_open();
 

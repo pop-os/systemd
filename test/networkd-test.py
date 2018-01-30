@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1+
 #
 # networkd integration test
 # This uses temporary configuration in /run and temporary veth devices, and
@@ -719,7 +720,8 @@ class NetworkdClientTest(ClientTestBase, unittest.TestCase):
         self.addCleanup(os.remove, script)
         with os.fdopen(fd, 'w+') as f:
             f.write('''\
-#!/bin/sh -eu
+#!/bin/sh
+set -eu
 mkdir -p /run/systemd/network
 mkdir -p /run/systemd/netif
 mount -t tmpfs none /run/systemd/network

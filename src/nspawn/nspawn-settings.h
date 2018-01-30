@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -20,6 +21,8 @@
 ***/
 
 #include <stdio.h>
+
+#include "sd-id128.h"
 
 #include "macro.h"
 #include "nspawn-expose-ports.h"

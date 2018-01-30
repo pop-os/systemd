@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -20,6 +21,7 @@
 #include "alloc-util.h"
 #include "curl-util.h"
 #include "fd-util.h"
+#include "locale-util.h"
 #include "string-util.h"
 
 static void curl_glue_check_finished(CurlGlue *g) {
@@ -413,8 +415,8 @@ int curl_header_strdup(const void *contents, size_t sz, const char *field, char 
 }
 
 int curl_parse_http_time(const char *t, usec_t *ret) {
+        _cleanup_(freelocalep) locale_t loc = (locale_t) 0;
         const char *e;
-        locale_t loc;
         struct tm tm;
         time_t v;
 
@@ -433,7 +435,6 @@ int curl_parse_http_time(const char *t, usec_t *ret) {
         if (!e || *e != 0)
                 /* ANSI C */
                 e = strptime_l(t, "%a %b %d %H:%M:%S %Y", &tm, loc);
-        freelocale(loc);
         if (!e || *e != 0)
                 return -EINVAL;
 

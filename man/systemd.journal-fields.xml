@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -193,18 +195,19 @@
 
       <varlistentry>
         <term><varname>_SYSTEMD_CGROUP=</varname></term>
-        <term><varname>_SYSTEMD_SESSION=</varname></term>
+        <term><varname>_SYSTEMD_SLICE=</varname></term>
         <term><varname>_SYSTEMD_UNIT=</varname></term>
         <term><varname>_SYSTEMD_USER_UNIT=</varname></term>
+        <term><varname>_SYSTEMD_SESSION=</varname></term>
         <term><varname>_SYSTEMD_OWNER_UID=</varname></term>
-        <term><varname>_SYSTEMD_SLICE=</varname></term>
 
         <listitem>
           <para>The control group path in the systemd hierarchy, the
-          systemd session ID (if any), the systemd unit name (if any),
-          the systemd user session unit name (if any), the owner UID
-          of the systemd session (if any) and the systemd slice unit
-          of the process the journal entry originates from.</para>
+          the systemd slice unit name, the systemd unit name, the
+          unit name in the systemd user manager (if any), the systemd
+          session ID (if any), and the owner UID of the systemd user
+          unit or systemd session (if any) of the process the journal
+          entry originates from.</para>
         </listitem>
       </varlistentry>
 
@@ -336,7 +339,7 @@
       <varlistentry>
         <term><varname>_STREAM_ID=</varname></term>
         <listitem>
-          <para>Only applies to <literal>_TRANSPORT=stream</literal> records: specifies a randomized 128bit ID assigned
+          <para>Only applies to <literal>_TRANSPORT=stdout</literal> records: specifies a randomized 128bit ID assigned
           to the stream connection when it was first created. This ID is useful to reconstruct individual log streams
           from the log records: all log records carrying the same stream ID originate from the same stream.</para>
         </listitem>
@@ -344,7 +347,7 @@
       <varlistentry>
         <term><varname>_LINE_BREAK=</varname></term>
         <listitem>
-          <para>Only applies to <literal>_TRANSPORT=stream</literal> records: indicates that the log message in the
+          <para>Only applies to <literal>_TRANSPORT=stdout</literal> records: indicates that the log message in the
           standard output/error stream was not terminated with a normal newline character (<literal>\n</literal>,
           i.e. ASCII 10). Specifically, when set this field is one of <option>nul</option> (in case the line was
           terminated by a NUL byte), <option>line-max</option> (in case the maximum log line length was reached, as

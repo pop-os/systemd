@@ -1,4 +1,7 @@
-#!/bin/sh -eu
+#!/bin/sh
+set -eu
+
+export SYSTEMD_LOG_LEVEL=info
 
 # output width
 if "$1"  --help | grep -v 'default:' | grep -E -q '.{80}.'; then

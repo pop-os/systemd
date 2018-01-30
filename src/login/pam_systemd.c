@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -196,7 +197,7 @@ static int export_legacy_dbus_address(
                 return PAM_SUCCESS;
 
         s = mfree(s);
-        if (asprintf(&s, UNIX_USER_BUS_ADDRESS_FMT, runtime) < 0)
+        if (asprintf(&s, DEFAULT_USER_BUS_ADDRESS_FMT, runtime) < 0)
                 goto error;
 
         r = pam_misc_setenv(handle, "DBUS_SESSION_BUS_ADDRESS", s, 0);

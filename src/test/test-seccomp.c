@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -17,12 +18,12 @@
   along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
+#include <poll.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/personality.h>
-#include <sys/poll.h>
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -140,7 +141,7 @@ static void test_filter_sets(void) {
                         _exit(EXIT_SUCCESS);
                 }
 
-                assert_se(wait_for_terminate_and_warn(syscall_filter_sets[i].name, pid, true) == EXIT_SUCCESS);
+                assert_se(wait_for_terminate_and_check(syscall_filter_sets[i].name, pid, WAIT_LOG) == EXIT_SUCCESS);
         }
 }
 
@@ -226,7 +227,7 @@ static void test_restrict_namespace(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("nsseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("nsseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_protect_sysctl(void) {
@@ -259,7 +260,7 @@ static void test_protect_sysctl(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("sysctlseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("sysctlseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_restrict_address_families(void) {
@@ -342,7 +343,7 @@ static void test_restrict_address_families(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("socketseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("socketseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_restrict_realtime(void) {
@@ -380,7 +381,7 @@ static void test_restrict_realtime(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("realtimeseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("realtimeseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_memory_deny_write_execute_mmap(void) {
@@ -423,7 +424,7 @@ static void test_memory_deny_write_execute_mmap(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("memoryseccomp-mmap", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("memoryseccomp-mmap", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_memory_deny_write_execute_shmat(void) {
@@ -470,7 +471,7 @@ static void test_memory_deny_write_execute_shmat(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("memoryseccomp-shmat", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("memoryseccomp-shmat", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_restrict_archs(void) {
@@ -504,7 +505,7 @@ static void test_restrict_archs(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("archseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("archseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_load_syscall_filter_set_raw(void) {
@@ -519,7 +520,7 @@ static void test_load_syscall_filter_set_raw(void) {
         assert_se(pid >= 0);
 
         if (pid == 0) {
-                _cleanup_set_free_ Set *s = NULL;
+                _cleanup_hashmap_free_ Hashmap *s = NULL;
 
                 assert_se(access("/", F_OK) >= 0);
                 assert_se(poll(NULL, 0, 0) == 0);
@@ -528,11 +529,11 @@ static void test_load_syscall_filter_set_raw(void) {
                 assert_se(access("/", F_OK) >= 0);
                 assert_se(poll(NULL, 0, 0) == 0);
 
-                assert_se(s = set_new(NULL));
+                assert_se(s = hashmap_new(NULL));
 #if SCMP_SYS(access) >= 0
-                assert_se(set_put(s, UINT32_TO_PTR(__NR_access + 1)) >= 0);
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_access + 1), INT_TO_PTR(-1)) >= 0);
 #else
-                assert_se(set_put(s, UINT32_TO_PTR(__NR_faccessat + 1)) >= 0);
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_faccessat + 1), INT_TO_PTR(-1)) >= 0);
 #endif
 
                 assert_se(seccomp_load_syscall_filter_set_raw(SCMP_ACT_ALLOW, s, SCMP_ACT_ERRNO(EUCLEAN)) >= 0);
@@ -542,27 +543,60 @@ static void test_load_syscall_filter_set_raw(void) {
 
                 assert_se(poll(NULL, 0, 0) == 0);
 
-                s = set_free(s);
+                s = hashmap_free(s);
 
-                assert_se(s = set_new(NULL));
-#if SCMP_SYS(poll) >= 0
-                assert_se(set_put(s, UINT32_TO_PTR(__NR_poll + 1)) >= 0);
+                assert_se(s = hashmap_new(NULL));
+#if SCMP_SYS(access) >= 0
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_access + 1), INT_TO_PTR(EILSEQ)) >= 0);
 #else
-                assert_se(set_put(s, UINT32_TO_PTR(__NR_ppoll + 1)) >= 0);
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_faccessat + 1), INT_TO_PTR(EILSEQ)) >= 0);
+#endif
+
+                assert_se(seccomp_load_syscall_filter_set_raw(SCMP_ACT_ALLOW, s, SCMP_ACT_ERRNO(EUCLEAN)) >= 0);
+
+                assert_se(access("/", F_OK) < 0);
+                assert_se(errno == EILSEQ);
+
+                assert_se(poll(NULL, 0, 0) == 0);
+
+                s = hashmap_free(s);
+
+                assert_se(s = hashmap_new(NULL));
+#if SCMP_SYS(poll) >= 0
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_poll + 1), INT_TO_PTR(-1)) >= 0);
+#else
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_ppoll + 1), INT_TO_PTR(-1)) >= 0);
 #endif
 
                 assert_se(seccomp_load_syscall_filter_set_raw(SCMP_ACT_ALLOW, s, SCMP_ACT_ERRNO(EUNATCH)) >= 0);
 
                 assert_se(access("/", F_OK) < 0);
-                assert_se(errno == EUCLEAN);
+                assert_se(errno == EILSEQ);
 
                 assert_se(poll(NULL, 0, 0) < 0);
                 assert_se(errno == EUNATCH);
 
+                s = hashmap_free(s);
+
+                assert_se(s = hashmap_new(NULL));
+#if SCMP_SYS(poll) >= 0
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_poll + 1), INT_TO_PTR(EILSEQ)) >= 0);
+#else
+                assert_se(hashmap_put(s, UINT32_TO_PTR(__NR_ppoll + 1), INT_TO_PTR(EILSEQ)) >= 0);
+#endif
+
+                assert_se(seccomp_load_syscall_filter_set_raw(SCMP_ACT_ALLOW, s, SCMP_ACT_ERRNO(EUNATCH)) >= 0);
+
+                assert_se(access("/", F_OK) < 0);
+                assert_se(errno == EILSEQ);
+
+                assert_se(poll(NULL, 0, 0) < 0);
+                assert_se(errno == EILSEQ);
+
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("syscallrawseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("syscallrawseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_lock_personality(void) {
@@ -609,7 +643,7 @@ static void test_lock_personality(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(wait_for_terminate_and_warn("lockpersonalityseccomp", pid, true) == EXIT_SUCCESS);
+        assert_se(wait_for_terminate_and_check("lockpersonalityseccomp", pid, WAIT_LOG) == EXIT_SUCCESS);
 }
 
 static void test_filter_sets_ordered(void) {

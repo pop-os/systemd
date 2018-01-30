@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -88,7 +89,7 @@ static bool ignore_proc(pid_t pid, bool warn_rootfs) {
         return true;
 }
 
-static void wait_for_children(Set *pids, sigset_t *mask) {
+static void wait_for_children(Set *pids, sigset_t *mask, usec_t timeout) {
         usec_t until;
 
         assert(mask);
@@ -96,7 +97,7 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
         if (set_isempty(pids))
                 return;
 
-        until = now(CLOCK_MONOTONIC) + DEFAULT_TIMEOUT_USEC;
+        until = now(CLOCK_MONOTONIC) + timeout;
         for (;;) {
                 struct timespec ts;
                 int k;
@@ -129,9 +130,9 @@ static void wait_for_children(Set *pids, sigset_t *mask) {
                  * might not be our child. */
                 SET_FOREACH(p, pids, i) {
 
-                        /* We misuse getpgid as a check whether a
-                         * process still exists. */
-                        if (getpgid(PTR_TO_PID(p)) >= 0)
+                        /* kill(pid, 0) sends no signal, but it tells
+                         * us whether the process still exists. */
+                        if (kill(PTR_TO_PID(p), 0) == 0)
                                 continue;
 
                         if (errno != ESRCH)
@@ -220,7 +221,7 @@ static int killall(int sig, Set *pids, bool send_sighup) {
         return set_size(pids);
 }
 
-void broadcast_signal(int sig, bool wait_for_exit, bool send_sighup) {
+void broadcast_signal(int sig, bool wait_for_exit, bool send_sighup, usec_t timeout) {
         sigset_t mask, oldmask;
         _cleanup_set_free_ Set *pids = NULL;
 
@@ -240,7 +241,7 @@ void broadcast_signal(int sig, bool wait_for_exit, bool send_sighup) {
                 log_warning_errno(errno, "kill(-1, SIGCONT) failed: %m");
 
         if (wait_for_exit)
-                wait_for_children(pids, &mask);
+                wait_for_children(pids, &mask, timeout);
 
         assert_se(sigprocmask(SIG_SETMASK, &oldmask, NULL) == 0);
 }

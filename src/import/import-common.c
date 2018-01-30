@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -26,6 +27,7 @@
 #include "capability-util.h"
 #include "fd-util.h"
 #include "import-common.h"
+#include "process-util.h"
 #include "signal-util.h"
 #include "util.h"
 
@@ -81,11 +83,10 @@ int import_fork_tar_x(const char *path, pid_t *ret) {
         if (pipe2(pipefd, O_CLOEXEC) < 0)
                 return log_error_errno(errno, "Failed to create pipe for tar: %m");
 
-        pid = fork();
-        if (pid < 0)
-                return log_error_errno(errno, "Failed to fork off tar: %m");
-
-        if (pid == 0) {
+        r = safe_fork("(tar)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
+        if (r < 0)
+                return r;
+        if (r == 0) {
                 int null_fd;
                 uint64_t retain =
                         (1ULL << CAP_CHOWN) |
@@ -97,19 +98,13 @@ int import_fork_tar_x(const char *path, pid_t *ret) {
 
                 /* Child */
 
-                (void) reset_all_signal_handlers();
-                (void) reset_signal_mask();
-                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
-
                 pipefd[1] = safe_close(pipefd[1]);
 
-                if (dup2(pipefd[0], STDIN_FILENO) != STDIN_FILENO) {
-                        log_error_errno(errno, "Failed to dup2() fd: %m");
+                r = move_fd(pipefd[0], STDIN_FILENO, false);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to move fd: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                if (pipefd[0] != STDIN_FILENO)
-                        pipefd[0] = safe_close(pipefd[0]);
 
                 null_fd = open("/dev/null", O_WRONLY|O_NOCTTY);
                 if (null_fd < 0) {
@@ -117,13 +112,11 @@ int import_fork_tar_x(const char *path, pid_t *ret) {
                         _exit(EXIT_FAILURE);
                 }
 
-                if (dup2(null_fd, STDOUT_FILENO) != STDOUT_FILENO) {
-                        log_error_errno(errno, "Failed to dup2() fd: %m");
+                r = move_fd(null_fd, STDOUT_FILENO, false);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to move fd: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                if (null_fd != STDOUT_FILENO)
-                        null_fd = safe_close(null_fd);
 
                 stdio_unset_cloexec();
 
@@ -159,29 +152,22 @@ int import_fork_tar_c(const char *path, pid_t *ret) {
         if (pipe2(pipefd, O_CLOEXEC) < 0)
                 return log_error_errno(errno, "Failed to create pipe for tar: %m");
 
-        pid = fork();
-        if (pid < 0)
-                return log_error_errno(errno, "Failed to fork off tar: %m");
-
-        if (pid == 0) {
+        r = safe_fork("(tar)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
+        if (r < 0)
+                return r;
+        if (r == 0) {
                 int null_fd;
                 uint64_t retain = (1ULL << CAP_DAC_OVERRIDE);
 
                 /* Child */
 
-                (void) reset_all_signal_handlers();
-                (void) reset_signal_mask();
-                assert_se(prctl(PR_SET_PDEATHSIG, SIGTERM) == 0);
-
                 pipefd[0] = safe_close(pipefd[0]);
 
-                if (dup2(pipefd[1], STDOUT_FILENO) != STDOUT_FILENO) {
-                        log_error_errno(errno, "Failed to dup2() fd: %m");
+                r = move_fd(pipefd[1], STDOUT_FILENO, false);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to move fd: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                if (pipefd[1] != STDOUT_FILENO)
-                        pipefd[1] = safe_close(pipefd[1]);
 
                 null_fd = open("/dev/null", O_RDONLY|O_NOCTTY);
                 if (null_fd < 0) {
@@ -189,13 +175,11 @@ int import_fork_tar_c(const char *path, pid_t *ret) {
                         _exit(EXIT_FAILURE);
                 }
 
-                if (dup2(null_fd, STDIN_FILENO) != STDIN_FILENO) {
-                        log_error_errno(errno, "Failed to dup2() fd: %m");
+                r = move_fd(null_fd, STDIN_FILENO, false);
+                if (r < 0) {
+                        log_error_errno(errno, "Failed to move fd: %m");
                         _exit(EXIT_FAILURE);
                 }
-
-                if (null_fd != STDIN_FILENO)
-                        null_fd = safe_close(null_fd);
 
                 stdio_unset_cloexec();
 

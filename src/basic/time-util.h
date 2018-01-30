@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -148,16 +149,14 @@ clockid_t clock_boottime_or_monotonic(void);
 
 usec_t usec_shift_clock(usec_t, clockid_t from, clockid_t to);
 
-#define xstrftime(buf, fmt, tm) \
-        assert_message_se(strftime(buf, ELEMENTSOF(buf), fmt, tm) > 0, \
-                          "xstrftime: " #buf "[] must be big enough")
-
 int get_timezone(char **timezone);
 
 time_t mktime_or_timegm(struct tm *tm, bool utc);
 struct tm *localtime_or_gmtime_r(const time_t *t, struct tm *tm, bool utc);
 
 unsigned long usec_to_jiffies(usec_t usec);
+
+bool in_utc_timezone(void);
 
 static inline usec_t usec_add(usec_t a, usec_t b) {
         usec_t c;

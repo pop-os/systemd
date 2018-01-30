@@ -1,3 +1,5 @@
+#  SPDX-License-Identifier: LGPL-2.1+
+#
 #  This file is part of systemd.
 #
 #  systemd is free software; you can redistribute it and/or modify it
@@ -9,6 +11,7 @@
 # systemd-rc-local-generator if @RC_LOCAL_SCRIPT_PATH_START@ is executable.
 [Unit]
 Description=@RC_LOCAL_SCRIPT_PATH_START@ Compatibility
+Documentation=man:systemd-rc-local-generator(8)
 ConditionFileIsExecutable=@RC_LOCAL_SCRIPT_PATH_START@
 After=network.target
 

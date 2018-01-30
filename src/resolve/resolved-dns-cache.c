@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -475,7 +476,7 @@ static int dns_cache_put_positive(
         if (r < 0)
                 return r;
 
-        if (log_get_max_level() >= LOG_DEBUG) {
+        if (DEBUG_LOGGING) {
                 _cleanup_free_ char *t = NULL;
 
                 (void) in_addr_to_string(i->owner_family, &i->owner_address, &t);

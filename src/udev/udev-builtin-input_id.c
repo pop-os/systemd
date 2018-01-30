@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * expose input properties via udev
  *
@@ -101,8 +102,7 @@ static void get_cap_mask(struct udev_device *dev,
         unsigned long val;
 
         v = udev_device_get_sysattr_value(pdev, attr);
-        if (!v)
-                v = "";
+        v = strempty(v);
 
         xsprintf(text, "%s", v);
         log_debug("%s raw kernel attribute: %s", attr, text);

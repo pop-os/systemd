@@ -1,6 +1,8 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2011 Lennart Poettering
@@ -66,6 +68,18 @@
       <xsl:value-of select="manvolnum"/>
       <xsl:text>/</xsl:text>
       <xsl:value-of select="refentrytitle"/>
+    </xsl:attribute>
+    <xsl:call-template name="inline.charseq"/>
+  </a>
+</xsl:template>
+
+<xsl:template match="citerefentry[@project='wireguard']">
+  <a>
+    <xsl:attribute name="href">
+      <xsl:text>https://git.zx2c4.com/WireGuard/about/src/tools/</xsl:text>
+      <xsl:value-of select="refentrytitle"/>
+      <xsl:text>.</xsl:text>
+      <xsl:value-of select="manvolnum"/>
     </xsl:attribute>
     <xsl:call-template name="inline.charseq"/>
   </a>

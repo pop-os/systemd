@@ -3,6 +3,8 @@
 "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2014 Zbigniew Jędrzejewski-Szmek
@@ -145,6 +147,7 @@
       </varlistentry>
 
       <varlistentry>
+        <term><option>-q</option></term>
         <term><option>--quiet</option></term>
 
         <listitem>
@@ -235,6 +238,16 @@
           shown is possibly inconsistent, as the data read from
           <filename>/proc</filename> might be more recent than the rest of
           the credential information. Defaults to <literal>yes</literal>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--watch-bind=</option><replaceable>BOOL</replaceable></term>
+
+        <listitem>
+          <para>Controls whether to wait for the specified <constant>AF_UNIX</constant> bus socket to appear in the
+          file system before connecting to it. Defaults to off. When enabled, the tool will watch the file system until
+          the socket is created and then connect to it.</para>
         </listitem>
       </varlistentry>
 

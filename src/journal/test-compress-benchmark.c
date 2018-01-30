@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd
 
@@ -22,6 +23,7 @@
 #include "env-util.h"
 #include "macro.h"
 #include "parse-util.h"
+#include "process-util.h"
 #include "random-util.h"
 #include "string-util.h"
 #include "util.h"

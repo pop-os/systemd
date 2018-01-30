@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -36,6 +37,10 @@ static void print_local_addresses(struct local_address *a, unsigned n) {
 int main(int argc, char *argv[]) {
         struct local_address *a;
         int n;
+
+        log_set_max_level(LOG_DEBUG);
+        log_parse_environment();
+        log_open();
 
         a = NULL;
         n = local_addresses(NULL, 0, AF_UNSPEC, &a);

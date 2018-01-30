@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -74,9 +75,7 @@ static int context_read_data(Context *c) {
         else if (r < 0)
                 log_warning_errno(r, "Failed to get target of /etc/localtime: %m");
 
-        free(c->zone);
-        c->zone = t;
-        t = NULL;
+        free_and_replace(c->zone, t);
 
         c->local_rtc = clock_is_localtime(NULL) > 0;
 
@@ -676,9 +675,9 @@ static int connect_bus(Context *c, sd_event *event, sd_bus **_bus) {
         if (r < 0)
                 return log_error_errno(r, "Failed to register object: %m");
 
-        r = sd_bus_request_name(bus, "org.freedesktop.timedate1", 0);
+        r = sd_bus_request_name_async(bus, NULL, "org.freedesktop.timedate1", 0, NULL, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to register name: %m");
+                return log_error_errno(r, "Failed to request name: %m");
 
         r = sd_bus_attach_event(bus, event, 0);
         if (r < 0)

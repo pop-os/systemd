@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -21,6 +22,7 @@
 #include <fnmatch.h>
 
 #include "alloc-util.h"
+#include "blockdev-util.h"
 #include "bpf-firewall.h"
 #include "cgroup-util.h"
 #include "cgroup.h"
@@ -30,12 +32,25 @@
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "procfs-util.h"
 #include "special.h"
 #include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
 
 #define CGROUP_CPU_QUOTA_PERIOD_USEC ((usec_t) 100 * USEC_PER_MSEC)
+
+bool unit_has_root_cgroup(Unit *u) {
+        assert(u);
+
+        /* Returns whether this unit manages the root cgroup. Note that this is different from being named "-.slice",
+         * as inside of containers the root slice won't be identical to the root cgroup. */
+
+        if (!u->cgroup_path)
+                return false;
+
+        return isempty(u->cgroup_path) || path_equal(u->cgroup_path, "/");
+}
 
 static void cgroup_compat_warn(void) {
         static bool cgroup_compat_warned = false;
@@ -209,6 +224,16 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
                 prefix, cgroup_device_policy_to_string(c->device_policy),
                 prefix, yes_no(c->delegate));
 
+        if (c->delegate) {
+                _cleanup_free_ char *t = NULL;
+
+                (void) cg_mask_to_string(c->delegate_controllers, &t);
+
+                fprintf(f, "%sDelegateControllers=%s\n",
+                        prefix,
+                        strempty(t));
+        }
+
         LIST_FOREACH(device_allow, a, c->device_allow)
                 fprintf(f,
                         "%sDeviceAllow=%s %s%s%s\n",
@@ -296,7 +321,7 @@ static int lookup_block_device(const char *p, dev_t *dev) {
 
                 /* If this is a partition, try to get the originating
                  * block device */
-                block_get_whole_disk(*dev, dev);
+                (void) block_get_whole_disk(*dev, dev);
         } else {
                 log_warning("%s is not a block device and file system block device cannot be determined or is not local.", p);
                 return -ENODEV;
@@ -666,8 +691,10 @@ static void cgroup_apply_unified_memory_limit(Unit *u, const char *file, uint64_
                               "Failed to set %s: %m", file);
 }
 
-static void cgroup_apply_firewall(Unit *u, CGroupContext *c) {
+static void cgroup_apply_firewall(Unit *u) {
         int r;
+
+        assert(u);
 
         if (u->type == UNIT_SLICE) /* Skip this for slice units, they are inner cgroup nodes, and since bpf/cgroup is
                                     * not recursive we don't ever touch the bpf on them */
@@ -694,21 +721,17 @@ static void cgroup_context_apply(
 
         assert(u);
 
-        c = unit_get_cgroup_context(u);
-        path = u->cgroup_path;
-
-        assert(c);
-        assert(path);
-
         /* Nothing to do? Exit early! */
         if (apply_mask == 0 && !apply_bpf)
                 return;
 
-        /* Some cgroup attributes are not supported on the root cgroup,
-         * hence silently ignore */
-        is_root = isempty(path) || path_equal(path, "/");
-        if (is_root)
-                /* Make sure we don't try to display messages with an empty path. */
+        /* Some cgroup attributes are not supported on the root cgroup, hence silently ignore */
+        is_root = unit_has_root_cgroup(u);
+
+        assert_se(c = unit_get_cgroup_context(u));
+        assert_se(path = u->cgroup_path);
+
+        if (is_root) /* Make sure we don't try to display messages with an empty path. */
                 path = "/";
 
         /* We generally ignore errors caused by read-only mounted
@@ -964,7 +987,7 @@ static void cgroup_context_apply(
                                 "/dev/random\0" "rwm\0"
                                 "/dev/urandom\0" "rwm\0"
                                 "/dev/tty\0" "rwm\0"
-                                "/dev/pts/ptmx\0" "rw\0" /* /dev/pts/ptmx may not be duplicated, but accessed */
+                                "/dev/ptmx\0" "rwm\0"
                                 /* Allow /run/systemd/inaccessible/{chr,blk} devices for mapping InaccessiblePaths */
                                 "-/run/systemd/inaccessible/chr\0" "rwm\0"
                                 "-/run/systemd/inaccessible/blk\0" "rwm\0";
@@ -974,6 +997,7 @@ static void cgroup_context_apply(
                         NULSTR_FOREACH_PAIR(x, y, auto_devices)
                                 whitelist_device(path, x, y);
 
+                        /* PTS (/dev/pts) devices may not be duplicated, but accessed */
                         whitelist_major(path, "pts", 'c', "rw");
                 }
 
@@ -1004,23 +1028,50 @@ static void cgroup_context_apply(
                 }
         }
 
-        if ((apply_mask & CGROUP_MASK_PIDS) && !is_root) {
+        if (apply_mask & CGROUP_MASK_PIDS) {
 
-                if (c->tasks_max != CGROUP_LIMIT_MAX) {
-                        char buf[DECIMAL_STR_MAX(uint64_t) + 2];
+                if (is_root) {
+                        /* So, the "pids" controller does not expose anything on the root cgroup, in order not to
+                         * replicate knobs exposed elsewhere needlessly. We abstract this away here however, and when
+                         * the knobs of the root cgroup are modified propagate this to the relevant sysctls. There's a
+                         * non-obvious asymmetry however: unlike the cgroup properties we don't really want to take
+                         * exclusive ownership of the sysctls, but we still want to honour things if the user sets
+                         * limits. Hence we employ sort of a one-way strategy: when the user sets a bounded limit
+                         * through us it counts. When the user afterwards unsets it again (i.e. sets it to unbounded)
+                         * it also counts. But if the user never set a limit through us (i.e. we are the default of
+                         * "unbounded") we leave things unmodified. For this we manage a global boolean that we turn on
+                         * the first time we set a limit. Note that this boolean is flushed out on manager reload,
+                         * which is desirable so that there's an offical way to release control of the sysctl from
+                         * systemd: set the limit to unbounded and reload. */
 
-                        sprintf(buf, "%" PRIu64 "\n", c->tasks_max);
-                        r = cg_set_attribute("pids", path, "pids.max", buf);
-                } else
-                        r = cg_set_attribute("pids", path, "pids.max", "max");
+                        if (c->tasks_max != CGROUP_LIMIT_MAX) {
+                                u->manager->sysctl_pid_max_changed = true;
+                                r = procfs_tasks_set_limit(c->tasks_max);
+                        } else if (u->manager->sysctl_pid_max_changed)
+                                r = procfs_tasks_set_limit(TASKS_MAX);
+                        else
+                                r = 0;
 
-                if (r < 0)
-                        log_unit_full(u, IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
-                                      "Failed to set pids.max: %m");
+                        if (r < 0)
+                                log_unit_full(u, IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                                              "Failed to write to tasks limit sysctls: %m");
+
+                } else {
+                        if (c->tasks_max != CGROUP_LIMIT_MAX) {
+                                char buf[DECIMAL_STR_MAX(uint64_t) + 2];
+
+                                sprintf(buf, "%" PRIu64 "\n", c->tasks_max);
+                                r = cg_set_attribute("pids", path, "pids.max", buf);
+                        } else
+                                r = cg_set_attribute("pids", path, "pids.max", "max");
+                        if (r < 0)
+                                log_unit_full(u, IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
+                                              "Failed to set pids.max: %m");
+                }
         }
 
         if (apply_bpf)
-                cgroup_apply_firewall(u, c);
+                cgroup_apply_firewall(u);
 }
 
 CGroupMask cgroup_context_get_mask(CGroupContext *c) {
@@ -1047,7 +1098,7 @@ CGroupMask cgroup_context_get_mask(CGroupContext *c) {
                 mask |= CGROUP_MASK_DEVICES;
 
         if (c->tasks_accounting ||
-            c->tasks_max != (uint64_t) -1)
+            c->tasks_max != CGROUP_LIMIT_MAX)
                 mask |= CGROUP_MASK_PIDS;
 
         return mask;
@@ -1062,32 +1113,42 @@ CGroupMask unit_get_own_mask(Unit *u) {
         if (!c)
                 return 0;
 
-        /* If delegation is turned on, then turn on all cgroups,
-         * unless we are on the legacy hierarchy and the process we
-         * fork into it is known to drop privileges, and hence
-         * shouldn't get access to the controllers.
-         *
-         * Note that on the unified hierarchy it is safe to delegate
-         * controllers to unprivileged services. */
+        return cgroup_context_get_mask(c) | unit_get_delegate_mask(u);
+}
 
-        if (c->delegate) {
+CGroupMask unit_get_delegate_mask(Unit *u) {
+        CGroupContext *c;
+
+        /* If delegation is turned on, then turn on selected controllers, unless we are on the legacy hierarchy and the
+         * process we fork into is known to drop privileges, and hence shouldn't get access to the controllers.
+         *
+         * Note that on the unified hierarchy it is safe to delegate controllers to unprivileged services. */
+
+        if (u->type == UNIT_SLICE)
+                return 0;
+
+        c = unit_get_cgroup_context(u);
+        if (!c)
+                return 0;
+
+        if (!c->delegate)
+                return 0;
+
+        if (cg_all_unified() <= 0) {
                 ExecContext *e;
 
                 e = unit_get_exec_context(u);
-                if (!e ||
-                    exec_context_maintains_privileges(e) ||
-                    cg_all_unified() > 0)
-                        return _CGROUP_MASK_ALL;
+                if (e && !exec_context_maintains_privileges(e))
+                        return 0;
         }
 
-        return cgroup_context_get_mask(c);
+        return c->delegate_controllers;
 }
 
 CGroupMask unit_get_members_mask(Unit *u) {
         assert(u);
 
-        /* Returns the mask of controllers all of the unit's children
-         * require, merged */
+        /* Returns the mask of controllers all of the unit's children require, merged */
 
         if (u->cgroup_members_mask_valid)
                 return u->cgroup_members_mask;
@@ -1095,10 +1156,11 @@ CGroupMask unit_get_members_mask(Unit *u) {
         u->cgroup_members_mask = 0;
 
         if (u->type == UNIT_SLICE) {
+                void *v;
                 Unit *member;
                 Iterator i;
 
-                SET_FOREACH(member, u->dependencies[UNIT_BEFORE], i) {
+                HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i) {
 
                         if (member == u)
                                 continue;
@@ -1106,9 +1168,7 @@ CGroupMask unit_get_members_mask(Unit *u) {
                         if (UNIT_DEREF(member->slice) != u)
                                 continue;
 
-                        u->cgroup_members_mask |=
-                                unit_get_own_mask(member) |
-                                unit_get_members_mask(member);
+                        u->cgroup_members_mask |= unit_get_subtree_mask(member); /* note that this calls ourselves again, for the children */
                 }
         }
 
@@ -1126,7 +1186,7 @@ CGroupMask unit_get_siblings_mask(Unit *u) {
         if (UNIT_ISSET(u->slice))
                 return unit_get_members_mask(UNIT_DEREF(u->slice));
 
-        return unit_get_own_mask(u) | unit_get_members_mask(u);
+        return unit_get_subtree_mask(u); /* we are the top-level slice */
 }
 
 CGroupMask unit_get_subtree_mask(Unit *u) {
@@ -1372,6 +1432,31 @@ int unit_watch_cgroup(Unit *u) {
         return 0;
 }
 
+int unit_pick_cgroup_path(Unit *u) {
+        _cleanup_free_ char *path = NULL;
+        int r;
+
+        assert(u);
+
+        if (u->cgroup_path)
+                return 0;
+
+        if (!UNIT_HAS_CGROUP_CONTEXT(u))
+                return -EINVAL;
+
+        path = unit_default_cgroup_path(u);
+        if (!path)
+                return log_oom();
+
+        r = unit_set_cgroup_path(u, path);
+        if (r == -EEXIST)
+                return log_unit_error_errno(u, r, "Control group %s exists already.", path);
+        if (r < 0)
+                return log_unit_error_errno(u, r, "Failed to set unit's control group path to %s: %m", path);
+
+        return 0;
+}
+
 static int unit_create_cgroup(
                 Unit *u,
                 CGroupMask target_mask,
@@ -1387,19 +1472,10 @@ static int unit_create_cgroup(
         if (!c)
                 return 0;
 
-        if (!u->cgroup_path) {
-                _cleanup_free_ char *path = NULL;
-
-                path = unit_default_cgroup_path(u);
-                if (!path)
-                        return log_oom();
-
-                r = unit_set_cgroup_path(u, path);
-                if (r == -EEXIST)
-                        return log_unit_error_errno(u, r, "Control group %s exists already.", path);
-                if (r < 0)
-                        return log_unit_error_errno(u, r, "Failed to set unit's control group path to %s: %m", path);
-        }
+        /* Figure out our cgroup path */
+        r = unit_pick_cgroup_path(u);
+        if (r < 0)
+                return r;
 
         /* First, create our own group */
         r = cg_create_everywhere(u->manager->cgroup_supported, target_mask, u->cgroup_path);
@@ -1465,7 +1541,7 @@ static void cgroup_xattr_apply(Unit *u) {
                          sd_id128_to_string(u->invocation_id, ids), 32,
                          0);
         if (r < 0)
-                log_unit_warning_errno(u, r, "Failed to set invocation ID on control group %s, ignoring: %m", u->cgroup_path);
+                log_unit_debug_errno(u, r, "Failed to set invocation ID on control group %s, ignoring: %m", u->cgroup_path);
 }
 
 static bool unit_has_mask_realized(
@@ -1483,6 +1559,27 @@ static bool unit_has_mask_realized(
                  (!needs_bpf && u->cgroup_bpf_state == UNIT_CGROUP_BPF_OFF));
 }
 
+static void unit_add_to_cgroup_realize_queue(Unit *u) {
+        assert(u);
+
+        if (u->in_cgroup_realize_queue)
+                return;
+
+        LIST_PREPEND(cgroup_realize_queue, u->manager->cgroup_realize_queue, u);
+        u->in_cgroup_realize_queue = true;
+}
+
+static void unit_remove_from_cgroup_realize_queue(Unit *u) {
+        assert(u);
+
+        if (!u->in_cgroup_realize_queue)
+                return;
+
+        LIST_REMOVE(cgroup_realize_queue, u->manager->cgroup_realize_queue, u);
+        u->in_cgroup_realize_queue = false;
+}
+
+
 /* Check if necessary controllers and attributes for a unit are in place.
  *
  * If so, do nothing.
@@ -1496,10 +1593,7 @@ static int unit_realize_cgroup_now(Unit *u, ManagerState state) {
 
         assert(u);
 
-        if (u->in_cgroup_realize_queue) {
-                LIST_REMOVE(cgroup_realize_queue, u->manager->cgroup_realize_queue, u);
-                u->in_cgroup_realize_queue = false;
-        }
+        unit_remove_from_cgroup_realize_queue(u);
 
         target_mask = unit_get_target_mask(u);
         enable_mask = unit_get_enable_mask(u);
@@ -1532,16 +1626,6 @@ static int unit_realize_cgroup_now(Unit *u, ManagerState state) {
         return 0;
 }
 
-static void unit_add_to_cgroup_realize_queue(Unit *u) {
-        assert(u);
-
-        if (u->in_cgroup_realize_queue)
-                return;
-
-        LIST_PREPEND(cgroup_realize_queue, u->manager->cgroup_realize_queue, u);
-        u->in_cgroup_realize_queue = true;
-}
-
 unsigned manager_dispatch_cgroup_realize_queue(Manager *m) {
         ManagerState state;
         unsigned n = 0;
@@ -1554,6 +1638,12 @@ unsigned manager_dispatch_cgroup_realize_queue(Manager *m) {
 
         while ((i = m->cgroup_realize_queue)) {
                 assert(i->in_cgroup_realize_queue);
+
+                if (UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(i))) {
+                        /* Maybe things changed, and the unit is not actually active anymore? */
+                        unit_remove_from_cgroup_realize_queue(i);
+                        continue;
+                }
 
                 r = unit_realize_cgroup_now(i, state);
                 if (r < 0)
@@ -1575,8 +1665,9 @@ static void unit_add_siblings_to_cgroup_realize_queue(Unit *u) {
         while ((slice = UNIT_DEREF(u->slice))) {
                 Iterator i;
                 Unit *m;
+                void *v;
 
-                SET_FOREACH(m, slice->dependencies[UNIT_BEFORE], i) {
+                HASHMAP_FOREACH_KEY(v, m, u->dependencies[UNIT_BEFORE], i) {
                         if (m == u)
                                 continue;
 
@@ -1772,6 +1863,31 @@ static int unit_watch_pids_in_path(Unit *u, const char *path) {
         return ret;
 }
 
+int unit_synthesize_cgroup_empty_event(Unit *u) {
+        int r;
+
+        assert(u);
+
+        /* Enqueue a synthetic cgroup empty event if this unit doesn't watch any PIDs anymore. This is compatibility
+         * support for non-unified systems where notifications aren't reliable, and hence need to take whatever we can
+         * get as notification source as soon as we stopped having any useful PIDs to watch for. */
+
+        if (!u->cgroup_path)
+                return -ENOENT;
+
+        r = cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER);
+        if (r < 0)
+                return r;
+        if (r > 0) /* On unified we have reliable notifications, and don't need this */
+                return 0;
+
+        if (!set_isempty(u->pids))
+                return 0;
+
+        unit_add_to_cgroup_empty_queue(u);
+        return 0;
+}
+
 int unit_watch_all_pids(Unit *u) {
         int r;
 
@@ -1944,11 +2060,9 @@ int manager_setup_cgroup(Manager *m) {
         if (e)
                 *e = 0;
 
-        /* And make sure to store away the root value without trailing
-         * slash, even for the root dir, so that we can easily prepend
-         * it everywhere. */
-        while ((e = endswith(m->cgroup_root, "/")))
-                *e = 0;
+        /* And make sure to store away the root value without trailing slash, even for the root dir, so that we can
+         * easily prepend it everywhere. */
+        delete_trailing_chars(m->cgroup_root, "/");
 
         /* 2. Show data */
         r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, m->cgroup_root, NULL, &path);
@@ -1960,9 +2074,9 @@ int manager_setup_cgroup(Manager *m) {
                 return log_error_errno(r, "Couldn't determine if we are running in the unified hierarchy: %m");
 
         all_unified = cg_all_unified();
-        if (r < 0)
-                return log_error_errno(r, "Couldn't determine whether we are in all unified mode: %m");
-        if (r > 0)
+        if (all_unified < 0)
+                return log_error_errno(all_unified, "Couldn't determine whether we are in all unified mode: %m");
+        if (all_unified > 0)
                 log_debug("Unified cgroup hierarchy is located at %s.", path);
         else {
                 r = cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER);
@@ -2108,40 +2222,46 @@ Unit* manager_get_unit_by_cgroup(Manager *m, const char *cgroup) {
 
 Unit *manager_get_unit_by_pid_cgroup(Manager *m, pid_t pid) {
         _cleanup_free_ char *cgroup = NULL;
-        int r;
 
         assert(m);
 
-        if (pid <= 0)
+        if (!pid_is_valid(pid))
                 return NULL;
 
-        r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, pid, &cgroup);
-        if (r < 0)
+        if (cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, pid, &cgroup) < 0)
                 return NULL;
 
         return manager_get_unit_by_cgroup(m, cgroup);
 }
 
 Unit *manager_get_unit_by_pid(Manager *m, pid_t pid) {
-        Unit *u;
+        Unit *u, **array;
 
         assert(m);
 
-        if (pid <= 0)
+        /* Note that a process might be owned by multiple units, we return only one here, which is good enough for most
+         * cases, though not strictly correct. We prefer the one reported by cgroup membership, as that's the most
+         * relevant one as children of the process will be assigned to that one, too, before all else. */
+
+        if (!pid_is_valid(pid))
                 return NULL;
 
-        if (pid == 1)
+        if (pid == getpid_cached())
                 return hashmap_get(m->units, SPECIAL_INIT_SCOPE);
 
-        u = hashmap_get(m->watch_pids1, PID_TO_PTR(pid));
+        u = manager_get_unit_by_pid_cgroup(m, pid);
         if (u)
                 return u;
 
-        u = hashmap_get(m->watch_pids2, PID_TO_PTR(pid));
+        u = hashmap_get(m->watch_pids, PID_TO_PTR(pid));
         if (u)
                 return u;
 
-        return manager_get_unit_by_pid_cgroup(m, pid);
+        array = hashmap_get(m->watch_pids, PID_TO_PTR(-pid));
+        if (array)
+                return array[0];
+
+        return NULL;
 }
 
 int manager_notify_cgroup_empty(Manager *m, const char *cgroup) {
@@ -2209,6 +2329,10 @@ int unit_get_tasks_current(Unit *u, uint64_t *ret) {
 
         if ((u->cgroup_realized_mask & CGROUP_MASK_PIDS) == 0)
                 return -ENODATA;
+
+        /* The root cgroup doesn't expose this information, let's get it from /proc instead */
+        if (unit_has_root_cgroup(u))
+                return procfs_tasks_get_current(ret);
 
         r = cg_get_attribute("pids", u->cgroup_path, "pids.current", &v);
         if (r == -ENOENT)
@@ -2332,7 +2456,6 @@ int unit_get_ip_accounting(
         fd = IN_SET(metric, CGROUP_IP_INGRESS_BYTES, CGROUP_IP_INGRESS_PACKETS) ?
                 u->ip_accounting_ingress_map_fd :
                 u->ip_accounting_egress_map_fd;
-
         if (fd < 0)
                 return -ENODATA;
 
@@ -2402,7 +2525,7 @@ void unit_invalidate_cgroup(Unit *u, CGroupMask m) {
         if (m & (CGROUP_MASK_CPU | CGROUP_MASK_CPUACCT))
                 m |= CGROUP_MASK_CPU | CGROUP_MASK_CPUACCT;
 
-        if ((u->cgroup_realized_mask & m) == 0)
+        if ((u->cgroup_realized_mask & m) == 0) /* NOP? */
                 return;
 
         u->cgroup_realized_mask &= ~m;
@@ -2415,7 +2538,7 @@ void unit_invalidate_cgroup_bpf(Unit *u) {
         if (!UNIT_HAS_CGROUP_CONTEXT(u))
                 return;
 
-        if (u->cgroup_bpf_state == UNIT_CGROUP_BPF_INVALIDATED)
+        if (u->cgroup_bpf_state == UNIT_CGROUP_BPF_INVALIDATED) /* NOP? */
                 return;
 
         u->cgroup_bpf_state = UNIT_CGROUP_BPF_INVALIDATED;
@@ -2426,8 +2549,9 @@ void unit_invalidate_cgroup_bpf(Unit *u) {
         if (u->type == UNIT_SLICE) {
                 Unit *member;
                 Iterator i;
+                void *v;
 
-                SET_FOREACH(member, u->dependencies[UNIT_BEFORE], i) {
+                HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i) {
                         if (member == u)
                                 continue;
 

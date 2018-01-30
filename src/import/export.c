@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -20,6 +21,7 @@
 #include <getopt.h>
 
 #include "sd-event.h"
+#include "sd-id128.h"
 
 #include "alloc-util.h"
 #include "export-raw.h"

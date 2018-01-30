@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -19,6 +20,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "env-util.h"
 #include "fileio.h"

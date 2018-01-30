@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2013 Lennart Poettering
@@ -80,7 +82,7 @@
         <citerefentry><refentrytitle>systemd-system-update-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         checks whether <filename>/system-update</filename> exists. If so, it (temporarily and for
         this boot only) redirects (i.e. symlinks) <filename>default.target</filename> to
-        <filename>system-update.target</filename>, a special target that is pulls in the base system
+        <filename>system-update.target</filename>, a special target that pulls in the base system
         (i.e. <filename>sysinit.target</filename>, so that all file systems are mounted but little
         else) and the system update units.</para>
       </listitem>
@@ -170,7 +172,6 @@
     <title>See also</title>
 
     <para>
-      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/SystemUpdates/">Implementing Offline System Updates</ulink>,
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd.generator</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd-system-update-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,

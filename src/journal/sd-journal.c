@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -47,6 +48,7 @@
 #include "lookup3.h"
 #include "missing.h"
 #include "path-util.h"
+#include "process-util.h"
 #include "replace-var.h"
 #include "stat-util.h"
 #include "stdio-util.h"
@@ -1976,18 +1978,13 @@ fail:
 
 _public_ void sd_journal_close(sd_journal *j) {
         Directory *d;
-        JournalFile *f;
-        char *p;
 
         if (!j)
                 return;
 
         sd_journal_flush_matches(j);
 
-        while ((f = ordered_hashmap_steal_first(j->files)))
-                (void) journal_file_close(f);
-
-        ordered_hashmap_free(j->files);
+        ordered_hashmap_free_with_destructor(j->files, journal_file_close);
 
         while ((d = hashmap_first(j->directories_by_path)))
                 remove_directory(j, d);
@@ -2005,9 +2002,7 @@ _public_ void sd_journal_close(sd_journal *j) {
                 mmap_cache_unref(j->mmap);
         }
 
-        while ((p = hashmap_steal_first(j->errors)))
-                free(p);
-        hashmap_free(j->errors);
+        hashmap_free_free(j->errors);
 
         free(j->path);
         free(j->prefix);

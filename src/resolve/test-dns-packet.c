@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd
 
@@ -19,6 +20,8 @@
 
 #include <net/if.h>
 #include <glob.h>
+
+#include "sd-id128.h"
 
 #include "alloc-util.h"
 #include "fileio.h"

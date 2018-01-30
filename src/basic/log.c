@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -53,6 +54,7 @@
 #include "syslog-util.h"
 #include "terminal-util.h"
 #include "time-util.h"
+#include "utf8.h"
 #include "util.h"
 
 #define SNDBUF_SIZE (8*1024*1024)
@@ -75,40 +77,40 @@ static bool show_location = false;
 static bool upgrade_syslog_to_journal = false;
 static bool always_reopen_console = false;
 static bool open_when_needed = false;
+static bool prohibit_ipc = false;
 
 /* Akin to glibc's __abort_msg; which is private and we hence cannot
  * use here. */
 static char *log_abort_msg = NULL;
 
-void log_close_console(void) {
+static void log_close_console(void) {
 
         if (console_fd < 0)
                 return;
 
-        if (getpid_cached() == 1) {
-                if (console_fd >= 3)
-                        safe_close(console_fd);
+        if (console_fd >= 3)
+                safe_close(console_fd);
 
-                console_fd = -1;
-        }
+        console_fd = -1;
 }
 
 static int log_open_console(void) {
 
-        if (console_fd >= 0)
+        if (!always_reopen_console) {
+                console_fd = STDERR_FILENO;
                 return 0;
+        }
 
-        if (always_reopen_console) {
+        if (console_fd < 3) {
                 console_fd = open_terminal("/dev/console", O_WRONLY|O_NOCTTY|O_CLOEXEC);
                 if (console_fd < 0)
                         return console_fd;
-        } else
-                console_fd = STDERR_FILENO;
+        }
 
         return 0;
 }
 
-void log_close_kmsg(void) {
+static void log_close_kmsg(void) {
         kmsg_fd = safe_close(kmsg_fd);
 }
 
@@ -124,7 +126,7 @@ static int log_open_kmsg(void) {
         return 0;
 }
 
-void log_close_syslog(void) {
+static void log_close_syslog(void) {
         syslog_fd = safe_close(syslog_fd);
 }
 
@@ -196,7 +198,7 @@ fail:
         return r;
 }
 
-void log_close_journal(void) {
+static void log_close_journal(void) {
         journal_fd = safe_close(journal_fd);
 }
 
@@ -238,7 +240,8 @@ int log_open(void) {
         /* If we don't use the console we close it here, to not get
          * killed by SAK. If we don't use syslog we close it here so
          * that we are not confused by somebody deleting the socket in
-         * the fs. If we don't use /dev/kmsg we still keep it open,
+         * the fs, and to make sure we don't use it if prohibit_ipc is
+         * set. If we don't use /dev/kmsg we still keep it open,
          * because there is no reason to close it. */
 
         if (log_target == LOG_TARGET_NULL) {
@@ -248,11 +251,12 @@ int log_open(void) {
                 return 0;
         }
 
-        if (!IN_SET(log_target, LOG_TARGET_AUTO, LOG_TARGET_SAFE) ||
+        if (log_target != LOG_TARGET_AUTO ||
             getpid_cached() == 1 ||
             isatty(STDERR_FILENO) <= 0) {
 
-                if (IN_SET(log_target, LOG_TARGET_AUTO,
+                if (!prohibit_ipc &&
+                    IN_SET(log_target, LOG_TARGET_AUTO,
                                        LOG_TARGET_JOURNAL_OR_KMSG,
                                        LOG_TARGET_JOURNAL)) {
                         r = log_open_journal();
@@ -263,7 +267,8 @@ int log_open(void) {
                         }
                 }
 
-                if (IN_SET(log_target, LOG_TARGET_SYSLOG_OR_KMSG,
+                if (!prohibit_ipc &&
+                    IN_SET(log_target, LOG_TARGET_SYSLOG_OR_KMSG,
                                        LOG_TARGET_SYSLOG)) {
                         r = log_open_syslog();
                         if (r >= 0) {
@@ -274,7 +279,6 @@ int log_open(void) {
                 }
 
                 if (IN_SET(log_target, LOG_TARGET_AUTO,
-                                       LOG_TARGET_SAFE,
                                        LOG_TARGET_JOURNAL_OR_KMSG,
                                        LOG_TARGET_SYSLOG_OR_KMSG,
                                        LOG_TARGET_KMSG)) {
@@ -358,7 +362,7 @@ static int write_to_console(
         highlight = LOG_PRI(level) <= LOG_ERR && show_color;
 
         if (show_location) {
-                snprintf(location, sizeof(location), "(%s:%i) ", file, line);
+                xsprintf(location, "(%s:%i) ", file, line);
                 iovec[n++] = IOVEC_MAKE_STRING(location);
         }
 
@@ -626,7 +630,6 @@ int log_dispatch_internal(
 
                 if (k <= 0 &&
                     IN_SET(log_target, LOG_TARGET_AUTO,
-                                       LOG_TARGET_SAFE,
                                        LOG_TARGET_SYSLOG_OR_KMSG,
                                        LOG_TARGET_JOURNAL_OR_KMSG,
                                        LOG_TARGET_KMSG)) {
@@ -797,7 +800,7 @@ static void log_assert(
                 return;
 
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        snprintf(buffer, sizeof buffer, format, text, file, line, func);
+        xsprintf(buffer, format, text, file, line, func);
         REENABLE_WARNING;
 
         log_abort_msg = buffer;
@@ -847,8 +850,8 @@ int log_oom_internal(LogRealm realm, const char *file, int line, const char *fun
 
 int log_format_iovec(
                 struct iovec *iovec,
-                unsigned iovec_len,
-                unsigned *n,
+                size_t iovec_len,
+                size_t *n,
                 bool newline_separator,
                 int error,
                 const char *format,
@@ -928,7 +931,7 @@ int log_struct_internal(
                 if (journal_fd >= 0) {
                         char header[LINE_MAX];
                         struct iovec iovec[17] = {};
-                        unsigned n = 0, i;
+                        size_t n = 0, i;
                         int r;
                         struct msghdr mh = {
                                 .msg_iov = iovec,
@@ -1046,18 +1049,18 @@ int log_struct_iovec_internal(
         }
 
         for (i = 0; i < n_input_iovec; i++) {
-                if (input_iovec[i].iov_len < strlen("MESSAGE="))
+                if (input_iovec[i].iov_len < STRLEN("MESSAGE="))
                         continue;
 
-                if (memcmp(input_iovec[i].iov_base, "MESSAGE=", strlen("MESSAGE=")) == 0)
+                if (memcmp(input_iovec[i].iov_base, "MESSAGE=", STRLEN("MESSAGE=")) == 0)
                         break;
         }
 
         if (_unlikely_(i >= n_input_iovec)) /* Couldn't find MESSAGE=? */
                 return -error;
 
-        m = strndupa(input_iovec[i].iov_base + strlen("MESSAGE="),
-                     input_iovec[i].iov_len - strlen("MESSAGE="));
+        m = strndupa(input_iovec[i].iov_base + STRLEN("MESSAGE="),
+                     input_iovec[i].iov_len - STRLEN("MESSAGE="));
 
         return log_dispatch_internal(level, error, file, line, func, NULL, NULL, NULL, NULL, m);
 }
@@ -1218,17 +1221,18 @@ static const char *const log_target_table[_LOG_TARGET_MAX] = {
         [LOG_TARGET_SYSLOG] = "syslog",
         [LOG_TARGET_SYSLOG_OR_KMSG] = "syslog-or-kmsg",
         [LOG_TARGET_AUTO] = "auto",
-        [LOG_TARGET_SAFE] = "safe",
-        [LOG_TARGET_NULL] = "null"
+        [LOG_TARGET_NULL] = "null",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(log_target, LogTarget);
 
 void log_received_signal(int level, const struct signalfd_siginfo *si) {
-        if (si->ssi_pid > 0) {
+        assert(si);
+
+        if (pid_is_valid(si->ssi_pid)) {
                 _cleanup_free_ char *p = NULL;
 
-                get_process_comm(si->ssi_pid, &p);
+                (void) get_process_comm(si->ssi_pid, &p);
 
                 log_full(level,
                          "Received SIG%s from PID %"PRIu32" (%s).",
@@ -1238,7 +1242,6 @@ void log_received_signal(int level, const struct signalfd_siginfo *si) {
                 log_full(level,
                          "Received SIG%s.",
                          signal_to_string(si->ssi_signo));
-
 }
 
 int log_syntax_internal(
@@ -1288,8 +1291,37 @@ int log_syntax_internal(
                         NULL);
 }
 
+int log_syntax_invalid_utf8_internal(
+                const char *unit,
+                int level,
+                const char *config_file,
+                unsigned config_line,
+                const char *file,
+                int line,
+                const char *func,
+                const char *rvalue) {
+
+        _cleanup_free_ char *p = NULL;
+
+        if (rvalue)
+                p = utf8_escape_invalid(rvalue);
+
+        log_syntax_internal(unit, level, config_file, config_line, 0, file, line, func,
+                            "String is not UTF-8 clean, ignoring assignment: %s", strna(p));
+
+        return -EINVAL;
+}
+
 void log_set_upgrade_syslog_to_journal(bool b) {
         upgrade_syslog_to_journal = b;
+
+        /* Make the change effective immediately */
+        if (b) {
+                if (log_target == LOG_TARGET_SYSLOG)
+                        log_target = LOG_TARGET_JOURNAL;
+                else if (log_target == LOG_TARGET_SYSLOG_OR_KMSG)
+                        log_target = LOG_TARGET_JOURNAL_OR_KMSG;
+        }
 }
 
 void log_set_always_reopen_console(bool b) {
@@ -1298,4 +1330,15 @@ void log_set_always_reopen_console(bool b) {
 
 void log_set_open_when_needed(bool b) {
         open_when_needed = b;
+}
+
+void log_set_prohibit_ipc(bool b) {
+        prohibit_ipc = b;
+}
+
+int log_emergency_level(void) {
+        /* Returns the log level to use for log_emergency() logging. We use LOG_EMERG only when we are PID 1, as only
+         * then the system of the whole system is obviously affected. */
+
+        return getpid_cached() == 1 ? LOG_EMERG : LOG_ERR;
 }

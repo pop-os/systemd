@@ -1,6 +1,6 @@
 From: Michael Biebl <biebl@debian.org>
 Date: Tue, 24 Jun 2014 12:35:25 +0200
-Subject: Add /run/initctl support to SysV compat tools
+Subject: [PATCH] Add /run/initctl support to SysV compat tools
 
 sysvinit in Debian uses /run/initctl as FIFO to communicate with PID 1.
 Make the SysV compat tools in systemd-sysv try both /run/initctl and the
@@ -11,21 +11,21 @@ as PID 1.
  1 file changed, 10 insertions(+), 5 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index f218bb0..37e8df2 100644
+index 5732d88..75198a5 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
-@@ -8263,17 +8263,22 @@ static int talk_initctl(void) {
+@@ -8329,17 +8329,22 @@ static int talk_initctl(void) {
  
          request.runlevel = rl;
  
--        fd = open(INIT_FIFO, O_WRONLY|O_NDELAY|O_CLOEXEC|O_NOCTTY);
+-        fd = open(INIT_FIFO, O_WRONLY|O_NONBLOCK|O_CLOEXEC|O_NOCTTY);
 +        /* Try /run/initctl first since that is what sysvinit in Debian uses */
-+        fd = open("/run/initctl", O_WRONLY|O_NDELAY|O_CLOEXEC|O_NOCTTY);
++        fd = open("/run/initctl", O_WRONLY|O_NONBLOCK|O_CLOEXEC|O_NOCTTY);
          if (fd < 0) {
 -                if (errno == ENOENT)
 -                        return 0;
 +                /* Fall back to /dev/initctl */
-+                fd = open(INIT_FIFO, O_WRONLY|O_NDELAY|O_CLOEXEC|O_NOCTTY);
++                fd = open(INIT_FIFO, O_WRONLY|O_NONBLOCK|O_CLOEXEC|O_NOCTTY);
 +                if (fd < 0) {
 +                        if (errno == ENOENT)
 +                                return 0;

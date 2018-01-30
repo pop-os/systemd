@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd
 
@@ -42,7 +43,7 @@ int main(int argc, char *argv[]) {
 
         assert_se(asynchronous_job(async_func, NULL) >= 0);
 
-        assert_se(asynchronous_sync() >= 0);
+        assert_se(asynchronous_sync(NULL) >= 0);
 
         sleep(1);
 

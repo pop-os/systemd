@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -23,6 +24,8 @@
 #include <sys/prctl.h>
 #include <sys/types.h>
 
+#include "cpu-set-util.h"
+#include "errno-list.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "macro.h"
@@ -100,6 +103,40 @@ static void test(Manager *m, const char *unit_name, int status_expected, int cod
         check(m, unit, status_expected, code_expected);
 }
 
+static void test_exec_bindpaths(Manager *m) {
+        assert_se(mkdir_p("/tmp/test-exec-bindpaths", 0755) >= 0);
+        assert_se(mkdir_p("/tmp/test-exec-bindreadonlypaths", 0755) >= 0);
+
+        test(m, "exec-bindpaths.service", 0, CLD_EXITED);
+
+        (void) rm_rf("/tmp/test-exec-bindpaths", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/tmp/test-exec-bindreadonlypaths", REMOVE_ROOT|REMOVE_PHYSICAL);
+}
+
+static void test_exec_cpuaffinity(Manager *m) {
+        _cleanup_cpu_free_ cpu_set_t *c = NULL;
+        unsigned n;
+
+        assert_se(c = cpu_set_malloc(&n));
+        assert_se(sched_getaffinity(0, CPU_ALLOC_SIZE(n), c) >= 0);
+
+        if (CPU_ISSET_S(0, CPU_ALLOC_SIZE(n), c) == 0) {
+                log_notice("Cannot use CPU 0, skipping %s", __func__);
+                return;
+        }
+
+        test(m, "exec-cpuaffinity1.service", 0, CLD_EXITED);
+        test(m, "exec-cpuaffinity2.service", 0, CLD_EXITED);
+
+        if (CPU_ISSET_S(1, CPU_ALLOC_SIZE(n), c) == 0 ||
+            CPU_ISSET_S(2, CPU_ALLOC_SIZE(n), c) == 0) {
+                log_notice("Cannot use CPU 1 or 2, skipping remaining tests in %s", __func__);
+                return;
+        }
+
+        test(m, "exec-cpuaffinity3.service", 0, CLD_EXITED);
+}
+
 static void test_exec_workingdirectory(Manager *m) {
         assert_se(mkdir_p("/tmp/test-exec_workingdirectory", 0755) >= 0);
 
@@ -127,6 +164,8 @@ static void test_exec_personality(Manager *m) {
 
 #elif defined(__i386__)
         test(m, "exec-personality-x86.service", 0, CLD_EXITED);
+#else
+        log_notice("Unknown personality, skipping %s", __func__);
 #endif
 }
 
@@ -145,36 +184,25 @@ static void test_exec_privatetmp(Manager *m) {
 }
 
 static void test_exec_privatedevices(Manager *m) {
+        int r;
+
         if (detect_container() > 0) {
-                log_notice("testing in container, skipping %s", __func__);
+                log_notice("Testing in container, skipping %s", __func__);
                 return;
         }
         if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping %s", __func__);
+                log_notice("Testing without inaccessible, skipping %s", __func__);
                 return;
         }
 
         test(m, "exec-privatedevices-yes.service", 0, CLD_EXITED);
         test(m, "exec-privatedevices-no.service", 0, CLD_EXITED);
-}
-
-static void test_exec_privatedevices_capabilities(Manager *m) {
-        int r;
-
-        if (detect_container() > 0) {
-                log_notice("testing in container, skipping %s", __func__);
-                return;
-        }
-        if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping %s", __func__);
-                return;
-        }
 
         /* We use capsh to test if the capabilities are
          * properly set, so be sure that it exists */
         r = find_binary("capsh", NULL);
         if (r < 0) {
-                log_error_errno(r, "Skipping %s, could not find capsh binary: %m", __func__);
+                log_error_errno(r, "Could not find capsh binary, skipping remaining tests in %s: %m", __func__);
                 return;
         }
 
@@ -188,11 +216,11 @@ static void test_exec_protectkernelmodules(Manager *m) {
         int r;
 
         if (detect_container() > 0) {
-                log_notice("testing in container, skipping %s", __func__);
+                log_notice("Testing in container, skipping %s", __func__);
                 return;
         }
         if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping %s", __func__);
+                log_notice("Testing without inaccessible, skipping %s", __func__);
                 return;
         }
 
@@ -202,7 +230,6 @@ static void test_exec_protectkernelmodules(Manager *m) {
                 return;
         }
 
-
         test(m, "exec-protectkernelmodules-no-capabilities.service", 0, CLD_EXITED);
         test(m, "exec-protectkernelmodules-yes-capabilities.service", 0, CLD_EXITED);
         test(m, "exec-protectkernelmodules-yes-mount-propagation.service", 0, CLD_EXITED);
@@ -210,73 +237,93 @@ static void test_exec_protectkernelmodules(Manager *m) {
 
 static void test_exec_readonlypaths(Manager *m) {
 
-        if (path_is_read_only_fs("/var") > 0)
+        test(m, "exec-readonlypaths-simple.service", 0, CLD_EXITED);
+
+        if (path_is_read_only_fs("/var") > 0) {
+                log_notice("Directory /var is readonly, skipping remaining tests in %s", __func__);
                 return;
+        }
 
         test(m, "exec-readonlypaths.service", 0, CLD_EXITED);
         test(m, "exec-readonlypaths-mount-propagation.service", 0, CLD_EXITED);
+        test(m, "exec-readonlypaths-with-bindpaths.service", 0, CLD_EXITED);
 }
 
 static void test_exec_readwritepaths(Manager *m) {
 
-        if (path_is_read_only_fs("/") > 0)
+        if (path_is_read_only_fs("/") > 0) {
+                log_notice("Root directory is readonly, skipping %s", __func__);
                 return;
+        }
 
         test(m, "exec-readwritepaths-mount-propagation.service", 0, CLD_EXITED);
 }
 
 static void test_exec_inaccessiblepaths(Manager *m) {
 
-        if (path_is_read_only_fs("/") > 0)
-                return;
-
-        test(m, "exec-inaccessiblepaths-mount-propagation.service", 0, CLD_EXITED);
-}
-
-static void test_exec_inaccessiblepaths_proc(Manager *m) {
         if (!is_inaccessible_available()) {
-                log_notice("testing without inaccessible, skipping %s", __func__);
+                log_notice("Testing without inaccessible, skipping %s", __func__);
                 return;
         }
 
         test(m, "exec-inaccessiblepaths-proc.service", 0, CLD_EXITED);
+
+        if (path_is_read_only_fs("/") > 0) {
+                log_notice("Root directory is readonly, skipping remaining tests in %s", __func__);
+                return;
+        }
+
+        test(m, "exec-inaccessiblepaths-mount-propagation.service", 0, CLD_EXITED);
 }
 
 static void test_exec_systemcallfilter(Manager *m) {
 #if HAVE_SECCOMP
-        if (!is_seccomp_available())
+        if (!is_seccomp_available()) {
+                log_notice("Seccomp not available, skipping %s", __func__);
                 return;
+        }
+
         test(m, "exec-systemcallfilter-not-failing.service", 0, CLD_EXITED);
         test(m, "exec-systemcallfilter-not-failing2.service", 0, CLD_EXITED);
         test(m, "exec-systemcallfilter-failing.service", SIGSYS, CLD_KILLED);
         test(m, "exec-systemcallfilter-failing2.service", SIGSYS, CLD_KILLED);
-
+        test(m, "exec-systemcallfilter-with-errno-name.service", errno_from_name("EILSEQ"), CLD_EXITED);
+        test(m, "exec-systemcallfilter-with-errno-number.service", 255, CLD_EXITED);
 #endif
 }
 
 static void test_exec_systemcallerrornumber(Manager *m) {
 #if HAVE_SECCOMP
-        if (is_seccomp_available())
-                test(m, "exec-systemcallerrornumber.service", 1, CLD_EXITED);
+        if (!is_seccomp_available()) {
+                log_notice("Seccomp not available, skipping %s", __func__);
+                return;
+        }
+
+        test(m, "exec-systemcallerrornumber-name.service", errno_from_name("EACCES"), CLD_EXITED);
+        test(m, "exec-systemcallerrornumber-number.service", 255, CLD_EXITED);
 #endif
 }
 
-static void test_exec_restrict_namespaces(Manager *m) {
+static void test_exec_restrictnamespaces(Manager *m) {
 #if HAVE_SECCOMP
-        if (!is_seccomp_available())
+        if (!is_seccomp_available()) {
+                log_notice("Seccomp not available, skipping %s", __func__);
                 return;
+        }
 
-        test(m, "exec-restrict-namespaces-no.service", 0, CLD_EXITED);
-        test(m, "exec-restrict-namespaces-yes.service", 1, CLD_EXITED);
-        test(m, "exec-restrict-namespaces-mnt.service", 0, CLD_EXITED);
-        test(m, "exec-restrict-namespaces-mnt-blacklist.service", 1, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-no.service", 0, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-yes.service", 1, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-mnt.service", 0, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-mnt-blacklist.service", 1, CLD_EXITED);
 #endif
 }
 
-static void test_exec_systemcall_system_mode_with_user(Manager *m) {
+static void test_exec_systemcallfilter_system(Manager *m) {
 #if HAVE_SECCOMP
-        if (!is_seccomp_available())
+        if (!is_seccomp_available()) {
+                log_notice("Seccomp not available, skipping %s", __func__);
                 return;
+        }
         if (getpwnam("nobody"))
                 test(m, "exec-systemcallfilter-system-user.service", 0, CLD_EXITED);
         else if (getpwnam("nfsnobody"))
@@ -300,11 +347,13 @@ static void test_exec_group(Manager *m) {
                 test(m, "exec-group.service", 0, CLD_EXITED);
         else if (getgrnam("nfsnobody"))
                 test(m, "exec-group-nfsnobody.service", 0, CLD_EXITED);
+        else if (getgrnam("nogroup"))
+                test(m, "exec-group-nogroup.service", 0, CLD_EXITED);
         else
-                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody group: %m", __func__);
+                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody/nogroup group: %m", __func__);
 }
 
-static void test_exec_supplementary_groups(Manager *m) {
+static void test_exec_supplementarygroups(Manager *m) {
         test(m, "exec-supplementarygroups.service", 0, CLD_EXITED);
         test(m, "exec-supplementarygroups-single-group.service", 0, CLD_EXITED);
         test(m, "exec-supplementarygroups-single-group-user.service", 0, CLD_EXITED);
@@ -313,11 +362,18 @@ static void test_exec_supplementary_groups(Manager *m) {
         test(m, "exec-supplementarygroups-multiple-groups-withuid.service", 0, CLD_EXITED);
 }
 
-static void test_exec_dynamic_user(Manager *m) {
+static void test_exec_dynamicuser(Manager *m) {
         test(m, "exec-dynamicuser-fixeduser.service", 0, CLD_EXITED);
         test(m, "exec-dynamicuser-fixeduser-one-supplementarygroup.service", 0, CLD_EXITED);
         test(m, "exec-dynamicuser-supplementarygroups.service", 0, CLD_EXITED);
-        test(m, "exec-dynamicuser-state-dir.service", 0, CLD_EXITED);
+        test(m, "exec-dynamicuser-statedir.service", 0, CLD_EXITED);
+
+        test(m, "exec-dynamicuser-statedir-migrate-step1.service", 0, CLD_EXITED);
+        test(m, "exec-dynamicuser-statedir-migrate-step2.service", 0, CLD_EXITED);
+        (void) rm_rf("/var/lib/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/var/lib/test-dynamicuser-migrate2", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/var/lib/private/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/var/lib/private/test-dynamicuser-migrate2", REMOVE_ROOT|REMOVE_PHYSICAL);
 }
 
 static void test_exec_environment(Manager *m) {
@@ -343,7 +399,7 @@ static void test_exec_environmentfile(Manager *m) {
 
         test(m, "exec-environmentfile.service", 0, CLD_EXITED);
 
-        unlink("/tmp/test-exec_environmentfile.conf");
+        (void) unlink("/tmp/test-exec_environmentfile.conf");
 }
 
 static void test_exec_passenvironment(Manager *m) {
@@ -409,17 +465,19 @@ static void test_exec_capabilityambientset(Manager *m) {
          * capabilities is fine, since we are expecting them to be unset
          * in the first place for the tests. */
         r = prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0);
-        if (r >= 0 || errno != EINVAL) {
-                if (getpwnam("nobody")) {
-                        test(m, "exec-capabilityambientset.service", 0, CLD_EXITED);
-                        test(m, "exec-capabilityambientset-merge.service", 0, CLD_EXITED);
-                } else if (getpwnam("nfsnobody")) {
-                        test(m, "exec-capabilityambientset-nfsnobody.service", 0, CLD_EXITED);
-                        test(m, "exec-capabilityambientset-merge-nfsnobody.service", 0, CLD_EXITED);
-                } else
-                        log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody user: %m", __func__);
+        if (r < 0 && IN_SET(errno, EINVAL, EOPNOTSUPP, ENOSYS)) {
+                log_error("Skipping %s, the kernel does not support ambient capabilities", __func__);
+                return;
+        }
+
+        if (getpwnam("nobody")) {
+                test(m, "exec-capabilityambientset.service", 0, CLD_EXITED);
+                test(m, "exec-capabilityambientset-merge.service", 0, CLD_EXITED);
+        } else if (getpwnam("nfsnobody")) {
+                test(m, "exec-capabilityambientset-nfsnobody.service", 0, CLD_EXITED);
+                test(m, "exec-capabilityambientset-merge-nfsnobody.service", 0, CLD_EXITED);
         } else
-                log_error_errno(errno, "Skipping %s, the kernel does not support ambient capabilities: %m", __func__);
+                log_error_errno(errno, "Skipping %s, could not find nobody/nfsnobody user: %m", __func__);
 }
 
 static void test_exec_privatenetwork(Manager *m) {
@@ -446,16 +504,19 @@ static void test_exec_ioschedulingclass(Manager *m) {
         test(m, "exec-ioschedulingclass-best-effort.service", 0, CLD_EXITED);
 }
 
-static void test_exec_spec_interpolation(Manager *m) {
-        test(m, "exec-spec-interpolation.service", 0, CLD_EXITED);
+static void test_exec_unsetenvironment(Manager *m) {
+        test(m, "exec-unsetenvironment.service", 0, CLD_EXITED);
 }
 
-static void test_exec_read_only_path_suceed(Manager *m) {
-        test(m, "exec-read-only-path-succeed.service", 0, CLD_EXITED);
+static void test_exec_specifier(Manager *m) {
+        test(m, "exec-specifier.service", 0, CLD_EXITED);
+        test(m, "exec-specifier@foo-bar.service", 0, CLD_EXITED);
+        test(m, "exec-specifier-interpolation.service", 0, CLD_EXITED);
 }
 
-static void test_exec_unset_environment(Manager *m) {
-        test(m, "exec-unset-environment.service", 0, CLD_EXITED);
+static void test_exec_standardinput(Manager *m) {
+        test(m, "exec-standardinput-data.service", 0, CLD_EXITED);
+        test(m, "exec-standardinput-file.service", 0, CLD_EXITED);
 }
 
 static int run_tests(UnitFileScope scope, const test_function_t *tests) {
@@ -483,41 +544,41 @@ static int run_tests(UnitFileScope scope, const test_function_t *tests) {
 
 int main(int argc, char *argv[]) {
         static const test_function_t user_tests[] = {
-                test_exec_workingdirectory,
-                test_exec_personality,
+                test_exec_bindpaths,
+                test_exec_capabilityambientset,
+                test_exec_capabilityboundingset,
+                test_exec_cpuaffinity,
+                test_exec_environment,
+                test_exec_environmentfile,
+                test_exec_group,
                 test_exec_ignoresigpipe,
-                test_exec_privatetmp,
+                test_exec_inaccessiblepaths,
+                test_exec_ioschedulingclass,
+                test_exec_oomscoreadjust,
+                test_exec_passenvironment,
+                test_exec_personality,
                 test_exec_privatedevices,
-                test_exec_privatedevices_capabilities,
+                test_exec_privatenetwork,
+                test_exec_privatetmp,
                 test_exec_protectkernelmodules,
                 test_exec_readonlypaths,
                 test_exec_readwritepaths,
-                test_exec_inaccessiblepaths,
-                test_exec_inaccessiblepaths_proc,
-                test_exec_privatenetwork,
-                test_exec_systemcallfilter,
-                test_exec_systemcallerrornumber,
-                test_exec_restrict_namespaces,
-                test_exec_user,
-                test_exec_group,
-                test_exec_supplementary_groups,
-                test_exec_environment,
-                test_exec_environmentfile,
-                test_exec_passenvironment,
-                test_exec_umask,
+                test_exec_restrictnamespaces,
                 test_exec_runtimedirectory,
-                test_exec_capabilityboundingset,
-                test_exec_capabilityambientset,
-                test_exec_oomscoreadjust,
-                test_exec_ioschedulingclass,
-                test_exec_spec_interpolation,
-                test_exec_read_only_path_suceed,
-                test_exec_unset_environment,
+                test_exec_standardinput,
+                test_exec_supplementarygroups,
+                test_exec_systemcallerrornumber,
+                test_exec_systemcallfilter,
+                test_exec_umask,
+                test_exec_unsetenvironment,
+                test_exec_user,
+                test_exec_workingdirectory,
                 NULL,
         };
         static const test_function_t system_tests[] = {
-                test_exec_systemcall_system_mode_with_user,
-                test_exec_dynamic_user,
+                test_exec_dynamicuser,
+                test_exec_specifier,
+                test_exec_systemcallfilter_system,
                 NULL,
         };
         int r;
@@ -526,13 +587,20 @@ int main(int argc, char *argv[]) {
         log_parse_environment();
         log_open();
 
+        (void) unsetenv("USER");
+        (void) unsetenv("LOGNAME");
+
         /* It is needed otherwise cgroup creation fails */
         if (getuid() != 0) {
-                printf("Skipping test: not root\n");
+                puts("Skipping test: not root");
                 return EXIT_TEST_SKIP;
         }
 
-        enter_cgroup_subroot();
+        r = enter_cgroup_subroot();
+        if (r == -ENOMEDIUM) {
+                puts("Skipping test: cgroupfs not available");
+                return EXIT_TEST_SKIP;
+        }
 
         assert_se(setenv("XDG_RUNTIME_DIR", "/tmp/", 1) == 0);
         assert_se(set_unit_path(get_testdata_dir("/test-execute")) >= 0);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -18,6 +19,7 @@
 ***/
 
 #include <stdio.h>
+#include <string.h>
 
 #include "time-util.h"
 
@@ -61,6 +63,7 @@ int main(void) {
         info(usec_t);
         info(__time_t);
         info(pid_t);
+        info(uid_t);
         info(gid_t);
 
         info(enum Enum);

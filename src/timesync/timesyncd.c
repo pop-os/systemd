@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -65,11 +66,12 @@ static int load_clock_timestamp(uid_t uid, gid_t gid) {
                         if (r < 0)
                                 return log_error_errno(errno, "Failed to change file access mode: %m");
                         r = fchown(fd, uid, gid);
+                        if (r < 0)
                                 return log_error_errno(errno, "Failed to change file owner: %m");
                 }
 
         } else {
-                r = mkdir_safe_label("/var/lib/systemd/timesync", 0755, uid, gid);
+                r = mkdir_safe_label("/var/lib/systemd/timesync", 0755, uid, gid, true);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create state directory: %m");
 
@@ -95,7 +97,7 @@ static int load_clock_timestamp(uid_t uid, gid_t gid) {
 int main(int argc, char *argv[]) {
         _cleanup_(manager_freep) Manager *m = NULL;
         const char *user = "systemd-timesync";
-        uid_t uid;
+        uid_t uid, uid_current;
         gid_t gid;
         int r;
 
@@ -112,10 +114,15 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        r = get_user_creds(&user, &uid, &gid, NULL, NULL);
-        if (r < 0) {
-                log_error_errno(r, "Cannot resolve user name %s: %m", user);
-                goto finish;
+        uid = uid_current = geteuid();
+        gid = getegid();
+
+        if (uid_current == 0) {
+                r = get_user_creds(&user, &uid, &gid, NULL, NULL);
+                if (r < 0) {
+                        log_error_errno(r, "Cannot resolve user name %s: %m", user);
+                        goto finish;
+                }
         }
 
         r = load_clock_timestamp(uid, gid);
@@ -124,7 +131,7 @@ int main(int argc, char *argv[]) {
 
         /* Drop privileges, but only if we have been started as root. If we are not running as root we assume all
          * privileges are already dropped. */
-        if (geteuid() == 0) {
+        if (uid_current == 0) {
                 r = drop_privileges(uid, gid, (1ULL << CAP_SYS_TIME));
                 if (r < 0)
                         goto finish;

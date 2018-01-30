@@ -1,3 +1,20 @@
+# SPDX-License-Identifier: LGPL-2.1+
+#
+# Copyright 2017 Zbigniew Jędrzejewski-Szmek
+#
+# systemd is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# systemd is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with systemd; If not, see <http://www.gnu.org/licenses/>.
+
 systemd_logind_sources = files('''
         logind.c
         logind.h
@@ -71,27 +88,36 @@ if conf.get('ENABLE_LOGIND') == 1
         install_data('org.freedesktop.login1.service',
                      install_dir : dbussystemservicedir)
 
-        custom_target(
+        i18n.merge_file(
                 'org.freedesktop.login1.policy',
                 input : 'org.freedesktop.login1.policy.in',
                 output : 'org.freedesktop.login1.policy',
-                command : intltool_command,
+                po_dir : po_dir,
+                data_dirs : po_dir,
                 install : install_polkit,
                 install_dir : polkitpolicydir)
 
-        install_data('70-power-switch.rules',
-                     '70-uaccess.rules',
+        install_data('70-power-switch.rules', install_dir : udevrulesdir)
+
+        if conf.get('HAVE_ACL') == 1
+                install_data('70-uaccess.rules', install_dir : udevrulesdir)
+        endif
+
+        seat_rules = configure_file(
+                input : '71-seat.rules.in',
+                output : '71-seat.rules',
+                configuration : substs)
+        install_data(seat_rules,
                      install_dir : udevrulesdir)
 
-        foreach file : ['71-seat.rules',
-                        '73-seat-late.rules']
-                gen = configure_file(
-                        input : file + '.in',
-                        output : file,
-                        configuration : substs)
-                install_data(gen,
-                             install_dir : udevrulesdir)
-        endforeach
+        custom_target(
+                '73-seat-late.rules',
+                input : '73-seat-late.rules.m4',
+                output: '73-seat-late.rules',
+                command : [m4, '-P'] + m4_defines + ['@INPUT@'],
+                capture : true,
+                install : true,
+                install_dir : udevrulesdir)
 
         custom_target(
                 'systemd-user',

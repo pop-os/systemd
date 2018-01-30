@@ -1,3 +1,137 @@
+systemd (237-1ubuntu1) bionic; urgency=medium
+
+  * Remaining delta from Debian:
+    - ship dhclient enter hook for dhclient integration with resolved
+    - ship resolvconf integration via stub-resolv.conf
+    - ship s390x virtio interface names migration
+    - do not disable systemd-resolved upon libnss-resolve removal
+    - do not remount fs in containers, for non-degrated boot
+    - Unlink invocation id key, upon chown failure in containers
+    - Change default to UseDomains by default
+    - Do not treat failure to set Nice= setting as error in containers
+    - Add a condition to systemd-journald-audit.socet to not start in
+      containers (fails)
+    - Build without any built-in/fallback DNS server setting
+    - Enable resolved by default
+    - Update autopkgtests for reliability/raciness, and testing for typical
+      defaults
+    - Always upgrade udev, when running adt tests
+    - Skip test-execute on armhf
+    - Cherry-pick a few testsuite fixes
+    - Do not use nested kvm during ADT tests
+    - Fix ADT systemd-fsckd tests to work on s390x too
+    - Enable persistent journal by default
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 30 Jan 2018 13:52:27 +0000
+
+systemd (237-1) unstable; urgency=medium
+
+  * New upstream version 237
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * Update Vcs-* to point to https://salsa.debian.org
+  * Bump Standards-Version to 4.1.3
+  * Set Rules-Requires-Root to no
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 30 Jan 2018 01:55:24 +0100
+
+systemd (236-4) unstable; urgency=medium
+
+  [ Felipe Sateler ]
+  * Allow systemd-timesyncd to start when libnss-systemd is not installed.
+    Pick upstream patch requiring the existence of the systemd-timesync user
+    only when running as root, which is not the case for the system unit.
+    (Closes: #887343)
+
+  [ Nicolas Braud-Santoni ]
+  * debian/copyright: Refer to the CC0 license file (Closes: #882629)
+
+  [ Michael Biebl ]
+  * Add Build-Depends on python3-evdev <!nocheck>
+    This is used by hwdb/parse_hwdb.py to perform additional validation on
+    hwdb files.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 28 Jan 2018 22:29:32 +0100
+
+systemd (236-3) unstable; urgency=medium
+
+  * Revert "core/execute: RuntimeDirectory= or friends requires mount
+    namespace"
+    This was making mounts from SSH sessions invisible to the system.
+    (Closes: #885325)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 11 Jan 2018 16:46:04 +0100
+
+systemd (236-2) unstable; urgency=medium
+
+  * Downgrade priority of libudev1 to optional.
+    This makes it compliant with recent versions of debian-policy which
+    recommends to use priority optional for library packages.
+  * Clarify NEWS entry about removal of system users.
+    Mention in the recent NEWS entry that the associated system groups
+    should be removed as well. (Closes: #885061)
+  * cryptsetup-generator: Don't mistake NULL input as OOM.
+    Fixes systemd-cryptsetup-generator failing to run during boot.
+    (Closes: #885201)
+  * analyze: Use normal bus connection for "plot" verb.
+    Fixes "systemd-analyze plot" failing to run as root. (Closes: #884506)
+  * Stop re-enabling systemd services on every upgrade.
+    This was done so changes to the [Install] section would be applied on
+    upgrades. Forcefully re-enabling a service might overwrite local
+    modifications though and thus far, none of the affected services did
+    actually change its [Install] section. So remove this code from the
+    maintainer scripts as it was apparently doing more harm then good.
+    (Closes: #869354)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 02 Jan 2018 00:35:14 +0100
+
+systemd (236-1) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/upstream: Only show ≥ warning in journal dumps.
+    Showing the entire debug log is too hard to scan visually, and most of
+    the time the warnings and errors are sufficient to explain a failure.
+    Put the journal files into the artifacts though, in case the debug
+    information is necessary.
+
+  [ Michael Biebl ]
+  * New upstream version 236
+    - nspawn: Adjust path to static resolv.conf to support split usr.
+      (Closes: #881310)
+    - networkd: Don't stop networkd if CONFIG_FIB_RULES=n in kernel.
+      (Closes: #881823)
+    - core: Fix segfault in compile_bind_mounts() when BindPaths= or
+      BindReadOnlyPaths= is set. (Closes: #883380)
+    - meson: Link NSS modules with -z nodelete to fix memory leak in
+      nss-systemd. (Closes: #883407)
+    - logind: Make sure we don't acces m->action_what if it's not initialized.
+      (Closes: #882270)
+    - systemctl: Ignore shutdown's "-t" argument. (Closes: #882245)
+    - core: Be more defensive if we can't determine per-connection socket
+      peer. (Closes: #879603)
+    - bpf-firewall: Actually invoke BPF_PROG_ATTACH to check whether
+      cgroup/bpf is available. (Closes: #878965)
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * Bump Standards-Version to 4.1.2
+  * Clean up old /var/lib/systemd/clock on upgrade.
+    The clock file used by systemd-timesyncd is now stored in
+    StateDirectory=systemd/timesync. (Closes: #883605)
+  * Stop creating systemd-timesync system user.
+    DynamicUser=yes has been enabled for systemd-timesyncd.service so
+    allocating a system user statically is no longer necessary.
+  * Document removal of systemd-{timesync,journal-gateway,journal-upload} user.
+    We no longer create those system users as the corresponding services now
+    use DynamicUser=yes. Removing those system users automatically is tricky,
+    as the relevant services might be running during upgrade. Add a NEWS
+    entry instead which documents this change.
+  * Revert "udev-rules: Permission changes for /dev/dri/renderD*"
+    This would introduce a new system group "render". As the name is rather
+    generic, this needs further discussion first, so revert this change for
+    now.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 17 Dec 2017 21:45:51 +0100
+
 systemd (235-3ubuntu3) bionic; urgency=medium
 
   * netwokrd: add support for RequiredForOnline stanza. (LP: #1737570)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -19,6 +20,7 @@
 ***/
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <net/ethernet.h>
 #include <stdio.h>
 #include <string.h>

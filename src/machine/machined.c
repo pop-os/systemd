@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -36,6 +37,7 @@
 #include "machined.h"
 #include "process-util.h"
 #include "signal-util.h"
+#include "special.h"
 
 Manager *manager_new(void) {
         Manager *m;
@@ -67,7 +69,6 @@ Manager *manager_new(void) {
 
 void manager_free(Manager *m) {
         Machine *machine;
-        Image *i;
 
         assert(m);
 
@@ -83,10 +84,7 @@ void manager_free(Manager *m) {
         hashmap_free(m->machine_units);
         hashmap_free(m->machine_leaders);
 
-        while ((i = hashmap_steal_first(m->image_cache)))
-                image_unref(i);
-
-        hashmap_free(m->image_cache);
+        hashmap_free_with_destructor(m->image_cache, image_unref);
 
         sd_event_source_unref(m->image_cache_defer_event);
 
@@ -115,7 +113,7 @@ static int manager_add_host_machine(Manager *m) {
         if (!rd)
                 return log_oom();
 
-        unit = strdup("-.slice");
+        unit = strdup(SPECIAL_ROOT_SLICE);
         if (!unit)
                 return log_oom();
 
@@ -188,7 +186,6 @@ int manager_enumerate_machines(Manager *m) {
 }
 
 static int manager_connect_bus(Manager *m) {
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
 
         assert(m);
@@ -218,70 +215,65 @@ static int manager_connect_bus(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to add image enumerator: %m");
 
-        r = sd_bus_add_match(m->bus,
-                             NULL,
-                             "type='signal',"
-                             "sender='org.freedesktop.systemd1',"
-                             "interface='org.freedesktop.systemd1.Manager',"
-                             "member='JobRemoved',"
-                             "path='/org/freedesktop/systemd1'",
-                             match_job_removed,
-                             m);
+        r = sd_bus_match_signal_async(
+                        m->bus,
+                        NULL,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "JobRemoved",
+                        match_job_removed, NULL, m);
         if (r < 0)
                 return log_error_errno(r, "Failed to add match for JobRemoved: %m");
 
-        r = sd_bus_add_match(m->bus,
-                             NULL,
-                             "type='signal',"
-                             "sender='org.freedesktop.systemd1',"
-                             "interface='org.freedesktop.systemd1.Manager',"
-                             "member='UnitRemoved',"
-                             "path='/org/freedesktop/systemd1'",
-                             match_unit_removed,
-                             m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for UnitRemoved: %m");
-
-        r = sd_bus_add_match(m->bus,
-                             NULL,
-                             "type='signal',"
-                             "sender='org.freedesktop.systemd1',"
-                             "interface='org.freedesktop.DBus.Properties',"
-                             "member='PropertiesChanged',"
-                             "arg0='org.freedesktop.systemd1.Unit'",
-                             match_properties_changed,
-                             m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for PropertiesChanged: %m");
-
-        r = sd_bus_add_match(m->bus,
-                             NULL,
-                             "type='signal',"
-                             "sender='org.freedesktop.systemd1',"
-                             "interface='org.freedesktop.systemd1.Manager',"
-                             "member='Reloading',"
-                             "path='/org/freedesktop/systemd1'",
-                             match_reloading,
-                             m);
-        if (r < 0)
-                return log_error_errno(r, "Failed to add match for Reloading: %m");
-
-        r = sd_bus_call_method(
+        r = sd_bus_match_signal_async(
                         m->bus,
+                        NULL,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "UnitRemoved",
+                        match_unit_removed, NULL, m);
+        if (r < 0)
+                return log_error_errno(r, "Failed to request match for UnitRemoved: %m");
+
+        r = sd_bus_match_signal_async(
+                        m->bus,
+                        NULL,
+                        "org.freedesktop.systemd1",
+                        NULL,
+                        "org.freedesktop.DBus.Properties",
+                        "PropertiesChanged",
+                        match_properties_changed, NULL, m);
+        if (r < 0)
+                return log_error_errno(r, "Failed to request match for PropertiesChanged: %m");
+
+        r = sd_bus_match_signal_async(
+                        m->bus,
+                        NULL,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "Reloading",
+                        match_reloading, NULL, m);
+        if (r < 0)
+                return log_error_errno(r, "Failed to request match for Reloading: %m");
+
+        r = sd_bus_call_method_async(
+                        m->bus,
+                        NULL,
                         "org.freedesktop.systemd1",
                         "/org/freedesktop/systemd1",
                         "org.freedesktop.systemd1.Manager",
                         "Subscribe",
-                        &error,
-                        NULL, NULL);
-        if (r < 0) {
-                log_error("Failed to enable subscription: %s", bus_error_message(&error, r));
-                return r;
-        }
-
-        r = sd_bus_request_name(m->bus, "org.freedesktop.machine1", 0);
+                        NULL, NULL,
+                        NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to register name: %m");
+                return log_error_errno(r, "Failed to enable subscription: %m");
+
+        r = sd_bus_request_name_async(m->bus, NULL, "org.freedesktop.machine1", 0, NULL, NULL);
+        if (r < 0)
+                return log_error_errno(r, "Failed to request name: %m");
 
         r = sd_bus_attach_event(m->bus, m->event, 0);
         if (r < 0)

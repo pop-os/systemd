@@ -7,9 +7,10 @@ Uploaders: Michael Biebl <biebl@debian.org>,
            Marco d'Itri <md@linux.it>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>
-Standards-Version: 4.1.1
-Vcs-Git: https://anonscm.debian.org/git/pkg-systemd/systemd.git
-Vcs-Browser: https://anonscm.debian.org/git/pkg-systemd/systemd.git
+Standards-Version: 4.1.3
+Rules-Requires-Root: no
+Vcs-Git: https://salsa.debian.org/systemd-team/systemd.git
+Vcs-Browser: https://salsa.debian.org/systemd-team/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper (>= 10.4~),
                pkg-config,
@@ -51,6 +52,7 @@ Build-Depends: debhelper (>= 10.4~),
                python3:native,
                python3-lxml:native,
                python3-pyparsing <!nocheck>,
+               python3-evdev <!nocheck>,
                tzdata <!nocheck>,
                libcap2-bin <!nocheck>,
                iproute2 <!nocheck>,
@@ -340,7 +342,7 @@ Description: /dev/ and hotplug management daemon
 
 Package: libudev1
 Section: libs
-Priority: important
+Priority: optional
 Architecture: linux-any
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}

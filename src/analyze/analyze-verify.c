@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -146,7 +147,7 @@ static int verify_socket(Unit *u) {
 }
 
 static int verify_executable(Unit *u, ExecCommand *exec) {
-        if (exec == NULL)
+        if (!exec)
                 return 0;
 
         if (access(exec->path, X_OK) < 0)
@@ -219,7 +220,7 @@ static int verify_unit(Unit *u, bool check_man) {
 
         assert(u);
 
-        if (log_get_max_level() >= LOG_DEBUG)
+        if (DEBUG_LOGGING)
                 unit_dump(u, stdout, "\t");
 
         log_unit_debug(u, "Creating %s/start job", u->id);

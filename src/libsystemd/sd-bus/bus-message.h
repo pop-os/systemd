@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -135,10 +136,6 @@ struct sd_bus_message {
 
         usec_t timeout;
 
-        char sender_buffer[3 + DECIMAL_STR_MAX(uint64_t) + 1];
-        char destination_buffer[3 + DECIMAL_STR_MAX(uint64_t) + 1];
-        char *destination_ptr;
-
         size_t header_offsets[_BUS_MESSAGE_HEADER_MAX];
         unsigned n_header_offsets;
 };
@@ -187,7 +184,6 @@ static inline bool BUS_MESSAGE_IS_GVARIANT(sd_bus_message *m) {
         return m->header->version == 2;
 }
 
-int bus_message_seal(sd_bus_message *m, uint64_t serial, usec_t timeout);
 int bus_message_get_blob(sd_bus_message *m, void **buffer, size_t *sz);
 int bus_message_read_strv_extend(sd_bus_message *m, char ***l);
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -268,9 +269,7 @@ static int raw_pull_maybe_convert_qcow2(RawPull *i) {
         }
 
         (void) unlink(i->temp_path);
-        free(i->temp_path);
-        i->temp_path = t;
-        t = NULL;
+        free_and_replace(i->temp_path, t);
 
         safe_close(i->raw_job->disk_fd);
         i->raw_job->disk_fd = converted_fd;

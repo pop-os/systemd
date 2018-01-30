@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -73,12 +74,30 @@ extern const SyscallFilterSet syscall_filter_sets[];
 
 const SyscallFilterSet *syscall_filter_set_find(const char *name);
 
-int seccomp_filter_set_add(Set *s, bool b, const SyscallFilterSet *set);
+int seccomp_filter_set_add(Hashmap *s, bool b, const SyscallFilterSet *set);
 
 int seccomp_add_syscall_filter_item(scmp_filter_ctx *ctx, const char *name, uint32_t action, char **exclude);
 
 int seccomp_load_syscall_filter_set(uint32_t default_action, const SyscallFilterSet *set, uint32_t action);
-int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Set* set, uint32_t action);
+int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Hashmap* set, uint32_t action);
+
+int seccomp_parse_syscall_filter_internal(
+                bool invert, const char *name, int errno_num, Hashmap *filter, bool whitelist,
+                bool warn, const char *unit, const char *filename, unsigned line);
+
+static inline int seccomp_parse_syscall_filter_and_warn(
+                bool invert, const char *name, int errno_num, Hashmap *filter, bool whitelist,
+                const char *unit, const char *filename, unsigned line) {
+        assert(unit);
+        assert(filename);
+
+        return seccomp_parse_syscall_filter_internal(invert, name, errno_num, filter, whitelist, true, unit, filename, line);
+}
+
+static inline int seccomp_parse_syscall_filter(
+                bool invert, const char *name, int errno_num, Hashmap *filter, bool whitelist) {
+        return seccomp_parse_syscall_filter_internal(invert, name, errno_num, filter, whitelist, false, NULL, NULL, 0);
+}
 
 int seccomp_restrict_archs(Set *archs);
 int seccomp_restrict_namespaces(unsigned long retain);

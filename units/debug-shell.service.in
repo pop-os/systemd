@@ -1,3 +1,5 @@
+#  SPDX-License-Identifier: LGPL-2.1+
+#
 #  This file is part of systemd.
 #
 #  systemd is free software; you can redistribute it and/or modify it
@@ -8,6 +10,7 @@
 [Unit]
 Description=Early root shell on @DEBUGTTY@ FOR DEBUGGING ONLY
 Documentation=man:sushell(8)
+Documentation=man:systemd-debug-generator(8)
 DefaultDependencies=no
 IgnoreOnIsolate=yes
 ConditionPathExists=@DEBUGTTY@

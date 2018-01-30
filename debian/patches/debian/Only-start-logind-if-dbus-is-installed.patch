@@ -11,10 +11,10 @@ Part of #772700
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-logind.service.in b/units/systemd-logind.service.in
-index de380a2..a2a6ac3 100644
+index 968b92a..dde62ec 100644
 --- a/units/systemd-logind.service.in
 +++ b/units/systemd-logind.service.in
-@@ -12,6 +12,7 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/logind
+@@ -14,6 +14,7 @@ Documentation=https://www.freedesktop.org/wiki/Software/systemd/logind
  Documentation=https://www.freedesktop.org/wiki/Software/systemd/multiseat
  Wants=user.slice
  After=nss-user-lookup.target user.slice

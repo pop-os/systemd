@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -41,6 +42,7 @@
 #include "path-util.h"
 #include "selinux-util.h"
 #include "socket-util.h"
+#include "stat-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -191,7 +193,7 @@ static void mount_entry_done(MountEntry *p) {
         p->source_malloc = mfree(p->source_malloc);
 }
 
-static int append_access_mounts(MountEntry **p, char **strv, MountMode mode) {
+static int append_access_mounts(MountEntry **p, char **strv, MountMode mode, bool forcibly_require_prefix) {
         char **i;
 
         assert(p);
@@ -219,7 +221,7 @@ static int append_access_mounts(MountEntry **p, char **strv, MountMode mode) {
                         .path_const = e,
                         .mode = mode,
                         .ignore = ignore,
-                        .has_prefix = !needs_prefix,
+                        .has_prefix = !needs_prefix && !forcibly_require_prefix,
                 };
         }
 
@@ -495,6 +497,35 @@ static void drop_outside_root(const char *root_directory, MountEntry *m, unsigne
         *n = t - m;
 }
 
+static int clone_device_node(const char *d, const char *temporary_mount) {
+        const char *dn;
+        struct stat st;
+        int r;
+
+        if (stat(d, &st) < 0) {
+                if (errno == ENOENT)
+                        return 0;
+                return -errno;
+        }
+
+        if (!S_ISBLK(st.st_mode) &&
+            !S_ISCHR(st.st_mode))
+                return -EINVAL;
+
+        if (st.st_rdev == 0)
+                return 0;
+
+        dn = strjoina(temporary_mount, d);
+
+        mac_selinux_create_file_prepare(d, st.st_mode);
+        r = mknod(dn, st.st_mode, st.st_rdev);
+        mac_selinux_create_file_clear();
+        if (r < 0)
+                return log_debug_errno(errno, "mknod failed for %s: %m", d);
+
+        return 1;
+}
+
 static int mount_private_dev(MountEntry *m) {
         static const char devnodes[] =
                 "/dev/null\0"
@@ -530,14 +561,33 @@ static int mount_private_dev(MountEntry *m) {
                 goto fail;
         }
 
-        devptmx = strjoina(temporary_mount, "/dev/ptmx");
-        if (symlink("pts/ptmx", devptmx) < 0) {
-                r = -errno;
+        /* /dev/ptmx can either be a device node or a symlink to /dev/pts/ptmx
+         * when /dev/ptmx a device node, /dev/pts/ptmx has 000 permissions making it inaccessible
+         * thus, in that case make a clone
+         *
+         * in nspawn and other containers it will be a symlink, in that case make it a symlink
+         */
+        r = is_symlink("/dev/ptmx");
+        if (r < 0)
                 goto fail;
+        if (r > 0) {
+                devptmx = strjoina(temporary_mount, "/dev/ptmx");
+                if (symlink("pts/ptmx", devptmx) < 0) {
+                        r = -errno;
+                        goto fail;
+                }
+        } else {
+                r = clone_device_node("/dev/ptmx", temporary_mount);
+                if (r < 0)
+                        goto fail;
+                if (r == 0) {
+                        r = -ENXIO;
+                        goto fail;
+                }
         }
 
         devshm = strjoina(temporary_mount, "/dev/shm");
-        (void) mkdir(devshm, 01777);
+        (void) mkdir(devshm, 0755);
         r = mount("/dev/shm", devshm, NULL, MS_BIND, NULL);
         if (r < 0) {
                 r = -errno;
@@ -556,42 +606,9 @@ static int mount_private_dev(MountEntry *m) {
         (void) symlink("/run/systemd/journal/dev-log", devlog);
 
         NULSTR_FOREACH(d, devnodes) {
-                _cleanup_free_ char *dn = NULL;
-                struct stat st;
-
-                r = stat(d, &st);
-                if (r < 0) {
-
-                        if (errno == ENOENT)
-                                continue;
-
-                        r = -errno;
+                r = clone_device_node(d, temporary_mount);
+                if (r < 0)
                         goto fail;
-                }
-
-                if (!S_ISBLK(st.st_mode) &&
-                    !S_ISCHR(st.st_mode)) {
-                        r = -EINVAL;
-                        goto fail;
-                }
-
-                if (st.st_rdev == 0)
-                        continue;
-
-                dn = strappend(temporary_mount, d);
-                if (!dn) {
-                        r = -ENOMEM;
-                        goto fail;
-                }
-
-                mac_selinux_create_file_prepare(d, st.st_mode);
-                r = mknod(dn, st.st_mode, st.st_rdev);
-                mac_selinux_create_file_clear();
-
-                if (r < 0) {
-                        r = -errno;
-                        goto fail;
-                }
         }
 
         dev_setup(temporary_mount, UID_INVALID, GID_INVALID);
@@ -795,8 +812,8 @@ static int apply_mount(
 
         case BIND_MOUNT:
                 rbind = false;
-                /* fallthrough */
 
+                _fallthrough_;
         case BIND_MOUNT_RECURSIVE:
                 /* Also chase the source mount */
 
@@ -898,7 +915,7 @@ static int make_read_only(MountEntry *m, char **blacklist, FILE *proc_self_mount
         return r;
 }
 
-static bool namespace_info_mount_apivfs(const char *root_directory, const NameSpaceInfo *ns_info) {
+static bool namespace_info_mount_apivfs(const char *root_directory, const NamespaceInfo *ns_info) {
         assert(ns_info);
 
         /*
@@ -916,7 +933,7 @@ static bool namespace_info_mount_apivfs(const char *root_directory, const NameSp
 
 static unsigned namespace_calculate_mounts(
                 const char* root_directory,
-                const NameSpaceInfo *ns_info,
+                const NamespaceInfo *ns_info,
                 char** read_write_paths,
                 char** read_only_paths,
                 char** inaccessible_paths,
@@ -960,7 +977,7 @@ static unsigned namespace_calculate_mounts(
 int setup_namespace(
                 const char* root_directory,
                 const char* root_image,
-                const NameSpaceInfo *ns_info,
+                const NamespaceInfo *ns_info,
                 char** read_write_paths,
                 char** read_only_paths,
                 char** inaccessible_paths,
@@ -983,6 +1000,7 @@ int setup_namespace(
         bool make_slave = false;
         const char *root;
         unsigned n_mounts;
+        bool require_prefix = false;
         int r = 0;
 
         assert(ns_info);
@@ -1027,6 +1045,7 @@ int setup_namespace(
 
                 root = "/run/systemd/unit-root";
                 (void) mkdir_label(root, 0700);
+                require_prefix = true;
         } else
                 root = NULL;
 
@@ -1047,15 +1066,15 @@ int setup_namespace(
 
         if (n_mounts > 0) {
                 m = mounts = (MountEntry *) alloca0(n_mounts * sizeof(MountEntry));
-                r = append_access_mounts(&m, read_write_paths, READWRITE);
+                r = append_access_mounts(&m, read_write_paths, READWRITE, require_prefix);
                 if (r < 0)
                         goto finish;
 
-                r = append_access_mounts(&m, read_only_paths, READONLY);
+                r = append_access_mounts(&m, read_only_paths, READONLY, require_prefix);
                 if (r < 0)
                         goto finish;
 
-                r = append_access_mounts(&m, inaccessible_paths, INACCESSIBLE);
+                r = append_access_mounts(&m, inaccessible_paths, INACCESSIBLE, require_prefix);
                 if (r < 0)
                         goto finish;
 
@@ -1150,13 +1169,9 @@ int setup_namespace(
                 }
         }
 
-        /* Try to set up the new root directory before mounting anything there */
-        if (root)
-                (void) base_filesystem_create(root, UID_INVALID, GID_INVALID);
-
         if (root_image) {
                 /* A root image is specified, mount it to the right place */
-                r = dissected_image_mount(dissected_image, root, dissect_image_flags);
+                r = dissected_image_mount(dissected_image, root, UID_INVALID, dissect_image_flags);
                 if (r < 0)
                         goto finish;
 
@@ -1189,6 +1204,10 @@ int setup_namespace(
                         goto finish;
                 }
         }
+
+        /* Try to set up the new root directory before mounting anything else there. */
+        if (root_image || root_directory)
+                (void) base_filesystem_create(root, UID_INVALID, GID_INVALID);
 
         if (n_mounts > 0) {
                 _cleanup_fclose_ FILE *proc_self_mountinfo = NULL;
@@ -1428,6 +1447,17 @@ fail:
         return r;
 }
 
+bool ns_type_supported(NamespaceType type) {
+        const char *t, *ns_proc;
+
+        t = namespace_type_to_string(type);
+        if (!t) /* Don't know how to translate this? Then it's not supported */
+                return false;
+
+        ns_proc = strjoina("/proc/self/ns/", t);
+        return access(ns_proc, F_OK) == 0;
+}
+
 static const char *const protect_home_table[_PROTECT_HOME_MAX] = {
         [PROTECT_HOME_NO] = "no",
         [PROTECT_HOME_YES] = "yes",
@@ -1435,6 +1465,18 @@ static const char *const protect_home_table[_PROTECT_HOME_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(protect_home, ProtectHome);
+
+ProtectHome parse_protect_home_or_bool(const char *s) {
+        int r;
+
+        r = parse_boolean(s);
+        if (r > 0)
+                return PROTECT_HOME_YES;
+        if (r == 0)
+                return PROTECT_HOME_NO;
+
+        return protect_home_from_string(s);
+}
 
 static const char *const protect_system_table[_PROTECT_SYSTEM_MAX] = {
         [PROTECT_SYSTEM_NO] = "no",
@@ -1444,3 +1486,27 @@ static const char *const protect_system_table[_PROTECT_SYSTEM_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(protect_system, ProtectSystem);
+
+ProtectSystem parse_protect_system_or_bool(const char *s) {
+        int r;
+
+        r = parse_boolean(s);
+        if (r > 0)
+                return PROTECT_SYSTEM_YES;
+        if (r == 0)
+                return PROTECT_SYSTEM_NO;
+
+        return protect_system_from_string(s);
+}
+
+static const char* const namespace_type_table[] = {
+        [NAMESPACE_MOUNT] = "mnt",
+        [NAMESPACE_CGROUP] = "cgroup",
+        [NAMESPACE_UTS] = "uts",
+        [NAMESPACE_IPC] = "ipc",
+        [NAMESPACE_USER] = "user",
+        [NAMESPACE_PID] = "pid",
+        [NAMESPACE_NET] = "net",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(namespace_type, NamespaceType);

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -33,6 +34,7 @@ struct DHCP6Message {
                 } _packed_;
                 be32_t transaction_id;
         };
+        uint8_t options[];
 } _packed_;
 
 typedef struct DHCP6Message DHCP6Message;
@@ -103,4 +105,10 @@ enum {
         DHCP6_STATUS_NOT_ON_LINK                = 4,
         DHCP6_STATUS_USE_MULTICAST              = 5,
         _DHCP6_STATUS_MAX                       = 6,
+};
+
+enum {
+        DHCP6_FQDN_FLAG_S = (1 << 0),
+        DHCP6_FQDN_FLAG_O = (1 << 1),
+        DHCP6_FQDN_FLAG_N = (1 << 2),
 };

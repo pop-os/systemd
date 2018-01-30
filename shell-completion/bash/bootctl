@@ -1,4 +1,5 @@
 # bootctl(1) completion                               -*- shell-script -*-
+# SPDX-License-Identifier: LGPL-2.1+
 #
 # This file is part of systemd.
 #
@@ -28,7 +29,8 @@ _bootctl() {
         local i verb comps
         local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
         local -A OPTS=(
-               [STANDALONE]='-h --help --version'
+                [STANDALONE]='-h --help --no-variables -p --print-path --version'
+                       [ARG]='--path'
         )
 
         if [[ "$cur" = -* ]]; then
@@ -37,7 +39,7 @@ _bootctl() {
         fi
 
         local -A VERBS=(
-                [STANDALONE]='status'
+                [STANDALONE]='help install list remove status update'
         )
 
         for ((i=0; i < COMP_CWORD; i++)); do

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 /***
   This file is part of systemd.
 
@@ -103,9 +104,37 @@ static void test_strstrip(void) {
 }
 
 static void test_strextend(void) {
-        _cleanup_free_ char *str = strdup("0123");
-        strextend(&str, "456", "78", "9", NULL);
-        assert_se(streq(str, "0123456789"));
+        _cleanup_free_ char *str = NULL;
+
+        assert_se(strextend(&str, NULL));
+        assert_se(streq_ptr(str, ""));
+        assert_se(strextend(&str, "", "0", "", "", "123", NULL));
+        assert_se(streq_ptr(str, "0123"));
+        assert_se(strextend(&str, "456", "78", "9", NULL));
+        assert_se(streq_ptr(str, "0123456789"));
+}
+
+static void test_strextend_with_separator(void) {
+        _cleanup_free_ char *str = NULL;
+
+        assert_se(strextend_with_separator(&str, NULL, NULL));
+        assert_se(streq_ptr(str, ""));
+        str = mfree(str);
+
+        assert_se(strextend_with_separator(&str, "...", NULL));
+        assert_se(streq_ptr(str, ""));
+        assert_se(strextend_with_separator(&str, "...", NULL));
+        assert_se(streq_ptr(str, ""));
+        str = mfree(str);
+
+        assert_se(strextend_with_separator(&str, "xyz", "a", "bb", "ccc", NULL));
+        assert_se(streq_ptr(str, "axyzbbxyzccc"));
+        str = mfree(str);
+
+        assert_se(strextend_with_separator(&str, ",", "start", "", "1", "234", NULL));
+        assert_se(streq_ptr(str, "start,,1,234"));
+        assert_se(strextend_with_separator(&str, ";", "more", "5", "678", NULL));
+        assert_se(streq_ptr(str, "start,,1,234;more;5;678"));
 }
 
 static void test_strrep(void) {
@@ -288,11 +317,60 @@ static void test_endswith_no_case(void) {
 }
 
 static void test_delete_chars(void) {
-        char *r;
-        char input[] = "   hello, waldo.   abc";
+        char *s, input[] = "   hello, waldo.   abc";
 
-        r = delete_chars(input, WHITESPACE);
-        assert_se(streq(r, "hello,waldo.abc"));
+        s = delete_chars(input, WHITESPACE);
+        assert_se(streq(s, "hello,waldo.abc"));
+        assert_se(s == input);
+}
+
+static void test_delete_trailing_chars(void) {
+
+        char *s,
+                input1[] = " \n \r k \n \r ",
+                input2[] = "kkkkthiskkkiskkkaktestkkk",
+                input3[] = "abcdef";
+
+        s = delete_trailing_chars(input1, WHITESPACE);
+        assert_se(streq(s, " \n \r k"));
+        assert_se(s == input1);
+
+        s = delete_trailing_chars(input2, "kt");
+        assert_se(streq(s, "kkkkthiskkkiskkkaktes"));
+        assert_se(s == input2);
+
+        s = delete_trailing_chars(input3, WHITESPACE);
+        assert_se(streq(s, "abcdef"));
+        assert_se(s == input3);
+
+        s = delete_trailing_chars(input3, "fe");
+        assert_se(streq(s, "abcd"));
+        assert_se(s == input3);
+}
+
+static void test_delete_trailing_slashes(void) {
+        char s1[] = "foobar//",
+             s2[] = "foobar/",
+             s3[] = "foobar",
+             s4[] = "";
+
+        assert_se(streq(delete_trailing_chars(s1, "_"), "foobar//"));
+        assert_se(streq(delete_trailing_chars(s1, "/"), "foobar"));
+        assert_se(streq(delete_trailing_chars(s2, "/"), "foobar"));
+        assert_se(streq(delete_trailing_chars(s3, "/"), "foobar"));
+        assert_se(streq(delete_trailing_chars(s4, "/"), ""));
+}
+
+static void test_skip_leading_chars(void) {
+        char input1[] = " \n \r k \n \r ",
+                input2[] = "kkkkthiskkkiskkkaktestkkk",
+                input3[] = "abcdef";
+
+        assert_se(streq(skip_leading_chars(input1, WHITESPACE), "k \n \r "));
+        assert_se(streq(skip_leading_chars(input2, "k"), "thiskkkiskkkaktestkkk"));
+        assert_se(streq(skip_leading_chars(input2, "tk"), "hiskkkiskkkaktestkkk"));
+        assert_se(streq(skip_leading_chars(input3, WHITESPACE), "abcdef"));
+        assert_se(streq(skip_leading_chars(input3, "bcaef"), "def"));
 }
 
 static void test_in_charset(void) {
@@ -349,6 +427,7 @@ int main(int argc, char *argv[]) {
         test_streq_ptr();
         test_strstrip();
         test_strextend();
+        test_strextend_with_separator();
         test_strrep();
         test_strappend();
         test_string_has_cc();
@@ -361,6 +440,9 @@ int main(int argc, char *argv[]) {
         test_endswith();
         test_endswith_no_case();
         test_delete_chars();
+        test_delete_trailing_chars();
+        test_delete_trailing_slashes();
+        test_skip_leading_chars();
         test_in_charset();
         test_split_pair();
         test_first_word();

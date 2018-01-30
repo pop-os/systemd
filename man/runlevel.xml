@@ -3,6 +3,8 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
+  SPDX-License-Identifier: LGPL-2.1+
+
   This file is part of systemd.
 
   Copyright 2010 Lennart Poettering
@@ -171,10 +173,9 @@
 
     <variablelist>
       <varlistentry>
-        <term><filename>/var/run/utmp</filename></term>
+        <term><filename>/run/utmp</filename></term>
 
-        <listitem><para>The utmp database <command>runlevel</command>
-        reads the previous and current runlevel
+        <listitem><para>The utmp database <command>runlevel</command> reads the previous and current runlevel
         from.</para></listitem>
       </varlistentry>
     </variablelist>

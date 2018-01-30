@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
 /***
@@ -36,7 +37,8 @@ bool net_match_config(const struct ether_addr *match_mac,
                       char * const *match_name,
                       Condition *match_host,
                       Condition *match_virt,
-                      Condition *match_kernel,
+                      Condition *match_kernel_cmdline,
+                      Condition *match_kernel_version,
                       Condition *match_arch,
                       const struct ether_addr *dev_mac,
                       const char *dev_path,
