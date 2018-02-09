@@ -1,3 +1,15 @@
+systemd (237-1ubuntu3) bionic; urgency=medium
+
+  * Re-enable gnu-efi on arm64, binutils is fixed.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 09 Feb 2018 15:49:01 +0000
+
+systemd (237-1ubuntu2) bionic; urgency=medium
+
+  * Disable gnu-efi on arm64, due to FTBFS. LP: #1746765
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 02 Feb 2018 23:30:05 +0000
+
 systemd (237-1ubuntu1) bionic; urgency=medium
 
   * Remaining delta from Debian:
