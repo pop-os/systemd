@@ -1,0 +1,40 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Fri, 9 Feb 2018 15:57:54 +0000
+Subject: UBUNTU: resolved: disable global LLMNR and MulticastDNS by default.
+
+LP: #1739672
+---
+ src/resolve/resolved-manager.c | 4 ++--
+ src/resolve/resolved.conf.in   | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 2ee0277..37cef3f 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -596,8 +596,8 @@ int manager_new(Manager **ret) {
+         m->dns_stub_udp_fd = m->dns_stub_tcp_fd = -1;
+         m->hostname_fd = -1;
+ 
+-        m->llmnr_support = RESOLVE_SUPPORT_YES;
+-        m->mdns_support = RESOLVE_SUPPORT_YES;
++        m->llmnr_support = RESOLVE_SUPPORT_NO;
++        m->mdns_support = RESOLVE_SUPPORT_NO;
+         m->dnssec_mode = DEFAULT_DNSSEC_MODE;
+         m->enable_cache = true;
+         m->dns_stub_listener_mode = DNS_STUB_LISTENER_UDP;
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index e6b2062..bcd7a92 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
+@@ -15,8 +15,8 @@
+ #DNS=
+ #FallbackDNS=@DNS_SERVERS@
+ #Domains=
+-#LLMNR=yes
+-#MulticastDNS=yes
++#LLMNR=no
++#MulticastDNS=no
+ #DNSSEC=@DEFAULT_DNSSEC_MODE@
+ #Cache=yes
+ #DNSStubListener=udp
