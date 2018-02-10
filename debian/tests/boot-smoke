@@ -30,11 +30,12 @@ EOF
     fi
 else
     echo "checking for failed unmounts for user systemd"
-    if journalctl | grep -E "systemd\[([2-9]|[1-9][0-9]+)\].*Failed unmounting"; then
+    JOURNAL=$(journalctl)
+    if echo "$JOURNAL" | grep -E "systemd\[([2-9]|[1-9][0-9]+)\].*Failed unmounting"; then
         exit 1
     fi
     echo "checking for connection timeouts"
-    if journalctl | grep "Connection timed out"; then
+    if echo "$JOURNAL" | grep "Connection timed out"; then
         exit 1
     fi
 
