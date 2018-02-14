@@ -1,3 +1,25 @@
+systemd (237-3) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/boot-smoke: More robust journal checking.
+    Also fail the test if calling journalctl fails, and avoid calling it
+    twice. See https://github.com/systemd/systemd/pull/8032
+  * Simplify PO template creation.
+    Use the existing upstream build system instead of a manual call to
+    `intltool-update` and `xgettext` to build systemd.pot. Remove the now
+    obsolete intltool build dependency, but still explicitly keep gettext.
+    (LP: #1707898)
+  * Make systemd-sysv-install robust against existing $ROOT.
+    Always initialize `$ROOT`, to avoid the script getting confused by an
+    existing outside env variable. Also fix the `--root` option to actually
+    work, the previous approach was conceptually broken due to how shell
+    quoting works. Make the work with `set -u`. (Closes: #890436)
+
+  [ Felipe Sateler ]
+  * Backport upstream patch fixing a wrong assert() call (Closes: #890423)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 14 Feb 2018 23:07:17 +0100
+
 systemd (237-2) unstable; urgency=medium
 
   * Drop debian/extra/rules/70-debian-uaccess.rules.
