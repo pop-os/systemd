@@ -1,3 +1,26 @@
+systemd (237-2ubuntu1) bionic; urgency=medium
+
+  [ Michael Vogt ]
+  * Add "AssumedApparmorLabel=unconfined" to timedate1 dbus service file
+    (LP: #1749000)
+
+  [ Martin Pitt ]
+  * debian/tests/boot-smoke: More robust journal checking.
+    Also fail the test if calling journalctl fails, and avoid calling it
+    twice. See https://github.com/systemd/systemd/pull/8032
+
+  [ Gunnar Hjalmarsson ]
+  * Fix creation of translation template
+    - State the gettext package domain "systemd" explicitly, as with the
+      move to meson it ended up as "untitled.pot"
+    - Call xgettext to extract strings from polkit *.policy.in files, which
+      intltool-update ignores. (LP: #1707898)
+
+  [ Dimitri John Ledkov ]
+  * Enable qemu tests on all architectures LP: #1749540
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 14 Feb 2018 16:43:12 +0000
+
 systemd (237-2) unstable; urgency=medium
 
   * Drop debian/extra/rules/70-debian-uaccess.rules.
@@ -9,12 +32,6 @@ systemd (237-2) unstable; urgency=medium
     the cgroup. (Closes: #889144)
 
  -- Michael Biebl <biebl@debian.org>  Fri, 09 Feb 2018 23:35:31 +0100
-
-systemd (237-1ubuntu4) UNRELEASED; urgency=medium
-
-  * Enable qemu tests on all architectures LP: #1749540
-
- -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 14 Feb 2018 16:20:50 +0000
 
 systemd (237-1ubuntu3) bionic; urgency=medium
 
