@@ -45,6 +45,7 @@ class FsckdTest(unittest.TestCase):
         # ensure we have our root fsck enabled by default (it detects it runs in a vm and doesn't pull the target)
         # note that it can already exists in case of a reboot (as there was no tearDown as we wanted)
         os.makedirs(os.path.dirname(SYSTEMD_FSCK_ROOT_ENABLE_PATH), exist_ok=True)
+        os.makedirs('/var/log/journal', exist_ok=True)
         with suppress(FileExistsError):
             os.symlink(SYSTEMD_FSCK_ROOT_PATH, SYSTEMD_FSCK_ROOT_ENABLE_PATH)
         enable_plymouth()
@@ -97,7 +98,10 @@ class FsckdTest(unittest.TestCase):
             self.assertFsckdStop()
             self.assertWasRunning('process-killer')
             self.assertFalse(self.is_failed_unit('process-killer'))
-            self.assertFsckProceeded()
+            self.assertWasRunning('systemd-fsckd')
+            self.assertFalse(self.is_failed_unit('systemd-fsckd'))
+            self.assertTrue(self.is_failed_unit('systemd-fsck-root'))
+            self.assertWasRunning('plymouth-start')
             self.assertSystemRunning()
 
     def test_systemd_fsck_with_failure(self):
@@ -121,7 +125,7 @@ class FsckdTest(unittest.TestCase):
         else:
             self.assertFsckdStop()
             self.assertProcessKilled()
-            self.assertFalse(self.is_failed_unit('systemd-fsck-root'))
+            self.assertTrue(self.is_failed_unit('systemd-fsck-root'))
             self.assertTrue(self.is_failed_unit('systemd-fsckd'))
             self.assertWasRunning('plymouth-start')
             self.assertSystemRunning()
