@@ -1,13 +1,13 @@
 From: Lennart Poettering <lennart@poettering.net>
-Date: Thu, 8 Feb 2018 13:25:15 +0100
-Subject: service: relax PID file symlink chain checks a bit
+Date: Fri, 9 Feb 2018 17:05:17 +0100
+Subject: service: relax PID file symlink chain checks a bit (#8133)
 
 Let's read the PID file after all if there's a potentially unsafe
 symlink chain in place. But if we do, then refuse taking the PID if its
 outside of the cgroup.
 
 Fixes: #8085
-(cherry picked from commit 7911fec833f2e51541cd6155a622fa2073f39c69)
+(cherry picked from commit 73969ab61c39357e6892747e43307fbf07cafbed)
 ---
  src/core/service.c | 15 +++++++++++++--
  1 file changed, 13 insertions(+), 2 deletions(-)

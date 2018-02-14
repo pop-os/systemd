@@ -163,7 +163,8 @@ ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_auto_build --builddirectory=build-udeb
 endif
 	# generate POT file for translators
-	cd build-deb/po; srcdir=../../po intltool-update --pot --verbose
+	cd build-deb/po; srcdir=../../po intltool-update --pot --verbose --gettext-package=systemd
+	xgettext -f "po/POTFILES.in" -o "build-deb/po/systemd.pot" --join-existing
 
 override_dh_auto_install:
 	dh_auto_install --builddirectory=build-deb \

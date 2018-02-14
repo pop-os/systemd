@@ -1,3 +1,15 @@
+systemd (237-2) unstable; urgency=medium
+
+  * Drop debian/extra/rules/70-debian-uaccess.rules.
+    Up-to-date udev rules for U2F devices are shipped in libu2f-udev nowadays.
+    (Closes: #889665)
+  * service: relax PID file symlink chain checks a bit.
+    Let's read the PID file after all if there's a potentially unsafe symlink
+    chain in place. But if we do, then refuse taking the PID if its outside of
+    the cgroup. (Closes: #889144)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 09 Feb 2018 23:35:31 +0100
+
 systemd (237-1ubuntu4) UNRELEASED; urgency=medium
 
   * Enable qemu tests on all architectures LP: #1749540
