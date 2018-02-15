@@ -1,3 +1,13 @@
+systemd (237-2ubuntu2) bionic; urgency=medium
+
+  * Fix cryptsetup tests by shipping 95-dm-notify udev rule. (LP: #1749432)
+  * debian/tests/systemd-fsckd: update assertions expectations for v237
+    fsck got rewritten to use "safe_fork" and whilst previously it would ignore the
+    error, when fsck is terminated by signal PIPE, it no longer does so. Thus one
+    should expect systemd-fsck-root.service to have failed in certain test cases.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 15 Feb 2018 00:32:54 +0000
+
 systemd (237-2ubuntu1) bionic; urgency=medium
 
   [ Michael Vogt ]
