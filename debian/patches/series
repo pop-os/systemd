@@ -36,3 +36,4 @@ debian/UBUNTU-test-test-functions-drop-all-prefixes.patch
 debian/UBUNTU-test-process-util-fails-to-verify-cmdline-changes-in-unpr.patch
 debian/UBUNTU-resolved-disable-global-LLMNR-and-MulticastDNS.patch
 debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
+debian/UBUNTU-test-fs-utils-detect-container.patch
