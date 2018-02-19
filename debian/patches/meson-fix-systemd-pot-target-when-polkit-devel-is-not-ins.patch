@@ -1,0 +1,37 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sun, 18 Feb 2018 17:39:08 +0100
+Subject: meson: fix systemd-pot target when polkit-devel is not installed
+
+To successfully extract strings from our .policy files, gettext needs
+polkit.{its,loc} files provided by policykit-devel. When that package is not
+installed, systemd-pot would fail to extract strings:
+
+[0/1] Running external command systemd-pot.
+xgettext: warning: file 'src/core/org.freedesktop.systemd1.policy.in.in' extension 'policy' is unknown; will try C
+xgettext: warning: file 'src/hostname/org.freedesktop.hostname1.policy.in' extension 'policy' is unknown; will try C
+...
+
+We now don't need the .its and .loc files for normal building, but they are
+still useful when generating the .pot file, because that way we avoid the
+dependency on sufficiently new polkit. We just need to tell i18n to pass their
+location to xgettext.
+
+(cherry picked from commit b0faead2501cd539767dc11d098c08f5730224ff)
+---
+ po/meson.build | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/po/meson.build b/po/meson.build
+index 7ba08fb..01ab7a3 100644
+--- a/po/meson.build
++++ b/po/meson.build
+@@ -16,6 +16,6 @@
+ # along with systemd; If not, see <http://www.gnu.org/licenses/>.
+ 
+ i18n = import('i18n')
+-i18n.gettext(meson.project_name(), preset: 'glib')
+-
+-po_dir = meson.current_source_dir()
++i18n.gettext(meson.project_name(),
++             preset : 'glib',
++             data_dirs : '.')

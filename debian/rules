@@ -163,8 +163,7 @@ ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_auto_build --builddirectory=build-udeb
 endif
 	# generate POT file for translators
-	cd build-deb/po; srcdir=../../po intltool-update --pot --verbose --gettext-package=systemd
-	xgettext -f "po/POTFILES.in" -o "build-deb/po/systemd.pot" --join-existing
+	ninja -C build-deb/ systemd-pot
 
 override_dh_auto_install:
 	dh_auto_install --builddirectory=build-deb \
@@ -189,6 +188,7 @@ endif
 	rm -rf debian/install/ debian/shlibs.local
 	# remove Python byte code files
 	rm -rf tools/__pycache__/
+	rm -f po/systemd.pot
 
 override_dh_install:
 	# remove unnecessary / unused files

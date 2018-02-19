@@ -1,4 +1,11 @@
 service-relax-PID-file-symlink-chain-checks-a-bit-8133.patch
+socket-util-fix-getpeergroups-assert-fd-8080.patch
+l10n-update-POTFILES.in-8163.patch
+Gettextize-policy-files.patch
+meson-drop-double-.in-suffix-for-o.fd.systemd1.policy-fil.patch
+meson-drop-unnecessary-transformation-of-policy-files.patch
+l10n-Update-POTFILES.in-and-POTFILES.skip.patch
+meson-fix-systemd-pot-target-when-polkit-devel-is-not-ins.patch
 test-test-functions-Debian-Ubuntu-now-ship-95-dm-notify.r.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
