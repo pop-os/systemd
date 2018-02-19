@@ -1,0 +1,52 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Fri, 16 Feb 2018 14:25:32 +0100
+Subject: l10n: Update POTFILES.in and POTFILES.skip
+
+We no longer use .in suffixes for .policy files.
+
+Follow-up for commit 9b3cff199dd3827a9f2df9a7f5874d6ef18880f2 and
+70886abbde59a45cfabe0769c0cdb3af1e5f7790.
+
+(cherry picked from commit d4d4688122a228a90d39ac3bddf29d1bb33d9850)
+---
+ po/POTFILES.in   | 16 ++++++++--------
+ po/POTFILES.skip |  2 +-
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index f610828..470829a 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -1,9 +1,9 @@
+-src/core/org.freedesktop.systemd1.policy.in.in
+-src/hostname/org.freedesktop.hostname1.policy.in
+-src/import/org.freedesktop.import1.policy.in
+-src/locale/org.freedesktop.locale1.policy.in
+-src/login/org.freedesktop.login1.policy.in
+-src/machine/org.freedesktop.machine1.policy.in
+-src/resolve/org.freedesktop.resolve1.policy.in
+-src/timedate/org.freedesktop.timedate1.policy.in
++src/core/org.freedesktop.systemd1.policy.in
++src/hostname/org.freedesktop.hostname1.policy
++src/import/org.freedesktop.import1.policy
++src/locale/org.freedesktop.locale1.policy
++src/login/org.freedesktop.login1.policy
++src/machine/org.freedesktop.machine1.policy
++src/resolve/org.freedesktop.resolve1.policy
++src/timedate/org.freedesktop.timedate1.policy
+ src/core/dbus-unit.c
+diff --git a/po/POTFILES.skip b/po/POTFILES.skip
+index b56a998..e6ef4d7 100644
+--- a/po/POTFILES.skip
++++ b/po/POTFILES.skip
+@@ -12,9 +12,9 @@ src/core/dbus-target.c
+ src/core/dbus-timer.c
+ src/core/dbus-unit.c
+ src/core/dbus-scope.c
++src/core/org.freedesktop.systemd1.policy
+ src/hostname/hostnamed.c
+ src/locale/localed.c
+-src/core/org.freedesktop.systemd1.policy.in
+ src/timedate/timedated.c
+ units/user@.service.in
+ units/debug-shell.service.in

@@ -258,12 +258,12 @@ index 36a62d2..c734561 100644
             'src/sleep/sleep.c',
             include_directories : includes,
 diff --git a/po/POTFILES.in b/po/POTFILES.in
-index f33c53f..4b8ef2e 100644
+index 470829a..55edf97 100644
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -6,3 +6,4 @@ src/login/org.freedesktop.login1.policy.in
- src/machine/org.freedesktop.machine1.policy.in
- src/timedate/org.freedesktop.timedate1.policy.in
+@@ -7,3 +7,4 @@ src/machine/org.freedesktop.machine1.policy
+ src/resolve/org.freedesktop.resolve1.policy
+ src/timedate/org.freedesktop.timedate1.policy
  src/core/dbus-unit.c
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
