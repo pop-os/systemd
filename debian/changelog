@@ -1,3 +1,17 @@
+systemd (237-3ubuntu1) bionic; urgency=medium
+
+  [ Gunnar Hjalmarsson ]
+  * Fix PO template creation.
+    Cherry-pick upstream patches to build a correct systemd.pot including
+    the polkit policy files even without policykit-1 being installed.
+    (LP: #1707898)
+
+  [ Dimitri John Ledkov ]
+  * Blacklist TEST-16-EXTEND-TIMEOUT
+  * test/test-functions: use vmlinux for ppc64 tests.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 19 Feb 2018 21:15:23 +0000
+
 systemd (237-3) unstable; urgency=medium
 
   [ Martin Pitt ]
