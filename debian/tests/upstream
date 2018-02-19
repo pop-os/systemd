@@ -5,7 +5,7 @@ set -e
 
 # even after installing policycoreutils this fails with
 # "Failed to install /usr/libexec/selinux/hll/pp"
-BLACKLIST="TEST-06-SELINUX"
+BLACKLIST="TEST-06-SELINUX TEST-16-EXTEND-TIMEOUT"
 
 # quiesce Makefile.guess; not really relevant as systemd/nspawn run from
 # installed packages
@@ -18,14 +18,6 @@ sed -i '/DESTDIR.* install/ s%^.*$%    for p in `grep ^Package: '`pwd`'/debian/c
 
 # FIXME: avoid building the entire tree when running tests (fixed in master, but not yet 234)
 sed -i '/@make.*all/ d' test/TEST*/Makefile
-
-
-# timeout tests, seems to fail success start in a VM
-# but passes on bare metal
-sed -i 's/wait_for success_all/# wait_for success_all/' test/TEST-16-EXTEND-TIMEOUT/assess.sh
-sed -i 's/wait_for success_start/# wait_for success_start/' test/TEST-16-EXTEND-TIMEOUT/assess.sh
-sed -i 's/Wants=testsuite-success-all.service/# Wants=testsuite-success-all.service/' test/TEST-16-EXTEND-TIMEOUT/testsuite.service
-sed -i 's/Wants=testsuite-success-start.service/# Wants=testsuite-success-start.service/' test/TEST-16-EXTEND-TIMEOUT/testsuite.service
 
 # adjust path
 sed -i 's_/usr/libexec/selinux/hll/pp_/usr/lib/selinux/hll/pp_' test/TEST-06-SELINUX/test.sh
