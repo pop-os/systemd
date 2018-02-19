@@ -1,3 +1,16 @@
+systemd (237-2ubuntu3) bionic; urgency=medium
+
+  * test/test-fs-util: detect container, in addition to root.
+    On armhf, during autopkgtests, whilst root is avilable, full capabilities in
+    parent namespace are not, since the tests are run in an LXD container.
+    This should resolve armhf autopkgtest failure.
+  * test/test-functions: launch qemu-system with -vga none.
+    Should resolve booting qemu-system-ppc64 without seabios.
+  * tests/upstream: skip parts of extend time out tests, regressed.
+    (LP: #1750364)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 19 Feb 2018 13:32:07 +0000
+
 systemd (237-2ubuntu2) bionic; urgency=medium
 
   * Fix cryptsetup tests by shipping 95-dm-notify udev rule. (LP: #1749432)
