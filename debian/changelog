@@ -1,3 +1,12 @@
+systemd (237-3ubuntu2) bionic; urgency=medium
+
+  * tests/boot-smoke: ignore udevd connection timeouts resolving colord group.
+  * tests/systemd-fsckd: ignore systemd_fsck_with_plymouth_failure.
+  * tests/control: ensure boot-smoke uses latest systemd & udev.
+  * test/test-functions: on PPC64 use hvc0 console.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 20 Feb 2018 12:03:14 +0000
+
 systemd (237-3ubuntu1) bionic; urgency=medium
 
   [ Gunnar Hjalmarsson ]
