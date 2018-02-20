@@ -1,0 +1,39 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Tue, 20 Feb 2018 12:01:40 +0000
+Subject: test/test-functions: on PPC64 use hvc0 console
+
+(cherry picked from commit 47709db0687f27c4a1de0826f2330ae147db6e01)
+---
+ test/test-functions | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 87235e3..22066d9 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -68,6 +68,8 @@ run_qemu() {
+             && KERNEL_BIN="$EFI_MOUNT/$MACHINE_ID/$KERNEL_VER/linux"
+     fi
+ 
++    CONSOLE=ttyS0
++
+     if [[ ! "$KERNEL_BIN" ]]; then
+         if [[ "$LOOKS_LIKE_ARCH" ]]; then
+             KERNEL_BIN=/boot/vmlinuz-linux
+@@ -76,6 +78,7 @@ run_qemu() {
+             case $ARCH in
+                 ppc64*)
+                 KERNEL_BIN=/boot/vmlinux-$KERNEL_VER
++                CONSOLE=hvc0
+                 ;;
+                 *)
+                 KERNEL_BIN=/boot/vmlinuz-$KERNEL_VER
+@@ -127,7 +130,7 @@ root=/dev/sda1 \
+ raid=noautodetect \
+ loglevel=2 \
+ init=$ROOTLIBDIR/systemd \
+-console=ttyS0 \
++console=$CONSOLE \
+ selinux=0 \
+ $_cgroup_args \
+ $KERNEL_APPEND \
