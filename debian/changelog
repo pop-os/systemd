@@ -1,3 +1,11 @@
+systemd (237-3ubuntu3) bionic; urgency=medium
+
+  * tests/control: drop qemu-system-ppc.
+    Whilst some tests pass, many regress / fail to boot. This is not a regression,
+    as qemu-based tests were not run previously.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 20 Feb 2018 17:40:02 +0000
+
 systemd (237-3ubuntu2) bionic; urgency=medium
 
   * tests/boot-smoke: ignore udevd connection timeouts resolving colord group.
