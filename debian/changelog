@@ -1,3 +1,20 @@
+systemd (237-4) unstable; urgency=medium
+
+  [ Gunnar Hjalmarsson ]
+  * Fix PO template creation.
+    Cherry-pick upstream patches to build a correct systemd.pot including
+    the polkit policy files even without policykit-1 being installed.
+    (LP: #1707898)
+
+  [ Michael Biebl ]
+  * Drop mask for fuse SysV init script.
+    The fuse package has removed its SysV init script a long time ago, so
+    the mask is no longer needed.
+  * Replace two Debian specific patches which cherry-picks from upstream
+    master
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 28 Feb 2018 19:18:34 +0100
+
 systemd (237-3) unstable; urgency=medium
 
   [ Martin Pitt ]
