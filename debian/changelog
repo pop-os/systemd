@@ -1,3 +1,12 @@
+systemd (237-3ubuntu4) bionic; urgency=medium
+
+  * systemd-sysv-install: fix name initialisation.
+    Only initialise NAME, after --root optional argument has been parsed, otherwise
+    NAME is initialized to e.g. `enable', instead of to the `unit-name`, resulting
+    in failures. (LP: #1752882)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 05 Mar 2018 09:57:58 +0100
+
 systemd (237-3ubuntu3) bionic; urgency=medium
 
   * tests/control: drop qemu-system-ppc.
