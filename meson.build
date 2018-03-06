@@ -16,7 +16,7 @@
 # along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 project('systemd', 'c',
-        version : '237',
+        version : '238',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu99',
@@ -27,8 +27,8 @@ project('systemd', 'c',
         meson_version : '>= 0.41',
        )
 
-libsystemd_version = '0.21.0'
-libudev_version = '1.6.9'
+libsystemd_version = '0.22.0'
+libudev_version = '1.6.10'
 
 # We need the same data in three different formats, ugh!
 # Also, for hysterical reasons, we use different variable
@@ -54,13 +54,26 @@ endif
 
 #####################################################################
 
-split_usr = get_option('split-usr')
-conf.set10('HAVE_SPLIT_USR', split_usr)
+if get_option('split-usr') == 'auto'
+        split_usr = run_command('test', '-L', '/bin').returncode() != 0
+else
+        split_usr = get_option('split-usr') == 'true'
+endif
+conf.set10('HAVE_SPLIT_USR', split_usr,
+           description : '/usr/bin and /bin directories are separate')
+
+if get_option('split-bin') == 'auto'
+        split_bin = run_command('test', '-L', '/usr/sbin').returncode() != 0
+else
+        split_bin = get_option('split-bin') == 'true'
+endif
+conf.set10('HAVE_SPLIT_BIN', split_bin,
+           description : 'bin and sbin directories are separate')
 
 rootprefixdir = get_option('rootprefix')
 # Unusual rootprefixdir values are used by some distros
 # (see https://github.com/systemd/systemd/pull/7461).
-rootprefix_default = get_option('split-usr') ? '/' : '/usr'
+rootprefix_default = split_usr ? '/' : '/usr'
 if rootprefixdir == ''
         rootprefixdir = rootprefix_default
 endif
@@ -87,6 +100,7 @@ datadir = join_paths(prefixdir, get_option('datadir'))
 localstatedir = join_paths('/', get_option('localstatedir'))
 
 rootbindir = join_paths(rootprefixdir, 'bin')
+rootsbindir = join_paths(rootprefixdir, split_bin ? 'sbin' : 'bin')
 rootlibexecdir = join_paths(rootprefixdir, 'lib/systemd')
 
 rootlibdir = get_option('rootlibdir')
@@ -136,12 +150,16 @@ udevhwdbdir = join_paths(udevlibexecdir, 'hwdb.d')
 catalogdir = join_paths(prefixdir, 'lib/systemd/catalog')
 kernelinstalldir = join_paths(prefixdir, 'lib/kernel/install.d')
 factorydir = join_paths(datadir, 'factory')
-docdir = join_paths(datadir, 'doc/systemd')
 bootlibdir = join_paths(prefixdir, 'lib/systemd/boot/efi')
 testsdir = join_paths(prefixdir, 'lib/systemd/tests')
 systemdstatedir = join_paths(localstatedir, 'lib/systemd')
 catalogstatedir = join_paths(systemdstatedir, 'catalog')
 randomseeddir = join_paths(localstatedir, 'lib/systemd')
+
+docdir = get_option('docdir')
+if docdir == ''
+        docdir = join_paths(datadir, 'doc/systemd')
+endif
 
 dbuspolicydir = get_option('dbuspolicydir')
 if dbuspolicydir == ''
@@ -168,6 +186,8 @@ if pamconfdir == ''
         pamconfdir = join_paths(sysconfdir, 'pam.d')
 endif
 
+memory_accounting_default = get_option('memory-accounting-default')
+
 conf.set_quoted('PKGSYSCONFDIR',                              pkgsysconfdir)
 conf.set_quoted('SYSTEM_CONFIG_UNIT_PATH',                    join_paths(pkgsysconfdir, 'system'))
 conf.set_quoted('SYSTEM_DATA_UNIT_PATH',                      systemunitdir)
@@ -175,6 +195,9 @@ conf.set_quoted('SYSTEM_SYSVINIT_PATH',                       sysvinit_path)
 conf.set_quoted('SYSTEM_SYSVRCND_PATH',                       sysvrcnd_path)
 conf.set_quoted('RC_LOCAL_SCRIPT_PATH_START',                 get_option('rc-local'))
 conf.set_quoted('RC_LOCAL_SCRIPT_PATH_STOP',                  get_option('halt-local'))
+
+conf.set('ANSI_OK_COLOR',                                     'ANSI_' + get_option('ok-color').underscorify().to_upper())
+
 conf.set_quoted('USER_CONFIG_UNIT_PATH',                      join_paths(pkgsysconfdir, 'user'))
 conf.set_quoted('USER_DATA_UNIT_PATH',                        userunitdir)
 conf.set_quoted('CERTIFICATE_ROOT',                           get_option('certificate-root'))
@@ -213,6 +236,8 @@ conf.set_quoted('SYSTEMD_EXPORT_PATH',                        join_paths(rootlib
 conf.set_quoted('VENDOR_KEYRING_PATH',                        join_paths(rootlibexecdir, 'import-pubring.gpg'))
 conf.set_quoted('USER_KEYRING_PATH',                          join_paths(pkgsysconfdir, 'import-pubring.gpg'))
 conf.set_quoted('DOCUMENT_ROOT',                              join_paths(pkgdatadir, 'gatewayd'))
+conf.set('MEMORY_ACCOUNTING_DEFAULT',                         memory_accounting_default ? 'true' : 'false')
+conf.set_quoted('MEMORY_ACCOUNTING_DEFAULT_ON_OFF',           memory_accounting_default ? 'on' : 'off')
 
 conf.set_quoted('ABS_BUILD_DIR',                              meson.build_root())
 conf.set_quoted('ABS_SRC_DIR',                                meson.source_root())
@@ -253,6 +278,7 @@ substs.set('SYSTEM_SYSVINIT_PATH',                            sysvinit_path)
 substs.set('SYSTEM_SYSVRCND_PATH',                            sysvrcnd_path)
 substs.set('RC_LOCAL_SCRIPT_PATH_START',                      get_option('rc-local'))
 substs.set('RC_LOCAL_SCRIPT_PATH_STOP',                       get_option('halt-local'))
+substs.set('MEMORY_ACCOUNTING_DEFAULT',                       memory_accounting_default ? 'yes' : 'no')
 
 #####################################################################
 
@@ -344,7 +370,7 @@ foreach arg : ['unused-parameter',
         endif
 endforeach
 
-if cc.compiles('
+if cc.compiles('''
    #include <time.h>
    #include <inttypes.h>
    typedef uint64_t usec_t;
@@ -353,7 +379,7 @@ if cc.compiles('
            struct timespec now;
            return 0;
    }
-', name : '-Werror=shadow with local shadowing')
+''', name : '-Werror=shadow with local shadowing')
         add_project_arguments('-Werror=shadow', language : 'c')
 endif
 
@@ -440,6 +466,8 @@ decl_headers = '''
 #include <uchar.h>
 #include <linux/ethtool.h>
 #include <linux/fib_rules.h>
+#include <linux/stat.h>
+#include <sys/stat.h>
 '''
 # FIXME: key_serial_t is only defined in keyutils.h, this is bound to fail
 
@@ -448,6 +476,7 @@ foreach decl : ['char16_t',
                 'key_serial_t',
                 'struct ethtool_link_settings',
                 'struct fib_rule_uid_range',
+                'struct statx',
                ]
 
         # We get -1 if the size cannot be determined
@@ -509,7 +538,11 @@ foreach ident : [
                                  #include <unistd.h>'''],
         ['bpf',               '''#include <sys/syscall.h>
                                  #include <unistd.h>'''],
+        ['statx',             '''#include <sys/types.h>
+                                 #include <sys/stat.h>
+                                 #include <unistd.h>'''],
         ['explicit_bzero' ,   '''#include <string.h>'''],
+        ['reallocarray',      '''#include <malloc.h>'''],
 ]
 
         have = cc.has_function(ident[0], prefix : ident[1], args : '-D_GNU_SOURCE')
@@ -647,8 +680,11 @@ system_uid_max = get_option('system-uid-max')
 if system_uid_max == ''
         system_uid_max = run_command(
                 awk,
-                'BEGIN { uid=999 } /^\s*SYS_UID_MAX\s+/ { uid=$2 } END { print uid }',
-                '/etc/login.defs').stdout()
+                '/^\s*SYS_UID_MAX\s+/ { uid=$2 } END { print uid }',
+                '/etc/login.defs').stdout().strip()
+        if system_uid_max == ''
+                system_uid_max = '999'
+        endif
 endif
 system_uid_max = system_uid_max.to_int()
 conf.set('SYSTEM_UID_MAX', system_uid_max)
@@ -659,8 +695,11 @@ system_gid_max = get_option('system-gid-max')
 if system_gid_max == ''
         system_gid_max = run_command(
                 awk,
-                'BEGIN { gid=999 } /^\s*SYS_GID_MAX\s+/ { gid=$2 } END { print gid }',
-                '/etc/login.defs').stdout()
+                '/^\s*SYS_GID_MAX\s+/ { gid=$2 } END { print gid }',
+                '/etc/login.defs').stdout().strip()
+        if system_gid_max == ''
+                system_gid_max = '999'
+        endif
 endif
 system_gid_max = system_gid_max.to_int()
 conf.set('SYSTEM_GID_MAX', system_gid_max)
@@ -1431,6 +1470,10 @@ executable('systemd',
            install : true,
            install_dir : rootlibexecdir)
 
+meson.add_install_script(meson_make_symlink,
+                         join_paths(rootlibexecdir, 'systemd'),
+                         join_paths(rootsbindir, 'init'))
+
 exe = executable('systemd-analyze',
                  systemd_analyze_sources,
                  include_directories : includes,
@@ -1689,6 +1732,12 @@ exe = executable('systemctl', 'src/systemctl/systemctl.c',
                  install : true,
                  install_dir : rootbindir)
 public_programs += [exe]
+
+foreach alias : ['halt', 'poweroff', 'reboot', 'runlevel', 'shutdown', 'telinit']
+        meson.add_install_script(meson_make_symlink,
+                                 join_paths(rootbindir, 'systemctl'),
+                                 join_paths(rootsbindir, alias))
+endforeach
 
 if conf.get('ENABLE_BACKLIGHT') == 1
         executable('systemd-backlight',
@@ -2574,15 +2623,17 @@ install_data('xorg/50-systemd-user.sh',
              install_dir : xinitrcdir)
 install_data('modprobe.d/systemd.conf',
              install_dir : modprobedir)
-install_data('README',
-             'NEWS',
-             'CODING_STYLE',
-             'DISTRO_PORTING',
-             'ENVIRONMENT.md',
-             'LICENSE.GPL2',
+install_data('LICENSE.GPL2',
              'LICENSE.LGPL2.1',
-             'TRANSIENT-SETTINGS.md',
-             'UIDS-GIDS.md',
+             'NEWS',
+             'README',
+             'doc/CODING_STYLE',
+             'doc/DISTRO_PORTING',
+             'doc/ENVIRONMENT.md',
+             'doc/HACKING',
+             'doc/TRANSIENT-SETTINGS.md',
+             'doc/TRANSLATORS',
+             'doc/UIDS-GIDS.md',
              'src/libsystemd/sd-bus/GVARIANT-SERIALIZATION',
              install_dir : docdir)
 
@@ -2703,6 +2754,8 @@ run_target(
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
+        'split /usr:                        @0@'.format(split_usr),
+        'split bin-sbin:                    @0@'.format(split_bin),
         'prefix directory:                  @0@'.format(prefixdir),
         'rootprefix directory:              @0@'.format(rootprefixdir),
         'sysconf directory:                 @0@'.format(sysconfdir),
@@ -2839,7 +2892,6 @@ foreach tuple : [
         ['man pages',        want_man],
         ['html pages',       want_html],
         ['man page indices', want_man and have_lxml],
-        ['split /usr',       conf.get('HAVE_SPLIT_USR') == 1],
         ['SysV compat'],
         ['utmp'],
         ['ldconfig'],

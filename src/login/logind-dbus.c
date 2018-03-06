@@ -41,6 +41,7 @@
 #include "mkdir.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "cgroup-util.h"
 #include "selinux-util.h"
 #include "sleep-config.h"
 #include "special.h"
@@ -658,6 +659,7 @@ static int method_list_inhibitors(sd_bus_message *message, void *userdata, sd_bu
 static int method_create_session(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         const char *service, *type, *class, *cseat, *tty, *display, *remote_user, *remote_host, *desktop;
         uint32_t audit_id = 0;
+        _cleanup_free_ char *unit = NULL;
         _cleanup_free_ char *id = NULL;
         Session *session = NULL;
         Manager *m = userdata;
@@ -787,8 +789,15 @@ static int method_create_session(sd_bus_message *message, void *userdata, sd_bus
                         return r;
         }
 
-        r = manager_get_session_by_pid(m, leader, NULL);
-        if (r > 0)
+        /*
+         * Check if we are already in a logind session.  Or if we are in user@.service
+         * which is a special PAM session that avoids creating a logind session.
+         */
+        r = cg_pid_get_unit(leader, &unit);
+        if (r < 0)
+                return r;
+        if (hashmap_get(m->session_units, unit) ||
+            hashmap_get(m->user_units, unit))
                 return sd_bus_error_setf(error, BUS_ERROR_SESSION_BUSY, "Already running in a session");
 
         /*
@@ -1930,15 +1939,11 @@ static int nologin_timeout_handler(
                         void *userdata) {
 
         Manager *m = userdata;
-        int r;
 
         log_info("Creating /run/nologin, blocking further logins...");
 
-        r = write_string_file_atomic_label("/run/nologin", "System is going down.");
-        if (r < 0)
-                log_error_errno(r, "Failed to create /run/nologin: %m");
-        else
-                m->unlink_nologin = true;
+        m->unlink_nologin =
+                create_shutdown_run_nologin_or_warn() >= 0;
 
         return 0;
 }
@@ -2010,7 +2015,7 @@ static void reset_scheduled_shutdown(Manager *m) {
         m->shutdown_dry_run = false;
 
         if (m->unlink_nologin) {
-                (void) unlink("/run/nologin");
+                (void) unlink_or_warn("/run/nologin");
                 m->unlink_nologin = false;
         }
 
@@ -2653,6 +2658,7 @@ const sd_bus_vtable manager_vtable[] = {
         SD_BUS_PROPERTY("HandleSuspendKey", "s", property_get_handle_action, offsetof(Manager, handle_suspend_key), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("HandleHibernateKey", "s", property_get_handle_action, offsetof(Manager, handle_hibernate_key), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("HandleLidSwitch", "s", property_get_handle_action, offsetof(Manager, handle_lid_switch), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("HandleLidSwitchExternalPower", "s", property_get_handle_action, offsetof(Manager, handle_lid_switch_ep), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("HandleLidSwitchDocked", "s", property_get_handle_action, offsetof(Manager, handle_lid_switch_docked), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("HoldoffTimeoutUSec", "t", NULL, offsetof(Manager, holdoff_timeout_usec), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("IdleAction", "s", property_get_handle_action, offsetof(Manager, idle_action), SD_BUS_VTABLE_PROPERTY_CONST),

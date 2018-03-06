@@ -24,6 +24,7 @@
 #include "alloc-util.h"
 #include "blockdev-util.h"
 #include "bpf-firewall.h"
+#include "bus-error.h"
 #include "cgroup-util.h"
 #include "cgroup.h"
 #include "fd-util.h"
@@ -37,19 +38,34 @@
 #include "stdio-util.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "virt.h"
 
 #define CGROUP_CPU_QUOTA_PERIOD_USEC ((usec_t) 100 * USEC_PER_MSEC)
+
+bool manager_owns_root_cgroup(Manager *m) {
+        assert(m);
+
+        /* Returns true if we are managing the root cgroup. Note that it isn't sufficient to just check whether the
+         * group root path equals "/" since that will also be the case if CLONE_NEWCGROUP is in the mix. Since there's
+         * appears to be no nice way to detect whether we are in a CLONE_NEWCGROUP namespace we instead just check if
+         * we run in any kind of container virtualization. */
+
+        if (detect_container() > 0)
+                return false;
+
+        return isempty(m->cgroup_root) || path_equal(m->cgroup_root, "/");
+}
 
 bool unit_has_root_cgroup(Unit *u) {
         assert(u);
 
-        /* Returns whether this unit manages the root cgroup. Note that this is different from being named "-.slice",
-         * as inside of containers the root slice won't be identical to the root cgroup. */
+        /* Returns whether this unit manages the root cgroup. This will return true if this unit is the root slice and
+         * the manager manages the root cgroup. */
 
-        if (!u->cgroup_path)
+        if (!manager_owns_root_cgroup(u->manager))
                 return false;
 
-        return isempty(u->cgroup_path) || path_equal(u->cgroup_path, "/");
+        return unit_has_name(u, SPECIAL_ROOT_SLICE);
 }
 
 static void cgroup_compat_warn(void) {
@@ -58,7 +74,9 @@ static void cgroup_compat_warn(void) {
         if (cgroup_compat_warned)
                 return;
 
-        log_warning("cgroup compatibility translation between legacy and unified hierarchy settings activated. See cgroup-compat debug messages for details.");
+        log_warning("cgroup compatibility translation between legacy and unified hierarchy settings activated. "
+                    "See cgroup-compat debug messages for details.");
+
         cgroup_compat_warned = true;
 }
 
@@ -692,20 +710,14 @@ static void cgroup_apply_unified_memory_limit(Unit *u, const char *file, uint64_
 }
 
 static void cgroup_apply_firewall(Unit *u) {
-        int r;
-
         assert(u);
 
-        if (u->type == UNIT_SLICE) /* Skip this for slice units, they are inner cgroup nodes, and since bpf/cgroup is
-                                    * not recursive we don't ever touch the bpf on them */
-                return;
+        /* Best-effort: let's apply IP firewalling and/or accounting if that's enabled */
 
-        r = bpf_firewall_compile(u);
-        if (r < 0)
+        if (bpf_firewall_compile(u) < 0)
                 return;
 
         (void) bpf_firewall_install(u);
-        return;
 }
 
 static void cgroup_context_apply(
@@ -1124,14 +1136,7 @@ CGroupMask unit_get_delegate_mask(Unit *u) {
          *
          * Note that on the unified hierarchy it is safe to delegate controllers to unprivileged services. */
 
-        if (u->type == UNIT_SLICE)
-                return 0;
-
-        c = unit_get_cgroup_context(u);
-        if (!c)
-                return 0;
-
-        if (!c->delegate)
+        if (!unit_cgroup_delegate(u))
                 return 0;
 
         if (cg_all_unified() <= 0) {
@@ -1142,6 +1147,7 @@ CGroupMask unit_get_delegate_mask(Unit *u) {
                         return 0;
         }
 
+        assert_se(c = unit_get_cgroup_context(u));
         return c->delegate_controllers;
 }
 
@@ -1232,11 +1238,6 @@ bool unit_get_needs_bpf(Unit *u) {
         Unit *p;
         assert(u);
 
-        /* We never attach BPF to slice units, as they are inner cgroup nodes and cgroup/BPF is not recursive at the
-         * moment. */
-        if (u->type == UNIT_SLICE)
-                return false;
-
         c = unit_get_cgroup_context(u);
         if (!c)
                 return false;
@@ -1309,13 +1310,12 @@ void unit_update_cgroup_members_masks(Unit *u) {
         }
 }
 
-static const char *migrate_callback(CGroupMask mask, void *userdata) {
-        Unit *u = userdata;
+const char *unit_get_realized_cgroup_path(Unit *u, CGroupMask mask) {
 
-        assert(mask != 0);
-        assert(u);
+        /* Returns the realized cgroup path of the specified unit where all specified controllers are available. */
 
         while (u) {
+
                 if (u->cgroup_path &&
                     u->cgroup_realized &&
                     (u->cgroup_realized_mask & mask) == mask)
@@ -1325,6 +1325,10 @@ static const char *migrate_callback(CGroupMask mask, void *userdata) {
         }
 
         return NULL;
+}
+
+static const char *migrate_callback(CGroupMask mask, void *userdata) {
+        return unit_get_realized_cgroup_path(userdata, mask);
 }
 
 char *unit_default_cgroup_path(Unit *u) {
@@ -1496,7 +1500,7 @@ static int unit_create_cgroup(
         u->cgroup_enabled_mask = enable_mask;
         u->cgroup_bpf_state = needs_bpf ? UNIT_CGROUP_BPF_ON : UNIT_CGROUP_BPF_OFF;
 
-        if (u->type != UNIT_SLICE && !c->delegate) {
+        if (u->type != UNIT_SLICE && !unit_cgroup_delegate(u)) {
 
                 /* Then, possibly move things over, but not if
                  * subgroups may contain processes, which is the case
@@ -1509,19 +1513,142 @@ static int unit_create_cgroup(
         return 0;
 }
 
-int unit_attach_pids_to_cgroup(Unit *u) {
+static int unit_attach_pid_to_cgroup_via_bus(Unit *u, pid_t pid, const char *suffix_path) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        char *pp;
         int r;
+
         assert(u);
+
+        if (MANAGER_IS_SYSTEM(u->manager))
+                return -EINVAL;
+
+        if (!u->manager->system_bus)
+                return -EIO;
+
+        if (!u->cgroup_path)
+                return -EINVAL;
+
+        /* Determine this unit's cgroup path relative to our cgroup root */
+        pp = path_startswith(u->cgroup_path, u->manager->cgroup_root);
+        if (!pp)
+                return -EINVAL;
+
+        pp = strjoina("/", pp, suffix_path);
+        path_kill_slashes(pp);
+
+        r = sd_bus_call_method(u->manager->system_bus,
+                               "org.freedesktop.systemd1",
+                               "/org/freedesktop/systemd1",
+                               "org.freedesktop.systemd1.Manager",
+                               "AttachProcessesToUnit",
+                               &error, NULL,
+                               "ssau",
+                               NULL /* empty unit name means client's unit, i.e. us */, pp, 1, (uint32_t) pid);
+        if (r < 0)
+                return log_unit_debug_errno(u, r, "Failed to attach unit process " PID_FMT " via the bus: %s", pid, bus_error_message(&error, r));
+
+        return 0;
+}
+
+int unit_attach_pids_to_cgroup(Unit *u, Set *pids, const char *suffix_path) {
+        CGroupMask delegated_mask;
+        const char *p;
+        Iterator i;
+        void *pidp;
+        int r, q;
+
+        assert(u);
+
+        if (!UNIT_HAS_CGROUP_CONTEXT(u))
+                return -EINVAL;
+
+        if (set_isempty(pids))
+                return 0;
 
         r = unit_realize_cgroup(u);
         if (r < 0)
                 return r;
 
-        r = cg_attach_many_everywhere(u->manager->cgroup_supported, u->cgroup_path, u->pids, migrate_callback, u);
-        if (r < 0)
-                return r;
+        if (isempty(suffix_path))
+                p = u->cgroup_path;
+        else
+                p = strjoina(u->cgroup_path, "/", suffix_path);
 
-        return 0;
+        delegated_mask = unit_get_delegate_mask(u);
+
+        r = 0;
+        SET_FOREACH(pidp, pids, i) {
+                pid_t pid = PTR_TO_PID(pidp);
+                CGroupController c;
+
+                /* First, attach the PID to the main cgroup hierarchy */
+                q = cg_attach(SYSTEMD_CGROUP_CONTROLLER, p, pid);
+                if (q < 0) {
+                        log_unit_debug_errno(u, q, "Couldn't move process " PID_FMT " to requested cgroup '%s': %m", pid, p);
+
+                        if (MANAGER_IS_USER(u->manager) && IN_SET(q, -EPERM, -EACCES)) {
+                                int z;
+
+                                /* If we are in a user instance, and we can't move the process ourselves due to
+                                 * permission problems, let's ask the system instance about it instead. Since it's more
+                                 * privileged it might be able to move the process across the leaves of a subtree who's
+                                 * top node is not owned by us. */
+
+                                z = unit_attach_pid_to_cgroup_via_bus(u, pid, suffix_path);
+                                if (z < 0)
+                                        log_unit_debug_errno(u, z, "Couldn't move process " PID_FMT " to requested cgroup '%s' via the system bus either: %m", pid, p);
+                                else
+                                        continue; /* When the bus thing worked via the bus we are fully done for this PID. */
+                        }
+
+                        if (r >= 0)
+                                r = q; /* Remember first error */
+
+                        continue;
+                }
+
+                q = cg_all_unified();
+                if (q < 0)
+                        return q;
+                if (q > 0)
+                        continue;
+
+                /* In the legacy hierarchy, attach the process to the request cgroup if possible, and if not to the
+                 * innermost realized one */
+
+                for (c = 0; c < _CGROUP_CONTROLLER_MAX; c++) {
+                        CGroupMask bit = CGROUP_CONTROLLER_TO_MASK(c);
+                        const char *realized;
+
+                        if (!(u->manager->cgroup_supported & bit))
+                                continue;
+
+                        /* If this controller is delegated and realized, honour the caller's request for the cgroup suffix. */
+                        if (delegated_mask & u->cgroup_realized_mask & bit) {
+                                q = cg_attach(cgroup_controller_to_string(c), p, pid);
+                                if (q >= 0)
+                                        continue; /* Success! */
+
+                                log_unit_debug_errno(u, q, "Failed to attach PID " PID_FMT " to requested cgroup %s in controller %s, falling back to unit's cgroup: %m",
+                                                     pid, p, cgroup_controller_to_string(c));
+                        }
+
+                        /* So this controller is either not delegate or realized, or something else weird happened. In
+                         * that case let's attach the PID at least to the closest cgroup up the tree that is
+                         * realized. */
+                        realized = unit_get_realized_cgroup_path(u, bit);
+                        if (!realized)
+                                continue; /* Not even realized in the root slice? Then let's not bother */
+
+                        q = cg_attach(cgroup_controller_to_string(c), realized, pid);
+                        if (q < 0)
+                                log_unit_debug_errno(u, q, "Failed to attach PID " PID_FMT " to realized cgroup %s in controller %s, ignoring: %m",
+                                                     pid, realized, cgroup_controller_to_string(c));
+                }
+        }
+
+        return r;
 }
 
 static void cgroup_xattr_apply(Unit *u) {
@@ -2296,6 +2423,10 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
         if (!u->cgroup_path)
                 return -ENODATA;
 
+        /* The root cgroup doesn't expose this information, let's get it from /proc instead */
+        if (unit_has_root_cgroup(u))
+                return procfs_memory_get_current(ret);
+
         if ((u->cgroup_realized_mask & CGROUP_MASK_MEMORY) == 0)
                 return -ENODATA;
 
@@ -2327,12 +2458,12 @@ int unit_get_tasks_current(Unit *u, uint64_t *ret) {
         if (!u->cgroup_path)
                 return -ENODATA;
 
-        if ((u->cgroup_realized_mask & CGROUP_MASK_PIDS) == 0)
-                return -ENODATA;
-
         /* The root cgroup doesn't expose this information, let's get it from /proc instead */
         if (unit_has_root_cgroup(u))
                 return procfs_tasks_get_current(ret);
+
+        if ((u->cgroup_realized_mask & CGROUP_MASK_PIDS) == 0)
+                return -ENODATA;
 
         r = cg_get_attribute("pids", u->cgroup_path, "pids.current", &v);
         if (r == -ENOENT)
@@ -2354,20 +2485,25 @@ static int unit_get_cpu_usage_raw(Unit *u, nsec_t *ret) {
         if (!u->cgroup_path)
                 return -ENODATA;
 
+        /* The root cgroup doesn't expose this information, let's get it from /proc instead */
+        if (unit_has_root_cgroup(u))
+                return procfs_cpu_get_usage(ret);
+
         r = cg_all_unified();
         if (r < 0)
                 return r;
         if (r > 0) {
-                const char *keys[] = { "usage_usec", NULL };
                 _cleanup_free_ char *val = NULL;
                 uint64_t us;
 
                 if ((u->cgroup_realized_mask & CGROUP_MASK_CPU) == 0)
                         return -ENODATA;
 
-                r = cg_get_keyed_attribute("cpu", u->cgroup_path, "cpu.stat", keys, &val);
+                r = cg_get_keyed_attribute("cpu", u->cgroup_path, "cpu.stat", STRV_MAKE("usage_usec"), &val);
                 if (r < 0)
                         return r;
+                if (IN_SET(r, -ENOENT, -ENXIO))
+                        return -ENODATA;
 
                 r = safe_atou64(val, &us);
                 if (r < 0)
@@ -2442,13 +2578,6 @@ int unit_get_ip_accounting(
         assert(metric >= 0);
         assert(metric < _CGROUP_IP_ACCOUNTING_METRIC_MAX);
         assert(ret);
-
-        /* IP accounting is currently not recursive, and hence we refuse to return any data for slice nodes. Slices are
-         * inner cgroup nodes and hence have no processes directly attached, hence their counters would be zero
-         * anyway. And if we block this now we can later open this up, if the kernel learns recursive BPF cgroup
-         * filters. */
-        if (u->type == UNIT_SLICE)
-                return -ENODATA;
 
         if (!UNIT_CGROUP_BOOL(u, ip_accounting))
                 return -ENODATA;
@@ -2561,6 +2690,21 @@ void unit_invalidate_cgroup_bpf(Unit *u) {
                         unit_invalidate_cgroup_bpf(member);
                 }
         }
+}
+
+bool unit_cgroup_delegate(Unit *u) {
+        CGroupContext *c;
+
+        assert(u);
+
+        if (!UNIT_VTABLE(u)->can_delegate)
+                return false;
+
+        c = unit_get_cgroup_context(u);
+        if (!c)
+                return false;
+
+        return c->delegate;
 }
 
 void manager_invalidate_startup_units(Manager *m) {

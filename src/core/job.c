@@ -312,11 +312,13 @@ void job_dump(Job *j, FILE*f, const char *prefix) {
                 "%s-> Job %u:\n"
                 "%s\tAction: %s -> %s\n"
                 "%s\tState: %s\n"
-                "%s\tIrreversible: %s\n",
+                "%s\tIrreversible: %s\n"
+                "%s\tMay GC: %s\n",
                 prefix, j->id,
                 prefix, j->unit->id, job_type_to_string(j->type),
                 prefix, job_state_to_string(j->state),
-                prefix, yes_no(j->irreversible));
+                prefix, yes_no(j->irreversible),
+                prefix, yes_no(job_may_gc(j)));
 }
 
 /*
@@ -694,7 +696,7 @@ _pure_ static const char *job_get_status_message_format(Unit *u, JobType t, JobR
 static const struct {
         const char *color, *word;
 } job_print_status_messages [_JOB_RESULT_MAX] = {
-        [JOB_DONE]        = { ANSI_GREEN,            "  OK  " },
+        [JOB_DONE]        = { ANSI_OK_COLOR,         "  OK  " },
         [JOB_TIMEOUT]     = { ANSI_HIGHLIGHT_RED,    " TIME " },
         [JOB_FAILED]      = { ANSI_HIGHLIGHT_RED,    "FAILED" },
         [JOB_DEPENDENCY]  = { ANSI_HIGHLIGHT_YELLOW, "DEPEND" },
@@ -774,9 +776,12 @@ static void job_log_status_message(Unit *u, JobType t, JobResult result) {
         if (!format)
                 return;
 
-        /* The description might be longer than the buffer, but that's OK, we'll just truncate it here */
+        /* The description might be longer than the buffer, but that's OK,
+         * we'll just truncate it here. Note that we use snprintf() rather than
+         * xsprintf() on purpose here: we are fine with truncation and don't
+         * consider that an error. */
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        xsprintf(buf, format, unit_description(u));
+        (void) snprintf(buf, sizeof(buf), format, unit_description(u));
         REENABLE_WARNING;
 
         switch (t) {
@@ -1272,7 +1277,7 @@ int job_get_timeout(Job *j, usec_t *timeout) {
         return 1;
 }
 
-bool job_check_gc(Job *j) {
+bool job_may_gc(Job *j) {
         Unit *other;
         Iterator i;
         void *v;
@@ -1280,13 +1285,14 @@ bool job_check_gc(Job *j) {
         assert(j);
 
         /* Checks whether this job should be GC'ed away. We only do this for jobs of units that have no effect on their
-         * own and just track external state. For now the only unit type that qualifies for this are .device units. */
+         * own and just track external state. For now the only unit type that qualifies for this are .device units.
+         * Returns true if the job can be collected. */
 
         if (!UNIT_VTABLE(j->unit)->gc_jobs)
-                return true;
+                return false;
 
         if (sd_bus_track_count(j->bus_track) > 0)
-                return true;
+                return false;
 
         /* FIXME: So this is a bit ugly: for now we don't properly track references made via private bus connections
          * (because it's nasty, as sd_bus_track doesn't apply to it). We simply remember that the job was once
@@ -1296,11 +1302,11 @@ bool job_check_gc(Job *j) {
                 if (set_isempty(j->unit->manager->private_buses))
                         j->ref_by_private_bus = false;
                 else
-                        return true;
+                        return false;
         }
 
         if (j->type == JOB_NOP)
-                return true;
+                return false;
 
         /* If a job is ordered after ours, and is to be started, then it needs to wait for us, regardless if we stop or
          * start, hence let's not GC in that case. */
@@ -1312,7 +1318,7 @@ bool job_check_gc(Job *j) {
                         continue;
 
                 if (IN_SET(other->job->type, JOB_START, JOB_VERIFY_ACTIVE, JOB_RELOAD))
-                        return true;
+                        return false;
         }
 
         /* If we are going down, but something else is ordered After= us, then it needs to wait for us */
@@ -1324,7 +1330,7 @@ bool job_check_gc(Job *j) {
                         if (other->job->ignore_order)
                                 continue;
 
-                        return true;
+                        return false;
                 }
 
         /* The logic above is kinda the inverse of the job_is_runnable() logic. Specifically, if the job "we" is
@@ -1344,7 +1350,7 @@ bool job_check_gc(Job *j) {
          *
          */
 
-        return false;
+        return true;
 }
 
 void job_add_to_gc_queue(Job *j) {
@@ -1353,7 +1359,7 @@ void job_add_to_gc_queue(Job *j) {
         if (j->in_gc_queue)
                 return;
 
-        if (job_check_gc(j))
+        if (!job_may_gc(j))
                 return;
 
         LIST_PREPEND(gc_queue, j->unit->manager->gc_job_queue, j);

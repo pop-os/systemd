@@ -28,21 +28,45 @@
 #include "macro.h"
 #include "time-util.h"
 
-#define ANSI_RED "\x1B[0;31m"
-#define ANSI_GREEN "\x1B[0;32m"
+/* Regular colors */
+#define ANSI_BLACK   "\x1B[0;30m"
+#define ANSI_RED     "\x1B[0;31m"
+#define ANSI_GREEN   "\x1B[0;32m"
+#define ANSI_YELLOW  "\x1B[0;33m"
+#define ANSI_BLUE    "\x1B[0;34m"
+#define ANSI_MAGENTA "\x1B[0;35m"
+#define ANSI_CYAN    "\x1B[0;36m"
+#define ANSI_WHITE   "\x1B[0;37m"
+
+/* Bold/highlighted */
+#define ANSI_HIGHLIGHT_BLACK   "\x1B[0;1;30m"
+#define ANSI_HIGHLIGHT_RED     "\x1B[0;1;31m"
+#define ANSI_HIGHLIGHT_GREEN   "\x1B[0;1;32m"
+#define ANSI_HIGHLIGHT_YELLOW  "\x1B[0;1;33m"
+#define ANSI_HIGHLIGHT_BLUE    "\x1B[0;1;34m"
+#define ANSI_HIGHLIGHT_MAGENTA "\x1B[0;1;35m"
+#define ANSI_HIGHLIGHT_CYAN    "\x1B[0;1;36m"
+#define ANSI_HIGHLIGHT_WHITE   "\x1B[0;1;37m"
+
+/* Underlined */
+#define ANSI_HIGHLIGHT_BLACK_UNDERLINE   "\x1B[0;1;4;30m"
+#define ANSI_HIGHLIGHT_RED_UNDERLINE     "\x1B[0;1;4;31m"
+#define ANSI_HIGHLIGHT_GREEN_UNDERLINE   "\x1B[0;1;4;32m"
+#define ANSI_HIGHLIGHT_YELLOW_UNDERLINE  "\x1B[0;1;4;33m"
+#define ANSI_HIGHLIGHT_BLUE_UNDERLINE    "\x1B[0;1;4;34m"
+#define ANSI_HIGHLIGHT_MAGENTA_UNDERLINE "\x1B[0;1;4;35m"
+#define ANSI_HIGHLIGHT_CYAN_UNDERLINE    "\x1B[0;1;4;36m"
+#define ANSI_HIGHLIGHT_WHITE_UNDERLINE   "\x1B[0;1;4;37m"
+
+/* Other ANSI codes */
 #define ANSI_UNDERLINE "\x1B[0;4m"
 #define ANSI_HIGHLIGHT "\x1B[0;1;39m"
-#define ANSI_HIGHLIGHT_RED "\x1B[0;1;31m"
-#define ANSI_HIGHLIGHT_GREEN "\x1B[0;1;32m"
-#define ANSI_HIGHLIGHT_YELLOW "\x1B[0;1;33m"
-#define ANSI_HIGHLIGHT_BLUE "\x1B[0;1;34m"
 #define ANSI_HIGHLIGHT_UNDERLINE "\x1B[0;1;4m"
-#define ANSI_HIGHLIGHT_RED_UNDERLINE "\x1B[0;1;4;31m"
-#define ANSI_HIGHLIGHT_GREEN_UNDERLINE "\x1B[0;1;4;32m"
-#define ANSI_HIGHLIGHT_YELLOW_UNDERLINE "\x1B[0;1;4;33m"
-#define ANSI_HIGHLIGHT_BLUE_UNDERLINE "\x1B[0;1;4;34m"
+
+/* Reset/clear ANSI styles */
 #define ANSI_NORMAL "\x1B[0m"
 
+/* Erase characters until the end of the line */
 #define ANSI_ERASE_TO_END_OF_LINE "\x1B[K"
 
 /* Set cursor to top left corner and clear screen */
@@ -52,7 +76,23 @@ int reset_terminal_fd(int fd, bool switch_to_text);
 int reset_terminal(const char *name);
 
 int open_terminal(const char *name, int mode);
-int acquire_terminal(const char *name, bool fail, bool force, bool ignore_tiocstty_eperm, usec_t timeout);
+
+/* Flags for tweaking the way we become the controlling process of a terminal. */
+typedef enum AcquireTerminalFlags {
+        /* Try to become the controlling process of the TTY. If we can't return -EPERM. */
+        ACQUIRE_TERMINAL_TRY = 0,
+
+        /* Tell the kernel to forcibly make us the controlling process of the TTY. Returns -EPERM if the kernel doesn't allow that. */
+        ACQUIRE_TERMINAL_FORCE = 1,
+
+        /* If we can't become the controlling process of the TTY right-away, then wait until we can. */
+        ACQUIRE_TERMINAL_WAIT = 2,
+
+        /* Pick one of the above, and then OR this flag in, in order to request permissive behaviour, if we can't become controlling process then don't mind */
+        ACQUIRE_TERMINAL_PERMISSIVE = 4,
+} AcquireTerminalFlags;
+
+int acquire_terminal(const char *name, AcquireTerminalFlags flags, usec_t timeout);
 int release_terminal(void);
 
 int terminal_vhangup_fd(int fd);
@@ -66,28 +106,29 @@ int ask_string(char **ret, const char *text, ...) _printf_(2, 3);
 
 int vt_disallocate(const char *name);
 
-char *resolve_dev_console(char **active);
-int get_kernel_consoles(char ***consoles);
+int resolve_dev_console(char **ret);
+int get_kernel_consoles(char ***ret);
 bool tty_is_vc(const char *tty);
 bool tty_is_vc_resolve(const char *tty);
 bool tty_is_console(const char *tty) _pure_;
 int vtnr_from_tty(const char *tty);
 const char *default_term_for_tty(const char *tty);
 
-int make_stdio(int fd);
-int make_null_stdio(void);
 int make_console_stdio(void);
 
 int fd_columns(int fd);
 unsigned columns(void);
 int fd_lines(int fd);
 unsigned lines(void);
+
 void columns_lines_cache_reset(int _unused_ signum);
+void reset_terminal_feature_caches(void);
 
 bool on_tty(void);
 bool terminal_is_dumb(void);
 bool colors_enabled(void);
 bool underline_enabled(void);
+bool dev_console_colors_enabled(void);
 
 #define DEFINE_ANSI_FUNC(name, NAME)                            \
         static inline const char *ansi_##name(void) {           \

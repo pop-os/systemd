@@ -22,7 +22,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <linux/reboot.h>
 #include <locale.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -57,8 +56,8 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "glob-util.h"
-#include "hostname-util.h"
 #include "hexdecoct.h"
+#include "hostname-util.h"
 #include "initreq.h"
 #include "install.h"
 #include "io-util.h"
@@ -73,6 +72,7 @@
 #include "path-lookup.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "reboot-util.h"
 #include "rlimit-util.h"
 #include "set.h"
 #include "sigbus.h"
@@ -2942,7 +2942,8 @@ static int start_unit_one(
                 log_error("Failed to %s %s: %s", verb, name, bus_error_message(error, r));
 
                 if (!sd_bus_error_has_name(error, BUS_ERROR_NO_SUCH_UNIT) &&
-                    !sd_bus_error_has_name(error, BUS_ERROR_UNIT_MASKED))
+                    !sd_bus_error_has_name(error, BUS_ERROR_UNIT_MASKED) &&
+                    !sd_bus_error_has_name(error, BUS_ERROR_JOB_TYPE_NOT_APPLICABLE))
                         log_error("See %s logs and 'systemctl%s status%s %s' for details.",
                                    arg_scope == UNIT_FILE_SYSTEM ? "system" : "user",
                                    arg_scope == UNIT_FILE_SYSTEM ? "" : " --user",
@@ -4870,7 +4871,7 @@ static int print_property(const char *name, sd_bus_message *m, const char *conte
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(sb)", &path, &ignore)) > 0)
-                                print_prop("EnvironmentFile", "%s (ignore_errors=%s)", path, yes_no(ignore));
+                                print_prop(name, "%s (ignore_errors=%s)", path, yes_no(ignore));
 
                         if (r < 0)
                                 return bus_log_parse_error(r);
@@ -4889,7 +4890,7 @@ static int print_property(const char *name, sd_bus_message *m, const char *conte
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(ss)", &type, &path)) > 0)
-                                print_prop(type, "%s", path);
+                                print_prop(name, "%s (%s)", path, type);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -4907,10 +4908,7 @@ static int print_property(const char *name, sd_bus_message *m, const char *conte
                                 return bus_log_parse_error(r);
 
                         while ((r = sd_bus_message_read(m, "(ss)", &type, &path)) > 0)
-                                if (arg_value)
-                                        puts(path);
-                                else
-                                        printf("Listen%s=%s\n", type, path);
+                                print_prop(name, "%s (%s)", path, type);
                         if (r < 0)
                                 return bus_log_parse_error(r);
 
@@ -4920,7 +4918,7 @@ static int print_property(const char *name, sd_bus_message *m, const char *conte
 
                         return 0;
 
-                } else if (contents[1] == SD_BUS_TYPE_STRUCT_BEGIN && streq(name, "Timers")) {
+                } else if (contents[1] == SD_BUS_TYPE_STRUCT_BEGIN && streq(name, "TimersMonotonic")) {
                         const char *base;
                         uint64_t value, next_elapse;
 
@@ -4931,9 +4929,32 @@ static int print_property(const char *name, sd_bus_message *m, const char *conte
                         while ((r = sd_bus_message_read(m, "(stt)", &base, &value, &next_elapse)) > 0) {
                                 char timespan1[FORMAT_TIMESPAN_MAX], timespan2[FORMAT_TIMESPAN_MAX];
 
-                                print_prop(base, "{ value=%s ; next_elapse=%s }",
+                                print_prop(name, "{ %s=%s ; next_elapse=%s }", base,
                                            format_timespan(timespan1, sizeof(timespan1), value, 0),
                                            format_timespan(timespan2, sizeof(timespan2), next_elapse, 0));
+                        }
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        r = sd_bus_message_exit_container(m);
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        return 0;
+
+                } else if (contents[1] == SD_BUS_TYPE_STRUCT_BEGIN && streq(name, "TimersCalendar")) {
+                        const char *base, *spec;
+                        uint64_t next_elapse;
+
+                        r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(sst)");
+                        if (r < 0)
+                                return bus_log_parse_error(r);
+
+                        while ((r = sd_bus_message_read(m, "(sst)", &base, &spec, &next_elapse)) > 0) {
+                                char timestamp[FORMAT_TIMESTAMP_MAX];
+
+                                print_prop(name, "{ %s=%s ; next_elapse=%s }", base, spec,
+                                           format_timestamp(timestamp, sizeof(timestamp), next_elapse));
                         }
                         if (r < 0)
                                 return bus_log_parse_error(r);
@@ -7227,85 +7248,85 @@ static void systemctl_help(void) {
                "     --firmware-setup Tell the firmware to show the setup menu on next boot\n"
                "     --plain          Print unit dependencies as a list instead of a tree\n\n"
                "Unit Commands:\n"
-               "  list-units [PATTERN...]         List units currently in memory\n"
-               "  list-sockets [PATTERN...]       List socket units currently in memory, ordered\n"
-               "                                  by address\n"
-               "  list-timers [PATTERN...]        List timer units currently in memory, ordered\n"
-               "                                  by next elapse\n"
-               "  start NAME...                   Start (activate) one or more units\n"
-               "  stop NAME...                    Stop (deactivate) one or more units\n"
-               "  reload NAME...                  Reload one or more units\n"
-               "  restart NAME...                 Start or restart one or more units\n"
-               "  try-restart NAME...             Restart one or more units if active\n"
-               "  reload-or-restart NAME...       Reload one or more units if possible,\n"
-               "                                  otherwise start or restart\n"
-               "  try-reload-or-restart NAME...   If active, reload one or more units,\n"
-               "                                  if supported, otherwise restart\n"
-               "  isolate NAME                    Start one unit and stop all others\n"
-               "  kill NAME...                    Send signal to processes of a unit\n"
-               "  is-active PATTERN...            Check whether units are active\n"
-               "  is-failed PATTERN...            Check whether units are failed\n"
-               "  status [PATTERN...|PID...]      Show runtime status of one or more units\n"
-               "  show [PATTERN...|JOB...]        Show properties of one or more\n"
-               "                                  units/jobs or the manager\n"
-               "  cat PATTERN...                  Show files and drop-ins of one or more units\n"
-               "  set-property NAME ASSIGNMENT... Sets one or more properties of a unit\n"
-               "  help PATTERN...|PID...          Show manual for one or more units\n"
-               "  reset-failed [PATTERN...]       Reset failed state for all, one, or more\n"
-               "                                  units\n"
-               "  list-dependencies [NAME]        Recursively show units which are required\n"
-               "                                  or wanted by this unit or by which this\n"
-               "                                  unit is required or wanted\n\n"
+               "  list-units [PATTERN...]             List units currently in memory\n"
+               "  list-sockets [PATTERN...]           List socket units currently in memory,\n"
+               "                                      ordered by address\n"
+               "  list-timers [PATTERN...]            List timer units currently in memory,\n"
+               "                                      ordered by next elapse\n"
+               "  start UNIT...                       Start (activate) one or more units\n"
+               "  stop UNIT...                        Stop (deactivate) one or more units\n"
+               "  reload UNIT...                      Reload one or more units\n"
+               "  restart UNIT...                     Start or restart one or more units\n"
+               "  try-restart UNIT...                 Restart one or more units if active\n"
+               "  reload-or-restart UNIT...           Reload one or more units if possible,\n"
+               "                                      otherwise start or restart\n"
+               "  try-reload-or-restart UNIT...       If active, reload one or more units,\n"
+               "                                      if supported, otherwise restart\n"
+               "  isolate UNIT                        Start one unit and stop all others\n"
+               "  kill UNIT...                        Send signal to processes of a unit\n"
+               "  is-active PATTERN...                Check whether units are active\n"
+               "  is-failed PATTERN...                Check whether units are failed\n"
+               "  status [PATTERN...|PID...]          Show runtime status of one or more units\n"
+               "  show [PATTERN...|JOB...]            Show properties of one or more\n"
+               "                                      units/jobs or the manager\n"
+               "  cat PATTERN...                      Show files and drop-ins of specified units\n"
+               "  set-property UNIT PROPERTY=VALUE... Sets one or more properties of a unit\n"
+               "  help PATTERN...|PID...              Show manual for one or more units\n"
+               "  reset-failed [PATTERN...]           Reset failed state for all, one, or more\n"
+               "                                      units\n"
+               "  list-dependencies [UNIT]            Recursively show units which are required\n"
+               "                                      or wanted by this unit or by which this\n"
+               "                                      unit is required or wanted\n\n"
                "Unit File Commands:\n"
-               "  list-unit-files [PATTERN...]    List installed unit files\n"
-               "  enable [NAME...|PATH...]        Enable one or more unit files\n"
-               "  disable NAME...                 Disable one or more unit files\n"
-               "  reenable NAME...                Reenable one or more unit files\n"
-               "  preset NAME...                  Enable/disable one or more unit files\n"
-               "                                  based on preset configuration\n"
-               "  preset-all                      Enable/disable all unit files based on\n"
-               "                                  preset configuration\n"
-               "  is-enabled NAME...              Check whether unit files are enabled\n"
-               "  mask NAME...                    Mask one or more units\n"
-               "  unmask NAME...                  Unmask one or more units\n"
-               "  link PATH...                    Link one or more units files into\n"
-               "                                  the search path\n"
-               "  revert NAME...                  Revert one or more unit files to vendor\n"
-               "                                  version\n"
-               "  add-wants TARGET NAME...        Add 'Wants' dependency for the target\n"
-               "                                  on specified one or more units\n"
-               "  add-requires TARGET NAME...     Add 'Requires' dependency for the target\n"
-               "                                  on specified one or more units\n"
-               "  edit NAME...                    Edit one or more unit files\n"
-               "  get-default                     Get the name of the default target\n"
-               "  set-default NAME                Set the default target\n\n"
+               "  list-unit-files [PATTERN...]        List installed unit files\n"
+               "  enable [UNIT...|PATH...]            Enable one or more unit files\n"
+               "  disable UNIT...                     Disable one or more unit files\n"
+               "  reenable UNIT...                    Reenable one or more unit files\n"
+               "  preset UNIT...                      Enable/disable one or more unit files\n"
+               "                                      based on preset configuration\n"
+               "  preset-all                          Enable/disable all unit files based on\n"
+               "                                      preset configuration\n"
+               "  is-enabled UNIT...                  Check whether unit files are enabled\n"
+               "  mask UNIT...                        Mask one or more units\n"
+               "  unmask UNIT...                      Unmask one or more units\n"
+               "  link PATH...                        Link one or more units files into\n"
+               "                                      the search path\n"
+               "  revert UNIT...                      Revert one or more unit files to vendor\n"
+               "                                      version\n"
+               "  add-wants TARGET UNIT...            Add 'Wants' dependency for the target\n"
+               "                                      on specified one or more units\n"
+               "  add-requires TARGET UNIT...         Add 'Requires' dependency for the target\n"
+               "                                      on specified one or more units\n"
+               "  edit UNIT...                        Edit one or more unit files\n"
+               "  get-default                         Get the name of the default target\n"
+               "  set-default TARGET                  Set the default target\n\n"
                "Machine Commands:\n"
-               "  list-machines [PATTERN...]      List local containers and host\n\n"
+               "  list-machines [PATTERN...]          List local containers and host\n\n"
                "Job Commands:\n"
-               "  list-jobs [PATTERN...]          List jobs\n"
-               "  cancel [JOB...]                 Cancel all, one, or more jobs\n\n"
+               "  list-jobs [PATTERN...]              List jobs\n"
+               "  cancel [JOB...]                     Cancel all, one, or more jobs\n\n"
                "Environment Commands:\n"
-               "  show-environment                Dump environment\n"
-               "  set-environment NAME=VALUE...   Set one or more environment variables\n"
-               "  unset-environment NAME...       Unset one or more environment variables\n"
-               "  import-environment [NAME...]    Import all or some environment variables\n\n"
+               "  show-environment                    Dump environment\n"
+               "  set-environment VARIABLE=VALUE...   Set one or more environment variables\n"
+               "  unset-environment VARIABLE...       Unset one or more environment variables\n"
+               "  import-environment [VARIABLE...]    Import all or some environment variables\n\n"
                "Manager Lifecycle Commands:\n"
-               "  daemon-reload                   Reload systemd manager configuration\n"
-               "  daemon-reexec                   Reexecute systemd manager\n\n"
+               "  daemon-reload                       Reload systemd manager configuration\n"
+               "  daemon-reexec                       Reexecute systemd manager\n\n"
                "System Commands:\n"
-               "  is-system-running               Check whether system is fully running\n"
-               "  default                         Enter system default mode\n"
-               "  rescue                          Enter system rescue mode\n"
-               "  emergency                       Enter system emergency mode\n"
-               "  halt                            Shut down and halt the system\n"
-               "  poweroff                        Shut down and power-off the system\n"
-               "  reboot [ARG]                    Shut down and reboot the system\n"
-               "  kexec                           Shut down and reboot the system with kexec\n"
-               "  exit [EXIT_CODE]                Request user instance or container exit\n"
-               "  switch-root ROOT [INIT]         Change to a different root file system\n"
-               "  suspend                         Suspend the system\n"
-               "  hibernate                       Hibernate the system\n"
-               "  hybrid-sleep                    Hibernate and suspend the system\n",
+               "  is-system-running                   Check whether system is fully running\n"
+               "  default                             Enter system default mode\n"
+               "  rescue                              Enter system rescue mode\n"
+               "  emergency                           Enter system emergency mode\n"
+               "  halt                                Shut down and halt the system\n"
+               "  poweroff                            Shut down and power-off the system\n"
+               "  reboot [ARG]                        Shut down and reboot the system\n"
+               "  kexec                               Shut down and reboot the system with kexec\n"
+               "  exit [EXIT_CODE]                    Request user instance or container exit\n"
+               "  switch-root ROOT [INIT]             Change to a different root file system\n"
+               "  suspend                             Suspend the system\n"
+               "  hibernate                           Hibernate the system\n"
+               "  hybrid-sleep                        Hibernate and suspend the system\n",
                program_invocation_short_name);
 }
 
@@ -7467,7 +7488,6 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 ARG_NO_ASK_PASSWORD,
                 ARG_FAILED,
                 ARG_RUNTIME,
-                ARG_FORCE,
                 ARG_PLAIN,
                 ARG_STATE,
                 ARG_JOB_MODE,
@@ -7507,7 +7527,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
                 { "dry-run",             no_argument,       NULL, ARG_DRY_RUN             },
                 { "quiet",               no_argument,       NULL, 'q'                     },
                 { "root",                required_argument, NULL, ARG_ROOT                },
-                { "force",               no_argument,       NULL, ARG_FORCE               },
+                { "force",               no_argument,       NULL, 'f'                     },
                 { "no-reload",           no_argument,       NULL, ARG_NO_RELOAD           },
                 { "kill-who",            required_argument, NULL, ARG_KILL_WHO            },
                 { "signal",              required_argument, NULL, 's'                     },
@@ -7720,10 +7740,6 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
 
                 case 'q':
                         arg_quiet = true;
-                        break;
-
-                case ARG_FORCE:
-                        arg_force++;
                         break;
 
                 case 'f':
@@ -8252,28 +8268,43 @@ static int parse_argv(int argc, char *argv[]) {
                 if (strstr(program_invocation_short_name, "halt")) {
                         arg_action = ACTION_HALT;
                         return halt_parse_argv(argc, argv);
+
                 } else if (strstr(program_invocation_short_name, "poweroff")) {
                         arg_action = ACTION_POWEROFF;
                         return halt_parse_argv(argc, argv);
+
                 } else if (strstr(program_invocation_short_name, "reboot")) {
                         if (kexec_loaded())
                                 arg_action = ACTION_KEXEC;
                         else
                                 arg_action = ACTION_REBOOT;
                         return halt_parse_argv(argc, argv);
+
                 } else if (strstr(program_invocation_short_name, "shutdown")) {
                         arg_action = ACTION_POWEROFF;
                         return shutdown_parse_argv(argc, argv);
+
                 } else if (strstr(program_invocation_short_name, "init")) {
+
+                        /* Matches invocations as "init" as well as "telinit", which are synonymous when run as PID !=
+                         * 1 on SysV.
+                         *
+                         * On SysV "telinit" was the official command to communicate with PID 1, but "init" would
+                         * redirect itself to "telinit" if called with PID != 1. We follow the same logic here still,
+                         * though we add one level of indirection, as we implement "telinit" in "systemctl". Hence, for
+                         * us if you invoke "init" you get "systemd", but it will execve() "systemctl" immediately with
+                         * argv[] unmodified if PID is != 1. If you invoke "telinit" you directly get "systemctl". In
+                         * both cases we shall do the same thing, which is why we do strstr(p_i_s_n, "init") here, as a
+                         * quick way to match both.
+                         *
+                         * Also see redirect_telinit() in src/core/main.c. */
 
                         if (sd_booted() > 0) {
                                 arg_action = _ACTION_INVALID;
                                 return telinit_parse_argv(argc, argv);
                         } else {
-                                /* Hmm, so some other init system is
-                                 * running, we need to forward this
-                                 * request to it. For now we simply
-                                 * guess that it is Upstart. */
+                                /* Hmm, so some other init system is running, we need to forward this request to
+                                 * it. For now we simply guess that it is Upstart. */
 
                                 execv(TELINIT, argv);
 
@@ -8452,11 +8483,9 @@ static int start_with_fallback(void) {
 }
 
 static int halt_now(enum action a) {
-        int r;
 
-        /* The kernel will automaticall flush ATA disks and suchlike
-         * on reboot(), but the file systems need to be synce'd
-         * explicitly in advance. */
+        /* The kernel will automatically flush ATA disks and suchlike on reboot(), but the file systems need to be
+         * synce'd explicitly in advance. */
         if (!arg_no_sync && !arg_dry_run)
                 (void) sync();
 
@@ -8483,30 +8512,10 @@ static int halt_now(enum action a) {
                 return -errno;
 
         case ACTION_KEXEC:
-        case ACTION_REBOOT: {
-                _cleanup_free_ char *param = NULL;
-
-                r = read_one_line_file("/run/systemd/reboot-param", &param);
-                if (r < 0 && r != -ENOENT)
-                        log_warning_errno(r, "Failed to read reboot parameter file: %m");
-
-                if (!isempty(param)) {
-                        if (!arg_quiet)
-                                log_info("Rebooting with argument '%s'.", param);
-                        if (!arg_dry_run) {
-                                (void) syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
-                                               LINUX_REBOOT_CMD_RESTART2, param);
-                                log_warning_errno(errno, "Failed to reboot with parameter, retrying without: %m");
-                        }
-                }
-
-                if (!arg_quiet)
-                        log_info("Rebooting.");
-                if (arg_dry_run)
-                        return 0;
-                (void) reboot(RB_AUTOBOOT);
-                return -errno;
-        }
+        case ACTION_REBOOT:
+                return reboot_with_parameter(REBOOT_FALLBACK |
+                                             (arg_quiet ? 0 : REBOOT_LOG) |
+                                             (arg_dry_run ? REBOOT_DRY_RUN : 0));
 
         default:
                 assert_not_reached("Unknown action.");
