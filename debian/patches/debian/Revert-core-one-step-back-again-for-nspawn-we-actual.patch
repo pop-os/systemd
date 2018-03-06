@@ -10,33 +10,26 @@ Bug-Debian: https://bugs.debian.org/784720
 Bug-Ubuntu: https://launchpad.net/bugs/1448259
 Bug-Fedora: https://bugzilla.redhat.com/show_bug.cgi?id=1141137
 ---
- src/core/unit.c | 18 +-----------------
- 1 file changed, 1 insertion(+), 17 deletions(-)
+ src/core/unit.c | 11 +----------
+ 1 file changed, 1 insertion(+), 10 deletions(-)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 932f05b..74fc703 100644
+index c305662..8fcb1f0 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
-@@ -4558,23 +4558,7 @@ int unit_kill_context(
+@@ -4531,16 +4531,7 @@ int unit_kill_context(
  
                  } else if (r > 0) {
  
--                        /* FIXME: For now, on the legacy hierarchy, we
--                         * will not wait for the cgroup members to die
--                         * if we are running in a container or if this
--                         * is a delegation unit, simply because cgroup
--                         * notification is unreliable in these
--                         * cases. It doesn't work at all in
--                         * containers, and outside of containers it
--                         * can be confused easily by left-over
--                         * directories in the cgroup — which however
--                         * should not exist in non-delegated units. On
--                         * the unified hierarchy that's different,
--                         * there we get proper events. Hence rely on
--                         * them. */
+-                        /* FIXME: For now, on the legacy hierarchy, we will not wait for the cgroup members to die if
+-                         * we are running in a container or if this is a delegation unit, simply because cgroup
+-                         * notification is unreliable in these cases. It doesn't work at all in containers, and outside
+-                         * of containers it can be confused easily by left-over directories in the cgroup — which
+-                         * however should not exist in non-delegated units. On the unified hierarchy that's different,
+-                         * there we get proper events. Hence rely on them. */
 -
 -                        if (cg_unified_controller(SYSTEMD_CGROUP_CONTROLLER) > 0 ||
--                            (detect_container() == 0 && !UNIT_CGROUP_BOOL(u, delegate)))
+-                            (detect_container() == 0 && !unit_cgroup_delegate(u)))
 -                                wait_for_exit = true;
 +                        wait_for_exit = true;
  
