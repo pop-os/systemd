@@ -635,13 +635,13 @@ int config_parse_netdev(const char *unit,
         case NETDEV_KIND_VCAN:
                 r = hashmap_put(network->stacked_netdevs, netdev->ifname, netdev);
                 if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r, "Can not add NetDev '%s' to network: %m", rvalue);
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Cannot add NetDev '%s' to network: %m", rvalue);
                         return 0;
                 }
 
                 break;
         default:
-                assert_not_reached("Can not parse NetDev");
+                assert_not_reached("Cannot parse NetDev");
         }
 
         netdev_ref(netdev);
@@ -894,12 +894,12 @@ int config_parse_ipv6token(
 
         r = in_addr_is_null(AF_INET6, &buffer);
         if (r != 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "IPv6 token can not be the ANY address, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_ERR, filename, line, r, "IPv6 token cannot be the ANY address, ignoring: %s", rvalue);
                 return 0;
         }
 
         if ((buffer.in6.s6_addr32[0] | buffer.in6.s6_addr32[1]) != 0) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "IPv6 token can not be longer than 64 bits, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_ERR, filename, line, 0, "IPv6 token cannot be longer than 64 bits, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -1072,7 +1072,7 @@ int config_parse_dhcp_server_dns(
                         continue;
                 }
 
-                m = realloc(n->dhcp_server_dns, (n->n_dhcp_server_dns + 1) * sizeof(struct in_addr));
+                m = reallocarray(n->dhcp_server_dns, n->n_dhcp_server_dns + 1, sizeof(struct in_addr));
                 if (!m)
                         return log_oom();
 
@@ -1120,7 +1120,7 @@ int config_parse_radv_dns(
                 if (in_addr_from_string(AF_INET6, w, &a) >= 0) {
                         struct in6_addr *m;
 
-                        m = realloc(n->router_dns, (n->n_router_dns + 1) * sizeof(struct in6_addr));
+                        m = reallocarray(n->router_dns, n->n_router_dns + 1, sizeof(struct in6_addr));
                         if (!m)
                                 return log_oom();
 
@@ -1223,7 +1223,7 @@ int config_parse_dhcp_server_ntp(
                         continue;
                 }
 
-                m = realloc(n->dhcp_server_ntp, (n->n_dhcp_server_ntp + 1) * sizeof(struct in_addr));
+                m = reallocarray(n->dhcp_server_ntp, n->n_dhcp_server_ntp + 1, sizeof(struct in_addr));
                 if (!m)
                         return log_oom();
 
@@ -1273,7 +1273,7 @@ int config_parse_dns(
                         continue;
                 }
 
-                m = realloc(n->dns, (n->n_dns + 1) * sizeof(struct in_addr_data));
+                m = reallocarray(n->dns, n->n_dns + 1, sizeof(struct in_addr_data));
                 if (!m)
                         return log_oom();
 

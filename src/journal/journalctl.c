@@ -81,6 +81,8 @@
 
 #define DEFAULT_FSS_INTERVAL_USEC (15*USEC_PER_MINUTE)
 
+#define PROCESS_INOTIFY_INTERVAL 1024   /* Every 1,024 messages processed */
+
 #if HAVE_PCRE2
 DEFINE_TRIVIAL_CLEANUP_FUNC(pcre2_match_data*, pcre2_match_data_free);
 DEFINE_TRIVIAL_CLEANUP_FUNC(pcre2_code*, pcre2_code_free);
@@ -334,7 +336,7 @@ static void help(void) {
                "     --user-unit=UNIT        Show logs from the specified user unit\n"
                "  -t --identifier=STRING     Show entries with the specified syslog identifier\n"
                "  -p --priority=RANGE        Show entries with the specified priority\n"
-               "  -g --grep=PATTERN          Show entries with MESSSAGE matching PATTERN\n"
+               "  -g --grep=PATTERN          Show entries with MESSAGE matching PATTERN\n"
                "     --case-sensitive[=BOOL] Force case sensitive or insenstive matching\n"
                "  -e --pager-end             Immediately jump to the end in the pager\n"
                "  -f --follow                Follow the journal\n"
@@ -492,7 +494,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hefo:aln::qmb::kD:p:c:S:U:t:u:NF:xrM:", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hefo:aln::qmb::kD:p:g:c:S:U:t:u:NF:xrM:", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -970,8 +972,7 @@ static int parse_argv(int argc, char *argv[]) {
                 return -EINVAL;
         }
 
-        if (!strv_isempty(arg_system_units) && (arg_journal_type == SD_JOURNAL_CURRENT_USER)) {
-
+        if (!strv_isempty(arg_system_units) && arg_journal_type == SD_JOURNAL_CURRENT_USER) {
                 /* Specifying --user and --unit= at the same time makes no sense (as the former excludes the user
                  * journal, but the latter excludes the system journal, thus resulting in empty output). Let's be nice
                  * to users, and automatically turn --unit= into --user-unit= if combined with --user. */
@@ -2239,7 +2240,8 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        r = journal_access_check_and_warn(j, arg_quiet);
+        r = journal_access_check_and_warn(j, arg_quiet,
+                                          !(arg_journal_type == SD_JOURNAL_CURRENT_USER || arg_user_units));
         if (r < 0)
                 goto finish;
 
@@ -2639,6 +2641,20 @@ int main(int argc, char *argv[]) {
                                 goto finish;
 
                         n_shown++;
+
+                        /* If journalctl take a long time to process messages, and during that time journal file
+                         * rotation occurs, a journalctl client will keep those rotated files open until it calls
+                         * sd_journal_process(), which typically happens as a result of calling sd_journal_wait() below
+                         * in the "following" case.  By periodically calling sd_journal_process() during the processing
+                         * loop we shrink the window of time a client instance has open file descriptors for rotated
+                         * (deleted) journal files. */
+                        if ((n_shown % PROCESS_INOTIFY_INTERVAL) == 0) {
+                                r = sd_journal_process(j);
+                                if (r < 0) {
+                                        log_error_errno(r, "Failed to process inotify events: %m");
+                                        goto finish;
+                                }
+                        }
                 }
 
                 if (!arg_follow) {

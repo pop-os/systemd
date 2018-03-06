@@ -164,7 +164,7 @@ static void socket_done(Unit *u) {
 
         s->peers_by_address = set_free(s->peers_by_address);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime);
+        s->exec_runtime = exec_runtime_unref(s->exec_runtime, false);
         exec_command_free_array(s->exec_command, _SOCKET_EXEC_COMMAND_MAX);
         s->control_command = NULL;
 
@@ -250,7 +250,7 @@ int socket_instantiate_service(Socket *s) {
         if (r < 0)
                 return r;
 
-        unit_ref_set(&s->service, u);
+        unit_ref_set(&s->service, UNIT(s), u);
 
         return unit_add_two_dependencies(UNIT(s), UNIT_BEFORE, UNIT_TRIGGERS, u, false, UNIT_DEPENDENCY_IMPLICIT);
 }
@@ -377,7 +377,7 @@ static int socket_add_extras(Socket *s) {
                         if (r < 0)
                                 return r;
 
-                        unit_ref_set(&s->service, x);
+                        unit_ref_set(&s->service, u, x);
                 }
 
                 r = unit_add_two_dependencies(u, UNIT_BEFORE, UNIT_TRIGGERS, UNIT_DEREF(s->service), true, UNIT_DEPENDENCY_IMPLICIT);
@@ -1521,7 +1521,7 @@ static int socket_address_listen_in_cgroup(
         r = bpf_firewall_supported();
         if (r < 0)
                 return r;
-        if (r == 0) /* If BPF firewalling isn't supported anyway — there's no point in this forking complexity */
+        if (r == BPF_FIREWALL_UNSUPPORTED) /* If BPF firewalling isn't supported anyway — there's no point in this forking complexity */
                 goto shortcut;
 
         if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, pair) < 0)
@@ -1878,8 +1878,10 @@ static int socket_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(s->deserialized_state, SOCKET_DEAD, SOCKET_FAILED))
+        if (!IN_SET(s->deserialized_state, SOCKET_DEAD, SOCKET_FAILED)) {
                 (void) unit_setup_dynamic_creds(u);
+                (void) unit_setup_exec_runtime(u);
+        }
 
         socket_set_state(s, s->deserialized_state);
         return 0;
@@ -1908,7 +1910,6 @@ static int socket_spawn(Socket *s, ExecCommand *c, pid_t *_pid) {
         if (r < 0)
                 return r;
 
-        manager_set_exec_params(UNIT(s)->manager, &exec_params);
         unit_set_exec_params(UNIT(s), &exec_params);
 
         exec_params.argv = c->argv;
@@ -2017,8 +2018,7 @@ static void socket_enter_dead(Socket *s, SocketResult f) {
 
         socket_set_state(s, s->result != SOCKET_SUCCESS ? SOCKET_FAILED : SOCKET_DEAD);
 
-        exec_runtime_destroy(s->exec_runtime);
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime);
+        s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
 
         exec_context_destroy_runtime_directory(&s->exec_context, UNIT(s)->manager->prefix[EXEC_DIRECTORY_RUNTIME]);
 
@@ -2818,12 +2818,12 @@ SocketType socket_port_type_from_string(const char *s) {
                 return _SOCKET_TYPE_INVALID;
 }
 
-_pure_ static bool socket_check_gc(Unit *u) {
+_pure_ static bool socket_may_gc(Unit *u) {
         Socket *s = SOCKET(u);
 
         assert(u);
 
-        return s->n_connections > 0;
+        return s->n_connections == 0;
 }
 
 static int socket_accept_do(Socket *s, int fd) {
@@ -2865,7 +2865,7 @@ static int socket_accept_in_cgroup(Socket *s, SocketPort *p, int fd) {
         r = bpf_firewall_supported();
         if (r < 0)
                 return r;
-        if (r == 0)
+        if (r == BPF_FIREWALL_UNSUPPORTED)
                 goto shortcut;
 
         if (socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0, pair) < 0)
@@ -3323,7 +3323,7 @@ const UnitVTable socket_vtable = {
         .active_state = socket_active_state,
         .sub_state_to_string = socket_sub_state_to_string,
 
-        .check_gc = socket_check_gc,
+        .may_gc = socket_may_gc,
 
         .sigchld_event = socket_sigchld_event,
 

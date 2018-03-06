@@ -59,12 +59,18 @@ typedef struct Item {
         char *gid_path;
         char *description;
         char *home;
+        char *shell;
 
         gid_t gid;
         uid_t uid;
 
         bool gid_set:1;
-        bool gid_must_exist:1;
+
+        /* When set the group with the specified gid must exist
+         * and the check if a uid clashes with the gid is skipped.
+         */
+        bool id_set_strict:1;
+
         bool uid_set:1;
 
         bool todo_user:1;
@@ -72,6 +78,8 @@ typedef struct Item {
 } Item;
 
 static char *arg_root = NULL;
+static const char *arg_replace = NULL;
+static bool arg_inline = false;
 
 static const char conf_file_dirs[] = CONF_PATHS_NULSTR("sysusers.d");
 
@@ -381,6 +389,10 @@ static int rename_and_apply_smack(const char *temp_path, const char *dest_path) 
         return r;
 }
 
+static const char* default_shell(uid_t uid) {
+        return uid == 0 ? "/bin/sh" : "/sbin/nologin";
+}
+
 static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char **tmpfile_path) {
         _cleanup_fclose_ FILE *original = NULL, *passwd = NULL;
         _cleanup_(unlink_and_freep) char *passwd_tmp = NULL;
@@ -448,7 +460,7 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char 
 
                         /* Initialize the shell to nologin, with one exception:
                          * for root we patch in something special */
-                        .pw_shell = i->uid == 0 ? (char*) "/bin/sh" : (char*) "/sbin/nologin",
+                        .pw_shell = i->shell ?: (char*) default_shell(i->uid),
                 };
 
                 errno = 0;
@@ -801,7 +813,7 @@ static int write_files(void) {
         return 0;
 }
 
-static int uid_is_ok(uid_t uid, const char *name) {
+static int uid_is_ok(uid_t uid, const char *name, bool check_with_gid) {
         struct passwd *p;
         struct group *g;
         const char *n;
@@ -813,17 +825,21 @@ static int uid_is_ok(uid_t uid, const char *name) {
 
         /* Try to avoid using uids that are already used by a group
          * that doesn't have the same name as our new user. */
-        i = ordered_hashmap_get(todo_gids, GID_TO_PTR(uid));
-        if (i && !streq(i->name, name))
-                return 0;
+        if (check_with_gid) {
+                i = ordered_hashmap_get(todo_gids, GID_TO_PTR(uid));
+                if (i && !streq(i->name, name))
+                        return 0;
+        }
 
         /* Let's check the files directly */
         if (hashmap_contains(database_uid, UID_TO_PTR(uid)))
                 return 0;
 
-        n = hashmap_get(database_gid, GID_TO_PTR(uid));
-        if (n && !streq(n, name))
-                return 0;
+        if (check_with_gid) {
+                n = hashmap_get(database_gid, GID_TO_PTR(uid));
+                if (n && !streq(n, name))
+                        return 0;
+        }
 
         /* Let's also check via NSS, to avoid UID clashes over LDAP and such, just in case */
         if (!arg_root) {
@@ -834,13 +850,15 @@ static int uid_is_ok(uid_t uid, const char *name) {
                 if (!IN_SET(errno, 0, ENOENT))
                         return -errno;
 
-                errno = 0;
-                g = getgrgid((gid_t) uid);
-                if (g) {
-                        if (!streq(g->gr_name, name))
-                                return 0;
-                } else if (!IN_SET(errno, 0, ENOENT))
-                        return -errno;
+                if (check_with_gid) {
+                        errno = 0;
+                        g = getgrgid((gid_t) uid);
+                        if (g) {
+                                if (!streq(g->gr_name, name))
+                                        return 0;
+                        } else if (!IN_SET(errno, 0, ENOENT))
+                                return -errno;
+                }
         }
 
         return 1;
@@ -952,7 +970,7 @@ static int add_user(Item *i) {
 
         /* Try to use the suggested numeric uid */
         if (i->uid_set) {
-                r = uid_is_ok(i->uid, i->name);
+                r = uid_is_ok(i->uid, i->name, !i->id_set_strict);
                 if (r < 0)
                         return log_error_errno(r, "Failed to verify uid " UID_FMT ": %m", i->uid);
                 if (r == 0) {
@@ -970,7 +988,7 @@ static int add_user(Item *i) {
                         if (c <= 0 || !uid_range_contains(uid_range, n_uid_range, c))
                                 log_debug("User ID " UID_FMT " of file not suitable for %s.", c, i->name);
                         else {
-                                r = uid_is_ok(c, i->name);
+                                r = uid_is_ok(c, i->name, true);
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to verify uid " UID_FMT ": %m", i->uid);
                                 else if (r > 0) {
@@ -984,7 +1002,7 @@ static int add_user(Item *i) {
 
         /* Otherwise, try to reuse the group ID */
         if (!i->uid_set && i->gid_set) {
-                r = uid_is_ok((uid_t) i->gid, i->name);
+                r = uid_is_ok((uid_t) i->gid, i->name, true);
                 if (r < 0)
                         return log_error_errno(r, "Failed to verify uid " UID_FMT ": %m", i->uid);
                 if (r > 0) {
@@ -1002,7 +1020,7 @@ static int add_user(Item *i) {
                                 return r;
                         }
 
-                        r = uid_is_ok(search_uid, i->name);
+                        r = uid_is_ok(search_uid, i->name, true);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to verify uid " UID_FMT ": %m", i->uid);
                         else if (r > 0)
@@ -1099,7 +1117,7 @@ static int add_group(Item *i) {
                 r = gid_is_ok(i->gid);
                 if (r < 0)
                         return log_error_errno(r, "Failed to verify gid " GID_FMT ": %m", i->gid);
-                if (i->gid_must_exist) {
+                if (i->id_set_strict) {
                         /* If we require the gid to already exist we can return here:
                          * r > 0: means the gid does not exist -> fail
                          * r == 0: means the gid exists -> nothing more to do.
@@ -1191,12 +1209,25 @@ static int process_item(Item *i) {
 
         switch (i->type) {
 
-        case ADD_USER:
-                r = add_group(i);
-                if (r < 0)
-                        return r;
+        case ADD_USER: {
+                Item *j;
+
+                j = ordered_hashmap_get(groups, i->name);
+                if (j && j->todo_group) {
+                        /* When the group with the same name is already in queue,
+                         * use the information about the group and do not create
+                         * duplicated group entry. */
+                        i->gid_set = j->gid_set;
+                        i->gid = j->gid;
+                        i->id_set_strict = true;
+                } else {
+                        r = add_group(i);
+                        if (r < 0)
+                                return r;
+                }
 
                 return add_user(i);
+        }
 
         case ADD_GROUP:
                 return add_group(i);
@@ -1216,6 +1247,7 @@ static void item_free(Item *i) {
         free(i->gid_path);
         free(i->description);
         free(i->home);
+        free(i->shell);
         free(i);
 }
 
@@ -1227,40 +1259,11 @@ static int add_implicit(void) {
         int r;
 
         /* Implicitly create additional users and groups, if they were listed in "m" lines */
-
         ORDERED_HASHMAP_FOREACH_KEY(l, g, members, iterator) {
-                Item *i;
                 char **m;
 
-                i = ordered_hashmap_get(groups, g);
-                if (!i) {
-                        _cleanup_(item_freep) Item *j = NULL;
-
-                        r = ordered_hashmap_ensure_allocated(&groups, &string_hash_ops);
-                        if (r < 0)
-                                return log_oom();
-
-                        j = new0(Item, 1);
-                        if (!j)
-                                return log_oom();
-
-                        j->type = ADD_GROUP;
-                        j->name = strdup(g);
-                        if (!j->name)
-                                return log_oom();
-
-                        r = ordered_hashmap_put(groups, j->name, j);
-                        if (r < 0)
-                                return log_oom();
-
-                        log_debug("Adding implicit group '%s' due to m line", j->name);
-                        j = NULL;
-                }
-
-                STRV_FOREACH(m, l) {
-
-                        i = ordered_hashmap_get(users, *m);
-                        if (!i) {
+                STRV_FOREACH(m, l)
+                        if (!ordered_hashmap_get(users, *m)) {
                                 _cleanup_(item_freep) Item *j = NULL;
 
                                 r = ordered_hashmap_ensure_allocated(&users, &string_hash_ops);
@@ -1283,6 +1286,30 @@ static int add_implicit(void) {
                                 log_debug("Adding implicit user '%s' due to m line", j->name);
                                 j = NULL;
                         }
+
+                if (!(ordered_hashmap_get(users, g) ||
+                      ordered_hashmap_get(groups, g))) {
+                        _cleanup_(item_freep) Item *j = NULL;
+
+                        r = ordered_hashmap_ensure_allocated(&groups, &string_hash_ops);
+                        if (r < 0)
+                                return log_oom();
+
+                        j = new0(Item, 1);
+                        if (!j)
+                                return log_oom();
+
+                        j->type = ADD_GROUP;
+                        j->name = strdup(g);
+                        if (!j->name)
+                                return log_oom();
+
+                        r = ordered_hashmap_put(groups, j->name, j);
+                        if (r < 0)
+                                return log_oom();
+
+                        log_debug("Adding implicit group '%s' due to m line", j->name);
+                        j = NULL;
                 }
         }
 
@@ -1323,6 +1350,9 @@ static bool item_equal(Item *a, Item *b) {
         if (!streq_ptr(a->home, b->home))
                 return false;
 
+        if (!streq_ptr(a->shell, b->shell))
+                return false;
+
         return true;
 }
 
@@ -1336,7 +1366,12 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                 {}
         };
 
-        _cleanup_free_ char *action = NULL, *name = NULL, *id = NULL, *resolved_name = NULL, *resolved_id = NULL, *description = NULL, *home = NULL;
+        _cleanup_free_ char *action = NULL,
+                *name = NULL, *resolved_name = NULL,
+                *id = NULL, *resolved_id = NULL,
+                *description = NULL,
+                *home = NULL,
+                *shell, *resolved_shell = NULL;
         _cleanup_(item_freep) Item *i = NULL;
         Item *existing;
         OrderedHashmap *h;
@@ -1349,7 +1384,8 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
 
         /* Parse columns */
         p = buffer;
-        r = extract_many_words(&p, NULL, EXTRACT_QUOTES, &action, &name, &id, &description, &home, NULL);
+        r = extract_many_words(&p, NULL, EXTRACT_QUOTES,
+                               &action, &name, &id, &description, &home, &shell, NULL);
         if (r < 0) {
                 log_error("[%s:%u] Syntax error.", fname, line);
                 return r;
@@ -1425,6 +1461,24 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                 }
         }
 
+        /* Verify shell */
+        if (isempty(shell) || streq(shell, "-"))
+                shell = mfree(shell);
+
+        if (shell) {
+                r = specifier_printf(shell, specifier_table, NULL, &resolved_shell);
+                if (r < 0) {
+                        log_error("[%s:%u] Failed to replace specifiers: %s", fname, line, shell);
+                        return r;
+                }
+
+                if (!valid_shell(resolved_shell)) {
+                        log_error("[%s:%u] '%s' is not a valid login shell field.", fname, line, resolved_shell);
+                        return -EINVAL;
+                }
+        }
+
+
         switch (action[0]) {
 
         case ADD_RANGE:
@@ -1438,13 +1492,10 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                         return -EINVAL;
                 }
 
-                if (description) {
-                        log_error("[%s:%u] Lines of type 'r' don't take a GECOS field.", fname, line);
-                        return -EINVAL;
-                }
-
-                if (home) {
-                        log_error("[%s:%u] Lines of type 'r' don't take a home directory field.", fname, line);
+                if (description || home || shell) {
+                        log_error("[%s:%u] Lines of type '%c' don't take a %s field.",
+                                  fname, line, action[0],
+                                  description ? "GECOS" : home ? "home directory" : "login shell");
                         return -EINVAL;
                 }
 
@@ -1475,13 +1526,10 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                         return -EINVAL;
                 }
 
-                if (description) {
-                        log_error("[%s:%u] Lines of type 'm' don't take a GECOS field.", fname, line);
-                        return -EINVAL;
-                }
-
-                if (home) {
-                        log_error("[%s:%u] Lines of type 'm' don't take a home directory field.", fname, line);
+                if (description || home || shell) {
+                        log_error("[%s:%u] Lines of type '%c' don't take a %s field.",
+                                  fname, line, action[0],
+                                  description ? "GECOS" : home ? "home directory" : "login shell");
                         return -EINVAL;
                 }
 
@@ -1548,14 +1596,15 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                                         if (r < 0)
                                                 return log_error_errno(r, "Failed to parse GID: '%s': %m", id);
                                         i->gid_set = true;
-                                        i->gid_must_exist = true;
+                                        i->id_set_strict = true;
                                         free_and_replace(resolved_id, uid);
                                 }
-                                r = parse_uid(resolved_id, &i->uid);
-                                if (r < 0)
-                                        return log_error_errno(r, "Failed to parse UID: '%s': %m", id);
-
-                                i->uid_set = true;
+                                if (!streq(resolved_id, "-")) {
+                                        r = parse_uid(resolved_id, &i->uid);
+                                        if (r < 0)
+                                                return log_error_errno(r, "Failed to parse UID: '%s': %m", id);
+                                        i->uid_set = true;
+                                }
                         }
                 }
 
@@ -1564,6 +1613,9 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
 
                 i->home = home;
                 home = NULL;
+
+                i->shell = resolved_shell;
+                resolved_shell = NULL;
 
                 h = users;
                 break;
@@ -1574,13 +1626,10 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                         return -EINVAL;
                 }
 
-                if (description) {
-                        log_error("[%s:%u] Lines of type 'g' don't take a GECOS field.", fname, line);
-                        return -EINVAL;
-                }
-
-                if (home) {
-                        log_error("[%s:%u] Lines of type 'g' don't take a home directory field.", fname, line);
+                if (description || home || shell) {
+                        log_error("[%s:%u] Lines of type '%c' don't take a %s field.",
+                                  fname, line, action[0],
+                                  description ? "GECOS" : home ? "home directory" : "login shell");
                         return -EINVAL;
                 }
 
@@ -1710,6 +1759,8 @@ static void help(void) {
                "  -h --help                 Show this help\n"
                "     --version              Show package version\n"
                "     --root=PATH            Operate on an alternate filesystem root\n"
+               "     --replace=PATH         Treat arguments as replacement for PATH\n"
+               "     --inline               Treat arguments as configuration lines\n"
                , program_invocation_short_name);
 }
 
@@ -1718,12 +1769,16 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_ROOT,
+                ARG_REPLACE,
+                ARG_INLINE,
         };
 
         static const struct option options[] = {
                 { "help",    no_argument,       NULL, 'h'         },
                 { "version", no_argument,       NULL, ARG_VERSION },
                 { "root",    required_argument, NULL, ARG_ROOT    },
+                { "replace", required_argument, NULL, ARG_REPLACE },
+                { "inline",  no_argument,       NULL, ARG_INLINE  },
                 {}
         };
 
@@ -1749,6 +1804,20 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
+                case ARG_REPLACE:
+                        if (!path_is_absolute(optarg) ||
+                            !endswith(optarg, ".conf")) {
+                                log_error("The argument to --replace= must an absolute path to a config file");
+                                return -EINVAL;
+                        }
+
+                        arg_replace = optarg;
+                        break;
+
+                case ARG_INLINE:
+                        arg_inline = true;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -1756,14 +1825,76 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option");
                 }
 
+        if (arg_replace && optind >= argc) {
+                log_error("When --replace= is given, some configuration items must be specified");
+                return -EINVAL;
+        }
+
         return 1;
+}
+
+static int parse_arguments(char **args) {
+        char **arg;
+        unsigned pos = 1;
+        int r;
+
+        STRV_FOREACH(arg, args) {
+                if (arg_inline)
+                        /* Use (argument):n, where n==1 for the first positional arg */
+                        r = parse_line("(argument)", pos, *arg);
+                else
+                        r = read_config_file(*arg, false);
+                if (r < 0)
+                        return r;
+
+                pos++;
+        }
+
+        return 0;
+}
+
+static int read_config_files(const char* dirs, char **args) {
+        _cleanup_strv_free_ char **files = NULL;
+        _cleanup_free_ char *p = NULL;
+        char **f;
+        int r;
+
+        r = conf_files_list_nulstr(&files, ".conf", arg_root, 0, dirs);
+        if (r < 0)
+                return log_error_errno(r, "Failed to enumerate sysusers.d files: %m");
+
+        if (arg_replace) {
+                r = conf_files_insert_nulstr(&files, arg_root, dirs, arg_replace);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to extend sysusers.d file list: %m");
+
+                p = path_join(arg_root, arg_replace, NULL);
+                if (!p)
+                        return log_oom();
+        }
+
+        STRV_FOREACH(f, files)
+                if (p && path_equal(*f, p)) {
+                        log_debug("Parsing arguments at position \"%s\"…", *f);
+
+                        r = parse_arguments(args);
+                        if (r < 0)
+                                return r;
+                } else {
+                        log_debug("Reading config file \"%s\"…", *f);
+
+                        /* Just warn, ignore result otherwise */
+                        (void) read_config_file(*f, true);
+                }
+
+        return 0;
 }
 
 int main(int argc, char *argv[]) {
 
         _cleanup_close_ int lock = -1;
         Iterator iterator;
-        int r, k;
+        int r;
         Item *i;
         char *n;
 
@@ -1783,30 +1914,18 @@ int main(int argc, char *argv[]) {
                 goto finish;
         }
 
-        if (optind < argc) {
-                int j;
-
-                for (j = optind; j < argc; j++) {
-                        k = read_config_file(argv[j], false);
-                        if (k < 0 && r == 0)
-                                r = k;
-                }
-        } else {
-                _cleanup_strv_free_ char **files = NULL;
-                char **f;
-
-                r = conf_files_list_nulstr(&files, ".conf", arg_root, 0, conf_file_dirs);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to enumerate sysusers.d files: %m");
-                        goto finish;
-                }
-
-                STRV_FOREACH(f, files) {
-                        k = read_config_file(*f, true);
-                        if (k < 0 && r == 0)
-                                r = k;
-                }
-        }
+        /* If command line arguments are specified along with --replace, read all
+         * configuration files and insert the positional arguments at the specified
+         * place. Otherwise, if command line arguments are specified, execute just
+         * them, and finally, without --replace= or any positional arguments, just
+         * read configuration and execute it.
+         */
+        if (arg_replace || optind >= argc)
+                r = read_config_files(conf_file_dirs, argv + optind);
+        else
+                r = parse_arguments(argv + optind);
+        if (r < 0)
+                goto finish;
 
         /* Let's tell nss-systemd not to synthesize the "root" and "nobody" entries for it, so that our detection
          * whether the names or UID/GID area already used otherwise doesn't get confused. After all, even though
@@ -1819,7 +1938,7 @@ int main(int argc, char *argv[]) {
         }
 
         if (!uid_range) {
-                /* Default to default range of 1..SYSTEMD_UID_MAX */
+                /* Default to default range of 1..SYSTEM_UID_MAX */
                 r = uid_range_add(&uid_range, &n_uid_range, 1, SYSTEM_UID_MAX);
                 if (r < 0) {
                         log_oom();
@@ -1833,7 +1952,7 @@ int main(int argc, char *argv[]) {
 
         lock = take_etc_passwd_lock(arg_root);
         if (lock < 0) {
-                log_error_errno(lock, "Failed to take lock: %m");
+                log_error_errno(lock, "Failed to take /etc/passwd lock: %m");
                 goto finish;
         }
 

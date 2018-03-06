@@ -241,7 +241,7 @@ static void mount_done(Unit *u) {
         mount_parameters_done(&m->parameters_proc_self_mountinfo);
         mount_parameters_done(&m->parameters_fragment);
 
-        m->exec_runtime = exec_runtime_unref(m->exec_runtime);
+        m->exec_runtime = exec_runtime_unref(m->exec_runtime, false);
         exec_command_done_array(m->exec_command, _MOUNT_EXEC_COMMAND_MAX);
         m->control_command = NULL;
 
@@ -699,14 +699,17 @@ static int mount_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(new_state, MOUNT_DEAD, MOUNT_FAILED))
+        if (!IN_SET(new_state, MOUNT_DEAD, MOUNT_FAILED)) {
                 (void) unit_setup_dynamic_creds(u);
+                (void) unit_setup_exec_runtime(u);
+        }
 
         mount_set_state(m, new_state);
         return 0;
 }
 
 static void mount_dump(Unit *u, FILE *f, const char *prefix) {
+        char buf[FORMAT_TIMESPAN_MAX];
         Mount *m = MOUNT(u);
         MountParameters *p;
 
@@ -728,7 +731,8 @@ static void mount_dump(Unit *u, FILE *f, const char *prefix) {
                 "%sDirectoryMode: %04o\n"
                 "%sSloppyOptions: %s\n"
                 "%sLazyUnmount: %s\n"
-                "%sForceUnmount: %s\n",
+                "%sForceUnmount: %s\n"
+                "%sTimoutSec: %s\n",
                 prefix, mount_state_to_string(m->state),
                 prefix, mount_result_to_string(m->result),
                 prefix, m->where,
@@ -741,7 +745,8 @@ static void mount_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, m->directory_mode,
                 prefix, yes_no(m->sloppy_options),
                 prefix, yes_no(m->lazy_unmount),
-                prefix, yes_no(m->force_unmount));
+                prefix, yes_no(m->force_unmount),
+                prefix, format_timespan(buf, sizeof(buf), m->timeout_usec, USEC_PER_SEC));
 
         if (m->control_pid > 0)
                 fprintf(f,
@@ -776,7 +781,6 @@ static int mount_spawn(Mount *m, ExecCommand *c, pid_t *_pid) {
         if (r < 0)
                 return r;
 
-        manager_set_exec_params(UNIT(m)->manager, &exec_params);
         unit_set_exec_params(UNIT(m), &exec_params);
 
         r = exec_spawn(UNIT(m),
@@ -810,8 +814,7 @@ static void mount_enter_dead(Mount *m, MountResult f) {
 
         mount_set_state(m, m->result != MOUNT_SUCCESS ? MOUNT_FAILED : MOUNT_DEAD);
 
-        exec_runtime_destroy(m->exec_runtime);
-        m->exec_runtime = exec_runtime_unref(m->exec_runtime);
+        m->exec_runtime = exec_runtime_unref(m->exec_runtime, true);
 
         exec_context_destroy_runtime_directory(&m->exec_context, UNIT(m)->manager->prefix[EXEC_DIRECTORY_RUNTIME]);
 
@@ -1230,12 +1233,15 @@ _pure_ static const char *mount_sub_state_to_string(Unit *u) {
         return mount_state_to_string(MOUNT(u)->state);
 }
 
-_pure_ static bool mount_check_gc(Unit *u) {
+_pure_ static bool mount_may_gc(Unit *u) {
         Mount *m = MOUNT(u);
 
         assert(m);
 
-        return m->from_proc_self_mountinfo;
+        if (m->from_proc_self_mountinfo)
+                return false;
+
+        return true;
 }
 
 static void mount_sigchld_event(Unit *u, pid_t pid, int code, int status) {
@@ -1833,7 +1839,7 @@ static int mount_dispatch_io(sd_event_source *source, int fd, uint32_t revents, 
                             mount->parameters_proc_self_mountinfo.what) {
 
                                 /* Remember that this device might just have disappeared */
-                                if (set_ensure_allocated(&gone, &string_hash_ops) < 0 ||
+                                if (set_ensure_allocated(&gone, &path_hash_ops) < 0 ||
                                     set_put(gone, mount->parameters_proc_self_mountinfo.what) < 0)
                                         log_oom(); /* we don't care too much about OOM here... */
                         }
@@ -1888,7 +1894,7 @@ static int mount_dispatch_io(sd_event_source *source, int fd, uint32_t revents, 
                     mount->from_proc_self_mountinfo &&
                     mount->parameters_proc_self_mountinfo.what) {
 
-                        if (set_ensure_allocated(&around, &string_hash_ops) < 0 ||
+                        if (set_ensure_allocated(&around, &path_hash_ops) < 0 ||
                             set_put(around, mount->parameters_proc_self_mountinfo.what) < 0)
                                 log_oom();
                 }
@@ -1991,7 +1997,7 @@ const UnitVTable mount_vtable = {
         .active_state = mount_active_state,
         .sub_state_to_string = mount_sub_state_to_string,
 
-        .check_gc = mount_check_gc,
+        .may_gc = mount_may_gc,
 
         .sigchld_event = mount_sigchld_event,
 

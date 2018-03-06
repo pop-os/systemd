@@ -51,7 +51,7 @@
 #include "util.h"
 
 #if ENABLE_IDN
-#  define IDN_FLAGS (NI_IDN|NI_IDN_USE_STD3_ASCII_RULES)
+#  define IDN_FLAGS NI_IDN
 #else
 #  define IDN_FLAGS 0
 #endif
@@ -758,19 +758,6 @@ int socknameinfo_pretty(union sockaddr_union *sa, socklen_t salen, char **_ret) 
         return 0;
 }
 
-int getnameinfo_pretty(int fd, char **ret) {
-        union sockaddr_union sa;
-        socklen_t salen = sizeof(sa);
-
-        assert(fd >= 0);
-        assert(ret);
-
-        if (getsockname(fd, &sa.sa, &salen) < 0)
-                return -errno;
-
-        return socknameinfo_pretty(&sa, salen, ret);
-}
-
 int socket_address_unlink(SocketAddress *a) {
         assert(a);
 
@@ -1008,7 +995,7 @@ int getpeergroups(int fd, gid_t **ret) {
         socklen_t n = sizeof(gid_t) * 64;
         _cleanup_free_ gid_t *d = NULL;
 
-        assert(fd);
+        assert(fd >= 0);
         assert(ret);
 
         for (;;) {

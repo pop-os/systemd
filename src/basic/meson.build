@@ -157,6 +157,9 @@ basic_sources = files('''
         ratelimit.c
         ratelimit.h
         raw-clone.h
+        raw-reboot.h
+        reboot-util.c
+        reboot-util.h
         refcnt.h
         replace-var.c
         replace-var.h
@@ -317,6 +320,7 @@ libbasic = static_library(
         dependencies : [threads,
                         libcap,
                         libblkid,
+                        libmount,
                         libselinux],
         c_args : ['-fvisibility=default'],
         install : false)

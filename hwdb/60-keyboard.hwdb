@@ -162,8 +162,9 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnTravelMate*C3[01]0*:pvr*
  KEYBOARD_KEY_6b=fn
  KEYBOARD_KEY_6c=screenlock                             # FIXME: lock tablet device/buttons
 
-# Travelmate P648-G2-MG
+# Travelmate P648-G2-MG and P645-S
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnTravelMate*P648-G2-MG*:pvr*
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnTravelMate*P645-S*:pvr*
  KEYBOARD_KEY_8a=f20                                    # Microphone mute button; should be micmute
 
 # on some models this isn't brightnessup
@@ -807,7 +808,7 @@ evdev:input:b0003v046DpC517*
  KEYBOARD_KEY_c104c=ejectclosecd
 
 # Cordless Wave Pro
-evdev:input:b0003v046DpC52[9B]*
+evdev:input:b0003v046DpC529*
  KEYBOARD_KEY_0c01b6=camera
  KEYBOARD_KEY_0c0183=media
  KEYBOARD_KEY_0c0184=wordprocessor
@@ -1203,6 +1204,13 @@ evdev:name:Sony Vaio Keys:dmi:bvn*:bvr*:bd*:svnSony*:pnVPC*:pvr*
  KEYBOARD_KEY_0e=up                                     # Fn+F10 zoomin
 
 ###########################################################
+# T-bao
+###########################################################
+
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnT-bao:pnTbookair:pvr*
+ KEYBOARD_KEY_76=f21                                    # Touchpad toggle
+
+###########################################################
 # Toshiba
 ###########################################################
 
@@ -1261,6 +1269,13 @@ evdev:name:Toshiba*input*device:dmi:bvn*:bvr*:bd*:svnTOSHIBA*:pnSatellite*P75-A:
 
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnVIA:pnK8N800:pvr*
  KEYBOARD_KEY_81=prog1
+
+###########################################################
+# VIOS
+###########################################################
+
+evdev:name:SIPODEV USB Composite Device:dmi:bvn*:bvr*:bd*:svnVIOS:pnLTH17:pvr*
+ KEYBOARD_KEY_70073=f21                                 # Touchpad toggle
 
 ###########################################################
 # Zepto

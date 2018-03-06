@@ -2233,10 +2233,8 @@ static int chase_symlinks_and_update(char **p, unsigned flags) {
         if (r < 0)
                 return log_error_errno(r, "Failed to resolve path %s: %m", *p);
 
-        free(*p);
-        *p = chased;
-
-        return 0;
+        free_and_replace(*p, chased);
+        return r; /* r might be an fd here in case we ever use CHASE_OPEN in flags */
 }
 
 static int determine_uid_shift(const char *directory) {
@@ -2584,23 +2582,15 @@ static int outer_child(
                 return log_error_errno(errno, "PR_SET_PDEATHSIG failed: %m");
 
         if (interactive) {
-                close_nointr(STDIN_FILENO);
-                close_nointr(STDOUT_FILENO);
-                close_nointr(STDERR_FILENO);
+                int terminal;
 
-                r = open_terminal(console, O_RDWR);
-                if (r != STDIN_FILENO) {
-                        if (r >= 0) {
-                                safe_close(r);
-                                r = -EINVAL;
-                        }
+                terminal = open_terminal(console, O_RDWR);
+                if (terminal < 0)
+                        return log_error_errno(terminal, "Failed to open console: %m");
 
-                        return log_error_errno(r, "Failed to open console: %m");
-                }
-
-                if (dup2(STDIN_FILENO, STDOUT_FILENO) != STDOUT_FILENO ||
-                    dup2(STDIN_FILENO, STDERR_FILENO) != STDERR_FILENO)
-                        return log_error_errno(errno, "Failed to duplicate console: %m");
+                r = rearrange_stdio(terminal, terminal, terminal); /* invalidates 'terminal' on success and failure */
+                if (r < 0)
+                        return log_error_errno(r, "Failed to move console to stdin/stdout/stderr: %m");
         }
 
         r = reset_audit_loginuid();

@@ -311,7 +311,7 @@ int unit_file_changes_add(
         if (!changes)
                 return 0;
 
-        c = realloc(*changes, (*n_changes + 1) * sizeof(UnitFileChange));
+        c = reallocarray(*changes, *n_changes + 1, sizeof(UnitFileChange));
         if (!c)
                 return -ENOMEM;
         *changes = c;
@@ -522,7 +522,7 @@ static int mark_symlink_for_removal(
 
         assert(p);
 
-        r = set_ensure_allocated(remove_symlinks_to, &string_hash_ops);
+        r = set_ensure_allocated(remove_symlinks_to, &path_hash_ops);
         if (r < 0)
                 return r;
 
@@ -1284,10 +1284,10 @@ static int unit_file_load(
                 info->type = UNIT_FILE_TYPE_MASKED;
                 return 0;
         }
-        if (S_ISDIR(st.st_mode))
-                return -EISDIR;
-        if (!S_ISREG(st.st_mode))
-                return -ENOTTY;
+
+        r = stat_verify_regular(&st);
+        if (r < 0)
+                return r;
 
         f = fdopen(fd, "re");
         if (!f)
@@ -1460,6 +1460,9 @@ static int unit_file_search(
                 log_debug("Cannot find unit %s%s%s.", info->name, template ? " or " : "", strempty(template));
                 return -ENOENT;
         }
+
+        if (info->type == UNIT_FILE_TYPE_MASKED)
+                return result;
 
         /* Search for drop-in directories */
 
@@ -2163,12 +2166,9 @@ int unit_file_link(
 
                 if (lstat(full, &st) < 0)
                         return -errno;
-                if (S_ISLNK(st.st_mode))
-                        return -ELOOP;
-                if (S_ISDIR(st.st_mode))
-                        return -EISDIR;
-                if (!S_ISREG(st.st_mode))
-                        return -ENOTTY;
+                r = stat_verify_regular(&st);
+                if (r < 0)
+                        return r;
 
                 q = in_search_path(&paths, *i);
                 if (q < 0)

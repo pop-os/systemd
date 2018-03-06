@@ -163,9 +163,6 @@ static int scope_load_init_scope(Unit *u) {
          * synthesize it here, instead of relying on the unit file on disk. */
 
         u->default_dependencies = false;
-        u->ignore_on_isolate = true;
-
-        SCOPE(u)->kill_context.kill_signal = SIGRTMIN+14;
 
         /* Prettify things, if we can. */
         if (!u->description)
@@ -346,7 +343,7 @@ static int scope_start(Unit *u) {
 
         unit_export_state_files(UNIT(s));
 
-        r = unit_attach_pids_to_cgroup(u);
+        r = unit_attach_pids_to_cgroup(u, UNIT(s)->pids, NULL);
         if (r < 0) {
                 log_unit_warning_errno(UNIT(s), r, "Failed to add PIDs to scope's control group: %m");
                 scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
@@ -602,6 +599,7 @@ const UnitVTable scope_vtable = {
         .private_section = "Scope",
 
         .can_transient = true,
+        .can_delegate = true,
 
         .init = scope_init,
         .load = scope_load,
