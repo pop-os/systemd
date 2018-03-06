@@ -1,3 +1,16 @@
+systemd (238-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 238
+
+  [ Dimitri John Ledkov ]
+  * systemd-sysv-install: Fix name initialisation.
+    Only initialise NAME after --root optional argument has been parsed,
+    otherwise NAME is initialized to e.g. `enable`, instead of to the
+    `unit-name`, resulting in failures. (LP: #1752882)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 06 Mar 2018 20:13:40 +0100
+
 systemd (237-4) unstable; urgency=medium
 
   [ Gunnar Hjalmarsson ]
