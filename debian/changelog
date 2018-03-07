@@ -1,7 +1,15 @@
-systemd (238-1) UNRELEASED; urgency=medium
+systemd (238-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 238
+    - Fixes systemd-tmpfiles to correctly handle symlinks present in
+      non-terminal path components. (CVE-2018-6954, Closes: #890779)
+  * Rebase patches
+  * Use compat symlinks as provided by upstream.
+    As the upstream build system now creates those symlinks for us, we no
+    longer have to create them manually.
+  * Update symbols file for libsystemd0
+  * test-cgroup-util: bail out when running under a buildd environment
 
   [ Dimitri John Ledkov ]
   * systemd-sysv-install: Fix name initialisation.
@@ -9,7 +17,7 @@ systemd (238-1) UNRELEASED; urgency=medium
     otherwise NAME is initialized to e.g. `enable`, instead of to the
     `unit-name`, resulting in failures. (LP: #1752882)
 
- -- Michael Biebl <biebl@debian.org>  Tue, 06 Mar 2018 20:13:40 +0100
+ -- Michael Biebl <biebl@debian.org>  Wed, 07 Mar 2018 23:21:53 +0100
 
 systemd (237-4) unstable; urgency=medium
 
