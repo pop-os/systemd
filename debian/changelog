@@ -1,3 +1,12 @@
+systemd (238-2) unstable; urgency=medium
+
+  [ Alf Gaida ]
+  * core: do not free stack-allocated strings.
+    Fixes a crash in systemd when the cpuacct cgroup controller is not
+    available. (Closes: #892360)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 10 Mar 2018 01:12:47 +0100
+
 systemd (238-1) unstable; urgency=medium
 
   [ Michael Biebl ]
