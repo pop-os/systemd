@@ -11,10 +11,10 @@ environments. This is similar to how OOMScoreAdjust is treated.
  1 file changed, 11 insertions(+), 5 deletions(-)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index 36dbc28..749ed32 100644
+index 0df3971..0b5aa53 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
-@@ -2905,11 +2905,17 @@ static int exec_child(
+@@ -2953,11 +2953,17 @@ static int exec_child(
                  }
          }
  
