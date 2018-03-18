@@ -16,7 +16,7 @@ Closes: #751392
  2 files changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/core/mount-setup.c b/src/core/mount-setup.c
-index 536c17b..5df2418 100644
+index 9c27972..5f9a960 100644
 --- a/src/core/mount-setup.c
 +++ b/src/core/mount-setup.c
 @@ -98,6 +98,8 @@ static const MountPoint mount_table[] = {

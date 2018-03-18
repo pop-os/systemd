@@ -1,6 +1,6 @@
 From: Michael Biebl <biebl@debian.org>
 Date: Tue, 24 Jun 2014 12:35:25 +0200
-Subject: [PATCH] Add /run/initctl support to SysV compat tools
+Subject: Add /run/initctl support to SysV compat tools
 
 sysvinit in Debian uses /run/initctl as FIFO to communicate with PID 1.
 Make the SysV compat tools in systemd-sysv try both /run/initctl and the
