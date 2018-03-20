@@ -1,3 +1,29 @@
+systemd (238-3) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Enable systemd-sysusers unit and provide correct Debian static u/gids.
+    Add a helper script debian/extra/make-sysusers-basic which generates a
+    sysusers.d(5) file from Debian's static master passwd/group files.
+    systemd 238 now supports  specifying different uid and gid and a
+    non-default login shell, so this is possible now. (Closes: #888126)
+  * udev README.Debian: Include initrd rebuild and some clarifications in
+    migration.
+    While initrd update is already being mentioned in the introductory
+    section, it is easy to miss when going through the migration steps, so
+    explicitly mention it again. Also add a warning about keeping a fallback
+    on misconfigurations, and the possibility to migrate one interface at a
+    time.
+    Thanks to Karl O. Pinc for the suggestions! (Closes: #881769)
+
+  [ Michael Biebl ]
+  * basic/macros: Rename noreturn into _noreturn_.
+    "noreturn" is reserved and can be used in other header files we include.
+    (Closes: #893426)
+  * units: Fix SuccessAction that belongs to [Unit] section not [Service]
+    section (Closes: #893282)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 20 Mar 2018 23:22:57 +0100
+
 systemd (238-2) unstable; urgency=medium
 
   [ Alf Gaida ]
