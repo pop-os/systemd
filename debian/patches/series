@@ -49,3 +49,4 @@ debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-fs-utils-detect-container.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
 debian/UBUNTU-core-use-setreuid-setregid-trick-to-create-session-k.patch
+debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
