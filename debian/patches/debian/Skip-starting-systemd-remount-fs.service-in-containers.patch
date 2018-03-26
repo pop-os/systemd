@@ -14,10 +14,10 @@ LP: #1576341
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-remount-fs.service.in b/units/systemd-remount-fs.service.in
-index 29d0674..7bb5477 100644
+index 2e5b75e..fb3e30b 100644
 --- a/units/systemd-remount-fs.service.in
 +++ b/units/systemd-remount-fs.service.in
-@@ -15,6 +15,7 @@ After=systemd-fsck-root.service
+@@ -17,6 +17,7 @@ After=systemd-fsck-root.service
  Before=local-fs-pre.target local-fs.target shutdown.target
  Wants=local-fs-pre.target
  ConditionPathExists=/etc/fstab

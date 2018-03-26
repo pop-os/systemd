@@ -8,10 +8,10 @@ Subject: UBUNTU: drop using kvm for qemu tests,
  1 file changed, 4 deletions(-)
 
 diff --git a/test/test-functions b/test/test-functions
-index 92388dc..095c6d7 100644
+index 22066d9..ab0f87e 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -136,10 +136,6 @@ $KERNEL_APPEND \
+@@ -148,10 +148,6 @@ $KERNEL_APPEND \
          QEMU_OPTIONS="$QEMU_OPTIONS -initrd $INITRD"
      fi
  

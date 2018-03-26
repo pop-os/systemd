@@ -26,7 +26,7 @@ index d0befba..c3ed2da 100644
  
          strscpy(name, IFNAMSIZ, event->name);
  
-         r = rtnl_set_link_name(&event->rtnl, udev_device_get_ifindex(dev), name);
++        r = rtnl_set_link_name(&event->rtnl, udev_device_get_ifindex(dev), name);
 +        if (r >= 0) {
 +                log_debug("renamed network interface %s to %s\n", oldname, name);
 +                goto out;
@@ -38,7 +38,7 @@ index d0befba..c3ed2da 100644
 +
 +        /* free our own name, another process may wait for us */
 +        snprintf(name, IFNAMSIZ, "rename%u", udev_device_get_ifindex(dev));
-+        r = rtnl_set_link_name(&event->rtnl, udev_device_get_ifindex(dev), name);
+         r = rtnl_set_link_name(&event->rtnl, udev_device_get_ifindex(dev), name);
          if (r < 0)
 -                return log_error_errno(r, "Error changing net interface name '%s' to '%s': %m", oldname, name);
 +                  goto out;

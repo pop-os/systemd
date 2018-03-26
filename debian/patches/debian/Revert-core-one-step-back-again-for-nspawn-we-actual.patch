@@ -1,8 +1,8 @@
 From: Martin Pitt <martin.pitt@ubuntu.com>
 Date: Mon, 27 Apr 2015 15:29:13 +0200
 Subject: Revert "core: one step back again,
- for nspawn we actually can't wait for cgroups running empty since
- systemd will get exactly zero notifications about it"
+ for nspawn we actually can't wait for cgroups running empty since systemd
+ will get exactly zero notifications about it"
 
 This reverts commit 743970d2ea6d08aa7c7bff8220f6b7702f2b1db7.
 
