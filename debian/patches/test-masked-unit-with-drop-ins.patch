@@ -1,0 +1,30 @@
+From: Filipe Brandenburger <filbranden@google.com>
+Date: Thu, 1 Mar 2018 21:07:27 -0800
+Subject: test: masked unit with drop-ins
+
+(cherry picked from commit 67348e791dd0c546965e48cc091f1e8245b9260d)
+---
+ test/TEST-15-DROPIN/test-dropin.sh | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/test/TEST-15-DROPIN/test-dropin.sh b/test/TEST-15-DROPIN/test-dropin.sh
+index 9d8af99..ab0a58c 100755
+--- a/test/TEST-15-DROPIN/test-dropin.sh
++++ b/test/TEST-15-DROPIN/test-dropin.sh
+@@ -179,6 +179,16 @@ test_masked_dropins () {
+         ln -sf ../b.service /usr/lib/systemd/system/a.service.wants/b.service
+         check_ko a Wants b.service
+ 
++        # 'a' is masked but has an override config file
++        echo "*** test a is masked but has an override"
++        create_services a b
++        ln -sf /dev/null /etc/systemd/system/a.service
++        cat >/usr/lib/systemd/system/a.service.d/override.conf <<EOF
++[Unit]
++After=b.service
++EOF
++        check_ok a UnitFileState masked
++
+         # 'b1' is an alias for 'b': masking 'b' dep should not influence 'b1' dep
+         echo "*** test a wants b, b1, and one is masked"
+         create_services a b

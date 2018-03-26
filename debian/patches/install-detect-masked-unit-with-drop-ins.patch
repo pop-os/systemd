@@ -1,0 +1,26 @@
+From: Filipe Brandenburger <filbranden@google.com>
+Date: Thu, 1 Mar 2018 17:48:15 -0800
+Subject: install: detect masked unit with drop-ins
+
+Before this fix, a unit with drop-ins will not be reported as masked by
+`systemctl is-enabled` or `systemctl list-unit-files`.
+
+(cherry picked from commit 9639b1752cf97eeee93d2a3dbc8531d6d4d4bc2e)
+---
+ src/shared/install.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/shared/install.c b/src/shared/install.c
+index 026aa32..9628ac6 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -1461,6 +1461,9 @@ static int unit_file_search(
+                 return -ENOENT;
+         }
+ 
++        if (info->type == UNIT_FILE_TYPE_MASKED)
++                return result;
++
+         /* Search for drop-in directories */
+ 
+         dropin_dir_name = strjoina(info->name, ".d");
