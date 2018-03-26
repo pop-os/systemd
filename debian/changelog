@@ -1,3 +1,20 @@
+systemd (237-3ubuntu5) bionic; urgency=medium
+
+  * Drop old keyring/invocation_id patch, which made keyring setup be skipped in containers.
+  * Use new patch, which sets up session keyring without relying on chown operation.
+  * Drop systemd.prerm safety check.
+    On Ubuntu, systemd is the only choice, and is essential, via init ->
+    systemd-sysv -> systemd dependency chain, thus removing systemd is already
+    quite hard, and appropriate warnings are emitted by dpkg. (LP: #1758438)
+  * Detect Masked unit with drop-ins. (LP: #1752722)
+  * wait-online: do not wait, if no links are managed (neither configured, or failed).
+    (LP: #1728181)
+  * journald.service: set Nice=-1 to dodge watchdog on soft lockups.
+    (LP: #1696970)
+  * Refresh all patches.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 26 Mar 2018 15:55:25 +0100
+
 systemd (237-3ubuntu4) bionic; urgency=medium
 
   * systemd-sysv-install: fix name initialisation.
