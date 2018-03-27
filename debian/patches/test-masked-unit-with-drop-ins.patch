@@ -8,7 +8,7 @@ Subject: test: masked unit with drop-ins
  1 file changed, 10 insertions(+)
 
 diff --git a/test/TEST-15-DROPIN/test-dropin.sh b/test/TEST-15-DROPIN/test-dropin.sh
-index 9d8af99..ab0a58c 100755
+index 9d8af99..3819cad 100755
 --- a/test/TEST-15-DROPIN/test-dropin.sh
 +++ b/test/TEST-15-DROPIN/test-dropin.sh
 @@ -179,6 +179,16 @@ test_masked_dropins () {
@@ -23,7 +23,7 @@ index 9d8af99..ab0a58c 100755
 +[Unit]
 +After=b.service
 +EOF
-+        check_ok a UnitFileState masked
++        [ `systemctl is-enabled a` = "masked" ]
 +
          # 'b1' is an alias for 'b': masking 'b' dep should not influence 'b1' dep
          echo "*** test a wants b, b1, and one is masked"
