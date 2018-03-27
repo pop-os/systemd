@@ -1,3 +1,10 @@
+systemd (237-3ubuntu6) bionic; urgency=medium
+
+  * Adjust the new dropin test, for v237 systemd.
+  * Refresh the keyring patch, to the one merged.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 27 Mar 2018 13:40:09 +0100
+
 systemd (237-3ubuntu5) bionic; urgency=medium
 
   * Drop old keyring/invocation_id patch, which made keyring setup be skipped in containers.
