@@ -3,6 +3,7 @@ core-do-not-free-stack-allocated-strings.patch
 basic-macros-rename-noreturn-into-_noreturn_-8456.patch
 units-Fix-SuccessAction-that-belongs-to-Unit-section-not-.patch
 udev-net-id-Fix-check-for-address-to-keep-interface-names.patch
+core-when-reloading-delay-any-actions-on-journal-and-dbus.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
