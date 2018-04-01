@@ -1,3 +1,22 @@
+systemd (238-4) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * udev/net-id: Fix check for address to keep interface names stable
+  * debian/copyright: Move global wildcard section to the top
+
+  [ Martin Pitt ]
+  * Fix daemon reload failures
+
+  [ Laurent Bigonville ]
+  * Fix /sys/fs/cgroup mount when using SELinux.
+    Since v236, all cgroups except /sys/fs/cgroup/systemd and
+    /sys/fs/cgroup/unified are not mounted when SELinux is enabled (even in
+    permissive mode). Disabling SELinux completely restores these cgroups.
+    This patch fixes that issue by no longer making the assumption that those
+    cgroups are mounted by initrd/dracut before systemd is started.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 01 Apr 2018 13:02:57 +0200
+
 systemd (238-3) unstable; urgency=medium
 
   [ Martin Pitt ]
