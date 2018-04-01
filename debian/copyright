@@ -3,12 +3,6 @@ Upstream-Name: systemd
 Upstream-Contact: systemd-devel@lists.freedesktop.org
 Source: https://www.freedesktop.org/wiki/Software/systemd/
 
-Files: debian/*
-Copyright: 2010-2013 Tollef Fog Heen <tfheen@debian.org>
-           2013-2015 Michael Biebl <biebl@debian.org>
-           2013 Michael Stapelberg <stapelberg@debian.org>
-License: LGPL-2.1+
-
 Files: *
 Copyright: 2008-2015 Kay Sievers <kay@vrfy.org>
            2010-2015 Lennart Poettering
@@ -109,6 +103,12 @@ License: LGPL-2.1+
 Files: src/udev/scsi_id/scsi.h
 Copyright: 2003 IBM Corp.
 License: GPL-2
+
+Files: debian/*
+Copyright: 2010-2013 Tollef Fog Heen <tfheen@debian.org>
+           2013-2018 Michael Biebl <biebl@debian.org>
+           2013 Michael Stapelberg <stapelberg@debian.org>
+License: LGPL-2.1+
 
 License: Expat
  Permission is hereby granted, free of charge, to any person obtaining a copy
