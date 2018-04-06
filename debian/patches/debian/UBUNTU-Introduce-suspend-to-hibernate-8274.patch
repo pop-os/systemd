@@ -1,4 +1,3 @@
-From c58493c00af97146d3b6c24da9c0371978124703 Mon Sep 17 00:00:00 2001
 From: Mario Limonciello <superm1@gmail.com>
 Date: Thu, 8 Mar 2018 21:17:33 +0800
 Subject: [PATCH] Introduce suspend-to-hibernate (#8274)
@@ -40,10 +39,10 @@ Signed-off-by: Mario Limonciello <mario.limonciello@dell.com>
  create mode 100644 units/suspend-to-hibernate.target
  create mode 100644 units/systemd-suspend-to-hibernate.service.in
 
-Index: systemd-237/man/logind.conf.xml
-===================================================================
---- systemd-237.orig/man/logind.conf.xml
-+++ systemd-237/man/logind.conf.xml
+diff --git a/man/logind.conf.xml b/man/logind.conf.xml
+index 8d2bfc5..5fb430f 100644
+--- a/man/logind.conf.xml
++++ b/man/logind.conf.xml
 @@ -175,7 +175,8 @@
          <literal>kexec</literal>,
          <literal>suspend</literal>,
@@ -64,10 +63,10 @@ Index: systemd-237/man/logind.conf.xml
          <literal>lock</literal>.
          If <literal>ignore</literal>, logind will never handle these
          keys. If <literal>lock</literal>, all running sessions will be
-Index: systemd-237/man/rules/meson.build
-===================================================================
---- systemd-237.orig/man/rules/meson.build
-+++ systemd-237/man/rules/meson.build
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index 79fc914..5e584cc 100644
+--- a/man/rules/meson.build
++++ b/man/rules/meson.build
 @@ -626,6 +626,7 @@ manpages = [
    '8',
    ['systemd-hibernate.service',
@@ -76,10 +75,10 @@ Index: systemd-237/man/rules/meson.build
     'systemd-sleep'],
    ''],
   ['systemd-sysctl.service', '8', ['systemd-sysctl'], ''],
-Index: systemd-237/man/systemd-sleep.conf.xml
-===================================================================
---- systemd-237.orig/man/systemd-sleep.conf.xml
-+++ systemd-237/man/systemd-sleep.conf.xml
+diff --git a/man/systemd-sleep.conf.xml b/man/systemd-sleep.conf.xml
+index 7fecd66..6ad9ff4 100644
+--- a/man/systemd-sleep.conf.xml
++++ b/man/systemd-sleep.conf.xml
 @@ -60,7 +60,7 @@
    <refsect1>
      <title>Description</title>
@@ -146,7 +145,7 @@ Index: systemd-237/man/systemd-sleep.conf.xml
      </variablelist>
    </refsect1>
  
-@@ -180,6 +202,7 @@ SuspendState=freeze</programlisting></pa
+@@ -180,6 +202,7 @@ SuspendState=freeze</programlisting></para>
        <citerefentry><refentrytitle>systemd-suspend.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
        <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
        <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
@@ -154,10 +153,10 @@ Index: systemd-237/man/systemd-sleep.conf.xml
        <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
        <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>
      </para>
-Index: systemd-237/man/systemd-suspend.service.xml
-===================================================================
---- systemd-237.orig/man/systemd-suspend.service.xml
-+++ systemd-237/man/systemd-suspend.service.xml
+diff --git a/man/systemd-suspend.service.xml b/man/systemd-suspend.service.xml
+index 24c213e..2455baa 100644
+--- a/man/systemd-suspend.service.xml
++++ b/man/systemd-suspend.service.xml
 @@ -50,6 +50,7 @@
      <refname>systemd-suspend.service</refname>
      <refname>systemd-hibernate.service</refname>
@@ -218,10 +217,10 @@ Index: systemd-237/man/systemd-suspend.service.xml
          </listitem>
        </varlistentry>
      </variablelist>
-Index: systemd-237/man/systemd.special.xml
-===================================================================
---- systemd-237.orig/man/systemd.special.xml
-+++ systemd-237/man/systemd.special.xml
+diff --git a/man/systemd.special.xml b/man/systemd.special.xml
+index 2810d6f..75e3027 100644
+--- a/man/systemd.special.xml
++++ b/man/systemd.special.xml
 @@ -65,6 +65,7 @@
      <filename>halt.target</filename>,
      <filename>hibernate.target</filename>,
@@ -230,10 +229,11 @@ Index: systemd-237/man/systemd.special.xml
      <filename>initrd-fs.target</filename>,
      <filename>initrd-root-device.target</filename>,
      <filename>initrd-root-fs.target</filename>,
-@@ -308,6 +309,15 @@
+@@ -307,6 +308,15 @@
+           <filename>sleep.target</filename>.</para>
          </listitem>
        </varlistentry>
-       <varlistentry>
++      <varlistentry>
 +        <term><filename>suspend-to-hibernate.target</filename></term>
 +        <listitem>
 +          <para>A special target unit for suspending the system for a period
@@ -242,14 +242,13 @@ Index: systemd-237/man/systemd.special.xml
 +        </listitem>
 +      </varlistentry>
 +
-+      <varlistentry>
+       <varlistentry>
          <term><filename>halt.target</filename></term>
          <listitem>
-           <para>A special target unit for shutting down and halting
-Index: systemd-237/shell-completion/bash/systemctl.in
-===================================================================
---- systemd-237.orig/shell-completion/bash/systemctl.in
-+++ systemd-237/shell-completion/bash/systemctl.in
+diff --git a/shell-completion/bash/systemctl.in b/shell-completion/bash/systemctl.in
+index 080deea..de2648a 100644
+--- a/shell-completion/bash/systemctl.in
++++ b/shell-completion/bash/systemctl.in
 @@ -205,8 +205,9 @@ _systemctl () {
                       [JOBS]='cancel'
                       [ENVS]='set-environment unset-environment import-environment'
@@ -262,10 +261,10 @@ Index: systemd-237/shell-completion/bash/systemctl.in
                               reboot rescue show-environment suspend get-default
                               is-system-running preset-all'
                       [FILE]='link switch-root'
-Index: systemd-237/shell-completion/zsh/_systemctl.in
-===================================================================
---- systemd-237.orig/shell-completion/zsh/_systemctl.in
-+++ systemd-237/shell-completion/zsh/_systemctl.in
+diff --git a/shell-completion/zsh/_systemctl.in b/shell-completion/zsh/_systemctl.in
+index a3df9a0..ca07444 100644
+--- a/shell-completion/zsh/_systemctl.in
++++ b/shell-completion/zsh/_systemctl.in
 @@ -18,6 +18,7 @@
      "force-reload:Reload one or more units if possible, otherwise restart if active"
      "hibernate:Hibernate the system"
@@ -274,10 +273,10 @@ Index: systemd-237/shell-completion/zsh/_systemctl.in
      "try-reload-or-restart:Reload one or more units if possible, otherwise restart if active"
      "isolate:Start one unit and stop all others"
      "kill:Send signal to processes of a unit"
-Index: systemd-237/src/basic/special.h
-===================================================================
---- systemd-237.orig/src/basic/special.h
-+++ systemd-237/src/basic/special.h
+diff --git a/src/basic/special.h b/src/basic/special.h
+index c058b1d..81078ff 100644
+--- a/src/basic/special.h
++++ b/src/basic/special.h
 @@ -37,6 +37,7 @@
  #define SPECIAL_SUSPEND_TARGET "suspend.target"
  #define SPECIAL_HIBERNATE_TARGET "hibernate.target"
@@ -286,10 +285,10 @@ Index: systemd-237/src/basic/special.h
  
  /* Special boot targets */
  #define SPECIAL_RESCUE_TARGET "rescue.target"
-Index: systemd-237/src/login/logind-action.c
-===================================================================
---- systemd-237.orig/src/login/logind-action.c
-+++ systemd-237/src/login/logind-action.c
+diff --git a/src/login/logind-action.c b/src/login/logind-action.c
+index 852ea9f..0e8e0b2 100644
+--- a/src/login/logind-action.c
++++ b/src/login/logind-action.c
 @@ -47,7 +47,8 @@ int manager_handle_action(
                  [HANDLE_KEXEC] = "Rebooting via kexec...",
                  [HANDLE_SUSPEND] = "Suspending...",
@@ -330,7 +329,7 @@ Index: systemd-237/src/login/logind-action.c
  
          /* If the actual operation is inhibited, warn and fail */
          if (!ignore_inhibited &&
-@@ -172,6 +178,7 @@ static const char* const handle_action_t
+@@ -172,6 +178,7 @@ static const char* const handle_action_table[_HANDLE_ACTION_MAX] = {
          [HANDLE_SUSPEND] = "suspend",
          [HANDLE_HIBERNATE] = "hibernate",
          [HANDLE_HYBRID_SLEEP] = "hybrid-sleep",
@@ -338,10 +337,10 @@ Index: systemd-237/src/login/logind-action.c
          [HANDLE_LOCK] = "lock"
  };
  
-Index: systemd-237/src/login/logind-action.h
-===================================================================
---- systemd-237.orig/src/login/logind-action.h
-+++ systemd-237/src/login/logind-action.h
+diff --git a/src/login/logind-action.h b/src/login/logind-action.h
+index 8c31ec4..1ee8c81 100644
+--- a/src/login/logind-action.h
++++ b/src/login/logind-action.h
 @@ -29,6 +29,7 @@ typedef enum HandleAction {
          HANDLE_SUSPEND,
          HANDLE_HIBERNATE,
@@ -350,11 +349,11 @@ Index: systemd-237/src/login/logind-action.h
          HANDLE_LOCK,
          _HANDLE_ACTION_MAX,
          _HANDLE_ACTION_INVALID = -1
-Index: systemd-237/src/login/logind-dbus.c
-===================================================================
---- systemd-237.orig/src/login/logind-dbus.c
-+++ systemd-237/src/login/logind-dbus.c
-@@ -1924,6 +1924,20 @@ static int method_hybrid_sleep(sd_bus_me
+diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
+index ae36ece..51617d6 100644
+--- a/src/login/logind-dbus.c
++++ b/src/login/logind-dbus.c
+@@ -1924,6 +1924,20 @@ static int method_hybrid_sleep(sd_bus_message *message, void *userdata, sd_bus_e
                          error);
  }
  
@@ -375,7 +374,7 @@ Index: systemd-237/src/login/logind-dbus.c
  static int nologin_timeout_handler(
                          sd_event_source *s,
                          uint64_t usec,
-@@ -2381,6 +2395,19 @@ static int method_can_hybrid_sleep(sd_bu
+@@ -2381,6 +2395,19 @@ static int method_can_hybrid_sleep(sd_bus_message *message, void *userdata, sd_b
                          error);
  }
  
@@ -410,36 +409,36 @@ Index: systemd-237/src/login/logind-dbus.c
          SD_BUS_METHOD("ScheduleShutdown", "st", NULL, method_schedule_shutdown, SD_BUS_VTABLE_UNPRIVILEGED),
          SD_BUS_METHOD("CancelScheduledShutdown", NULL, "b", method_cancel_scheduled_shutdown, SD_BUS_VTABLE_UNPRIVILEGED),
          SD_BUS_METHOD("Inhibit", "ssss", "h", method_inhibit, SD_BUS_VTABLE_UNPRIVILEGED),
-Index: systemd-237/src/login/org.freedesktop.login1.conf
-===================================================================
---- systemd-237.orig/src/login/org.freedesktop.login1.conf
-+++ systemd-237/src/login/org.freedesktop.login1.conf
-@@ -152,6 +152,10 @@
- 
-                 <allow send_destination="org.freedesktop.login1"
+diff --git a/src/login/org.freedesktop.login1.conf b/src/login/org.freedesktop.login1.conf
+index d842411..970a217 100644
+--- a/src/login/org.freedesktop.login1.conf
++++ b/src/login/org.freedesktop.login1.conf
+@@ -150,6 +150,10 @@
                         send_interface="org.freedesktop.login1.Manager"
+                        send_member="HybridSleep"/>
+ 
++                <allow send_destination="org.freedesktop.login1"
++                       send_interface="org.freedesktop.login1.Manager"
 +                       send_member="SuspendToHibernate"/>
 +
-+                <allow send_destination="org.freedesktop.login1"
-+                       send_interface="org.freedesktop.login1.Manager"
-                        send_member="CanPowerOff"/>
- 
-                 <allow send_destination="org.freedesktop.login1"
-@@ -176,6 +180,10 @@
- 
                  <allow send_destination="org.freedesktop.login1"
                         send_interface="org.freedesktop.login1.Manager"
-+                       send_member="CanSuspendToHibernate"/>
-+
+                        send_member="CanPowerOff"/>
+@@ -174,6 +178,10 @@
+                        send_interface="org.freedesktop.login1.Manager"
+                        send_member="CanHybridSleep"/>
+ 
 +                <allow send_destination="org.freedesktop.login1"
 +                       send_interface="org.freedesktop.login1.Manager"
-                        send_member="ScheduleShutdown"/>
- 
++                       send_member="CanSuspendToHibernate"/>
++
                  <allow send_destination="org.freedesktop.login1"
-Index: systemd-237/src/shared/sleep-config.c
-===================================================================
---- systemd-237.orig/src/shared/sleep-config.c
-+++ systemd-237/src/shared/sleep-config.c
+                        send_interface="org.freedesktop.login1.Manager"
+                        send_member="ScheduleShutdown"/>
+diff --git a/src/shared/sleep-config.c b/src/shared/sleep-config.c
+index 8b091c4..4a365b1 100644
+--- a/src/shared/sleep-config.c
++++ b/src/shared/sleep-config.c
 @@ -3,6 +3,7 @@
    This file is part of systemd.
  
@@ -464,7 +463,7 @@ Index: systemd-237/src/shared/sleep-config.c
  
          const ConfigTableItem items[] = {
                  { "Sleep",   "SuspendMode",      config_parse_strv,  0, &suspend_mode  },
-@@ -56,6 +58,7 @@ int parse_sleep_config(const char *verb,
+@@ -56,6 +58,7 @@ int parse_sleep_config(const char *verb, char ***_modes, char ***_states) {
                  { "Sleep",   "HibernateState",   config_parse_strv,  0, &hibernate_state },
                  { "Sleep",   "HybridSleepMode",  config_parse_strv,  0, &hybrid_mode  },
                  { "Sleep",   "HybridSleepState", config_parse_strv,  0, &hybrid_state },
@@ -472,7 +471,7 @@ Index: systemd-237/src/shared/sleep-config.c
                  {}
          };
  
-@@ -94,18 +97,26 @@ int parse_sleep_config(const char *verb,
+@@ -94,18 +97,26 @@ int parse_sleep_config(const char *verb, char ***_modes, char ***_states) {
                          USE(states, hybrid_state);
                  else
                          states = strv_new("disk", NULL);
@@ -503,7 +502,7 @@ Index: systemd-237/src/shared/sleep-config.c
          return 0;
  }
  
-@@ -266,15 +277,44 @@ static bool enough_memory_for_hibernatio
+@@ -266,15 +277,44 @@ static bool enough_memory_for_hibernation(void) {
          return r;
  }
  
@@ -550,10 +549,10 @@ Index: systemd-237/src/shared/sleep-config.c
          if (r < 0)
                  return false;
  
-Index: systemd-237/src/shared/sleep-config.h
-===================================================================
---- systemd-237.orig/src/shared/sleep-config.h
-+++ systemd-237/src/shared/sleep-config.h
+diff --git a/src/shared/sleep-config.h b/src/shared/sleep-config.h
+index fc5a81d..3dacda0 100644
+--- a/src/shared/sleep-config.h
++++ b/src/shared/sleep-config.h
 @@ -20,7 +20,9 @@
    along with systemd; If not, see <http://www.gnu.org/licenses/>.
  ***/
@@ -565,10 +564,10 @@ Index: systemd-237/src/shared/sleep-config.h
  
  int can_sleep(const char *verb);
  int can_sleep_disk(char **types);
-Index: systemd-237/src/sleep/sleep.c
-===================================================================
---- systemd-237.orig/src/sleep/sleep.c
-+++ systemd-237/src/sleep/sleep.c
+diff --git a/src/sleep/sleep.c b/src/sleep/sleep.c
+index 518032e..48e7c38 100644
+--- a/src/sleep/sleep.c
++++ b/src/sleep/sleep.c
 @@ -4,6 +4,7 @@
  
    Copyright 2012 Lennart Poettering
@@ -592,7 +591,7 @@ Index: systemd-237/src/sleep/sleep.c
  #include "string-util.h"
  #include "strv.h"
  #include "util.h"
-@@ -135,6 +138,83 @@ static int execute(char **modes, char **
+@@ -135,6 +138,83 @@ static int execute(char **modes, char **states) {
          return r;
  }
  
@@ -685,7 +684,7 @@ Index: systemd-237/src/sleep/sleep.c
                 , program_invocation_short_name);
  }
  
-@@ -189,7 +271,8 @@ static int parse_argv(int argc, char *ar
+@@ -189,7 +271,8 @@ static int parse_argv(int argc, char *argv[]) {
  
          if (!streq(arg_verb, "suspend") &&
              !streq(arg_verb, "hibernate") &&
@@ -695,7 +694,7 @@ Index: systemd-237/src/sleep/sleep.c
                  log_error("Unknown command '%s'.", arg_verb);
                  return -EINVAL;
          }
-@@ -199,6 +282,7 @@ static int parse_argv(int argc, char *ar
+@@ -199,6 +282,7 @@ static int parse_argv(int argc, char *argv[]) {
  
  int main(int argc, char *argv[]) {
          _cleanup_strv_free_ char **modes = NULL, **states = NULL;
@@ -721,10 +720,10 @@ Index: systemd-237/src/sleep/sleep.c
  finish:
          return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
  }
-Index: systemd-237/src/systemctl/systemctl.c
-===================================================================
---- systemd-237.orig/src/systemctl/systemctl.c
-+++ systemd-237/src/systemctl/systemctl.c
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index 75198a5..c27116f 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
 @@ -160,6 +160,7 @@ static enum action {
          ACTION_SUSPEND,
          ACTION_HIBERNATE,
@@ -771,7 +770,7 @@ Index: systemd-237/src/systemctl/systemctl.c
  };
  
  static enum action verb_to_action(const char *verb) {
-@@ -3277,6 +3279,11 @@ static int logind_reboot(enum action a)
+@@ -3277,6 +3279,11 @@ static int logind_reboot(enum action a) {
                  description = "put system into hybrid sleep";
                  break;
  
@@ -783,7 +782,7 @@ Index: systemd-237/src/systemctl/systemctl.c
          default:
                  return -EINVAL;
          }
-@@ -3628,7 +3635,8 @@ static int start_special(int argc, char
+@@ -3628,7 +3635,8 @@ static int start_special(int argc, char *argv[], void *userdata) {
                             ACTION_HALT,
                             ACTION_SUSPEND,
                             ACTION_HIBERNATE,
@@ -804,7 +803,7 @@ Index: systemd-237/src/systemctl/systemctl.c
                 program_invocation_short_name);
  }
  
-@@ -8397,6 +8407,7 @@ static int systemctl_main(int argc, char
+@@ -8397,6 +8407,7 @@ static int systemctl_main(int argc, char *argv[]) {
                  { "suspend",               VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
                  { "hibernate",             VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
                  { "hybrid-sleep",          VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
@@ -820,10 +819,10 @@ Index: systemd-237/src/systemctl/systemctl.c
          case ACTION_EMERGENCY:
          case ACTION_DEFAULT:
                  /* systemctl verbs with no equivalent in the legacy commands.
-Index: systemd-237/src/test/test-sleep.c
-===================================================================
---- systemd-237.orig/src/test/test-sleep.c
-+++ systemd-237/src/test/test-sleep.c
+diff --git a/src/test/test-sleep.c b/src/test/test-sleep.c
+index 3c2b115..e49ecbe 100644
+--- a/src/test/test-sleep.c
++++ b/src/test/test-sleep.c
 @@ -48,6 +48,7 @@ static void test_sleep(void) {
          log_info("Suspend configured and possible: %s", yes_no(can_sleep("suspend") > 0));
          log_info("Hibernation configured and possible: %s", yes_no(can_sleep("hibernate") > 0));
@@ -832,10 +831,10 @@ Index: systemd-237/src/test/test-sleep.c
  }
  
  int main(int argc, char* argv[]) {
-Index: systemd-237/units/meson.build
-===================================================================
---- systemd-237.orig/units/meson.build
-+++ systemd-237/units/meson.build
+diff --git a/units/meson.build b/units/meson.build
+index d58abfe..20fb90d 100644
+--- a/units/meson.build
++++ b/units/meson.build
 @@ -36,6 +36,7 @@ units = [
          ['halt.target',                         ''],
          ['hibernate.target',                    'ENABLE_HIBERNATE'],
@@ -852,10 +851,11 @@ Index: systemd-237/units/meson.build
          ['systemd-hostnamed.service',            'ENABLE_HOSTNAMED',
           'dbus-org.freedesktop.hostname1.service'],
          ['systemd-hwdb-update.service',          'ENABLE_HWDB',
-Index: systemd-237/units/suspend-to-hibernate.target
-===================================================================
+diff --git a/units/suspend-to-hibernate.target b/units/suspend-to-hibernate.target
+new file mode 100644
+index 0000000..b9ab6d1
 --- /dev/null
-+++ systemd-237/units/suspend-to-hibernate.target
++++ b/units/suspend-to-hibernate.target
 @@ -0,0 +1,16 @@
 +#  SPDX-License-Identifier: LGPL-2.1+
 +#
@@ -873,10 +873,11 @@ Index: systemd-237/units/suspend-to-hibernate.target
 +Requires=systemd-suspend-to-hibernate.service
 +After=systemd-suspend-to-hibernate.service
 +StopWhenUnneeded=yes
-Index: systemd-237/units/systemd-suspend-to-hibernate.service.in
-===================================================================
+diff --git a/units/systemd-suspend-to-hibernate.service.in b/units/systemd-suspend-to-hibernate.service.in
+new file mode 100644
+index 0000000..9bec9f6
 --- /dev/null
-+++ systemd-237/units/systemd-suspend-to-hibernate.service.in
++++ b/units/systemd-suspend-to-hibernate.service.in
 @@ -0,0 +1,19 @@
 +#  SPDX-License-Identifier: LGPL-2.1+
 +#

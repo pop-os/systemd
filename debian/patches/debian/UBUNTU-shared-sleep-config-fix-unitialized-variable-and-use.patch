@@ -1,5 +1,4 @@
-From 9aa2e409bcb70f3952b38a35f16fc080c22dd5a5 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Sun, 11 Mar 2018 09:13:03 +0100
 Subject: [PATCH] shared/sleep-config: fix unitialized variable and use
  STR_IN_SET (#8416)
@@ -8,11 +7,11 @@ Subject: [PATCH] shared/sleep-config: fix unitialized variable and use
  src/shared/sleep-config.c | 17 +++++++----------
  1 file changed, 7 insertions(+), 10 deletions(-)
 
-Index: systemd-237/src/shared/sleep-config.c
-===================================================================
---- systemd-237.orig/src/shared/sleep-config.c
-+++ systemd-237/src/shared/sleep-config.c
-@@ -49,7 +49,7 @@ int parse_sleep_config(const char *verb,
+diff --git a/src/shared/sleep-config.c b/src/shared/sleep-config.c
+index 4a365b1..94e3e26 100644
+--- a/src/shared/sleep-config.c
++++ b/src/shared/sleep-config.c
+@@ -49,7 +49,7 @@ int parse_sleep_config(const char *verb, char ***_modes, char ***_states, usec_t
                  **hibernate_mode = NULL, **hibernate_state = NULL,
                  **hybrid_mode = NULL, **hybrid_state = NULL;
          char **modes, **states;
@@ -21,7 +20,7 @@ Index: systemd-237/src/shared/sleep-config.c
  
          const ConfigTableItem items[] = {
                  { "Sleep",   "SuspendMode",      config_parse_strv,  0, &suspend_mode  },
-@@ -97,13 +97,13 @@ int parse_sleep_config(const char *verb,
+@@ -97,13 +97,13 @@ int parse_sleep_config(const char *verb, char ***_modes, char ***_states, usec_t
                          USE(states, hybrid_state);
                  else
                          states = strv_new("disk", NULL);
