@@ -55,3 +55,4 @@ debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
 debian/UBUNTU-Introduce-suspend-to-hibernate-8274.patch
 debian/UBUNTU-shared-sleep-config-fix-unitialized-variable-and-use.patch
 debian/UBUNTU-Rename-suspend-to-hibernate-to-suspend-then-hibernat.patch
+debian/UBUNTU-resolved-Listen-on-both-TCP-and-UDP-by-default.patch

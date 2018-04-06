@@ -1,0 +1,50 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Fri, 6 Apr 2018 14:53:39 +0100
+Subject: UBUNTU resolved: Listen on both TCP and UDP by default.
+
+LP: #1731522
+---
+ man/resolved.conf.xml          | 4 ++--
+ src/resolve/resolved-manager.c | 2 +-
+ src/resolve/resolved.conf.in   | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
+index 451b9cd..bf88c0e 100644
+--- a/man/resolved.conf.xml
++++ b/man/resolved.conf.xml
+@@ -233,9 +233,9 @@
+       <varlistentry>
+         <term><varname>DNSStubListener=</varname></term>
+         <listitem><para>Takes a boolean argument or one of <literal>udp</literal> and <literal>tcp</literal>. If
+-        <literal>udp</literal> (the default), a DNS stub resolver will listen for UDP requests on address 127.0.0.53
++        <literal>udp</literal>, a DNS stub resolver will listen for UDP requests on address 127.0.0.53
+         port 53. If <literal>tcp</literal>, the stub will listen for TCP requests on the same address and port. If
+-        <literal>yes</literal>, the stub listens for both UDP and TCP requests.  If <literal>no</literal>, the stub
++        <literal>yes</literal> (the default), the stub listens for both UDP and TCP requests.  If <literal>no</literal>, the stub
+         listener is disabled.</para>
+ 
+         <para>Note that the DNS stub listener is turned off implicitly when its listening address and port are already
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 37cef3f..12a9d17 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -600,7 +600,7 @@ int manager_new(Manager **ret) {
+         m->mdns_support = RESOLVE_SUPPORT_NO;
+         m->dnssec_mode = DEFAULT_DNSSEC_MODE;
+         m->enable_cache = true;
+-        m->dns_stub_listener_mode = DNS_STUB_LISTENER_UDP;
++        m->dns_stub_listener_mode = DNS_STUB_LISTENER_YES;
+         m->read_resolv_conf = true;
+         m->need_builtin_fallbacks = true;
+         m->etc_hosts_last = m->etc_hosts_mtime = USEC_INFINITY;
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index bcd7a92..945760a 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
+@@ -19,4 +19,4 @@
+ #MulticastDNS=no
+ #DNSSEC=@DEFAULT_DNSSEC_MODE@
+ #Cache=yes
+-#DNSStubListener=udp
++#DNSStubListener=yes
