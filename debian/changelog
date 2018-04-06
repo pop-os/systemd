@@ -1,3 +1,9 @@
+systemd (237-3ubuntu7) bionic; urgency=medium
+
+  * Introduce suspend then hibernate (LP: #1756006)
+
+ -- Mario Limonciello <mario.limonciello@dell.com>  Mon, 02 Apr 2018 14:25:04 -0500
+
 systemd (237-3ubuntu6) bionic; urgency=medium
 
   * Adjust the new dropin test, for v237 systemd.

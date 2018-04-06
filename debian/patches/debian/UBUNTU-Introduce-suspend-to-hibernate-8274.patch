@@ -1,0 +1,899 @@
+From c58493c00af97146d3b6c24da9c0371978124703 Mon Sep 17 00:00:00 2001
+From: Mario Limonciello <superm1@gmail.com>
+Date: Thu, 8 Mar 2018 21:17:33 +0800
+Subject: [PATCH] Introduce suspend-to-hibernate (#8274)
+
+Suspend to Hibernate is a new sleep method that invokes suspend
+for a predefined period of time before automatically waking up
+and hibernating the system.
+
+It's similar to HybridSleep however there isn't a performance
+impact on every suspend cycle.
+
+It's intended to use with systems that may have a higher power
+drain in their supported suspend states to prevent battery and
+data loss over an extended suspend cycle.
+
+Signed-off-by: Mario Limonciello <mario.limonciello@dell.com>
+---
+ man/logind.conf.xml                           |  6 +-
+ man/rules/meson.build                         |  1 +
+ man/systemd-sleep.conf.xml                    | 33 ++++++++--
+ man/systemd-suspend.service.xml               | 17 +++--
+ man/systemd.special.xml                       | 10 +++
+ shell-completion/bash/systemctl.in            |  5 +-
+ shell-completion/zsh/_systemctl.in            |  1 +
+ src/basic/special.h                           |  1 +
+ src/login/logind-action.c                     | 13 +++-
+ src/login/logind-action.h                     |  1 +
+ src/login/logind-dbus.c                       | 29 +++++++++
+ src/login/org.freedesktop.login1.conf         |  8 +++
+ src/shared/sleep-config.c                     | 54 +++++++++++++--
+ src/shared/sleep-config.h                     |  4 +-
+ src/sleep/sleep.c                             | 94 +++++++++++++++++++++++++--
+ src/systemctl/systemctl.c                     | 46 ++++++++-----
+ src/test/test-sleep.c                         |  1 +
+ units/meson.build                             |  2 +
+ units/suspend-to-hibernate.target             | 16 +++++
+ units/systemd-suspend-to-hibernate.service.in | 19 ++++++
+ 20 files changed, 315 insertions(+), 46 deletions(-)
+ create mode 100644 units/suspend-to-hibernate.target
+ create mode 100644 units/systemd-suspend-to-hibernate.service.in
+
+Index: systemd-237/man/logind.conf.xml
+===================================================================
+--- systemd-237.orig/man/logind.conf.xml
++++ systemd-237/man/logind.conf.xml
+@@ -175,7 +175,8 @@
+         <literal>kexec</literal>,
+         <literal>suspend</literal>,
+         <literal>hibernate</literal>,
+-        <literal>hybrid-sleep</literal>, and
++        <literal>hybrid-sleep</literal>,
++        <literal>suspend-to-hibernate</literal>, and
+         <literal>lock</literal>.
+         Defaults to <literal>ignore</literal>.</para>
+ 
+@@ -223,7 +224,8 @@
+         <literal>kexec</literal>,
+         <literal>suspend</literal>,
+         <literal>hibernate</literal>,
+-        <literal>hybrid-sleep</literal>, and
++        <literal>hybrid-sleep</literal>,
++        <literal>suspend-to-hibernate</literal>, and
+         <literal>lock</literal>.
+         If <literal>ignore</literal>, logind will never handle these
+         keys. If <literal>lock</literal>, all running sessions will be
+Index: systemd-237/man/rules/meson.build
+===================================================================
+--- systemd-237.orig/man/rules/meson.build
++++ systemd-237/man/rules/meson.build
+@@ -626,6 +626,7 @@ manpages = [
+   '8',
+   ['systemd-hibernate.service',
+    'systemd-hybrid-sleep.service',
++   'systemd-suspend-to-hibernate.service',
+    'systemd-sleep'],
+   ''],
+  ['systemd-sysctl.service', '8', ['systemd-sysctl'], ''],
+Index: systemd-237/man/systemd-sleep.conf.xml
+===================================================================
+--- systemd-237.orig/man/systemd-sleep.conf.xml
++++ systemd-237/man/systemd-sleep.conf.xml
+@@ -60,7 +60,7 @@
+   <refsect1>
+     <title>Description</title>
+ 
+-    <para><command>systemd</command> supports three general
++    <para><command>systemd</command> supports four general
+     power-saving modes:</para>
+ 
+     <variablelist>
+@@ -102,6 +102,17 @@
+         suspend-to-both by the kernel.
+         </para></listitem>
+       </varlistentry>
++
++      <varlistentry>
++        <term>suspend-to-hibernate</term>
++
++        <listitem><para>A low power state where the system is initially suspended
++        (the state is stored in RAM). If not interrupted within the delay specified by
++        <command>HibernateDelaySec=</command>, the system will be woken using an RTC
++        alarm and hibernated (the state is then stored on disk).
++        </para></listitem>
++      </varlistentry>
++
+     </variablelist>
+ 
+     <para>Settings in these files determine what strings
+@@ -134,8 +145,9 @@
+         <filename>/sys/power/disk</filename> by,
+         respectively,
+         <citerefentry><refentrytitle>systemd-suspend.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-        <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>, or
+-        <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
++        <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++        <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>, or
++        <citerefentry><refentrytitle>systemd-suspend-to-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+         More than one value can be specified by separating
+         multiple values with whitespace. They will be tried
+         in turn, until one is written without error. If
+@@ -152,14 +164,24 @@
+         <filename>/sys/power/state</filename> by,
+         respectively,
+         <citerefentry><refentrytitle>systemd-suspend.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-        <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>, or
+-        <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
++        <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++        <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>, or
++        <citerefentry><refentrytitle>systemd-suspend-to-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+         More than one value can be specified by separating
+         multiple values with whitespace. They will be tried
+         in turn, until one is written without error. If
+         neither succeeds, the operation will be aborted.
+         </para></listitem>
+       </varlistentry>
++      <varlistentry>
++        <term><varname>HibernateDelaySec=</varname></term>
++
++        <listitem><para>The amount of time in seconds
++        that will pass before the system is automatically
++        put into hibernate when using
++        <citerefentry><refentrytitle>systemd-suspend-to-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
++        </para></listitem>
++      </varlistentry>
+     </variablelist>
+   </refsect1>
+ 
+@@ -180,6 +202,7 @@ SuspendState=freeze</programlisting></pa
+       <citerefentry><refentrytitle>systemd-suspend.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-hybrid-sleep.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-suspend-to-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+     </para>
+Index: systemd-237/man/systemd-suspend.service.xml
+===================================================================
+--- systemd-237.orig/man/systemd-suspend.service.xml
++++ systemd-237/man/systemd-suspend.service.xml
+@@ -50,6 +50,7 @@
+     <refname>systemd-suspend.service</refname>
+     <refname>systemd-hibernate.service</refname>
+     <refname>systemd-hybrid-sleep.service</refname>
++    <refname>systemd-suspend-to-hibernate.service</refname>
+     <refname>systemd-sleep</refname>
+     <refpurpose>System sleep state logic</refpurpose>
+   </refnamediv>
+@@ -58,6 +59,7 @@
+     <para><filename>systemd-suspend.service</filename></para>
+     <para><filename>systemd-hibernate.service</filename></para>
+     <para><filename>systemd-hybrid-sleep.service</filename></para>
++    <para><filename>systemd-suspend-to-hibernate.service</filename></para>
+     <para><filename>/usr/lib/systemd/system-sleep</filename></para>
+   </refsynopsisdiv>
+ 
+@@ -72,7 +74,9 @@
+     hibernation. Finally,
+     <filename>systemd-hybrid-sleep.service</filename> is pulled in by
+     <filename>hybrid-sleep.target</filename> to execute hybrid
+-    hibernation with system suspend.</para>
++    hibernation with system suspend and pulled in by
++    <filename>suspend-to-hibernate.target</filename> to execute system suspend
++    with a timeout that will activate hibernate later.</para>
+ 
+     <para>Immediately before entering system suspend and/or
+     hibernation <filename>systemd-suspend.service</filename> (and the
+@@ -80,8 +84,9 @@
+     <filename>/usr/lib/systemd/system-sleep/</filename> and pass two
+     arguments to them. The first argument will be
+     <literal>pre</literal>, the second either
+-    <literal>suspend</literal>, <literal>hibernate</literal>, or
+-    <literal>hybrid-sleep</literal> depending on the chosen action.
++    <literal>suspend</literal>, <literal>hibernate</literal>,
++    <literal>hybrid-sleep</literal>, or <literal>suspend-to-hibernate</literal>
++    depending on the chosen action.
+     Immediately after leaving system suspend and/or hibernation the
+     same executables are run, but the first argument is now
+     <literal>post</literal>. All executables in this directory are
+@@ -100,6 +105,7 @@
+     <filename>systemd-suspend.service</filename>,
+     <filename>systemd-hibernate.service</filename>, and
+     <filename>systemd-hybrid-sleep.service</filename>
++    <filename>systemd-suspend-to-hibernate.service</filename>
+     should never be executed directly. Instead, trigger system sleep
+     states with a command such as <literal>systemctl suspend</literal>
+     or similar.</para>
+@@ -128,9 +134,10 @@
+         <term><option>suspend</option></term>
+         <term><option>hibernate</option></term>
+         <term><option>hybrid-sleep</option></term>
++        <term><option>suspend-to-hibernate</option></term>
+ 
+-        <listitem><para>Suspend, hibernate, or put the system to
+-        hybrid sleep.</para>
++        <listitem><para>Suspend, hibernate, suspend to hibernate, or put the
++        system to hybrid sleep.</para>
+         </listitem>
+       </varlistentry>
+     </variablelist>
+Index: systemd-237/man/systemd.special.xml
+===================================================================
+--- systemd-237.orig/man/systemd.special.xml
++++ systemd-237/man/systemd.special.xml
+@@ -65,6 +65,7 @@
+     <filename>halt.target</filename>,
+     <filename>hibernate.target</filename>,
+     <filename>hybrid-sleep.target</filename>,
++    <filename>suspend-to-hibernate.target</filename>,
+     <filename>initrd-fs.target</filename>,
+     <filename>initrd-root-device.target</filename>,
+     <filename>initrd-root-fs.target</filename>,
+@@ -308,6 +309,15 @@
+         </listitem>
+       </varlistentry>
+       <varlistentry>
++        <term><filename>suspend-to-hibernate.target</filename></term>
++        <listitem>
++          <para>A special target unit for suspending the system for a period
++          of time, waking it and putting it into hibernate. This pulls in
++          <filename>sleep.target</filename>.</para>
++        </listitem>
++      </varlistentry>
++
++      <varlistentry>
+         <term><filename>halt.target</filename></term>
+         <listitem>
+           <para>A special target unit for shutting down and halting
+Index: systemd-237/shell-completion/bash/systemctl.in
+===================================================================
+--- systemd-237.orig/shell-completion/bash/systemctl.in
++++ systemd-237/shell-completion/bash/systemctl.in
+@@ -205,8 +205,9 @@ _systemctl () {
+                      [JOBS]='cancel'
+                      [ENVS]='set-environment unset-environment import-environment'
+                [STANDALONE]='daemon-reexec daemon-reload default
+-                             emergency exit halt hibernate hybrid-sleep kexec list-jobs
+-                             list-sockets list-timers list-units list-unit-files poweroff
++                             emergency exit halt hibernate hybrid-sleep
++                             suspend-to-hibernate kexec list-jobs list-sockets
++                             list-timers list-units list-unit-files poweroff
+                              reboot rescue show-environment suspend get-default
+                              is-system-running preset-all'
+                      [FILE]='link switch-root'
+Index: systemd-237/shell-completion/zsh/_systemctl.in
+===================================================================
+--- systemd-237.orig/shell-completion/zsh/_systemctl.in
++++ systemd-237/shell-completion/zsh/_systemctl.in
+@@ -18,6 +18,7 @@
+     "force-reload:Reload one or more units if possible, otherwise restart if active"
+     "hibernate:Hibernate the system"
+     "hybrid-sleep:Hibernate and suspend the system"
++    "suspend-to-hibernate:Suspend the system for a period of time, and then hibernate it"
+     "try-reload-or-restart:Reload one or more units if possible, otherwise restart if active"
+     "isolate:Start one unit and stop all others"
+     "kill:Send signal to processes of a unit"
+Index: systemd-237/src/basic/special.h
+===================================================================
+--- systemd-237.orig/src/basic/special.h
++++ systemd-237/src/basic/special.h
+@@ -37,6 +37,7 @@
+ #define SPECIAL_SUSPEND_TARGET "suspend.target"
+ #define SPECIAL_HIBERNATE_TARGET "hibernate.target"
+ #define SPECIAL_HYBRID_SLEEP_TARGET "hybrid-sleep.target"
++#define SPECIAL_SUSPEND_TO_HIBERNATE_TARGET "suspend-to-hibernate.target"
+ 
+ /* Special boot targets */
+ #define SPECIAL_RESCUE_TARGET "rescue.target"
+Index: systemd-237/src/login/logind-action.c
+===================================================================
+--- systemd-237.orig/src/login/logind-action.c
++++ systemd-237/src/login/logind-action.c
+@@ -47,7 +47,8 @@ int manager_handle_action(
+                 [HANDLE_KEXEC] = "Rebooting via kexec...",
+                 [HANDLE_SUSPEND] = "Suspending...",
+                 [HANDLE_HIBERNATE] = "Hibernating...",
+-                [HANDLE_HYBRID_SLEEP] = "Hibernating and suspending..."
++                [HANDLE_HYBRID_SLEEP] = "Hibernating and suspending...",
++                [HANDLE_SUSPEND_TO_HIBERNATE] = "Suspending to hibernate...",
+         };
+ 
+         static const char * const target_table[_HANDLE_ACTION_MAX] = {
+@@ -57,7 +58,8 @@ int manager_handle_action(
+                 [HANDLE_KEXEC] = SPECIAL_KEXEC_TARGET,
+                 [HANDLE_SUSPEND] = SPECIAL_SUSPEND_TARGET,
+                 [HANDLE_HIBERNATE] = SPECIAL_HIBERNATE_TARGET,
+-                [HANDLE_HYBRID_SLEEP] = SPECIAL_HYBRID_SLEEP_TARGET
++                [HANDLE_HYBRID_SLEEP] = SPECIAL_HYBRID_SLEEP_TARGET,
++                [HANDLE_SUSPEND_TO_HIBERNATE] = SPECIAL_SUSPEND_TO_HIBERNATE_TARGET,
+         };
+ 
+         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+@@ -110,6 +112,8 @@ int manager_handle_action(
+                 supported = can_sleep("hibernate") > 0;
+         else if (handle == HANDLE_HYBRID_SLEEP)
+                 supported = can_sleep("hybrid-sleep") > 0;
++        else if (handle == HANDLE_SUSPEND_TO_HIBERNATE)
++                supported = can_sleep("suspend-to-hibernate") > 0;
+         else if (handle == HANDLE_KEXEC)
+                 supported = access(KEXEC, X_OK) >= 0;
+         else
+@@ -125,7 +129,9 @@ int manager_handle_action(
+                 return -EALREADY;
+         }
+ 
+-        inhibit_operation = IN_SET(handle, HANDLE_SUSPEND, HANDLE_HIBERNATE, HANDLE_HYBRID_SLEEP) ? INHIBIT_SLEEP : INHIBIT_SHUTDOWN;
++        inhibit_operation = IN_SET(handle, HANDLE_SUSPEND, HANDLE_HIBERNATE,
++                                           HANDLE_HYBRID_SLEEP,
++                                           HANDLE_SUSPEND_TO_HIBERNATE) ? INHIBIT_SLEEP : INHIBIT_SHUTDOWN;
+ 
+         /* If the actual operation is inhibited, warn and fail */
+         if (!ignore_inhibited &&
+@@ -172,6 +178,7 @@ static const char* const handle_action_t
+         [HANDLE_SUSPEND] = "suspend",
+         [HANDLE_HIBERNATE] = "hibernate",
+         [HANDLE_HYBRID_SLEEP] = "hybrid-sleep",
++        [HANDLE_SUSPEND_TO_HIBERNATE] = "suspend-to-hibernate",
+         [HANDLE_LOCK] = "lock"
+ };
+ 
+Index: systemd-237/src/login/logind-action.h
+===================================================================
+--- systemd-237.orig/src/login/logind-action.h
++++ systemd-237/src/login/logind-action.h
+@@ -29,6 +29,7 @@ typedef enum HandleAction {
+         HANDLE_SUSPEND,
+         HANDLE_HIBERNATE,
+         HANDLE_HYBRID_SLEEP,
++        HANDLE_SUSPEND_TO_HIBERNATE,
+         HANDLE_LOCK,
+         _HANDLE_ACTION_MAX,
+         _HANDLE_ACTION_INVALID = -1
+Index: systemd-237/src/login/logind-dbus.c
+===================================================================
+--- systemd-237.orig/src/login/logind-dbus.c
++++ systemd-237/src/login/logind-dbus.c
+@@ -1924,6 +1924,20 @@ static int method_hybrid_sleep(sd_bus_me
+                         error);
+ }
+ 
++static int method_suspend_to_hibernate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Manager *m = userdata;
++
++        return method_do_shutdown_or_sleep(
++                        m, message,
++                        SPECIAL_SUSPEND_TO_HIBERNATE_TARGET,
++                        INHIBIT_SLEEP,
++                        "org.freedesktop.login1.hibernate",
++                        "org.freedesktop.login1.hibernate-multiple-sessions",
++                        "org.freedesktop.login1.hibernate-ignore-inhibit",
++                        "hybrid-sleep",
++                        error);
++}
++
+ static int nologin_timeout_handler(
+                         sd_event_source *s,
+                         uint64_t usec,
+@@ -2381,6 +2395,19 @@ static int method_can_hybrid_sleep(sd_bu
+                         error);
+ }
+ 
++static int method_can_suspend_to_hibernate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Manager *m = userdata;
++
++        return method_can_shutdown_or_sleep(
++                        m, message,
++                        INHIBIT_SLEEP,
++                        "org.freedesktop.login1.hibernate",
++                        "org.freedesktop.login1.hibernate-multiple-sessions",
++                        "org.freedesktop.login1.hibernate-ignore-inhibit",
++                        "suspend-to-hibernate",
++                        error);
++}
++
+ static int property_get_reboot_to_firmware_setup(
+                 sd_bus *bus,
+                 const char *path,
+@@ -2700,12 +2727,14 @@ const sd_bus_vtable manager_vtable[] = {
+         SD_BUS_METHOD("Suspend", "b", NULL, method_suspend, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("Hibernate", "b", NULL, method_hibernate, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("HybridSleep", "b", NULL, method_hybrid_sleep, SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD("SuspendToHibernate", "b", NULL, method_suspend_to_hibernate, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CanPowerOff", NULL, "s", method_can_poweroff, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CanReboot", NULL, "s", method_can_reboot, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CanHalt", NULL, "s", method_can_halt, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CanSuspend", NULL, "s", method_can_suspend, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CanHibernate", NULL, "s", method_can_hibernate, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CanHybridSleep", NULL, "s", method_can_hybrid_sleep, SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD("CanSuspendToHibernate", NULL, "s", method_can_suspend_to_hibernate, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("ScheduleShutdown", "st", NULL, method_schedule_shutdown, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("CancelScheduledShutdown", NULL, "b", method_cancel_scheduled_shutdown, SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD("Inhibit", "ssss", "h", method_inhibit, SD_BUS_VTABLE_UNPRIVILEGED),
+Index: systemd-237/src/login/org.freedesktop.login1.conf
+===================================================================
+--- systemd-237.orig/src/login/org.freedesktop.login1.conf
++++ systemd-237/src/login/org.freedesktop.login1.conf
+@@ -152,6 +152,10 @@
+ 
+                 <allow send_destination="org.freedesktop.login1"
+                        send_interface="org.freedesktop.login1.Manager"
++                       send_member="SuspendToHibernate"/>
++
++                <allow send_destination="org.freedesktop.login1"
++                       send_interface="org.freedesktop.login1.Manager"
+                        send_member="CanPowerOff"/>
+ 
+                 <allow send_destination="org.freedesktop.login1"
+@@ -176,6 +180,10 @@
+ 
+                 <allow send_destination="org.freedesktop.login1"
+                        send_interface="org.freedesktop.login1.Manager"
++                       send_member="CanSuspendToHibernate"/>
++
++                <allow send_destination="org.freedesktop.login1"
++                       send_interface="org.freedesktop.login1.Manager"
+                        send_member="ScheduleShutdown"/>
+ 
+                 <allow send_destination="org.freedesktop.login1"
+Index: systemd-237/src/shared/sleep-config.c
+===================================================================
+--- systemd-237.orig/src/shared/sleep-config.c
++++ systemd-237/src/shared/sleep-config.c
+@@ -3,6 +3,7 @@
+   This file is part of systemd.
+ 
+   Copyright 2013 Zbigniew Jędrzejewski-Szmek
++  Copyright 2018 Dell Inc.
+ 
+   systemd is free software; you can redistribute it and/or modify it
+   under the terms of the GNU Lesser General Public License as published by
+@@ -41,13 +42,14 @@
+ 
+ #define USE(x, y) do { (x) = (y); (y) = NULL; } while (0)
+ 
+-int parse_sleep_config(const char *verb, char ***_modes, char ***_states) {
++int parse_sleep_config(const char *verb, char ***_modes, char ***_states, usec_t *_delay) {
+ 
+         _cleanup_strv_free_ char
+                 **suspend_mode = NULL, **suspend_state = NULL,
+                 **hibernate_mode = NULL, **hibernate_state = NULL,
+                 **hybrid_mode = NULL, **hybrid_state = NULL;
+         char **modes, **states;
++        usec_t delay;
+ 
+         const ConfigTableItem items[] = {
+                 { "Sleep",   "SuspendMode",      config_parse_strv,  0, &suspend_mode  },
+@@ -56,6 +58,7 @@ int parse_sleep_config(const char *verb,
+                 { "Sleep",   "HibernateState",   config_parse_strv,  0, &hibernate_state },
+                 { "Sleep",   "HybridSleepMode",  config_parse_strv,  0, &hybrid_mode  },
+                 { "Sleep",   "HybridSleepState", config_parse_strv,  0, &hybrid_state },
++                { "Sleep",   "HibernateDelaySec", config_parse_sec,  0, &delay},
+                 {}
+         };
+ 
+@@ -94,18 +97,26 @@ int parse_sleep_config(const char *verb,
+                         USE(states, hybrid_state);
+                 else
+                         states = strv_new("disk", NULL);
+-
++        } else if (streq(verb, "suspend-to-hibernate")) {
++                if (delay == 0)
++                        delay = 180 * USEC_PER_MINUTE;
+         } else
+                 assert_not_reached("what verb");
+ 
+-        if ((!modes && !streq(verb, "suspend")) || !states) {
++        if ((!modes && (streq(verb, "hibernate") || streq(verb, "hybrid-sleep"))) ||
++            (!states && !streq(verb, "suspend-to-hibernate"))) {
+                 strv_free(modes);
+                 strv_free(states);
+                 return log_oom();
+         }
+ 
+-        *_modes = modes;
+-        *_states = states;
++        if (_modes)
++                *_modes = modes;
++        if (_states)
++                *_states = states;
++        if (_delay)
++                *_delay = delay;
++
+         return 0;
+ }
+ 
+@@ -266,15 +277,44 @@ static bool enough_memory_for_hibernatio
+         return r;
+ }
+ 
++static bool can_s2h(void) {
++        int r;
++
++        r = access("/sys/class/rtc/rtc0/wakealarm", W_OK);
++        if (r < 0) {
++                log_full(errno == ENOENT ? LOG_DEBUG : LOG_WARNING,
++                         "/sys/class/rct/rct0/wakealarm is not writable %m");
++                return false;
++        }
++
++        r = can_sleep("suspend");
++        if (r < 0) {
++                log_debug_errno(r, "Unable to suspend system.");
++                return false;
++        }
++
++        r = can_sleep("hibernate");
++        if (r < 0) {
++                log_debug_errno(r, "Unable to hibernate system.");
++                return false;
++        }
++
++        return true;
++}
++
+ int can_sleep(const char *verb) {
+         _cleanup_strv_free_ char **modes = NULL, **states = NULL;
+         int r;
+ 
+         assert(streq(verb, "suspend") ||
+                streq(verb, "hibernate") ||
+-               streq(verb, "hybrid-sleep"));
++               streq(verb, "hybrid-sleep") ||
++               streq(verb, "suspend-to-hibernate"));
++
++        if (streq(verb, "suspend-to-hibernate"))
++                return can_s2h();
+ 
+-        r = parse_sleep_config(verb, &modes, &states);
++        r = parse_sleep_config(verb, &modes, &states, NULL);
+         if (r < 0)
+                 return false;
+ 
+Index: systemd-237/src/shared/sleep-config.h
+===================================================================
+--- systemd-237.orig/src/shared/sleep-config.h
++++ systemd-237/src/shared/sleep-config.h
+@@ -20,7 +20,9 @@
+   along with systemd; If not, see <http://www.gnu.org/licenses/>.
+ ***/
+ 
+-int parse_sleep_config(const char *verb, char ***modes, char ***states);
++#include "time-util.h"
++
++int parse_sleep_config(const char *verb, char ***modes, char ***states, usec_t *delay);
+ 
+ int can_sleep(const char *verb);
+ int can_sleep_disk(char **types);
+Index: systemd-237/src/sleep/sleep.c
+===================================================================
+--- systemd-237.orig/src/sleep/sleep.c
++++ systemd-237/src/sleep/sleep.c
+@@ -4,6 +4,7 @@
+ 
+   Copyright 2012 Lennart Poettering
+   Copyright 2013 Zbigniew Jędrzejewski-Szmek
++  Copyright 2018 Dell Inc.
+ 
+   systemd is free software; you can redistribute it and/or modify it
+   under the terms of the GNU Lesser General Public License as published by
+@@ -25,12 +26,14 @@
+ 
+ #include "sd-messages.h"
+ 
++#include "parse-util.h"
+ #include "def.h"
+ #include "exec-util.h"
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "log.h"
+ #include "sleep-config.h"
++#include "stdio-util.h"
+ #include "string-util.h"
+ #include "strv.h"
+ #include "util.h"
+@@ -135,6 +138,83 @@ static int execute(char **modes, char **
+         return r;
+ }
+ 
++static int read_wakealarm(uint64_t *result) {
++        _cleanup_free_ char *t = NULL;
++
++        if (read_one_line_file("/sys/class/rtc/rtc0/since_epoch", &t) >= 0)
++                return safe_atou64(t, result);
++        return -EBADF;
++}
++
++static int write_wakealarm(const char *str) {
++
++        _cleanup_fclose_ FILE *f = NULL;
++        int r;
++
++        f = fopen("/sys/class/rtc/rtc0/wakealarm", "we");
++        if (!f)
++                return log_error_errno(errno, "Failed to open /sys/class/rtc/rtc0/wakealarm: %m");
++
++        r = write_string_stream(f, str, 0);
++        if (r < 0)
++                return log_error_errno(r, "Failed to write '%s' to /sys/class/rtc/rtc0/wakealarm: %m", str);
++
++        return 0;
++}
++
++static int execute_s2h(usec_t hibernate_delay_sec) {
++
++        _cleanup_strv_free_ char **hibernate_modes = NULL, **hibernate_states = NULL,
++                                 **suspend_modes = NULL, **suspend_states = NULL;
++        usec_t orig_time, cmp_time;
++        char time_str[DECIMAL_STR_MAX(uint64_t)];
++        int r;
++
++        r = parse_sleep_config("suspend", &suspend_modes, &suspend_states,
++                               NULL);
++        if (r < 0)
++                return r;
++
++        r = parse_sleep_config("hibernate", &hibernate_modes,
++                               &hibernate_states, NULL);
++        if (r < 0)
++                return r;
++
++        r = read_wakealarm(&orig_time);
++        if (r < 0)
++                return log_error_errno(errno, "Failed to read time: %d", r);
++
++        orig_time += hibernate_delay_sec / USEC_PER_SEC;
++        xsprintf(time_str, "%" PRIu64, orig_time);
++
++        r = write_wakealarm(time_str);
++        if (r < 0)
++                return r;
++
++        log_debug("Set RTC wake alarm for %s", time_str);
++
++        r = execute(suspend_modes, suspend_states);
++        if (r < 0)
++                return r;
++
++        r = read_wakealarm(&cmp_time);
++        if (r < 0)
++                return log_error_errno(errno, "Failed to read time: %d", r);
++
++        /* reset RTC */
++        r = write_wakealarm("0");
++        if (r < 0)
++                return r;
++
++        log_debug("Woke up at %"PRIu64, cmp_time);
++
++        /* if woken up after alarm time, hibernate */
++        if (cmp_time >= orig_time)
++                r = execute(hibernate_modes, hibernate_states);
++
++        return r;
++}
++
+ static void help(void) {
+         printf("%s COMMAND\n\n"
+                "Suspend the system, hibernate the system, or both.\n\n"
+@@ -144,6 +224,8 @@ static void help(void) {
+                "  suspend              Suspend the system\n"
+                "  hibernate            Hibernate the system\n"
+                "  hybrid-sleep         Both hibernate and suspend the system\n"
++               "  suspend-to-hibernate Initially suspend and then hibernate\n"
++               "                       the system after a fixed period of time\n"
+                , program_invocation_short_name);
+ }
+ 
+@@ -189,7 +271,8 @@ static int parse_argv(int argc, char *ar
+ 
+         if (!streq(arg_verb, "suspend") &&
+             !streq(arg_verb, "hibernate") &&
+-            !streq(arg_verb, "hybrid-sleep")) {
++            !streq(arg_verb, "hybrid-sleep") &&
++            !streq(arg_verb, "suspend-to-hibernate")) {
+                 log_error("Unknown command '%s'.", arg_verb);
+                 return -EINVAL;
+         }
+@@ -199,6 +282,7 @@ static int parse_argv(int argc, char *ar
+ 
+ int main(int argc, char *argv[]) {
+         _cleanup_strv_free_ char **modes = NULL, **states = NULL;
++        usec_t delay = 0;
+         int r;
+ 
+         log_set_target(LOG_TARGET_AUTO);
+@@ -209,12 +293,14 @@ int main(int argc, char *argv[]) {
+         if (r <= 0)
+                 goto finish;
+ 
+-        r = parse_sleep_config(arg_verb, &modes, &states);
++        r = parse_sleep_config(arg_verb, &modes, &states, &delay);
+         if (r < 0)
+                 goto finish;
+ 
+-        r = execute(modes, states);
+-
++        if (streq(arg_verb, "suspend-to-hibernate"))
++                r = execute_s2h(delay);
++        else
++                r = execute(modes, states);
+ finish:
+         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+Index: systemd-237/src/systemctl/systemctl.c
+===================================================================
+--- systemd-237.orig/src/systemctl/systemctl.c
++++ systemd-237/src/systemctl/systemctl.c
+@@ -160,6 +160,7 @@ static enum action {
+         ACTION_SUSPEND,
+         ACTION_HIBERNATE,
+         ACTION_HYBRID_SLEEP,
++        ACTION_SUSPEND_TO_HIBERNATE,
+         ACTION_RUNLEVEL2,
+         ACTION_RUNLEVEL3,
+         ACTION_RUNLEVEL4,
+@@ -3032,21 +3033,22 @@ static const struct {
+         const char *verb;
+         const char *mode;
+ } action_table[_ACTION_MAX] = {
+-        [ACTION_HALT]         = { SPECIAL_HALT_TARGET,         "halt",         "replace-irreversibly" },
+-        [ACTION_POWEROFF]     = { SPECIAL_POWEROFF_TARGET,     "poweroff",     "replace-irreversibly" },
+-        [ACTION_REBOOT]       = { SPECIAL_REBOOT_TARGET,       "reboot",       "replace-irreversibly" },
+-        [ACTION_KEXEC]        = { SPECIAL_KEXEC_TARGET,        "kexec",        "replace-irreversibly" },
+-        [ACTION_RUNLEVEL2]    = { SPECIAL_MULTI_USER_TARGET,   NULL,           "isolate" },
+-        [ACTION_RUNLEVEL3]    = { SPECIAL_MULTI_USER_TARGET,   NULL,           "isolate" },
+-        [ACTION_RUNLEVEL4]    = { SPECIAL_MULTI_USER_TARGET,   NULL,           "isolate" },
+-        [ACTION_RUNLEVEL5]    = { SPECIAL_GRAPHICAL_TARGET,    NULL,           "isolate" },
+-        [ACTION_RESCUE]       = { SPECIAL_RESCUE_TARGET,       "rescue",       "isolate" },
+-        [ACTION_EMERGENCY]    = { SPECIAL_EMERGENCY_TARGET,    "emergency",    "isolate" },
+-        [ACTION_DEFAULT]      = { SPECIAL_DEFAULT_TARGET,      "default",      "isolate" },
+-        [ACTION_EXIT]         = { SPECIAL_EXIT_TARGET,         "exit",         "replace-irreversibly" },
+-        [ACTION_SUSPEND]      = { SPECIAL_SUSPEND_TARGET,      "suspend",      "replace-irreversibly" },
+-        [ACTION_HIBERNATE]    = { SPECIAL_HIBERNATE_TARGET,    "hibernate",    "replace-irreversibly" },
+-        [ACTION_HYBRID_SLEEP] = { SPECIAL_HYBRID_SLEEP_TARGET, "hybrid-sleep", "replace-irreversibly" },
++        [ACTION_HALT]                 = { SPECIAL_HALT_TARGET,                 "halt",                 "replace-irreversibly" },
++        [ACTION_POWEROFF]             = { SPECIAL_POWEROFF_TARGET,             "poweroff",             "replace-irreversibly" },
++        [ACTION_REBOOT]               = { SPECIAL_REBOOT_TARGET,               "reboot",               "replace-irreversibly" },
++        [ACTION_KEXEC]                = { SPECIAL_KEXEC_TARGET,                "kexec",                "replace-irreversibly" },
++        [ACTION_RUNLEVEL2]            = { SPECIAL_MULTI_USER_TARGET,           NULL,                   "isolate" },
++        [ACTION_RUNLEVEL3]            = { SPECIAL_MULTI_USER_TARGET,           NULL,                   "isolate" },
++        [ACTION_RUNLEVEL4]            = { SPECIAL_MULTI_USER_TARGET,           NULL,                   "isolate" },
++        [ACTION_RUNLEVEL5]            = { SPECIAL_GRAPHICAL_TARGET,            NULL,                   "isolate" },
++        [ACTION_RESCUE]               = { SPECIAL_RESCUE_TARGET,               "rescue",               "isolate" },
++        [ACTION_EMERGENCY]            = { SPECIAL_EMERGENCY_TARGET,            "emergency",            "isolate" },
++        [ACTION_DEFAULT]              = { SPECIAL_DEFAULT_TARGET,              "default",              "isolate" },
++        [ACTION_EXIT]                 = { SPECIAL_EXIT_TARGET,                 "exit",                 "replace-irreversibly" },
++        [ACTION_SUSPEND]              = { SPECIAL_SUSPEND_TARGET,              "suspend",              "replace-irreversibly" },
++        [ACTION_HIBERNATE]            = { SPECIAL_HIBERNATE_TARGET,            "hibernate",            "replace-irreversibly" },
++        [ACTION_HYBRID_SLEEP]         = { SPECIAL_HYBRID_SLEEP_TARGET,         "hybrid-sleep",         "replace-irreversibly" },
++        [ACTION_SUSPEND_TO_HIBERNATE] = { SPECIAL_SUSPEND_TO_HIBERNATE_TARGET, "suspend-to-hibernate", "replace-irreversibly" },
+ };
+ 
+ static enum action verb_to_action(const char *verb) {
+@@ -3277,6 +3279,11 @@ static int logind_reboot(enum action a)
+                 description = "put system into hybrid sleep";
+                 break;
+ 
++        case ACTION_SUSPEND_TO_HIBERNATE:
++                method = "SuspendToHibernate";
++                description = "put system into suspend followed by hibernate";
++                break;
++
+         default:
+                 return -EINVAL;
+         }
+@@ -3628,7 +3635,8 @@ static int start_special(int argc, char
+                            ACTION_HALT,
+                            ACTION_SUSPEND,
+                            ACTION_HIBERNATE,
+-                           ACTION_HYBRID_SLEEP)) {
++                           ACTION_HYBRID_SLEEP,
++                           ACTION_SUSPEND_TO_HIBERNATE)) {
+ 
+                         r = logind_reboot(a);
+                         if (r >= 0)
+@@ -7305,7 +7313,9 @@ static void systemctl_help(void) {
+                "  switch-root ROOT [INIT]         Change to a different root file system\n"
+                "  suspend                         Suspend the system\n"
+                "  hibernate                       Hibernate the system\n"
+-               "  hybrid-sleep                    Hibernate and suspend the system\n",
++               "  hybrid-sleep                    Hibernate and suspend the system\n"
++               "  suspend-to-hibernate            Suspend the system, wake after a period of\n"
++               "                                  time and put it into hibernate\n",
+                program_invocation_short_name);
+ }
+ 
+@@ -8397,6 +8407,7 @@ static int systemctl_main(int argc, char
+                 { "suspend",               VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
+                 { "hibernate",             VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
+                 { "hybrid-sleep",          VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
++                { "suspend-to-hibernate",  VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
+                 { "default",               VERB_ANY, 1,        VERB_ONLINE_ONLY, start_special        },
+                 { "rescue",                VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
+                 { "emergency",             VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
+@@ -8750,6 +8761,7 @@ int main(int argc, char*argv[]) {
+         case ACTION_SUSPEND:
+         case ACTION_HIBERNATE:
+         case ACTION_HYBRID_SLEEP:
++        case ACTION_SUSPEND_TO_HIBERNATE:
+         case ACTION_EMERGENCY:
+         case ACTION_DEFAULT:
+                 /* systemctl verbs with no equivalent in the legacy commands.
+Index: systemd-237/src/test/test-sleep.c
+===================================================================
+--- systemd-237.orig/src/test/test-sleep.c
++++ systemd-237/src/test/test-sleep.c
+@@ -48,6 +48,7 @@ static void test_sleep(void) {
+         log_info("Suspend configured and possible: %s", yes_no(can_sleep("suspend") > 0));
+         log_info("Hibernation configured and possible: %s", yes_no(can_sleep("hibernate") > 0));
+         log_info("Hybrid-sleep configured and possible: %s", yes_no(can_sleep("hybrid-sleep") > 0));
++        log_info("Suspend-to-Hibernate configured and possible: %s", yes_no(can_sleep("suspend-to-hibernate") > 0));
+ }
+ 
+ int main(int argc, char* argv[]) {
+Index: systemd-237/units/meson.build
+===================================================================
+--- systemd-237.orig/units/meson.build
++++ systemd-237/units/meson.build
+@@ -36,6 +36,7 @@ units = [
+         ['halt.target',                         ''],
+         ['hibernate.target',                    'ENABLE_HIBERNATE'],
+         ['hybrid-sleep.target',                 'ENABLE_HIBERNATE'],
++        ['suspend-to-hibernate.target',         'ENABLE_HIBERNATE'],
+         ['initrd-fs.target',                    ''],
+         ['initrd-root-device.target',           ''],
+         ['initrd-root-fs.target',               ''],
+@@ -158,6 +159,7 @@ in_units = [
+         ['systemd-hibernate-resume@.service',    'ENABLE_HIBERNATE'],
+         ['systemd-hibernate.service',            'ENABLE_HIBERNATE'],
+         ['systemd-hybrid-sleep.service',         'ENABLE_HIBERNATE'],
++        ['systemd-suspend-to-hibernate.service', 'ENABLE_HIBERNATE'],
+         ['systemd-hostnamed.service',            'ENABLE_HOSTNAMED',
+          'dbus-org.freedesktop.hostname1.service'],
+         ['systemd-hwdb-update.service',          'ENABLE_HWDB',
+Index: systemd-237/units/suspend-to-hibernate.target
+===================================================================
+--- /dev/null
++++ systemd-237/units/suspend-to-hibernate.target
+@@ -0,0 +1,16 @@
++#  SPDX-License-Identifier: LGPL-2.1+
++#
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=Suspend; Idle into hibernate
++Documentation=man:systemd.special(7)
++DefaultDependencies=no
++Requires=systemd-suspend-to-hibernate.service
++After=systemd-suspend-to-hibernate.service
++StopWhenUnneeded=yes
+Index: systemd-237/units/systemd-suspend-to-hibernate.service.in
+===================================================================
+--- /dev/null
++++ systemd-237/units/systemd-suspend-to-hibernate.service.in
+@@ -0,0 +1,19 @@
++#  SPDX-License-Identifier: LGPL-2.1+
++#
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=Suspend; Idle into hibernate
++Documentation=man:systemd-suspend.service(8)
++DefaultDependencies=no
++Requires=sleep.target
++After=sleep.target
++
++[Service]
++Type=oneshot
++ExecStart=@rootlibexecdir@/systemd-sleep suspend-to-hibernate
