@@ -1,3 +1,13 @@
+systemd (237-3ubuntu8) bionic; urgency=medium
+
+  * Workaround captive portals not responding to EDNS0 queries (DVE-2018-0001).
+    (LP: #1727237)
+  * resolved: Listen on both TCP and UDP by default. (LP: #1731522)
+  * Recommend networkd-dispatcher (LP: #1762386)
+  * Refresh patches
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 12 Apr 2018 12:12:24 +0100
+
 systemd (237-3ubuntu7) bionic; urgency=medium
 
   * Introduce suspend then hibernate (LP: #1756006)
