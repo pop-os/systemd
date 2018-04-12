@@ -63,7 +63,8 @@ Multi-Arch: foreign
 Section: admin
 Priority: important
 Recommends: libpam-systemd,
-            dbus
+            dbus,
+            networkd-dispatcher
 Suggests: systemd-container,
           policykit-1
 Pre-Depends: ${shlibs:Pre-Depends},
@@ -81,7 +82,6 @@ Breaks: apparmor (<< 2.9.2-1),
         udev (<< 228-5),
         laptop-mode-tools (<< 1.68~),
 Replaces: udev (<< 228-5),
-Recommends: networkd-dispatcher
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
