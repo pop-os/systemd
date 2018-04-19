@@ -256,6 +256,9 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	install --mode=755 debian/extra/set-cpufreq debian/systemd/lib/systemd/
 endif
 
+	# https://github.com/systemd/systemd/pull/8623 until 239 gets released/packaged
+	for p in sbin/resolvconf usr/bin/resolvectl; do install -D debian/install/deb/$$p debian/systemd/$$p || true; done
+
 override_dh_installinit:
 	dh_installinit --no-start
 
