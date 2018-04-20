@@ -1,3 +1,16 @@
+systemd (237-3ubuntu9) bionic; urgency=medium
+
+  * networkd: if RA was implicit, do not await ndisc_configured.
+    If RA was iplicit, meaning not otherwise requested, and a kernel default was in
+    use. Do not prevent link entering configured state, whilst ndisc configuration
+    is pending. Implicit kernel RA, is expected to be asynchronous and
+    non-blocking. (LP: #1765173)
+  * udev-udeb: ship modprobe.d snippet to force scsi_mod.scan=sync in d-i.
+    This ensures that all scans are completed, before installer reaches
+    partitioning stage. (LP: #1751813)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 20 Apr 2018 04:35:33 +0100
+
 systemd (237-3ubuntu8) bionic; urgency=medium
 
   * Workaround captive portals not responding to EDNS0 queries (DVE-2018-0001).
