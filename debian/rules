@@ -261,15 +261,21 @@ endif
 override_dh_installinit:
 	dh_installinit --no-start
 
+PROJECT_VERSION ?= $(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.h | tr -d \")
+
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
-	dh_shlibdeps -psystemd -- -dPre-Depends -edebian/systemd/bin/systemctl -dDepends
+	dh_shlibdeps -psystemd -- \
+		-dPre-Depends \
+		-edebian/systemd/bin/systemctl \
+		-edebian/systemd/lib/systemd/libsystemd-shared-$(PROJECT_VERSION).so \
+		-dDepends
 	dh_shlibdeps --remaining-packages -Lsystemd
 
 override_dh_makeshlibs:
-	sed 's/SHARED_LIB_VERSION/$(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.h | tr -d \")/' debian/shlibs.local.in > debian/shlibs.local
+	sed 's/SHARED_LIB_VERSION/$(PROJECT_VERSION)/' debian/shlibs.local.in > debian/shlibs.local
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
