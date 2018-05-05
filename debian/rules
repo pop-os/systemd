@@ -20,10 +20,10 @@ endif
 # fail on missing files and symbols changes on distro builds, but not if we
 # build/test upstream master
 ifeq ($(TEST_UPSTREAM),)
-    DH_INSTALL_MISSING = --fail-missing
+    DH_MISSING = --fail-missing
     GENSYMBOLS_LEVEL = 4
 else
-    DH_INSTALL_MISSING = --list-missing
+    DH_MISSING = --list-missing
     GENSYMBOLS_LEVEL = 1
 endif
 
@@ -221,7 +221,7 @@ ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
 
-	dh_install --remaining-packages --sourcedir=debian/install/deb $(DH_INSTALL_MISSING)
+	dh_install --remaining-packages --sourcedir=debian/install/deb
 
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
@@ -258,6 +258,9 @@ endif
 
 	# https://github.com/systemd/systemd/pull/8623 until 239 gets released/packaged
 	for p in sbin/resolvconf usr/bin/resolvectl; do install -D debian/install/deb/$$p debian/systemd/$$p || true; done
+
+override_dh_missing:
+	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
 
 override_dh_installinit:
 	dh_installinit --no-start
