@@ -12,6 +12,7 @@ test-test-functions-on-PPC64-use-hvc0-console.patch
 test-masked-unit-with-drop-ins.patch
 install-detect-masked-unit-with-drop-ins.patch
 resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
+hwdb-Use-wlan-keycode-for-all-Dell-systems-8762.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
