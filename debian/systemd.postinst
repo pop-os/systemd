@@ -125,7 +125,10 @@ addgroup --quiet --system systemd-journal
 # Enable persistent journal, in auto-mode, by default on new installs installs and upgrades
 if dpkg --compare-versions "$2" lt "235-3ubuntu3~"; then
     mkdir -p /var/log/journal
-    systemd-tmpfiles --create --prefix /var/log/journal
+    # create tmpfiles only when running systemd, otherwise %b substitution fails
+    if [ -d /run/systemd/system ]; then
+        systemd-tmpfiles --create --prefix /var/log/journal
+    fi
 fi
 
 adduser --quiet --system --group --no-create-home --home /run/systemd/netif \

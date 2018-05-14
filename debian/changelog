@@ -1,3 +1,10 @@
+systemd (237-3ubuntu10) bionic; urgency=medium
+
+  * Create tmpfiles for persistent journal in postinst only when running
+    systemd (LP: #1748659)
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 20 Apr 2018 18:55:56 +0200
+
 systemd (237-3ubuntu9) bionic; urgency=medium
 
   * networkd: if RA was implicit, do not await ndisc_configured.
