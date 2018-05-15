@@ -8,6 +8,7 @@ units-initctl-move-the-fifo-to-run-initctl-to-match-sysvi.patch
 systemctl-try-opening-run-initctl-before-dev-initctl.patch
 core-dont-t-remount-sys-fs-cgroup-for-relabel-if-not-need.patch
 sd-bus-do-not-try-to-close-already-closed-fd-8392.patch
+core-don-t-include-libmount.h-in-a-header-file-8580.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
