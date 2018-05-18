@@ -1,0 +1,34 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 22 Mar 2018 16:53:26 +0100
+Subject: [PATCH] macro: introduce TAKE_PTR() macro
+
+This macro will read a pointer of any type, return it, and set the
+pointer to NULL. This is useful as an explicit concept of passing
+ownership of a memory area between pointers.
+
+This takes inspiration from Rust:
+
+https://doc.rust-lang.org/std/option/enum.Option.html#method.take
+
+and was suggested by Alan Jenkins (@sourcejedi).
+---
+ src/basic/alloc-util.h | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/basic/alloc-util.h b/src/basic/alloc-util.h
+index 02dee37..3a3a7a9 100644
+--- a/src/basic/alloc-util.h
++++ b/src/basic/alloc-util.h
+@@ -128,3 +128,12 @@ void* greedy_realloc0(void **p, size_t *allocated, size_t need, size_t size);
+                 _new_ = alloca_align(_size_, (align));                  \
+                 (void*)memset(_new_, 0, _size_);                        \
+         })
++
++/* Takes inspiration from Rusts's Option::take() method: reads and returns a pointer, but at the same time resets it to
++ * NULL. See: https://doc.rust-lang.org/std/option/enum.Option.html#method.take */
++#define TAKE_PTR(ptr)                           \
++        ({                                      \
++                typeof(ptr) _ptr_ = (ptr);      \
++                (ptr) = NULL;                   \
++                _ptr_;                          \
++        })
