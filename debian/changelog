@@ -1,3 +1,35 @@
+systemd (237-3ubuntu11) cosmic; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * hwdb: Fix wlan/rfkill keycode on Dell systems. (LP: #1762385)
+  * Cherrypick upstream fix for corrected detection of Virtualbox & Xen.
+    (LP: #1768104)
+  * Further improve captive portal workarounds.
+    Retry any NXDOMAIN results with lower feature levels, instead of just those
+    with 'secure' in the domain name. (LP: #1766969)
+  * Bump gbp.conf to cosmic
+
+  [ Michael Biebl ]
+  * Add dependencies of libsystemd-shared to Pre-Depends.
+    This is necessary so systemctl is functional at all times during a
+    dist-upgrade. (Closes: #897986) (LP: #1771791)
+  * basic/macros: Rename noreturn into _noreturn_
+    "noreturn" is reserved and can be used in other header files we include.
+    (Closes: #893426)
+
+  [ Mario Limonciello ]
+  * Fix hibernate disk offsets.
+    Configure resume offset via sysfs, to enable resume from a swapfile.
+    (LP: #1760106)
+
+  [ Felipe Sateler ]
+  * Don't include libmount.h in a header file.
+    Kernel and glibc headers both use MS_* constants, but are not in sync, so
+    only one of them can be used at a time. Thus, only import them where needed
+    Works around #898743
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Sat, 19 May 2018 00:35:30 +0100
+
 systemd (237-3ubuntu10) bionic; urgency=medium
 
   * Create tmpfiles for persistent journal in postinst only when running
