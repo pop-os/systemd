@@ -15,7 +15,7 @@ This reverts commit 4e15a7343cb389e97f3eb4f49699161862d8b8b2.
  4 files changed, 2 insertions(+), 9 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index bb74c85..8a25c5d 100644
+index c113750..a42a34d 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -792,7 +792,6 @@ if get_option('wheel-group')
