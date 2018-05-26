@@ -1,3 +1,36 @@
+systemd (238-5) unstable; urgency=medium
+
+  [ Evgeny Vereshchagin ]
+  * upstream autopkgtest: Copy journal subdirectories.
+    Otherwise logs are missing on failures.
+
+  [ Martin Pitt ]
+  * debian/tests/boot-and-services: Ignore cpi.service failure.
+    This is apparently a regression in Ubuntu 18.04, not in systemd, so
+    ignore it.
+
+  [ Michael Biebl ]
+  * sd-bus: Do not try to close already closed fd (Closes: #896781)
+  * Use dh_missing to act on uninstalled files.
+    The usage of dh_install --fail-missing has been deprecated.
+  * meson: Avoid warning about comparison of bool and string.
+    The result of this is undefined and will become a hard error in a future
+    Meson release.
+  * login: Respect --no-wall when cancelling a shutdown request
+    (Closes: #897938)
+  * Add dependencies of libsystemd-shared to Pre-Depends.
+    This is necessary so systemctl is functional at all times during a
+    dist-upgrade. (Closes: #897986)
+  * Drop dh_strip override, the dbgsym migration is done
+
+  [ Felipe Sateler ]
+  * Don't include libmount.h in a header file.
+    Kernel and glibc headers both use MS_* constants, but are not in sync, so
+    only one of them can be used at a time. Thus, only import them where
+    needed. Works around #898743.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 26 May 2018 10:31:29 +0200
+
 systemd (238-4) unstable; urgency=medium
 
   [ Michael Biebl ]
