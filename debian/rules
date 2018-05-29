@@ -20,10 +20,10 @@ endif
 # fail on missing files and symbols changes on distro builds, but not if we
 # build/test upstream master
 ifeq ($(TEST_UPSTREAM),)
-    DH_INSTALL_MISSING = --fail-missing
+    DH_MISSING = --fail-missing
     GENSYMBOLS_LEVEL = 4
 else
-    DH_INSTALL_MISSING = --list-missing
+    DH_MISSING = --list-missing
     GENSYMBOLS_LEVEL = 1
 endif
 
@@ -214,14 +214,13 @@ override_dh_install:
 	rm -rf debian/install/*/etc/systemd/system/*.target.wants/
 	# remove aliases
 	find debian/install/*/etc/systemd/system/ -type l -delete
-	# FIXME: generate proper sysusers.d/basic.conf for Debian, and add autopkgtest
-	rm -rf debian/install/*/usr/lib/sysusers.d/*
-	rm -f debian/install/*/lib/systemd/system/*sysusers*.service debian/install/*/lib/systemd/system/*/*sysusers*.service
+	# replace upstream sysusers.d/basic.conf with proper users for Debian
+	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
 
-	dh_install --remaining-packages --sourcedir=debian/install/deb $(DH_INSTALL_MISSING)
+	dh_install --remaining-packages --sourcedir=debian/install/deb
 
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
@@ -258,6 +257,12 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=755 debian/extra/dhclient-enter-resolved-hook debian/systemd/etc/dhcp/dhclient-enter-hooks.d/resolved
 endif
 
+	# https://github.com/systemd/systemd/pull/8623 until 239 gets released/packaged
+	for p in sbin/resolvconf usr/bin/resolvectl; do install -D debian/install/deb/$$p debian/systemd/$$p || true; done
+
+override_dh_missing:
+	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
+
 override_dh_installinit:
 	dh_installinit --no-start
 
@@ -267,8 +272,7 @@ PROJECT_VERSION ?= $(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.
 # quasi-essential, so add their dependencies to Pre-Depends
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=753589
 override_dh_shlibdeps:
-	dh_shlibdeps -psystemd -- \
-		-dPre-Depends \
+	dh_shlibdeps -psystemd -- -dPre-Depends \
 		-edebian/systemd/bin/systemctl \
 		-edebian/systemd/lib/systemd/libsystemd-shared-$(PROJECT_VERSION).so \
 		-dDepends
@@ -279,9 +283,6 @@ override_dh_makeshlibs:
 	dh_makeshlibs -plibudev1 --add-udeb=libudev1-udeb -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs -psystemd -Xlibsystemd-shared -- -c$(GENSYMBOLS_LEVEL)
 	dh_makeshlibs --remaining-packages -- -c$(GENSYMBOLS_LEVEL)
-
-override_dh_strip:
-	dh_strip --dbgsym-migration='systemd-dbg (<< 229-6~)'
 
 override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))

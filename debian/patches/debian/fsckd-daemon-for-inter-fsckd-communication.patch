@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index bfc267b..79fc914 100644
+index 84b911b..ab9f0f1 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -543,6 +543,7 @@ manpages = [
+@@ -544,6 +544,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 36a62d2..c734561 100644
+index e152226..c113750 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2083,6 +2083,14 @@ executable('systemd-makefs',
+@@ -2132,6 +2132,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  
@@ -963,10 +963,10 @@ index 0000000..d48e53a
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index 814ee78..d58abfe 100644
+index 7f40464..82b536c 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -98,6 +98,7 @@ units = [
+@@ -97,6 +97,7 @@ units = [
           'multi-user.target.wants/'],
          ['systemd-coredump.socket',             'ENABLE_COREDUMP',
           'sockets.target.wants/'],
@@ -974,7 +974,7 @@ index 814ee78..d58abfe 100644
          ['systemd-initctl.socket',              '',
           'sockets.target.wants/'],
          ['systemd-journal-gatewayd.socket',     'ENABLE_REMOTE HAVE_MICROHTTPD'],
-@@ -152,6 +153,7 @@ in_units = [
+@@ -151,6 +152,7 @@ in_units = [
           'sysinit.target.wants/'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],

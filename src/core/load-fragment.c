@@ -1745,9 +1745,8 @@ int config_parse_trigger_unit(
                 log_syntax(unit, LOG_ERR, filename, line, 0, "Unit type not valid, ignoring: %s", rvalue);
                 return 0;
         }
-
-        if (type == u->type) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Trigger cannot be of same type, ignoring: %s", rvalue);
+        if (unit_has_name(u, p)) {
+                log_syntax(unit, LOG_ERR, filename, line, 0, "Units cannot trigger themselves, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -1860,7 +1859,7 @@ int config_parse_socket_service(
                 return -ENOEXEC;
         }
 
-        unit_ref_set(&s->service, x);
+        unit_ref_set(&s->service, UNIT(s), x);
 
         return 0;
 }
@@ -2581,7 +2580,7 @@ int config_parse_log_extra_fields(
                         continue;
                 }
 
-                t = realloc_multiply(c->log_extra_fields, sizeof(struct iovec), c->n_log_extra_fields+1);
+                t = reallocarray(c->log_extra_fields, c->n_log_extra_fields+1, sizeof(struct iovec));
                 if (!t)
                         return log_oom();
 
@@ -2935,7 +2934,7 @@ int config_parse_syscall_filter(
                         c->syscall_whitelist = true;
 
                         /* Accept default syscalls if we are on a whitelist */
-                        r = seccomp_parse_syscall_filter(false, "@default", -1, c->syscall_filter, true);
+                        r = seccomp_parse_syscall_filter("@default", -1, c->syscall_filter, SECCOMP_PARSE_WHITELIST);
                         if (r < 0)
                                 return r;
                 }
@@ -2962,7 +2961,9 @@ int config_parse_syscall_filter(
                         continue;
                 }
 
-                r = seccomp_parse_syscall_filter_and_warn(invert, name, num, c->syscall_filter, c->syscall_whitelist, unit, filename, line);
+                r = seccomp_parse_syscall_filter_full(name, num, c->syscall_filter,
+                                                      SECCOMP_PARSE_LOG|SECCOMP_PARSE_PERMISSIVE|(invert ? SECCOMP_PARSE_INVERT : 0)|(c->syscall_whitelist ? SECCOMP_PARSE_WHITELIST : 0),
+                                                      unit, filename, line);
                 if (r < 0)
                         return r;
         }
@@ -4170,6 +4171,83 @@ int config_parse_namespace_path_strv(
                         return log_oom();
 
                 joined = NULL;
+        }
+
+        return 0;
+}
+
+int config_parse_temporary_filesystems(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        Unit *u = userdata;
+        ExecContext *c = data;
+        const char *cur;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if (isempty(rvalue)) {
+                /* Empty assignment resets the list */
+                temporary_filesystem_free_many(c->temporary_filesystems, c->n_temporary_filesystems);
+                c->temporary_filesystems = NULL;
+                c->n_temporary_filesystems = 0;
+                return 0;
+        }
+
+        cur = rvalue;
+        for (;;) {
+                _cleanup_free_ char *word = NULL, *path = NULL, *resolved = NULL;
+                const char *w;
+
+                r = extract_first_word(&cur, &word, NULL, EXTRACT_QUOTES);
+                if (r == 0)
+                        break;
+                if (r == -ENOMEM)
+                        return log_oom();
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to extract first word, ignoring: %s", rvalue);
+                        return 0;
+                }
+
+                w = word;
+                r = extract_first_word(&w, &path, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        return -EINVAL;
+
+                r = unit_full_printf(u, path, &resolved);
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve specifiers in %s, ignoring: %m", word);
+                        continue;
+                }
+
+                if (!path_is_absolute(resolved)) {
+                        log_syntax(unit, LOG_ERR, filename, line, 0, "Not an absolute path, ignoring: %s", resolved);
+                        continue;
+                }
+
+                path_kill_slashes(resolved);
+
+                r = temporary_filesystem_add(&c->temporary_filesystems, &c->n_temporary_filesystems, path, w);
+                if (r == -ENOMEM)
+                        return log_oom();
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse mount options, ignoring: %s", word);
+                        continue;
+                }
         }
 
         return 0;

@@ -225,49 +225,6 @@ int readlink_and_make_absolute(const char *p, char **r) {
         return 0;
 }
 
-int readlink_and_canonicalize(const char *p, const char *root, char **ret) {
-        char *t, *s;
-        int r;
-
-        assert(p);
-        assert(ret);
-
-        r = readlink_and_make_absolute(p, &t);
-        if (r < 0)
-                return r;
-
-        r = chase_symlinks(t, root, 0, &s);
-        if (r < 0)
-                /* If we can't follow up, then let's return the original string, slightly cleaned up. */
-                *ret = path_kill_slashes(t);
-        else {
-                *ret = s;
-                free(t);
-        }
-
-        return 0;
-}
-
-int readlink_and_make_absolute_root(const char *root, const char *path, char **ret) {
-        _cleanup_free_ char *target = NULL, *t = NULL;
-        const char *full;
-        int r;
-
-        full = prefix_roota(root, path);
-        r = readlink_malloc(full, &target);
-        if (r < 0)
-                return r;
-
-        t = file_in_same_dir(path, target);
-        if (!t)
-                return -ENOMEM;
-
-        *ret = t;
-        t = NULL;
-
-        return 0;
-}
-
 int chmod_and_chown(const char *path, mode_t mode, uid_t uid, gid_t gid) {
         assert(path);
 
@@ -595,6 +552,17 @@ int tmp_dir(const char **ret) {
          * backed by an in-memory file system: /tmp. */
 
         return tmp_dir_internal("/tmp", ret);
+}
+
+int unlink_or_warn(const char *filename) {
+        if (unlink(filename) < 0 && errno != ENOENT)
+                /* If the file doesn't exist and the fs simply was read-only (in which
+                 * case unlink() returns EROFS even if the file doesn't exist), don't
+                 * complain */
+                if (errno != EROFS || access(filename, F_OK) >= 0)
+                        return log_error_errno(errno, "Failed to remove \"%s\": %m", filename);
+
+        return 0;
 }
 
 int inotify_add_watch_fd(int fd, int what, uint32_t mask) {
@@ -929,4 +897,103 @@ int access_fd(int fd, int mode) {
                 r = -errno;
 
         return r;
+}
+
+int unlinkat_deallocate(int fd, const char *name, int flags) {
+        _cleanup_close_ int truncate_fd = -1;
+        struct stat st;
+        off_t l, bs;
+
+        /* Operates like unlinkat() but also deallocates the file contents if it is a regular file and there's no other
+         * link to it. This is useful to ensure that other processes that might have the file open for reading won't be
+         * able to keep the data pinned on disk forever. This call is particular useful whenever we execute clean-up
+         * jobs ("vacuuming"), where we want to make sure the data is really gone and the disk space released and
+         * returned to the free pool.
+         *
+         * Deallocation is preferably done by FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE (👊) if supported, which means
+         * the file won't change size. That's a good thing since we shouldn't needlessly trigger SIGBUS in other
+         * programs that have mmap()ed the file. (The assumption here is that changing file contents to all zeroes
+         * underneath those programs is the better choice than simply triggering SIGBUS in them which truncation does.)
+         * However if hole punching is not implemented in the kernel or file system we'll fall back to normal file
+         * truncation (🔪), as our goal of deallocating the data space trumps our goal of being nice to readers (💐).
+         *
+         * Note that we attempt deallocation, but failure to succeed with that is not considered fatal, as long as the
+         * primary job – to delete the file – is accomplished. */
+
+        if ((flags & AT_REMOVEDIR) == 0) {
+                truncate_fd = openat(fd, name, O_WRONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW|O_NONBLOCK);
+                if (truncate_fd < 0) {
+
+                        /* If this failed because the file doesn't exist propagate the error right-away. Also,
+                         * AT_REMOVEDIR wasn't set, and we tried to open the file for writing, which means EISDIR is
+                         * returned when this is a directory but we are not supposed to delete those, hence propagate
+                         * the error right-away too. */
+                        if (IN_SET(errno, ENOENT, EISDIR))
+                                return -errno;
+
+                        if (errno != ELOOP) /* don't complain if this is a symlink */
+                                log_debug_errno(errno, "Failed to open file '%s' for deallocation, ignoring: %m", name);
+                }
+        }
+
+        if (unlinkat(fd, name, flags) < 0)
+                return -errno;
+
+        if (truncate_fd < 0) /* Don't have a file handle, can't do more ☹️ */
+                return 0;
+
+        if (fstat(truncate_fd, &st) < 0) {
+                log_debug_errno(errno, "Failed to stat file '%s' for deallocation, ignoring.", name);
+                return 0;
+        }
+
+        if (!S_ISREG(st.st_mode) || st.st_blocks == 0 || st.st_nlink > 0)
+                return 0;
+
+        /* If this is a regular file, it actually took up space on disk and there are no other links it's time to
+         * punch-hole/truncate this to release the disk space. */
+
+        bs = MAX(st.st_blksize, 512);
+        l = DIV_ROUND_UP(st.st_size, bs) * bs; /* Round up to next block size */
+
+        if (fallocate(truncate_fd, FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE, 0, l) >= 0)
+                return 0; /* Successfully punched a hole! 😊 */
+
+        /* Fall back to truncation */
+        if (ftruncate(truncate_fd, 0) < 0) {
+                log_debug_errno(errno, "Failed to truncate file to 0, ignoring: %m");
+                return 0;
+        }
+
+        return 0;
+}
+
+int fsync_directory_of_file(int fd) {
+        _cleanup_free_ char *path = NULL, *dn = NULL;
+        _cleanup_close_ int dfd = -1;
+        int r;
+
+        r = fd_verify_regular(fd);
+        if (r < 0)
+                return r;
+
+        r = fd_get_path(fd, &path);
+        if (r < 0)
+                return r;
+
+        if (!path_is_absolute(path))
+                return -EINVAL;
+
+        dn = dirname_malloc(path);
+        if (!dn)
+                return -ENOMEM;
+
+        dfd = open(dn, O_RDONLY|O_CLOEXEC|O_DIRECTORY);
+        if (dfd < 0)
+                return -errno;
+
+        if (fsync(dfd) < 0)
+                return -errno;
+
+        return 0;
 }

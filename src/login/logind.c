@@ -35,6 +35,7 @@
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "format-util.h"
+#include "fs-util.h"
 #include "logind.h"
 #include "process-util.h"
 #include "selinux-util.h"
@@ -53,6 +54,7 @@ static void manager_reset_config(Manager *m) {
         m->handle_suspend_key = HANDLE_SUSPEND;
         m->handle_hibernate_key = HANDLE_HIBERNATE;
         m->handle_lid_switch = HANDLE_SUSPEND;
+        m->handle_lid_switch_ep = _HANDLE_ACTION_INVALID;
         m->handle_lid_switch_docked = HANDLE_IGNORE;
         m->power_key_ignore_inhibited = false;
         m->suspend_key_ignore_inhibited = false;
@@ -182,7 +184,7 @@ static void manager_free(Manager *m) {
         udev_unref(m->udev);
 
         if (m->unlink_nologin)
-                (void) unlink("/run/nologin");
+                (void) unlink_or_warn("/run/nologin");
 
         bus_verify_polkit_async_registry_free(m->polkit_registry);
 
@@ -253,11 +255,7 @@ static int manager_enumerate_buttons(Manager *m) {
 
         /* Loads buttons from udev */
 
-        if (m->handle_power_key == HANDLE_IGNORE &&
-            m->handle_suspend_key == HANDLE_IGNORE &&
-            m->handle_hibernate_key == HANDLE_IGNORE &&
-            m->handle_lid_switch == HANDLE_IGNORE &&
-            m->handle_lid_switch_docked == HANDLE_IGNORE)
+        if (manager_all_buttons_ignored(m))
                 return 0;
 
         e = udev_enumerate_new(m->udev);
@@ -325,7 +323,9 @@ static int manager_enumerate_seats(Manager *m) {
 
                 s = hashmap_get(m->seats, de->d_name);
                 if (!s) {
-                        unlinkat(dirfd(d), de->d_name, 0);
+                        if (unlinkat(dirfd(d), de->d_name, 0) < 0)
+                                log_warning("Failed to remove /run/systemd/seats/%s: %m",
+                                            de->d_name);
                         continue;
                 }
 
@@ -453,9 +453,15 @@ static int manager_attach_fds(Manager *m) {
                         continue;
                 }
 
+                if (!S_ISCHR(st.st_mode) && !S_ISBLK(st.st_mode)) {
+                        log_debug("Device fd doesn't actually point to device node: %m");
+                        close_nointr(fd);
+                        continue;
+                }
+
                 sd = hashmap_get(s->devices, &st.st_rdev);
                 if (!sd) {
-                        /* Weird we got an fd for a session device which wasn't
+                        /* Weird, we got an fd for a session device which wasn't
                         * recorded in the session state file... */
                         log_warning("Got fd for missing session device [%u:%u] in session %s",
                                     major(st.st_rdev), minor(st.st_rdev), s->id);
@@ -905,12 +911,7 @@ static int manager_connect_udev(Manager *m) {
                 return r;
 
         /* Don't watch keys if nobody cares */
-        if (m->handle_power_key != HANDLE_IGNORE ||
-            m->handle_suspend_key != HANDLE_IGNORE ||
-            m->handle_hibernate_key != HANDLE_IGNORE ||
-            m->handle_lid_switch != HANDLE_IGNORE ||
-            m->handle_lid_switch_docked != HANDLE_IGNORE) {
-
+        if (!manager_all_buttons_ignored(m)) {
                 m->udev_button_monitor = udev_monitor_new_from_netlink(m->udev, "udev");
                 if (!m->udev_button_monitor)
                         return -ENOMEM;
@@ -966,7 +967,7 @@ static void manager_gc(Manager *m, bool drop_not_started) {
                 LIST_REMOVE(gc_queue, m->seat_gc_queue, seat);
                 seat->in_gc_queue = false;
 
-                if (!seat_check_gc(seat, drop_not_started)) {
+                if (seat_may_gc(seat, drop_not_started)) {
                         seat_stop(seat, false);
                         seat_free(seat);
                 }
@@ -977,14 +978,14 @@ static void manager_gc(Manager *m, bool drop_not_started) {
                 session->in_gc_queue = false;
 
                 /* First, if we are not closing yet, initiate stopping */
-                if (!session_check_gc(session, drop_not_started) &&
+                if (session_may_gc(session, drop_not_started) &&
                     session_get_state(session) != SESSION_CLOSING)
                         session_stop(session, false);
 
                 /* Normally, this should make the session referenced
                  * again, if it doesn't then let's get rid of it
                  * immediately */
-                if (!session_check_gc(session, drop_not_started)) {
+                if (session_may_gc(session, drop_not_started)) {
                         session_finalize(session);
                         session_free(session);
                 }
@@ -995,11 +996,11 @@ static void manager_gc(Manager *m, bool drop_not_started) {
                 user->in_gc_queue = false;
 
                 /* First step: queue stop jobs */
-                if (!user_check_gc(user, drop_not_started))
+                if (user_may_gc(user, drop_not_started))
                         user_stop(user, false);
 
                 /* Second step: finalize user */
-                if (!user_check_gc(user, drop_not_started)) {
+                if (user_may_gc(user, drop_not_started)) {
                         user_finalize(user);
                         user_free(user);
                 }

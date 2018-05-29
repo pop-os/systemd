@@ -1,3 +1,128 @@
+systemd (238-5) unstable; urgency=medium
+
+  [ Evgeny Vereshchagin ]
+  * upstream autopkgtest: Copy journal subdirectories.
+    Otherwise logs are missing on failures.
+
+  [ Martin Pitt ]
+  * debian/tests/boot-and-services: Ignore cpi.service failure.
+    This is apparently a regression in Ubuntu 18.04, not in systemd, so
+    ignore it.
+
+  [ Michael Biebl ]
+  * sd-bus: Do not try to close already closed fd (Closes: #896781)
+  * Use dh_missing to act on uninstalled files.
+    The usage of dh_install --fail-missing has been deprecated.
+  * meson: Avoid warning about comparison of bool and string.
+    The result of this is undefined and will become a hard error in a future
+    Meson release.
+  * login: Respect --no-wall when cancelling a shutdown request
+    (Closes: #897938)
+  * Add dependencies of libsystemd-shared to Pre-Depends.
+    This is necessary so systemctl is functional at all times during a
+    dist-upgrade. (Closes: #897986)
+  * Drop dh_strip override, the dbgsym migration is done
+
+  [ Felipe Sateler ]
+  * Don't include libmount.h in a header file.
+    Kernel and glibc headers both use MS_* constants, but are not in sync, so
+    only one of them can be used at a time. Thus, only import them where
+    needed. Works around #898743.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 26 May 2018 10:31:29 +0200
+
+systemd (238-4) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * udev/net-id: Fix check for address to keep interface names stable
+  * debian/copyright: Move global wildcard section to the top
+
+  [ Martin Pitt ]
+  * Fix daemon reload failures
+
+  [ Laurent Bigonville ]
+  * Fix /sys/fs/cgroup mount when using SELinux.
+    Since v236, all cgroups except /sys/fs/cgroup/systemd and
+    /sys/fs/cgroup/unified are not mounted when SELinux is enabled (even in
+    permissive mode). Disabling SELinux completely restores these cgroups.
+    This patch fixes that issue by no longer making the assumption that those
+    cgroups are mounted by initrd/dracut before systemd is started.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 01 Apr 2018 13:02:57 +0200
+
+systemd (238-3) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * Enable systemd-sysusers unit and provide correct Debian static u/gids.
+    Add a helper script debian/extra/make-sysusers-basic which generates a
+    sysusers.d(5) file from Debian's static master passwd/group files.
+    systemd 238 now supports  specifying different uid and gid and a
+    non-default login shell, so this is possible now. (Closes: #888126)
+  * udev README.Debian: Include initrd rebuild and some clarifications in
+    migration.
+    While initrd update is already being mentioned in the introductory
+    section, it is easy to miss when going through the migration steps, so
+    explicitly mention it again. Also add a warning about keeping a fallback
+    on misconfigurations, and the possibility to migrate one interface at a
+    time.
+    Thanks to Karl O. Pinc for the suggestions! (Closes: #881769)
+
+  [ Michael Biebl ]
+  * basic/macros: Rename noreturn into _noreturn_.
+    "noreturn" is reserved and can be used in other header files we include.
+    (Closes: #893426)
+  * units: Fix SuccessAction that belongs to [Unit] section not [Service]
+    section (Closes: #893282)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 20 Mar 2018 23:22:57 +0100
+
+systemd (238-2) unstable; urgency=medium
+
+  [ Alf Gaida ]
+  * core: do not free stack-allocated strings.
+    Fixes a crash in systemd when the cpuacct cgroup controller is not
+    available. (Closes: #892360)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 10 Mar 2018 01:12:47 +0100
+
+systemd (238-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 238
+    - Fixes systemd-tmpfiles to correctly handle symlinks present in
+      non-terminal path components. (CVE-2018-6954, Closes: #890779)
+  * Rebase patches
+  * Use compat symlinks as provided by upstream.
+    As the upstream build system now creates those symlinks for us, we no
+    longer have to create them manually.
+  * Update symbols file for libsystemd0
+  * test-cgroup-util: bail out when running under a buildd environment
+
+  [ Dimitri John Ledkov ]
+  * systemd-sysv-install: Fix name initialisation.
+    Only initialise NAME after --root optional argument has been parsed,
+    otherwise NAME is initialized to e.g. `enable`, instead of to the
+    `unit-name`, resulting in failures. (LP: #1752882)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 07 Mar 2018 23:21:53 +0100
+
+systemd (237-4) unstable; urgency=medium
+
+  [ Gunnar Hjalmarsson ]
+  * Fix PO template creation.
+    Cherry-pick upstream patches to build a correct systemd.pot including
+    the polkit policy files even without policykit-1 being installed.
+    (LP: #1707898)
+
+  [ Michael Biebl ]
+  * Drop mask for fuse SysV init script.
+    The fuse package has removed its SysV init script a long time ago, so
+    the mask is no longer needed.
+  * Replace two Debian specific patches which cherry-picks from upstream
+    master
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 28 Feb 2018 19:18:34 +0100
+
 systemd (237-3ubuntu11) cosmic; urgency=medium
 
   [ Dimitri John Ledkov ]

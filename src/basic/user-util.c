@@ -197,6 +197,25 @@ int get_user_creds(
         return 0;
 }
 
+static inline bool is_nologin_shell(const char *shell) {
+
+        return PATH_IN_SET(shell,
+                           /* 'nologin' is the friendliest way to disable logins for a user account. It prints a nice
+                            * message and exits. Different distributions place the binary at different places though,
+                            * hence let's list them all. */
+                           "/bin/nologin",
+                           "/sbin/nologin",
+                           "/usr/bin/nologin",
+                           "/usr/sbin/nologin",
+                           /* 'true' and 'false' work too for the same purpose, but are less friendly as they don't do
+                            * any message printing. Different distributions place the binary at various places but at
+                            * least not in the 'sbin' directory. */
+                           "/bin/false",
+                           "/usr/bin/false",
+                           "/bin/true",
+                           "/usr/bin/true");
+}
+
 int get_user_creds_clean(
                 const char **username,
                 uid_t *uid, gid_t *gid,
@@ -212,11 +231,7 @@ int get_user_creds_clean(
                 return r;
 
         if (shell &&
-            (isempty(*shell) || PATH_IN_SET(*shell,
-                                            "/bin/nologin",
-                                            "/sbin/nologin",
-                                            "/usr/bin/nologin",
-                                            "/usr/sbin/nologin")))
+            (isempty(*shell) || is_nologin_shell(*shell)))
                 *shell = NULL;
 
         if (home &&
@@ -553,18 +568,18 @@ int take_etc_passwd_lock(const char *root) {
          * awfully racy, and thus we just won't do them. */
 
         if (root)
-                path = prefix_roota(root, "/etc/.pwd.lock");
+                path = prefix_roota(root, ETC_PASSWD_LOCK_PATH);
         else
-                path = "/etc/.pwd.lock";
+                path = ETC_PASSWD_LOCK_PATH;
 
         fd = open(path, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW, 0600);
         if (fd < 0)
-                return -errno;
+                return log_debug_errno(errno, "Cannot open %s: %m", path);
 
         r = fcntl(fd, F_SETLKW, &flock);
         if (r < 0) {
                 safe_close(fd);
-                return -errno;
+                return log_debug_errno(errno, "Locking %s failed: %m", path);
         }
 
         return fd;
@@ -645,6 +660,8 @@ bool valid_gecos(const char *d) {
 }
 
 bool valid_home(const char *p) {
+        /* Note that this function is also called by valid_shell(), any
+         * changes must account for that. */
 
         if (isempty(p))
                 return false;

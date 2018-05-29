@@ -182,6 +182,8 @@ struct Manager {
         int user_lookup_fds[2];
         sd_event_source *user_lookup_event_source;
 
+        sd_event_source *sync_bus_names_event_source;
+
         UnitFileScope unit_file_scope;
         LookupPaths lookup_paths;
         Set *unit_path_cache;
@@ -341,6 +343,9 @@ struct Manager {
         Hashmap *uid_refs;
         Hashmap *gid_refs;
 
+        /* ExecRuntime, indexed by their owner unit id */
+        Hashmap *exec_runtime_by_id;
+
         /* When the user hits C-A-D more than 7 times per 2s, do something immediately... */
         RateLimit ctrl_alt_del_ratelimit;
         EmergencyAction cad_burst_action;
@@ -422,6 +427,7 @@ bool manager_unit_inactive_or_pending(Manager *m, const char *name);
 
 void manager_check_finished(Manager *m);
 
+void manager_recheck_dbus(Manager *m);
 void manager_recheck_journal(Manager *m);
 
 void manager_set_show_status(Manager *m, ShowStatus mode);
@@ -431,8 +437,6 @@ void manager_status_printf(Manager *m, StatusType type, const char *status, cons
 void manager_flip_auto_status(Manager *m, bool enable);
 
 Set *manager_get_units_requiring_mounts_for(Manager *m, const char *path);
-
-void manager_set_exec_params(Manager *m, ExecParameters *p);
 
 ManagerState manager_state(Manager *m);
 

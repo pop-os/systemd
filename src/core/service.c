@@ -120,6 +120,9 @@ static void service_init(Unit *u) {
         s->guess_main_pid = true;
 
         s->control_command_id = _SERVICE_EXEC_COMMAND_INVALID;
+
+        s->exec_context.keyring_mode = MANAGER_IS_SYSTEM(u->manager) ?
+                EXEC_KEYRING_PRIVATE : EXEC_KEYRING_INHERIT;
 }
 
 static void service_unwatch_control_pid(Service *s) {
@@ -369,7 +372,7 @@ static void service_done(Unit *u) {
         s->pid_file = mfree(s->pid_file);
         s->status_text = mfree(s->status_text);
 
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime);
+        s->exec_runtime = exec_runtime_unref(s->exec_runtime, false);
         exec_command_free_array(s->exec_command, _SERVICE_EXEC_COMMAND_MAX);
         s->control_command = NULL;
         s->main_command = NULL;
@@ -774,6 +777,8 @@ static int service_load(Unit *u) {
 }
 
 static void service_dump(Unit *u, FILE *f, const char *prefix) {
+        char buf_restart[FORMAT_TIMESPAN_MAX], buf_start[FORMAT_TIMESPAN_MAX], buf_stop[FORMAT_TIMESPAN_MAX];
+        char buf_runtime[FORMAT_TIMESPAN_MAX], buf_watchdog[FORMAT_TIMESPAN_MAX];
         ServiceExecCommand c;
         Service *s = SERVICE(u);
         const char *prefix2;
@@ -837,6 +842,18 @@ static void service_dump(Unit *u, FILE *f, const char *prefix) {
                 fprintf(f,
                         "%sAccept Socket: %s\n",
                         prefix, UNIT_DEREF(s->accept_socket)->id);
+
+        fprintf(f,
+                "%sRestartSec: %s\n"
+                "%sTimeoutStartSec: %s\n"
+                "%sTimeoutStopSec: %s\n"
+                "%sRuntimeMaxSec: %s\n"
+                "%sWatchdogSec: %s\n",
+                prefix, format_timespan(buf_restart, sizeof(buf_restart), s->restart_usec, USEC_PER_SEC),
+                prefix, format_timespan(buf_start, sizeof(buf_start), s->timeout_start_usec, USEC_PER_SEC),
+                prefix, format_timespan(buf_stop, sizeof(buf_stop), s->timeout_stop_usec, USEC_PER_SEC),
+                prefix, format_timespan(buf_runtime, sizeof(buf_runtime), s->runtime_max_usec, USEC_PER_SEC),
+                prefix, format_timespan(buf_watchdog, sizeof(buf_watchdog), s->watchdog_usec, USEC_PER_SEC));
 
         kill_context_dump(&s->kill_context, f, prefix);
         exec_context_dump(&s->exec_context, f, prefix);
@@ -902,6 +919,7 @@ static int service_is_suitable_main_pid(Service *s, pid_t pid, int prio) {
 
 static int service_load_pid_file(Service *s, bool may_warn) {
         char procfs[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(int)];
+        bool questionable_pid_file = false;
         _cleanup_free_ char *k = NULL;
         _cleanup_close_ int fd = -1;
         int r, prio;
@@ -915,8 +933,13 @@ static int service_load_pid_file(Service *s, bool may_warn) {
         prio = may_warn ? LOG_INFO : LOG_DEBUG;
 
         fd = chase_symlinks(s->pid_file, NULL, CHASE_OPEN|CHASE_SAFE, NULL);
-        if (fd == -EPERM)
-                return log_unit_full(UNIT(s), prio, fd, "Permission denied while opening PID file or unsafe symlink chain: %s", s->pid_file);
+        if (fd == -EPERM) {
+                log_unit_full(UNIT(s), LOG_DEBUG, fd, "Permission denied while opening PID file or potentially unsafe symlink chain, will now retry with relaxed checks: %s", s->pid_file);
+
+                questionable_pid_file = true;
+
+                fd = chase_symlinks(s->pid_file, NULL, CHASE_OPEN, NULL);
+        }
         if (fd < 0)
                 return log_unit_full(UNIT(s), prio, fd, "Can't open PID file %s (yet?) after %s: %m", s->pid_file, service_state_to_string(s->state));
 
@@ -938,6 +961,11 @@ static int service_load_pid_file(Service *s, bool may_warn) {
                 return r;
         if (r == 0) {
                 struct stat st;
+
+                if (questionable_pid_file) {
+                        log_unit_error(UNIT(s), "Refusing to accept PID outside of service control group, acquired through unsafe symlink chain: %s", s->pid_file);
+                        return -EPERM;
+                }
 
                 /* Hmm, it's not clear if the new main PID is safe. Let's allow this if the PID file is owned by root */
 
@@ -1141,8 +1169,10 @@ static int service_coldplug(Unit *u) {
         if (IN_SET(s->deserialized_state, SERVICE_START_POST, SERVICE_RUNNING, SERVICE_RELOAD))
                 service_start_watchdog(s);
 
-        if (!IN_SET(s->deserialized_state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_AUTO_RESTART))
+        if (!IN_SET(s->deserialized_state, SERVICE_DEAD, SERVICE_FAILED, SERVICE_AUTO_RESTART)) {
                 (void) unit_setup_dynamic_creds(u);
+                (void) unit_setup_exec_runtime(u);
+        }
 
         if (UNIT_ISSET(s->accept_socket)) {
                 Socket* socket = SOCKET(UNIT_DEREF(s->accept_socket));
@@ -1224,7 +1254,7 @@ static int service_collect_fds(Service *s,
                         } else {
                                 int *t;
 
-                                t = realloc(rfds, (rn_socket_fds + cn_fds) * sizeof(int));
+                                t = reallocarray(rfds, rn_socket_fds + cn_fds, sizeof(int));
                                 if (!t)
                                         return -ENOMEM;
 
@@ -1246,13 +1276,13 @@ static int service_collect_fds(Service *s,
                 char **nl;
                 int *t;
 
-                t = realloc(rfds, (rn_socket_fds + s->n_fd_store) * sizeof(int));
+                t = reallocarray(rfds, rn_socket_fds + s->n_fd_store, sizeof(int));
                 if (!t)
                         return -ENOMEM;
 
                 rfds = t;
 
-                nl = realloc(rfd_names, (rn_socket_fds + s->n_fd_store + 1) * sizeof(char*));
+                nl = reallocarray(rfd_names, rn_socket_fds + s->n_fd_store + 1, sizeof(char *));
                 if (!nl)
                         return -ENOMEM;
 
@@ -1422,7 +1452,6 @@ static int service_spawn(
                 }
         }
 
-        manager_set_exec_params(UNIT(s)->manager, &exec_params);
         unit_set_exec_params(UNIT(s), &exec_params);
 
         final_env = strv_env_merge(2, exec_params.environment, our_env, NULL);
@@ -1629,8 +1658,7 @@ static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) 
         s->forbid_restart = false;
 
         /* We want fresh tmpdirs in case service is started again immediately */
-        exec_runtime_destroy(s->exec_runtime);
-        s->exec_runtime = exec_runtime_unref(s->exec_runtime);
+        s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
 
         if (s->exec_context.runtime_directory_preserve_mode == EXEC_PRESERVE_NO ||
             (s->exec_context.runtime_directory_preserve_mode == EXEC_PRESERVE_RESTART && !service_will_restart(UNIT(s))))
@@ -2658,7 +2686,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
                 if (r < 0)
                         log_unit_debug_errno(u, r, "Failed to load accept-socket unit: %s", value);
                 else {
-                        unit_ref_set(&s->accept_socket, socket);
+                        unit_ref_set(&s->accept_socket, u, socket);
                         SOCKET(socket)->n_connections++;
                 }
 
@@ -2807,20 +2835,20 @@ static const char *service_sub_state_to_string(Unit *u) {
         return service_state_to_string(SERVICE(u)->state);
 }
 
-static bool service_check_gc(Unit *u) {
+static bool service_may_gc(Unit *u) {
         Service *s = SERVICE(u);
 
         assert(s);
 
         /* Never clean up services that still have a process around, even if the service is formally dead. Note that
-         * unit_check_gc() already checked our cgroup for us, we just check our two additional PIDs, too, in case they
+         * unit_may_gc() already checked our cgroup for us, we just check our two additional PIDs, too, in case they
          * have moved outside of the cgroup. */
 
         if (main_pid_good(s) > 0 ||
             control_pid_good(s) > 0)
-                return true;
+                return false;
 
-        return false;
+        return true;
 }
 
 static int service_retry_pid_file(Service *s) {
@@ -3744,7 +3772,7 @@ int service_set_socket_fd(Service *s, int fd, Socket *sock, bool selinux_context
         s->socket_fd = fd;
         s->socket_fd_selinux_context_net = selinux_context_net;
 
-        unit_ref_set(&s->accept_socket, UNIT(sock));
+        unit_ref_set(&s->accept_socket, UNIT(s), UNIT(sock));
         return 0;
 }
 
@@ -3883,6 +3911,9 @@ const UnitVTable service_vtable = {
                 "Install\0",
         .private_section = "Service",
 
+        .can_transient = true,
+        .can_delegate = true,
+
         .init = service_init,
         .done = service_done,
         .load = service_load,
@@ -3908,7 +3939,7 @@ const UnitVTable service_vtable = {
 
         .will_restart = service_will_restart,
 
-        .check_gc = service_check_gc,
+        .may_gc = service_may_gc,
 
         .sigchld_event = service_sigchld_event,
 
@@ -3928,7 +3959,6 @@ const UnitVTable service_vtable = {
 
         .get_timeout = service_get_timeout,
         .needs_console = service_needs_console,
-        .can_transient = true,
 
         .status_message_formats = {
                 .starting_stopping = {

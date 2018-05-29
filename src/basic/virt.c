@@ -57,6 +57,7 @@ static int detect_vm_cpuid(void) {
                 { "Microsoft Hv", VIRTUALIZATION_MICROSOFT },
                 /* https://wiki.freebsd.org/bhyve */
                 { "bhyve bhyve ", VIRTUALIZATION_BHYVE     },
+                { "QNXQVMBSQG",   VIRTUALIZATION_QNX       },
         };
 
         uint32_t eax, ebx, ecx, edx;
@@ -281,6 +282,10 @@ static int detect_vm_uml(void) {
 
         /* Detect User-Mode Linux by reading /proc/cpuinfo */
         r = read_full_file("/proc/cpuinfo", &cpuinfo_contents, NULL);
+        if (r == -ENOENT) {
+                log_debug("/proc/cpuinfo not found, assuming no UML virtualization.");
+                return VIRTUALIZATION_NONE;
+        }
         if (r < 0)
                 return r;
 
@@ -289,7 +294,7 @@ static int detect_vm_uml(void) {
                 return VIRTUALIZATION_UML;
         }
 
-        log_debug("No virtualization found in /proc/cpuinfo.");
+        log_debug("UML virtualization not found in /proc/cpuinfo.");
         return VIRTUALIZATION_NONE;
 }
 
@@ -603,16 +608,16 @@ int running_in_userns(void) {
 }
 
 int running_in_chroot(void) {
-        int ret;
+        int r;
 
         if (getenv_bool("SYSTEMD_IGNORE_CHROOT") > 0)
                 return 0;
 
-        ret = files_same("/proc/1/root", "/", 0);
-        if (ret < 0)
-                return ret;
+        r = files_same("/proc/1/root", "/", 0);
+        if (r < 0)
+                return r;
 
-        return ret == 0;
+        return r == 0;
 }
 
 static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {
@@ -628,6 +633,7 @@ static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {
         [VIRTUALIZATION_ZVM] = "zvm",
         [VIRTUALIZATION_PARALLELS] = "parallels",
         [VIRTUALIZATION_BHYVE] = "bhyve",
+        [VIRTUALIZATION_QNX] = "qnx",
         [VIRTUALIZATION_VM_OTHER] = "vm-other",
 
         [VIRTUALIZATION_SYSTEMD_NSPAWN] = "systemd-nspawn",

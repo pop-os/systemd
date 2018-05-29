@@ -94,10 +94,7 @@ static int add_match(sd_journal *j, const char *match) {
         else
                 prefix = "COREDUMP_COMM=";
 
-        pattern = strjoin(prefix, match);
-        if (!pattern)
-                return log_oom();
-
+        pattern = strjoina(prefix, match);
         log_debug("Adding match: %s", pattern);
         r = sd_journal_add_match(j, pattern, 0);
         if (r < 0)
@@ -932,6 +929,7 @@ static int run_gdb(sd_journal *j) {
                 goto finish;
         if (r == 0) {
                 execlp("gdb", "gdb", exe, path, NULL);
+                log_open();
                 log_error_errno(errno, "Failed to invoke gdb: %m");
                 _exit(EXIT_FAILURE);
         }
@@ -1040,7 +1038,7 @@ int main(int argc, char *argv[]) {
                 }
         }
 
-        r = journal_access_check_and_warn(j, arg_quiet);
+        r = journal_access_check_and_warn(j, arg_quiet, true);
         if (r < 0)
                 goto end;
 

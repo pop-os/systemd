@@ -51,6 +51,8 @@ class ServicesTest(unittest.TestCase):
         failed = [f for f in failed if 'thermald' not in f]
         # console-setup.service fails on devices without keyboard (LP: #1516591)
         failed = [f for f in failed if 'console-setup' not in f]
+        # cpi.service fails on s390x
+        failed = [f for f in failed if 'cpi.service' not in f]
         if failed:
             for f in failed:
                 f = f.split()[0]
