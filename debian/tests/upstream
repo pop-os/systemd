@@ -22,6 +22,8 @@ sed -i '/@make.*all/ d' test/TEST*/Makefile
 # adjust path
 sed -i 's_/usr/libexec/selinux/hll/pp_/usr/lib/selinux/hll/pp_' test/TEST-06-SELINUX/test.sh
 
+FAILED=""
+
 for t in test/TEST*; do
     echo "$BLACKLIST" | grep -q "$(basename $t)" && continue
     echo "========== `basename $t` =========="
@@ -34,7 +36,12 @@ for t in test/TEST*; do
             echo "---- $j ----"
             journalctl --priority=warning --directory=$j
         done
-        exit 1
+        FAILED="$FAILED $t"
     fi
     echo
 done
+
+if [ -n "$FAILED" ]; then
+        echo FAILED TESTS: "$FAILED"
+        exit 1
+fi
