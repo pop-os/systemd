@@ -16,10 +16,10 @@ and was suggested by Alan Jenkins (@sourcejedi).
  1 file changed, 9 insertions(+)
 
 diff --git a/src/basic/alloc-util.h b/src/basic/alloc-util.h
-index 02dee37..3a3a7a9 100644
+index ec7808c..b1e0edb 100644
 --- a/src/basic/alloc-util.h
 +++ b/src/basic/alloc-util.h
-@@ -128,3 +128,12 @@ void* greedy_realloc0(void **p, size_t *allocated, size_t need, size_t size);
+@@ -130,3 +130,12 @@ void* greedy_realloc0(void **p, size_t *allocated, size_t need, size_t size);
                  _new_ = alloca_align(_size_, (align));                  \
                  (void*)memset(_new_, 0, _size_);                        \
          })

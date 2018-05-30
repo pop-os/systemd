@@ -33,7 +33,7 @@ as it's more descriptive of what's happening.
  delete mode 100644 units/systemd-suspend-to-hibernate.service.in
 
 diff --git a/man/logind.conf.xml b/man/logind.conf.xml
-index 5fb430f..04b89b0 100644
+index 3fa3e85..46eaee1 100644
 --- a/man/logind.conf.xml
 +++ b/man/logind.conf.xml
 @@ -176,7 +176,7 @@
@@ -45,7 +45,7 @@ index 5fb430f..04b89b0 100644
          <literal>lock</literal>.
          Defaults to <literal>ignore</literal>.</para>
  
-@@ -225,7 +225,7 @@
+@@ -226,7 +226,7 @@
          <literal>suspend</literal>,
          <literal>hibernate</literal>,
          <literal>hybrid-sleep</literal>,
@@ -55,10 +55,10 @@ index 5fb430f..04b89b0 100644
          If <literal>ignore</literal>, logind will never handle these
          keys. If <literal>lock</literal>, all running sessions will be
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index 5e584cc..67f3f17 100644
+index 41a9da2..3dfc9b4 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -626,7 +626,7 @@ manpages = [
+@@ -627,7 +627,7 @@ manpages = [
    '8',
    ['systemd-hibernate.service',
     'systemd-hybrid-sleep.service',
@@ -178,7 +178,7 @@ index 2455baa..8b9a11c 100644
          </listitem>
        </varlistentry>
 diff --git a/man/systemd.special.xml b/man/systemd.special.xml
-index 75e3027..1ad2aff 100644
+index 95e2ffc..7bf674e 100644
 --- a/man/systemd.special.xml
 +++ b/man/systemd.special.xml
 @@ -65,7 +65,7 @@
@@ -303,10 +303,10 @@ index 1ee8c81..9f5dee6 100644
          _HANDLE_ACTION_MAX,
          _HANDLE_ACTION_INVALID = -1
 diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
-index 51617d6..2222f19 100644
+index 37c2f34..6565e04 100644
 --- a/src/login/logind-dbus.c
 +++ b/src/login/logind-dbus.c
-@@ -1924,12 +1924,12 @@ static int method_hybrid_sleep(sd_bus_message *message, void *userdata, sd_bus_e
+@@ -1933,12 +1933,12 @@ static int method_hybrid_sleep(sd_bus_message *message, void *userdata, sd_bus_e
                          error);
  }
  
@@ -321,7 +321,7 @@ index 51617d6..2222f19 100644
                          INHIBIT_SLEEP,
                          "org.freedesktop.login1.hibernate",
                          "org.freedesktop.login1.hibernate-multiple-sessions",
-@@ -2395,7 +2395,7 @@ static int method_can_hybrid_sleep(sd_bus_message *message, void *userdata, sd_b
+@@ -2400,7 +2400,7 @@ static int method_can_hybrid_sleep(sd_bus_message *message, void *userdata, sd_b
                          error);
  }
  
@@ -330,7 +330,7 @@ index 51617d6..2222f19 100644
          Manager *m = userdata;
  
          return method_can_shutdown_or_sleep(
-@@ -2404,7 +2404,7 @@ static int method_can_suspend_to_hibernate(sd_bus_message *message, void *userda
+@@ -2409,7 +2409,7 @@ static int method_can_suspend_to_hibernate(sd_bus_message *message, void *userda
                          "org.freedesktop.login1.hibernate",
                          "org.freedesktop.login1.hibernate-multiple-sessions",
                          "org.freedesktop.login1.hibernate-ignore-inhibit",
@@ -339,7 +339,7 @@ index 51617d6..2222f19 100644
                          error);
  }
  
-@@ -2727,14 +2727,14 @@ const sd_bus_vtable manager_vtable[] = {
+@@ -2733,14 +2733,14 @@ const sd_bus_vtable manager_vtable[] = {
          SD_BUS_METHOD("Suspend", "b", NULL, method_suspend, SD_BUS_VTABLE_UNPRIVILEGED),
          SD_BUS_METHOD("Hibernate", "b", NULL, method_hibernate, SD_BUS_VTABLE_UNPRIVILEGED),
          SD_BUS_METHOD("HybridSleep", "b", NULL, method_hybrid_sleep, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -442,7 +442,7 @@ index 48e7c38..2830b23 100644
          else
                  r = execute(modes, states);
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index c27116f..70f8dd4 100644
+index 6970f01..f5d5c91 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
 @@ -160,7 +160,7 @@ static enum action {
@@ -454,7 +454,7 @@ index c27116f..70f8dd4 100644
          ACTION_RUNLEVEL2,
          ACTION_RUNLEVEL3,
          ACTION_RUNLEVEL4,
-@@ -3033,22 +3033,22 @@ static const struct {
+@@ -3034,22 +3034,22 @@ static const struct {
          const char *verb;
          const char *mode;
  } action_table[_ACTION_MAX] = {
@@ -493,7 +493,7 @@ index c27116f..70f8dd4 100644
  };
  
  static enum action verb_to_action(const char *verb) {
-@@ -3279,8 +3279,8 @@ static int logind_reboot(enum action a) {
+@@ -3280,8 +3280,8 @@ static int logind_reboot(enum action a) {
                  description = "put system into hybrid sleep";
                  break;
  
@@ -504,7 +504,7 @@ index c27116f..70f8dd4 100644
                  description = "put system into suspend followed by hibernate";
                  break;
  
-@@ -3636,7 +3636,7 @@ static int start_special(int argc, char *argv[], void *userdata) {
+@@ -3637,7 +3637,7 @@ static int start_special(int argc, char *argv[], void *userdata) {
                             ACTION_SUSPEND,
                             ACTION_HIBERNATE,
                             ACTION_HYBRID_SLEEP,
@@ -513,16 +513,16 @@ index c27116f..70f8dd4 100644
  
                          r = logind_reboot(a);
                          if (r >= 0)
-@@ -7314,7 +7314,7 @@ static void systemctl_help(void) {
-                "  suspend                         Suspend the system\n"
-                "  hibernate                       Hibernate the system\n"
-                "  hybrid-sleep                    Hibernate and suspend the system\n"
--               "  suspend-to-hibernate            Suspend the system, wake after a period of\n"
-+               "  suspend-then-hibernate          Suspend the system, wake after a period of\n"
-                "                                  time and put it into hibernate\n",
+@@ -7335,7 +7335,7 @@ static void systemctl_help(void) {
+                "  suspend                             Suspend the system\n"
+                "  hibernate                           Hibernate the system\n"
+                "  hybrid-sleep                        Hibernate and suspend the system\n"
+-               "  suspend-to-hibernate                Suspend the system, wake after a period of\n"
++               "  suspend-then-hibernate              Suspend the system, wake after a period of\n"
+                "                                      time and put it into hibernate\n",
                 program_invocation_short_name);
  }
-@@ -8407,7 +8407,7 @@ static int systemctl_main(int argc, char *argv[]) {
+@@ -8438,7 +8438,7 @@ static int systemctl_main(int argc, char *argv[]) {
                  { "suspend",               VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
                  { "hibernate",             VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
                  { "hybrid-sleep",          VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
@@ -531,7 +531,7 @@ index c27116f..70f8dd4 100644
                  { "default",               VERB_ANY, 1,        VERB_ONLINE_ONLY, start_special        },
                  { "rescue",                VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
                  { "emergency",             VERB_ANY, 1,        VERB_ONLINE_ONLY, start_system_special },
-@@ -8761,7 +8761,7 @@ int main(int argc, char*argv[]) {
+@@ -8770,7 +8770,7 @@ int main(int argc, char*argv[]) {
          case ACTION_SUSPEND:
          case ACTION_HIBERNATE:
          case ACTION_HYBRID_SLEEP:
@@ -554,7 +554,7 @@ index e49ecbe..cea511d 100644
  
  int main(int argc, char* argv[]) {
 diff --git a/units/meson.build b/units/meson.build
-index 20fb90d..da22fa8 100644
+index d88e05a..e82f94e 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -36,7 +36,7 @@ units = [
@@ -566,7 +566,7 @@ index 20fb90d..da22fa8 100644
          ['initrd-fs.target',                    ''],
          ['initrd-root-device.target',           ''],
          ['initrd-root-fs.target',               ''],
-@@ -159,7 +159,7 @@ in_units = [
+@@ -158,7 +158,7 @@ in_units = [
          ['systemd-hibernate-resume@.service',    'ENABLE_HIBERNATE'],
          ['systemd-hibernate.service',            'ENABLE_HIBERNATE'],
          ['systemd-hybrid-sleep.service',         'ENABLE_HIBERNATE'],

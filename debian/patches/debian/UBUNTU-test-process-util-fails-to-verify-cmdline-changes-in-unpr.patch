@@ -12,7 +12,7 @@ unpriviledged user namespaced containers.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/test/test-process-util.c b/src/test/test-process-util.c
-index 72edcbb..8286b66 100644
+index 0e5a9d8..321b6a5 100644
 --- a/src/test/test-process-util.c
 +++ b/src/test/test-process-util.c
 @@ -381,7 +381,7 @@ static void test_rename_process_now(const char *p, int ret) {

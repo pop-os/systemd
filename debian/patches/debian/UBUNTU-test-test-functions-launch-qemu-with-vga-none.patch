@@ -10,10 +10,10 @@ really have no need for vga or seabios in this case.
  1 file changed, 1 insertion(+)
 
 diff --git a/test/test-functions b/test/test-functions
-index 0b7575b..f5f789c 100644
+index c5def82..a96c9e2 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -140,6 +140,7 @@ $KERNEL_APPEND \
+@@ -129,6 +129,7 @@ $KERNEL_APPEND \
  -net none \
  -m 512M \
  -nographic \

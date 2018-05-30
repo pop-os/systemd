@@ -12,10 +12,10 @@ Fixes: #8844
  1 file changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/src/basic/virt.c b/src/basic/virt.c
-index f4796b5..1bc26ec 100644
+index 39b4a98..971701a 100644
 --- a/src/basic/virt.c
 +++ b/src/basic/virt.c
-@@ -327,13 +327,16 @@ int detect_vm(void) {
+@@ -332,13 +332,16 @@ int detect_vm(void) {
  
          /* We have to use the correct order here:
           *

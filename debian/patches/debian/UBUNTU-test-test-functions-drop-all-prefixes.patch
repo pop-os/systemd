@@ -28,10 +28,10 @@ Without this patch tests fail on default Ubuntu installs.
  1 file changed, 2 insertions(+), 3 deletions(-)
 
 diff --git a/test/test-functions b/test/test-functions
-index ab0f87e..0b7575b 100644
+index 96b3fe3..c5def82 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -432,9 +432,8 @@ install_execs() {
+@@ -422,9 +422,8 @@ install_execs() {
      export PKG_CONFIG_PATH=$BUILD_DIR/src/core/
      systemdsystemunitdir=$(pkg-config --variable=systemdsystemunitdir systemd)
      systemduserunitdir=$(pkg-config --variable=systemduserunitdir systemd)

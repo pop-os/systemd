@@ -11,7 +11,7 @@ This should resolve armhf test failure.
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
-index 2525c47..10ecc60 100644
+index 425f22d..454db3f 100644
 --- a/src/test/test-fs-util.c
 +++ b/src/test/test-fs-util.c
 @@ -35,6 +35,7 @@
