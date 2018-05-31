@@ -1,7 +1,7 @@
 From ea930139eabb18b2e7acf814d9ee696748e2831a Mon Sep 17 00:00:00 2001
 From: Filipe Brandenburger <filbranden@google.com>
 Date: Mon, 19 Mar 2018 10:05:49 -0700
-Subject: [PATCH 042/131] macros: fix sysusers_create_inline (#8489)
+Subject: [PATCH] macros: fix sysusers_create_inline (#8489)
 
 This typo was introduced in commit dd2490ae12ad1e when using
 here-documents for the macro values.

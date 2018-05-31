@@ -1,8 +1,7 @@
 From b4467b2fb6a8e140700752a906ca4f98d5f75c74 Mon Sep 17 00:00:00 2001
 From: "Matteo F. Vescovi" <mfvescovi@users.noreply.github.com>
 Date: Tue, 20 Mar 2018 07:41:19 +0100
-Subject: [PATCH 044/131] hwdb: ThinkPad 4x0s and X1 Carbon 3rd gen LEDs
- (#8492)
+Subject: [PATCH] hwdb: ThinkPad 4x0s and X1 Carbon 3rd gen LEDs (#8492)
 
 (cherry picked from commit c72102edd503cabfb7abeee009e06b823a9717c4)
 ---

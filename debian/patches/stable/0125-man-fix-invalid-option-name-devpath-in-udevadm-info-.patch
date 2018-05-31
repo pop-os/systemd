@@ -1,8 +1,8 @@
 From b62c727cdfb31d05706da9e2450b63ae82520e44 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Wed, 9 May 2018 16:17:37 +0900
-Subject: [PATCH 125/131] man: fix invalid option name --devpath in 'udevadm
- info' (#8935)
+Subject: [PATCH] man: fix invalid option name --devpath in 'udevadm info'
+ (#8935)
 
 (cherry picked from commit cf5c1cbfba757203103a610f65e0dcf3ba26f71c)
 ---

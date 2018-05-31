@@ -1,7 +1,7 @@
 From b3f69e3db7838c4536699a729a38a46ef6a98a8b Mon Sep 17 00:00:00 2001
 From: Mikhail Kasimov <mikhail.kasimov@gmail.com>
 Date: Thu, 10 May 2018 06:15:55 +0300
-Subject: [PATCH 127/131] man: systemd-escape: add missed short keys (#8944)
+Subject: [PATCH] man: systemd-escape: add missed short keys (#8944)
 
 Added short keys -u and -m for --unescape and --mangle respectively. These short keys are present in systemd-escape --help output and are absent in man systemd-escape page.
 

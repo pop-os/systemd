@@ -1,7 +1,7 @@
 From 885e5e7ed85a33af4512bfad5ada9a1986fa1a66 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Fri, 11 May 2018 15:43:04 +0900
-Subject: [PATCH 129/131] network: make route_update() accept NULL
+Subject: [PATCH] network: make route_update() accept NULL
 
 This also fixes a wrong argument for route_configure().
 

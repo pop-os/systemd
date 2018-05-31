@@ -1,8 +1,8 @@
 From 5637563bb58aba8ba4a1600afc44c586b96eadfa Mon Sep 17 00:00:00 2001
 From: Karol Augustin <karol@augustin.pl>
 Date: Sun, 18 Mar 2018 10:40:07 +0000
-Subject: [PATCH 024/131] units: Fix SuccessAction that belongs to [Unit]
- section not [Service] section (#8478)
+Subject: [PATCH] units: Fix SuccessAction that belongs to [Unit] section not
+ [Service] section (#8478)
 
 (cherry picked from commit 94a1d03e27811e06045cdfba2e0fc7180964dc0e)
 ---

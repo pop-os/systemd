@@ -1,8 +1,8 @@
 From 66a9314e5b655752b4239b41378927bbb98755b1 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Fri, 30 Mar 2018 17:06:50 +0900
-Subject: [PATCH 070/131] bash-completion: busctl: suggests only writable
- properties for set-property
+Subject: [PATCH] bash-completion: busctl: suggests only writable properties
+ for set-property
 
 (cherry picked from commit 1e58b1dc40a35d1b0fc8c3cef3ae3c3b7ac481fd)
 ---

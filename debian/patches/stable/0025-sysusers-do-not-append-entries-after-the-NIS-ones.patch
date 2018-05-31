@@ -1,7 +1,7 @@
 From 9f294d0d0fd18bc6b7544ba755f061972db74df3 Mon Sep 17 00:00:00 2001
 From: Franck Bui <fbui@suse.com>
 Date: Thu, 15 Mar 2018 18:46:28 +0100
-Subject: [PATCH 025/131] sysusers: do not append entries after the NIS ones
+Subject: [PATCH] sysusers: do not append entries after the NIS ones
 
 The NIS-catchall entry switches from files to NIS lookup and never goes back,
 so it must be the last entry in /etc/passwd (the other +/-{user,@netgroup}

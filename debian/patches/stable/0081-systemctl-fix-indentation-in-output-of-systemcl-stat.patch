@@ -1,8 +1,8 @@
 From d9a57942ec5efb72a7521510c96cdf35b10f51aa Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Fri, 23 Feb 2018 12:31:30 +0100
-Subject: [PATCH 081/131] systemctl: fix indentation in output of "systemcl
- status" if there are multiple drop-in dirs
+Subject: [PATCH] systemctl: fix indentation in output of "systemcl status" if
+ there are multiple drop-in dirs
 
 We were a few whitespace off. Let's fix that.
 

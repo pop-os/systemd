@@ -1,7 +1,7 @@
 From 63e0c53ba0d2857967e12ad5d6037aa90f44018f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 29 Mar 2018 16:37:21 +0200
-Subject: [PATCH 075/131] tmpfiles: ignore "operational" errors during setup
+Subject: [PATCH] tmpfiles: ignore "operational" errors during setup
 
 We still get the errors logged, but we don't fail the service. This
 is better for users because rerunning tmpfiles-setup.service a second

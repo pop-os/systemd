@@ -1,8 +1,7 @@
 From e37b49559bd82cdbde4d28cc02da9a8623a39880 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 23 Apr 2018 19:21:27 +0200
-Subject: [PATCH 106/131] doc: clarify the intended audience of
- CGROUP_DELEGATION.md
+Subject: [PATCH] doc: clarify the intended audience of CGROUP_DELEGATION.md
 
 There was some confusion about who is the intended audience. Let's
 clarify that early on, to ensure people aren't disappointed.

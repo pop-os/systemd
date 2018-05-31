@@ -1,7 +1,7 @@
 From 0ee731f325935b791e8ff58ae5a43e32700c9d16 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 8 Mar 2018 10:57:44 +0100
-Subject: [PATCH 032/131] systemctl: propagate the error from kexec
+Subject: [PATCH] systemctl: propagate the error from kexec
 
 (cherry picked from commit df685d5784e0cfdd89b6153bde886b071afff388)
 ---

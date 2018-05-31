@@ -1,8 +1,8 @@
 From c58ab03f64890e7db88745a843bd4520e307099b Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Tue, 20 Mar 2018 20:41:30 +0100
-Subject: [PATCH 051/131] journal: don't insist that the journal file header's
- boot ID matches the last entry
+Subject: [PATCH] journal: don't insist that the journal file header's boot ID
+ matches the last entry
 
 We update the boot ID whenever the file is opened for writing (i.e. set
 to ONLINE stat), even if we never write a single entry to it. Hence,

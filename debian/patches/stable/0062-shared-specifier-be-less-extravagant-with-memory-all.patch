@@ -1,8 +1,7 @@
 From 6fd6c0d7d7502f61f177feb5356b97545827f012 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 28 Mar 2018 10:15:44 +0200
-Subject: [PATCH 062/131] shared/specifier: be less extravagant with memory
- allocations
+Subject: [PATCH] shared/specifier: be less extravagant with memory allocations
 
 ubsan times out because we do too many allocations:
 

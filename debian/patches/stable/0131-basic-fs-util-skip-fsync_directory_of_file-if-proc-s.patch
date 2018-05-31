@@ -1,7 +1,7 @@
 From 0e0aa590a8ba759679efbd72e92c0ba4811aa1ec Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 20 Mar 2018 18:20:01 +0100
-Subject: [PATCH 131/131] basic/fs-util: skip fsync_directory_of_file() if
+Subject: [PATCH] basic/fs-util: skip fsync_directory_of_file() if
  /proc/self/fd/ is not available (#8386)
 
 When systemd is running under lorax (in Fedora compose process), it'd think that

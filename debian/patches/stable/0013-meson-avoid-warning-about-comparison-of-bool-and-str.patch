@@ -1,8 +1,7 @@
 From e101b22e43c13f73e6cbfeadb6c4bf12bd45e432 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Fri, 9 Mar 2018 14:21:08 +0100
-Subject: [PATCH 013/131] meson: avoid warning about comparison of bool and
- string
+Subject: [PATCH] meson: avoid warning about comparison of bool and string
 
 meson.build:2907: WARNING: Trying to compare values of different types (bool, str) using ==.
 The result of this is undefined and will become a hard error in a future Meson release.

@@ -1,8 +1,8 @@
 From d66dac530acb3eaa4dcc0a0dcd79a3323ab1eac2 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Tue, 27 Mar 2018 09:36:49 +0200
-Subject: [PATCH 059/131] journal-file: we can't use a chain cache entry if we
- don't know where it starts (#8542)
+Subject: [PATCH] journal-file: we can't use a chain cache entry if we don't
+ know where it starts (#8542)
 
 It might happen that we try to bisect through a chain of offset arrays in the
 journal whose last element was just allocated but no item yet written

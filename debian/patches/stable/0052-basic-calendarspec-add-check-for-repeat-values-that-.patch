@@ -1,8 +1,8 @@
 From c885a886eb7400010c728814d6ef4c3404149009 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Mon, 19 Mar 2018 09:21:02 +0100
-Subject: [PATCH 052/131] basic/calendarspec: add check for repeat values that
- would overflow
+Subject: [PATCH] basic/calendarspec: add check for repeat values that would
+ overflow
 
 https://oss-fuzz.com/v2/issue/4651449704251392/7004
 (cherry picked from commit e127f26b1a19571a4da6094c226ad5f34438357a)

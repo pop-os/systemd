@@ -1,7 +1,7 @@
 From 1cfb90a0db47cc4a163085e495169b39a3aa9951 Mon Sep 17 00:00:00 2001
 From: emelenas <4527811+emelenas@users.noreply.github.com>
 Date: Tue, 10 Apr 2018 00:15:25 +0200
-Subject: [PATCH 077/131] Add override axis for Toshiba Satellite R830 (#8694)
+Subject: [PATCH] Add override axis for Toshiba Satellite R830 (#8694)
 
 Incorrect range and resolution for the touchpad at a Toshiba Satellite R830 reported by kernel. After running
 

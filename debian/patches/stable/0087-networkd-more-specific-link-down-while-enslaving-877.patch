@@ -1,8 +1,7 @@
 From 5fedf07ae0b13e678b895514cdcf903cacbb73dc Mon Sep 17 00:00:00 2001
 From: Tobias Jungel <Tobias.Jungel@gmail.com>
 Date: Fri, 20 Apr 2018 16:30:40 +0200
-Subject: [PATCH 087/131] networkd: more specific link down while enslaving
- (#8771)
+Subject: [PATCH] networkd: more specific link down while enslaving (#8771)
 
 Issue #5853 introduced a link_down for every netdev enslaved. This behaviour is
 not required on other slave interfaces.

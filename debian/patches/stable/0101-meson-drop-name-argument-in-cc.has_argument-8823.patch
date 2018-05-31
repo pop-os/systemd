@@ -1,8 +1,7 @@
 From 801a81fc1e4963fb06e891f0f064ffe9cf8cf1b3 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Thu, 26 Apr 2018 17:53:10 +0900
-Subject: [PATCH 101/131] meson: drop 'name' argument in cc.has_argument()
- (#8823)
+Subject: [PATCH] meson: drop 'name' argument in cc.has_argument() (#8823)
 
 This fixes the following warning with clang and meson-0.46.0,
 ```

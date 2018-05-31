@@ -1,7 +1,7 @@
 From 4c7f25c07692d8f5f132839e9500617d97358b7e Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Wed, 21 Mar 2018 11:46:49 +0100
-Subject: [PATCH 050/131] sd-bus: drop fd_nonblock() calls that are implied by
+Subject: [PATCH] sd-bus: drop fd_nonblock() calls that are implied by
  rearrange_stdio() (#8514)
 
 (cherry picked from commit 68b525d1d1e8153cbc2e2354fa650aa165f7a434)

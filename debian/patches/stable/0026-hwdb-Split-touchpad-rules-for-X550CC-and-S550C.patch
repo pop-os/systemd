@@ -1,7 +1,7 @@
 From 62618a6ef199e2691804c69f76ca52ff470ac538 Mon Sep 17 00:00:00 2001
 From: Elia Geretto <elia.f.geretto@gmail.com>
 Date: Mon, 19 Mar 2018 08:00:28 +0100
-Subject: [PATCH 026/131] hwdb: Split touchpad rules for X550CC and S550C
+Subject: [PATCH] hwdb: Split touchpad rules for X550CC and S550C
 
 (cherry picked from commit 80188d5bf6e3a97b5faff3a868ecd2627d94e352)
 ---

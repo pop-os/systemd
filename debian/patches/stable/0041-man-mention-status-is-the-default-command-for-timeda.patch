@@ -1,8 +1,7 @@
 From 597b5c3b782b6cf24096a75259f7d405dec77fca Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Wed, 14 Mar 2018 15:10:46 +0900
-Subject: [PATCH 041/131] man: mention 'status' is the default command for
- timedatectl
+Subject: [PATCH] man: mention 'status' is the default command for timedatectl
 
 (cherry picked from commit 24fcd009c3eb89f590bef96dd5495fd4ef796fd0)
 ---

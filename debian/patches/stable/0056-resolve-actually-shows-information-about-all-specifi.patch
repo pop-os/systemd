@@ -1,8 +1,8 @@
 From de5826c5b3d02b801810913b40a1090b04105127 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Tue, 20 Mar 2018 18:11:39 +0900
-Subject: [PATCH 056/131] resolve: actually shows information about all
- specified interfaces
+Subject: [PATCH] resolve: actually shows information about all specified
+ interfaces
 
 (cherry picked from commit 2892077c937f85a019fcb3bdbcd4433f2e373274)
 ---

@@ -1,8 +1,8 @@
 From a9e23be7f0f183615f640aa0e05c7844ea1e6233 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Mon, 7 May 2018 10:16:04 +0900
-Subject: [PATCH 123/131] login: do not wall message on cancelling shutdown
- when Manager.enable_wall_messages is false
+Subject: [PATCH] login: do not wall message on cancelling shutdown when
+ Manager.enable_wall_messages is false
 
 Fixes #8904.
 

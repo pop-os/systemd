@@ -1,7 +1,7 @@
 From 3c1a062cd0134766f4c8052cbd53b2c2e2ab312b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 24 Apr 2018 13:57:38 +0200
-Subject: [PATCH 098/131] basic/log: do not use global errno in log_*_errno()
+Subject: [PATCH] basic/log: do not use global errno in log_*_errno()
 
 Quoting https://github.com/systemd/systemd/pull/8760#discussion_r183321060:
 

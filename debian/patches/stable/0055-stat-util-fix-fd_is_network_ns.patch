@@ -1,7 +1,7 @@
 From 20785fa6ca3634e0d492486a66dd89a7886c0539 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Fri, 23 Mar 2018 09:47:04 +0100
-Subject: [PATCH 055/131] stat-util: fix fd_is_network_ns()
+Subject: [PATCH] stat-util: fix fd_is_network_ns()
 
 This was broken in 77f9fa3b8ea46c27e5a5e9270f71bf1b4000c3e0. My fault.
 

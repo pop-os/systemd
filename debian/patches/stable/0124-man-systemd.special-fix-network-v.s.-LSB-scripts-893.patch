@@ -1,8 +1,7 @@
 From 7acfd2b9c954e4032ce3f7449011f97e8468380b Mon Sep 17 00:00:00 2001
 From: Alan Jenkins <alan.christopher.jenkins@gmail.com>
 Date: Tue, 8 May 2018 15:53:41 +0100
-Subject: [PATCH 124/131] man/systemd.special: fix network v.s. LSB scripts
- (#8930)
+Subject: [PATCH] man/systemd.special: fix network v.s. LSB scripts (#8930)
 
 $network is converted to network-online.target, not network-target.
 

@@ -1,7 +1,7 @@
 From 2ecc5e8c80b863a50e899e0e758fbd4149fa77dd Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Thu, 5 Apr 2018 00:33:22 +0900
-Subject: [PATCH 073/131] network: fix typo in log message
+Subject: [PATCH] network: fix typo in log message
 
 (cherry picked from commit 3d282fff063c81893dc4bbd0282193d20dd5357e)
 ---

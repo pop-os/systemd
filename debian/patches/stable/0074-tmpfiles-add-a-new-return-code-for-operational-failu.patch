@@ -1,8 +1,8 @@
 From 6fdb437b18fb8d6b91890edc076f0c43b8b5d6c6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 29 Mar 2018 16:19:33 +0200
-Subject: [PATCH 074/131] tmpfiles: add a new return code for "operational
- failure" when processing
+Subject: [PATCH] tmpfiles: add a new return code for "operational failure"
+ when processing
 
 Things can fail, and we have no control over it:
 - file system issues (immutable bits, file system errors, MAC refusals, etc)

@@ -1,8 +1,8 @@
 From 5127fbedd7a40a9ab31ade29f416458e3adbe949 Mon Sep 17 00:00:00 2001
 From: Will Dietz <github@wdtz.org>
 Date: Sat, 31 Mar 2018 05:55:45 -0500
-Subject: [PATCH 066/131] generate-af-list.sh: slightly generalize pattern, fix
- w/musl (#8629)
+Subject: [PATCH] generate-af-list.sh: slightly generalize pattern, fix w/musl
+ (#8629)
 
 Accept definitions to other AF_ constants, not just PF_ ones,
 such as:

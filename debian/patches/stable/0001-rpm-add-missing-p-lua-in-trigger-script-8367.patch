@@ -1,7 +1,7 @@
 From 5f122cea440d7187faf0148f5ffac2ed1d03ae0f Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Tue, 6 Mar 2018 16:02:44 +0900
-Subject: [PATCH 001/131] rpm: add missing '-p <lua>' in trigger script (#8367)
+Subject: [PATCH] rpm: add missing '-p <lua>' in trigger script (#8367)
 
 Follow-up for 32a00a9c097cf04ec2b0fcbf9b73eba188318424 (#8090).
 

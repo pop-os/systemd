@@ -1,7 +1,7 @@
 From 7a1d67470a47a3bf8c11ef80804e3a3fc2176cda Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 8 Mar 2018 11:00:26 +0100
-Subject: [PATCH 033/131] systemctl: if kexec is missing, do not try to kexec
+Subject: [PATCH] systemctl: if kexec is missing, do not try to kexec
 
 (cherry picked from commit c0d73214986ca006949b86b74c583878a562be53)
 ---

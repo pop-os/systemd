@@ -1,8 +1,8 @@
 From ebc02cc11366b726f8376561ec5cb061d2ad1f0f Mon Sep 17 00:00:00 2001
 From: Paul Menzel <pmenzel@molgen.mpg.de>
 Date: Mon, 23 Apr 2018 11:03:16 +0200
-Subject: [PATCH 091/131] man/os-release: Document that blank lines are
- permitted (#8777)
+Subject: [PATCH] man/os-release: Document that blank lines are permitted
+ (#8777)
 
 Fixes: https://github.com/systemd/systemd/issues/8773
 (cherry picked from commit 33ce73f66c9e35b16624db17079cb76e25b2c846)

@@ -1,7 +1,7 @@
 From b8bc04b02aad77ad0ee25679b7c8cb969b215c75 Mon Sep 17 00:00:00 2001
 From: Antique <phrdina@redhat.com>
 Date: Thu, 26 Apr 2018 12:37:35 +0200
-Subject: [PATCH 102/131] cgroup-util: fix enabling of controllers (#8816)
+Subject: [PATCH] cgroup-util: fix enabling of controllers (#8816)
 
 If enabling controller for some reason fails we need to clear error
 for the FILE stream.  Enabling remaining controllers would otherwise

@@ -1,7 +1,7 @@
 From bbbbe12745aac335b65d18f4b6d473af11b714b1 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Sat, 5 May 2018 00:49:57 +0900
-Subject: [PATCH 120/131] meson: also try to search gnu-efi based on
+Subject: [PATCH] meson: also try to search gnu-efi based on
  EFI_MACHINE_TYPE_NAME (#8900)
 
 On Fedora rawhide, since gnu-efi-3.0.8-3.fc29, many file paths are

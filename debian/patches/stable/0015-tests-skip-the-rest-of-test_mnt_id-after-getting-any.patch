@@ -1,8 +1,7 @@
 From c87b8c5dd21c97d6a8786c76c1073f6b91948814 Mon Sep 17 00:00:00 2001
 From: Evegeny Vereshchagin <evvers@ya.ru>
 Date: Fri, 9 Mar 2018 00:44:57 +0000
-Subject: [PATCH 015/131] tests: skip the rest of test_mnt_id after getting any
- error
+Subject: [PATCH] tests: skip the rest of test_mnt_id after getting any error
 
 This mainly gets around a kernel bug making it possible to
 have non-existent paths in /proc/self/mountinfo, but it should also

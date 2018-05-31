@@ -1,7 +1,7 @@
 From 767bbbc6169639eab9881762b82f641d4fe66f83 Mon Sep 17 00:00:00 2001
 From: Peter Hutterer <peter.hutterer@who-t.net>
 Date: Fri, 9 Mar 2018 19:54:28 +1000
-Subject: [PATCH 011/131] hwdb: add axis overrides for HP Pavilion 15 (#8404)
+Subject: [PATCH] hwdb: add axis overrides for HP Pavilion 15 (#8404)
 
 https://bugzilla.redhat.com/show_bug.cgi?id=1551188
 (cherry picked from commit fc6f94500ea525361b5357b4b09940e97c9f022a)

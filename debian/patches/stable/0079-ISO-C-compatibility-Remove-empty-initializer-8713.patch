@@ -1,8 +1,7 @@
 From 4253a195e847caf0c5930abd69bdf066edc913ea Mon Sep 17 00:00:00 2001
 From: Leonard <leonard.r.koenig@googlemail.com>
 Date: Thu, 12 Apr 2018 21:31:19 +0200
-Subject: [PATCH 079/131] ISO-C compatibility:  Remove empty initializer
- (#8713)
+Subject: [PATCH] ISO-C compatibility:  Remove empty initializer (#8713)
 
 ISO-C doesn't allow empty initializers, so replace it by explicitly
 initializing to zero.

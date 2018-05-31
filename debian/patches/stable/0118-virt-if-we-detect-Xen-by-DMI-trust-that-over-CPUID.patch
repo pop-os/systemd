@@ -1,7 +1,7 @@
 From 84b11c72f8ddea97204246c982c3d684ea28145c Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 30 Apr 2018 12:23:03 +0200
-Subject: [PATCH 118/131] virt: if we detect Xen by DMI, trust that over CPUID
+Subject: [PATCH] virt: if we detect Xen by DMI, trust that over CPUID
 
 Apparently Xen sometimes lies about its identity when queried via CPUID.
 Let's hence prefer DMI tests for CPUID

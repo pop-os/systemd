@@ -1,8 +1,7 @@
 From 0c093fadb5fa90f55f3a7b8ee86a594327a100c3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 7 Mar 2018 22:41:25 +0100
-Subject: [PATCH 005/131] test-cgroup-util: bail out when running under mock
- (#8365)
+Subject: [PATCH] test-cgroup-util: bail out when running under mock (#8365)
 
 The builds were failing in Fedora koji, where something strange is mounted
 on /sys/fs/cgroup.

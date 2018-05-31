@@ -1,7 +1,7 @@
 From 7d287d826c9755381df33b219bc46c930379e9b6 Mon Sep 17 00:00:00 2001
 From: Mikhail Kasimov <mikhail.kasimov@gmail.com>
 Date: Fri, 11 May 2018 02:17:27 +0300
-Subject: [PATCH 128/131] man: systemd-journal-upload: rsa 2048
+Subject: [PATCH] man: systemd-journal-upload: rsa 2048
 
 rsa:2048 is currently in use as minimal recommended key length on cert/key generating. Specifying rsa:1024 is not recommended for security reasons.
 (cherry picked from commit 562b65ca38cfe79bce1d33bec363fe72f903a8b6)

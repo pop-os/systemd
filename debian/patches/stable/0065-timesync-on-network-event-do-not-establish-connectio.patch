@@ -1,8 +1,8 @@
 From 18334f048bd679ee82fd1e614b1adc5dcc81adb5 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Thu, 29 Mar 2018 23:15:56 +0900
-Subject: [PATCH 065/131] timesync: on network event do not establish
- connection when NTP servers are not changed (#8611)
+Subject: [PATCH] timesync: on network event do not establish connection when
+ NTP servers are not changed (#8611)
 
 Fixes #8603.
 

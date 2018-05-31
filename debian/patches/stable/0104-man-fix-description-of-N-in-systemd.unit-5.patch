@@ -1,7 +1,7 @@
 From 24713f6a47cb241e3d29b61b548819999b2c3ead Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Mon, 23 Apr 2018 17:26:03 +0200
-Subject: [PATCH 104/131] man: fix description of %N in systemd.unit(5)
+Subject: [PATCH] man: fix description of %N in systemd.unit(5)
 
 The description in the man page disagreed with the code. Let the code win,
 since if anybody is using this, they are more likely to depend on actual

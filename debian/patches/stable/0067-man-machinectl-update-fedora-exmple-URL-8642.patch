@@ -1,7 +1,7 @@
 From 7552b8d49901b1f55e159e5b232cdec10abcf65d Mon Sep 17 00:00:00 2001
 From: Radostin Stoyanov <rst0git@users.noreply.github.com>
 Date: Tue, 3 Apr 2018 04:06:53 +0100
-Subject: [PATCH 067/131] man: machinectl: update fedora exmple URL (#8642)
+Subject: [PATCH] man: machinectl: update fedora exmple URL (#8642)
 
 (cherry picked from commit fcc7ce4c8e68b0eaef2db1649d1b40ad54f8dc9c)
 ---

@@ -1,7 +1,7 @@
 From e6a038ec9dde8accc2ced04d38127bda53b64d97 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Mon, 26 Mar 2018 10:40:45 +0200
-Subject: [PATCH 060/131] README: mention systemd-stable
+Subject: [PATCH] README: mention systemd-stable
 
 Fixes #8564.
 

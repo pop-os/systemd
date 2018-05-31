@@ -1,8 +1,7 @@
 From d4802de173a856bd0ba1c452bb35df1e537b7726 Mon Sep 17 00:00:00 2001
 From: Evegeny Vereshchagin <evvers@ya.ru>
 Date: Fri, 9 Mar 2018 01:10:42 +0000
-Subject: [PATCH 016/131] tests: make / private after creating a mount
- namespace
+Subject: [PATCH] tests: make / private after creating a mount namespace
 
 so that the test never affects the root namespace.
 

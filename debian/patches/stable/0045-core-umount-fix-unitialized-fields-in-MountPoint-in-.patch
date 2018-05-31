@@ -1,7 +1,7 @@
 From ff47896b4866c3b8a90012e113e1cf0a13bdcddd Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 14 Mar 2018 12:37:19 +0100
-Subject: [PATCH 045/131] core/umount: fix unitialized fields in MountPoint in
+Subject: [PATCH] core/umount: fix unitialized fields in MountPoint in
  dm_list_get()
 
 This one might actually might cause a crash.

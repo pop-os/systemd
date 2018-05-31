@@ -1,8 +1,7 @@
 From f398c546c6fc43121131f41acec56b5a851bd35e Mon Sep 17 00:00:00 2001
 From: Martin Wilck <mwilck@suse.com>
 Date: Sat, 7 Apr 2018 17:33:48 +0200
-Subject: [PATCH 076/131] systemd-udevd: limit children-max by available memory
- (#8668)
+Subject: [PATCH] systemd-udevd: limit children-max by available memory (#8668)
 
 Udev workers consume typically 50-100MiB virtual memory.
 On systems with lots of CPUs and relatively low memory, that may

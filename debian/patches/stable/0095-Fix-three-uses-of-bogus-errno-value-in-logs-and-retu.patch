@@ -1,8 +1,8 @@
 From bfb950ce40cf42e27bb9450ce383609472ea2223 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 24 Apr 2018 13:45:44 +0200
-Subject: [PATCH 095/131] Fix three uses of bogus errno value in logs (and
- returned value in one case)
+Subject: [PATCH] Fix three uses of bogus errno value in logs (and returned
+ value in one case)
 
 (cherry picked from commit 4355f1c9da0843708426f5c2c8b85179b934a5c7)
 ---

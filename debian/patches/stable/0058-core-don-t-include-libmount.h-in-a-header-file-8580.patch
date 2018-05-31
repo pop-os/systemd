@@ -1,8 +1,7 @@
 From cca96c039e14dc01fba5964ab11d2e53e0a7a197 Mon Sep 17 00:00:00 2001
 From: Michael Olbrich <m.olbrich@pengutronix.de>
 Date: Mon, 26 Mar 2018 17:34:53 +0200
-Subject: [PATCH 058/131] core: don't include libmount.h in a header file
- (#8580)
+Subject: [PATCH] core: don't include libmount.h in a header file (#8580)
 
 linux/fs.h sys/mount.h, libmount.h and missing.h all include MS_*
 definitions.

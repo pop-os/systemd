@@ -1,8 +1,7 @@
 From 720e28ba76f4ce6adc44f787a68d30f1f37dc2d9 Mon Sep 17 00:00:00 2001
 From: Adam Duskett <Aduskett@gmail.com>
 Date: Wed, 2 May 2018 04:04:50 -0400
-Subject: [PATCH 109/131] add __nr_statx defines for extra architectures
- (#8872)
+Subject: [PATCH] add __nr_statx defines for extra architectures (#8872)
 
 This includes:
  - arm

@@ -1,8 +1,8 @@
 From f9e4beb2690f7b6848cf1f3c146190a28782a66a Mon Sep 17 00:00:00 2001
 From: Jui-Chi Ricky Liang <juichi.liang@gmail.com>
 Date: Tue, 20 Mar 2018 16:54:18 +0800
-Subject: [PATCH 046/131] v4l_id: check mplane video capture and output
- capailities (#8464)
+Subject: [PATCH] v4l_id: check mplane video capture and output capailities
+ (#8464)
 
 Video devices using mplane buffer API declare capture and output
 capabilities with V4L2_CAP_VIDEO_CAPTURE_MPLANE and

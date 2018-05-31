@@ -1,8 +1,7 @@
 From d555d4cf8e1cf1d065e49e6eba88e7f8c780449e Mon Sep 17 00:00:00 2001
 From: Peter Hutterer <peter.hutterer@who-t.net>
 Date: Wed, 14 Mar 2018 06:36:29 +1000
-Subject: [PATCH 019/131] hwdb: add axis override for the Razer Blade Stealth
- (#8436)
+Subject: [PATCH] hwdb: add axis override for the Razer Blade Stealth (#8436)
 
 This touchpad has heavy jitter, set a fuzz of 8 to work around this.
 

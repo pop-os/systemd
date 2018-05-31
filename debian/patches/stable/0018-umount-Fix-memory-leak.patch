@@ -1,7 +1,7 @@
 From 38f9d78afd2b6632ce1733791532345b0d404324 Mon Sep 17 00:00:00 2001
 From: Jan Janssen <medhefgo@web.de>
 Date: Thu, 8 Mar 2018 16:44:17 +0100
-Subject: [PATCH 018/131] umount: Fix memory leak
+Subject: [PATCH] umount: Fix memory leak
 
 (cherry picked from commit 659b15313b9ca8c7f3f6e523e0d3fd696243ff8b)
 ---

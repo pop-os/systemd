@@ -1,8 +1,7 @@
 From 59e913549aa4a340f809cadf0bb35809156d76e8 Mon Sep 17 00:00:00 2001
 From: Franck Bui <fbui@suse.com>
 Date: Tue, 20 Mar 2018 11:38:00 +0100
-Subject: [PATCH 048/131] sysusers: make sure to reset errno before calling
- fget*ent()
+Subject: [PATCH] sysusers: make sure to reset errno before calling fget*ent()
 
 Due to the glibc interface we have to test errno in various places to detect if
 an error occured after calling fget*ent() helpers.

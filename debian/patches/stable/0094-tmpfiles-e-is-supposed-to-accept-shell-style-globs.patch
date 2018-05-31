@@ -1,7 +1,7 @@
 From b105896ab50c3ab3363ada624e3ac791e00a7ee0 Mon Sep 17 00:00:00 2001
 From: Franck Bui <fbui@suse.com>
 Date: Tue, 24 Apr 2018 12:24:38 +0200
-Subject: [PATCH 094/131] tmpfiles: 'e' is supposed to accept shell-style globs
+Subject: [PATCH] tmpfiles: 'e' is supposed to accept shell-style globs
 
 (cherry picked from commit 939ca2136363f50b5acdb9ca102b9c27389859f1)
 ---

@@ -1,7 +1,7 @@
 From c79751911c585e415926364e19c18877f53942df Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Fri, 30 Mar 2018 17:13:52 +0900
-Subject: [PATCH 072/131] bash-completion: busctl: make variables local
+Subject: [PATCH] bash-completion: busctl: make variables local
 
 (cherry picked from commit 7f9c3ecad840fe8584ad4d350eefb67fe43869e7)
 ---

@@ -1,8 +1,8 @@
 From 27490aae697879bdcf45570b3be9c39f5eb72961 Mon Sep 17 00:00:00 2001
 From: Evgeny Vereshchagin <evvers@ya.ru>
 Date: Tue, 3 Apr 2018 16:04:22 +0300
-Subject: [PATCH 068/131] core: skip the removal of cgroups in the
- TEST_RUN_MINIMAL mode (#8622)
+Subject: [PATCH] core: skip the removal of cgroups in the TEST_RUN_MINIMAL
+ mode (#8622)
 
 When `systemd` is run in the TEST_RUN_MINIMAL mode, it doesn't really
 set up cgroups, so it shouldn't try to remove anything.

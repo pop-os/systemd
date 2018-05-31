@@ -1,7 +1,7 @@
 From 78d08b80c07c8a144ca1f18d0c5df9a22952926b Mon Sep 17 00:00:00 2001
 From: Susant Sahani <145210+ssahani@users.noreply.github.com>
 Date: Thu, 3 May 2018 20:50:56 +0530
-Subject: [PATCH 119/131] ethtool: get_glinksettings Fix copy (#8889)
+Subject: [PATCH] ethtool: get_glinksettings Fix copy (#8889)
 
 It should be other way around.
 

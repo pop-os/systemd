@@ -1,8 +1,8 @@
 From bf3eefb69901df47736191aefd55f49e3d652fe7 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 21 Mar 2018 16:07:20 +0100
-Subject: [PATCH 057/131] man: add a note that nspawn gives access to network
- by default
+Subject: [PATCH] man: add a note that nspawn gives access to network by
+ default
 
 Fixes #6546.
 

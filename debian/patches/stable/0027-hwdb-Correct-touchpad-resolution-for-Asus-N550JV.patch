@@ -1,7 +1,7 @@
 From 493ea04a9ac5fb8fd8c986e35937c0cd287f6072 Mon Sep 17 00:00:00 2001
 From: Elia Geretto <elia.f.geretto@gmail.com>
 Date: Mon, 19 Mar 2018 08:02:40 +0100
-Subject: [PATCH 027/131] hwdb: Correct touchpad resolution for Asus N550JV
+Subject: [PATCH] hwdb: Correct touchpad resolution for Asus N550JV
 
 (cherry picked from commit 26d0c809a504b6aa4781fbb158623e19862d156f)
 ---

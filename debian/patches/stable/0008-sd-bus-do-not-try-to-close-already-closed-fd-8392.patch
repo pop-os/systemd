@@ -1,7 +1,7 @@
 From 42ae2624942412fff6bc84bfa9d50bb0033e5b9c Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Thu, 8 Mar 2018 22:19:35 +0900
-Subject: [PATCH 008/131] sd-bus: do not try to close already closed fd (#8392)
+Subject: [PATCH] sd-bus: do not try to close already closed fd (#8392)
 
 Fixes #8376, which is introduced by 2b33ab0957f453a06b58e4bee482f2c2d4e100c1.
 

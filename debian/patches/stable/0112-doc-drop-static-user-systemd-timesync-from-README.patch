@@ -1,7 +1,7 @@
 From 6f448047ed9da175292ece50a7aa16e28ed1abc7 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Tue, 1 May 2018 15:16:39 +0900
-Subject: [PATCH 112/131] doc: drop static user systemd-timesync from README
+Subject: [PATCH] doc: drop static user systemd-timesync from README
 
 (cherry picked from commit 2a46c4b739e1f39124b5e7f3f0c806b3452bad53)
 ---

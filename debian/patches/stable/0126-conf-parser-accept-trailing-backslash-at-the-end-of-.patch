@@ -1,8 +1,8 @@
 From 946afe56a8a9cf220f9aeed5a4d2a482b566b78f Mon Sep 17 00:00:00 2001
 From: Filipe Brandenburger <filbranden@google.com>
 Date: Wed, 9 May 2018 18:10:07 -0700
-Subject: [PATCH 126/131] conf-parser: accept trailing backslash at the end of
- the file (#8941)
+Subject: [PATCH] conf-parser: accept trailing backslash at the end of the file
+ (#8941)
 
 This makes it behave the same whether there is a blank line or not at
 the end of the file.  This is also consistent with the behavior of the

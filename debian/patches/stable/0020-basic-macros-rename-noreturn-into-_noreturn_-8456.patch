@@ -1,7 +1,7 @@
 From 49a5d09a402d23815275282a89526869fc1c39f5 Mon Sep 17 00:00:00 2001
 From: Franck Bui <fbui@suse.com>
 Date: Thu, 15 Mar 2018 06:23:46 +0100
-Subject: [PATCH 020/131] basic/macros: rename noreturn into _noreturn_ (#8456)
+Subject: [PATCH] basic/macros: rename noreturn into _noreturn_ (#8456)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

@@ -1,7 +1,7 @@
 From 8b734a0dea7d48b27ea7f21ac2bef4c336fe303d Mon Sep 17 00:00:00 2001
 From: Peter Hutterer <peter.hutterer@who-t.net>
 Date: Thu, 8 Mar 2018 17:41:33 +1000
-Subject: [PATCH 006/131] hwdb: add Dell Inspiron 3537 axis overrides (#8388)
+Subject: [PATCH] hwdb: add Dell Inspiron 3537 axis overrides (#8388)
 
 PS/2 and RMI4 entries
 

@@ -1,8 +1,8 @@
 From 4d26a94a8942c721af6fe9863e6fcbb770e8c75d Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 7 May 2018 14:49:16 +0200
-Subject: [PATCH 121/131] doc: clarify at which point user/group name
- resolution needs to work (#8884)
+Subject: [PATCH] doc: clarify at which point user/group name resolution needs
+ to work (#8884)
 
 Prompted by the discussions on:
 

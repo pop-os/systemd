@@ -1,8 +1,8 @@
 From c9bbf11a8ca24738fa56b90bc4c2db1468910f33 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Fri, 20 Apr 2018 18:10:04 +0200
-Subject: [PATCH 088/131] doc: add a bit more documentation about systemd and
- cgroups and cgroupsv2 and delegation
+Subject: [PATCH] doc: add a bit more documentation about systemd and cgroups
+ and cgroupsv2 and delegation
 
 Ultimately we should replace the relevant wiki texts with documentation
 maintained as part of our project tree. This is a start. It can't

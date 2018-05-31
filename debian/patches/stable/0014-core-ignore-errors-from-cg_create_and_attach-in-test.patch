@@ -1,8 +1,8 @@
 From dab644722e9af19273da3d3086c365f0df6115f1 Mon Sep 17 00:00:00 2001
 From: Michal Sekletar <msekletar@users.noreply.github.com>
 Date: Fri, 9 Mar 2018 23:30:32 +0100
-Subject: [PATCH 014/131] core: ignore errors from cg_create_and_attach() in
- test mode (#8401)
+Subject: [PATCH] core: ignore errors from cg_create_and_attach() in test mode
+ (#8401)
 
 Reproducer:
 

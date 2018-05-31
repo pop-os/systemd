@@ -1,8 +1,7 @@
 From 228bf05dc9fe2efb0b65a2ca81b800f6309d6672 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Fri, 9 Mar 2018 08:56:23 +0100
-Subject: [PATCH 030/131] meson: add note about coreutils version with ln
- --relative
+Subject: [PATCH] meson: add note about coreutils version with ln --relative
 
 https://bugs.freedesktop.org/show_bug.cgi?id=90799
 (cherry picked from commit cd001016a166bb849c454e7b5cdb58053f34935b)

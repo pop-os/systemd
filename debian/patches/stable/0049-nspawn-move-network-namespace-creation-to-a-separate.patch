@@ -1,8 +1,8 @@
 From 649030e8cb00b2a9f1767cb8f77f7edb522b1dfb Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 20 Mar 2018 18:07:17 +0100
-Subject: [PATCH 049/131] nspawn: move network namespace creation to a separate
- step (#8430)
+Subject: [PATCH] nspawn: move network namespace creation to a separate step
+ (#8430)
 
 Fixes #8427.
 

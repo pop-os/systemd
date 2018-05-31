@@ -1,8 +1,8 @@
 From 7171b895bc1f339cf77627b19c9cf0785f823640 Mon Sep 17 00:00:00 2001
 From: Filipe Brandenburger <filbranden@google.com>
 Date: Thu, 15 Mar 2018 10:42:38 -0700
-Subject: [PATCH 021/131] udev/net-id: Fix check for address to keep interface
- names stable (#8458)
+Subject: [PATCH] udev/net-id: Fix check for address to keep interface names
+ stable (#8458)
 
 This was a bug inadvertently added by commit 73fc96c8ac0aa9.
 

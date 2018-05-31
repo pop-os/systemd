@@ -1,8 +1,7 @@
 From 1ea48092d3fbb3d3a02226898a5837ccc4d917fd Mon Sep 17 00:00:00 2001
 From: Franck Bui <fbui@suse.com>
 Date: Tue, 20 Mar 2018 09:32:05 +0100
-Subject: [PATCH 047/131] sysusers: also add support for NIS entries in
- /etc/shadow
+Subject: [PATCH] sysusers: also add support for NIS entries in /etc/shadow
 
 Commit 563dc6f8e2cda4114dd20f32655890ed378c3740 added support for
 /etc/{passwd,group} only but since nsswitch.conf(5) appears to document the NIS

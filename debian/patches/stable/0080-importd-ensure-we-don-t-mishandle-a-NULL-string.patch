@@ -1,7 +1,7 @@
 From 0f1865eee2f7d7d7c1c552ba8dae64fdd61ee4df Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Fri, 6 Apr 2018 18:57:36 +0200
-Subject: [PATCH 080/131] importd: ensure we don't mishandle a NULL string
+Subject: [PATCH] importd: ensure we don't mishandle a NULL string
 
 (cherry picked from commit fe4377faa58cecb6abdac3549443cd74728559d2)
 ---

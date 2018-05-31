@@ -1,8 +1,7 @@
 From fee9c90aaf455ed2cb8383c469bfd0c8c9e5a9fb Mon Sep 17 00:00:00 2001
 From: Franck Bui <fbui@suse.com>
 Date: Tue, 24 Apr 2018 12:23:29 +0200
-Subject: [PATCH 093/131] tmpfiles: 'e' is supposed to operate on directory
- only
+Subject: [PATCH] tmpfiles: 'e' is supposed to operate on directory only
 
 (cherry picked from commit d460ba18e777128c19343b067574ecac399f3afc)
 ---

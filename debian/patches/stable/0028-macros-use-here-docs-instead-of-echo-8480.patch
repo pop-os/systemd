@@ -1,7 +1,7 @@
 From b3e9aedfd1fa426cc5ee8fbab4a4861ad1e8ad41 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Mon, 19 Mar 2018 09:07:44 +0100
-Subject: [PATCH 028/131] macros: use here-docs instead of echo (#8480)
+Subject: [PATCH] macros: use here-docs instead of echo (#8480)
 
 It's common for sysusers files to contain quotes (in particular around the
 comment/GECOS field), and using echo "..." is very likely to not work properly

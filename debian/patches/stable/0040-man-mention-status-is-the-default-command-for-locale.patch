@@ -1,8 +1,7 @@
 From 0f61b3b0ded362b81f79b541545c46e49133f4bb Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Wed, 14 Mar 2018 14:52:45 +0900
-Subject: [PATCH 040/131] man: mention 'status' is the default command for
- localectl
+Subject: [PATCH] man: mention 'status' is the default command for localectl
 
 (cherry picked from commit d4e0773b4da6146f64947360ae6f8c971d459372)
 ---

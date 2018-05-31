@@ -1,7 +1,7 @@
 From 863b1d54c0c4cae66e5448cdab3a96041a84d106 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Wed, 2 May 2018 16:54:32 +0200
-Subject: [PATCH 116/131] man: document the XDG specs as further sources of
+Subject: [PATCH] man: document the XDG specs as further sources of
  specifications for file-hierarchy(7)
 
 We document this further down in the text, but let's also list this

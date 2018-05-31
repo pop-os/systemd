@@ -1,8 +1,7 @@
 From fc50fa43e7bc93bef84dd6ac9adf7389ce370531 Mon Sep 17 00:00:00 2001
 From: futpib <futpib@gmail.com>
 Date: Fri, 16 Mar 2018 17:25:14 +0300
-Subject: [PATCH 022/131] hwdb: fix comment suggested `udevadm trigger` command
- (#8465)
+Subject: [PATCH] hwdb: fix comment suggested `udevadm trigger` command (#8465)
 
 (cherry picked from commit d24e70fe8b6bebd9abe4c1578d22cb5536044cc2)
 ---

@@ -1,8 +1,7 @@
 From 8e27c889ae7b3bed634b4c67f4d43b94806799e3 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Fri, 30 Mar 2018 17:08:11 +0900
-Subject: [PATCH 071/131] bash-completion: busctl: do not suggest "-" for
- signature
+Subject: [PATCH] bash-completion: busctl: do not suggest "-" for signature
 
 Fixes #8371.
 

@@ -1,6 +1,7 @@
+From f58e62cbbc1c2842881a2a6ab9beda7bcb044a30 Mon Sep 17 00:00:00 2001
 From: Mike Gilbert <floppym@gentoo.org>
 Date: Fri, 30 Mar 2018 11:04:57 -0400
-Subject: systemctl: try opening /run/initctl before /dev/initctl
+Subject: [PATCH] systemctl: try opening /run/initctl before /dev/initctl
 
 This ensures compatability with old/new sysvinit.
 
@@ -11,10 +12,10 @@ http://git.savannah.nongnu.org/cgit/sysvinit.git/commit/?id=80dbcf3de3c1b83aeaa7
  1 file changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index 1e975a5..5ca97b6 100644
+index 4b34615f2c..3666be61ec 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
-@@ -8353,6 +8353,7 @@ static int talk_initctl(void) {
+@@ -8376,6 +8376,7 @@ static int talk_initctl(void) {
          _cleanup_close_ int fd = -1;
          char rl;
          int r;
@@ -22,7 +23,7 @@ index 1e975a5..5ca97b6 100644
  
          rl = action_to_runlevel();
          if (!rl)
-@@ -8360,17 +8361,21 @@ static int talk_initctl(void) {
+@@ -8383,17 +8384,21 @@ static int talk_initctl(void) {
  
          request.runlevel = rl;
  
@@ -47,3 +48,6 @@ index 1e975a5..5ca97b6 100644
  
          return 1;
  #else
+-- 
+2.17.0
+

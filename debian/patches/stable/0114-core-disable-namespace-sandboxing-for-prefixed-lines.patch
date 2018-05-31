@@ -1,8 +1,7 @@
 From 320feaf6c3d4a015427defb1dd4c3ea709d797b9 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Tue, 1 May 2018 13:33:34 +0900
-Subject: [PATCH 114/131] core: disable namespace sandboxing for '+' prefixed
- lines
+Subject: [PATCH] core: disable namespace sandboxing for '+' prefixed lines
 
 Fixes #8842.
 

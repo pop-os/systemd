@@ -1,7 +1,7 @@
 From d0734f14ddba2d2d514c85635c5dcdeb698ca241 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 26 Apr 2018 20:31:11 +0200
-Subject: [PATCH 103/131] hwdb: add "special" keys on Dell XPS L702x (#8828)
+Subject: [PATCH] hwdb: add "special" keys on Dell XPS L702x (#8828)
 
 Based on information provided by phenest in
 https://github.com/systemd/systemd/issues/5341.

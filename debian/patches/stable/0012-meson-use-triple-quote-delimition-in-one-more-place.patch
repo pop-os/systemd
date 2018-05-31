@@ -1,7 +1,7 @@
 From e439584ff90e8e1f47d2fc6f46e78ed8c8027feb Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Fri, 9 Mar 2018 14:15:39 +0100
-Subject: [PATCH 012/131] meson: use triple-quote delimition in one more place
+Subject: [PATCH] meson: use triple-quote delimition in one more place
 
 (cherry picked from commit f83f8c70bd518e2b7a0011d82a2fb7074fb3a19a)
 ---

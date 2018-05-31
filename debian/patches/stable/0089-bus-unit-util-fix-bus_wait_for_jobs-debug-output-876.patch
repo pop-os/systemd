@@ -1,8 +1,7 @@
 From f6d97238e9e6f74fb8325f2ed4b1a6d7c01b3351 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 23 Apr 2018 02:24:43 +0200
-Subject: [PATCH 089/131] bus-unit-util: fix bus_wait_for_jobs() debug output
- (#8760)
+Subject: [PATCH] bus-unit-util: fix bus_wait_for_jobs() debug output (#8760)
 
 We shouldn't print 'errno' if its not initialized properly.
 

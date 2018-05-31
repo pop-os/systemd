@@ -1,7 +1,7 @@
 From 1394c16f3617697e059bd1405bb358611554e317 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 6 Mar 2018 09:37:11 +0100
-Subject: [PATCH 010/131] basic/cgroup-util: remove unused variable
+Subject: [PATCH] basic/cgroup-util: remove unused variable
 
 (cherry picked from commit eef03d70c1bedb3aabd4e2bcf10ab1f2678443bf)
 ---

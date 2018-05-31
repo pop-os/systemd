@@ -1,8 +1,8 @@
 From c1923ce8264e65a16ab8adb8b7f3666342c76011 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Tue, 24 Apr 2018 11:51:21 +0200
-Subject: [PATCH 107/131] man: don't claim we'd set XDG_SEAT and XDG_VTNR as
- part of service management
+Subject: [PATCH] man: don't claim we'd set XDG_SEAT and XDG_VTNR as part of
+ service management
 
 Previously, reading through systemd.exec(5) one might get the idea that
 XDG_SEAT and XDG_VTNR are part of the service management logic, but they

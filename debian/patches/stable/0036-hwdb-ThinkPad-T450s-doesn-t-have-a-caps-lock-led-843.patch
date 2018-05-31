@@ -1,8 +1,7 @@
 From f02abd834904351307ebded912067b3df9442b35 Mon Sep 17 00:00:00 2001
 From: Paride Legovini <pl@ninthfloor.org>
 Date: Mon, 19 Mar 2018 15:56:11 +0100
-Subject: [PATCH 036/131] hwdb: ThinkPad T450s doesn't have a caps lock led
- (#8433)
+Subject: [PATCH] hwdb: ThinkPad T450s doesn't have a caps lock led (#8433)
 
 (cherry picked from commit 16bed3afa1b916ace5e927392a1baab9dd9ff963)
 ---

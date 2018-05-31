@@ -1,8 +1,8 @@
 From cfb9578f22309ab412a020085baffae4882ceba0 Mon Sep 17 00:00:00 2001
 From: Anssi Hannula <anssi.hannula@iki.fi>
 Date: Tue, 17 Apr 2018 18:12:00 +0300
-Subject: [PATCH 085/131] networkd: fix dhcp4 link without routes not being
- considered ready (#8728)
+Subject: [PATCH] networkd: fix dhcp4 link without routes not being considered
+ ready (#8728)
 
 The dhcp4 code sets link->dhcp4_configured when dhcp4_route_handler()
 has processed the last message.

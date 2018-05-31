@@ -1,7 +1,7 @@
 From abd8876a3448f2f7bca4404ccae43f281c426f1e Mon Sep 17 00:00:00 2001
 From: Chris Lesiak <chris.lesiak@licor.com>
 Date: Tue, 24 Apr 2018 09:50:42 -0500
-Subject: [PATCH 099/131] fileio.c: fix incorrect mtime
+Subject: [PATCH] fileio.c: fix incorrect mtime
 
 A regression was introduced that caused the mtime of /etc/.updated
 and /var/.updated to be the current time when systemd-update-done

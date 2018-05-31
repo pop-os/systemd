@@ -1,7 +1,7 @@
 From 6079d9da0cd351e49e774fe9bf1609caec6b4067 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Mon, 12 Mar 2018 17:45:42 +0900
-Subject: [PATCH 037/131] busctl: add missing oom check
+Subject: [PATCH] busctl: add missing oom check
 
 (cherry picked from commit cb05d2a5149517ed524f859aa219e27c601d74ad)
 ---

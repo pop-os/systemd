@@ -1,8 +1,7 @@
 From 7b0948598224ebb1056eba7f25afdb104337a73d Mon Sep 17 00:00:00 2001
 From: Susant Sahani <145210+ssahani@users.noreply.github.com>
 Date: Tue, 17 Apr 2018 20:25:04 +0530
-Subject: [PATCH 084/131] networkd: fix crash if fails to get network file
- (#8714)
+Subject: [PATCH] networkd: fix crash if fails to get network file (#8714)
 
 In some situation if networkd fails to get the network file
 then networkd crashes becasse the link->network is not initalized;

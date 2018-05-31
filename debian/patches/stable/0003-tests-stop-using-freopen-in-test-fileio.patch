@@ -1,7 +1,7 @@
 From d2adc475bcc17985b05bd219a74d5d5a0bd624a1 Mon Sep 17 00:00:00 2001
 From: Evegeny Vereshchagin <evvers@ya.ru>
 Date: Mon, 5 Mar 2018 21:23:33 +0000
-Subject: [PATCH 003/131] tests: stop using `freopen` in `test-fileio`
+Subject: [PATCH] tests: stop using `freopen` in `test-fileio`
 
 This helps get around a bug confusing `glibc` and making the test bail
 out with the following error under `asan` on `x86`:

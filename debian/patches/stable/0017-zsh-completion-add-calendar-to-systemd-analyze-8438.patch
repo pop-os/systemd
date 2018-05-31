@@ -1,8 +1,7 @@
 From cb8a6583ba317db49057c1c710dd19e415f3eb5f Mon Sep 17 00:00:00 2001
 From: Doug Christman <douglaschristman@gmail.com>
 Date: Tue, 13 Mar 2018 16:41:07 +0800
-Subject: [PATCH 017/131] zsh-completion: add calendar to systemd-analyze
- (#8438)
+Subject: [PATCH] zsh-completion: add calendar to systemd-analyze (#8438)
 
 (cherry picked from commit ce21568dc34494f125bb70f6c51f80a5232b9020)
 ---

@@ -1,7 +1,7 @@
 From 29caf9b1160106c998dd0dab2f6a32d1fc632acd Mon Sep 17 00:00:00 2001
 From: Tomasz Torcz <tomek@pipebreaker.pl>
 Date: Tue, 6 Mar 2018 09:35:47 +0100
-Subject: [PATCH 002/131] NEWS: fix typos in v238 section (#8369)
+Subject: [PATCH] NEWS: fix typos in v238 section (#8369)
 
 (cherry picked from commit 07a35e846b7986d3c02eca99fa291f6869035c58)
 ---

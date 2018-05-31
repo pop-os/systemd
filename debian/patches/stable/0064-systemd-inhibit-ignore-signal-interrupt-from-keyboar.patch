@@ -1,8 +1,8 @@
 From 9dc914916daacd120bbf52e4989764b3e0cbb1a6 Mon Sep 17 00:00:00 2001
 From: Christian Hesse <mail@eworm.de>
 Date: Wed, 28 Mar 2018 21:58:10 +0200
-Subject: [PATCH 064/131] systemd-inhibit: ignore signal interrupt from
- keyboard (#8569)
+Subject: [PATCH] systemd-inhibit: ignore signal interrupt from keyboard
+ (#8569)
 
 By default both processes, systemd-inhibit and the forked one, receive
 the signals. Pressing Ctrl+C on the keyboard results in SIGINT being

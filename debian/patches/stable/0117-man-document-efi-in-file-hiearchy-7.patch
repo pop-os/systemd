@@ -1,7 +1,7 @@
 From d903ee2cab000704b19427629fdb262403093481 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Wed, 2 May 2018 16:55:37 +0200
-Subject: [PATCH 117/131] man: document /efi in file-hiearchy(7)
+Subject: [PATCH] man: document /efi in file-hiearchy(7)
 
 We have been supporting the directory since a while in the gpt
 generator, let's document it in file-hierarchy(7) too

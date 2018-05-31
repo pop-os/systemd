@@ -1,8 +1,8 @@
 From 6668121f9c23c8eed036b9d176e925a03a5fdebc Mon Sep 17 00:00:00 2001
 From: Hans de Goede <j.w.r.degoede@gmail.com>
 Date: Sat, 28 Apr 2018 10:43:06 +0200
-Subject: [PATCH 108/131] hwdb: Add accelerometer orientation quirk for the
- Kazam Vision tablet (#8845)
+Subject: [PATCH] hwdb: Add accelerometer orientation quirk for the Kazam
+ Vision tablet (#8845)
 
 Add accelerometer orientation quirk for the 8" Kazam Vision "gaming"
 tablet.

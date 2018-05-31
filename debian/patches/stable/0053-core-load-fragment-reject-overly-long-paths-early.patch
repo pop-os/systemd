@@ -1,7 +1,7 @@
 From 59e82d4fb689d1c654284aab12cef2c081fbcb5e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Mon, 19 Mar 2018 15:43:35 +0100
-Subject: [PATCH 053/131] core/load-fragment: reject overly long paths early
+Subject: [PATCH] core/load-fragment: reject overly long paths early
 
 No need to go through the specifier_printf() if the path is already too long in
 the unexpanded form (since specifiers increase the length of the string in all

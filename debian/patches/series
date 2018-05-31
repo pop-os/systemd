@@ -129,8 +129,8 @@ stable/0128-man-systemd-journal-upload-rsa-2048.patch
 stable/0129-network-make-route_update-accept-NULL.patch
 stable/0130-core-dont-t-remount-sys-fs-cgroup-for-relabel-if-not.patch
 stable/0131-basic-fs-util-skip-fsync_directory_of_file-if-proc-s.patch
-units-initctl-move-the-fifo-to-run-initctl-to-match-sysvi.patch
-systemctl-try-opening-run-initctl-before-dev-initctl.patch
+stable/0132-units-initctl-move-the-fifo-to-run-initctl-to-match-.patch
+stable/0133-systemctl-try-opening-run-initctl-before-dev-initctl.patch
 login-change-variable-type-of-enable_wall_messages-as-it-.patch
 resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
 debian/Use-Debian-specific-config-files.patch

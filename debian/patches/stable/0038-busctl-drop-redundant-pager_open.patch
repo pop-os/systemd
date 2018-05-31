@@ -1,7 +1,7 @@
 From f619f8a2ff409d20821a54c7faae97cfda30c6c9 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Mon, 12 Mar 2018 17:47:16 +0900
-Subject: [PATCH 038/131] busctl: drop redundant pager_open()
+Subject: [PATCH] busctl: drop redundant pager_open()
 
 (cherry picked from commit 548866015467d82c0688730807bd1b704be21c38)
 ---

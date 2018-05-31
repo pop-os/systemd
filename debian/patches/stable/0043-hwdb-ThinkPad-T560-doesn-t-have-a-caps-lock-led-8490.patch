@@ -1,8 +1,7 @@
 From 3015f90bd906fa05339ad25d6c1af4855c4f1536 Mon Sep 17 00:00:00 2001
 From: Salvo 'LtWorf' Tomaselli <ltworf@users.noreply.github.com>
 Date: Mon, 19 Mar 2018 19:19:53 +0100
-Subject: [PATCH 043/131] hwdb: ThinkPad T560 doesn't have a caps lock led
- (#8490)
+Subject: [PATCH] hwdb: ThinkPad T560 doesn't have a caps lock led (#8490)
 
 Similar to 16bed3afa1b916ace5e927392a1baab9dd9ff963, this model also doesn't have the
 LED.

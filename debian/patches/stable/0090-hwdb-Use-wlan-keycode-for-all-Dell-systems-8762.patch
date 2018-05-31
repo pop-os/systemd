@@ -1,7 +1,7 @@
 From f64ae64869332409ba9345c595b95725ceaf5414 Mon Sep 17 00:00:00 2001
 From: Kai-Heng Feng <kaihengfeng@gmail.com>
 Date: Mon, 23 Apr 2018 16:23:03 +0800
-Subject: [PATCH 090/131] hwdb: Use wlan keycode for all Dell systems (#8762)
+Subject: [PATCH] hwdb: Use wlan keycode for all Dell systems (#8762)
 
 Once the seat is acquired, gnome-settings-daemon (GSD) takes full
 control of rfkill by sending RFKILL_IOCTL_NOINPUT ioctl to disable

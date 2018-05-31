@@ -1,8 +1,7 @@
 From c388e15df60237f870df3fd49ef36a4363ee335c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 8 Mar 2018 10:19:26 +0100
-Subject: [PATCH 031/131] systemctl: raise level of log line about kernel
- loading
+Subject: [PATCH] systemctl: raise level of log line about kernel loading
 
 It's pretty important after all. Also include the actual kexecuted command in
 the log message, that's useful to debug if something goes wrong.

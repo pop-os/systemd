@@ -1,8 +1,7 @@
 From d620595dac516cce112e604a295989b18bda07fc Mon Sep 17 00:00:00 2001
 From: Daniel Lin <ephemient@gmail.com>
 Date: Thu, 8 Mar 2018 02:44:11 -0500
-Subject: [PATCH 007/131] hwdb: add accelerometer mount matrix for Eve V
- (#8382)
+Subject: [PATCH] hwdb: add accelerometer mount matrix for Eve V (#8382)
 
 (cherry picked from commit fc17f194ded93b51899aa0bbd4e66870d975fe5a)
 ---

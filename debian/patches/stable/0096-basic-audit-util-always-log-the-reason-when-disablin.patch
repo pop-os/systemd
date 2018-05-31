@@ -1,8 +1,8 @@
 From fbe55b3493876cf6ef823c90f312c4bedac3eeeb Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 24 Apr 2018 13:46:58 +0200
-Subject: [PATCH 096/131] basic/audit-util: always log the reason when
- disabling audit logs
+Subject: [PATCH] basic/audit-util: always log the reason when disabling audit
+ logs
 
 This state is cached, and it's seems OK to log at least once.
 

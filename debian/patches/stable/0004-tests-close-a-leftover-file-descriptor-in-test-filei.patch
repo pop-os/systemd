@@ -1,8 +1,7 @@
 From 5419477b418fedebb776cb3284aeff3b4c95915e Mon Sep 17 00:00:00 2001
 From: Evegeny Vereshchagin <evvers@ya.ru>
 Date: Mon, 5 Mar 2018 22:05:46 +0000
-Subject: [PATCH 004/131] tests: close a leftover file descriptor in
- `test-fileio`
+Subject: [PATCH] tests: close a leftover file descriptor in `test-fileio`
 
 This should make it a bit easier to search for real file descriptor leaks.
 

@@ -1,8 +1,8 @@
 From 92f00c07a5cf41e4f475b651d18ec47806630b4a Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Thu, 3 May 2018 16:02:43 +0200
-Subject: [PATCH 115/131] man: docbook doesn't like line breaks within table
- cells (#8885)
+Subject: [PATCH] man: docbook doesn't like line breaks within table cells
+ (#8885)
 
 It will pass them on as they are to the formatted man pages, which is
 pretty uncool. Let's hence avoid line breaks with table cells.

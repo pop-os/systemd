@@ -1,8 +1,7 @@
 From 40c53eafa849aab34744c2f240151f913a75f100 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Tue, 1 May 2018 15:15:44 +0900
-Subject: [PATCH 111/131] doc: drop static user systemd-journal-gateway from
- README
+Subject: [PATCH] doc: drop static user systemd-journal-gateway from README
 
 and add systemd-journal-remote instead.
 

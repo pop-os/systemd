@@ -1,8 +1,7 @@
 From 8c0a2e896bd5339e8926233ee5251411601bfacf Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Tue, 8 May 2018 17:53:52 +0900
-Subject: [PATCH 122/131] man: fix title of systemd-networkd-wait-online(8)
- (#8925)
+Subject: [PATCH] man: fix title of systemd-networkd-wait-online(8) (#8925)
 
 (cherry picked from commit 77e3a240b3d4610f147f49ccaf530d4c0f765134)
 ---

@@ -1,8 +1,8 @@
 From 2b1a1ebd8951a2fca8fd3154d5a319fa01bbacaa Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Fri, 16 Mar 2018 23:01:05 +0100
-Subject: [PATCH 023/131] core: when reloading, delay any actions on journal
- and dbus connections
+Subject: [PATCH] core: when reloading, delay any actions on journal and dbus
+ connections
 
 manager_recheck_journal() and manager_recheck_dbus() would be called to early
 while we were deserialiazing units, before the systemd-journald.service and

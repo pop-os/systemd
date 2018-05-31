@@ -1,8 +1,8 @@
 From 8c24744e50eafd61bd475e39a5cbbf48ff5233a6 Mon Sep 17 00:00:00 2001
 From: Krzysztof Nowicki <krzysztof.a.nowicki+github@gmail.com>
 Date: Wed, 28 Mar 2018 13:36:33 +0200
-Subject: [PATCH 130/131] core: dont't remount /sys/fs/cgroup for relabel if
- not needed (#8595)
+Subject: [PATCH] core: dont't remount /sys/fs/cgroup for relabel if not needed
+ (#8595)
 
 The initial fix for relabelling the cgroup filesystem for
 SELinux delivered in commit 8739f23e3 was based on the assumption that

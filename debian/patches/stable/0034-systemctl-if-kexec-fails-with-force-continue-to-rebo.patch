@@ -1,8 +1,8 @@
 From b1fea1c9baf7390a43320ae3f3602d77bafa6868 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Thu, 8 Mar 2018 11:27:15 +0100
-Subject: [PATCH 034/131] systemctl: if kexec fails with --force, continue to
- reboot normally
+Subject: [PATCH] systemctl: if kexec fails with --force, continue to reboot
+ normally
 
 When we are in late shutdown, and for whatever reason kexec fails, we should
 proceed with a normal reboot. Network is down and sessions have been terminated

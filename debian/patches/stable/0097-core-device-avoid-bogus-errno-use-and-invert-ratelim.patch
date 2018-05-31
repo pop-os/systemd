@@ -1,7 +1,7 @@
 From 90b033e44ffc8f8d6577e86fce45eb1d9a9c38bc Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Tue, 24 Apr 2018 13:50:46 +0200
-Subject: [PATCH 097/131] core/device: avoid bogus errno use and invert
+Subject: [PATCH] core/device: avoid bogus errno use and invert
  ratelimit_test()
 
 I'm not sure if I understand the original code. AFAICS, errno does not

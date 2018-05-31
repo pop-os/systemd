@@ -1,7 +1,7 @@
 From 64eafeaf75c2953e1ed136e4c69e14cb392d2f05 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Wed, 14 Mar 2018 14:06:50 +0900
-Subject: [PATCH 039/131] man: mention that 'status' is the default command for
+Subject: [PATCH] man: mention that 'status' is the default command for
  `hostnamectl`
 
 (cherry picked from commit a456324fefec12ac929fd844bcec243b657d7b1f)

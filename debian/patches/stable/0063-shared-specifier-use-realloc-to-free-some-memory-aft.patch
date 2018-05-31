@@ -1,8 +1,8 @@
 From 2cdc3c58322d75db434eae111e8f2026d509dde6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 28 Mar 2018 10:33:40 +0200
-Subject: [PATCH 063/131] shared/specifier: use realloc to free some memory
- after specifier expansion
+Subject: [PATCH] shared/specifier: use realloc to free some memory after
+ specifier expansion
 
 This is a separate commit only because it actually *increases* memory allocations:
 ==3256==   total heap usage: 100,120 allocs, 100,120 frees, 13,097,140 bytes allocated

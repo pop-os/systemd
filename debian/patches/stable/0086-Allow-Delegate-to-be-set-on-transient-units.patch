@@ -1,7 +1,7 @@
 From 19da3fec80d3e30191be11f6dc7305f6c82e5254 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 18 Apr 2018 18:48:55 +0200
-Subject: [PATCH 086/131] Allow Delegate= to be set on transient units
+Subject: [PATCH] Allow Delegate= to be set on transient units
 
 ---
  src/core/dbus-cgroup.c | 13 +++++++------

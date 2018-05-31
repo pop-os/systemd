@@ -1,7 +1,7 @@
 From be13871a844cbbe0e7d21bb15ec5b6cf14392090 Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Thu, 8 Mar 2018 22:21:54 +0900
-Subject: [PATCH 009/131] core: do not free heap-allocated strings (#8391)
+Subject: [PATCH] core: do not free heap-allocated strings (#8391)
 
 Fixes #8387.
 

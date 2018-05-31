@@ -1,8 +1,7 @@
 From 5b9b7eb88fae8acd00a714c7269b7498f6e4f78b Mon Sep 17 00:00:00 2001
 From: Yu Watanabe <watanabe.yu+github@gmail.com>
 Date: Wed, 2 May 2018 17:05:51 +0900
-Subject: [PATCH 110/131] meson: drop 'name' argument in cc.has_argument()
- (#8878)
+Subject: [PATCH] meson: drop 'name' argument in cc.has_argument() (#8878)
 
 (cherry picked from commit b0903bb585d2158f78a4cf603fde4aed5474e2b9)
 ---
