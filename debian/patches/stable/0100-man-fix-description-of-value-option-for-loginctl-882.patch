@@ -1,0 +1,33 @@
+From 3237e92e5d5ca91b9708b71938d48f2626c12f32 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 26 Apr 2018 16:51:11 +0900
+Subject: [PATCH 100/131] man: fix description of --value option for loginctl
+ (#8820)
+
+(cherry picked from commit ad628501b95b83ac6c0b42bb69db7e1b38c0ff13)
+---
+ man/loginctl.xml | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/man/loginctl.xml b/man/loginctl.xml
+index 65c5227ed3..3863ec6621 100644
+--- a/man/loginctl.xml
++++ b/man/loginctl.xml
+@@ -98,11 +98,9 @@
+       <varlistentry>
+         <term><option>--value</option></term>
+ 
+-        <listitem>
+-          <para>When printing properties with <command>show</command>,
+-          only print the value, and skip the property name and
+-          <literal>=</literal>.</para>
+-        </listitem>
++        <listitem><para>When showing session/user/seat properties,
++        only print the value, and skip the property name and
++        <literal>=</literal>.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+-- 
+2.17.0
+

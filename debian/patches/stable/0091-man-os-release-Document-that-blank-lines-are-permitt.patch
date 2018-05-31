@@ -1,0 +1,29 @@
+From ebc02cc11366b726f8376561ec5cb061d2ad1f0f Mon Sep 17 00:00:00 2001
+From: Paul Menzel <pmenzel@molgen.mpg.de>
+Date: Mon, 23 Apr 2018 11:03:16 +0200
+Subject: [PATCH 091/131] man/os-release: Document that blank lines are
+ permitted (#8777)
+
+Fixes: https://github.com/systemd/systemd/issues/8773
+(cherry picked from commit 33ce73f66c9e35b16624db17079cb76e25b2c846)
+---
+ man/os-release.xml | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/man/os-release.xml b/man/os-release.xml
+index b0468c16a0..da0b166eb7 100644
+--- a/man/os-release.xml
++++ b/man/os-release.xml
+@@ -74,7 +74,8 @@
+     shell style. All strings should be in UTF-8 format, and
+     non-printable characters should not be used. It is not supported
+     to concatenate multiple individually quoted strings. Lines
+-    beginning with "#" shall be ignored as comments.</para>
++    beginning with "#" shall be ignored as comments. Blank lines are
++    permitted and ignored.</para>
+ 
+     <para>The file <filename>/etc/os-release</filename> takes
+     precedence over <filename>/usr/lib/os-release</filename>.
+-- 
+2.17.0
+

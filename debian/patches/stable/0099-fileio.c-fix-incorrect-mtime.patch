@@ -1,0 +1,64 @@
+From abd8876a3448f2f7bca4404ccae43f281c426f1e Mon Sep 17 00:00:00 2001
+From: Chris Lesiak <chris.lesiak@licor.com>
+Date: Tue, 24 Apr 2018 09:50:42 -0500
+Subject: [PATCH 099/131] fileio.c: fix incorrect mtime
+
+A regression was introduced that caused the mtime of /etc/.updated
+and /var/.updated to be the current time when systemd-update-done
+ran instead of being copied from /usr.
+
+This was nearly fixed, but due to fflush being called after mtime
+was carefully set, it was overwritten with the current time.
+
+Regression introduced in 872c40396384f9fa89b01baf4e739d28ed590299
+
+A fix was just missed in 39c38d773fbe2b4f76ff29ecd3344640efb9a86c
+
+Fixes #8806
+
+(cherry picked from commit be83711c7eb6a09e0d0c529c427cebcae87c0c1f)
+---
+ src/basic/fileio.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/src/basic/fileio.c b/src/basic/fileio.c
+index 29b941348a..9875abff51 100644
+--- a/src/basic/fileio.c
++++ b/src/basic/fileio.c
+@@ -63,6 +63,7 @@ int write_string_stream_ts(
+                 struct timespec *ts) {
+ 
+         bool needs_nl;
++        int r;
+ 
+         assert(f);
+         assert(line);
+@@ -87,6 +88,13 @@ int write_string_stream_ts(
+                 if (fputc('\n', f) == EOF)
+                         return -errno;
+ 
++        if (flags & WRITE_STRING_FILE_SYNC)
++                r = fflush_sync_and_check(f);
++        else
++                r = fflush_and_check(f);
++        if (r < 0)
++                return r;
++
+         if (ts) {
+                 struct timespec twice[2] = {*ts, *ts};
+ 
+@@ -94,10 +102,7 @@ int write_string_stream_ts(
+                         return -errno;
+         }
+ 
+-        if (flags & WRITE_STRING_FILE_SYNC)
+-                return fflush_sync_and_check(f);
+-        else
+-                return fflush_and_check(f);
++        return 0;
+ }
+ 
+ static int write_string_file_atomic(
+-- 
+2.17.0
+

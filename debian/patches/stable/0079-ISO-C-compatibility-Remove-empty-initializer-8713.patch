@@ -1,0 +1,34 @@
+From 4253a195e847caf0c5930abd69bdf066edc913ea Mon Sep 17 00:00:00 2001
+From: Leonard <leonard.r.koenig@googlemail.com>
+Date: Thu, 12 Apr 2018 21:31:19 +0200
+Subject: [PATCH 079/131] ISO-C compatibility:  Remove empty initializer
+ (#8713)
+
+ISO-C doesn't allow empty initializers, so replace it by explicitly
+initializing to zero.
+
+Also add braces because x is a union and we initialize a subobject, so
+a compiler might warn about suggesting braces.  Shut that up.
+
+(cherry picked from commit d579a56c397a1aeaa490032a9f7aabd82124f1c8)
+---
+ src/systemd/sd-bus-vtable.h | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/systemd/sd-bus-vtable.h b/src/systemd/sd-bus-vtable.h
+index f6fb40fbb5..425e38e2e2 100644
+--- a/src/systemd/sd-bus-vtable.h
++++ b/src/systemd/sd-bus-vtable.h
+@@ -157,8 +157,7 @@ struct sd_bus_vtable {
+         {                                                               \
+                 .type = _SD_BUS_VTABLE_END,                             \
+                 .flags = 0,                                             \
+-                .x = {                                                  \
+-                },                                                      \
++                .x = { { 0 } },                                         \
+         }
+ 
+ _SD_END_DECLARATIONS;
+-- 
+2.17.0
+

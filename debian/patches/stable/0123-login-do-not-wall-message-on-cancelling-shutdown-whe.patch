@@ -1,0 +1,29 @@
+From a9e23be7f0f183615f640aa0e05c7844ea1e6233 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 7 May 2018 10:16:04 +0900
+Subject: [PATCH 123/131] login: do not wall message on cancelling shutdown
+ when Manager.enable_wall_messages is false
+
+Fixes #8904.
+
+(cherry picked from commit 6e78fa4afd474dae984f3ee4a8477c623296a519)
+---
+ src/login/logind-dbus.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
+index 07cb257151..4a85d751bc 100644
+--- a/src/login/logind-dbus.c
++++ b/src/login/logind-dbus.c
+@@ -2197,7 +2197,7 @@ static int method_cancel_scheduled_shutdown(sd_bus_message *message, void *userd
+         cancelled = m->scheduled_shutdown_type != NULL;
+         reset_scheduled_shutdown(m);
+ 
+-        if (cancelled) {
++        if (cancelled && m->enable_wall_messages) {
+                 _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
+                 const char *tty = NULL;
+                 uid_t uid = 0;
+-- 
+2.17.0
+

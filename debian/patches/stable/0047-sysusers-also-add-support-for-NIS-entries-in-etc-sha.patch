@@ -1,0 +1,70 @@
+From 1ea48092d3fbb3d3a02226898a5837ccc4d917fd Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Tue, 20 Mar 2018 09:32:05 +0100
+Subject: [PATCH 047/131] sysusers: also add support for NIS entries in
+ /etc/shadow
+
+Commit 563dc6f8e2cda4114dd20f32655890ed378c3740 added support for
+/etc/{passwd,group} only but since nsswitch.conf(5) appears to document the NIS
+entries also for shadow, let's support this case too.
+
+(cherry picked from commit 19ec7de2d65ad01a76a2f8672363e72c43607934)
+---
+ src/sysusers/sysusers.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/src/sysusers/sysusers.c b/src/sysusers/sysusers.c
+index 5dcc213b17..0af4af06aa 100644
+--- a/src/sysusers/sysusers.c
++++ b/src/sysusers/sysusers.c
+@@ -497,6 +497,7 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char
+ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char **tmpfile_path) {
+         _cleanup_fclose_ FILE *original = NULL, *shadow = NULL;
+         _cleanup_(unlink_and_freep) char *shadow_tmp = NULL;
++        struct spwd *sp = NULL;
+         Iterator iterator;
+         long lstchg;
+         Item *i;
+@@ -513,7 +514,6 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char
+ 
+         original = fopen(shadow_path, "re");
+         if (original) {
+-                struct spwd *sp;
+ 
+                 r = sync_rights(original, shadow);
+                 if (r < 0)
+@@ -534,6 +534,11 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char
+                         }
+ 
+                         errno = 0;
++
++                        /* Make sure we keep the NIS entries (if any) at the end. */
++                        if (IN_SET(sp->sp_namp[0], '+', '-'))
++                                break;
++
+                         if (putspent(sp, shadow) < 0)
+                                 return errno ? -errno : -EIO;
+ 
+@@ -566,6 +571,19 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char
+                 if (putspent(&n, shadow) != 0)
+                         return errno ? -errno : -EIO;
+         }
++        errno = 0;
++
++        /* Append the remaining NIS entries if any */
++        while (sp) {
++                errno = 0;
++                if (putspent(sp, shadow) < 0)
++                        return errno ? -errno : -EIO;
++
++                errno = 0;
++                sp = fgetspent(original);
++        }
++        if (!IN_SET(errno, 0, ENOENT))
++                return -errno;
+ 
+         r = fflush_sync_and_check(shadow);
+         if (r < 0)
+-- 
+2.17.0
+

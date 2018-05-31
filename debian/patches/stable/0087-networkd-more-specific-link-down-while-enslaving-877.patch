@@ -1,0 +1,32 @@
+From 5fedf07ae0b13e678b895514cdcf903cacbb73dc Mon Sep 17 00:00:00 2001
+From: Tobias Jungel <Tobias.Jungel@gmail.com>
+Date: Fri, 20 Apr 2018 16:30:40 +0200
+Subject: [PATCH 087/131] networkd: more specific link down while enslaving
+ (#8771)
+
+Issue #5853 introduced a link_down for every netdev enslaved. This behaviour is
+not required on other slave interfaces.
+
+fixes 14b6bb7
+
+(cherry picked from commit 4c3879863a5b35f3ccc3fe9bba2b629702a7469d)
+---
+ src/network/netdev/netdev.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/network/netdev/netdev.c b/src/network/netdev/netdev.c
+index 93648e1be0..fa054fcfc3 100644
+--- a/src/network/netdev/netdev.c
++++ b/src/network/netdev/netdev.c
+@@ -238,7 +238,7 @@ static int netdev_enslave_ready(NetDev *netdev, Link* link, sd_netlink_message_h
+         assert(link);
+         assert(callback);
+ 
+-        if (link->flags & IFF_UP) {
++        if (link->flags & IFF_UP && netdev->kind == NETDEV_KIND_BOND) {
+                 log_netdev_debug(netdev, "Link '%s' was up when attempting to enslave it. Bringing link down.", link->ifname);
+                 r = link_down(link);
+                 if (r < 0)
+-- 
+2.17.0
+

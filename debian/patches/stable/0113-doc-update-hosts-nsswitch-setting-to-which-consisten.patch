@@ -1,0 +1,27 @@
+From 0814734507c4ee354e42d7bc84acedc987b05a99 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 1 May 2018 15:18:10 +0900
+Subject: [PATCH 113/131] doc: update hosts nsswitch setting to which
+ consistent to man pages
+
+(cherry picked from commit a42d4f574138d1d3e69e53e5eee806a6144fd5d6)
+---
+ README | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/README b/README
+index bc81d4e7f8..4a561a65cb 100644
+--- a/README
++++ b/README
+@@ -272,7 +272,7 @@ NSS:
+ 
+                 passwd: compat mymachines systemd
+                 group: compat mymachines systemd
+-                hosts: files mymachines resolve myhostname
++                hosts: files mymachines resolve [!UNAVAIL=return] dns myhostname
+ 
+ SYSV INIT.D SCRIPTS:
+         When calling "systemctl enable/disable/is-enabled" on a unit which is a
+-- 
+2.17.0
+

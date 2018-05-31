@@ -1,0 +1,26 @@
+From f02abd834904351307ebded912067b3df9442b35 Mon Sep 17 00:00:00 2001
+From: Paride Legovini <pl@ninthfloor.org>
+Date: Mon, 19 Mar 2018 15:56:11 +0100
+Subject: [PATCH 036/131] hwdb: ThinkPad T450s doesn't have a caps lock led
+ (#8433)
+
+(cherry picked from commit 16bed3afa1b916ace5e927392a1baab9dd9ff963)
+---
+ hwdb/60-keyboard.hwdb | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hwdb/60-keyboard.hwdb b/hwdb/60-keyboard.hwdb
+index 6406a7dbf9..e05b1d10c2 100644
+--- a/hwdb/60-keyboard.hwdb
++++ b/hwdb/60-keyboard.hwdb
+@@ -1421,3 +1421,7 @@ evdev:input:b0003v05FEp1010*
+ evdev:input:b0003v046Dp4002*
+  KEYBOARD_LED_NUMLOCK=0
+  KEYBOARD_LED_CAPSLOCK=0
++
++# Lenovo ThinkPad T450s
++evdev:atkbd:dmi:bvn*:bvr*:bd*:svnLENOVO:pn*:pvrThinkPadT450s
++ KEYBOARD_LED_CAPSLOCK=0
+-- 
+2.17.0
+

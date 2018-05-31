@@ -1,0 +1,37 @@
+From d0734f14ddba2d2d514c85635c5dcdeb698ca241 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 26 Apr 2018 20:31:11 +0200
+Subject: [PATCH 103/131] hwdb: add "special" keys on Dell XPS L702x (#8828)
+
+Based on information provided by phenest in
+https://github.com/systemd/systemd/issues/5341.
+
+Those keys map to some special functions in windows, so let's map them
+to prog1/prog2 so the user map them to something.
+
+Fixes #5341.
+
+(cherry picked from commit 189847c43088d879dcf5875c58963353b7d18a6e)
+---
+ hwdb/60-keyboard.hwdb | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/hwdb/60-keyboard.hwdb b/hwdb/60-keyboard.hwdb
+index 9965035d61..2e24c86663 100644
+--- a/hwdb/60-keyboard.hwdb
++++ b/hwdb/60-keyboard.hwdb
+@@ -326,6 +326,11 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDell*:pnLatitude*E7*:pvr*
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDell*:pnXPS*:pvr*
+  KEYBOARD_KEY_8c=!unknown
+ 
++# Dell XPS L702x
++evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDellInc.:pnDellSystemXPSL702X:pvr*
++ KEYBOARD_KEY_84=prog1
++ KEYBOARD_KEY_85=prog2
++
+ # Dell XPS12 9Q33
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDell*:pnXPS12-9Q33*:pvr*
+  KEYBOARD_KEY_88=wlan
+-- 
+2.17.0
+

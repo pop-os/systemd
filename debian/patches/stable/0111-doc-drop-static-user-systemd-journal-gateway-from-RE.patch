@@ -1,0 +1,31 @@
+From 40c53eafa849aab34744c2f240151f913a75f100 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 1 May 2018 15:15:44 +0900
+Subject: [PATCH 111/131] doc: drop static user systemd-journal-gateway from
+ README
+
+and add systemd-journal-remote instead.
+
+(cherry picked from commit f959c5c66f97d12933925ba513af9d128c4eb3c9)
+---
+ README | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/README b/README
+index b735214e2e..25646ac22e 100644
+--- a/README
++++ b/README
+@@ -232,8 +232,8 @@ USERS AND GROUPS:
+         groups "wheel" and "adm" will be given read-only access to
+         journal files using systemd-tmpfiles.service.
+ 
+-        The journal gateway daemon requires the
+-        "systemd-journal-gateway" system user and group to
++        The journal remote daemon requires the
++        "systemd-journal-remote" system user and group to
+         exist. During execution this network facing service will drop
+         privileges and assume this uid/gid for security reasons.
+ 
+-- 
+2.17.0
+

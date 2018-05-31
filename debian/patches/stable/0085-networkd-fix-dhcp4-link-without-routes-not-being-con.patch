@@ -1,0 +1,46 @@
+From cfb9578f22309ab412a020085baffae4882ceba0 Mon Sep 17 00:00:00 2001
+From: Anssi Hannula <anssi.hannula@iki.fi>
+Date: Tue, 17 Apr 2018 18:12:00 +0300
+Subject: [PATCH 085/131] networkd: fix dhcp4 link without routes not being
+ considered ready (#8728)
+
+The dhcp4 code sets link->dhcp4_configured when dhcp4_route_handler()
+has processed the last message.
+
+However, in case UseRoutes=no has been set in the [DHCP] section, or
+in case the DHCP server simply sends no routes, link_set_dhcp_routes()
+will not send any netlink messages and dhcp4_route_handler() will
+therefore never be called.
+
+This causes the link to never reach LINK_STATE_CONFIGURED, and e.g.
+systemd-networkd-wait-online will not consider the link as ready.
+
+Fix that by setting link->dhcp4_configured = true and calling
+link_check_ready() in dhcp4_address_handler() in case
+link_set_dhcp_routes() sent no netlink messages (dhcp4_messages is
+zero).
+
+(cherry picked from commit 223932c786ada7f758a7b7878a6ad2dae0d1e5fb)
+---
+ src/network/networkd-dhcp4.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
+index ecb96cdb57..aaea2ae908 100644
+--- a/src/network/networkd-dhcp4.c
++++ b/src/network/networkd-dhcp4.c
+@@ -332,6 +332,11 @@ static int dhcp4_address_handler(sd_netlink *rtnl, sd_netlink_message *m,
+ 
+         link_set_dhcp_routes(link);
+ 
++        if (link->dhcp4_messages == 0) {
++                link->dhcp4_configured = true;
++                link_check_ready(link);
++        }
++
+         return 1;
+ }
+ 
+-- 
+2.17.0
+

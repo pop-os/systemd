@@ -1,0 +1,28 @@
+From fee9c90aaf455ed2cb8383c469bfd0c8c9e5a9fb Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Tue, 24 Apr 2018 12:23:29 +0200
+Subject: [PATCH 093/131] tmpfiles: 'e' is supposed to operate on directory
+ only
+
+(cherry picked from commit d460ba18e777128c19343b067574ecac399f3afc)
+---
+ src/tmpfiles/tmpfiles.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
+index cbacfae66b..4ede634f00 100644
+--- a/src/tmpfiles/tmpfiles.c
++++ b/src/tmpfiles/tmpfiles.c
+@@ -879,6 +879,9 @@ static int path_set_perms(Item *i, const char *path) {
+         if (fstat(fd, &st) < 0)
+                 return log_error_errno(errno, "Failed to fstat() file %s: %m", path);
+ 
++        if (i->type == EMPTY_DIRECTORY && !S_ISDIR(st.st_mode))
++                return log_error_errno(EEXIST, "'%s' already exists and is not a directory. ", path);
++
+         return fd_set_perms(i, fd, &st);
+ }
+ 
+-- 
+2.17.0
+

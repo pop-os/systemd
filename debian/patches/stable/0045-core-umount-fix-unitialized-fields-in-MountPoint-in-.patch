@@ -1,0 +1,29 @@
+From ff47896b4866c3b8a90012e113e1cf0a13bdcddd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 14 Mar 2018 12:37:19 +0100
+Subject: [PATCH 045/131] core/umount: fix unitialized fields in MountPoint in
+ dm_list_get()
+
+This one might actually might cause a crash.
+
+(cherry picked from commit b93618644bf24bc0cd87adb1346955d783f6f9b8)
+---
+ src/core/umount.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/umount.c b/src/core/umount.c
+index 8ba4179a0f..de826edd4d 100644
+--- a/src/core/umount.c
++++ b/src/core/umount.c
+@@ -315,7 +315,7 @@ static int dm_list_get(MountPoint **head) {
+                 if (!node)
+                         return -ENOMEM;
+ 
+-                m = new(MountPoint, 1);
++                m = new0(MountPoint, 1);
+                 if (!m) {
+                         free(node);
+                         return -ENOMEM;
+-- 
+2.17.0
+

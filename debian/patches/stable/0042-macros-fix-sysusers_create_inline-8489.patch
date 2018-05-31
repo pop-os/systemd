@@ -1,0 +1,29 @@
+From ea930139eabb18b2e7acf814d9ee696748e2831a Mon Sep 17 00:00:00 2001
+From: Filipe Brandenburger <filbranden@google.com>
+Date: Mon, 19 Mar 2018 10:05:49 -0700
+Subject: [PATCH 042/131] macros: fix sysusers_create_inline (#8489)
+
+This typo was introduced in commit dd2490ae12ad1e when using
+here-documents for the macro values.
+
+(cherry picked from commit c2887d565f35a6b512bd4571d11322027a8c05bb)
+---
+ src/core/macros.systemd.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/macros.systemd.in b/src/core/macros.systemd.in
+index 8307712ffe..6a162a0ec8 100644
+--- a/src/core/macros.systemd.in
++++ b/src/core/macros.systemd.in
+@@ -102,7 +102,7 @@ systemd-sysusers %{?*} >/dev/null 2>&1 || : \
+ 
+ %sysusers_create_inline() \
+ systemd-sysusers - <<SYSTEMD_INLINE_EOF >/dev/null 2>&1 || : \
+-%(cat %2) \
++%{?*} \
+ SYSTEMD_INLINE_EOF \
+ %{nil}
+ 
+-- 
+2.17.0
+

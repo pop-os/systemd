@@ -1,0 +1,27 @@
+From eca85ae139397305b43eceeb9887e4810af6add1 Mon Sep 17 00:00:00 2001
+From: futpib <futpib@gmail.com>
+Date: Mon, 19 Mar 2018 12:25:07 +0300
+Subject: [PATCH 029/131] hwdb: fix accelerometer mount matrix for Asus TP300LD
+ (#8327) (#8463)
+
+(cherry picked from commit e9ee721abdefc69f581e46bb3b4ed1471f6fd8af)
+---
+ hwdb/60-sensor.hwdb | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hwdb/60-sensor.hwdb b/hwdb/60-sensor.hwdb
+index 616c390134..8385efd28d 100644
+--- a/hwdb/60-sensor.hwdb
++++ b/hwdb/60-sensor.hwdb
+@@ -82,7 +82,7 @@ sensor:modalias:acpi:SMO8500*:dmi:*svn*ASUSTeK*:*pn*TP500LB*
+  ACCEL_MOUNT_MATRIX=0, 1, 0; 1, 0, 0; 0, 0, 1
+ 
+ sensor:modalias:acpi:SMO8500*:dmi:*svn*ASUSTeK*:*pn*TP300LD*
+- ACCEL_MOUNT_MATRIX=0, 1, 0; 1, 0, 0; 0, 0, 1
++ ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
+ 
+ #########################################
+ # Axxo
+-- 
+2.17.0
+

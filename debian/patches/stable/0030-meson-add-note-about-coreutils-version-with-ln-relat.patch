@@ -1,0 +1,28 @@
+From 228bf05dc9fe2efb0b65a2ca81b800f6309d6672 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 9 Mar 2018 08:56:23 +0100
+Subject: [PATCH 030/131] meson: add note about coreutils version with ln
+ --relative
+
+https://bugs.freedesktop.org/show_bug.cgi?id=90799
+(cherry picked from commit cd001016a166bb849c454e7b5cdb58053f34935b)
+---
+ meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/meson.build b/meson.build
+index e152226ead..358b41b9d1 100644
+--- a/meson.build
++++ b/meson.build
+@@ -604,7 +604,7 @@ endforeach
+ conf.set_quoted('TELINIT', get_option('telinit-path'))
+ 
+ if run_command('ln', '--relative', '--help').returncode() != 0
+-        error('ln does not support --relative')
++        error('ln does not support --relative (added in coreutils 8.16)')
+ endif
+ 
+ ############################################################
+-- 
+2.17.0
+

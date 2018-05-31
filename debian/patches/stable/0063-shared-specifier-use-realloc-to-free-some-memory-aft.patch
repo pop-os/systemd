@@ -1,0 +1,48 @@
+From 2cdc3c58322d75db434eae111e8f2026d509dde6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 28 Mar 2018 10:33:40 +0200
+Subject: [PATCH 063/131] shared/specifier: use realloc to free some memory
+ after specifier expansion
+
+This is a separate commit only because it actually *increases* memory allocations:
+==3256==   total heap usage: 100,120 allocs, 100,120 frees, 13,097,140 bytes allocated
+to
+==4690==   total heap usage: 100,121 allocs, 100,121 frees, 14,198,329 bytes allocated
+
+Essentially, we do a little more work to reduce the memory footprint a bit. For a
+test where we just allocate the memory and drop it soon afterwards, this is not
+beneficial, but it should still be useful for a long running program.
+
+(cherry picked from commit bec8a68ceee4cbf5de4d7026e750f11130c33ccd)
+---
+ src/shared/specifier.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/specifier.c b/src/shared/specifier.c
+index 62be2bf0a2..849ff67e76 100644
+--- a/src/shared/specifier.c
++++ b/src/shared/specifier.c
+@@ -102,11 +102,18 @@ int specifier_printf(const char *text, const Specifier table[], void *userdata,
+                 else
+                         *(t++) = *f;
+ 
+-        /* if string ended with a stray %, also end with % */
++        /* If string ended with a stray %, also end with % */
+         if (percent)
+                 *(t++) = '%';
++        *(t++) = 0;
++
++        /* Try to deallocate unused bytes, but don't sweat it too much */
++        if ((size_t)(t - ret) < allocated) {
++                t = realloc(ret, t - ret);
++                if (t)
++                        ret = t;
++        }
+ 
+-        *t = 0;
+         *_ret = ret;
+         ret = NULL;
+         return 0;
+-- 
+2.17.0
+

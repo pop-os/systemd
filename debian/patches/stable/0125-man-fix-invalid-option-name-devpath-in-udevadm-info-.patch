@@ -1,0 +1,42 @@
+From b62c727cdfb31d05706da9e2450b63ae82520e44 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 9 May 2018 16:17:37 +0900
+Subject: [PATCH 125/131] man: fix invalid option name --devpath in 'udevadm
+ info' (#8935)
+
+(cherry picked from commit cf5c1cbfba757203103a610f65e0dcf3ba26f71c)
+---
+ man/udevadm.xml | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/man/udevadm.xml b/man/udevadm.xml
+index 1495f556f3..6bb54c86d8 100644
+--- a/man/udevadm.xml
++++ b/man/udevadm.xml
+@@ -131,9 +131,9 @@
+             <filename><optional>/sys</optional>/class/block/sda</filename>.
+             Note that this option usually is not very useful, since
+             <command>udev</command> can guess the type of the
+-            argument, so <command>udevadm
+-            --devpath=/class/block/sda</command> is equivalent to
+-            <command>udevadm /sys/class/block/sda</command>.</para>
++            argument, so <command>udevadm info
++            --path=/class/block/sda</command> is equivalent to
++            <command>udevadm info /sys/class/block/sda</command>.</para>
+           </listitem>
+         </varlistentry>
+         <varlistentry>
+@@ -144,8 +144,8 @@
+             e.g. <filename><optional>/dev</optional>/sda</filename>.
+             Note that this option usually is not very useful, since
+             <command>udev</command> can guess the type of the
+-            argument, so <command>udevadm --name=sda</command> is
+-            equivalent to <command>udevadm /dev/sda</command>.</para>
++            argument, so <command>udevadm info --name=sda</command> is
++            equivalent to <command>udevadm info /dev/sda</command>.</para>
+           </listitem>
+         </varlistentry>
+         <varlistentry>
+-- 
+2.17.0
+

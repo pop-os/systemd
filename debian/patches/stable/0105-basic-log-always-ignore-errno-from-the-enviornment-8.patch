@@ -1,0 +1,72 @@
+From 46edf6eb886bf1221902822ed856892c0a9e99b1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 27 Apr 2018 18:00:58 +0200
+Subject: [PATCH 105/131] basic/log: always ignore errno from the enviornment
+ (#8841)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This extends the change done in b29f6480ec to other logging functions.
+
+This actually fixes some bugs in callers of log_struct(), for example
+config_parse_alias() called 'return log_syntax(..., 0, ...)' which could result
+in a bogus non-zero return value.
+
+Calls to log_object() and log_format_iovec() — which is only used by
+server_driver_message() — appear correct.
+
+(cherry picked from commit d1a1f0aaf0d2f08c60d1e0d32e646439d99f58dc)
+---
+ src/basic/log.c | 14 +++++---------
+ 1 file changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/src/basic/log.c b/src/basic/log.c
+index c1bdda7905..9a39da7c16 100644
+--- a/src/basic/log.c
++++ b/src/basic/log.c
+@@ -748,9 +748,8 @@ static int log_object_internalv(
+         if (_likely_(LOG_PRI(level) > log_max_level[LOG_REALM_SYSTEMD]))
+                 return -error;
+ 
+-        /* Make sure that %m maps to the specified error */
+-        if (error != 0)
+-                errno = error;
++        /* Make sure that %m maps to the specified error (or "Success"). */
++        errno = error;
+ 
+         /* Prepend the object name before the message */
+         if (object) {
+@@ -873,8 +872,7 @@ int log_format_iovec(
+                  * since vasprintf() leaves it afterwards at
+                  * an undefined location */
+ 
+-                if (error != 0)
+-                        errno = error;
++                errno = error;
+ 
+                 va_copy(aq, ap);
+                 r = vasprintf(&m, format, aq);
+@@ -975,8 +973,7 @@ int log_struct_internal(
+         while (format) {
+                 va_list aq;
+ 
+-                if (error != 0)
+-                        errno = error;
++                errno = error;
+ 
+                 va_copy(aq, ap);
+                 (void) vsnprintf(buf, sizeof buf, format, aq);
+@@ -1274,8 +1271,7 @@ int log_syntax_internal(
+         if (log_target == LOG_TARGET_NULL)
+                 return -error;
+ 
+-        if (error != 0)
+-                errno = error;
++        errno = error;
+ 
+         va_start(ap, format);
+         (void) vsnprintf(buffer, sizeof buffer, format, ap);
+-- 
+2.17.0
+

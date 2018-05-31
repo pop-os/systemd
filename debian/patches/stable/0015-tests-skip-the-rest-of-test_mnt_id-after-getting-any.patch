@@ -1,0 +1,40 @@
+From c87b8c5dd21c97d6a8786c76c1073f6b91948814 Mon Sep 17 00:00:00 2001
+From: Evegeny Vereshchagin <evvers@ya.ru>
+Date: Fri, 9 Mar 2018 00:44:57 +0000
+Subject: [PATCH 015/131] tests: skip the rest of test_mnt_id after getting any
+ error
+
+This mainly gets around a kernel bug making it possible to
+have non-existent paths in /proc/self/mountinfo, but it should also
+prevent flaky failures that can happen if something changes immediately
+after or during reading /proc/self/mountinfo.
+
+Closes https://github.com/systemd/systemd/issues/8286.
+
+(cherry picked from commit 112cc3b5b2f61475afed6b082e917001710470bf)
+---
+ src/test/test-mount-util.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/src/test/test-mount-util.c b/src/test/test-mount-util.c
+index c95baa81a7..5f2ad7c719 100644
+--- a/src/test/test-mount-util.c
++++ b/src/test/test-mount-util.c
+@@ -80,12 +80,8 @@ static void test_mnt_id(void) {
+                 int mnt_id = PTR_TO_INT(k), mnt_id2;
+ 
+                 r = path_get_mnt_id(p, &mnt_id2);
+-                if (r == -EOPNOTSUPP) { /* kernel or file system too old? */
+-                        log_debug("%s doesn't support mount IDs\n", p);
+-                        continue;
+-                }
+-                if (IN_SET(r, -EACCES, -EPERM)) {
+-                        log_debug("Can't access %s\n", p);
++                if (r < 0) {
++                        log_debug_errno(r, "Failed to get the mnt id of %s: %m\n", p);
+                         continue;
+                 }
+ 
+-- 
+2.17.0
+

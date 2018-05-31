@@ -1,0 +1,45 @@
+From 5419477b418fedebb776cb3284aeff3b4c95915e Mon Sep 17 00:00:00 2001
+From: Evegeny Vereshchagin <evvers@ya.ru>
+Date: Mon, 5 Mar 2018 22:05:46 +0000
+Subject: [PATCH 004/131] tests: close a leftover file descriptor in
+ `test-fileio`
+
+This should make it a bit easier to search for real file descriptor leaks.
+
+```
+$ valgrind --leak-check=full --track-fds=yes ./build/test-fileio
+...
+==29457==
+==29457== FILE DESCRIPTORS: 4 open at exit.
+==29457== Open file descriptor 3: /tmp/test-systemd_writing_tmpfile.lyV5Rc
+==29457==    at 0x4B9AD9E: open (open.c:43)
+==29457==    by 0x4B19B24: __gen_tempname (tempname.c:261)
+==29457==    by 0x4BA5CC3: mkostemp64 (mkostemp64.c:32)
+==29457==    by 0x48F739B: mkostemp_safe (fileio.c:1206)
+==29457==    by 0x10D968: test_writing_tmpfile (test-fileio.c:620)
+==29457==    by 0x10E930: main (test-fileio.c:767)
+==29457==
+```
+
+(cherry picked from commit 9a92e25545210a5f4eddacbf52a3eeeadb062313)
+---
+ src/test/test-fileio.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/test/test-fileio.c b/src/test/test-fileio.c
+index 3b4ee4b92a..c6128c9091 100644
+--- a/src/test/test-fileio.c
++++ b/src/test/test-fileio.c
+@@ -610,7 +610,8 @@ static void test_writing_tmpfile(void) {
+         char name[] = "/tmp/test-systemd_writing_tmpfile.XXXXXX";
+         _cleanup_free_ char *contents = NULL;
+         size_t size;
+-        int fd, r;
++        int r;
++        _cleanup_close_ int fd = -1;
+         struct iovec iov[3];
+ 
+         iov[0] = IOVEC_MAKE_STRING("abc\n");
+-- 
+2.17.0
+

@@ -1,0 +1,26 @@
+From 2ecc5e8c80b863a50e899e0e758fbd4149fa77dd Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 5 Apr 2018 00:33:22 +0900
+Subject: [PATCH 073/131] network: fix typo in log message
+
+(cherry picked from commit 3d282fff063c81893dc4bbd0282193d20dd5357e)
+---
+ src/network/networkd-manager.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/network/networkd-manager.c b/src/network/networkd-manager.c
+index 4f55c0172f..1c519d8c49 100644
+--- a/src/network/networkd-manager.c
++++ b/src/network/networkd-manager.c
+@@ -1825,7 +1825,7 @@ int manager_set_timezone(Manager *m, const char *tz) {
+                 return log_oom();
+ 
+         if (!m->bus || sd_bus_is_ready(m->bus) <= 0) {
+-                log_info("Not connected to system bus, not setting hostname.");
++                log_info("Not connected to system bus, not setting timezone.");
+                 return 0;
+         }
+ 
+-- 
+2.17.0
+

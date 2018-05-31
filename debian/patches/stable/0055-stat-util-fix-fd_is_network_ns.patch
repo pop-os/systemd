@@ -1,0 +1,30 @@
+From 20785fa6ca3634e0d492486a66dd89a7886c0539 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 23 Mar 2018 09:47:04 +0100
+Subject: [PATCH 055/131] stat-util: fix fd_is_network_ns()
+
+This was broken in 77f9fa3b8ea46c27e5a5e9270f71bf1b4000c3e0. My fault.
+
+Fixes: #8543
+(cherry picked from commit 29f74559d4dc6ea41232233d32f1a92bcee43626)
+---
+ src/basic/stat-util.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/basic/stat-util.c b/src/basic/stat-util.c
+index 3689f6e983..67705947aa 100644
+--- a/src/basic/stat-util.c
++++ b/src/basic/stat-util.c
+@@ -254,7 +254,8 @@ int fd_is_network_ns(int fd) {
+         if (r <= 0)
+                 return r;
+ 
+-        if (ioctl(fd, NS_GET_NSTYPE) < 0)
++        r = ioctl(fd, NS_GET_NSTYPE);
++        if (r < 0)
+                 return -errno;
+ 
+         return r == CLONE_NEWNET;
+-- 
+2.17.0
+

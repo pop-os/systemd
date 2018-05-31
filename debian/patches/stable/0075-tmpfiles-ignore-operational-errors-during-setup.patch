@@ -1,0 +1,41 @@
+From 63e0c53ba0d2857967e12ad5d6037aa90f44018f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 29 Mar 2018 16:37:21 +0200
+Subject: [PATCH 075/131] tmpfiles: ignore "operational" errors during setup
+
+We still get the errors logged, but we don't fail the service. This
+is better for users because rerunning tmpfiles-setup.service a second
+time is dangerous (c.f. cd9f5b68ce08375eb1d68a4ddaa7a24a5092d7ba).
+Note that this only touches sd-tmpfiles-setup.service and
+sd-tmpfiles-setup-dev.service. sd-tmpfiles-clean.service is as before.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1539341
+(cherry picked from commit c79b89e6eb5efaa69b7d8358c43373fb9fab0af6)
+---
+ units/systemd-tmpfiles-setup-dev.service.in | 2 +-
+ units/systemd-tmpfiles-setup.service.in     | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/units/systemd-tmpfiles-setup-dev.service.in b/units/systemd-tmpfiles-setup-dev.service.in
+index 6a6ebed955..1d06b369d4 100644
+--- a/units/systemd-tmpfiles-setup-dev.service.in
++++ b/units/systemd-tmpfiles-setup-dev.service.in
+@@ -20,4 +20,4 @@ ConditionCapability=CAP_SYS_MODULE
+ Type=oneshot
+ RemainAfterExit=yes
+ ExecStart=@rootbindir@/systemd-tmpfiles --prefix=/dev --create --boot
+-SuccessExitStatus=65
++SuccessExitStatus=65 73
+diff --git a/units/systemd-tmpfiles-setup.service.in b/units/systemd-tmpfiles-setup.service.in
+index 0410d0bfd8..384be59481 100644
+--- a/units/systemd-tmpfiles-setup.service.in
++++ b/units/systemd-tmpfiles-setup.service.in
+@@ -20,4 +20,4 @@ RefuseManualStop=yes
+ Type=oneshot
+ RemainAfterExit=yes
+ ExecStart=@rootbindir@/systemd-tmpfiles --create --remove --boot --exclude-prefix=/dev
+-SuccessExitStatus=65
++SuccessExitStatus=65 73
+-- 
+2.17.0
+

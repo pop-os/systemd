@@ -1,0 +1,34 @@
+From 3015f90bd906fa05339ad25d6c1af4855c4f1536 Mon Sep 17 00:00:00 2001
+From: Salvo 'LtWorf' Tomaselli <ltworf@users.noreply.github.com>
+Date: Mon, 19 Mar 2018 19:19:53 +0100
+Subject: [PATCH 043/131] hwdb: ThinkPad T560 doesn't have a caps lock led
+ (#8490)
+
+Similar to 16bed3afa1b916ace5e927392a1baab9dd9ff963, this model also doesn't have the
+LED.
+```
+cat /sys/class/dmi/id/modalias
+dmi:bvnLENOVO:bvrN1KET16W(1.03):bd01/20/2016:svnLENOVO:pn20FH001AMX:pvrThinkPadT560:rvnLENOVO:rn20FH001AMX:rvrSDK0J40705WIN:cvnLENOVO:ct10:cvrNone:
+```
+
+(cherry picked from commit bc33509ea0d688428f809712f67c9536a34b6356)
+---
+ hwdb/60-keyboard.hwdb | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/hwdb/60-keyboard.hwdb b/hwdb/60-keyboard.hwdb
+index e05b1d10c2..f0976a6d48 100644
+--- a/hwdb/60-keyboard.hwdb
++++ b/hwdb/60-keyboard.hwdb
+@@ -1425,3 +1425,8 @@ evdev:input:b0003v046Dp4002*
+ # Lenovo ThinkPad T450s
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnLENOVO:pn*:pvrThinkPadT450s
+  KEYBOARD_LED_CAPSLOCK=0
++
++# Lenovo ThinkPad T560s
++evdev:atkbd:dmi:bvn*:bvr*:bd*:svnLENOVO:pn*:pvrThinkPadT560s
++ KEYBOARD_LED_CAPSLOCK=0
++ KEYBOARD_LED_NUMLOCK=0
+-- 
+2.17.0
+

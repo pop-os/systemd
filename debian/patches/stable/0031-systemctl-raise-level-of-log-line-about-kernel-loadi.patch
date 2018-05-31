@@ -1,0 +1,37 @@
+From c388e15df60237f870df3fd49ef36a4363ee335c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 8 Mar 2018 10:19:26 +0100
+Subject: [PATCH 031/131] systemctl: raise level of log line about kernel
+ loading
+
+It's pretty important after all. Also include the actual kexecuted command in
+the log message, that's useful to debug if something goes wrong.
+
+(cherry picked from commit cd086a014b0f07b1d6cb5fa3881d6a14cb10fd76)
+---
+ src/systemctl/systemctl.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index 1e975a5f2f..e00cbb2b12 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
+@@ -3511,9 +3511,12 @@ static int load_kexec_kernel(void) {
+         if (!options)
+                 return log_oom();
+ 
+-        log_debug("%s kexec kernel %s initrd %s options \"%s\".",
+-                  arg_dry_run ? "Would load" : "loading",
+-                  kernel, initrd, options);
++        log_full(arg_quiet ? LOG_DEBUG : LOG_INFO,
++                 "%s "KEXEC" --load \"%s\" --append \"%s\"%s%s%s",
++                 arg_dry_run ? "Would run" : "Running",
++                 kernel,
++                 options,
++                 initrd ? " --initrd \"" : NULL, strempty(initrd), initrd ? "\"" : "");
+         if (arg_dry_run)
+                 return 0;
+ 
+-- 
+2.17.0
+

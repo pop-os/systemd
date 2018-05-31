@@ -1,0 +1,27 @@
+From 6f448047ed9da175292ece50a7aa16e28ed1abc7 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 1 May 2018 15:16:39 +0900
+Subject: [PATCH 112/131] doc: drop static user systemd-timesync from README
+
+(cherry picked from commit 2a46c4b739e1f39124b5e7f3f0c806b3452bad53)
+---
+ README | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/README b/README
+index 25646ac22e..bc81d4e7f8 100644
+--- a/README
++++ b/README
+@@ -237,9 +237,6 @@ USERS AND GROUPS:
+         exist. During execution this network facing service will drop
+         privileges and assume this uid/gid for security reasons.
+ 
+-        Similarly, the NTP daemon requires the "systemd-timesync" system
+-        user and group to exist.
+-
+         Similarly, the network management daemon requires the
+         "systemd-network" system user and group to exist.
+ 
+-- 
+2.17.0
+

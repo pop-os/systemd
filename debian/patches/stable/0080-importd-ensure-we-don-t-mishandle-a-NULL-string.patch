@@ -1,0 +1,26 @@
+From 0f1865eee2f7d7d7c1c552ba8dae64fdd61ee4df Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 6 Apr 2018 18:57:36 +0200
+Subject: [PATCH 080/131] importd: ensure we don't mishandle a NULL string
+
+(cherry picked from commit fe4377faa58cecb6abdac3549443cd74728559d2)
+---
+ src/import/import.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/import/import.c b/src/import/import.c
+index 454e64e3cb..b94b196b87 100644
+--- a/src/import/import.c
++++ b/src/import/import.c
+@@ -208,7 +208,7 @@ static int import_raw(int argc, char *argv[], void *userdata) {
+                 fd = STDIN_FILENO;
+ 
+                 (void) readlink_malloc("/proc/self/fd/0", &pretty);
+-                log_info("Importing '%s', saving as '%s'.", pretty, local);
++                log_info("Importing '%s', saving as '%s'.", strempty(pretty), local);
+         }
+ 
+         r = sd_event_default(&event);
+-- 
+2.17.0
+

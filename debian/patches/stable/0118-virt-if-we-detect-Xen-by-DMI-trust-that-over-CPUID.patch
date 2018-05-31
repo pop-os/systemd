@@ -1,0 +1,43 @@
+From 84b11c72f8ddea97204246c982c3d684ea28145c Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 30 Apr 2018 12:23:03 +0200
+Subject: [PATCH 118/131] virt: if we detect Xen by DMI, trust that over CPUID
+
+Apparently Xen sometimes lies about its identity when queried via CPUID.
+Let's hence prefer DMI tests for CPUID
+
+Fixes: #8844
+(cherry picked from commit f2fe2865cd19cd4318b82d01b9b62d22b1697b3a)
+---
+ src/basic/virt.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/basic/virt.c b/src/basic/virt.c
+index 39b4a98d89..971701acca 100644
+--- a/src/basic/virt.c
++++ b/src/basic/virt.c
+@@ -332,13 +332,16 @@ int detect_vm(void) {
+ 
+         /* We have to use the correct order here:
+          *
+-         * -> First try to detect Oracle Virtualbox, even if it uses KVM.
+-         * -> Second try to detect from cpuid, this will report KVM for
+-         *    whatever software is used even if info in dmi is overwritten.
+-         * -> Third try to detect from dmi. */
++         * → First, try to detect Oracle Virtualbox, even if it uses KVM, as well as Xen even if it cloaks as Microsoft
++         *   Hyper-V.
++         *
++         * → Second, try to detect from CPUID, this will report KVM for whatever software is used even if info in DMI is
++         *   overwritten.
++         *
++         * → Third, try to detect from DMI. */
+ 
+         dmi = detect_vm_dmi();
+-        if (dmi == VIRTUALIZATION_ORACLE) {
++        if (IN_SET(dmi, VIRTUALIZATION_ORACLE, VIRTUALIZATION_XEN)) {
+                 r = dmi;
+                 goto finish;
+         }
+-- 
+2.17.0
+

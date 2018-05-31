@@ -1,0 +1,64 @@
+From 7b0948598224ebb1056eba7f25afdb104337a73d Mon Sep 17 00:00:00 2001
+From: Susant Sahani <145210+ssahani@users.noreply.github.com>
+Date: Tue, 17 Apr 2018 20:25:04 +0530
+Subject: [PATCH 084/131] networkd: fix crash if fails to get network file
+ (#8714)
+
+In some situation if networkd fails to get the network file
+then networkd crashes becasse the link->network is not initalized;
+
+```
+veth99: Failed to get network dhcp-client-ipv4-only: No such file or directory
+Segmentation fault
+
+gdb) r
+The program being debugged has been started already.
+Start it from the beginning? (y or n) y
+Starting program: /home/sus/tt/systemd/build/systemd-networkd
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib64/libthread_db.so.1".
+warning: Loadable section ".note.gnu.property" outside of ELF segments
+warning: Loadable section ".note.gnu.property" outside of ELF segments
+warning: Loadable section ".note.gnu.property" outside of ELF segments
+
+Program received signal SIGSEGV, Segmentation fault.
+link_load (link=0x55555582ccd0) at ../src/network/networkd-link.c:2973
+2973	                r = sd_dhcp_client_new(&link->dhcp_client, link->network->dhcp_anonymize);
+(gdb) bt
+(gdb) p link->network
+$1 = (Network *) 0x0
+(gdb) list
+2968	                if (r < 0) {
+2969	                        log_link_debug_errno(link, r, "Failed to parse DHCPv4 address %s: %m", dhcp4_address);
+2970	                        goto dhcp4_address_fail;
+2971	                }
+2972
+2973	                r = sd_dhcp_client_new(&link->dhcp_client, link->network->dhcp_anonymize);
+2974	                if (r < 0)
+2975	                        return log_link_error_errno(link, r, "Failed to create DHCPv4 client: %m");
+2976
+2977	                r = sd_dhcp_client_set_request_address(link->dhcp_client, &address.in);
+(gdb) r
+```
+
+(cherry picked from commit b1c626f67fac9f29166812c12204bbb0c2d73047)
+---
+ src/network/networkd-link.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 64c45080df..31d3f7ade7 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -2985,7 +2985,7 @@ network_file_fail:
+                         goto dhcp4_address_fail;
+                 }
+ 
+-                r = sd_dhcp_client_new(&link->dhcp_client, link->network->dhcp_anonymize);
++                r = sd_dhcp_client_new(&link->dhcp_client, link->network ? link->network->dhcp_anonymize : 0);
+                 if (r < 0)
+                         return log_link_error_errno(link, r, "Failed to create DHCPv4 client: %m");
+ 
+-- 
+2.17.0
+

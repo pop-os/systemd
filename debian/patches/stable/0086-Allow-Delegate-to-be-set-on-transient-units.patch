@@ -1,0 +1,61 @@
+From 19da3fec80d3e30191be11f6dc7305f6c82e5254 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 18 Apr 2018 18:48:55 +0200
+Subject: [PATCH 086/131] Allow Delegate= to be set on transient units
+
+---
+ src/core/dbus-cgroup.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/dbus-cgroup.c b/src/core/dbus-cgroup.c
+index d77f96fdb3..489112087f 100644
+--- a/src/core/dbus-cgroup.c
++++ b/src/core/dbus-cgroup.c
+@@ -32,6 +32,7 @@
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "path-util.h"
++#include "unit.h"
+ 
+ static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_cgroup_device_policy, cgroup_device_policy, CGroupDevicePolicy);
+ 
+@@ -351,13 +352,13 @@ static int bus_cgroup_set_transient_property(
+         if (streq(name, "Delegate")) {
+                 int b;
+ 
+-                if (!UNIT_VTABLE(u)->can_delegate)
+-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Delegation not available for unit type");
+-
+                 r = sd_bus_message_read(message, "b", &b);
+                 if (r < 0)
+                         return r;
+ 
++                if (!UNIT_VTABLE(u)->can_delegate && b)
++                        log_unit_notice(u, "Delegate=yes set, but has no effect for unit type");
++
+                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                         c->delegate = b;
+                         c->delegate_controllers = b ? _CGROUP_MASK_ALL : 0;
+@@ -370,9 +371,6 @@ static int bus_cgroup_set_transient_property(
+         } else if (streq(name, "DelegateControllers")) {
+                 CGroupMask mask = 0;
+ 
+-                if (!UNIT_VTABLE(u)->can_delegate)
+-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Delegation not available for unit type");
+-
+                 r = sd_bus_message_enter_container(message, 'a', "s");
+                 if (r < 0)
+                         return r;
+@@ -414,6 +412,9 @@ static int bus_cgroup_set_transient_property(
+                         unit_write_settingf(u, flags, name, "Delegate=%s", strempty(t));
+                 }
+ 
++                if (!UNIT_VTABLE(u)->can_delegate && c->delegate)
++                        log_unit_notice(u, "Delegate=yes set, but has no effect for unit type");
++
+                 return 1;
+         }
+ 
+-- 
+2.17.0
+

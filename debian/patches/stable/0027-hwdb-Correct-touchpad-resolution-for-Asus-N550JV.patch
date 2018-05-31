@@ -1,0 +1,29 @@
+From 493ea04a9ac5fb8fd8c986e35937c0cd287f6072 Mon Sep 17 00:00:00 2001
+From: Elia Geretto <elia.f.geretto@gmail.com>
+Date: Mon, 19 Mar 2018 08:02:40 +0100
+Subject: [PATCH 027/131] hwdb: Correct touchpad resolution for Asus N550JV
+
+(cherry picked from commit 26d0c809a504b6aa4781fbb158623e19862d156f)
+---
+ hwdb/60-evdev.hwdb | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/hwdb/60-evdev.hwdb b/hwdb/60-evdev.hwdb
+index 69bd09c7bf..e8e650cde6 100644
+--- a/hwdb/60-evdev.hwdb
++++ b/hwdb/60-evdev.hwdb
+@@ -114,9 +114,10 @@ evdev:name:ETPS/2 Elantech Touchpad:dmi:bvn*:bvr*:bd*:svnASUSTeKComputerInc.:pnK
+  EVDEV_ABS_35=::18
+  EVDEV_ABS_36=::16
+ 
+-# Asus X550CC and S550CB
++# Asus X550CC, S550CB and N550JV
+ evdev:name:ETPS/2 Elantech Touchpad:dmi:*:svnASUSTeKCOMPUTERINC.:pnX550CC:*
+ evdev:name:ETPS/2 Elantech Touchpad:dmi:*:svnASUSTeKCOMPUTERINC.:pnS550CB:*
++evdev:name:ETPS/2 Elantech Touchpad:dmi:*:svnASUSTeKCOMPUTERINC.:pnN550JV:*
+  EVDEV_ABS_00=::31
+  EVDEV_ABS_01=::30
+  EVDEV_ABS_35=::31
+-- 
+2.17.0
+

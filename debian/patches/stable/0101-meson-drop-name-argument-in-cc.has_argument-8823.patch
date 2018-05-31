@@ -1,0 +1,42 @@
+From 801a81fc1e4963fb06e891f0f064ffe9cf8cf1b3 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 26 Apr 2018 17:53:10 +0900
+Subject: [PATCH 101/131] meson: drop 'name' argument in cc.has_argument()
+ (#8823)
+
+This fixes the following warning with clang and meson-0.46.0,
+```
+WARNING: Passed invalid keyword argument "name".
+WARNING: This will become a hard error in the future.
+WARNING: Passed invalid keyword argument "name".
+WARNING: This will become a hard error in the future.
+Compiler for C supports arguments -Wno-typedef-redefinition: YES
+WARNING: Passed invalid keyword argument "name".
+WARNING: This will become a hard error in the future.
+WARNING: Passed invalid keyword argument "name".
+WARNING: This will become a hard error in the future.
+Compiler for C supports arguments -Wno-gnu-variable-sized-type-not-at-end: YES
+```
+
+(cherry picked from commit 8ac42236b09d2f21f962bf72fcbeee24502f959f)
+---
+ meson.build | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index 358b41b9d1..a81fd5a165 100644
+--- a/meson.build
++++ b/meson.build
+@@ -387,8 +387,7 @@ if cc.get_id() == 'clang'
+         foreach arg : ['-Wno-typedef-redefinition',
+                        '-Wno-gnu-variable-sized-type-not-at-end',
+                       ]
+-                if cc.has_argument(arg,
+-                                   name : '@0@ is supported'.format(arg))
++                if cc.has_argument(arg)
+                         add_project_arguments(arg, language : 'c')
+                 endif
+         endforeach
+-- 
+2.17.0
+

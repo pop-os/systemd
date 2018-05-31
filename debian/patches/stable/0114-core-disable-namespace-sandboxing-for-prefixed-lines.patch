@@ -1,0 +1,53 @@
+From 320feaf6c3d4a015427defb1dd4c3ea709d797b9 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 1 May 2018 13:33:34 +0900
+Subject: [PATCH 114/131] core: disable namespace sandboxing for '+' prefixed
+ lines
+
+Fixes #8842.
+
+(cherry picked from commit b5a33299b055714e9ead2db33243f811ea488afa)
+---
+ src/core/execute.c | 19 +++++++++++--------
+ 1 file changed, 11 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/execute.c b/src/core/execute.c
+index 7292b815db..2f4b70ab3b 100644
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -2311,14 +2311,7 @@ static int apply_mount_namespace(
+         _cleanup_strv_free_ char **empty_directories = NULL;
+         char *tmp = NULL, *var = NULL;
+         const char *root_dir = NULL, *root_image = NULL;
+-        NamespaceInfo ns_info = {
+-                .ignore_protect_paths = false,
+-                .private_dev = context->private_devices,
+-                .protect_control_groups = context->protect_control_groups,
+-                .protect_kernel_tunables = context->protect_kernel_tunables,
+-                .protect_kernel_modules = context->protect_kernel_modules,
+-                .mount_apivfs = context->mount_apivfs,
+-        };
++        NamespaceInfo ns_info = {};
+         bool needs_sandboxing;
+         BindMount *bind_mounts = NULL;
+         unsigned n_bind_mounts = 0;
+@@ -2358,6 +2351,16 @@ static int apply_mount_namespace(
+ 
+         needs_sandboxing = (params->flags & EXEC_APPLY_SANDBOXING) && !(command->flags & EXEC_COMMAND_FULLY_PRIVILEGED);
+ 
++        if (needs_sandboxing)
++                ns_info = (NamespaceInfo) {
++                        .ignore_protect_paths = false,
++                        .private_dev = context->private_devices,
++                        .protect_control_groups = context->protect_control_groups,
++                        .protect_kernel_tunables = context->protect_kernel_tunables,
++                        .protect_kernel_modules = context->protect_kernel_modules,
++                        .mount_apivfs = context->mount_apivfs,
++                };
++
+         r = setup_namespace(root_dir, root_image,
+                             &ns_info, context->read_write_paths,
+                             needs_sandboxing ? context->read_only_paths : NULL,
+-- 
+2.17.0
+

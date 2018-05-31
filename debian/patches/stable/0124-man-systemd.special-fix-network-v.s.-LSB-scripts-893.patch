@@ -1,0 +1,46 @@
+From 7acfd2b9c954e4032ce3f7449011f97e8468380b Mon Sep 17 00:00:00 2001
+From: Alan Jenkins <alan.christopher.jenkins@gmail.com>
+Date: Tue, 8 May 2018 15:53:41 +0100
+Subject: [PATCH 124/131] man/systemd.special: fix network v.s. LSB scripts
+ (#8930)
+
+$network is converted to network-online.target, not network-target.
+
+See https://www.freedesktop.org/wiki/Software/systemd/NetworkTarget/
+and the implementation at `src/sysv-generator/sysv-generator.c`.
+
+(cherry picked from commit 3c88cbeed42867841ee53d49dd558c45615a5549)
+---
+ man/systemd.special.xml | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/man/systemd.special.xml b/man/systemd.special.xml
+index 6340eeb92d..5bb279333c 100644
+--- a/man/systemd.special.xml
++++ b/man/systemd.special.xml
+@@ -458,6 +458,10 @@
+           functionality to other hosts generally do not need to pull
+           this in.</para>
+ 
++          <para>systemd automatically adds dependencies of type <varname>Wants=</varname> and <varname>After=</varname>
++          for this target unit to all SysV init script service units with an LSB header referring to the
++          <literal>$network</literal> facility.</para>
++
+           <para>Note that this unit is only useful during the original system start-up logic. After the system has
+           completed booting up, it will not track the online state of the system anymore. Due to this it cannot be used
+           as a network connection monitor concept, it is purely a one-time system start-up concept.</para>
+@@ -849,11 +853,6 @@
+           information. Also see
+           <filename>network-online.target</filename> described
+           above.</para>
+-
+-          <para>systemd automatically adds dependencies of type
+-          <varname>After=</varname> for this target unit to all SysV
+-          init script service units with an LSB header referring to
+-          the <literal>$network</literal> facility.</para>
+         </listitem>
+       </varlistentry>
+       <varlistentry>
+-- 
+2.17.0
+

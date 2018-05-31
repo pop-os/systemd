@@ -1,0 +1,61 @@
+From 24713f6a47cb241e3d29b61b548819999b2c3ead Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 23 Apr 2018 17:26:03 +0200
+Subject: [PATCH 104/131] man: fix description of %N in systemd.unit(5)
+
+The description in the man page disagreed with the code. Let the code win,
+since if anybody is using this, they are more likely to depend on actual
+behaviour rather than the docs. (In Fedora workstation installation there's
+only one use, and it doesn't make much sense either way: SyslogIdentifier=%N
+in xfs_scrub@.service.)
+
+Also adds dots at the end everywhere, because we have multiple sentences in
+some explanations, so we need dots.
+
+(cherry picked from commit e1a7f622e7f9831c07294ad9ffc866d48b2b61a5)
+---
+ man/systemd.unit.xml | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
+index 8365cddc42..0c11119707 100644
+--- a/man/systemd.unit.xml
++++ b/man/systemd.unit.xml
+@@ -1555,28 +1555,28 @@
+           </row>
+           <row>
+             <entry><literal>%N</literal></entry>
+-            <entry>Unescaped full unit name</entry>
+-            <entry>Same as <literal>%n</literal>, but with escaping undone. This undoes the escaping used when generating unit names from arbitrary strings (see above). </entry>
++            <entry>Full unit name</entry>
++            <entry>Same as <literal>%n</literal>, but with the type suffix removed.</entry>
+           </row>
+           <row>
+             <entry><literal>%p</literal></entry>
+             <entry>Prefix name</entry>
+-            <entry>For instantiated units, this refers to the string before the <literal>@</literal> character of the unit name. For non-instantiated units, this refers to the name of the unit with the type suffix removed.</entry>
++            <entry>For instantiated units, this refers to the string before the first <literal>@</literal> character of the unit name. For non-instantiated units, same as <literal>%N</literal>.</entry>
+           </row>
+           <row>
+             <entry><literal>%P</literal></entry>
+             <entry>Unescaped prefix name</entry>
+-            <entry>Same as <literal>%p</literal>, but with escaping undone</entry>
++            <entry>Same as <literal>%p</literal>, but with escaping undone.</entry>
+           </row>
+           <row>
+             <entry><literal>%i</literal></entry>
+             <entry>Instance name</entry>
+-            <entry>For instantiated units: this is the string between the <literal>@</literal> character and the suffix of the unit name.</entry>
++            <entry>For instantiated units this is the string between the first <literal>@</literal> character and the type suffix. Empty for non-instantiated units.</entry>
+           </row>
+           <row>
+             <entry><literal>%I</literal></entry>
+             <entry>Unescaped instance name</entry>
+-            <entry>Same as <literal>%i</literal>, but with escaping undone</entry>
++            <entry>Same as <literal>%i</literal>, but with escaping undone.</entry>
+           </row>
+           <row>
+             <entry><literal>%f</literal></entry>
+-- 
+2.17.0
+

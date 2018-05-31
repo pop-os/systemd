@@ -1,0 +1,36 @@
+From f9e4beb2690f7b6848cf1f3c146190a28782a66a Mon Sep 17 00:00:00 2001
+From: Jui-Chi Ricky Liang <juichi.liang@gmail.com>
+Date: Tue, 20 Mar 2018 16:54:18 +0800
+Subject: [PATCH 046/131] v4l_id: check mplane video capture and output
+ capailities (#8464)
+
+Video devices using mplane buffer API declare capture and output
+capabilities with V4L2_CAP_VIDEO_CAPTURE_MPLANE and
+V4L2_CAP_VIDEO_OUTPUT_MPLANE.
+
+(cherry picked from commit 27b6cb1f59e1e7a5cc0e70d293dbb1607f754a99)
+---
+ src/udev/v4l_id/v4l_id.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/udev/v4l_id/v4l_id.c b/src/udev/v4l_id/v4l_id.c
+index 05f31d479e..8c525c1139 100644
+--- a/src/udev/v4l_id/v4l_id.c
++++ b/src/udev/v4l_id/v4l_id.c
+@@ -68,9 +68,11 @@ int main(int argc, char *argv[]) {
+                 printf("ID_V4L_VERSION=2\n");
+                 printf("ID_V4L_PRODUCT=%s\n", v2cap.card);
+                 printf("ID_V4L_CAPABILITIES=:");
+-                if ((v2cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) > 0)
++                if ((v2cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) > 0 ||
++                    (v2cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE) > 0)
+                         printf("capture:");
+-                if ((v2cap.capabilities & V4L2_CAP_VIDEO_OUTPUT) > 0)
++                if ((v2cap.capabilities & V4L2_CAP_VIDEO_OUTPUT) > 0 ||
++                    (v2cap.capabilities & V4L2_CAP_VIDEO_OUTPUT_MPLANE) > 0)
+                         printf("video_output:");
+                 if ((v2cap.capabilities & V4L2_CAP_VIDEO_OVERLAY) > 0)
+                         printf("video_overlay:");
+-- 
+2.17.0
+

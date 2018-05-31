@@ -1,0 +1,91 @@
+From c1923ce8264e65a16ab8adb8b7f3666342c76011 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 24 Apr 2018 11:51:21 +0200
+Subject: [PATCH 107/131] man: don't claim we'd set XDG_SEAT and XDG_VTNR as
+ part of service management
+
+Previously, reading through systemd.exec(5) one might get the idea that
+XDG_SEAT and XDG_VTNR are part of the service management logic, but they
+are not, they are only set if pam_systemd is part of a PAM stack an
+pam_systemd is used.
+
+Hence, let's drop these env vars from the list of env vars, and instead
+add a paragraph after the list mentioning that pam_systemd might add
+more systemd-specific env vars if included in the PAM stack for a
+service that uses PAMName=.
+
+(cherry picked from commit 46b073298f71034bafd6f007d6b7e796e12153f2)
+---
+ man/systemd.exec.xml | 35 +++++++++++++++--------------------
+ 1 file changed, 15 insertions(+), 20 deletions(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index daae94e372..7d7a6a839b 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -1987,7 +1987,9 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
+ 
+       <listitem><para>Variables read from files specified via <varname>EnvironmentFile=</varname> in the unit file</para></listitem>
+ 
+-      <listitem><para>Variables set by any PAM modules in case <varname>PAMName=</varname> is in effect, cf. <citerefentry project='man-pages'><refentrytitle>pam_env</refentrytitle><manvolnum>8</manvolnum></citerefentry></para></listitem>
++      <listitem><para>Variables set by any PAM modules in case <varname>PAMName=</varname> is in effect,
++      cf. <citerefentry
++      project='man-pages'><refentrytitle>pam_env</refentrytitle><manvolnum>8</manvolnum></citerefentry></para></listitem>
+     </itemizedlist>
+ 
+     <para>If the same environment variables are set by multiple of these sources, the later source — according to the
+@@ -1995,7 +1997,8 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
+     <varname>UnsetEnvironment=</varname> are removed again from the compiled environment variable list, immediately
+     before it is passed to the executed process.</para>
+ 
+-    <para>The following select environment variables are set by the service manager itself for each invoked process:</para>
++    <para>The following select environment variables are set or propagated by the service manager for each invoked
++    process:</para>
+ 
+     <variablelist class='environment-variables'>
+       <varlistentry>
+@@ -2046,24 +2049,11 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
+       <varlistentry>
+         <term><varname>$XDG_RUNTIME_DIR</varname></term>
+ 
+-        <listitem><para>The directory for volatile state. Set for the
+-        user <command>systemd</command> instance, and also in user
+-        sessions. See
+-        <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+-        </para></listitem>
+-      </varlistentry>
+-
+-      <varlistentry>
+-        <term><varname>$XDG_SESSION_ID</varname></term>
+-        <term><varname>$XDG_SEAT</varname></term>
+-        <term><varname>$XDG_VTNR</varname></term>
+-
+-        <listitem><para>The identifier of the session, the seat name,
+-        and virtual terminal of the session. Set by
+-        <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+-        for login sessions. <varname>$XDG_SEAT</varname> and
+-        <varname>$XDG_VTNR</varname> will only be set when attached to
+-        a seat and a tty.</para></listitem>
++        <listitem><para>The directory to use for runtime objects (such as IPC objects) and volatile state. Set for all
++        services run by the user <command>systemd</command> instance, as well as any system services that use
++        <varname>PAMName=</varname> with a PAM stack that includes <command>pam_systemd</command>. See below and
++        <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry> for more
++        information.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+@@ -2317,6 +2307,11 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
+         </listitem>
+       </varlistentry>
+     </variablelist>
++
++    <para>For system services, when <varname>PAMName=</varname> is enabled and <command>pam_systemd</command> is part
++    of the selected PAM stack, additional environment variables defined by systemd may be set for
++    services. Specifically, these are <varname>$XDG_SEAT</varname>, <varname>$XDG_VTNR</varname>, see
++    <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry> for details.</para>
+   </refsect1>
+ 
+   <refsect1>
+-- 
+2.17.0
+

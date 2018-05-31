@@ -1,0 +1,41 @@
+From c885a886eb7400010c728814d6ef4c3404149009 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 19 Mar 2018 09:21:02 +0100
+Subject: [PATCH 052/131] basic/calendarspec: add check for repeat values that
+ would overflow
+
+https://oss-fuzz.com/v2/issue/4651449704251392/7004
+(cherry picked from commit e127f26b1a19571a4da6094c226ad5f34438357a)
+
+[The fuzz case was not backported.]
+---
+ src/basic/calendarspec.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/basic/calendarspec.c b/src/basic/calendarspec.c
+index fd78022773..8f3bb9102f 100644
+--- a/src/basic/calendarspec.c
++++ b/src/basic/calendarspec.c
+@@ -181,6 +181,8 @@ int calendar_spec_normalize(CalendarSpec *c) {
+ }
+ 
+ _pure_ static bool chain_valid(CalendarComponent *c, int from, int to, bool end_of_month) {
++        assert(to >= from);
++
+         if (!c)
+                 return true;
+ 
+@@ -191,6 +193,10 @@ _pure_ static bool chain_valid(CalendarComponent *c, int from, int to, bool end_
+         if (c->start < from || c->start > to)
+                 return false;
+ 
++        /* Avoid overly large values that could cause overflow */
++        if (c->repeat > to - from)
++                return false;
++
+         /*
+          * c->repeat must be short enough so at least one repetition may
+          * occur before the end of the interval.  For dates scheduled
+-- 
+2.17.0
+

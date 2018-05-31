@@ -1,0 +1,33 @@
+From 5127fbedd7a40a9ab31ade29f416458e3adbe949 Mon Sep 17 00:00:00 2001
+From: Will Dietz <github@wdtz.org>
+Date: Sat, 31 Mar 2018 05:55:45 -0500
+Subject: [PATCH 066/131] generate-af-list.sh: slightly generalize pattern, fix
+ w/musl (#8629)
+
+Accept definitions to other AF_ constants, not just PF_ ones,
+such as:
+
+  #define AF_LINUX AF_LOCAL
+
+It may not be necessary to impose any restriction on the
+definitions of the macros extracted, but for now
+keep most of that requirement but match AF_* as well.
+
+(cherry picked from commit 203690537b2d2c099a1380e0950d07981b4471c4)
+---
+ src/basic/generate-af-list.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/basic/generate-af-list.sh b/src/basic/generate-af-list.sh
+index fa74198e58..39e2dad5e7 100755
+--- a/src/basic/generate-af-list.sh
++++ b/src/basic/generate-af-list.sh
+@@ -3,4 +3,4 @@ set -eu
+ 
+ $1 -E -dM -include sys/socket.h - </dev/null | \
+         grep -Ev 'AF_UNSPEC|AF_MAX' | \
+-        awk '/^#define[ \t]+AF_[^ \t]+[ \t]+PF_[^ \t]/ { print $2; }'
++        awk '/^#define[ \t]+AF_[^ \t]+[ \t]+[AP]F_[^ \t]/ { print $2; }'
+-- 
+2.17.0
+

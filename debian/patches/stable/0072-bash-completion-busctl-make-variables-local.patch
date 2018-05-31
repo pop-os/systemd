@@ -1,0 +1,50 @@
+From c79751911c585e415926364e19c18877f53942df Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 30 Mar 2018 17:13:52 +0900
+Subject: [PATCH 072/131] bash-completion: busctl: make variables local
+
+(cherry picked from commit 7f9c3ecad840fe8584ad4d350eefb67fe43869e7)
+---
+ shell-completion/bash/busctl | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/shell-completion/bash/busctl b/shell-completion/bash/busctl
+index c467b291b3..c357c25bc3 100644
+--- a/shell-completion/bash/busctl
++++ b/shell-completion/bash/busctl
+@@ -48,7 +48,7 @@ __get_interfaces() {
+         local mode=$1
+         local busname=$2
+         local path=$3
+-        local a b
++        local a b c
+         busctl $mode introspect --list --no-legend --no-pager $busname $path | { while read a b c; do [[ "$b" == "interface" ]] && echo " $a"; done; };
+ }
+ 
+@@ -59,7 +59,7 @@ __get_members() {
+         local interface=$4
+         local type=$5
+         local flags=$6
+-        local a b
++        local a b c d e
+         busctl $mode introspect --list --no-legend --no-pager $busname $path $interface | sed -e 's/^\.//' | { while read a b c d e; do [[ "$b" == "$type" && ( -z $flags || "$e" == "$flags" ) ]] && echo " $a"; done; };
+ }
+ 
+@@ -69,12 +69,12 @@ __get_signature() {
+         local path=$3
+         local interface=$4
+         local member=$5
+-        local a b
++        local a b c d
+         busctl $mode introspect --list --no-legend --no-pager $busname $path $interface | sed -e 's/^\.//' | { while read a b c d; do [[ "$a" == "$member" && "$c" != '-' ]] && echo " \"$c\""; done; };
+ }
+ 
+ _busctl() {
+-        local i verb comps mode
++        local i n verb comps mode
+         local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
+         local -A OPTS=(
+                [STANDALONE]='-h --help --version --no-pager --no-legend --system --user
+-- 
+2.17.0
+

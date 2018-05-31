@@ -1,0 +1,27 @@
+From 7a1d67470a47a3bf8c11ef80804e3a3fc2176cda Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 8 Mar 2018 11:00:26 +0100
+Subject: [PATCH 033/131] systemctl: if kexec is missing, do not try to kexec
+
+(cherry picked from commit c0d73214986ca006949b86b74c583878a562be53)
+---
+ src/systemctl/systemctl.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index 3be01321b6..dfc9630f55 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
+@@ -3483,6 +3483,9 @@ static int load_kexec_kernel(void) {
+                 return 0;
+         }
+ 
++        if (access(KEXEC, X_OK) < 0)
++                return log_error_errno(errno, KEXEC" is not available: %m");
++
+         r = find_esp_and_warn(arg_esp_path, false, &where, NULL, NULL, NULL, NULL);
+         if (r == -ENOKEY) /* find_esp_and_warn() doesn't warn about this case */
+                 return log_error_errno(r, "Cannot find the ESP partition mount point.");
+-- 
+2.17.0
+

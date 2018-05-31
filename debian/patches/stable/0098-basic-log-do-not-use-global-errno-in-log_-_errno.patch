@@ -1,0 +1,49 @@
+From 3c1a062cd0134766f4c8052cbd53b2c2e2ab312b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 24 Apr 2018 13:57:38 +0200
+Subject: [PATCH 098/131] basic/log: do not use global errno in log_*_errno()
+
+Quoting https://github.com/systemd/systemd/pull/8760#discussion_r183321060:
+
+> When we originally added the errno patching we went for a "best of both
+> worlds" approach, i.e. that we override errno if an error is specified, but
+> if no error is specified (i.e. 0 is passed as error code) then we use the
+> previously set errno, similar in style how plain `printf()` would do it. In
+> retrospect I think we almost never purposefully made use of the second,
+> i.e. the plain `printf()` logic, but we multiple times ran into this case
+> accidentally and introduced a bug. Hence yes, it probably makes sense to
+> switch this over, and consistently ignore the `errno` already set and always
+> override it with the error passed in. The only problem I see with that is: I
+> wonder if there might be a case or two lurking somewhere where we actually
+> made use of the "best of both worlds" approach, and if so, if we can detect
+> where... (But then again, even if there is, and we fail to find those cases,
+> maybe that's not all bad, as it's just a few new bugs against probably fixing
+> many more old and future bugs, if you follow what I mean).
+
+I scanned our codebase, and found some bugs in the value passed to log_*_errno,
+but no intentional cases of error=0 being passed.
+
+(cherry picked from commit b29f6480eca0550ba65d30fbece8dd4d4bfe666d)
+---
+ src/basic/log.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/basic/log.c b/src/basic/log.c
+index 16a2431c54..c1bdda7905 100644
+--- a/src/basic/log.c
++++ b/src/basic/log.c
+@@ -699,9 +699,8 @@ int log_internalv_realm(
+         if (_likely_(LOG_PRI(level) > log_max_level[realm]))
+                 return -error;
+ 
+-        /* Make sure that %m maps to the specified error */
+-        if (error != 0)
+-                errno = error;
++        /* Make sure that %m maps to the specified error (or "Success"). */
++        errno = error;
+ 
+         (void) vsnprintf(buffer, sizeof buffer, format, ap);
+ 
+-- 
+2.17.0
+

@@ -1,0 +1,70 @@
+From dab644722e9af19273da3d3086c365f0df6115f1 Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekletar@users.noreply.github.com>
+Date: Fri, 9 Mar 2018 23:30:32 +0100
+Subject: [PATCH 014/131] core: ignore errors from cg_create_and_attach() in
+ test mode (#8401)
+
+Reproducer:
+
+$ meson build && cd build
+$ ninja
+$ sudo useradd test
+$ sudo su test
+$ ./systemd --system --test
+...
+Failed to create /user.slice/user-1000.slice/session-6.scope/init.scope control group: Permission denied
+Failed to allocate manager object: Permission denied
+
+Above error message is caused by the fact that user test didn't have its
+own session and we tried to set up init.scope already running as user
+test in the directory owned by different user.
+
+Let's try to setup cgroup hierarchy, but if that fails return error only
+when not running in the test mode.
+
+Fixes #8072
+
+(cherry picked from commit aa77e234fce7413b7dd64f99ea51450f2e2e9dbd)
+---
+ src/core/cgroup.c | 23 ++++++++++++-----------
+ 1 file changed, 12 insertions(+), 11 deletions(-)
+
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index 3c0ff09639..65ed86580f 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -2272,19 +2272,20 @@ int manager_setup_cgroup(Manager *m) {
+         /* 5. Make sure we are in the special "init.scope" unit in the root slice. */
+         scope_path = strjoina(m->cgroup_root, "/" SPECIAL_INIT_SCOPE);
+         r = cg_create_and_attach(SYSTEMD_CGROUP_CONTROLLER, scope_path, 0);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to create %s control group: %m", scope_path);
++        if (r >= 0) {
++                /* Also, move all other userspace processes remaining in the root cgroup into that scope. */
++                r = cg_migrate(SYSTEMD_CGROUP_CONTROLLER, m->cgroup_root, SYSTEMD_CGROUP_CONTROLLER, scope_path, 0);
++                if (r < 0)
++                        log_warning_errno(r, "Couldn't move remaining userspace processes, ignoring: %m");
+ 
+-        /* Also, move all other userspace processes remaining in the root cgroup into that scope. */
+-        r = cg_migrate(SYSTEMD_CGROUP_CONTROLLER, m->cgroup_root, SYSTEMD_CGROUP_CONTROLLER, scope_path, 0);
+-        if (r < 0)
+-                log_warning_errno(r, "Couldn't move remaining userspace processes, ignoring: %m");
++                /* 6. And pin it, so that it cannot be unmounted */
++                safe_close(m->pin_cgroupfs_fd);
++                m->pin_cgroupfs_fd = open(path, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_NOCTTY|O_NONBLOCK);
++                if (m->pin_cgroupfs_fd < 0)
++                        return log_error_errno(errno, "Failed to open pin file: %m");
+ 
+-        /* 6. And pin it, so that it cannot be unmounted */
+-        safe_close(m->pin_cgroupfs_fd);
+-        m->pin_cgroupfs_fd = open(path, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_NOCTTY|O_NONBLOCK);
+-        if (m->pin_cgroupfs_fd < 0)
+-                return log_error_errno(errno, "Failed to open pin file: %m");
++        } else if (r < 0 && !m->test_run_flags)
++                return log_error_errno(r, "Failed to create %s control group: %m", scope_path);
+ 
+         /* 7. Always enable hierarchical support if it exists... */
+         if (!all_unified && m->test_run_flags == 0)
+-- 
+2.17.0
+

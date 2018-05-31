@@ -1,0 +1,46 @@
+From 1cfb90a0db47cc4a163085e495169b39a3aa9951 Mon Sep 17 00:00:00 2001
+From: emelenas <4527811+emelenas@users.noreply.github.com>
+Date: Tue, 10 Apr 2018 00:15:25 +0200
+Subject: [PATCH 077/131] Add override axis for Toshiba Satellite R830 (#8694)
+
+Incorrect range and resolution for the touchpad at a Toshiba Satellite R830 reported by kernel. After running
+
+$ sudo touchpad-edge-detector 85x50 /dev/input/event4
+
+the new axis overrides are as follows
+
+#Toshiba Satellite R830
+evdev:name:SynPS/2 Synaptics TouchPad:dmi:svnTOSHIBA:pnSATELLITER830
+EVDEV_ABS_00=1238:5785:53
+EVDEV_ABS_01=1045:4826:76
+EVDEV_ABS_35=1238:5785:53
+EVDEV_ABS_36=1045:4826:76
+
+Those overrides have been tested to work.
+
+(cherry picked from commit 87ca11cb9201055348b4202210b06988c5a6ed9b)
+---
+ hwdb/60-evdev.hwdb | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/hwdb/60-evdev.hwdb b/hwdb/60-evdev.hwdb
+index e8e650cde6..26c7f3b02d 100644
+--- a/hwdb/60-evdev.hwdb
++++ b/hwdb/60-evdev.hwdb
+@@ -461,6 +461,13 @@ evdev:name:AlpsPS/2 ALPS DualPoint TouchPad:dmi:*svnTOSHIBA:pnTECRAM11*
+  EVDEV_ABS_00=90:962:11
+  EVDEV_ABS_01=51:681:14
+ 
++# Toshiba Satellite R830
++evdev:name:SynPS/2 Synaptics TouchPad:dmi:*svnTOSHIBA:pnSATELLITER830*
++ EVDEV_ABS_00=1238:5785:53
++ EVDEV_ABS_01=1045:4826:76
++ EVDEV_ABS_35=1238:5785:53
++ EVDEV_ABS_36=1045:4826:76
++ 
+ #########################################
+ # Razer
+ #########################################
+-- 
+2.17.0
+

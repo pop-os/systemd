@@ -1,0 +1,37 @@
+From 597b5c3b782b6cf24096a75259f7d405dec77fca Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 14 Mar 2018 15:10:46 +0900
+Subject: [PATCH 041/131] man: mention 'status' is the default command for
+ timedatectl
+
+(cherry picked from commit 24fcd009c3eb89f590bef96dd5495fd4ef796fd0)
+---
+ man/timedatectl.xml | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/man/timedatectl.xml b/man/timedatectl.xml
+index dba94d8831..f24ec2d4c8 100644
+--- a/man/timedatectl.xml
++++ b/man/timedatectl.xml
+@@ -98,6 +98,10 @@
+       <xi:include href="standard-options.xml" xpointer="version" />
+       <xi:include href="standard-options.xml" xpointer="no-pager" />
+     </variablelist>
++  </refsect1>
++
++  <refsect1>
++    <title>Commands</title>
+ 
+     <para>The following commands are understood:</para>
+ 
+@@ -109,6 +113,7 @@
+         including whether network time synchronization through
+         <filename>systemd-timesyncd.service</filename> is active. Even if it is
+         inactive, a different service might still synchronize the clock.
++        If no command is specified, this is the implied default.
+         </para></listitem>
+       </varlistentry>
+ 
+-- 
+2.17.0
+

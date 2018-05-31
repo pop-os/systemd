@@ -1,0 +1,34 @@
+From 6668121f9c23c8eed036b9d176e925a03a5fdebc Mon Sep 17 00:00:00 2001
+From: Hans de Goede <j.w.r.degoede@gmail.com>
+Date: Sat, 28 Apr 2018 10:43:06 +0200
+Subject: [PATCH 108/131] hwdb: Add accelerometer orientation quirk for the
+ Kazam Vision tablet (#8845)
+
+Add accelerometer orientation quirk for the 8" Kazam Vision "gaming"
+tablet.
+
+(cherry picked from commit d5a21d85a5c81bd52ca8672ee1ae743eeecd26ea)
+---
+ hwdb/60-sensor.hwdb | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/hwdb/60-sensor.hwdb b/hwdb/60-sensor.hwdb
+index 8385efd28d..d7204422bc 100644
+--- a/hwdb/60-sensor.hwdb
++++ b/hwdb/60-sensor.hwdb
+@@ -192,6 +192,12 @@ sensor:modalias:acpi:BOSC0200*:dmi:bvnINSYDECorp.:bvrjumperx.T87.KFBNEE*
+ sensor:modalias:acpi:BOSC0200*:dmi:*:svnJumper:pnEZpad:*:rvr.A006:*
+  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, 1
+ 
++#########################################
++# Kazam
++#########################################
++sensor:modalias:acpi:KIOX000A*:dmi:bvnINSYDECorp.:bvrVISION.I22K*:svnKAZAM:pnVISION:*
++ ACCEL_MOUNT_MATRIX=0, 1, 0; 1, 0, 0; 0, 0, 1
++
+ #########################################
+ # Lamina
+ #########################################
+-- 
+2.17.0
+
