@@ -54,6 +54,7 @@ CONFFLAGS = \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
 	-Dpamconfdir=no \
+	-Drpmmacrosdir=no \
 	-Dqrencode=false \
 	-Dvconsole=false \
 	-Dfirstboot=false \
@@ -195,8 +196,6 @@ override_dh_install:
 	rm -f debian/install/*/usr/share/doc/systemd/LICENSE.*
 	rm -f debian/install/*/var/log/README
 	rm -f debian/install/*/etc/init.d/README
-	rm -rf debian/install/*/etc/rpm/
-	rm -rf debian/install/*/usr/lib/rpm/
 	rm -f debian/install/*/usr/lib/sysctl.d/50-default.conf
 	rm -f debian/install/*/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
 	rmdir -p --ignore-fail-on-non-empty debian/install/*/etc/X11/xinit/xinitrc.d/
