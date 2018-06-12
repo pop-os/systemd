@@ -284,14 +284,9 @@ override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	echo "01234567890123456789012345678901" > build-deb/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	# some tests are known to fail under ancient kernels
 	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id ninja -C build-deb test || ( \
 		cat build-deb/meson-logs/testlog.txt; \
-		if linux-version compare "$$(uname -r)" ge 3.13; then \
-		    exit 1; \
-		else \
-		    echo "Ignoring test failure under too old kernel $$(uname -r)"; \
-		fi)
+		exit 1)
 endif
 
 %:
