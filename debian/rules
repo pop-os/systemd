@@ -200,7 +200,6 @@ override_dh_install:
 	rm -f debian/install/*/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
 	rmdir -p --ignore-fail-on-non-empty debian/install/*/etc/X11/xinit/xinitrc.d/
 	rm -f debian/install/*/lib/systemd/system/halt-local.service
-	find debian/install/ -name '*.busname' -delete
 	# remove files related to factory-reset feature
 	find debian/install/ \( -name 'systemd-update-done*' -o \
 		-name systemd-journal-catalog-update.service -o \
