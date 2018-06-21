@@ -176,4 +176,10 @@ if dpkg --compare-versions "$2" lt-nl "236-1~"; then
     rm -f /var/lib/systemd/clock
 fi
 
+# Process all tmpfiles that we ship, including any overrides in
+# runtime-dir/sysadmin-dir/other packages (e.g. rsyslog)
+#
+# Ignore if this fails, because e.g. %b will fail on WSL
+systemd-tmpfiles --create || :
+
 #DEBHELPER#
