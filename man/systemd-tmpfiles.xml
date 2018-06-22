@@ -4,23 +4,6 @@
 
 <!--
   SPDX-License-Identifier: LGPL-2.1+
-
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="systemd-tmpfiles"
@@ -29,15 +12,6 @@
   <refentryinfo>
     <title>systemd-tmpfiles</title>
     <productname>systemd</productname>
-
-    <authorgroup>
-      <author>
-        <contrib>Developer</contrib>
-        <firstname>Lennart</firstname>
-        <surname>Poettering</surname>
-        <email>lennart@poettering.net</email>
-      </author>
-    </authorgroup>
   </refentryinfo>
 
   <refmeta>
@@ -196,6 +170,8 @@
         </para></listitem>
       </varlistentry>
 
+      <xi:include href="standard-options.xml" xpointer="cat-config" />
+      <xi:include href="standard-options.xml" xpointer="no-pager" />
       <xi:include href="standard-options.xml" xpointer="help" />
       <xi:include href="standard-options.xml" xpointer="version" />
     </variablelist>
@@ -225,11 +201,15 @@
   <refsect1>
     <title>Exit status</title>
 
-    <para>On success, 0 is returned. If the configuration was invalid (invalid syntax, missing
-    arguments, …), so some lines had to be ignored, but no other errors occurred,
+    <para>On success, 0 is returned. If the configuration was syntactically invalid (syntax errors,
+    missing arguments, …), so some lines had to be ignored, but no other errors occurred,
     <constant>65</constant> is returned (<constant>EX_DATAERR</constant> from
-    <filename>/usr/include/sysexits.h</filename>). Otherwise, <constant>1</constant> is returned
-    (<constant>EXIT_FAILURE</constant> from <filename>/usr/include/stdlib.h</filename>).
+    <filename>/usr/include/sysexits.h</filename>). If the configuration was syntactically valid, but
+    could not be executed (lack of permissions, creation of files in missing directories, invalid
+    contents when writing to <filename>/sys/</filename> values, …), <constant>73</constant> is
+    returned (<constant>EX_CANTCREAT</constant> from <filename>/usr/include/sysexits.h</filename>).
+    Otherwise, <constant>1</constant> is returned (<constant>EXIT_FAILURE</constant> from
+    <filename>/usr/include/stdlib.h</filename>).
     </para>
   </refsect1>
 

@@ -1,20 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Copyright (C) 2003-2004 Greg Kroah-Hartman <greg@kroah.com>
- * Copyright (C) 2004-2008 Kay Sievers <kay@vrfy.org>
+ * Copyright © 2003-2004 Greg Kroah-Hartman <greg@kroah.com>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <errno.h>
@@ -48,9 +35,9 @@ static int adm_test(struct udev *udev, int argc, char *argv[]) {
         const char *action = "add";
         const char *syspath = NULL;
         struct udev_list_entry *entry;
-        _cleanup_udev_rules_unref_ struct udev_rules *rules = NULL;
-        _cleanup_udev_device_unref_ struct udev_device *dev = NULL;
-        _cleanup_udev_event_unref_ struct udev_event *event = NULL;
+        _cleanup_(udev_rules_unrefp) struct udev_rules *rules = NULL;
+        _cleanup_(udev_device_unrefp) struct udev_device *dev = NULL;
+        _cleanup_(udev_event_unrefp) struct udev_event *event = NULL;
         sigset_t mask, sigmask_orig;
         int rc = 0, c;
 

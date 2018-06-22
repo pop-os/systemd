@@ -1,23 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-  Copyright 2013 Thomas H.P. Andersen
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <sched.h>
 #include <sys/mount.h>
@@ -102,6 +83,38 @@ static void test_get_process_comm(pid_t pid) {
 
         (void) getenv_for_pid(pid, "PATH", &i);
         log_info("PID"PID_FMT" $PATH: '%s'", pid, strna(i));
+}
+
+static void test_get_process_comm_escape_one(const char *input, const char *output) {
+        _cleanup_free_ char *n = NULL;
+
+        log_info("input: <%s> — output: <%s>", input, output);
+
+        assert_se(prctl(PR_SET_NAME, input) >= 0);
+        assert_se(get_process_comm(0, &n) >= 0);
+
+        log_info("got: <%s>", n);
+
+        assert_se(streq_ptr(n, output));
+}
+
+static void test_get_process_comm_escape(void) {
+        _cleanup_free_ char *saved = NULL;
+
+        assert_se(get_process_comm(0, &saved) >= 0);
+
+        test_get_process_comm_escape_one("", "");
+        test_get_process_comm_escape_one("foo", "foo");
+        test_get_process_comm_escape_one("012345678901234", "012345678901234");
+        test_get_process_comm_escape_one("0123456789012345", "012345678901234");
+        test_get_process_comm_escape_one("äöüß", "\\303\\244\\303…");
+        test_get_process_comm_escape_one("xäöüß", "x\\303\\244…");
+        test_get_process_comm_escape_one("xxäöüß", "xx\\303\\244…");
+        test_get_process_comm_escape_one("xxxäöüß", "xxx\\303\\244…");
+        test_get_process_comm_escape_one("xxxxäöüß", "xxxx\\303\\244…");
+        test_get_process_comm_escape_one("xxxxxäöüß", "xxxxx\\303…");
+
+        assert_se(prctl(PR_SET_NAME, saved) >= 0);
 }
 
 static void test_pid_is_unwaited(void) {
@@ -192,6 +205,8 @@ static void test_get_process_cmdline_harder(void) {
 
         assert_se(pid == 0);
         assert_se(unshare(CLONE_NEWNS) >= 0);
+
+        assert_se(mount(NULL, "/", NULL, MS_PRIVATE|MS_REC, NULL) >= 0);
 
         fd = mkostemp(path, O_CLOEXEC);
         assert_se(fd >= 0);
@@ -377,7 +392,7 @@ static void test_rename_process_now(const char *p, int ret) {
 
         assert_se(get_process_comm(0, &comm) >= 0);
         log_info("comm = <%s>", comm);
-        assert_se(strneq(comm, p, 15));
+        assert_se(strneq(comm, p, TASK_COMM_LEN-1));
 
         assert_se(get_process_cmdline(0, 0, false, &cmdline) >= 0);
         /* we cannot expect cmdline to be renamed properly without privileges */
@@ -539,8 +554,33 @@ static void test_pid_to_ptr(void) {
 #endif
 }
 
-int main(int argc, char *argv[]) {
+static void test_ioprio_class_from_to_string_one(const char *val, int expected) {
+        assert_se(ioprio_class_from_string(val) == expected);
+        if (expected >= 0) {
+                _cleanup_free_ char *s = NULL;
+                unsigned ret;
 
+                assert_se(ioprio_class_to_string_alloc(expected, &s) == 0);
+                /* We sometimes get a class number and sometimes a number back */
+                assert_se(streq(s, val) ||
+                          safe_atou(val, &ret) == 0);
+        }
+}
+
+static void test_ioprio_class_from_to_string(void) {
+        test_ioprio_class_from_to_string_one("none", IOPRIO_CLASS_NONE);
+        test_ioprio_class_from_to_string_one("realtime", IOPRIO_CLASS_RT);
+        test_ioprio_class_from_to_string_one("best-effort", IOPRIO_CLASS_BE);
+        test_ioprio_class_from_to_string_one("idle", IOPRIO_CLASS_IDLE);
+        test_ioprio_class_from_to_string_one("0", 0);
+        test_ioprio_class_from_to_string_one("1", 1);
+        test_ioprio_class_from_to_string_one("7", 7);
+        test_ioprio_class_from_to_string_one("8", 8);
+        test_ioprio_class_from_to_string_one("9", -1);
+        test_ioprio_class_from_to_string_one("-1", -1);
+}
+
+int main(int argc, char *argv[]) {
         log_set_max_level(LOG_DEBUG);
         log_parse_environment();
         log_open();
@@ -558,6 +598,7 @@ int main(int argc, char *argv[]) {
                 test_get_process_comm(getpid());
         }
 
+        test_get_process_comm_escape();
         test_pid_is_unwaited();
         test_pid_is_alive();
         test_personality();
@@ -567,6 +608,7 @@ int main(int argc, char *argv[]) {
         test_getpid_measure();
         test_safe_fork();
         test_pid_to_ptr();
+        test_ioprio_class_from_to_string();
 
         return 0;
 }

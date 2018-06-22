@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2013 Zbigniew Jędrzejewski-Szmek
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include "alloc-util.h"
 #include "build.h"
@@ -266,13 +248,18 @@ static void test_controller_is_valid(void) {
 
 static void test_slice_to_path_one(const char *unit, const char *path, int error) {
         _cleanup_free_ char *ret = NULL;
+        int r;
 
-        assert_se(cg_slice_to_path(unit, &ret) == error);
+        log_info("unit: %s", unit);
+
+        r = cg_slice_to_path(unit, &ret);
+        log_info("actual: %s / %d", strnull(ret), r);
+        log_info("expect: %s / %d", strnull(path), error);
+        assert_se(r == error);
         assert_se(streq_ptr(ret, path));
 }
 
 static void test_slice_to_path(void) {
-
         test_slice_to_path_one("foobar.slice", "foobar.slice", 0);
         test_slice_to_path_one("foobar-waldo.slice", "foobar.slice/foobar-waldo.slice", 0);
         test_slice_to_path_one("foobar-waldo.service", NULL, -EINVAL);
@@ -286,6 +273,15 @@ static void test_slice_to_path(void) {
         test_slice_to_path_one("foo.slice/foo--bar.slice", NULL, -EINVAL);
         test_slice_to_path_one("a-b.slice", "a.slice/a-b.slice", 0);
         test_slice_to_path_one("a-b-c-d-e.slice", "a.slice/a-b.slice/a-b-c.slice/a-b-c-d.slice/a-b-c-d-e.slice", 0);
+
+        test_slice_to_path_one("foobar@.slice", NULL, -EINVAL);
+        test_slice_to_path_one("foobar@waldo.slice", NULL, -EINVAL);
+        test_slice_to_path_one("foobar@waldo.service", NULL, -EINVAL);
+        test_slice_to_path_one("-foo@-.slice", NULL, -EINVAL);
+        test_slice_to_path_one("-foo@.slice", NULL, -EINVAL);
+        test_slice_to_path_one("foo@-.slice", NULL, -EINVAL);
+        test_slice_to_path_one("foo@@bar.slice", NULL, -EINVAL);
+        test_slice_to_path_one("foo.slice/foo@@bar.slice", NULL, -EINVAL);
 }
 
 static void test_shift_path_one(const char *raw, const char *root, const char *shifted) {
@@ -408,9 +404,15 @@ static void test_cg_tests(void) {
 static void test_cg_get_keyed_attribute(void) {
         _cleanup_free_ char *val = NULL;
         char *vals3[3] = {}, *vals3a[3] = {};
-        int i;
+        int i, r;
 
-        assert_se(cg_get_keyed_attribute("cpu", "/init.scope", "no_such_file", STRV_MAKE("no_such_attr"), &val) == -ENOENT);
+        r = cg_get_keyed_attribute("cpu", "/init.scope", "no_such_file", STRV_MAKE("no_such_attr"), &val);
+        if (r == -ENOMEDIUM) {
+                log_info_errno(r, "Skipping most of %s, /sys/fs/cgroup not accessible: %m", __func__);
+                return;
+        }
+
+        assert_se(r == -ENOENT);
         assert_se(val == NULL);
 
         if (access("/sys/fs/cgroup/init.scope/cpu.stat", R_OK) < 0) {

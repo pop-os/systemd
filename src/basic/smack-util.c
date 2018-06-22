@@ -1,38 +1,26 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 /***
-  This file is part of systemd.
-
-  Copyright 2013 Intel Corporation
+  Copyright © 2013 Intel Corporation
 
   Author: Auke Kok <auke-jan.h.kok@intel.com>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "fd-util.h"
 #include "fileio.h"
 #include "log.h"
 #include "macro.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "smack-util.h"
+#include "stdio-util.h"
 #include "string-table.h"
 #include "xattr-util.h"
 
@@ -134,7 +122,10 @@ int mac_smack_apply_pid(pid_t pid, const char *label) {
         return r;
 }
 
-int mac_smack_fix(const char *path, bool ignore_enoent, bool ignore_erofs) {
+int mac_smack_fix(const char *path, LabelFixFlags flags) {
+        char procfs_path[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(int)];
+        _cleanup_close_ int fd = -1;
+        const char *label;
         struct stat st;
         int r;
 
@@ -143,50 +134,72 @@ int mac_smack_fix(const char *path, bool ignore_enoent, bool ignore_erofs) {
         if (!mac_smack_use())
                 return 0;
 
+        /* Path must be in /dev. Note that this check is pretty sloppy, as we might be called with non-normalized paths
+         * and hence not detect all cases of /dev. */
+
+        if (path_is_absolute(path)) {
+                if (!path_startswith(path, "/dev"))
+                        return 0;
+        } else {
+                _cleanup_free_ char *cwd = NULL;
+
+                r = safe_getcwd(&cwd);
+                if (r < 0)
+                        return r;
+
+                if (!path_startswith(cwd, "/dev"))
+                        return 0;
+        }
+
+        fd = open(path, O_NOFOLLOW|O_CLOEXEC|O_PATH);
+        if (fd < 0) {
+                if ((flags & LABEL_IGNORE_ENOENT) && errno == ENOENT)
+                        return 0;
+
+                return -errno;
+        }
+
+        if (fstat(fd, &st) < 0)
+                return -errno;
+
         /*
-         * Path must be in /dev and must exist
+         * Label directories and character devices "*".
+         * Label symlinks "_".
+         * Don't change anything else.
          */
-        if (!path_startswith(path, "/dev"))
+
+        if (S_ISDIR(st.st_mode))
+                label = SMACK_STAR_LABEL;
+        else if (S_ISLNK(st.st_mode))
+                label = SMACK_FLOOR_LABEL;
+        else if (S_ISCHR(st.st_mode))
+                label = SMACK_STAR_LABEL;
+        else
                 return 0;
 
-        r = lstat(path, &st);
-        if (r >= 0) {
-                const char *label;
+        xsprintf(procfs_path, "/proc/self/fd/%i", fd);
+        if (setxattr(procfs_path, "security.SMACK64", label, strlen(label), 0) < 0) {
+                _cleanup_free_ char *old_label = NULL;
 
-                /*
-                 * Label directories and character devices "*".
-                 * Label symlinks "_".
-                 * Don't change anything else.
-                 */
-
-                if (S_ISDIR(st.st_mode))
-                        label = SMACK_STAR_LABEL;
-                else if (S_ISLNK(st.st_mode))
-                        label = SMACK_FLOOR_LABEL;
-                else if (S_ISCHR(st.st_mode))
-                        label = SMACK_STAR_LABEL;
-                else
-                        return 0;
-
-                r = lsetxattr(path, "security.SMACK64", label, strlen(label), 0);
+                r = -errno;
 
                 /* If the FS doesn't support labels, then exit without warning */
-                if (r < 0 && errno == EOPNOTSUPP)
+                if (r == -EOPNOTSUPP)
                         return 0;
+
+                /* It the FS is read-only and we were told to ignore failures caused by that, suppress error */
+                if (r == -EROFS && (flags & LABEL_IGNORE_EROFS))
+                        return 0;
+
+                /* If the old label is identical to the new one, suppress any kind of error */
+                if (getxattr_malloc(procfs_path, "security.SMACK64", &old_label, false) >= 0 &&
+                    streq(old_label, label))
+                        return 0;
+
+                return log_debug_errno(r, "Unable to fix SMACK label of %s: %m", path);
         }
 
-        if (r < 0) {
-                /* Ignore ENOENT in some cases */
-                if (ignore_enoent && errno == ENOENT)
-                        return 0;
-
-                if (ignore_erofs && errno == EROFS)
-                        return 0;
-
-                r = log_debug_errno(errno, "Unable to fix SMACK label of %s: %m", path);
-        }
-
-        return r;
+        return 0;
 }
 
 int mac_smack_copy(const char *dest, const char *src) {
@@ -232,7 +245,7 @@ int mac_smack_apply_pid(pid_t pid, const char *label) {
         return 0;
 }
 
-int mac_smack_fix(const char *path, bool ignore_enoent, bool ignore_erofs) {
+int mac_smack_fix(const char *path, LabelFixFlags flags) {
         return 0;
 }
 

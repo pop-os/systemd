@@ -1,21 +1,4 @@
-/***
-  This file is part of systemd.
-
-  Copyright 2017 Zbigniew Jędrzejewski-Szmek
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
+/* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <stdio.h>
 #include <linux/magic.h>
@@ -138,13 +121,15 @@ int boot_entry_load(const char *path, BootEntry *entry) {
 }
 
 void boot_config_free(BootConfig *config) {
-        unsigned i;
+        size_t i;
 
         assert(config);
 
         free(config->default_pattern);
         free(config->timeout);
         free(config->editor);
+        free(config->auto_entries);
+        free(config->auto_firmware);
 
         free(config->entry_oneshot);
         free(config->entry_default);
@@ -200,6 +185,12 @@ int boot_loader_read_conf(const char *path, BootConfig *config) {
                         r = free_and_strdup(&config->timeout, p);
                 else if (streq(field, "editor"))
                         r = free_and_strdup(&config->editor, p);
+                else if (streq(field, "auto-entries"))
+                        r = free_and_strdup(&config->auto_entries, p);
+                else if (streq(field, "auto-firmware"))
+                        r = free_and_strdup(&config->auto_firmware, p);
+                else if (streq(field, "console-mode"))
+                        r = free_and_strdup(&config->console_mode, p);
                 else {
                         log_notice("%s:%u: Unknown line \"%s\"", path, line, field);
                         continue;
@@ -252,7 +243,7 @@ int boot_entries_find(const char *dir, BootEntry **ret_entries, size_t *ret_n_en
 }
 
 static bool find_nonunique(BootEntry *entries, size_t n_entries, bool *arr) {
-        unsigned i, j;
+        size_t i, j;
         bool non_unique = false;
 
         assert(entries || n_entries == 0);
@@ -272,7 +263,7 @@ static bool find_nonunique(BootEntry *entries, size_t n_entries, bool *arr) {
 
 static int boot_entries_uniquify(BootEntry *entries, size_t n_entries) {
         char *s;
-        unsigned i;
+        size_t i;
         int r;
         bool arr[n_entries];
 
@@ -402,7 +393,7 @@ static int verify_esp(
                 uint64_t *ret_psize,
                 sd_id128_t *ret_uuid) {
 #if HAVE_BLKID
-        _cleanup_blkid_free_probe_ blkid_probe b = NULL;
+        _cleanup_(blkid_free_probep) blkid_probe b = NULL;
         char t[DEV_NUM_PATH_MAX];
         const char *v;
 #endif

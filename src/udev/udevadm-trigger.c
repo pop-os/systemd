@@ -1,19 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Copyright (C) 2008-2009 Kay Sievers <kay@vrfy.org>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <errno.h>
@@ -134,8 +121,8 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
                 TYPE_SUBSYSTEMS,
         } device_type = TYPE_DEVICES;
         const char *action = "change";
-        _cleanup_udev_enumerate_unref_ struct udev_enumerate *udev_enumerate = NULL;
-        _cleanup_udev_monitor_unref_ struct udev_monitor *udev_monitor = NULL;
+        _cleanup_(udev_enumerate_unrefp) struct udev_enumerate *udev_enumerate = NULL;
+        _cleanup_(udev_monitor_unrefp) struct udev_monitor *udev_monitor = NULL;
         _cleanup_close_ int fd_ep = -1;
         int fd_udev = -1;
         struct epoll_event ep_udev;
@@ -230,7 +217,7 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
                         }
                         break;
                 case 'b': {
-                        _cleanup_udev_device_unref_ struct udev_device *dev;
+                        _cleanup_(udev_device_unrefp) struct udev_device *dev;
 
                         dev = find_device(udev, optarg, "/sys");
                         if (!dev) {
@@ -250,7 +237,7 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
                         break;
 
                 case ARG_NAME: {
-                        _cleanup_udev_device_unref_ struct udev_device *dev;
+                        _cleanup_(udev_device_unrefp) struct udev_device *dev;
 
                         dev = find_device(udev, optarg, "/dev/");
                         if (!dev) {
@@ -280,7 +267,7 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
         }
 
         for (; optind < argc; optind++) {
-                _cleanup_udev_device_unref_ struct udev_device *dev;
+                _cleanup_(udev_device_unrefp) struct udev_device *dev;
 
                 dev = find_device(udev, argv[optind], NULL);
                 if (!dev) {
@@ -355,7 +342,7 @@ static int adm_trigger(struct udev *udev, int argc, char *argv[]) {
 
                 for (i = 0; i < fdcount; i++) {
                         if (ev[i].data.fd == fd_udev && ev[i].events & EPOLLIN) {
-                                _cleanup_udev_device_unref_ struct udev_device *device;
+                                _cleanup_(udev_device_unrefp) struct udev_device *device;
                                 const char *syspath = NULL;
 
                                 device = udev_monitor_receive_device(udev_monitor);

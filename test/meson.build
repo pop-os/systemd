@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1+
-#
-# Copyright 2017 Zbigniew Jędrzejewski-Szmek
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 test_data_files = '''
         a.service
@@ -45,6 +30,7 @@ test_data_files = '''
         sockets.target
         son.service
         sysinit.target
+        test-execute/exec-basic.service
         test-execute/exec-ambientcapabilities-merge-nfsnobody.service
         test-execute/exec-ambientcapabilities-merge-nobody.service
         test-execute/exec-ambientcapabilities-merge.service
@@ -93,6 +79,7 @@ test_data_files = '''
         test-execute/exec-personality-s390.service
         test-execute/exec-personality-x86-64.service
         test-execute/exec-personality-x86.service
+        test-execute/exec-privatedevices-disabled-by-prefix.service
         test-execute/exec-privatedevices-no-capability-mknod.service
         test-execute/exec-privatedevices-no-capability-sys-rawio.service
         test-execute/exec-privatedevices-no.service
@@ -110,6 +97,9 @@ test_data_files = '''
         test-execute/exec-readonlypaths-with-bindpaths.service
         test-execute/exec-readonlypaths.service
         test-execute/exec-readwritepaths-mount-propagation.service
+        test-execute/exec-restrictnamespaces-merge-all.service
+        test-execute/exec-restrictnamespaces-merge-and.service
+        test-execute/exec-restrictnamespaces-merge-or.service
         test-execute/exec-restrictnamespaces-mnt-blacklist.service
         test-execute/exec-restrictnamespaces-mnt.service
         test-execute/exec-restrictnamespaces-no.service
@@ -153,6 +143,7 @@ test_data_files = '''
         test-execute/exec-user-nobody.service
         test-execute/exec-user.service
         test-execute/exec-workingdirectory.service
+        test-execute/exec-workingdirectory-trailing-dot.service
         test-path/basic.target
         test-path/path-changed.path
         test-path/path-changed.service
@@ -171,8 +162,17 @@ test_data_files = '''
         test-path/path-unit.path
         test-path/paths.target
         test-path/sysinit.target
+        test-umount/empty.mountinfo
+        test-umount/example.swaps
+        test-umount/garbled.mountinfo
+        test-umount/rhbug-1554943.mountinfo
         testsuite.target
         timers.target
+        unit-with-.service.d/20-override.conf
+        unit-with-multiple-.service.d/20-override.conf
+        unit-with-multiple-.service.d/30-override.conf
+        unit-with-multiple-dashes.service
+        unit-with-multiple-dashes.service.d/10-override.conf
         unstoppable.service
 '''.split()
 
@@ -229,9 +229,13 @@ custom_target(
         output : 'sys',
         build_by_default : true)
 
-udev_test_pl = find_program('udev-test.pl')
-test('udev-test',
-     udev_test_pl)
+if perl.found()
+        udev_test_pl = find_program('udev-test.pl')
+        test('udev-test',
+             udev_test_pl)
+else
+        message('Skipping udev-test because perl is not available')
+endif
 
 if conf.get('ENABLE_HWDB') == 1
         hwdb_test_sh = find_program('hwdb-test.sh')

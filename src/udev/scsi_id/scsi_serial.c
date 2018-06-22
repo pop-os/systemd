@@ -1,21 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Copyright (C) IBM Corp. 2003
+ * Copyright © IBM Corp. 2003
  *
  * Author: Patrick Mansfield<patmans@us.ibm.com>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <errno.h>
@@ -590,7 +578,7 @@ static int check_fill_0x83_prespc3(struct udev *udev,
 {
         int i, j;
 
-        serial[0] = hex_str[id_search->id_type];
+        serial[0] = hex_str[SCSI_ID_NAA];
         /* serial has been memset to zero before */
         j = strlen(serial);        /* j = 1; */
 
@@ -602,7 +590,6 @@ static int check_fill_0x83_prespc3(struct udev *udev,
         strncpy(serial_short, serial, max_len-1);
         return 0;
 }
-
 
 /* Get device identification VPD page */
 static int do_scsi_page83_inquiry(struct udev *udev,
@@ -739,7 +726,7 @@ static int do_scsi_page83_prespc3_inquiry(struct udev *udev,
         if (page_83[6] == 0)
                 return 2;
 
-        serial[0] = hex_str[id_search_list[0].id_type];
+        serial[0] = hex_str[SCSI_ID_NAA];
         /*
          * The first four bytes contain data, not a descriptor.
          */

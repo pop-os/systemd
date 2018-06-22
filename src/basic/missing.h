@@ -1,25 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 /* Missing glibc definitions to access certain kernel APIs */
 
 #include <errno.h>
@@ -341,7 +322,6 @@ struct btrfs_ioctl_search_header {
         __u32 type;
         __u32 len;
 };
-
 
 struct btrfs_ioctl_search_args {
         struct btrfs_ioctl_search_key key;
@@ -1058,12 +1038,20 @@ struct input_mask {
 #define RTAX_QUICKACK 15
 #endif
 
+#ifndef RTA_EXPIRES
+#define RTA_EXPIRES 23
+#endif
+
 #ifndef IPV6_UNICAST_IF
 #define IPV6_UNICAST_IF 76
 #endif
 
 #ifndef IPV6_MIN_MTU
 #define IPV6_MIN_MTU 1280
+#endif
+
+#ifndef IPV4_MIN_MTU
+#define IPV4_MIN_MTU 68
 #endif
 
 #ifndef IFF_MULTI_QUEUE
@@ -1411,6 +1399,13 @@ struct statx {
 
 #ifndef AT_STATX_DONT_SYNC
 #define AT_STATX_DONT_SYNC 0x4000
+#endif
+
+/* The maximum thread/process name length including trailing NUL byte. This mimics the kernel definition of the same
+ * name, which we need in userspace at various places but is not defined in userspace currently, neither under this
+ * name nor any other. */
+#ifndef TASK_COMM_LEN
+#define TASK_COMM_LEN 16
 #endif
 
 #include "missing_syscall.h"

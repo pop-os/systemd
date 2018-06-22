@@ -1,20 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Copyright (C) IBM Corp. 2003
- * Copyright (C) SUSE Linux Products GmbH, 2006
+ * Copyright © IBM Corp. 2003
+ * Copyright © SUSE Linux Products GmbH, 2006
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ctype.h>
@@ -164,7 +152,7 @@ static int get_file_options(struct udev *udev,
                             const char *vendor, const char *model,
                             int *argc, char ***newargv)
 {
-        char *buffer;
+        _cleanup_free_ char *buffer = NULL;
         _cleanup_fclose_ FILE *f;
         char *buf;
         char *str1;
@@ -259,9 +247,8 @@ static int get_file_options(struct udev *udev,
                         if (vendor_in == NULL)
                                 break;
                 } else if (vendor_in &&
-                           strneq(vendor, vendor_in, strlen(vendor_in)) &&
-                           (!model_in ||
-                            (strneq(model, model_in, strlen(model_in))))) {
+                           startswith(vendor, vendor_in) &&
+                           (!model_in || startswith(model, model_in))) {
                                 /*
                                  * Matched vendor and optionally model.
                                  *
@@ -296,14 +283,13 @@ static int get_file_options(struct udev *udev,
                                 (*newargv)[c] = buffer;
                                 for (c = 1; c < *argc; c++)
                                         (*newargv)[c] = strsep(&buffer, " \t");
+                                buffer = NULL;
                         }
                 } else {
                         /* No matches  */
                         retval = 1;
                 }
         }
-        if (retval != 0)
-                free(buffer);
         return retval;
 }
 
@@ -570,9 +556,8 @@ out:
         return retval;
 }
 
-int main(int argc, char **argv)
-{
-        _cleanup_udev_unref_ struct udev *udev;
+int main(int argc, char **argv) {
+        _cleanup_(udev_unrefp) struct udev *udev;
         int retval = 0;
         char maj_min_dev[MAX_PATH_LEN];
         int newargc;

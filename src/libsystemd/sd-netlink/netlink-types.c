@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Tom Gundersen <teg@jklm.no>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <netinet/in.h>
 #include <stdint.h>
@@ -313,6 +295,11 @@ static const NLType rtnl_link_info_data_geneve_types[] = {
         [IFLA_GENEVE_LABEL]             = { .type = NETLINK_TYPE_U32 },
 };
 
+static const NLType rtnl_link_info_data_can_types[] = {
+        [IFLA_CAN_BITTIMING]            = { .size = sizeof(struct can_bittiming) },
+        [IFLA_CAN_RESTART_MS]           = { .type = NETLINK_TYPE_U32 },
+};
+
 /* these strings must match the .kind entries in the kernel */
 static const char* const nl_union_link_info_data_table[] = {
         [NL_UNION_LINK_INFO_DATA_BOND] = "bond",
@@ -338,6 +325,8 @@ static const char* const nl_union_link_info_data_table[] = {
         [NL_UNION_LINK_INFO_DATA_GENEVE] = "geneve",
         [NL_UNION_LINK_INFO_DATA_VXCAN] = "vxcan",
         [NL_UNION_LINK_INFO_DATA_WIREGUARD] = "wireguard",
+        [NL_UNION_LINK_INFO_DATA_NETDEVSIM] = "netdevsim",
+        [NL_UNION_LINK_INFO_DATA_CAN] = "can",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(nl_union_link_info_data, NLUnionLinkInfoData);
@@ -383,6 +372,8 @@ static const NLTypeSystem rtnl_link_info_data_type_systems[] = {
                                                        .types = rtnl_link_info_data_geneve_types },
         [NL_UNION_LINK_INFO_DATA_VXCAN] =            { .count = ELEMENTSOF(rtnl_link_info_data_vxcan_types),
                                                        .types = rtnl_link_info_data_vxcan_types },
+        [NL_UNION_LINK_INFO_DATA_CAN] =              { .count = ELEMENTSOF(rtnl_link_info_data_can_types),
+                                                       .types = rtnl_link_info_data_can_types },
 };
 
 static const NLTypeSystemUnion rtnl_link_info_data_type_system_union = {
@@ -582,7 +573,11 @@ static const NLType rtnl_route_types[] = {
         RTA_NEWDST,
 */
         [RTA_PREF]              = { .type = NETLINK_TYPE_U8 },
-
+/*
+        RTA_ENCAP_TYPE,
+        RTA_ENCAP,
+ */
+        [RTA_EXPIRES]           = { .type = NETLINK_TYPE_U32 },
 };
 
 static const NLTypeSystem rtnl_route_type_system = {

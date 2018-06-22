@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <netdb.h>
 #include <nss.h>
@@ -507,7 +489,7 @@ enum nss_status _nss_mymachines_getpwuid_r(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message* reply = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
-        const char *machine, *object;
+        const char *machine;
         uint32_t mapped;
         int r;
 
@@ -543,7 +525,7 @@ enum nss_status _nss_mymachines_getpwuid_r(
                 goto fail;
         }
 
-        r = sd_bus_message_read(reply, "sou", &machine, &object, &mapped);
+        r = sd_bus_message_read(reply, "sou", &machine, NULL, &mapped);
         if (r < 0)
                 goto fail;
 
@@ -656,7 +638,7 @@ enum nss_status _nss_mymachines_getgrnam_r(
         strcpy(buffer + sizeof(char*), name);
 
         gr->gr_name = buffer + sizeof(char*);
-        gr->gr_gid = gid;
+        gr->gr_gid = mapped;
         gr->gr_passwd = (char*) "*"; /* locked */
         gr->gr_mem = (char**) buffer;
 
@@ -681,7 +663,7 @@ enum nss_status _nss_mymachines_getgrgid_r(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message* reply = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
-        const char *machine, *object;
+        const char *machine;
         uint32_t mapped;
         int r;
 
@@ -717,7 +699,7 @@ enum nss_status _nss_mymachines_getgrgid_r(
                 goto fail;
         }
 
-        r = sd_bus_message_read(reply, "sou", &machine, &object, &mapped);
+        r = sd_bus_message_read(reply, "sou", &machine, NULL, &mapped);
         if (r < 0)
                 goto fail;
 

@@ -20,6 +20,11 @@ test executable. For features at a higher level, tests in src/test/ are very
 strongly recommended. If that is no possible, integration tests in test/ are
 encouraged.
 
+Please also have a look at our list of code quality tools we have setup for systemd,
+to ensure our codebase stays in good shape:
+
+        https://github.com/systemd/systemd/blob/master/doc/CODE_QUALITY.md
+
 Please always test your work before submitting a PR. For many of the components
 of systemd testing is straight-forward as you can simply compile systemd and
 run the relevant tool from the build directory.
@@ -68,6 +73,7 @@ for systemd (this example is for Fedora):
         $ meson build                          # configure the build
         $ ninja -C build                       # build it locally, see if everything compiles fine
         $ ninja -C build test                  # run some simple regression tests
+        $ (umask 077; echo 123 > mkosi.rootpw) # set root password used by mkosi
         $ sudo mkosi                           # build a test image
         $ sudo systemd-nspawn -bi image.raw    # boot up the test image
         $ git add -p                           # interactively put together your patch
@@ -91,10 +97,10 @@ function and add it to the list in src/fuzz/meson.build.
 Whenever possible, a seed corpus and a dictionary should also be added with new
 fuzz targets. The dictionary should be named src/fuzz/fuzz-foo.dict and the seed
 corpus should be built and exported as $OUT/fuzz-foo_seed_corpus.zip in
-scripts/oss-fuzz.sh.
+tools/oss-fuzz.sh.
 
 The fuzzers can be built locally if you have libFuzzer installed by running
-scripts/oss-fuzz.sh. You should also confirm that the fuzzer runs in the
+tools/oss-fuzz.sh. You should also confirm that the fuzzer runs in the
 OSS-Fuzz environment by checking out the OSS-Fuzz repo, and then running
 commands like this:
 

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -71,9 +53,9 @@ static void test_same_fd(void) {
         _cleanup_close_ int a = -1, b = -1, c = -1;
 
         assert_se(pipe2(p, O_CLOEXEC) >= 0);
-        assert_se((a = dup(p[0])) >= 0);
+        assert_se((a = fcntl(p[0], F_DUPFD, 3)) >= 0);
         assert_se((b = open("/dev/null", O_RDONLY|O_CLOEXEC)) >= 0);
-        assert_se((c = dup(a)) >= 0);
+        assert_se((c = fcntl(a, F_DUPFD, 3)) >= 0);
 
         assert_se(same_fd(p[0], p[0]) > 0);
         assert_se(same_fd(p[1], p[1]) > 0);
@@ -241,7 +223,101 @@ static void test_rearrange_stdio(void) {
         }
 }
 
+static void assert_equal_fd(int fd1, int fd2) {
+
+        for (;;) {
+                uint8_t a[4096], b[4096];
+                ssize_t x, y;
+
+                x = read(fd1, a, sizeof(a));
+                assert(x >= 0);
+
+                y = read(fd2, b, sizeof(b));
+                assert(y >= 0);
+
+                assert(x == y);
+
+                if (x == 0)
+                        break;
+
+                assert(memcmp(a, b, x) == 0);
+        }
+}
+
+static void test_fd_duplicate_data_fd(void) {
+        _cleanup_close_ int fd1 = -1, fd2 = -1;
+        _cleanup_(close_pairp) int sfd[2] = { -1, -1 };
+        _cleanup_(sigkill_waitp) pid_t pid = -1;
+        uint64_t i, j;
+        int r;
+
+        fd1 = open("/etc/fstab", O_RDONLY|O_CLOEXEC);
+        if (fd1 >= 0) {
+
+                fd2 = fd_duplicate_data_fd(fd1);
+                assert_se(fd2 >= 0);
+
+                assert_se(lseek(fd1, 0, SEEK_SET) == 0);
+                assert_equal_fd(fd1, fd2);
+        }
+
+        fd1 = safe_close(fd1);
+        fd2 = safe_close(fd2);
+
+        fd1 = acquire_data_fd("hallo", 6,  0);
+        assert_se(fd1 >= 0);
+
+        fd2 = fd_duplicate_data_fd(fd1);
+        assert_se(fd2 >= 0);
+
+        safe_close(fd1);
+        fd1 = acquire_data_fd("hallo", 6,  0);
+        assert_se(fd1 >= 0);
+
+        assert_equal_fd(fd1, fd2);
+
+        fd1 = safe_close(fd1);
+        fd2 = safe_close(fd2);
+
+        assert_se(socketpair(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0, sfd) >= 0);
+
+        r = safe_fork("(sd-pipe)", FORK_RESET_SIGNALS|FORK_DEATHSIG|FORK_LOG, &pid);
+        assert_se(r >= 0);
+
+        if (r == 0) {
+                /* child */
+
+                sfd[0] = safe_close(sfd[0]);
+
+                for (i = 0; i < 1536*1024 / sizeof(uint64_t); i++)
+                        assert_se(write(sfd[1], &i, sizeof(i)) == sizeof(i));
+
+                sfd[1] = safe_close(sfd[1]);
+
+                _exit(EXIT_SUCCESS);
+        }
+
+        sfd[1] = safe_close(sfd[1]);
+
+        fd2 = fd_duplicate_data_fd(sfd[0]);
+        assert_se(fd2 >= 0);
+
+        for (i = 0; i < 1536*1024 / sizeof(uint64_t); i++) {
+                assert_se(read(fd2, &j, sizeof(j)) == sizeof(j));
+                assert_se(i == j);
+        }
+
+        assert_se(read(fd2, &j, sizeof(j)) == 0);
+}
+
+static void test_read_nr_open(void) {
+        log_info("nr-open: %i", read_nr_open());
+}
+
 int main(int argc, char *argv[]) {
+
+        log_set_max_level(LOG_DEBUG);
+
         test_close_many();
         test_close_nointr();
         test_same_fd();
@@ -249,6 +325,8 @@ int main(int argc, char *argv[]) {
         test_acquire_data_fd();
         test_fd_move_above_stdio();
         test_rearrange_stdio();
+        test_fd_duplicate_data_fd();
+        test_read_nr_open();
 
         return 0;
 }

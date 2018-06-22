@@ -1,25 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
+#include <grp.h>
+#include <gshadow.h>
+#include <pwd.h>
+#include <shadow.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -110,3 +95,14 @@ static inline bool valid_shell(const char *p) {
 int maybe_setgroups(size_t size, const gid_t *list);
 
 bool synthesize_nobody(void);
+
+int fgetpwent_sane(FILE *stream, struct passwd **pw);
+int fgetspent_sane(FILE *stream, struct spwd **sp);
+int fgetgrent_sane(FILE *stream, struct group **gr);
+int putpwent_sane(const struct passwd *pw, FILE *stream);
+int putspent_sane(const struct spwd *sp, FILE *stream);
+int putgrent_sane(const struct group *gr, FILE *stream);
+#ifdef ENABLE_GSHADOW
+int fgetsgent_sane(FILE *stream, struct sgrp **sg);
+int putsgent_sane(const struct sgrp *sg, FILE *stream);
+#endif

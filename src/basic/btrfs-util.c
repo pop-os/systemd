@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -290,8 +272,10 @@ int btrfs_get_block_device_fd(int fd, dev_t *dev) {
                 return -errno;
 
         /* We won't do this for btrfs RAID */
-        if (fsi.num_devices != 1)
+        if (fsi.num_devices != 1) {
+                *dev = 0;
                 return 0;
+        }
 
         for (id = 1; id <= fsi.max_id; id++) {
                 struct btrfs_ioctl_dev_info_args di = {
@@ -511,7 +495,7 @@ int btrfs_subvol_get_info_fd(int fd, uint64_t subvol_id, BtrfsSubvolInfo *ret) {
                                 (usec_t) le32toh(ri->otime.nsec) / NSEC_PER_USEC;
 
                         ret->subvol_id = subvol_id;
-                        ret->read_only = !!(le64toh(ri->flags) & BTRFS_ROOT_SUBVOL_RDONLY);
+                        ret->read_only = le64toh(ri->flags) & BTRFS_ROOT_SUBVOL_RDONLY;
 
                         assert_cc(sizeof(ri->uuid) == sizeof(ret->uuid));
                         memcpy(&ret->uuid, ri->uuid, sizeof(ret->uuid));
@@ -1703,7 +1687,7 @@ int btrfs_subvol_snapshot_fd(int old_fd, const char *new_path, BtrfsSnapshotFlag
                 if (r == -ENOTTY && (flags & BTRFS_SNAPSHOT_FALLBACK_DIRECTORY)) {
                         /* If the destination doesn't support subvolumes, then use a plain directory, if that's requested. */
                         if (mkdir(new_path, 0755) < 0)
-                                return r;
+                                return -errno;
 
                         plain_directory = true;
                 } else if (r < 0)
@@ -1841,8 +1825,7 @@ int btrfs_qgroup_find_parents(int fd, uint64_t qgroupid, uint64_t **ret) {
                 return 0;
         }
 
-        *ret = items;
-        items = NULL;
+        *ret = TAKE_PTR(items);
 
         return (int) n_items;
 }

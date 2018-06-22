@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -354,8 +336,8 @@ static int write_to_console(
 
         char location[256], prefix[1 + DECIMAL_STR_MAX(int) + 2];
         struct iovec iovec[6] = {};
-        unsigned n = 0;
         bool highlight;
+        size_t n = 0;
 
         if (console_fd < 0)
                 return 0;
@@ -699,9 +681,8 @@ int log_internalv_realm(
         if (_likely_(LOG_PRI(level) > log_max_level[realm]))
                 return -error;
 
-        /* Make sure that %m maps to the specified error */
-        if (error != 0)
-                errno = error;
+        /* Make sure that %m maps to the specified error (or "Success"). */
+        errno = error;
 
         (void) vsnprintf(buffer, sizeof buffer, format, ap);
 
@@ -749,9 +730,8 @@ static int log_object_internalv(
         if (_likely_(LOG_PRI(level) > log_max_level[LOG_REALM_SYSTEMD]))
                 return -error;
 
-        /* Make sure that %m maps to the specified error */
-        if (error != 0)
-                errno = error;
+        /* Make sure that %m maps to the specified error (or "Success"). */
+        errno = error;
 
         /* Prepend the object name before the message */
         if (object) {
@@ -814,7 +794,7 @@ static void log_assert(
         log_dispatch_internal(level, 0, file, line, func, NULL, NULL, NULL, NULL, buffer);
 }
 
-noreturn void log_assert_failed_realm(
+_noreturn_ void log_assert_failed_realm(
                 LogRealm realm,
                 const char *text,
                 const char *file,
@@ -826,7 +806,7 @@ noreturn void log_assert_failed_realm(
         abort();
 }
 
-noreturn void log_assert_failed_unreachable_realm(
+_noreturn_ void log_assert_failed_unreachable_realm(
                 LogRealm realm,
                 const char *text,
                 const char *file,
@@ -874,8 +854,7 @@ int log_format_iovec(
                  * since vasprintf() leaves it afterwards at
                  * an undefined location */
 
-                if (error != 0)
-                        errno = error;
+                errno = error;
 
                 va_copy(aq, ap);
                 r = vasprintf(&m, format, aq);
@@ -976,8 +955,7 @@ int log_struct_internal(
         while (format) {
                 va_list aq;
 
-                if (error != 0)
-                        errno = error;
+                errno = error;
 
                 va_copy(aq, ap);
                 (void) vsnprintf(buf, sizeof buf, format, aq);
@@ -1054,13 +1032,9 @@ int log_struct_iovec_internal(
                         return -error;
         }
 
-        for (i = 0; i < n_input_iovec; i++) {
-                if (input_iovec[i].iov_len < STRLEN("MESSAGE="))
-                        continue;
-
-                if (memcmp(input_iovec[i].iov_base, "MESSAGE=", STRLEN("MESSAGE=")) == 0)
+        for (i = 0; i < n_input_iovec; i++)
+                if (memory_startswith(input_iovec[i].iov_base, input_iovec[i].iov_len, "MESSAGE="))
                         break;
-        }
 
         if (_unlikely_(i >= n_input_iovec)) /* Couldn't find MESSAGE=? */
                 return -error;
@@ -1275,8 +1249,7 @@ int log_syntax_internal(
         if (log_target == LOG_TARGET_NULL)
                 return -error;
 
-        if (error != 0)
-                errno = error;
+        errno = error;
 
         va_start(ap, format);
         (void) vsnprintf(buffer, sizeof buffer, format, ap);
@@ -1347,4 +1320,21 @@ int log_emergency_level(void) {
          * then the system of the whole system is obviously affected. */
 
         return getpid_cached() == 1 ? LOG_EMERG : LOG_ERR;
+}
+
+int log_dup_console(void) {
+        int copy;
+
+        /* Duplicate the fd we use for fd logging if it's < 3 and use the copy from now on. This call is useful
+         * whenever we want to continue logging through the original fd, but want to rearrange stderr. */
+
+        if (console_fd >= 3)
+                return 0;
+
+        copy = fcntl(console_fd, F_DUPFD_CLOEXEC, 3);
+        if (copy < 0)
+                return -errno;
+
+        console_fd = copy;
+        return 0;
 }

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <stdio_ext.h>
@@ -81,10 +63,8 @@ int name_to_handle_at_loop(
 
                 if (name_to_handle_at(fd, path, h, &mnt_id, flags) >= 0) {
 
-                        if (ret_handle) {
-                                *ret_handle = h;
-                                h = NULL;
-                        }
+                        if (ret_handle)
+                                *ret_handle = TAKE_PTR(h);
 
                         if (ret_mnt_id)
                                 *ret_mnt_id = mnt_id;
@@ -296,7 +276,7 @@ int path_is_mount_point(const char *t, const char *root, int flags) {
          * /bin -> /usr/bin/ and /usr is a mount point, then the parent that we
          * look at needs to be /usr, not /. */
         if (flags & AT_SYMLINK_FOLLOW) {
-                r = chase_symlinks(t, root, 0, &canonical);
+                r = chase_symlinks(t, root, CHASE_TRAIL_SLASH, &canonical);
                 if (r < 0)
                         return r;
 
@@ -428,7 +408,7 @@ int bind_remount_recursive_with_mountinfo(const char *prefix, bool ro, char **bl
         if (!cleaned)
                 return -ENOMEM;
 
-        path_kill_slashes(cleaned);
+        path_simplify(cleaned, false);
 
         done = set_new(&path_hash_ops);
         if (!done)
@@ -715,24 +695,33 @@ int repeat_unmount(const char *path, int flags) {
 }
 
 const char* mode_to_inaccessible_node(mode_t mode) {
-        /* This function maps a node type to the correspondent inaccessible node type.
-         * Character and block inaccessible devices may not be created (because major=0 and minor=0),
-         * in such case we map character and block devices to the inaccessible node type socket. */
+        /* This function maps a node type to a corresponding inaccessible file node. These nodes are created during
+         * early boot by PID 1. In some cases we lacked the privs to create the character and block devices (maybe
+         * because we run in an userns environment, or miss CAP_SYS_MKNOD, or run with a devices policy that excludes
+         * device nodes with major and minor of 0), but that's fine, in that case we use an AF_UNIX file node instead,
+         * which is not the same, but close enough for most uses. And most importantly, the kernel allows bind mounts
+         * from socket nodes to any non-directory file nodes, and that's the most important thing that matters. */
+
         switch(mode & S_IFMT) {
                 case S_IFREG:
                         return "/run/systemd/inaccessible/reg";
+
                 case S_IFDIR:
                         return "/run/systemd/inaccessible/dir";
+
                 case S_IFCHR:
                         if (access("/run/systemd/inaccessible/chr", F_OK) == 0)
                                 return "/run/systemd/inaccessible/chr";
                         return "/run/systemd/inaccessible/sock";
+
                 case S_IFBLK:
                         if (access("/run/systemd/inaccessible/blk", F_OK) == 0)
                                 return "/run/systemd/inaccessible/blk";
                         return "/run/systemd/inaccessible/sock";
+
                 case S_IFIFO:
                         return "/run/systemd/inaccessible/fifo";
+
                 case S_IFSOCK:
                         return "/run/systemd/inaccessible/sock";
         }
@@ -871,7 +860,6 @@ const char *mount_propagation_flags_to_string(unsigned long flags) {
         return NULL;
 }
 
-
 int mount_propagation_flags_from_string(const char *name, unsigned long *ret) {
 
         if (isempty(name))
@@ -951,8 +939,7 @@ int mount_option_mangle(
         }
 
         *ret_mount_flags = mount_flags;
-        *ret_remaining_options = ret;
-        ret = NULL;
+        *ret_remaining_options = TAKE_PTR(ret);
 
         return 0;
 }

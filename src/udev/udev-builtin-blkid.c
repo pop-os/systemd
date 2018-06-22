@@ -2,21 +2,8 @@
 /*
  * probe disks for filesystems and partitions
  *
- * Copyright (C) 2011 Kay Sievers <kay@vrfy.org>
- * Copyright (C) 2011 Karel Zak <kzak@redhat.com>
+ * Copyright © 2011 Karel Zak <kzak@redhat.com>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <blkid.h>
@@ -228,7 +215,7 @@ static int builtin_blkid(struct udev_device *dev, int argc, char *argv[], bool t
         int64_t offset = 0;
         bool noraid = false;
         _cleanup_close_ int fd = -1;
-        _cleanup_blkid_free_probe_ blkid_probe pr = NULL;
+        _cleanup_(blkid_free_probep) blkid_probe pr = NULL;
         const char *data;
         const char *name;
         int nvals;

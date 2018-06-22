@@ -1,25 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 #include <fnmatch.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -45,7 +26,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(char**, strv_free_erase);
 void strv_clear(char **l);
 
 char **strv_copy(char * const *l);
-unsigned strv_length(char * const *l) _pure_;
+size_t strv_length(char * const *l) _pure_;
 
 int strv_extend_strv(char ***a, char **b, bool filter_duplicates);
 int strv_extend_strv_concat(char ***a, char **b, const char *suffix);
@@ -54,7 +35,7 @@ int strv_extendf(char ***l, const char *format, ...) _printf_(2,0);
 int strv_extend_front(char ***l, const char *value);
 int strv_push(char ***l, char *value);
 int strv_push_pair(char ***l, char *a, char *b);
-int strv_insert(char ***l, unsigned position, char *value);
+int strv_insert(char ***l, size_t position, char *value);
 
 static inline int strv_push_prepend(char ***l, char *value) {
         return strv_insert(l, 0, value);
@@ -126,7 +107,7 @@ void strv_print(char **l);
                 if (!first)                                     \
                         _l = (char**) &first;                   \
                 else {                                          \
-                        unsigned _n;                            \
+                        size_t _n;                              \
                         va_list _ap;                            \
                                                                 \
                         _n = 1;                                 \

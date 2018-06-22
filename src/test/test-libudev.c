@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2008-2012 Kay Sievers <kay@vrfy.org>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <getopt.h>
 #include <stdio.h>
@@ -104,7 +86,7 @@ static void print_device(struct udev_device *device) {
 }
 
 static void test_device(struct udev *udev, const char *syspath) {
-        _cleanup_udev_device_unref_ struct udev_device *device;
+        _cleanup_(udev_device_unrefp) struct udev_device *device;
 
         log_info("looking at device: %s", syspath);
         device = udev_device_new_from_syspath(udev, syspath);
@@ -115,7 +97,7 @@ static void test_device(struct udev *udev, const char *syspath) {
 }
 
 static void test_device_parents(struct udev *udev, const char *syspath) {
-        _cleanup_udev_device_unref_ struct udev_device *device;
+        _cleanup_(udev_device_unrefp) struct udev_device *device;
         struct udev_device *device_parent;
 
         log_info("looking at device: %s", syspath);
@@ -140,7 +122,7 @@ static void test_device_parents(struct udev *udev, const char *syspath) {
 
 static void test_device_devnum(struct udev *udev) {
         dev_t devnum = makedev(1, 3);
-        _cleanup_udev_device_unref_ struct udev_device *device;
+        _cleanup_(udev_device_unrefp) struct udev_device *device;
 
         log_info("looking up device: %u:%u", major(devnum), minor(devnum));
         device = udev_device_new_from_devnum(udev, 'c', devnum);
@@ -151,7 +133,7 @@ static void test_device_devnum(struct udev *udev) {
 }
 
 static void test_device_subsys_name(struct udev *udev, const char *subsys, const char *dev) {
-        _cleanup_udev_device_unref_ struct udev_device *device;
+        _cleanup_(udev_device_unrefp) struct udev_device *device;
 
         log_info("looking up device: '%s:%s'", subsys, dev);
         device = udev_device_new_from_subsystem_sysname(udev, subsys, dev);
@@ -183,7 +165,7 @@ static int test_enumerate_print_list(struct udev_enumerate *enumerate) {
 }
 
 static void test_monitor(struct udev *udev) {
-        _cleanup_udev_monitor_unref_ struct udev_monitor *udev_monitor;
+        _cleanup_(udev_monitor_unrefp) struct udev_monitor *udev_monitor;
         _cleanup_close_ int fd_ep;
         int fd_udev;
         struct epoll_event ep_udev = {
@@ -350,7 +332,7 @@ static void test_hwdb(struct udev *udev, const char *modalias) {
 }
 
 int main(int argc, char *argv[]) {
-        _cleanup_udev_unref_ struct udev *udev = NULL;
+        _cleanup_(udev_unrefp) struct udev *udev = NULL;
         bool arg_monitor = false;
         static const struct option options[] = {
                 { "syspath",   required_argument, NULL, 'p' },
@@ -406,7 +388,6 @@ int main(int argc, char *argv[]) {
                 default:
                         assert_not_reached("Unhandled option code.");
                 }
-
 
         /* add sys path if needed */
         if (!startswith(syspath, "/sys"))

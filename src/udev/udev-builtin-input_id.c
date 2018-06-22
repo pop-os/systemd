@@ -2,24 +2,10 @@
 /*
  * expose input properties via udev
  *
- * Copyright (C) 2009 Martin Pitt <martin.pitt@ubuntu.com>
- * Portions Copyright (C) 2004 David Zeuthen, <david@fubar.dk>
- * Copyright (C) 2011 Kay Sievers <kay@vrfy.org>
- * Copyright (C) 2014 Carlos Garnacho <carlosg@gnome.org>
- * Copyright (C) 2014 David Herrmann <dh.herrmann@gmail.com>
+ * Copyright © 2009 Martin Pitt <martin.pitt@ubuntu.com>
+ * Portions Copyright © 2004 David Zeuthen, <david@fubar.dk>
+ * Copyright © 2014 Carlos Garnacho <carlosg@gnome.org>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <errno.h>
@@ -195,15 +181,23 @@ static bool test_pointers(struct udev_device *dev,
                 has_mt_coordinates = false;
         is_direct = test_bit(INPUT_PROP_DIRECT, bitmask_props);
         has_touch = test_bit(BTN_TOUCH, bitmask_key);
+
         /* joysticks don't necessarily have buttons; e. g.
          * rudders/pedals are joystick-like, but buttonless; they have
-         * other fancy axes. Others have buttons only but no axes. */
-        for (button = BTN_JOYSTICK; button < BTN_DIGI && !has_joystick_axes_or_buttons; button++)
-                has_joystick_axes_or_buttons = test_bit(button, bitmask_key);
-        for (button = BTN_TRIGGER_HAPPY1; button <= BTN_TRIGGER_HAPPY40 && !has_joystick_axes_or_buttons; button++)
-                has_joystick_axes_or_buttons = test_bit(button, bitmask_key);
-        for (button = BTN_DPAD_UP; button <= BTN_DPAD_RIGHT && !has_joystick_axes_or_buttons; button++)
-                has_joystick_axes_or_buttons = test_bit(button, bitmask_key);
+         * other fancy axes. Others have buttons only but no axes.
+         *
+         * The BTN_JOYSTICK range starts after the mouse range, so a mouse
+         * with more than 16 buttons runs into the joystick range (e.g. Mad
+         * Catz Mad Catz M.M.O.TE). Skip those.
+         */
+        if (!test_bit(BTN_JOYSTICK - 1, bitmask_key)) {
+                for (button = BTN_JOYSTICK; button < BTN_DIGI && !has_joystick_axes_or_buttons; button++)
+                        has_joystick_axes_or_buttons = test_bit(button, bitmask_key);
+                for (button = BTN_TRIGGER_HAPPY1; button <= BTN_TRIGGER_HAPPY40 && !has_joystick_axes_or_buttons; button++)
+                        has_joystick_axes_or_buttons = test_bit(button, bitmask_key);
+                for (button = BTN_DPAD_UP; button <= BTN_DPAD_RIGHT && !has_joystick_axes_or_buttons; button++)
+                        has_joystick_axes_or_buttons = test_bit(button, bitmask_key);
+        }
         for (axis = ABS_RX; axis < ABS_PRESSURE && !has_joystick_axes_or_buttons; axis++)
                 has_joystick_axes_or_buttons = test_bit(axis, bitmask_abs);
 
@@ -299,7 +293,7 @@ static bool test_key(struct udev_device *dev,
         /* the first 32 bits are ESC, numbers, and Q to D; if we have all of
          * those, consider it a full keyboard; do not test KEY_RESERVED, though */
         mask = 0xFFFFFFFE;
-        if ((bitmask_key[0] & mask) == mask) {
+        if (FLAGS_SET(bitmask_key[0], mask)) {
                 udev_builtin_add_property(dev, test, "ID_INPUT_KEYBOARD", "1");
                 ret = true;
         }

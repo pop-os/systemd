@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1337,7 +1319,7 @@ static int add_any_file(
                 goto finish;
         }
 
-        r = journal_file_open(fd, path, O_RDONLY, 0, false, false, NULL, j->mmap, NULL, NULL, &f);
+        r = journal_file_open(fd, path, O_RDONLY, 0, false, 0, false, NULL, j->mmap, NULL, NULL, &f);
         if (r < 0) {
                 log_debug_errno(r, "Failed to open journal file %s: %m", path);
                 goto finish;
@@ -1827,7 +1809,7 @@ static int allocate_inotify(sd_journal *j) {
 }
 
 static sd_journal *journal_new(int flags, const char *path) {
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
 
         j = new0(sd_journal, 1);
         if (!j)
@@ -1844,7 +1826,7 @@ static sd_journal *journal_new(int flags, const char *path) {
 
                 t = strdup(path);
                 if (!t)
-                        goto fail;
+                        return NULL;
 
                 if (flags & SD_JOURNAL_OS_ROOT)
                         j->prefix = t;
@@ -1854,19 +1836,15 @@ static sd_journal *journal_new(int flags, const char *path) {
 
         j->files = ordered_hashmap_new(&path_hash_ops);
         if (!j->files)
-                goto fail;
+                return NULL;
 
         j->files_cache = ordered_hashmap_iterated_cache_new(j->files);
         j->directories_by_path = hashmap_new(&path_hash_ops);
         j->mmap = mmap_cache_new();
         if (!j->files_cache || !j->directories_by_path || !j->mmap)
-                goto fail;
+                return NULL;
 
-        return j;
-
-fail:
-        sd_journal_close(j);
-        return NULL;
+        return TAKE_PTR(j);
 }
 
 #define OPEN_ALLOWED_FLAGS                              \
@@ -1875,7 +1853,7 @@ fail:
          SD_JOURNAL_SYSTEM | SD_JOURNAL_CURRENT_USER)
 
 _public_ int sd_journal_open(sd_journal **ret, int flags) {
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         int r;
 
         assert_return(ret, -EINVAL);
@@ -1887,15 +1865,10 @@ _public_ int sd_journal_open(sd_journal **ret, int flags) {
 
         r = add_search_paths(j);
         if (r < 0)
-                goto fail;
+                return r;
 
-        *ret = j;
+        *ret = TAKE_PTR(j);
         return 0;
-
-fail:
-        sd_journal_close(j);
-
-        return r;
 }
 
 #define OPEN_CONTAINER_ALLOWED_FLAGS                    \
@@ -1903,7 +1876,7 @@ fail:
 
 _public_ int sd_journal_open_container(sd_journal **ret, const char *machine, int flags) {
         _cleanup_free_ char *root = NULL, *class = NULL;
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         char *p;
         int r;
 
@@ -1916,7 +1889,7 @@ _public_ int sd_journal_open_container(sd_journal **ret, const char *machine, in
         assert_return(machine_name_is_valid(machine), -EINVAL);
 
         p = strjoina("/run/systemd/machines/", machine);
-        r = parse_env_file(p, NEWLINE, "ROOT", &root, "CLASS", &class, NULL);
+        r = parse_env_file(NULL, p, NEWLINE, "ROOT", &root, "CLASS", &class, NULL);
         if (r == -ENOENT)
                 return -EHOSTDOWN;
         if (r < 0)
@@ -1933,14 +1906,10 @@ _public_ int sd_journal_open_container(sd_journal **ret, const char *machine, in
 
         r = add_search_paths(j);
         if (r < 0)
-                goto fail;
+                return r;
 
-        *ret = j;
+        *ret = TAKE_PTR(j);
         return 0;
-
-fail:
-        sd_journal_close(j);
-        return r;
 }
 
 #define OPEN_DIRECTORY_ALLOWED_FLAGS                    \
@@ -1948,7 +1917,7 @@ fail:
          SD_JOURNAL_SYSTEM | SD_JOURNAL_CURRENT_USER )
 
 _public_ int sd_journal_open_directory(sd_journal **ret, const char *path, int flags) {
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         int r;
 
         assert_return(ret, -EINVAL);
@@ -1964,18 +1933,14 @@ _public_ int sd_journal_open_directory(sd_journal **ret, const char *path, int f
         else
                 r = add_root_directory(j, path, false);
         if (r < 0)
-                goto fail;
+                return r;
 
-        *ret = j;
+        *ret = TAKE_PTR(j);
         return 0;
-
-fail:
-        sd_journal_close(j);
-        return r;
 }
 
 _public_ int sd_journal_open_files(sd_journal **ret, const char **paths, int flags) {
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         const char **path;
         int r;
 
@@ -1989,17 +1954,13 @@ _public_ int sd_journal_open_files(sd_journal **ret, const char **paths, int fla
         STRV_FOREACH(path, paths) {
                 r = add_any_file(j, -1, *path);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
         j->no_new_files = true;
 
-        *ret = j;
+        *ret = TAKE_PTR(j);
         return 0;
-
-fail:
-        sd_journal_close(j);
-        return r;
 }
 
 #define OPEN_DIRECTORY_FD_ALLOWED_FLAGS         \
@@ -2007,7 +1968,7 @@ fail:
          SD_JOURNAL_SYSTEM | SD_JOURNAL_CURRENT_USER )
 
 _public_ int sd_journal_open_directory_fd(sd_journal **ret, int fd, int flags) {
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         struct stat st;
         int r;
 
@@ -2032,20 +1993,16 @@ _public_ int sd_journal_open_directory_fd(sd_journal **ret, int fd, int flags) {
         else
                 r = add_root_directory(j, NULL, false);
         if (r < 0)
-                goto fail;
+                return r;
 
-        *ret = j;
+        *ret = TAKE_PTR(j);
         return 0;
-
-fail:
-        sd_journal_close(j);
-        return r;
 }
 
 _public_ int sd_journal_open_files_fd(sd_journal **ret, int fds[], unsigned n_fds, int flags) {
         Iterator iterator;
         JournalFile *f;
-        sd_journal *j;
+        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         unsigned i;
         int r;
 
@@ -2082,7 +2039,7 @@ _public_ int sd_journal_open_files_fd(sd_journal **ret, int fds[], unsigned n_fd
         j->no_new_files = true;
         j->no_inotify = true;
 
-        *ret = j;
+        *ret = TAKE_PTR(j);
         return 0;
 
 fail:
@@ -2091,7 +2048,6 @@ fail:
         ORDERED_HASHMAP_FOREACH(f, j->files, iterator)
                 f->close_fd = false;
 
-        sd_journal_close(j);
         return r;
 }
 

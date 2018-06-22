@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1+
-#
-# Copyright 2017 Zbigniew Jędrzejewski-Szmek
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 basic_dns_sources = files('''
         resolved-dns-dnssec.c
@@ -80,7 +65,12 @@ systemd_resolved_sources = files('''
         resolved-etc-hosts.c
 '''.split())
 
-systemd_resolve_sources = files('resolve-tool.c')
+resolvectl_sources = files('''
+         resolvconf-compat.c
+         resolvconf-compat.h
+         resolvectl.c
+         resolvectl.h
+'''.split())
 
 ############################################################
 
@@ -148,6 +138,11 @@ libsystemd_resolve_core = static_library(
         include_directories : includes)
 
 systemd_resolved_sources += [resolved_gperf_c, resolved_dnssd_gperf_c]
+
+systemd_resolved_dependencies = [threads, libgpg_error, libm, libidn]
+if conf.get('ENABLE_DNS_OVER_TLS') == 1
+        systemd_resolved_dependencies += [libgnutls]
+endif
 
 if conf.get('ENABLE_RESOLVE') == 1
         install_data('org.freedesktop.resolve1.conf',

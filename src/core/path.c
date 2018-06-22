@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <sys/epoll.h>
@@ -80,7 +62,7 @@ int path_spec_watch(PathSpec *s, sd_event_io_handler_t handler) {
 
         (void) sd_event_source_set_description(s->event_source, "path");
 
-        /* This function assumes the path was passed through path_kill_slashes()! */
+        /* This function assumes the path was passed through path_simplify()! */
         assert(!strstr(s->path, "//"));
 
         for (slash = strchr(s->path, '/'); ; slash = strchr(slash+1, '/')) {
@@ -302,7 +284,7 @@ static int path_verify(Path *p) {
 
         if (!p->specs) {
                 log_unit_error(UNIT(p), "Path unit lacks path setting. Refusing.");
-                return -EINVAL;
+                return -ENOEXEC;
         }
 
         return 0;
@@ -438,7 +420,7 @@ static void path_set_state(Path *p, PathState state) {
         if (state != old_state)
                 log_unit_debug(UNIT(p), "Changed %s -> %s", path_state_to_string(old_state), path_state_to_string(state));
 
-        unit_notify(UNIT(p), state_translation_table[old_state], state_translation_table[state], true);
+        unit_notify(UNIT(p), state_translation_table[old_state], state_translation_table[state], 0);
 }
 
 static void path_enter_waiting(Path *p, bool initial, bool recheck);

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -95,7 +77,7 @@ int seat_save(Seat *s) {
         if (!s->started)
                 return 0;
 
-        r = mkdir_safe_label("/run/systemd/seats", 0755, 0, 0, false);
+        r = mkdir_safe_label("/run/systemd/seats", 0755, 0, 0, MKDIR_WARN_MODE);
         if (r < 0)
                 goto fail;
 
@@ -420,8 +402,7 @@ int seat_start(Seat *s) {
         log_struct(LOG_INFO,
                    "MESSAGE_ID=" SD_MESSAGE_SEAT_START_STR,
                    "SEAT_ID=%s", s->id,
-                   LOG_MESSAGE("New seat %s.", s->id),
-                   NULL);
+                   LOG_MESSAGE("New seat %s.", s->id));
 
         /* Initialize VT magic stuff */
         seat_preallocate_vts(s);
@@ -448,8 +429,7 @@ int seat_stop(Seat *s, bool force) {
                 log_struct(LOG_INFO,
                            "MESSAGE_ID=" SD_MESSAGE_SEAT_STOP_STR,
                            "SEAT_ID=%s", s->id,
-                           LOG_MESSAGE("Removed seat %s.", s->id),
-                           NULL);
+                           LOG_MESSAGE("Removed seat %s.", s->id));
 
         seat_stop_sessions(s, force);
 
@@ -560,8 +540,7 @@ void seat_complete_switch(Seat *s) {
         if (!s->pending_switch)
                 return;
 
-        session = s->pending_switch;
-        s->pending_switch = NULL;
+        session = TAKE_PTR(s->pending_switch);
 
         seat_set_active(s, session);
 }

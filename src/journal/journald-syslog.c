@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <stddef.h>
 #include <sys/epoll.h>
@@ -116,7 +98,7 @@ static void forward_syslog_iovec(Server *s, const struct iovec *iovec, unsigned 
                 log_debug_errno(errno, "Failed to forward syslog message: %m");
 }
 
-static void forward_syslog_raw(Server *s, int priority, const char *buffer, const struct ucred *ucred, const struct timeval *tv) {
+static void forward_syslog_raw(Server *s, int priority, const char *buffer, size_t buffer_len, const struct ucred *ucred, const struct timeval *tv) {
         struct iovec iovec;
 
         assert(s);
@@ -125,7 +107,7 @@ static void forward_syslog_raw(Server *s, int priority, const char *buffer, cons
         if (LOG_PRI(priority) > s->max_level_syslog)
                 return;
 
-        iovec = IOVEC_MAKE_STRING(buffer);
+        iovec = IOVEC_MAKE((char *) buffer, buffer_len);
         forward_syslog_iovec(s, &iovec, 1, ucred, tv);
 }
 
@@ -315,20 +297,20 @@ static void syslog_skip_date(char **buf) {
 void server_process_syslog_message(
                 Server *s,
                 const char *buf,
+                size_t buf_len,
                 const struct ucred *ucred,
                 const struct timeval *tv,
                 const char *label,
                 size_t label_len) {
 
         char syslog_priority[sizeof("PRIORITY=") + DECIMAL_STR_MAX(int)],
-             syslog_facility[sizeof("SYSLOG_FACILITY=") + DECIMAL_STR_MAX(int)];
+             syslog_facility[sizeof("SYSLOG_FACILITY=") + DECIMAL_STR_MAX(int)], *msg;
         const char *message = NULL, *syslog_identifier = NULL, *syslog_pid = NULL;
         _cleanup_free_ char *identifier = NULL, *pid = NULL;
         int priority = LOG_USER | LOG_INFO, r;
         ClientContext *context = NULL;
         struct iovec *iovec;
-        const char *orig;
-        size_t n = 0, m;
+        size_t n = 0, m, i;
 
         assert(s);
         assert(buf);
@@ -339,26 +321,35 @@ void server_process_syslog_message(
                         log_warning_errno(r, "Failed to retrieve credentials for PID " PID_FMT ", ignoring: %m", ucred->pid);
         }
 
-        orig = buf;
-        syslog_parse_priority(&buf, &priority, true);
+        /* We are creating copy of the message because we want to forward original message verbatim to the legacy
+           syslog implementation */
+        for (i = buf_len; i > 0; i--)
+                if (!strchr(WHITESPACE, buf[i-1]))
+                        break;
+
+        msg = newa(char, i + 1);
+        *((char *) mempcpy(msg, buf, i)) = 0;
+        msg = skip_leading_chars(msg, WHITESPACE);
+
+        syslog_parse_priority((const char **)&msg, &priority, true);
 
         if (!client_context_test_priority(context, priority))
                 return;
 
         if (s->forward_to_syslog)
-                forward_syslog_raw(s, priority, orig, ucred, tv);
+                forward_syslog_raw(s, priority, buf, buf_len, ucred, tv);
 
-        syslog_skip_date((char**) &buf);
-        syslog_parse_identifier(&buf, &identifier, &pid);
+        syslog_skip_date(&msg);
+        syslog_parse_identifier((const char**)&msg, &identifier, &pid);
 
         if (s->forward_to_kmsg)
-                server_forward_kmsg(s, priority, identifier, buf, ucred);
+                server_forward_kmsg(s, priority, identifier, msg, ucred);
 
         if (s->forward_to_console)
-                server_forward_console(s, priority, identifier, buf, ucred);
+                server_forward_console(s, priority, identifier, msg, ucred);
 
         if (s->forward_to_wall)
-                server_forward_wall(s, priority, identifier, buf, ucred);
+                server_forward_wall(s, priority, identifier, msg, ucred);
 
         m = N_IOVEC_META_FIELDS + 6 + client_context_extra_fields_n_iovec(context);
         iovec = newa(struct iovec, m);
@@ -383,7 +374,7 @@ void server_process_syslog_message(
                 iovec[n++] = IOVEC_MAKE_STRING(syslog_pid);
         }
 
-        message = strjoina("MESSAGE=", buf);
+        message = strjoina("MESSAGE=", msg);
         if (message)
                 iovec[n++] = IOVEC_MAKE_STRING(message);
 

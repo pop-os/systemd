@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2016 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <poll.h>
 #include <sched.h>
@@ -122,7 +104,8 @@ static void test_filter_sets(void) {
                 if (pid == 0) { /* Child? */
                         int fd;
 
-                        if (i == SYSCALL_FILTER_SET_DEFAULT) /* if we look at the default set, whitelist instead of blacklist */
+                        /* if we look at the default set (or one that includes it), whitelist instead of blacklist */
+                        if (IN_SET(i, SYSCALL_FILTER_SET_DEFAULT, SYSCALL_FILTER_SET_SYSTEM_SERVICE))
                                 r = seccomp_load_syscall_filter_set(SCMP_ACT_ERRNO(EUCLEAN), syscall_filter_sets + i, SCMP_ACT_ALLOW);
                         else
                                 r = seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + i, SCMP_ACT_ERRNO(EUCLEAN));
@@ -146,29 +129,36 @@ static void test_filter_sets(void) {
 }
 
 static void test_restrict_namespace(void) {
-        _cleanup_free_ char *s = NULL;
+        char *s = NULL;
         unsigned long ul;
         pid_t pid;
 
-        assert_se(namespace_flag_to_string(0) == NULL);
-        assert_se(streq(namespace_flag_to_string(CLONE_NEWNS), "mnt"));
-        assert_se(namespace_flag_to_string(CLONE_NEWNS|CLONE_NEWIPC) == NULL);
-        assert_se(streq(namespace_flag_to_string(CLONE_NEWCGROUP), "cgroup"));
+        assert_se(namespace_flags_to_string(0, &s) == 0 && streq(s, ""));
+        s = mfree(s);
+        assert_se(namespace_flags_to_string(CLONE_NEWNS, &s) == 0 && streq(s, "mnt"));
+        s = mfree(s);
+        assert_se(namespace_flags_to_string(CLONE_NEWNS|CLONE_NEWIPC, &s) == 0 && streq(s, "ipc mnt"));
+        s = mfree(s);
+        assert_se(namespace_flags_to_string(CLONE_NEWCGROUP, &s) == 0 && streq(s, "cgroup"));
+        s = mfree(s);
 
-        assert_se(namespace_flag_from_string("mnt") == CLONE_NEWNS);
-        assert_se(namespace_flag_from_string(NULL) == 0);
-        assert_se(namespace_flag_from_string("") == 0);
-        assert_se(namespace_flag_from_string("uts") == CLONE_NEWUTS);
-        assert_se(namespace_flag_from_string(namespace_flag_to_string(CLONE_NEWUTS)) == CLONE_NEWUTS);
-        assert_se(streq(namespace_flag_to_string(namespace_flag_from_string("ipc")), "ipc"));
+        assert_se(namespace_flags_from_string("mnt", &ul) == 0 && ul == CLONE_NEWNS);
+        assert_se(namespace_flags_from_string(NULL, &ul) == 0 && ul == 0);
+        assert_se(namespace_flags_from_string("", &ul) == 0 && ul == 0);
+        assert_se(namespace_flags_from_string("uts", &ul) == 0 && ul == CLONE_NEWUTS);
+        assert_se(namespace_flags_from_string("mnt uts ipc", &ul) == 0 && ul == (CLONE_NEWNS|CLONE_NEWUTS|CLONE_NEWIPC));
 
-        assert_se(namespace_flag_from_string_many(NULL, &ul) == 0 && ul == 0);
-        assert_se(namespace_flag_from_string_many("", &ul) == 0 && ul == 0);
-        assert_se(namespace_flag_from_string_many("mnt uts ipc", &ul) == 0 && ul == (CLONE_NEWNS|CLONE_NEWUTS|CLONE_NEWIPC));
+        assert_se(namespace_flags_to_string(CLONE_NEWUTS, &s) == 0 && streq(s, "uts"));
+        assert_se(namespace_flags_from_string(s, &ul) == 0 && ul == CLONE_NEWUTS);
+        s = mfree(s);
+        assert_se(namespace_flags_from_string("ipc", &ul) == 0 && ul == CLONE_NEWIPC);
+        assert_se(namespace_flags_to_string(ul, &s) == 0 && streq(s, "ipc"));
+        s = mfree(s);
 
-        assert_se(namespace_flag_to_string_many(NAMESPACE_FLAGS_ALL, &s) == 0);
+        assert_se(namespace_flags_to_string(NAMESPACE_FLAGS_ALL, &s) == 0);
         assert_se(streq(s, "cgroup ipc net mnt pid user uts"));
-        assert_se(namespace_flag_from_string_many(s, &ul) == 0 && ul == NAMESPACE_FLAGS_ALL);
+        assert_se(namespace_flags_from_string(s, &ul) == 0 && ul == NAMESPACE_FLAGS_ALL);
+        s = mfree(s);
 
         if (!is_seccomp_available())
                 return;

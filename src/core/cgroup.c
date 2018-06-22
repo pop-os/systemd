@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2013 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <fcntl.h>
 #include <fnmatch.h>
@@ -24,6 +6,7 @@
 #include "alloc-util.h"
 #include "blockdev-util.h"
 #include "bpf-firewall.h"
+#include "btrfs-util.h"
 #include "bus-error.h"
 #include "cgroup-util.h"
 #include "cgroup.h"
@@ -53,7 +36,7 @@ bool manager_owns_root_cgroup(Manager *m) {
         if (detect_container() > 0)
                 return false;
 
-        return isempty(m->cgroup_root) || path_equal(m->cgroup_root, "/");
+        return empty_or_root(m->cgroup_root);
 }
 
 bool unit_has_root_cgroup(Unit *u) {
@@ -319,32 +302,36 @@ void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix) {
         }
 }
 
-static int lookup_block_device(const char *p, dev_t *dev) {
+static int lookup_block_device(const char *p, dev_t *ret) {
         struct stat st;
         int r;
 
         assert(p);
-        assert(dev);
+        assert(ret);
 
-        r = stat(p, &st);
-        if (r < 0)
-                return log_warning_errno(errno, "Couldn't stat device %s: %m", p);
+        if (stat(p, &st) < 0)
+                return log_warning_errno(errno, "Couldn't stat device '%s': %m", p);
 
         if (S_ISBLK(st.st_mode))
-                *dev = st.st_rdev;
-        else if (major(st.st_dev) != 0) {
-                /* If this is not a device node then find the block
-                 * device this file is stored on */
-                *dev = st.st_dev;
-
-                /* If this is a partition, try to get the originating
-                 * block device */
-                (void) block_get_whole_disk(*dev, dev);
-        } else {
-                log_warning("%s is not a block device and file system block device cannot be determined or is not local.", p);
-                return -ENODEV;
+                *ret = st.st_rdev;
+        else if (major(st.st_dev) != 0)
+                *ret = st.st_dev; /* If this is not a device node then use the block device this file is stored on */
+        else {
+                /* If this is btrfs, getting the backing block device is a bit harder */
+                r = btrfs_get_block_device(p, ret);
+                if (r < 0 && r != -ENOTTY)
+                        return log_warning_errno(r, "Failed to determine block device backing btrfs file system '%s': %m", p);
+                if (r == -ENOTTY) {
+                        log_warning("'%s' is not a block device node, and file system block device cannot be determined or is not local.", p);
+                        return -ENODEV;
+                }
         }
 
+        /* If this is a LUKS device, try to get the originating block device */
+        (void) block_get_originating(*ret, ret);
+
+        /* If this is a partition, try to get the originating block device */
+        (void) block_get_whole_disk(*ret, ret);
         return 0;
 }
 
@@ -632,26 +619,22 @@ static void cgroup_apply_blkio_device_weight(Unit *u, const char *dev_path, uint
                               "Failed to set blkio.weight_device: %m");
 }
 
-static unsigned cgroup_apply_io_device_limit(Unit *u, const char *dev_path, uint64_t *limits) {
+static void cgroup_apply_io_device_limit(Unit *u, const char *dev_path, uint64_t *limits) {
         char limit_bufs[_CGROUP_IO_LIMIT_TYPE_MAX][DECIMAL_STR_MAX(uint64_t)];
         char buf[DECIMAL_STR_MAX(dev_t)*2+2+(6+DECIMAL_STR_MAX(uint64_t)+1)*4];
         CGroupIOLimitType type;
         dev_t dev;
-        unsigned n = 0;
         int r;
 
         r = lookup_block_device(dev_path, &dev);
         if (r < 0)
-                return 0;
+                return;
 
-        for (type = 0; type < _CGROUP_IO_LIMIT_TYPE_MAX; type++) {
-                if (limits[type] != cgroup_io_limit_defaults[type]) {
+        for (type = 0; type < _CGROUP_IO_LIMIT_TYPE_MAX; type++)
+                if (limits[type] != cgroup_io_limit_defaults[type])
                         xsprintf(limit_bufs[type], "%" PRIu64, limits[type]);
-                        n++;
-                } else {
+                else
                         xsprintf(limit_bufs[type], "%s", limits[type] == CGROUP_LIMIT_MAX ? "max" : "0");
-                }
-        }
 
         xsprintf(buf, "%u:%u rbps=%s wbps=%s riops=%s wiops=%s\n", major(dev), minor(dev),
                  limit_bufs[CGROUP_IO_RBPS_MAX], limit_bufs[CGROUP_IO_WBPS_MAX],
@@ -660,36 +643,28 @@ static unsigned cgroup_apply_io_device_limit(Unit *u, const char *dev_path, uint
         if (r < 0)
                 log_unit_full(u, IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
                               "Failed to set io.max: %m");
-        return n;
 }
 
-static unsigned cgroup_apply_blkio_device_limit(Unit *u, const char *dev_path, uint64_t rbps, uint64_t wbps) {
+static void cgroup_apply_blkio_device_limit(Unit *u, const char *dev_path, uint64_t rbps, uint64_t wbps) {
         char buf[DECIMAL_STR_MAX(dev_t)*2+2+DECIMAL_STR_MAX(uint64_t)+1];
         dev_t dev;
-        unsigned n = 0;
         int r;
 
         r = lookup_block_device(dev_path, &dev);
         if (r < 0)
-                return 0;
+                return;
 
-        if (rbps != CGROUP_LIMIT_MAX)
-                n++;
         sprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), rbps);
         r = cg_set_attribute("blkio", u->cgroup_path, "blkio.throttle.read_bps_device", buf);
         if (r < 0)
                 log_unit_full(u, IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
                               "Failed to set blkio.throttle.read_bps_device: %m");
 
-        if (wbps != CGROUP_LIMIT_MAX)
-                n++;
         sprintf(buf, "%u:%u %" PRIu64 "\n", major(dev), minor(dev), wbps);
         r = cg_set_attribute("blkio", u->cgroup_path, "blkio.throttle.write_bps_device", buf);
         if (r < 0)
                 log_unit_full(u, IN_SET(r, -ENOENT, -EROFS, -EACCES) ? LOG_DEBUG : LOG_WARNING, r,
                               "Failed to set blkio.throttle.write_bps_device: %m");
-
-        return n;
 }
 
 static bool cgroup_context_has_unified_memory_config(CGroupContext *c) {
@@ -840,16 +815,15 @@ static void cgroup_context_apply(
 
                 /* Apply limits and free ones without config. */
                 if (has_io) {
-                        CGroupIODeviceLimit *l, *next;
+                        CGroupIODeviceLimit *l;
 
-                        LIST_FOREACH_SAFE(device_limits, l, next, c->io_device_limits) {
-                                if (!cgroup_apply_io_device_limit(u, l->path, l->limits))
-                                        cgroup_context_free_io_device_limit(c, l);
-                        }
+                        LIST_FOREACH(device_limits, l, c->io_device_limits)
+                                cgroup_apply_io_device_limit(u, l->path, l->limits);
+
                 } else if (has_blockio) {
-                        CGroupBlockIODeviceBandwidth *b, *next;
+                        CGroupBlockIODeviceBandwidth *b;
 
-                        LIST_FOREACH_SAFE(device_bandwidths, b, next, c->blockio_device_bandwidths) {
+                        LIST_FOREACH(device_bandwidths, b, c->blockio_device_bandwidths) {
                                 uint64_t limits[_CGROUP_IO_LIMIT_TYPE_MAX];
                                 CGroupIOLimitType type;
 
@@ -862,8 +836,7 @@ static void cgroup_context_apply(
                                 log_cgroup_compat(u, "Applying BlockIO{Read|Write}Bandwidth %" PRIu64 " %" PRIu64 " as IO{Read|Write}BandwidthMax for %s",
                                                   b->rbps, b->wbps, b->path);
 
-                                if (!cgroup_apply_io_device_limit(u, b->path, limits))
-                                        cgroup_context_free_blockio_device_bandwidth(c, b);
+                                cgroup_apply_io_device_limit(u, b->path, limits);
                         }
                 }
         }
@@ -917,21 +890,19 @@ static void cgroup_context_apply(
 
                 /* Apply limits and free ones without config. */
                 if (has_io) {
-                        CGroupIODeviceLimit *l, *next;
+                        CGroupIODeviceLimit *l;
 
-                        LIST_FOREACH_SAFE(device_limits, l, next, c->io_device_limits) {
+                        LIST_FOREACH(device_limits, l, c->io_device_limits) {
                                 log_cgroup_compat(u, "Applying IO{Read|Write}Bandwidth %" PRIu64 " %" PRIu64 " as BlockIO{Read|Write}BandwidthMax for %s",
                                                   l->limits[CGROUP_IO_RBPS_MAX], l->limits[CGROUP_IO_WBPS_MAX], l->path);
 
-                                if (!cgroup_apply_blkio_device_limit(u, l->path, l->limits[CGROUP_IO_RBPS_MAX], l->limits[CGROUP_IO_WBPS_MAX]))
-                                        cgroup_context_free_io_device_limit(c, l);
+                                cgroup_apply_blkio_device_limit(u, l->path, l->limits[CGROUP_IO_RBPS_MAX], l->limits[CGROUP_IO_WBPS_MAX]);
                         }
                 } else if (has_blockio) {
-                        CGroupBlockIODeviceBandwidth *b, *next;
+                        CGroupBlockIODeviceBandwidth *b;
 
-                        LIST_FOREACH_SAFE(device_bandwidths, b, next, c->blockio_device_bandwidths)
-                                if (!cgroup_apply_blkio_device_limit(u, b->path, b->rbps, b->wbps))
-                                        cgroup_context_free_blockio_device_bandwidth(c, b);
+                        LIST_FOREACH(device_bandwidths, b, c->blockio_device_bandwidths)
+                                cgroup_apply_blkio_device_limit(u, b->path, b->rbps, b->wbps);
                 }
         }
 
@@ -1318,7 +1289,7 @@ const char *unit_get_realized_cgroup_path(Unit *u, CGroupMask mask) {
 
                 if (u->cgroup_path &&
                     u->cgroup_realized &&
-                    (u->cgroup_realized_mask & mask) == mask)
+                    FLAGS_SET(u->cgroup_realized_mask, mask))
                         return u->cgroup_path;
 
                 u = UNIT_DEREF(u->slice);
@@ -1381,8 +1352,7 @@ int unit_set_cgroup_path(Unit *u, const char *path) {
 
         unit_release_cgroup(u);
 
-        u->cgroup_path = p;
-        p = NULL;
+        u->cgroup_path = TAKE_PTR(p);
 
         return 1;
 }
@@ -1469,6 +1439,7 @@ static int unit_create_cgroup(
 
         CGroupContext *c;
         int r;
+        bool created;
 
         assert(u);
 
@@ -1485,14 +1456,20 @@ static int unit_create_cgroup(
         r = cg_create_everywhere(u->manager->cgroup_supported, target_mask, u->cgroup_path);
         if (r < 0)
                 return log_unit_error_errno(u, r, "Failed to create cgroup %s: %m", u->cgroup_path);
+        created = !!r;
 
         /* Start watching it */
         (void) unit_watch_cgroup(u);
 
-        /* Enable all controllers we need */
-        r = cg_enable_everywhere(u->manager->cgroup_supported, enable_mask, u->cgroup_path);
-        if (r < 0)
-                log_unit_warning_errno(u, r, "Failed to enable controllers on cgroup %s, ignoring: %m", u->cgroup_path);
+        /* Preserve enabled controllers in delegated units, adjust others. */
+        if (created || !unit_cgroup_delegate(u)) {
+
+                /* Enable all controllers we need */
+                r = cg_enable_everywhere(u->manager->cgroup_supported, enable_mask, u->cgroup_path);
+                if (r < 0)
+                        log_unit_warning_errno(u, r, "Failed to enable controllers on cgroup %s, ignoring: %m",
+                                               u->cgroup_path);
+        }
 
         /* Keep track that this is now realized */
         u->cgroup_realized = true;
@@ -1535,7 +1512,7 @@ static int unit_attach_pid_to_cgroup_via_bus(Unit *u, pid_t pid, const char *suf
                 return -EINVAL;
 
         pp = strjoina("/", pp, suffix_path);
-        path_kill_slashes(pp);
+        path_simplify(pp, false);
 
         r = sd_bus_call_method(u->manager->system_bus,
                                "org.freedesktop.systemd1",
@@ -1705,7 +1682,6 @@ static void unit_remove_from_cgroup_realize_queue(Unit *u) {
         LIST_REMOVE(cgroup_realize_queue, u->manager->cgroup_realize_queue, u);
         u->in_cgroup_realize_queue = false;
 }
-
 
 /* Check if necessary controllers and attributes for a unit are in place.
  *
@@ -2057,7 +2033,7 @@ static int on_cgroup_empty_event(sd_event_source *s, void *userdata) {
                 /* More stuff queued, let's make sure we remain enabled */
                 r = sd_event_source_set_enabled(s, SD_EVENT_ONESHOT);
                 if (r < 0)
-                        log_debug_errno(r, "Failed to reenable cgroup empty event source: %m");
+                        log_debug_errno(r, "Failed to reenable cgroup empty event source, ignoring: %m");
         }
 
         unit_add_to_gc_queue(u);
@@ -2272,19 +2248,20 @@ int manager_setup_cgroup(Manager *m) {
         /* 5. Make sure we are in the special "init.scope" unit in the root slice. */
         scope_path = strjoina(m->cgroup_root, "/" SPECIAL_INIT_SCOPE);
         r = cg_create_and_attach(SYSTEMD_CGROUP_CONTROLLER, scope_path, 0);
-        if (r < 0)
+        if (r >= 0) {
+                /* Also, move all other userspace processes remaining in the root cgroup into that scope. */
+                r = cg_migrate(SYSTEMD_CGROUP_CONTROLLER, m->cgroup_root, SYSTEMD_CGROUP_CONTROLLER, scope_path, 0);
+                if (r < 0)
+                        log_warning_errno(r, "Couldn't move remaining userspace processes, ignoring: %m");
+
+                /* 6. And pin it, so that it cannot be unmounted */
+                safe_close(m->pin_cgroupfs_fd);
+                m->pin_cgroupfs_fd = open(path, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_NOCTTY|O_NONBLOCK);
+                if (m->pin_cgroupfs_fd < 0)
+                        return log_error_errno(errno, "Failed to open pin file: %m");
+
+        } else if (r < 0 && !m->test_run_flags)
                 return log_error_errno(r, "Failed to create %s control group: %m", scope_path);
-
-        /* Also, move all other userspace processes remaining in the root cgroup into that scope. */
-        r = cg_migrate(SYSTEMD_CGROUP_CONTROLLER, m->cgroup_root, SYSTEMD_CGROUP_CONTROLLER, scope_path, 0);
-        if (r < 0)
-                log_warning_errno(r, "Couldn't move remaining userspace processes, ignoring: %m");
-
-        /* 6. And pin it, so that it cannot be unmounted */
-        safe_close(m->pin_cgroupfs_fd);
-        m->pin_cgroupfs_fd = open(path, O_RDONLY|O_CLOEXEC|O_DIRECTORY|O_NOCTTY|O_NONBLOCK);
-        if (m->pin_cgroupfs_fd < 0)
-                return log_error_errno(errno, "Failed to open pin file: %m");
 
         /* 7. Always enable hierarchical support if it exists... */
         if (!all_unified && m->test_run_flags == 0)
@@ -2305,7 +2282,7 @@ void manager_shutdown_cgroup(Manager *m, bool delete) {
 
         /* We can't really delete the group, since we are in it. But
          * let's trim it. */
-        if (delete && m->cgroup_root)
+        if (delete && m->cgroup_root && m->test_run_flags != MANAGER_TEST_RUN_MINIMAL)
                 (void) cg_trim(SYSTEMD_CGROUP_CONTROLLER, m->cgroup_root, false);
 
         m->cgroup_empty_event_source = sd_event_source_unref(m->cgroup_empty_event_source);

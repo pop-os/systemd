@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2017 Zbigniew Jędrzejewski-Szmek
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <string.h>
 
@@ -31,7 +13,7 @@ int udev_parse_config(void) {
         size_t n;
         int r;
 
-        r = parse_env_file("/etc/udev/udev.conf", NEWLINE, "udev_log", &val, NULL);
+        r = parse_env_file(NULL, "/etc/udev/udev.conf", NEWLINE, "udev_log", &val, NULL);
         if (r == -ENOENT || !val)
                 return 0;
         if (r < 0)
@@ -53,5 +35,28 @@ int udev_parse_config(void) {
         if (r < 0)
                 log_debug_errno(r, "/etc/udev/udev.conf: failed to set udev log level '%s', ignoring: %m", log);
 
+        return 0;
+}
+
+int udev_device_new_from_stat_rdev(struct udev *udev, const struct stat *st, struct udev_device **ret) {
+        struct udev_device *nd;
+        char type;
+
+        assert(udev);
+        assert(st);
+        assert(ret);
+
+        if (S_ISBLK(st->st_mode))
+                type = 'b';
+        else if (S_ISCHR(st->st_mode))
+                type = 'c';
+        else
+                return -ENOTTY;
+
+        nd = udev_device_new_from_devnum(udev, type, st->st_rdev);
+        if (!nd)
+                return -errno;
+
+        *ret = nd;
         return 0;
 }

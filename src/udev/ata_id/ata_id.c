@@ -2,22 +2,8 @@
 /*
  * ata_id - reads product/serial number from ATA drives
  *
- * Copyright (C) 2005-2008 Kay Sievers <kay@vrfy.org>
- * Copyright (C) 2009 Lennart Poettering <lennart@poettering.net>
- * Copyright (C) 2009-2010 David Zeuthen <zeuthen@gmail.com>
+ * Copyright © 2009-2010 David Zeuthen <zeuthen@gmail.com>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <ctype.h>
@@ -318,7 +304,7 @@ static void disk_identify_fixup_uint16 (uint8_t identify[512], unsigned int offs
  * device represented by @fd. If successful, then the result will be
  * copied into @out_identify and @out_is_packet_device.
  *
- * This routine is based on code from libatasmart, Copyright 2008
+ * This routine is based on code from libatasmart, Copyright © 2008
  * Lennart Poettering, LGPL v2.1.
  *
  * Returns: 0 if the data was successfully obtained, otherwise
@@ -405,9 +391,8 @@ out:
         return ret;
 }
 
-int main(int argc, char *argv[])
-{
-        _cleanup_udev_unref_ struct udev *udev = NULL;
+int main(int argc, char *argv[]) {
+        _cleanup_(udev_unrefp) struct udev *udev = NULL;
         struct hd_driveid id;
         union {
                 uint8_t  byte[512];

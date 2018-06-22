@@ -1,28 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <getopt.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
+#include "string-table.h"
 #include "util.h"
 #include "virt.h"
 
@@ -45,6 +28,7 @@ static void help(void) {
                "  -r --chroot           Detect whether we are run in a chroot() environment\n"
                "     --private-users    Only detect whether we are running in a user namespace\n"
                "  -q --quiet            Don't output anything, just set return value\n"
+               "     --list             List all known and detectable types of virtualization\n"
                , program_invocation_short_name);
 }
 
@@ -53,6 +37,7 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_PRIVATE_USERS,
+                ARG_LIST,
         };
 
         static const struct option options[] = {
@@ -63,6 +48,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "chroot",        no_argument, NULL, 'r'               },
                 { "private-users", no_argument, NULL, ARG_PRIVATE_USERS },
                 { "quiet",         no_argument, NULL, 'q'               },
+                { "list",          no_argument, NULL, ARG_LIST          },
                 {}
         };
 
@@ -101,6 +87,10 @@ static int parse_argv(int argc, char *argv[]) {
                 case 'r':
                         arg_mode = ONLY_CHROOT;
                         break;
+
+                case ARG_LIST:
+                        DUMP_STRING_TABLE(virtualization, int, _VIRTUALIZATION_MAX);
+                        return 0;
 
                 case '?':
                         return -EINVAL;

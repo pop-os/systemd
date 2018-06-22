@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2013 Tom Gundersen <teg@jklm.no>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <net/if.h>
 
@@ -37,7 +19,7 @@
 #define STATIC_ADDRESSES_PER_NETWORK_MAX 1024U
 
 int address_new(Address **ret) {
-        _cleanup_address_free_ Address *address = NULL;
+        _cleanup_(address_freep) Address *address = NULL;
 
         address = new0(Address, 1);
         if (!address)
@@ -48,15 +30,14 @@ int address_new(Address **ret) {
         address->cinfo.ifa_prefered = CACHE_INFO_INFINITY_LIFE_TIME;
         address->cinfo.ifa_valid = CACHE_INFO_INFINITY_LIFE_TIME;
 
-        *ret = address;
-        address = NULL;
+        *ret = TAKE_PTR(address);
 
         return 0;
 }
 
 int address_new_static(Network *network, const char *filename, unsigned section_line, Address **ret) {
-        _cleanup_network_config_section_free_ NetworkConfigSection *n = NULL;
-        _cleanup_address_free_ Address *address = NULL;
+        _cleanup_(network_config_section_freep) NetworkConfigSection *n = NULL;
+        _cleanup_(address_freep) Address *address = NULL;
         int r;
 
         assert(network);
@@ -70,8 +51,7 @@ int address_new_static(Network *network, const char *filename, unsigned section_
 
                 address = hashmap_get(network->addresses_by_section, n);
                 if (address) {
-                        *ret = address;
-                        address = NULL;
+                        *ret = TAKE_PTR(address);
 
                         return 0;
                 }
@@ -85,8 +65,7 @@ int address_new_static(Network *network, const char *filename, unsigned section_
                 return r;
 
         if (filename) {
-                address->section = n;
-                n = NULL;
+                address->section = TAKE_PTR(n);
 
                 r = hashmap_put(network->addresses_by_section, address->section, address);
                 if (r < 0)
@@ -97,8 +76,7 @@ int address_new_static(Network *network, const char *filename, unsigned section_
         LIST_APPEND(addresses, network->static_addresses, address);
         network->n_static_addresses++;
 
-        *ret = address;
-        address = NULL;
+        *ret = TAKE_PTR(address);
 
         return 0;
 }
@@ -258,7 +236,7 @@ static int address_add_internal(Link *link, Set **addresses,
                                 const union in_addr_union *in_addr,
                                 unsigned char prefixlen,
                                 Address **ret) {
-        _cleanup_address_free_ Address *address = NULL;
+        _cleanup_(address_freep) Address *address = NULL;
         int r;
 
         assert(link);
@@ -488,7 +466,7 @@ int address_remove(
 static int address_acquire(Link *link, Address *original, Address **ret) {
         union in_addr_union in_addr = {};
         struct in_addr broadcast = {};
-        _cleanup_address_free_ Address *na = NULL;
+        _cleanup_(address_freep) Address *na = NULL;
         int r;
 
         assert(link);
@@ -541,8 +519,7 @@ static int address_acquire(Link *link, Address *original, Address **ret) {
 
         LIST_PREPEND(addresses, link->pool_addresses, na);
 
-        *ret = na;
-        na = NULL;
+        *ret = TAKE_PTR(na);
 
         return 0;
 }
@@ -685,7 +662,7 @@ int config_parse_broadcast(
                 void *userdata) {
 
         Network *network = userdata;
-        _cleanup_address_free_ Address *n = NULL;
+        _cleanup_(address_freep) Address *n = NULL;
         int r;
 
         assert(filename);
@@ -727,7 +704,7 @@ int config_parse_address(const char *unit,
                 void *userdata) {
 
         Network *network = userdata;
-        _cleanup_address_free_ Address *n = NULL;
+        _cleanup_(address_freep) Address *n = NULL;
         const char *address, *e;
         union in_addr_union buffer;
         int r, f;
@@ -813,7 +790,7 @@ int config_parse_label(
                 void *data,
                 void *userdata) {
 
-        _cleanup_address_free_ Address *n = NULL;
+        _cleanup_(address_freep) Address *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -852,7 +829,7 @@ int config_parse_lifetime(const char *unit,
                           void *data,
                           void *userdata) {
         Network *network = userdata;
-        _cleanup_address_free_ Address *n = NULL;
+        _cleanup_(address_freep) Address *n = NULL;
         unsigned k;
         int r;
 
@@ -900,7 +877,7 @@ int config_parse_address_flags(const char *unit,
                                void *data,
                                void *userdata) {
         Network *network = userdata;
-        _cleanup_address_free_ Address *n = NULL;
+        _cleanup_(address_freep) Address *n = NULL;
         int r;
 
         assert(filename);
@@ -944,7 +921,7 @@ int config_parse_address_scope(const char *unit,
                                void *data,
                                void *userdata) {
         Network *network = userdata;
-        _cleanup_address_free_ Address *n = NULL;
+        _cleanup_(address_freep) Address *n = NULL;
         int r;
 
         assert(filename);

@@ -1,17 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation; either version 2.1 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * Lesser General Public License for more details.
- *
- * Copyright (C) 2015 Kay Sievers <kay@vrfy.org>
- */
 
 #include <efi.h>
 #include <efilib.h>
@@ -128,7 +115,7 @@ EFI_STATUS linux_exec(EFI_HANDLE *image,
                 if (EFI_ERROR(err))
                         return err;
                 CopyMem((VOID *)(UINTN)addr, cmdline, cmdline_len);
-                ((CHAR8 *)addr)[cmdline_len] = 0;
+                ((CHAR8 *)(UINTN)addr)[cmdline_len] = 0;
                 boot_setup->cmd_line_ptr = (UINT32)addr;
         }
 

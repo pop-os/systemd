@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2016 Zbigniew Jędrzejewski-Szmek
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <dlfcn.h>
 #include <stdlib.h>
@@ -100,7 +82,7 @@ static int print_gaih_addrtuples(const struct gaih_addrtuple *tuples) {
                 r = in_addr_to_string(it->family, &u, &a);
                 assert_se(IN_SET(r, 0, -EAFNOSUPPORT));
                 if (r == -EAFNOSUPPORT)
-                        assert_se((a = hexmem(it->addr, 16)));
+                        assert_se(a = hexmem(it->addr, 16));
 
                 if (it->scopeid == 0)
                         goto numerical_index;
@@ -193,7 +175,6 @@ static void test_gethostbyname4_r(void *handle, const char *module, const char *
                 assert_se(n == 2);
         }
 }
-
 
 static void test_gethostbyname3_r(void *handle, const char *module, const char *name, int af) {
         const char *fname;
@@ -413,7 +394,6 @@ static int test_one_module(const char* dir,
         void *handle;
         char **name;
         int i;
-
 
         log_info("======== %s ========", module);
 

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 
@@ -56,6 +38,7 @@ Job* job_new_raw(Unit *unit) {
         j->manager = unit->manager;
         j->unit = unit;
         j->type = _JOB_TYPE_INVALID;
+        j->reloaded = false;
 
         return j;
 }
@@ -77,6 +60,32 @@ Job* job_new(Unit *unit, JobType type) {
         return j;
 }
 
+void job_unlink(Job *j) {
+        assert(j);
+        assert(!j->installed);
+        assert(!j->transaction_prev);
+        assert(!j->transaction_next);
+        assert(!j->subject_list);
+        assert(!j->object_list);
+
+        if (j->in_run_queue) {
+                LIST_REMOVE(run_queue, j->manager->run_queue, j);
+                j->in_run_queue = false;
+        }
+
+        if (j->in_dbus_queue) {
+                LIST_REMOVE(dbus_queue, j->manager->dbus_job_queue, j);
+                j->in_dbus_queue = false;
+        }
+
+        if (j->in_gc_queue) {
+                LIST_REMOVE(gc_queue, j->manager->gc_job_queue, j);
+                j->in_gc_queue = false;
+        }
+
+        j->timer_event_source = sd_event_source_unref(j->timer_event_source);
+}
+
 void job_free(Job *j) {
         assert(j);
         assert(!j->installed);
@@ -85,16 +94,7 @@ void job_free(Job *j) {
         assert(!j->subject_list);
         assert(!j->object_list);
 
-        if (j->in_run_queue)
-                LIST_REMOVE(run_queue, j->manager->run_queue, j);
-
-        if (j->in_dbus_queue)
-                LIST_REMOVE(dbus_queue, j->manager->dbus_job_queue, j);
-
-        if (j->in_gc_queue)
-                LIST_REMOVE(gc_queue, j->manager->gc_job_queue, j);
-
-        sd_event_source_unref(j->timer_event_source);
+        job_unlink(j);
 
         sd_bus_track_unref(j->bus_track);
         strv_free(j->deserialized_clients);
@@ -254,6 +254,7 @@ int job_install_deserialized(Job *j) {
 
         *pj = j;
         j->installed = true;
+        j->reloaded = true;
 
         if (j->state == JOB_RUNNING)
                 j->unit->manager->n_running_jobs++;
@@ -576,7 +577,6 @@ int job_run_and_invalidate(Job *j) {
         job_set_state(j, JOB_RUNNING);
         job_add_to_dbus_queue(j);
 
-
         switch (j->type) {
 
                 case JOB_VERIFY_ACTIVE: {
@@ -626,6 +626,8 @@ int job_run_and_invalidate(Job *j) {
                         r = job_finish_and_invalidate(j, JOB_UNSUPPORTED, true, false);
                 else if (r == -ENOLINK)
                         r = job_finish_and_invalidate(j, JOB_DEPENDENCY, true, false);
+                else if (r == -ESTALE)
+                        r = job_finish_and_invalidate(j, JOB_ONCE, true, false);
                 else if (r == -EAGAIN)
                         job_set_state(j, JOB_WAITING);
                 else if (r < 0)
@@ -645,6 +647,7 @@ _pure_ static const char *job_get_status_message_format(Unit *u, JobType t, JobR
                 [JOB_ASSERT]      = "Assertion failed for %s.",
                 [JOB_UNSUPPORTED] = "Starting of %s not supported.",
                 [JOB_COLLECTED]   = "Unnecessary job for %s was removed.",
+                [JOB_ONCE]        = "Unit %s has been started before and cannot be started again."
         };
         static const char *const generic_finished_stop_job[_JOB_RESULT_MAX] = {
                 [JOB_DONE]        = "Stopped %s.",
@@ -704,6 +707,7 @@ static const struct {
         [JOB_ASSERT]      = { ANSI_HIGHLIGHT_YELLOW, "ASSERT" },
         [JOB_UNSUPPORTED] = { ANSI_HIGHLIGHT_YELLOW, "UNSUPP" },
         /* JOB_COLLECTED */
+        [JOB_ONCE]        = { ANSI_HIGHLIGHT_RED,    " ONCE " },
 };
 
 static void job_print_status_message(Unit *u, JobType t, JobResult result) {
@@ -761,6 +765,7 @@ static void job_log_status_message(Unit *u, JobType t, JobResult result) {
                 [JOB_ASSERT]      = LOG_WARNING,
                 [JOB_UNSUPPORTED] = LOG_WARNING,
                 [JOB_COLLECTED]   = LOG_INFO,
+                [JOB_ONCE]        = LOG_ERR,
         };
 
         assert(u);
@@ -808,8 +813,7 @@ static void job_log_status_message(Unit *u, JobType t, JobResult result) {
                            "JOB_TYPE=%s", job_type_to_string(t),
                            "JOB_RESULT=%s", job_result_to_string(result),
                            LOG_UNIT_ID(u),
-                           LOG_UNIT_INVOCATION_ID(u),
-                           NULL);
+                           LOG_UNIT_INVOCATION_ID(u));
                 return;
         }
 
@@ -819,8 +823,7 @@ static void job_log_status_message(Unit *u, JobType t, JobResult result) {
                    "JOB_RESULT=%s", job_result_to_string(result),
                    LOG_UNIT_ID(u),
                    LOG_UNIT_INVOCATION_ID(u),
-                   mid,
-                   NULL);
+                   mid);
 }
 
 static void job_emit_status_message(Unit *u, JobType t, JobResult result) {
@@ -851,6 +854,19 @@ static void job_fail_dependencies(Unit *u, UnitDependency d) {
 
                 job_finish_and_invalidate(j, JOB_DEPENDENCY, true, false);
         }
+}
+
+static int job_save_pending_finished_job(Job *j) {
+        int r;
+
+        assert(j);
+
+        r = set_ensure_allocated(&j->manager->pending_finished_jobs, NULL);
+        if (r < 0)
+                return r;
+
+        job_unlink(j);
+        return set_put(j->manager->pending_finished_jobs, j);
 }
 
 int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool already) {
@@ -892,7 +908,11 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
                 j->manager->n_failed_jobs++;
 
         job_uninstall(j);
-        job_free(j);
+        /* Keep jobs started before the reload to send singal later, free all others */
+        if (!MANAGER_IS_RELOADING(j->manager) ||
+            !j->reloaded ||
+            job_save_pending_finished_job(j) < 0)
+                job_free(j);
 
         /* Fail depending jobs on failure */
         if (result != JOB_DONE && recursive) {
@@ -916,8 +936,7 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
                            LOG_UNIT_MESSAGE(u, "Job %s/%s failed with result '%s'.",
                                             u->id,
                                             job_type_to_string(t),
-                                            job_result_to_string(result)),
-                           NULL);
+                                            job_result_to_string(result)));
 
                 unit_start_on_failure(u);
         }
@@ -1439,8 +1458,7 @@ int job_get_before(Job *j, Job*** ret) {
 
         n = sort_job_list(list, n);
 
-        *ret = list;
-        list = NULL;
+        *ret = TAKE_PTR(list);
 
         return (int) n;
 }
@@ -1489,8 +1507,7 @@ int job_get_after(Job *j, Job*** ret) {
 
         n = sort_job_list(list, n);
 
-        *ret = list;
-        list = NULL;
+        *ret = TAKE_PTR(list);
 
         return (int) n;
 }
@@ -1539,6 +1556,7 @@ static const char* const job_result_table[_JOB_RESULT_MAX] = {
         [JOB_ASSERT] = "assert",
         [JOB_UNSUPPORTED] = "unsupported",
         [JOB_COLLECTED] = "collected",
+        [JOB_ONCE] = "once",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(job_result, JobResult);

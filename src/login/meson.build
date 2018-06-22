@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1+
-#
-# Copyright 2017 Zbigniew Jędrzejewski-Szmek
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 systemd_logind_sources = files('''
         logind.c
@@ -25,9 +10,6 @@ logind_gperf_c = custom_target(
         input : 'logind-gperf.gperf',
         output : 'logind-gperf.c',
         command : [gperf, '@INPUT@', '--output-file', '@OUTPUT@'])
-
-systemd_logind_sources += [logind_gperf_c]
-
 
 liblogind_core_sources = files('''
         logind-core.c
@@ -55,6 +37,8 @@ liblogind_core_sources = files('''
         logind-acl.h
 '''.split())
 
+liblogind_core_sources += [logind_gperf_c]
+
 logind_acl_c = files('logind-acl.c')
 if conf.get('HAVE_ACL') == 1
         liblogind_core_sources += logind_acl_c
@@ -70,6 +54,11 @@ loginctl_sources = files('''
         loginctl.c
         sysfs-show.h
         sysfs-show.c
+'''.split())
+
+user_runtime_dir_sources = files('''
+        user-runtime-dir.c
+        logind.h
 '''.split())
 
 if conf.get('ENABLE_LOGIND') == 1
@@ -107,7 +96,7 @@ if conf.get('ENABLE_LOGIND') == 1
                 '73-seat-late.rules',
                 input : '73-seat-late.rules.m4',
                 output: '73-seat-late.rules',
-                command : [m4, '-P'] + m4_defines + ['@INPUT@'],
+                command : [meson_apply_m4, config_h, '@INPUT@'],
                 capture : true,
                 install : true,
                 install_dir : udevrulesdir)
@@ -116,7 +105,7 @@ if conf.get('ENABLE_LOGIND') == 1
                 'systemd-user',
                 input : 'systemd-user.m4',
                 output: 'systemd-user',
-                command : [m4, '-P'] + m4_defines + ['@INPUT@'],
+                command : [meson_apply_m4, config_h, '@INPUT@'],
                 capture : true,
                 install : pamconfdir != 'no',
                 install_dir : pamconfdir)

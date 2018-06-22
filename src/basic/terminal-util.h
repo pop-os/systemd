@@ -1,25 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -80,16 +61,16 @@ int open_terminal(const char *name, int mode);
 /* Flags for tweaking the way we become the controlling process of a terminal. */
 typedef enum AcquireTerminalFlags {
         /* Try to become the controlling process of the TTY. If we can't return -EPERM. */
-        ACQUIRE_TERMINAL_TRY = 0,
+        ACQUIRE_TERMINAL_TRY        = 0,
 
         /* Tell the kernel to forcibly make us the controlling process of the TTY. Returns -EPERM if the kernel doesn't allow that. */
-        ACQUIRE_TERMINAL_FORCE = 1,
+        ACQUIRE_TERMINAL_FORCE      = 1,
 
         /* If we can't become the controlling process of the TTY right-away, then wait until we can. */
-        ACQUIRE_TERMINAL_WAIT = 2,
+        ACQUIRE_TERMINAL_WAIT       = 2,
 
         /* Pick one of the above, and then OR this flag in, in order to request permissive behaviour, if we can't become controlling process then don't mind */
-        ACQUIRE_TERMINAL_PERMISSIVE = 4,
+        ACQUIRE_TERMINAL_PERMISSIVE = 1 << 2,
 } AcquireTerminalFlags;
 
 int acquire_terminal(const char *name, AcquireTerminalFlags flags, usec_t timeout);
@@ -133,22 +114,20 @@ bool dev_console_colors_enabled(void);
 #define DEFINE_ANSI_FUNC(name, NAME)                            \
         static inline const char *ansi_##name(void) {           \
                 return colors_enabled() ? ANSI_##NAME : "";     \
-        }                                                       \
-        struct __useless_struct_to_allow_trailing_semicolon__
+        }
 
 #define DEFINE_ANSI_FUNC_UNDERLINE(name, NAME, REPLACEMENT)             \
         static inline const char *ansi_##name(void) {                   \
                 return underline_enabled() ? ANSI_##NAME :              \
                         colors_enabled() ? ANSI_##REPLACEMENT : "";     \
-        }                                                               \
-        struct __useless_struct_to_allow_trailing_semicolon__
-
+        }
 
 DEFINE_ANSI_FUNC(highlight,                  HIGHLIGHT);
 DEFINE_ANSI_FUNC(highlight_red,              HIGHLIGHT_RED);
 DEFINE_ANSI_FUNC(highlight_green,            HIGHLIGHT_GREEN);
 DEFINE_ANSI_FUNC(highlight_yellow,           HIGHLIGHT_YELLOW);
 DEFINE_ANSI_FUNC(highlight_blue,             HIGHLIGHT_BLUE);
+DEFINE_ANSI_FUNC(highlight_magenta,          HIGHLIGHT_MAGENTA);
 DEFINE_ANSI_FUNC(normal,                     NORMAL);
 
 DEFINE_ANSI_FUNC_UNDERLINE(underline,                  UNDERLINE, NORMAL);
@@ -172,3 +151,14 @@ int open_terminal_in_namespace(pid_t pid, const char *name, int mode);
 
 int vt_default_utf8(void);
 int vt_reset_keyboard(int fd);
+
+int terminal_urlify(const char *url, const char *text, char **ret);
+int terminal_urlify_path(const char *path, const char *text, char **ret);
+
+typedef enum CatFlags {
+        CAT_FLAGS_MAIN_FILE_OPTIONAL = 1 << 0,
+} CatFlags;
+
+int cat_files(const char *file, char **dropins, CatFlags flags);
+
+void print_separator(void);

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include "bus-util.h"
 #include "dbus-cgroup.h"
@@ -28,78 +10,33 @@
 #include "string-util.h"
 #include "unit.h"
 
-static int property_get_what(
-                sd_bus *bus,
-                const char *path,
-                const char *interface,
-                const char *property,
-                sd_bus_message *reply,
-                void *userdata,
-                sd_bus_error *error) {
-
-        Mount *m = userdata;
-        const char *d = NULL;
-
-        assert(bus);
-        assert(reply);
-        assert(m);
-
+static const char *mount_get_what(const Mount *m) {
         if (m->from_proc_self_mountinfo && m->parameters_proc_self_mountinfo.what)
-                d = m->parameters_proc_self_mountinfo.what;
-        else if (m->from_fragment && m->parameters_fragment.what)
-                d = m->parameters_fragment.what;
-
-        return sd_bus_message_append(reply, "s", d);
+                return m->parameters_proc_self_mountinfo.what;
+        if (m->from_fragment && m->parameters_fragment.what)
+                return m->parameters_fragment.what;
+        return NULL;
 }
 
-static int property_get_options(
-                sd_bus *bus,
-                const char *path,
-                const char *interface,
-                const char *property,
-                sd_bus_message *reply,
-                void *userdata,
-                sd_bus_error *error) {
-
-        Mount *m = userdata;
-        const char *d = NULL;
-
-        assert(bus);
-        assert(reply);
-        assert(m);
-
+static const char *mount_get_options(const Mount *m) {
         if (m->from_proc_self_mountinfo && m->parameters_proc_self_mountinfo.options)
-                d = m->parameters_proc_self_mountinfo.options;
-        else if (m->from_fragment && m->parameters_fragment.options)
-                d = m->parameters_fragment.options;
-
-        return sd_bus_message_append(reply, "s", d);
+                return m->parameters_proc_self_mountinfo.options;
+        if (m->from_fragment && m->parameters_fragment.options)
+                return m->parameters_fragment.options;
+        return NULL;
 }
 
-static int property_get_type(
-                sd_bus *bus,
-                const char *path,
-                const char *interface,
-                const char *property,
-                sd_bus_message *reply,
-                void *userdata,
-                sd_bus_error *error) {
-
-        const char *fstype = NULL;
-        Mount *m = userdata;
-
-        assert(bus);
-        assert(reply);
-        assert(m);
-
+static const char *mount_get_fstype(const Mount *m) {
         if (m->from_proc_self_mountinfo && m->parameters_proc_self_mountinfo.fstype)
-                fstype = m->parameters_proc_self_mountinfo.fstype;
+                return m->parameters_proc_self_mountinfo.fstype;
         else if (m->from_fragment && m->parameters_fragment.fstype)
-                fstype = m->parameters_fragment.fstype;
-
-        return sd_bus_message_append(reply, "s", fstype);
+                return m->parameters_fragment.fstype;
+        return NULL;
 }
 
+static BUS_DEFINE_PROPERTY_GET(property_get_what, "s", Mount, mount_get_what);
+static BUS_DEFINE_PROPERTY_GET(property_get_options, "s", Mount, mount_get_options);
+static BUS_DEFINE_PROPERTY_GET(property_get_type, "s", Mount, mount_get_fstype);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_result, mount_result, MountResult);
 
 const sd_bus_vtable bus_mount_vtable[] = {
@@ -115,8 +52,8 @@ const sd_bus_vtable bus_mount_vtable[] = {
         SD_BUS_PROPERTY("LazyUnmount", "b", bus_property_get_bool, offsetof(Mount, lazy_unmount), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ForceUnmount", "b", bus_property_get_bool, offsetof(Mount, force_unmount), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Result", "s", property_get_result, offsetof(Mount, result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("UID", "u", NULL, offsetof(Unit, ref_uid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("GID", "u", NULL, offsetof(Unit, ref_gid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("UID", "u", bus_property_get_uid, offsetof(Unit, ref_uid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("GID", "u", bus_property_get_gid, offsetof(Unit, ref_gid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_COMMAND_VTABLE("ExecMount", offsetof(Mount, exec_command[MOUNT_EXEC_MOUNT]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_VTABLE("ExecUnmount", offsetof(Mount, exec_command[MOUNT_EXEC_UNMOUNT]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_VTABLE("ExecRemount", offsetof(Mount, exec_command[MOUNT_EXEC_REMOUNT]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <getopt.h>
 #include <linux/if_addrlabel.h>
@@ -210,8 +192,7 @@ static int acquire_link_info_strv(sd_netlink *rtnl, char **l, LinkInfo **ret) {
 
         qsort_safe(links, c, sizeof(LinkInfo), link_info_compare);
 
-        *ret = links;
-        links = NULL;
+        *ret = TAKE_PTR(links);
 
         return (int) c;
 }
@@ -251,8 +232,7 @@ static int acquire_link_info_all(sd_netlink *rtnl, LinkInfo **ret) {
 
         qsort_safe(links, c, sizeof(LinkInfo), link_info_compare);
 
-        *ret = links;
-        links = NULL;
+        *ret = TAKE_PTR(links);
 
         return (int) c;
 }
@@ -273,7 +253,7 @@ static int list_links(int argc, char *argv[], void *userdata) {
         if (c < 0)
                 return c;
 
-        pager_open(arg_no_pager, false);
+        (void) pager_open(arg_no_pager, false);
 
         if (arg_legend)
                 printf("%3s %-16s %-18s %-11s %-10s\n",
@@ -651,6 +631,10 @@ static int next_lldp_neighbor(FILE *f, sd_lldp_neighbor **ret) {
         if (l != sizeof(u))
                 return -EBADMSG;
 
+        /* each LLDP packet is at most MTU size, but let's allow up to 4KiB just in case */
+        if (le64toh(u) >= 4096)
+                return -EBADMSG;
+
         raw = new(uint8_t, le64toh(u));
         if (!raw)
                 return -ENOMEM;
@@ -836,7 +820,7 @@ static int link_status_one(
         }
 
         if (info->has_mtu)
-                printf("             MTU: %u\n", info->mtu);
+                printf("             MTU: %" PRIu32 "\n", info->mtu);
 
         (void) dump_addresses(rtnl, "         Address: ", info->ifindex);
         (void) dump_gateways(rtnl, hwdb, "         Gateway: ", info->ifindex);
@@ -897,7 +881,7 @@ static int link_status(int argc, char *argv[], void *userdata) {
         _cleanup_free_ LinkInfo *links = NULL;
         int r, c, i;
 
-        pager_open(arg_no_pager, false);
+        (void) pager_open(arg_no_pager, false);
 
         r = sd_netlink_open(&rtnl);
         if (r < 0)
@@ -993,7 +977,7 @@ static int link_lldp_status(int argc, char *argv[], void *userdata) {
         if (c < 0)
                 return c;
 
-        pager_open(arg_no_pager, false);
+        (void) pager_open(arg_no_pager, false);
 
         if (arg_legend)
                 printf("%-16s %-17s %-16s %-11s %-17s %-16s\n",
@@ -1156,11 +1140,11 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int networkctl_main(int argc, char *argv[]) {
-        const Verb verbs[] = {
-                { "list",   VERB_ANY, VERB_ANY, VERB_DEFAULT, list_links       },
-                { "status", VERB_ANY, VERB_ANY, 0,            link_status      },
-                { "lldp",   VERB_ANY, VERB_ANY, 0,            link_lldp_status },
-                { "label",  VERB_ANY, VERB_ANY, 0,            list_address_labels},
+        static const Verb verbs[] = {
+                { "list",   VERB_ANY, VERB_ANY, VERB_DEFAULT, list_links          },
+                { "status", VERB_ANY, VERB_ANY, 0,            link_status         },
+                { "lldp",   VERB_ANY, VERB_ANY, 0,            link_lldp_status    },
+                { "label",  VERB_ANY, VERB_ANY, 0,            list_address_labels },
                 {}
         };
 
