@@ -15,18 +15,18 @@ This reverts commit 4e15a7343cb389e97f3eb4f49699161862d8b8b2.
  4 files changed, 2 insertions(+), 9 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index c113750..a42a34d 100644
+index 4cca9fe..7d3fa6a 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -792,7 +792,6 @@ if get_option('wheel-group')
- endif
+@@ -742,7 +742,6 @@ conf.set10('ENABLE_ADM_GROUP', get_option('adm-group'))
+ conf.set10('ENABLE_WHEEL_GROUP', get_option('wheel-group'))
  
  substs.set('DEV_KVM_MODE', get_option('dev-kvm-mode'))
 -substs.set('GROUP_RENDER_MODE', get_option('group-render-mode'))
  
  kill_user_processes = get_option('default-kill-user-processes')
  conf.set10('KILL_USER_PROCESSES', kill_user_processes)
-@@ -2794,7 +2793,6 @@ status = [
+@@ -2874,7 +2873,6 @@ status = [
          'minimum container UID base:        @0@'.format(container_uid_base_min),
          'maximum container UID base:        @0@'.format(container_uid_base_max),
          '/dev/kvm access mode:              @0@'.format(get_option('dev-kvm-mode')),
@@ -35,10 +35,10 @@ index c113750..a42a34d 100644
          'support URL:                       @0@'.format(support_url),
          'nobody user name:                  @0@'.format(nobody_user),
 diff --git a/meson_options.txt b/meson_options.txt
-index 4efb422..5a19c40 100644
+index 16c1f2b..45c6320 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -183,8 +183,6 @@ option('nobody-group', type : 'string',
+@@ -180,8 +180,6 @@ option('nobody-group', type : 'string',
         value : 'nobody')
  option('dev-kvm-mode', type : 'string', value : '0666',
         description : '/dev/kvm access mode')

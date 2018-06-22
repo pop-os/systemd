@@ -1,17 +1,3 @@
-test-cgroup-util-bail-out-when-running-under-mock-8365.patch
-core-do-not-free-stack-allocated-strings.patch
-basic-macros-rename-noreturn-into-_noreturn_-8456.patch
-units-Fix-SuccessAction-that-belongs-to-Unit-section-not-.patch
-udev-net-id-Fix-check-for-address-to-keep-interface-names.patch
-core-when-reloading-delay-any-actions-on-journal-and-dbus.patch
-units-initctl-move-the-fifo-to-run-initctl-to-match-sysvi.patch
-systemctl-try-opening-run-initctl-before-dev-initctl.patch
-core-dont-t-remount-sys-fs-cgroup-for-relabel-if-not-need.patch
-sd-bus-do-not-try-to-close-already-closed-fd-8392.patch
-core-don-t-include-libmount.h-in-a-header-file-8580.patch
-meson-avoid-warning-about-comparison-of-bool-and-string.patch
-login-change-variable-type-of-enable_wall_messages-as-it-.patch
-login-do-not-wall-message-on-cancelling-shutdown-when-Man.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch

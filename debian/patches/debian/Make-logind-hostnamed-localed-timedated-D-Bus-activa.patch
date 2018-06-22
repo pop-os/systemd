@@ -12,10 +12,10 @@ activatable via D-Bus.
  4 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/src/hostname/org.freedesktop.hostname1.service b/src/hostname/org.freedesktop.hostname1.service
-index 421a8c6..51cc38b 100644
+index 98c7bcb..17b8e7b 100644
 --- a/src/hostname/org.freedesktop.hostname1.service
 +++ b/src/hostname/org.freedesktop.hostname1.service
-@@ -9,6 +9,6 @@
+@@ -7,6 +7,6 @@
  
  [D-BUS Service]
  Name=org.freedesktop.hostname1

@@ -9,10 +9,10 @@ to access logind via D-Bus will start it on demand.
  1 file changed, 4 deletions(-)
 
 diff --git a/src/login/pam_systemd.c b/src/login/pam_systemd.c
-index 1c3ba33..5b71ef4 100644
+index 1fbf6ba..67e321f 100644
 --- a/src/login/pam_systemd.c
 +++ b/src/login/pam_systemd.c
-@@ -235,10 +235,6 @@ _public_ PAM_EXTERN int pam_sm_open_session(
+@@ -299,10 +299,6 @@ _public_ PAM_EXTERN int pam_sm_open_session(
  
          assert(handle);
  

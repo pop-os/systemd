@@ -12,10 +12,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1400203
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/src/libsystemd/sd-login/sd-login.c b/src/libsystemd/sd-login/sd-login.c
-index 6601bcd..2286e47 100644
+index c2f7133..7594d25 100644
 --- a/src/libsystemd/sd-login/sd-login.c
 +++ b/src/libsystemd/sd-login/sd-login.c
-@@ -1026,8 +1026,12 @@ _public_ int sd_login_monitor_new(const char *category, sd_login_monitor **m) {
+@@ -996,8 +996,12 @@ _public_ int sd_login_monitor_new(const char *category, sd_login_monitor **m) {
  
          if (!category || streq(category, "machine")) {
                  k = inotify_add_watch(fd, "/run/systemd/machines/", IN_MOVED_TO|IN_DELETE);
