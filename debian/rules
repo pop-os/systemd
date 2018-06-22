@@ -211,6 +211,8 @@ override_dh_install:
 	find debian/install/*/etc/systemd/system/ -type l -delete
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
 	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
+	# remove resolvconf compat symlink
+	rm -f debian/install/*/sbin/resolvconf
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
@@ -249,9 +251,6 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
 	install --mode=755 debian/extra/set-cpufreq debian/systemd/lib/systemd/
 endif
-
-	# https://github.com/systemd/systemd/pull/8623 until 239 gets released/packaged
-	for p in sbin/resolvconf usr/bin/resolvectl; do install -D debian/install/deb/$$p debian/systemd/$$p || true; done
 
 override_dh_missing:
 	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
