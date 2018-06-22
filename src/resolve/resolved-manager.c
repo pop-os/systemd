@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Tom Gundersen <teg@jklm.no>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
- ***/
 
 #include <netinet/in.h>
 #include <poll.h>
@@ -396,11 +378,8 @@ static int determine_hostname(char **full_hostname, char **llmnr_hostname, char 
         if (r < 0)
                 return log_error_errno(r, "Failed to determine mDNS hostname: %m");
 
-        *llmnr_hostname = n;
-        n = NULL;
-
-        *full_hostname = h;
-        h = NULL;
+        *llmnr_hostname = TAKE_PTR(n);
+        *full_hostname = TAKE_PTR(h);
 
         return 0;
 }
@@ -445,11 +424,8 @@ static int make_fallback_hostnames(char **full_hostname, char **llmnr_hostname, 
         if (!h)
                 return log_oom();
 
-        *llmnr_hostname = n;
-        n = NULL;
-
-        *mdns_hostname = m;
-        m = NULL;
+        *llmnr_hostname = TAKE_PTR(n);
+        *mdns_hostname = TAKE_PTR(m);
 
         *full_hostname = h;
 
@@ -599,6 +575,7 @@ int manager_new(Manager **ret) {
         m->llmnr_support = RESOLVE_SUPPORT_YES;
         m->mdns_support = RESOLVE_SUPPORT_YES;
         m->dnssec_mode = DEFAULT_DNSSEC_MODE;
+        m->dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE;
         m->enable_cache = true;
         m->dns_stub_listener_mode = DNS_STUB_LISTENER_UDP;
         m->read_resolv_conf = true;
@@ -652,8 +629,7 @@ int manager_new(Manager **ret) {
 
         manager_cleanup_saved_user(m);
 
-        *ret = m;
-        m = NULL;
+        *ret = TAKE_PTR(m);
 
         return 0;
 }
@@ -708,7 +684,6 @@ Manager *manager_free(Manager *m) {
         manager_dns_stub_stop(m);
 
         sd_bus_slot_unref(m->prepare_for_sleep_slot);
-        sd_event_source_unref(m->bus_retry_event_source);
         sd_bus_unref(m->bus);
 
         sd_event_source_unref(m->sigusr1_event_source);
@@ -861,8 +836,7 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         p->ifindex = manager_find_ifindex(m, p->family, &p->destination);
         }
 
-        *ret = p;
-        p = NULL;
+        *ret = TAKE_PTR(p);
 
         return 1;
 }
@@ -1404,6 +1378,15 @@ bool manager_dnssec_supported(Manager *m) {
                         return false;
 
         return true;
+}
+
+DnsOverTlsMode manager_get_dns_over_tls_mode(Manager *m) {
+        assert(m);
+
+        if (m->dns_over_tls_mode != _DNS_OVER_TLS_MODE_INVALID)
+                return m->dns_over_tls_mode;
+
+        return DNS_OVER_TLS_NO;
 }
 
 void manager_dnssec_verdict(Manager *m, DnssecVerdict verdict, const DnsResourceKey *key) {

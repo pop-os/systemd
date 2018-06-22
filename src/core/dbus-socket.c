@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include "alloc-util.h"
 #include "bus-util.h"
@@ -36,6 +18,7 @@
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_result, socket_result, SocketResult);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_bind_ipv6_only, socket_address_bind_ipv6_only, SocketAddressBindIPv6Only);
+static BUS_DEFINE_PROPERTY_GET(property_get_fdname, "s", Socket, socket_fdname);
 
 static int property_get_listen(
                 sd_bus *bus,
@@ -45,7 +28,6 @@ static int property_get_listen(
                 sd_bus_message *reply,
                 void *userdata,
                 sd_bus_error *error) {
-
 
         Socket *s = SOCKET(userdata);
         SocketPort *p;
@@ -90,25 +72,6 @@ static int property_get_listen(
         }
 
         return sd_bus_message_close_container(reply);
-}
-
-
-static int property_get_fdname(
-                sd_bus *bus,
-                const char *path,
-                const char *interface,
-                const char *property,
-                sd_bus_message *reply,
-                void *userdata,
-                sd_bus_error *error) {
-
-        Socket *s = SOCKET(userdata);
-
-        assert(bus);
-        assert(reply);
-        assert(s);
-
-        return sd_bus_message_append(reply, "s", socket_fdname(s));
 }
 
 const sd_bus_vtable bus_socket_vtable[] = {
@@ -157,12 +120,13 @@ const sd_bus_vtable bus_socket_vtable[] = {
         SD_BUS_PROPERTY("Result", "s", property_get_result, offsetof(Socket, result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("NConnections", "u", bus_property_get_unsigned, offsetof(Socket, n_connections), 0),
         SD_BUS_PROPERTY("NAccepted", "u", bus_property_get_unsigned, offsetof(Socket, n_accepted), 0),
+        SD_BUS_PROPERTY("NRefused", "u", bus_property_get_unsigned, offsetof(Socket, n_refused), 0),
         SD_BUS_PROPERTY("FileDescriptorName", "s", property_get_fdname, 0, 0),
         SD_BUS_PROPERTY("SocketProtocol", "i", bus_property_get_int, offsetof(Socket, socket_protocol), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("TriggerLimitIntervalUSec", "t", bus_property_get_usec, offsetof(Socket, trigger_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("TriggerLimitBurst", "u", bus_property_get_unsigned, offsetof(Socket, trigger_limit.burst), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("UID", "u", NULL, offsetof(Unit, ref_uid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("GID", "u", NULL, offsetof(Unit, ref_gid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("UID", "u", bus_property_get_uid, offsetof(Unit, ref_uid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("GID", "u", bus_property_get_gid, offsetof(Unit, ref_gid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPre", offsetof(Socket, exec_command[SOCKET_EXEC_START_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPost", offsetof(Socket, exec_command[SOCKET_EXEC_START_POST]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStopPre", offsetof(Socket, exec_command[SOCKET_EXEC_STOP_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
@@ -174,7 +138,10 @@ static inline bool check_size_t_truncation(uint64_t t) {
         return (size_t) t == t;
 }
 
-static inline const char* socket_protocol_to_name_supported(int32_t i) {
+static inline const char* supported_socket_protocol_to_string(int32_t i) {
+        if (i == IPPROTO_IP)
+                return "";
+
         if (!IN_SET(i, IPPROTO_UDPLITE, IPPROTO_SCTP))
                 return NULL;
 
@@ -184,11 +151,11 @@ static inline const char* socket_protocol_to_name_supported(int32_t i) {
 static BUS_DEFINE_SET_TRANSIENT(int, "i", int32_t, int, "%" PRIi32);
 static BUS_DEFINE_SET_TRANSIENT(message_queue, "x", int64_t, long, "%" PRIi64);
 static BUS_DEFINE_SET_TRANSIENT_IS_VALID(size_t_check_truncation, "t", uint64_t, size_t, "%" PRIu64, check_size_t_truncation);
-static BUS_DEFINE_SET_TRANSIENT_PARSE(bind_ipv6_only, SocketAddressBindIPv6Only, parse_socket_address_bind_ipv6_only_or_bool);
+static BUS_DEFINE_SET_TRANSIENT_PARSE(bind_ipv6_only, SocketAddressBindIPv6Only, socket_address_bind_ipv6_only_or_bool_from_string);
 static BUS_DEFINE_SET_TRANSIENT_STRING_WITH_CHECK(fdname, fdname_is_valid);
 static BUS_DEFINE_SET_TRANSIENT_STRING_WITH_CHECK(ifname, ifname_valid);
 static BUS_DEFINE_SET_TRANSIENT_TO_STRING_ALLOC(ip_tos, "i", int32_t, int, "%" PRIi32, ip_tos_to_string_alloc);
-static BUS_DEFINE_SET_TRANSIENT_TO_STRING(socket_protocol, "i", int32_t, int, "%" PRIi32, socket_protocol_to_name_supported);
+static BUS_DEFINE_SET_TRANSIENT_TO_STRING(socket_protocol, "i", int32_t, int, "%" PRIi32, supported_socket_protocol_to_string);
 
 static int bus_socket_set_transient_property(
                 Socket *s,
@@ -394,7 +361,7 @@ static int bus_socket_set_transient_property(
 
                         if (p->type != SOCKET_SOCKET) {
                                 p->path = strdup(a);
-                                path_kill_slashes(p->path);
+                                path_simplify(p->path, false);
 
                         } else if (streq(t, "Netlink")) {
                                 r = socket_address_parse_netlink(&p->address, a);

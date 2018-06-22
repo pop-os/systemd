@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <getopt.h>
@@ -32,15 +14,17 @@
 #include "fileio.h"
 #include "hashmap.h"
 #include "log.h"
+#include "pager.h"
 #include "path-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "sysctl-util.h"
+#include "terminal-util.h"
 #include "util.h"
 
 static char **arg_prefixes = NULL;
-
-static const char conf_file_dirs[] = CONF_PATHS_NULSTR("sysctl.d");
+static bool arg_cat_config = false;
+static bool arg_no_pager = false;
 
 static int apply_all(OrderedHashmap *sysctl_options) {
         char *property, *value;
@@ -96,7 +80,7 @@ static int parse_file(OrderedHashmap *sysctl_options, const char *path, bool ign
 
         assert(path);
 
-        r = search_and_fopen_nulstr(path, "re", NULL, conf_file_dirs, &f);
+        r = search_and_fopen(path, "re", NULL, (const char**) CONF_PATHS_STRV("sysctl.d"), &f);
         if (r < 0) {
                 if (ignore_enoent && r == -ENOENT)
                         return 0;
@@ -181,7 +165,9 @@ static void help(void) {
                "Applies kernel sysctl settings.\n\n"
                "  -h --help             Show this help\n"
                "     --version          Show package version\n"
+               "     --cat-config       Show configuration files\n"
                "     --prefix=PATH      Only apply rules with the specified prefix\n"
+               "     --no-pager         Do not pipe output into a pager\n"
                , program_invocation_short_name);
 }
 
@@ -189,13 +175,17 @@ static int parse_argv(int argc, char *argv[]) {
 
         enum {
                 ARG_VERSION = 0x100,
-                ARG_PREFIX
+                ARG_CAT_CONFIG,
+                ARG_PREFIX,
+                ARG_NO_PAGER,
         };
 
         static const struct option options[] = {
-                { "help",      no_argument,       NULL, 'h'           },
-                { "version",   no_argument,       NULL, ARG_VERSION   },
-                { "prefix",    required_argument, NULL, ARG_PREFIX    },
+                { "help",       no_argument,       NULL, 'h'            },
+                { "version",    no_argument,       NULL, ARG_VERSION    },
+                { "cat-config", no_argument,       NULL, ARG_CAT_CONFIG },
+                { "prefix",     required_argument, NULL, ARG_PREFIX     },
+                { "no-pager",   no_argument,       NULL, ARG_NO_PAGER   },
                 {}
         };
 
@@ -214,6 +204,10 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_VERSION:
                         return version();
+
+                case ARG_CAT_CONFIG:
+                        arg_cat_config = true;
+                        break;
 
                 case ARG_PREFIX: {
                         char *p;
@@ -237,12 +231,21 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
                 }
 
+                case ARG_NO_PAGER:
+                        arg_no_pager = true;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
                 default:
                         assert_not_reached("Unhandled option");
                 }
+
+        if (arg_cat_config && argc > optind) {
+                log_error("Positional arguments are not allowed with --cat-config");
+                return -EINVAL;
+        }
 
         return 1;
 }
@@ -281,9 +284,16 @@ int main(int argc, char *argv[]) {
                 _cleanup_strv_free_ char **files = NULL;
                 char **f;
 
-                r = conf_files_list_nulstr(&files, ".conf", NULL, 0, conf_file_dirs);
+                r = conf_files_list_strv(&files, ".conf", NULL, 0, (const char**) CONF_PATHS_STRV("sysctl.d"));
                 if (r < 0) {
                         log_error_errno(r, "Failed to enumerate sysctl.d files: %m");
+                        goto finish;
+                }
+
+                if (arg_cat_config) {
+                        (void) pager_open(arg_no_pager, false);
+
+                        r = cat_files(NULL, files, 0);
                         goto finish;
                 }
 
@@ -299,6 +309,8 @@ int main(int argc, char *argv[]) {
                 r = k;
 
 finish:
+        pager_close();
+
         ordered_hashmap_free_free_free(sysctl_options);
         strv_free(arg_prefixes);
 

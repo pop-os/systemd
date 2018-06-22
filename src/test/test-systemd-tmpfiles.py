@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 #  SPDX-License-Identifier: LGPL-2.1+
 #
-#  This file is part of systemd.
-#
 #  systemd is free software; you can redistribute it and/or modify it
 #  under the terms of the GNU Lesser General Public License as published by
 #  the Free Software Foundation; either version 2.1 of the License, or
@@ -67,7 +65,7 @@ def test_invalids(*, user):
     test_line('h - - -', user=user)
     test_line('H - - -', user=user)
 
-def test_unitialized_t():
+def test_uninitialized_t():
     if os.getuid() == 0:
         return
 
@@ -134,7 +132,7 @@ def test_valid_specifiers(*, user):
 if __name__ == '__main__':
     test_invalids(user=False)
     test_invalids(user=True)
-    test_unitialized_t()
+    test_uninitialized_t()
 
     test_valid_specifiers(user=False)
     test_valid_specifiers(user=True)

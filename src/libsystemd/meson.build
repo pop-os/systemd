@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1+
-#
-# Copyright 2017 Zbigniew Jędrzejewski-Szmek
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 id128_sources = files('''
         sd-id128/id128-util.c
@@ -95,15 +80,17 @@ libsystemd_sources = files('''
         sd-utf8/sd-utf8.c
 '''.split()) + id128_sources + sd_daemon_c + sd_event_c + sd_login_c
 
+libsystemd_c_args = ['-fvisibility=default']
+
 libsystemd_static = static_library(
-        'systemd',
+        'systemd_static',
         libsystemd_sources,
         install : false,
         include_directories : includes,
         link_with : libbasic,
         dependencies : [threads,
                         librt],
-        c_args : ['-fvisibility=default'])
+        c_args : libsystemd_c_args)
 
 libsystemd_sym = 'src/libsystemd/libsystemd.sym'
 

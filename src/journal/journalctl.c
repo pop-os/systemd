@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -71,11 +53,12 @@
 #include "rlimit-util.h"
 #include "set.h"
 #include "sigbus.h"
+#include "string-table.h"
 #include "strv.h"
 #include "syslog-util.h"
 #include "terminal-util.h"
-#include "udev.h"
 #include "udev-util.h"
+#include "udev.h"
 #include "unit-name.h"
 #include "user-util.h"
 
@@ -194,11 +177,11 @@ typedef struct BootId {
 } BootId;
 
 static int add_matches_for_device(sd_journal *j, const char *devpath) {
-        int r;
-        _cleanup_udev_unref_ struct udev *udev = NULL;
-        _cleanup_udev_device_unref_ struct udev_device *device = NULL;
+        _cleanup_(udev_unrefp) struct udev *udev = NULL;
+        _cleanup_(udev_device_unrefp) struct udev_device *device = NULL;
         struct udev_device *d = NULL;
         struct stat st;
+        int r;
 
         assert(j);
         assert(devpath);
@@ -212,14 +195,14 @@ static int add_matches_for_device(sd_journal *j, const char *devpath) {
         if (!udev)
                 return log_oom();
 
-        r = stat(devpath, &st);
+        if (stat(devpath, &st) < 0)
+                return log_error_errno(errno, "Couldn't stat file: %m");
+
+        r = udev_device_new_from_stat_rdev(udev, &st, &device);
         if (r < 0)
-                log_error_errno(errno, "Couldn't stat file: %m");
+                return log_error_errno(r, "Failed to get udev device from devnum %u:%u: %m", major(st.st_rdev), minor(st.st_rdev));
 
-        d = device = udev_device_new_from_devnum(udev, S_ISBLK(st.st_mode) ? 'b' : 'c', st.st_rdev);
-        if (!device)
-                return log_error_errno(errno, "Failed to get udev device from devnum %u:%u: %m", major(st.st_rdev), minor(st.st_rdev));
-
+        d = device;
         while (d) {
                 _cleanup_free_ char *match = NULL;
                 const char *subsys, *sysname, *devnode;
@@ -316,7 +299,7 @@ static int parse_boot_descriptor(const char *x, sd_id128_t *boot_id, int *offset
 
 static void help(void) {
 
-        pager_open(arg_no_pager, arg_pager_end);
+        (void) pager_open(arg_no_pager, arg_pager_end);
 
         printf("%s [OPTIONS...] [MATCHES...]\n\n"
                "Query the journal.\n\n"
@@ -346,7 +329,7 @@ static void help(void) {
                "  -o --output=STRING         Change journal output mode (short, short-precise,\n"
                "                               short-iso, short-iso-precise, short-full,\n"
                "                               short-monotonic, short-unix, verbose, export,\n"
-               "                               json, json-pretty, json-sse, cat)\n"
+               "                               json, json-pretty, json-sse, cat, with-unit)\n"
                "     --output-fields=LIST    Select fields to print in verbose/export/json modes\n"
                "     --utc                   Express time in Coordinated Universal Time (UTC)\n"
                "  -x --catalog               Add message explanations where available\n"
@@ -522,6 +505,11 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'o':
+                        if (streq(optarg, "help")) {
+                                DUMP_STRING_TABLE(output_mode, OutputMode, _OUTPUT_MODE_MAX);
+                                return 0;
+                        }
+
                         arg_output = output_mode_from_string(optarg);
                         if (arg_output < 0) {
                                 log_error("Unknown output format '%s'.", optarg);
@@ -729,7 +717,6 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_action = ACTION_SETUP_KEYS;
                         break;
 
-
                 case ARG_VERIFY_KEY:
                         arg_action = ACTION_VERIFY;
                         r = free_and_strdup(&arg_verify_key, optarg);
@@ -921,10 +908,9 @@ static int parse_argv(int argc, char *argv[]) {
                         if (!v)
                                 return log_oom();
 
-                        if (!arg_output_fields) {
-                                arg_output_fields = v;
-                                v = NULL;
-                        } else {
+                        if (!arg_output_fields)
+                                arg_output_fields = TAKE_PTR(v);
+                        else {
                                 r = strv_extend_strv(&arg_output_fields, v, true);
                                 if (r < 0)
                                         return log_oom();
@@ -982,7 +968,6 @@ static int parse_argv(int argc, char *argv[]) {
 
                 arg_system_units = strv_free(arg_system_units);
         }
-
 
 #if HAVE_PCRE2
         if (arg_pattern) {
@@ -1070,7 +1055,7 @@ static int add_matches(sd_journal *j, char **args) {
                         _cleanup_free_ char *p = NULL, *t = NULL, *t2 = NULL, *interpreter = NULL;
                         struct stat st;
 
-                        r = chase_symlinks(*i, NULL, 0, &p);
+                        r = chase_symlinks(*i, NULL, CHASE_TRAIL_SLASH, &p);
                         if (r < 0)
                                 return log_error_errno(r, "Couldn't canonicalize path: %m");
 
@@ -1229,8 +1214,7 @@ static int discover_next_boot(sd_journal *j,
         if (r < 0)
                 return r;
 
-        *ret = next_boot;
-        next_boot = NULL;
+        *ret = TAKE_PTR(next_boot);
 
         return 0;
 }
@@ -1342,8 +1326,7 @@ static int get_boots(
                                 }
                         }
                         LIST_INSERT_AFTER(boot_list, head, tail, current);
-                        tail = current;
-                        current = NULL;
+                        tail = TAKE_PTR(current);
                         count++;
                 }
         }
@@ -1369,7 +1352,7 @@ static int list_boots(sd_journal *j) {
         if (count == 0)
                 return count;
 
-        pager_open(arg_no_pager, arg_pager_end);
+        (void) pager_open(arg_no_pager, arg_pager_end);
 
         /* numbers are one less, but we need an extra char for the sign */
         w = DECIMAL_STR_WIDTH(count - 1) + 1;
@@ -1508,8 +1491,8 @@ static int get_possible_units(
                 }
         }
 
-        *units = found;
-        found = NULL;
+        *units = TAKE_PTR(found);
+
         return 0;
 }
 
@@ -1539,7 +1522,7 @@ static int add_units(sd_journal *j) {
         STRV_FOREACH(i, arg_system_units) {
                 _cleanup_free_ char *u = NULL;
 
-                r = unit_name_mangle(*i, UNIT_NAME_GLOB, &u);
+                r = unit_name_mangle(*i, UNIT_NAME_MANGLE_GLOB | (arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN), &u);
                 if (r < 0)
                         return r;
 
@@ -1584,7 +1567,7 @@ static int add_units(sd_journal *j) {
         STRV_FOREACH(i, arg_user_units) {
                 _cleanup_free_ char *u = NULL;
 
-                r = unit_name_mangle(*i, UNIT_NAME_GLOB, &u);
+                r = unit_name_mangle(*i, UNIT_NAME_MANGLE_GLOB | (arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN), &u);
                 if (r < 0)
                         return r;
 
@@ -1659,7 +1642,6 @@ static int add_priorities(sd_journal *j) {
 
         return 0;
 }
-
 
 static int add_syslog_identifier(sd_journal *j) {
         int r;
@@ -2135,7 +2117,7 @@ int main(int argc, char *argv[]) {
                 } else {
                         bool oneline = arg_action == ACTION_LIST_CATALOG;
 
-                        pager_open(arg_no_pager, arg_pager_end);
+                        (void) pager_open(arg_no_pager, arg_pager_end);
 
                         if (optind < argc)
                                 r = catalog_list_items(stdout, database, oneline, argv + optind);
@@ -2410,11 +2392,13 @@ int main(int argc, char *argv[]) {
         /* Opening the fd now means the first sd_journal_wait() will actually wait */
         if (arg_follow) {
                 r = sd_journal_get_fd(j);
-                if (r == -EMEDIUMTYPE) {
+                if (r == -EMFILE) {
+                        log_warning("Insufficent watch descriptors available. Reverting to -n.");
+                        arg_follow = false;
+                } else if (r == -EMEDIUMTYPE) {
                         log_error_errno(r, "The --follow switch is not supported in conjunction with reading from STDIN.");
                         goto finish;
-                }
-                if (r < 0) {
+                } else if (r < 0) {
                         log_error_errno(r, "Failed to get journal fd: %m");
                         goto finish;
                 }
@@ -2492,7 +2476,7 @@ int main(int argc, char *argv[]) {
                 need_seek = true;
 
         if (!arg_follow)
-                pager_open(arg_no_pager, arg_pager_end);
+                (void) pager_open(arg_no_pager, arg_pager_end);
 
         if (!arg_quiet && (arg_lines != 0 || arg_follow)) {
                 usec_t start, end;
@@ -2632,8 +2616,8 @@ int main(int argc, char *argv[]) {
                                 arg_utc * OUTPUT_UTC |
                                 arg_no_hostname * OUTPUT_NO_HOSTNAME;
 
-                        r = output_journal(stdout, j, arg_output, 0, flags,
-                                           arg_output_fields, highlight, &ellipsized);
+                        r = show_journal_entry(stdout, j, arg_output, 0, flags,
+                                               arg_output_fields, highlight, &ellipsized);
                         need_seek = true;
                         if (r == -EADDRNOTAVAIL)
                                 break;

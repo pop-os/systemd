@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2012 Kay Sievers <kay@vrfy.org>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <ctype.h>
 #include <getopt.h>
@@ -114,7 +96,9 @@ static struct trie_node *node_lookup(const struct trie_node *node, uint8_t c) {
         struct trie_child_entry search;
 
         search.c = c;
-        child = bsearch(&search, node->children, node->children_count, sizeof(struct trie_child_entry), trie_children_cmp);
+        child = bsearch_safe(&search,
+                             node->children, node->children_count, sizeof(struct trie_child_entry),
+                             trie_children_cmp);
         if (child)
                 return child->child;
         return NULL;
@@ -461,6 +445,7 @@ static int import_file(struct udev *udev, struct trie *trie, const char *filenam
         FILE *f;
         char line[LINE_MAX];
         struct udev_list match_list;
+        int r = 0, err;
 
         udev_list_init(udev, &match_list, false);
 
@@ -494,6 +479,7 @@ static int import_file(struct udev *udev, struct trie *trie, const char *filenam
 
                         if (line[0] == ' ') {
                                 log_error("Error, MATCH expected but got '%s' in '%s':", line, filename);
+                                r = -EINVAL;
                                 break;
                         }
 
@@ -505,6 +491,7 @@ static int import_file(struct udev *udev, struct trie *trie, const char *filenam
                 case HW_MATCH:
                         if (len == 0) {
                                 log_error("Error, DATA expected but got empty line in '%s':", filename);
+                                r = -EINVAL;
                                 state = HW_NONE;
                                 udev_list_cleanup(&match_list);
                                 break;
@@ -518,7 +505,9 @@ static int import_file(struct udev *udev, struct trie *trie, const char *filenam
 
                         /* first data */
                         state = HW_DATA;
-                        insert_data(trie, &match_list, line, filename);
+                        err = insert_data(trie, &match_list, line, filename);
+                        if (err < 0)
+                                r = err;
                         break;
 
                 case HW_DATA:
@@ -531,19 +520,22 @@ static int import_file(struct udev *udev, struct trie *trie, const char *filenam
 
                         if (line[0] != ' ') {
                                 log_error("Error, DATA expected but got '%s' in '%s':", line, filename);
+                                r = -EINVAL;
                                 state = HW_NONE;
                                 udev_list_cleanup(&match_list);
                                 break;
                         }
 
-                        insert_data(trie, &match_list, line, filename);
+                        err = insert_data(trie, &match_list, line, filename);
+                        if (err < 0)
+                                r = err;
                         break;
                 };
         }
 
         fclose(f);
         udev_list_cleanup(&match_list);
-        return 0;
+        return r;
 }
 
 static void help(void) {
@@ -551,6 +543,7 @@ static void help(void) {
                "  -h --help            Print this message\n"
                "  -V --version         Print version of the program\n"
                "  -u --update          Update the hardware database\n"
+               "  -s --strict          When updating, return non-zero exit value on any parsing error\n"
                "     --usr             Generate in " UDEVLIBEXECDIR " instead of /etc/udev\n"
                "  -t --test=MODALIAS   Query database and print result\n"
                "  -r --root=PATH       Alternative root path in the filesystem\n\n"
@@ -568,6 +561,7 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
         static const struct option options[] = {
                 { "update",  no_argument,       NULL, 'u'     },
                 { "usr",     no_argument,       NULL, ARG_USR },
+                { "strict",  no_argument,       NULL, 's'     },
                 { "test",    required_argument, NULL, 't'     },
                 { "root",    required_argument, NULL, 'r'     },
                 { "version", no_argument,       NULL, 'V'     },
@@ -581,14 +575,18 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
         struct trie *trie = NULL;
         int err, c;
         int rc = EXIT_SUCCESS;
+        bool strict = false;
 
-        while ((c = getopt_long(argc, argv, "ut:r:Vh", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "ust:r:Vh", options, NULL)) >= 0)
                 switch(c) {
                 case 'u':
                         update = true;
                         break;
                 case ARG_USR:
                         hwdb_bin_dir = UDEVLIBEXECDIR;
+                        break;
+                case 's':
+                        strict = true;
                         break;
                 case 't':
                         test = optarg;
@@ -646,7 +644,8 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
                 }
                 STRV_FOREACH(f, files) {
                         log_debug("reading file '%s'", *f);
-                        import_file(udev, trie, *f);
+                        if (import_file(udev, trie, *f) < 0 && strict)
+                                rc = EXIT_FAILURE;
                 }
                 strv_free(files);
 
@@ -680,7 +679,7 @@ static int adm_hwdb(struct udev *udev, int argc, char *argv[]) {
                         rc = EXIT_FAILURE;
                 }
 
-                label_fix(hwdb_bin, false, false);
+                (void) label_fix(hwdb_bin, 0);
         }
 
         if (test) {
@@ -699,7 +698,8 @@ out:
         if (trie) {
                 if (trie->root)
                         trie_node_cleanup(trie->root);
-                strbuf_cleanup(trie->strings);
+                if (trie->strings)
+                        strbuf_cleanup(trie->strings);
                 free(trie);
         }
         return rc;

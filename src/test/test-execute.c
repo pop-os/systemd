@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Ronny Chevalier
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <grp.h>
 #include <pwd.h>
@@ -37,6 +19,7 @@
 #if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
+#include "service.h"
 #include "stat-util.h"
 #include "test-helper.h"
 #include "tests.h"
@@ -145,7 +128,7 @@ static void test(Manager *m, const char *unit_name, int status_expected, int cod
 
         assert_se(unit_name);
 
-        assert_se(manager_load_unit(m, unit_name, NULL, NULL, &unit) >= 0);
+        assert_se(manager_load_startable_unit_or_warn(m, unit_name, NULL, &unit) >= 0);
         assert_se(UNIT_VTABLE(unit)->start(unit) >= 0);
         check(m, unit, status_expected, code_expected);
 }
@@ -188,6 +171,7 @@ static void test_exec_workingdirectory(Manager *m) {
         assert_se(mkdir_p("/tmp/test-exec_workingdirectory", 0755) >= 0);
 
         test(m, "exec-workingdirectory.service", 0, CLD_EXITED);
+        test(m, "exec-workingdirectory-trailing-dot.service", 0, CLD_EXITED);
 
         (void) rm_rf("/tmp/test-exec_workingdirectory", REMOVE_ROOT|REMOVE_PHYSICAL);
 }
@@ -244,6 +228,7 @@ static void test_exec_privatedevices(Manager *m) {
 
         test(m, "exec-privatedevices-yes.service", 0, CLD_EXITED);
         test(m, "exec-privatedevices-no.service", 0, CLD_EXITED);
+        test(m, "exec-privatedevices-disabled-by-prefix.service", 0, CLD_EXITED);
 
         /* We use capsh to test if the capabilities are
          * properly set, so be sure that it exists */
@@ -370,6 +355,9 @@ static void test_exec_restrictnamespaces(Manager *m) {
         test(m, "exec-restrictnamespaces-yes.service", 1, CLD_EXITED);
         test(m, "exec-restrictnamespaces-mnt.service", 0, CLD_EXITED);
         test(m, "exec-restrictnamespaces-mnt-blacklist.service", 1, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-merge-and.service", 0, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-merge-or.service", 0, CLD_EXITED);
+        test(m, "exec-restrictnamespaces-merge-all.service", 0, CLD_EXITED);
 #endif
 }
 
@@ -443,8 +431,14 @@ static void test_exec_dynamicuser(Manager *m) {
         test(m, "exec-dynamicuser-supplementarygroups.service", 0, CLD_EXITED);
         test(m, "exec-dynamicuser-statedir.service", 0, CLD_EXITED);
 
+        (void) rm_rf("/var/lib/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/var/lib/test-dynamicuser-migrate2", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/var/lib/private/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
+        (void) rm_rf("/var/lib/private/test-dynamicuser-migrate2", REMOVE_ROOT|REMOVE_PHYSICAL);
+
         test(m, "exec-dynamicuser-statedir-migrate-step1.service", 0, CLD_EXITED);
         test(m, "exec-dynamicuser-statedir-migrate-step2.service", 0, CLD_EXITED);
+
         (void) rm_rf("/var/lib/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
         (void) rm_rf("/var/lib/test-dynamicuser-migrate2", REMOVE_ROOT|REMOVE_PHYSICAL);
         (void) rm_rf("/var/lib/private/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
@@ -466,7 +460,9 @@ static void test_exec_environmentfile(Manager *m) {
                 "; comment2\n"
                 " ; # comment3\n"
                 "line without an equal\n"
-                "VAR3='$word 5 6'\n";
+                "VAR3='$word 5 6'\n"
+                "VAR4='new\nline'\n"
+                "VAR5=password\\with\\backslashes";
         int r;
 
         r = write_string_file("/tmp/test-exec_environmentfile.conf", e, WRITE_STRING_FILE_CREATE);
@@ -492,12 +488,16 @@ static void test_exec_passenvironment(Manager *m) {
         assert_se(setenv("VAR1", "word1 word2", 1) == 0);
         assert_se(setenv("VAR2", "word3", 1) == 0);
         assert_se(setenv("VAR3", "$word 5 6", 1) == 0);
+        assert_se(setenv("VAR4", "new\nline", 1) == 0);
+        assert_se(setenv("VAR5", "passwordwithbackslashes", 1) == 0);
         test(m, "exec-passenvironment.service", 0, CLD_EXITED);
         test(m, "exec-passenvironment-repeated.service", 0, CLD_EXITED);
         test(m, "exec-passenvironment-empty.service", 0, CLD_EXITED);
         assert_se(unsetenv("VAR1") == 0);
         assert_se(unsetenv("VAR2") == 0);
         assert_se(unsetenv("VAR3") == 0);
+        assert_se(unsetenv("VAR4") == 0);
+        assert_se(unsetenv("VAR5") == 0);
         test(m, "exec-passenvironment-absent.service", 0, CLD_EXITED);
 }
 
@@ -544,6 +544,10 @@ static void test_exec_capabilityboundingset(Manager *m) {
         test(m, "exec-capabilityboundingset-reset.service", 0, CLD_EXITED);
         test(m, "exec-capabilityboundingset-merge.service", 0, CLD_EXITED);
         test(m, "exec-capabilityboundingset-invert.service", 0, CLD_EXITED);
+}
+
+static void test_exec_basic(Manager *m) {
+        test(m, "exec-basic.service", 0, CLD_EXITED);
 }
 
 static void test_exec_ambientcapabilities(Manager *m) {
@@ -623,12 +627,12 @@ static void test_exec_standardinput(Manager *m) {
 
 static int run_tests(UnitFileScope scope, const test_function_t *tests) {
         const test_function_t *test = NULL;
-        Manager *m = NULL;
+        _cleanup_(manager_freep) Manager *m = NULL;
         int r;
 
         assert_se(tests);
 
-        r = manager_new(scope, MANAGER_TEST_RUN_MINIMAL, &m);
+        r = manager_new(scope, MANAGER_TEST_RUN_BASIC, &m);
         if (MANAGER_SKIP_TEST(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return EXIT_TEST_SKIP;
@@ -639,14 +643,13 @@ static int run_tests(UnitFileScope scope, const test_function_t *tests) {
         for (test = tests; test && *test; test++)
                 (*test)(m);
 
-        manager_free(m);
-
         return 0;
 }
 
 int main(int argc, char *argv[]) {
         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
         static const test_function_t user_tests[] = {
+                test_exec_basic,
                 test_exec_ambientcapabilities,
                 test_exec_bindpaths,
                 test_exec_capabilityboundingset,
@@ -693,6 +696,7 @@ int main(int argc, char *argv[]) {
 
         (void) unsetenv("USER");
         (void) unsetenv("LOGNAME");
+        (void) unsetenv("SHELL");
 
         /* It is needed otherwise cgroup creation fails */
         if (getuid() != 0) {

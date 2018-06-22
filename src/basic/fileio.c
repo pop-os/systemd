@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -63,6 +45,7 @@ int write_string_stream_ts(
                 struct timespec *ts) {
 
         bool needs_nl;
+        int r;
 
         assert(f);
         assert(line);
@@ -87,6 +70,13 @@ int write_string_stream_ts(
                 if (fputc('\n', f) == EOF)
                         return -errno;
 
+        if (flags & WRITE_STRING_FILE_SYNC)
+                r = fflush_sync_and_check(f);
+        else
+                r = fflush_and_check(f);
+        if (r < 0)
+                return r;
+
         if (ts) {
                 struct timespec twice[2] = {*ts, *ts};
 
@@ -94,10 +84,7 @@ int write_string_stream_ts(
                         return -errno;
         }
 
-        if (flags & WRITE_STRING_FILE_SYNC)
-                return fflush_sync_and_check(f);
-        else
-                return fflush_and_check(f);
+        return 0;
 }
 
 static int write_string_file_atomic(
@@ -214,6 +201,25 @@ fail:
         return 0;
 }
 
+int write_string_filef(
+                const char *fn,
+                WriteStringFileFlags flags,
+                const char *format, ...) {
+
+        _cleanup_free_ char *p = NULL;
+        va_list ap;
+        int r;
+
+        va_start(ap, format);
+        r = vasprintf(&p, format, ap);
+        va_end(ap);
+
+        if (r < 0)
+                return -ENOMEM;
+
+        return write_string_file(fn, p, flags);
+}
+
 int read_one_line_file(const char *fn, char **line) {
         _cleanup_fclose_ FILE *f = NULL;
         int r;
@@ -271,29 +277,35 @@ int verify_file(const char *fn, const char *blob, bool accept_extra_nl) {
 }
 
 int read_full_stream(FILE *f, char **contents, size_t *size) {
-        size_t n, l;
         _cleanup_free_ char *buf = NULL;
         struct stat st;
+        size_t n, l;
+        int fd;
 
         assert(f);
         assert(contents);
 
-        if (fstat(fileno(f), &st) < 0)
-                return -errno;
-
         n = LINE_MAX;
 
-        if (S_ISREG(st.st_mode)) {
+        fd = fileno(f);
+        if (fd >= 0) { /* If the FILE* object is backed by an fd (as opposed to memory or such, see fmemopen(), let's
+                        * optimize our buffering) */
 
-                /* Safety check */
-                if (st.st_size > READ_FULL_BYTES_MAX)
-                        return -E2BIG;
+                if (fstat(fileno(f), &st) < 0)
+                        return -errno;
 
-                /* Start with the right file size, but be prepared for files from /proc which generally report a file
-                 * size of 0. Note that we increase the size to read here by one, so that the first read attempt
-                 * already makes us notice the EOF. */
-                if (st.st_size > 0)
-                        n = st.st_size + 1;
+                if (S_ISREG(st.st_mode)) {
+
+                        /* Safety check */
+                        if (st.st_size > READ_FULL_BYTES_MAX)
+                                return -E2BIG;
+
+                        /* Start with the right file size, but be prepared for files from /proc which generally report a file
+                         * size of 0. Note that we increase the size to read here by one, so that the first read attempt
+                         * already makes us notice the EOF. */
+                        if (st.st_size > 0)
+                                n = st.st_size + 1;
+                }
         }
 
         l = 0;
@@ -330,8 +342,7 @@ int read_full_stream(FILE *f, char **contents, size_t *size) {
         }
 
         buf[l] = 0;
-        *contents = buf;
-        buf = NULL; /* do not free */
+        *contents = TAKE_PTR(buf);
 
         if (size)
                 *size = l;
@@ -363,11 +374,11 @@ static int parse_env_file_internal(
                 void *userdata,
                 int *n_pushed) {
 
-        _cleanup_free_ char *contents = NULL, *key = NULL;
         size_t key_alloc = 0, n_key = 0, value_alloc = 0, n_value = 0, last_value_whitespace = (size_t) -1, last_key_whitespace = (size_t) -1;
-        char *p, *value = NULL;
-        int r;
+        _cleanup_free_ char *contents = NULL, *key = NULL, *value = NULL;
         unsigned line = 1;
+        char *p;
+        int r;
 
         enum {
                 PRE_KEY,
@@ -404,10 +415,8 @@ static int parse_env_file_internal(
                                 state = KEY;
                                 last_key_whitespace = (size_t) -1;
 
-                                if (!GREEDY_REALLOC(key, key_alloc, n_key+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(key, key_alloc, n_key+2))
+                                        return -ENOMEM;
 
                                 key[n_key++] = c;
                         }
@@ -427,10 +436,8 @@ static int parse_env_file_internal(
                                 else if (last_key_whitespace == (size_t) -1)
                                          last_key_whitespace = n_key;
 
-                                if (!GREEDY_REALLOC(key, key_alloc, n_key+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(key, key_alloc, n_key+2))
+                                        return -ENOMEM;
 
                                 key[n_key++] = c;
                         }
@@ -452,7 +459,7 @@ static int parse_env_file_internal(
 
                                 r = push(fname, line, key, value, userdata, n_pushed);
                                 if (r < 0)
-                                        goto fail;
+                                        return r;
 
                                 n_key = 0;
                                 value = NULL;
@@ -467,10 +474,8 @@ static int parse_env_file_internal(
                         else if (!strchr(WHITESPACE, c)) {
                                 state = VALUE;
 
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return  -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -497,7 +502,7 @@ static int parse_env_file_internal(
 
                                 r = push(fname, line, key, value, userdata, n_pushed);
                                 if (r < 0)
-                                        goto fail;
+                                        return r;
 
                                 n_key = 0;
                                 value = NULL;
@@ -512,10 +517,8 @@ static int parse_env_file_internal(
                                 else if (last_value_whitespace == (size_t) -1)
                                         last_value_whitespace = n_value;
 
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -527,10 +530,8 @@ static int parse_env_file_internal(
 
                         if (!strchr(newline, c)) {
                                 /* Escaped newlines we eat up entirely */
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -542,10 +543,8 @@ static int parse_env_file_internal(
                         else if (c == '\\')
                                 state = SINGLE_QUOTE_VALUE_ESCAPE;
                         else {
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -556,10 +555,8 @@ static int parse_env_file_internal(
                         state = SINGLE_QUOTE_VALUE;
 
                         if (!strchr(newline, c)) {
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -571,10 +568,8 @@ static int parse_env_file_internal(
                         else if (c == '\\')
                                 state = DOUBLE_QUOTE_VALUE_ESCAPE;
                         else {
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -585,10 +580,8 @@ static int parse_env_file_internal(
                         state = DOUBLE_QUOTE_VALUE;
 
                         if (!strchr(newline, c)) {
-                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2)) {
-                                        r = -ENOMEM;
-                                        goto fail;
-                                }
+                                if (!GREEDY_REALLOC(value, value_alloc, n_value+2))
+                                        return -ENOMEM;
 
                                 value[n_value++] = c;
                         }
@@ -633,14 +626,12 @@ static int parse_env_file_internal(
 
                 r = push(fname, line, key, value, userdata, n_pushed);
                 if (r < 0)
-                        goto fail;
+                        return r;
+
+                value = NULL;
         }
 
         return 0;
-
-fail:
-        free(value);
-        return r;
 }
 
 static int check_utf8ness_and_warn(
@@ -705,21 +696,41 @@ static int parse_env_file_push(
         return 0;
 }
 
-int parse_env_file(
+int parse_env_filev(
+                FILE *f,
                 const char *fname,
-                const char *newline, ...) {
+                const char *newline,
+                va_list ap) {
 
-        va_list ap;
         int r, n_pushed = 0;
+        va_list aq;
 
         if (!newline)
                 newline = NEWLINE;
 
+        va_copy(aq, ap);
+        r = parse_env_file_internal(f, fname, newline, parse_env_file_push, &aq, &n_pushed);
+        va_end(aq);
+        if (r < 0)
+                return r;
+
+        return n_pushed;
+}
+
+int parse_env_file(
+                FILE *f,
+                const char *fname,
+                const char *newline,
+                ...) {
+
+        va_list ap;
+        int r;
+
         va_start(ap, newline);
-        r = parse_env_file_internal(NULL, fname, newline, parse_env_file_push, &ap, &n_pushed);
+        r = parse_env_filev(f, fname, newline, ap);
         va_end(ap);
 
-        return r < 0 ? r : n_pushed;
+        return r;
 }
 
 static int load_env_file_push(
@@ -1237,7 +1248,7 @@ int tempfn_xxxxxx(const char *p, const char *extra, char **ret) {
 
         strcpy(stpcpy(stpcpy(stpcpy(mempcpy(t, p, fn - p), ".#"), extra), fn), "XXXXXX");
 
-        *ret = path_kill_slashes(t);
+        *ret = path_simplify(t, false);
         return 0;
 }
 
@@ -1278,7 +1289,7 @@ int tempfn_random(const char *p, const char *extra, char **ret) {
 
         *x = 0;
 
-        *ret = path_kill_slashes(t);
+        *ret = path_simplify(t, false);
         return 0;
 }
 
@@ -1318,7 +1329,7 @@ int tempfn_random_child(const char *p, const char *extra, char **ret) {
 
         *x = 0;
 
-        *ret = path_kill_slashes(t);
+        *ret = path_simplify(t, false);
         return 0;
 }
 
@@ -1452,8 +1463,7 @@ int open_tmpfile_linkable(const char *target, int flags, char **ret_path) {
         if (fd < 0)
                 return -errno;
 
-        *ret_path = tmp;
-        tmp = NULL;
+        *ret_path = TAKE_PTR(tmp);
 
         return fd;
 }
@@ -1539,28 +1549,35 @@ int read_nul_string(FILE *f, char **ret) {
                         return -ENOMEM;
         }
 
-        *ret = x;
-        x = NULL;
+        *ret = TAKE_PTR(x);
 
         return 0;
 }
 
 int mkdtemp_malloc(const char *template, char **ret) {
-        char *p;
+        _cleanup_free_ char *p = NULL;
+        int r;
 
-        assert(template);
         assert(ret);
 
-        p = strdup(template);
+        if (template)
+                p = strdup(template);
+        else {
+                const char *tmp;
+
+                r = tmp_dir(&tmp);
+                if (r < 0)
+                        return r;
+
+                p = strjoin(tmp, "/XXXXXX");
+        }
         if (!p)
                 return -ENOMEM;
 
-        if (!mkdtemp(p)) {
-                free(p);
+        if (!mkdtemp(p))
                 return -errno;
-        }
 
-        *ret = p;
+        *ret = TAKE_PTR(p);
         return 0;
 }
 
@@ -1629,8 +1646,7 @@ int read_line(FILE *f, size_t limit, char **ret) {
         if (ret) {
                 buffer[n] = 0;
 
-                *ret = buffer;
-                buffer = NULL;
+                *ret = TAKE_PTR(buffer);
         }
 
         return (int) count;

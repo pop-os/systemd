@@ -1,23 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2012 Lennart Poettering
-  Copyright 2013 Zbigniew Jędrzejewski-Szmek
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -29,6 +10,7 @@
 #include "alloc-util.h"
 #include "catalog.h"
 #include "fd-util.h"
+#include "fs-util.h"
 #include "fileio.h"
 #include "log.h"
 #include "macro.h"
@@ -45,9 +27,8 @@ static const char *no_catalog_dirs[] = {
         NULL
 };
 
-static Hashmap * test_import(const char* contents, ssize_t size, int code) {
-        int r;
-        char name[] = "/tmp/test-catalog.XXXXXX";
+static Hashmap* test_import(const char* contents, ssize_t size, int code) {
+        _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-catalog.XXXXXX";
         _cleanup_close_ int fd;
         Hashmap *h;
 
@@ -60,10 +41,7 @@ static Hashmap * test_import(const char* contents, ssize_t size, int code) {
         assert_se(fd >= 0);
         assert_se(write(fd, contents, size) == size);
 
-        r = catalog_import_file(h, name);
-        assert_se(r == code);
-
-        unlink(name);
+        assert_se(catalog_import_file(h, name) == code);
 
         return h;
 }
@@ -177,29 +155,21 @@ static void test_catalog_import_merge_no_body(void) {
         }
 }
 
-static const char* database = NULL;
-
-static void test_catalog_update(void) {
-        static char name[] = "/tmp/test-catalog.XXXXXX";
+static void test_catalog_update(const char *database) {
         int r;
-
-        r = mkostemp_safe(name);
-        assert_se(r >= 0);
-
-        database = name;
 
         /* Test what happens if there are no files. */
         r = catalog_update(database, NULL, NULL);
-        assert_se(r >= 0);
+        assert_se(r == 0);
 
         /* Test what happens if there are no files in the directory. */
         r = catalog_update(database, NULL, no_catalog_dirs);
-        assert_se(r >= 0);
+        assert_se(r == 0);
 
         /* Make sure that we at least have some files loaded or the
            catalog_list below will fail. */
         r = catalog_update(database, NULL, catalog_dirs);
-        assert_se(r >= 0);
+        assert_se(r == 0);
 }
 
 static void test_catalog_file_lang(void) {
@@ -231,6 +201,7 @@ static void test_catalog_file_lang(void) {
 }
 
 int main(int argc, char *argv[]) {
+        _cleanup_(unlink_tempfilep) char database[] = "/tmp/test-catalog.XXXXXX";
         _cleanup_free_ char *text = NULL;
         int r;
 
@@ -247,7 +218,9 @@ int main(int argc, char *argv[]) {
         test_catalog_import_merge();
         test_catalog_import_merge_no_body();
 
-        test_catalog_update();
+        assert_se(mkostemp_safe(database) >= 0);
+
+        test_catalog_update(database);
 
         r = catalog_list(stdout, database, true);
         assert_se(r >= 0);
@@ -257,9 +230,6 @@ int main(int argc, char *argv[]) {
 
         assert_se(catalog_get(database, SD_MESSAGE_COREDUMP, &text) >= 0);
         printf(">>>%s<<<\n", text);
-
-        if (database)
-                unlink(database);
 
         return 0;
 }

@@ -1,20 +1,5 @@
 # -*- mode: meson -*-
 # SPDX-License-Identifier: LGPL-2.1+
-#
-# Copyright 2017 Zbigniew Jędrzejewski-Szmek
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 option('split-usr', type : 'combo', choices : ['auto', 'true', 'false'],
        description : '''/bin, /sbin aren't symlinks into /usr''')
@@ -26,6 +11,14 @@ option('rootprefix', type : 'string',
        description : '''override the root prefix''')
 option('link-udev-shared', type : 'boolean',
        description : 'link systemd-udev and its helpers to libsystemd-shared.so')
+option('link-systemctl-shared', type: 'boolean',
+       description : 'link systemctl against libsystemd-shared.so')
+option('static-libsystemd', type : 'combo',
+       choices : ['false', 'true', 'pic', 'no-pic'],
+       description : '''install a static library for libsystemd''')
+option('static-libudev', type : 'combo',
+       choices : ['false', 'true', 'pic', 'no-pic'],
+       description : '''install a static library for libudev''')
 
 option('sysvinit-path', type : 'string', value : '/etc/init.d',
        description : 'the directory where the SysV init scripts are located')
@@ -53,10 +46,12 @@ option('debug-shell', type : 'string', value : '/bin/sh',
        description : 'path to debug shell binary')
 option('debug-tty', type : 'string', value : '/dev/tty9',
        description : 'specify the tty device for debug shell')
-option('debug', type : 'string',
-       description : 'enable extra debugging (hashmap,mmap-cache)')
+option('debug', type : 'array', choices : ['hashmap', 'mmap-cache'], value : [],
+       description : 'enable extra debugging')
 option('memory-accounting-default', type : 'boolean',
        description : 'enable MemoryAccounting= by default')
+option('valgrind', type : 'boolean', value : false,
+       description : 'do extra operations to avoid valgrind warnings')
 
 option('utmp', type : 'boolean',
        description : 'support for utmp/wtmp log handling')
@@ -84,6 +79,8 @@ option('localed', type : 'boolean',
        description : 'install the systemd-localed stack')
 option('machined', type : 'boolean',
        description : 'install the systemd-machined stack')
+option('portabled', type : 'boolean',
+       description : 'install the systemd-portabled stack')
 option('networkd', type : 'boolean',
        description : 'install the systemd-networkd stack')
 option('timedated', type : 'boolean',
@@ -194,6 +191,12 @@ option('default-dnssec', type : 'combo',
        description : 'default DNSSEC mode',
        choices : ['yes', 'allow-downgrade', 'no'],
        value : 'allow-downgrade')
+option('default-dns-over-tls', type : 'combo',
+       description : 'default DNS-over-TLS mode',
+       choices : ['opportunistic', 'no'],
+       value : 'no')
+option('dns-over-tls', type : 'combo', choices : ['auto', 'true', 'false'],
+       description : 'DNS-over-TLS support')
 option('dns-servers', type : 'string',
        description : 'space-separated list of default DNS servers',
        value : '8.8.8.8 8.8.4.4 2001:4860:4860::8888 2001:4860:4860::8844')

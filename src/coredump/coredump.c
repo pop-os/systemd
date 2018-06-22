@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2012 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <stdio.h>
@@ -154,7 +136,12 @@ static int parse_config(void) {
 }
 
 static inline uint64_t storage_size_max(void) {
-        return arg_storage == COREDUMP_STORAGE_EXTERNAL ? arg_external_size_max : arg_journal_size_max;
+        if (arg_storage == COREDUMP_STORAGE_EXTERNAL)
+                return arg_external_size_max;
+        if (arg_storage == COREDUMP_STORAGE_JOURNAL)
+                return arg_journal_size_max;
+        assert(arg_storage == COREDUMP_STORAGE_NONE);
+        return 0;
 }
 
 static int fix_acl(int fd, uid_t uid) {
@@ -336,7 +323,7 @@ static int save_external_coredump(
 
         _cleanup_free_ char *fn = NULL, *tmp = NULL;
         _cleanup_close_ int fd = -1;
-        uint64_t rlimit, max_size;
+        uint64_t rlimit, process_limit, max_size;
         struct stat st;
         uid_t uid;
         int r;
@@ -363,8 +350,14 @@ static int save_external_coredump(
                 return -EBADSLT;
         }
 
+        process_limit = MAX(arg_process_size_max, storage_size_max());
+        if (process_limit == 0) {
+                log_debug("Limits for coredump processing and storage are both 0, not dumping core.");
+                return -EBADSLT;
+        }
+
         /* Never store more than the process configured, or than we actually shall keep or process */
-        max_size = MIN(rlimit, MAX(arg_process_size_max, storage_size_max()));
+        max_size = MIN(rlimit, process_limit);
 
         r = make_filename(context, &fn);
         if (r < 0)
@@ -386,8 +379,7 @@ static int save_external_coredump(
                 log_struct(LOG_INFO,
                            LOG_MESSAGE("Core file was truncated to %zu bytes.", max_size),
                            "SIZE_LIMIT=%zu", max_size,
-                           "MESSAGE_ID=" SD_MESSAGE_TRUNCATED_CORE_STR,
-                           NULL);
+                           "MESSAGE_ID=" SD_MESSAGE_TRUNCATED_CORE_STR);
 
         if (fstat(fd, &st) < 0) {
                 log_error_errno(errno, "Failed to fstat core file %s: %m", coredump_tmpfile_name(tmp));
@@ -432,13 +424,10 @@ static int save_external_coredump(
                 if (tmp)
                         unlink_noerrno(tmp);
 
-                *ret_filename = fn_compressed;     /* compressed */
-                *ret_node_fd = fd_compressed;      /* compressed */
-                *ret_data_fd = fd;                 /* uncompressed */
+                *ret_filename = TAKE_PTR(fn_compressed);     /* compressed */
+                *ret_node_fd = TAKE_FD(fd_compressed);      /* compressed */
+                *ret_data_fd = TAKE_FD(fd);                 /* uncompressed */
                 *ret_size = (uint64_t) st.st_size; /* uncompressed */
-
-                fn_compressed = NULL;
-                fd = fd_compressed = -1;
 
                 return 0;
 
@@ -454,13 +443,10 @@ uncompressed:
         if (r < 0)
                 goto fail;
 
-        *ret_filename = fn;
-        *ret_data_fd = fd;
+        *ret_filename = TAKE_PTR(fn);
+        *ret_data_fd = TAKE_FD(fd);
         *ret_node_fd = -1;
         *ret_size = (uint64_t) st.st_size;
-
-        fn = NULL;
-        fd = -1;
 
         return 0;
 
@@ -497,10 +483,8 @@ static int allocate_journal_field(int fd, size_t size, char **ret, size_t *ret_s
                 return -EIO;
         }
 
-        *ret = field;
+        *ret = TAKE_PTR(field);
         *ret_size = size + 9;
-
-        field = NULL;
 
         return 0;
 }
@@ -584,8 +568,7 @@ static int compose_open_fds(pid_t pid, char **open_fds) {
         if (errno > 0)
                 return -errno;
 
-        *open_fds = buffer;
-        buffer = NULL;
+        *open_fds = TAKE_PTR(buffer);
 
         return 0;
 }
@@ -863,21 +846,18 @@ static void map_context_fields(const struct iovec *iovec, const char* context[])
         assert(context);
 
         for (i = 0; i < ELEMENTSOF(context_field_names); i++) {
-                size_t l;
+                char *p;
 
                 if (!context_field_names[i])
                         continue;
 
-                l = strlen(context_field_names[i]);
-                if (iovec->iov_len < l)
-                        continue;
-
-                if (memcmp(iovec->iov_base, context_field_names[i], l) != 0)
+                p = memory_startswith(iovec->iov_base, iovec->iov_len, context_field_names[i]);
+                if (!p)
                         continue;
 
                 /* Note that these strings are NUL terminated, because we made sure that a trailing NUL byte is in the
                  * buffer, though not included in the iov_len count. (see below) */
-                context[i] = (char*) iovec->iov_base + l;
+                context[i] = p;
                 break;
         }
 }
@@ -932,7 +912,7 @@ static int process_socket(int fd) {
 
                 mh.msg_iov = iovec + n_iovec;
 
-                n = recvmsg(fd, &mh, MSG_NOSIGNAL|MSG_CMSG_CLOEXEC);
+                n = recvmsg(fd, &mh, MSG_CMSG_CLOEXEC);
                 if (n < 0)  {
                         free(iovec[n_iovec].iov_base);
                         r = log_error_errno(errno, "Failed to receive datagram: %m");

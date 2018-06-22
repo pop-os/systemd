@@ -1,21 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 /***
-  This file is part of systemd.
-
-  Copyright 2013 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
 #include <endian.h>
@@ -261,16 +245,13 @@ static bool line_equals(const char *s, size_t m, const char *line) {
 }
 
 static bool line_begins(const char *s, size_t m, const char *word) {
-        size_t l;
+        const char *p;
 
-        l = strlen(word);
-        if (m < l)
+        p = memory_startswith(s, m, word);
+        if (!p)
                 return false;
 
-        if (memcmp(s, word, l) != 0)
-                return false;
-
-        return m == l || (m > l && s[l] == ' ');
+        return IN_SET(*p, 0, ' ');
 }
 
 static int verify_anonymous_token(sd_bus *b, const char *p, size_t l) {
@@ -552,7 +533,7 @@ static int bus_socket_read_auth(sd_bus *b) {
                 mh.msg_control = &control;
                 mh.msg_controllen = sizeof(control);
 
-                k = recvmsg(b->input_fd, &mh, MSG_DONTWAIT|MSG_NOSIGNAL|MSG_CMSG_CLOEXEC);
+                k = recvmsg(b->input_fd, &mh, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
                 if (k < 0 && errno == ENOTSOCK) {
                         b->prefer_readv = true;
                         k = readv(b->input_fd, &iov, 1);
@@ -790,7 +771,7 @@ static int bus_socket_inotify_setup(sd_bus *b) {
                         if (IN_SET(errno, ENOENT, ELOOP))
                                 break; /* This component doesn't exist yet, or the path contains a cyclic symlink right now */
 
-                        r = log_debug_errno(errno, "Failed to add inotify watch on %s: %m", isempty(prefix) ? "/" : prefix);
+                        r = log_debug_errno(errno, "Failed to add inotify watch on %s: %m", empty_to_root(prefix));
                         goto fail;
                 } else
                         new_watches[n++] = wd;
@@ -960,13 +941,8 @@ int bus_socket_exec(sd_bus *b) {
         if (r == 0) {
                 /* Child */
 
-                safe_close(s[0]);
-
                 if (rearrange_stdio(s[1], s[1], STDERR_FILENO) < 0)
                         _exit(EXIT_FAILURE);
-
-                (void) fd_nonblock(STDIN_FILENO, false);
-                (void) fd_nonblock(STDOUT_FILENO, false);
 
                 if (b->exec_argv)
                         execvp(b->exec_path, b->exec_argv);
@@ -1187,7 +1163,7 @@ int bus_socket_read_message(sd_bus *bus) {
                 mh.msg_control = &control;
                 mh.msg_controllen = sizeof(control);
 
-                k = recvmsg(bus->input_fd, &mh, MSG_DONTWAIT|MSG_NOSIGNAL|MSG_CMSG_CLOEXEC);
+                k = recvmsg(bus->input_fd, &mh, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
                 if (k < 0 && errno == ENOTSOCK) {
                         bus->prefer_readv = true;
                         k = readv(bus->input_fd, &iov, 1);

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <stddef.h>
 #include <unistd.h>
@@ -391,7 +373,7 @@ static int stdout_stream_line(StdoutStream *s, char *p, LineBreak line_break) {
                         return -EINVAL;
                 }
 
-                s->level_prefix = !!r;
+                s->level_prefix = r;
                 s->state = STDOUT_STREAM_FORWARD_TO_SYSLOG;
                 return 0;
 
@@ -402,7 +384,7 @@ static int stdout_stream_line(StdoutStream *s, char *p, LineBreak line_break) {
                         return -EINVAL;
                 }
 
-                s->forward_to_syslog = !!r;
+                s->forward_to_syslog = r;
                 s->state = STDOUT_STREAM_FORWARD_TO_KMSG;
                 return 0;
 
@@ -413,7 +395,7 @@ static int stdout_stream_line(StdoutStream *s, char *p, LineBreak line_break) {
                         return -EINVAL;
                 }
 
-                s->forward_to_kmsg = !!r;
+                s->forward_to_kmsg = r;
                 s->state = STDOUT_STREAM_FORWARD_TO_CONSOLE;
                 return 0;
 
@@ -424,7 +406,7 @@ static int stdout_stream_line(StdoutStream *s, char *p, LineBreak line_break) {
                         return -EINVAL;
                 }
 
-                s->forward_to_console = !!r;
+                s->forward_to_console = r;
                 s->state = STDOUT_STREAM_RUNNING;
 
                 /* Try to save the stream, so that journald can be restarted and we can recover */
@@ -659,7 +641,7 @@ static int stdout_stream_load(StdoutStream *stream, const char *fname) {
                         return log_oom();
         }
 
-        r = parse_env_file(stream->state_file, NEWLINE,
+        r = parse_env_file(NULL, stream->state_file, NEWLINE,
                            "PRIORITY", &priority,
                            "LEVEL_PREFIX", &level_prefix,
                            "FORWARD_TO_SYSLOG", &forward_to_syslog,
@@ -779,8 +761,8 @@ int server_restore_streams(Server *s, FDSet *fds) {
                         /* No file descriptor? Then let's delete the state file */
                         log_debug("Cannot restore stream file %s", de->d_name);
                         if (unlinkat(dirfd(d), de->d_name, 0) < 0)
-                                log_warning("Failed to remove /run/systemd/journal/streams/%s: %m",
-                                            de->d_name);
+                                log_warning_errno(errno, "Failed to remove /run/systemd/journal/streams/%s: %m",
+                                                  de->d_name);
                         continue;
                 }
 

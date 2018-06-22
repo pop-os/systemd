@@ -1,28 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <getopt.h>
-#include <grp.h>
-#include <gshadow.h>
-#include <pwd.h>
-#include <shadow.h>
 #include <utmp.h>
 
 #include "alloc-util.h"
@@ -30,16 +8,18 @@
 #include "copy.h"
 #include "def.h"
 #include "fd-util.h"
-#include "fs-util.h"
 #include "fileio-label.h"
 #include "format-util.h"
+#include "fs-util.h"
 #include "hashmap.h"
+#include "pager.h"
 #include "path-util.h"
 #include "selinux-util.h"
 #include "smack-util.h"
 #include "specifier.h"
 #include "string-util.h"
 #include "strv.h"
+#include "terminal-util.h"
 #include "uid-range.h"
 #include "user-util.h"
 #include "utf8.h"
@@ -51,6 +31,7 @@ typedef enum ItemType {
         ADD_MEMBER = 'm',
         ADD_RANGE = 'r',
 } ItemType;
+
 typedef struct Item {
         ItemType type;
 
@@ -78,10 +59,10 @@ typedef struct Item {
 } Item;
 
 static char *arg_root = NULL;
+static bool arg_cat_config = false;
 static const char *arg_replace = NULL;
 static bool arg_inline = false;
-
-static const char conf_file_dirs[] = CONF_PATHS_NULSTR("sysusers.d");
+static bool arg_no_pager = false;
 
 static OrderedHashmap *users = NULL, *groups = NULL;
 static OrderedHashmap *todo_uids = NULL, *todo_gids = NULL;
@@ -113,8 +94,7 @@ static int load_user_database(void) {
         if (r < 0)
                 return r;
 
-        errno = 0;
-        while ((pw = fgetpwent(f))) {
+        while ((r = fgetpwent_sane(f, &pw)) > 0) {
                 char *n;
                 int k, q;
 
@@ -130,20 +110,15 @@ static int load_user_database(void) {
 
                 q = hashmap_put(database_uid, UID_TO_PTR(pw->pw_uid), n);
                 if (q < 0 && q != -EEXIST) {
-                        if (k < 0)
+                        if (k <= 0)
                                 free(n);
                         return q;
                 }
 
-                if (q < 0 && k < 0)
+                if (k <= 0 && q <= 0)
                         free(n);
-
-                errno = 0;
         }
-        if (!IN_SET(errno, 0, ENOENT))
-                return -errno;
-
-        return 0;
+        return r;
 }
 
 static int load_group_database(void) {
@@ -182,12 +157,12 @@ static int load_group_database(void) {
 
                 q = hashmap_put(database_gid, GID_TO_PTR(gr->gr_gid), n);
                 if (q < 0 && q != -EEXIST) {
-                        if (k < 0)
+                        if (k <= 0)
                                 free(n);
                         return q;
                 }
 
-                if (q < 0 && k < 0)
+                if (k <= 0 && q <= 0)
                         free(n);
 
                 errno = 0;
@@ -232,11 +207,9 @@ static int make_backup(const char *target, const char *x) {
         backup = strjoina(x, "-");
 
         /* Copy over the access mask */
-        if (fchmod(fileno(dst), st.st_mode & 07777) < 0)
-                log_warning_errno(errno, "Failed to change mode on %s: %m", backup);
-
-        if (fchown(fileno(dst), st.st_uid, st.st_gid)< 0)
-                log_warning_errno(errno, "Failed to change ownership of %s: %m", backup);
+        r = fchmod_and_chown(fileno(dst), st.st_mode & 07777, st.st_uid, st.st_gid);
+        if (r < 0)
+                log_warning_errno(r, "Failed to change access mode or ownership of %s: %m", backup);
 
         ts[0] = st.st_atim;
         ts[1] = st.st_mtim;
@@ -287,6 +260,7 @@ static int putgrent_with_members(const struct group *gr, FILE *group) {
 
                 if (added) {
                         struct group t;
+                        int r;
 
                         strv_uniq(l);
                         strv_sort(l);
@@ -294,19 +268,12 @@ static int putgrent_with_members(const struct group *gr, FILE *group) {
                         t = *gr;
                         t.gr_mem = l;
 
-                        errno = 0;
-                        if (putgrent(&t, group) != 0)
-                                return errno > 0 ? -errno : -EIO;
-
-                        return 1;
+                        r = putgrent_sane(&t, group);
+                        return r < 0 ? r : 1;
                 }
         }
 
-        errno = 0;
-        if (putgrent(gr, group) != 0)
-                return errno > 0 ? -errno : -EIO;
-
-        return 0;
+        return putgrent_sane(gr, group);
 }
 
 #if ENABLE_GSHADOW
@@ -338,6 +305,7 @@ static int putsgent_with_members(const struct sgrp *sg, FILE *gshadow) {
 
                 if (added) {
                         struct sgrp t;
+                        int r;
 
                         strv_uniq(l);
                         strv_sort(l);
@@ -345,19 +313,12 @@ static int putsgent_with_members(const struct sgrp *sg, FILE *gshadow) {
                         t = *sg;
                         t.sg_mem = l;
 
-                        errno = 0;
-                        if (putsgent(&t, gshadow) != 0)
-                                return errno > 0 ? -errno : -EIO;
-
-                        return 1;
+                        r = putsgent_sane(&t, gshadow);
+                        return r < 0 ? r : 1;
                 }
         }
 
-        errno = 0;
-        if (putsgent(sg, gshadow) != 0)
-                return errno > 0 ? -errno : -EIO;
-
-        return 0;
+        return putsgent_sane(sg, gshadow);
 }
 #endif
 
@@ -367,13 +328,7 @@ static int sync_rights(FILE *from, FILE *to) {
         if (fstat(fileno(from), &st) < 0)
                 return -errno;
 
-        if (fchmod(fileno(to), st.st_mode & 07777) < 0)
-                return -errno;
-
-        if (fchown(fileno(to), st.st_uid, st.st_gid) < 0)
-                return -errno;
-
-        return 0;
+        return fchmod_and_chown(fileno(to), st.st_mode & 07777, st.st_uid, st.st_gid);
 }
 
 static int rename_and_apply_smack(const char *temp_path, const char *dest_path) {
@@ -396,6 +351,7 @@ static const char* default_shell(uid_t uid) {
 static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char **tmpfile_path) {
         _cleanup_fclose_ FILE *original = NULL, *passwd = NULL;
         _cleanup_(unlink_and_freep) char *passwd_tmp = NULL;
+        struct passwd *pw = NULL;
         Iterator iterator;
         Item *i;
         int r;
@@ -409,14 +365,12 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char 
 
         original = fopen(passwd_path, "re");
         if (original) {
-                struct passwd *pw;
 
                 r = sync_rights(original, passwd);
                 if (r < 0)
                         return r;
 
-                errno = 0;
-                while ((pw = fgetpwent(original))) {
+                while ((r = fgetpwent_sane(original, &pw)) > 0) {
 
                         i = ordered_hashmap_get(users, pw->pw_name);
                         if (i && i->todo_user) {
@@ -429,14 +383,16 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char 
                                 return -EEXIST;
                         }
 
-                        errno = 0;
-                        if (putpwent(pw, passwd) < 0)
-                                return errno ? -errno : -EIO;
+                        /* Make sure we keep the NIS entries (if any) at the end. */
+                        if (IN_SET(pw->pw_name[0], '+', '-'))
+                                break;
 
-                        errno = 0;
+                        r = putpwent_sane(pw, passwd);
+                        if (r < 0)
+                                return r;
                 }
-                if (!IN_SET(errno, 0, ENOENT))
-                        return -errno;
+                if (r < 0)
+                        return r;
 
         } else {
                 if (errno != ENOENT)
@@ -463,25 +419,38 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char 
                         .pw_shell = i->shell ?: (char*) default_shell(i->uid),
                 };
 
-                errno = 0;
-                if (putpwent(&n, passwd) != 0)
-                        return errno ? -errno : -EIO;
+                r = putpwent_sane(&n, passwd);
+                if (r < 0)
+                        return r;
+        }
+
+        /* Append the remaining NIS entries if any */
+        while (pw) {
+                r = putpwent_sane(pw, passwd);
+                if (r < 0)
+                        return r;
+
+                r = fgetpwent_sane(original, &pw);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
         }
 
         r = fflush_and_check(passwd);
         if (r < 0)
                 return r;
 
-        *tmpfile = passwd;
-        *tmpfile_path = passwd_tmp;
-        passwd = NULL;
-        passwd_tmp = NULL;
+        *tmpfile = TAKE_PTR(passwd);
+        *tmpfile_path = TAKE_PTR(passwd_tmp);
+
         return 0;
 }
 
 static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char **tmpfile_path) {
         _cleanup_fclose_ FILE *original = NULL, *shadow = NULL;
         _cleanup_(unlink_and_freep) char *shadow_tmp = NULL;
+        struct spwd *sp = NULL;
         Iterator iterator;
         long lstchg;
         Item *i;
@@ -498,14 +467,12 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char 
 
         original = fopen(shadow_path, "re");
         if (original) {
-                struct spwd *sp;
 
                 r = sync_rights(original, shadow);
                 if (r < 0)
                         return r;
 
-                errno = 0;
-                while ((sp = fgetspent(original))) {
+                while ((r = fgetspent_sane(original, &sp)) > 0) {
 
                         i = ordered_hashmap_get(users, sp->sp_namp);
                         if (i && i->todo_user) {
@@ -518,14 +485,16 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char 
                                 ordered_hashmap_remove(todo_uids, UID_TO_PTR(i->uid));
                         }
 
-                        errno = 0;
-                        if (putspent(sp, shadow) < 0)
-                                return errno ? -errno : -EIO;
+                        /* Make sure we keep the NIS entries (if any) at the end. */
+                        if (IN_SET(sp->sp_namp[0], '+', '-'))
+                                break;
 
-                        errno = 0;
+                        r = putspent_sane(sp, shadow);
+                        if (r < 0)
+                                return r;
                 }
-                if (!IN_SET(errno, 0, ENOENT))
-                        return -errno;
+                if (r < 0)
+                        return r;
 
         } else {
                 if (errno != ENOENT)
@@ -547,19 +516,33 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char 
                         .sp_flag = (unsigned long) -1, /* this appears to be what everybody does ... */
                 };
 
-                errno = 0;
-                if (putspent(&n, shadow) != 0)
-                        return errno ? -errno : -EIO;
+                r = putspent_sane(&n, shadow);
+                if (r < 0)
+                        return r;
         }
+
+        /* Append the remaining NIS entries if any */
+        while (sp) {
+                r = putspent_sane(sp, shadow);
+                if (r < 0)
+                        return r;
+
+                r = fgetspent_sane(original, &sp);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
+        }
+        if (!IN_SET(errno, 0, ENOENT))
+                return -errno;
 
         r = fflush_sync_and_check(shadow);
         if (r < 0)
                 return r;
 
-        *tmpfile = shadow;
-        *tmpfile_path = shadow_tmp;
-        shadow = NULL;
-        shadow_tmp = NULL;
+        *tmpfile = TAKE_PTR(shadow);
+        *tmpfile_path = TAKE_PTR(shadow_tmp);
+
         return 0;
 }
 
@@ -567,6 +550,7 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
         _cleanup_fclose_ FILE *original = NULL, *group = NULL;
         _cleanup_(unlink_and_freep) char *group_tmp = NULL;
         bool group_changed = false;
+        struct group *gr = NULL;
         Iterator iterator;
         Item *i;
         int r;
@@ -580,14 +564,12 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
 
         original = fopen(group_path, "re");
         if (original) {
-                struct group *gr;
 
                 r = sync_rights(original, group);
                 if (r < 0)
                         return r;
 
-                errno = 0;
-                while ((gr = fgetgrent(original))) {
+                while ((r = fgetgrent_sane(original, &gr)) > 0) {
                         /* Safety checks against name and GID collisions. Normally,
                          * this should be unnecessary, but given that we look at the
                          * entries anyway here, let's make an extra verification
@@ -604,16 +586,18 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
                                 return  -EEXIST;
                         }
 
+                        /* Make sure we keep the NIS entries (if any) at the end. */
+                        if (IN_SET(gr->gr_name[0], '+', '-'))
+                                break;
+
                         r = putgrent_with_members(gr, group);
                         if (r < 0)
                                 return r;
                         if (r > 0)
                                 group_changed = true;
-
-                        errno = 0;
                 }
-                if (!IN_SET(errno, 0, ENOENT))
-                        return -errno;
+                if (r < 0)
+                        return r;
 
         } else {
                 if (errno != ENOENT)
@@ -636,15 +620,26 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
                 group_changed = true;
         }
 
+        /* Append the remaining NIS entries if any */
+        while (gr) {
+                r = putgrent_sane(gr, group);
+                if (r < 0)
+                        return r;
+
+                r = fgetgrent_sane(original, &gr);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
+        }
+
         r = fflush_sync_and_check(group);
         if (r < 0)
                 return r;
 
         if (group_changed) {
-                *tmpfile = group;
-                *tmpfile_path = group_tmp;
-                group = NULL;
-                group_tmp = NULL;
+                *tmpfile = TAKE_PTR(group);
+                *tmpfile_path = TAKE_PTR(group_tmp);
         }
         return 0;
 }
@@ -673,8 +668,7 @@ static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, ch
                 if (r < 0)
                         return r;
 
-                errno = 0;
-                while ((sg = fgetsgent(original))) {
+                while ((r = fgetsgent_sane(original, &sg)) > 0) {
 
                         i = ordered_hashmap_get(groups, sg->sg_namp);
                         if (i && i->todo_group) {
@@ -687,11 +681,9 @@ static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, ch
                                 return r;
                         if (r > 0)
                                 group_changed = true;
-
-                        errno = 0;
                 }
-                if (!IN_SET(errno, 0, ENOENT))
-                        return -errno;
+                if (r < 0)
+                        return r;
 
         } else {
                 if (errno != ENOENT)
@@ -718,10 +710,8 @@ static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, ch
                 return r;
 
         if (group_changed) {
-                *tmpfile = gshadow;
-                *tmpfile_path = gshadow_tmp;
-                gshadow = NULL;
-                gshadow_tmp = NULL;
+                *tmpfile = TAKE_PTR(gshadow);
+                *tmpfile_path = TAKE_PTR(gshadow_tmp);
         }
         return 0;
 #else
@@ -1359,18 +1349,20 @@ static bool item_equal(Item *a, Item *b) {
 static int parse_line(const char *fname, unsigned line, const char *buffer) {
 
         static const Specifier specifier_table[] = {
-                { 'm', specifier_machine_id, NULL },
-                { 'b', specifier_boot_id, NULL },
-                { 'H', specifier_host_name, NULL },
+                { 'm', specifier_machine_id,     NULL },
+                { 'b', specifier_boot_id,        NULL },
+                { 'H', specifier_host_name,      NULL },
                 { 'v', specifier_kernel_release, NULL },
+                { 'T', specifier_tmp_dir,        NULL },
+                { 'V', specifier_var_tmp_dir,    NULL },
                 {}
         };
 
         _cleanup_free_ char *action = NULL,
                 *name = NULL, *resolved_name = NULL,
                 *id = NULL, *resolved_id = NULL,
-                *description = NULL,
-                *home = NULL,
+                *description = NULL, *resolved_description = NULL,
+                *home = NULL, *resolved_home = NULL,
                 *shell, *resolved_shell = NULL;
         _cleanup_(item_freep) Item *i = NULL;
         Item *existing;
@@ -1444,8 +1436,14 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                 description = mfree(description);
 
         if (description) {
-                if (!valid_gecos(description)) {
-                        log_error("[%s:%u] '%s' is not a valid GECOS field.", fname, line, description);
+                r = specifier_printf(description, specifier_table, NULL, &resolved_description);
+                if (r < 0) {
+                        log_error("[%s:%u] Failed to replace specifiers: %s", fname, line, description);
+                        return r;
+                }
+
+                if (!valid_gecos(resolved_description)) {
+                        log_error("[%s:%u] '%s' is not a valid GECOS field.", fname, line, resolved_description);
                         return -EINVAL;
                 }
         }
@@ -1455,8 +1453,14 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                 home = mfree(home);
 
         if (home) {
-                if (!valid_home(home)) {
-                        log_error("[%s:%u] '%s' is not a valid home directory field.", fname, line, home);
+                r = specifier_printf(home, specifier_table, NULL, &resolved_home);
+                if (r < 0) {
+                        log_error("[%s:%u] Failed to replace specifiers: %s", fname, line, home);
+                        return r;
+                }
+
+                if (!valid_home(resolved_home)) {
+                        log_error("[%s:%u] '%s' is not a valid home directory field.", fname, line, resolved_home);
                         return -EINVAL;
                 }
         }
@@ -1477,7 +1481,6 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                         return -EINVAL;
                 }
         }
-
 
         switch (action[0]) {
 
@@ -1585,10 +1588,8 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
 
                 if (resolved_id) {
                         if (path_is_absolute(resolved_id)) {
-                                i->uid_path = resolved_id;
-                                resolved_id = NULL;
-
-                                path_kill_slashes(i->uid_path);
+                                i->uid_path = TAKE_PTR(resolved_id);
+                                path_simplify(i->uid_path, false);
                         } else {
                                 _cleanup_free_ char *uid = NULL, *gid = NULL;
                                 if (split_pair(resolved_id, ":", &uid, &gid) == 0) {
@@ -1608,14 +1609,9 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
                         }
                 }
 
-                i->description = description;
-                description = NULL;
-
-                i->home = home;
-                home = NULL;
-
-                i->shell = resolved_shell;
-                resolved_shell = NULL;
+                i->description = TAKE_PTR(resolved_description);
+                i->home = TAKE_PTR(resolved_home);
+                i->shell = TAKE_PTR(resolved_shell);
 
                 h = users;
                 break;
@@ -1643,10 +1639,8 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
 
                 if (resolved_id) {
                         if (path_is_absolute(resolved_id)) {
-                                i->gid_path = resolved_id;
-                                resolved_id = NULL;
-
-                                path_kill_slashes(i->gid_path);
+                                i->gid_path = TAKE_PTR(resolved_id);
+                                path_simplify(i->gid_path, false);
                         } else {
                                 r = parse_gid(resolved_id, &i->gid);
                                 if (r < 0)
@@ -1664,8 +1658,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer) {
         }
 
         i->type = action[0];
-        i->name = resolved_name;
-        resolved_name = NULL;
+        i->name = TAKE_PTR(resolved_name);
 
         existing = ordered_hashmap_get(h, i->name);
         if (existing) {
@@ -1697,7 +1690,7 @@ static int read_config_file(const char *fn, bool ignore_enoent) {
         if (streq(fn, "-"))
                 f = stdin;
         else {
-                r = search_and_fopen_nulstr(fn, "re", arg_root, conf_file_dirs, &rf);
+                r = search_and_fopen(fn, "re", arg_root, (const char**) CONF_PATHS_STRV("sysusers.d"), &rf);
                 if (r < 0) {
                         if (ignore_enoent && r == -ENOENT)
                                 return 0;
@@ -1753,14 +1746,29 @@ static void free_database(Hashmap *by_name, Hashmap *by_id) {
         hashmap_free(by_id);
 }
 
+static int cat_config(void) {
+        _cleanup_strv_free_ char **files = NULL;
+        int r;
+
+        r = conf_files_list_with_replacement(arg_root, CONF_PATHS_STRV("sysusers.d"), arg_replace, &files, NULL);
+        if (r < 0)
+                return r;
+
+        (void) pager_open(arg_no_pager, false);
+
+        return cat_files(NULL, files, 0);
+}
+
 static void help(void) {
         printf("%s [OPTIONS...] [CONFIGURATION FILE...]\n\n"
                "Creates system user accounts.\n\n"
                "  -h --help                 Show this help\n"
                "     --version              Show package version\n"
+               "     --cat-config           Show configuration files\n"
                "     --root=PATH            Operate on an alternate filesystem root\n"
                "     --replace=PATH         Treat arguments as replacement for PATH\n"
                "     --inline               Treat arguments as configuration lines\n"
+               "     --no-pager             Do not pipe output into a pager\n"
                , program_invocation_short_name);
 }
 
@@ -1768,17 +1776,21 @@ static int parse_argv(int argc, char *argv[]) {
 
         enum {
                 ARG_VERSION = 0x100,
+                ARG_CAT_CONFIG,
                 ARG_ROOT,
                 ARG_REPLACE,
                 ARG_INLINE,
+                ARG_NO_PAGER,
         };
 
         static const struct option options[] = {
-                { "help",    no_argument,       NULL, 'h'         },
-                { "version", no_argument,       NULL, ARG_VERSION },
-                { "root",    required_argument, NULL, ARG_ROOT    },
-                { "replace", required_argument, NULL, ARG_REPLACE },
-                { "inline",  no_argument,       NULL, ARG_INLINE  },
+                { "help",       no_argument,       NULL, 'h'            },
+                { "version",    no_argument,       NULL, ARG_VERSION    },
+                { "cat-config", no_argument,       NULL, ARG_CAT_CONFIG },
+                { "root",       required_argument, NULL, ARG_ROOT       },
+                { "replace",    required_argument, NULL, ARG_REPLACE    },
+                { "inline",     no_argument,       NULL, ARG_INLINE     },
+                { "no-pager",   no_argument,       NULL, ARG_NO_PAGER   },
                 {}
         };
 
@@ -1797,6 +1809,10 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_VERSION:
                         return version();
+
+                case ARG_CAT_CONFIG:
+                        arg_cat_config = true;
+                        break;
 
                 case ARG_ROOT:
                         r = parse_path_argument_and_warn(optarg, true, &arg_root);
@@ -1818,12 +1834,21 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_inline = true;
                         break;
 
+                case ARG_NO_PAGER:
+                        arg_no_pager = true;
+                        break;
+
                 case '?':
                         return -EINVAL;
 
                 default:
                         assert_not_reached("Unhandled option");
                 }
+
+        if (arg_replace && arg_cat_config) {
+                log_error("Option --replace= is not supported with --cat-config");
+                return -EINVAL;
+        }
 
         if (arg_replace && optind >= argc) {
                 log_error("When --replace= is given, some configuration items must be specified");
@@ -1853,25 +1878,15 @@ static int parse_arguments(char **args) {
         return 0;
 }
 
-static int read_config_files(const char* dirs, char **args) {
+static int read_config_files(char **args) {
         _cleanup_strv_free_ char **files = NULL;
         _cleanup_free_ char *p = NULL;
         char **f;
         int r;
 
-        r = conf_files_list_nulstr(&files, ".conf", arg_root, 0, dirs);
+        r = conf_files_list_with_replacement(arg_root, CONF_PATHS_STRV("sysusers.d"), arg_replace, &files, &p);
         if (r < 0)
-                return log_error_errno(r, "Failed to enumerate sysusers.d files: %m");
-
-        if (arg_replace) {
-                r = conf_files_insert_nulstr(&files, arg_root, dirs, arg_replace);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to extend sysusers.d file list: %m");
-
-                p = path_join(arg_root, arg_replace, NULL);
-                if (!p)
-                        return log_oom();
-        }
+                return r;
 
         STRV_FOREACH(f, files)
                 if (p && path_equal(*f, p)) {
@@ -1891,7 +1906,6 @@ static int read_config_files(const char* dirs, char **args) {
 }
 
 int main(int argc, char *argv[]) {
-
         _cleanup_close_ int lock = -1;
         Iterator iterator;
         int r;
@@ -1905,6 +1919,11 @@ int main(int argc, char *argv[]) {
         log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
         log_open();
+
+        if (arg_cat_config) {
+                r = cat_config();
+                goto finish;
+        }
 
         umask(0022);
 
@@ -1921,7 +1940,7 @@ int main(int argc, char *argv[]) {
          * read configuration and execute it.
          */
         if (arg_replace || optind >= argc)
-                r = read_config_files(conf_file_dirs, argv + optind);
+                r = read_config_files(argv + optind);
         else
                 r = parse_arguments(argv + optind);
         if (r < 0)
@@ -1969,16 +1988,18 @@ int main(int argc, char *argv[]) {
         }
 
         ORDERED_HASHMAP_FOREACH(i, groups, iterator)
-                process_item(i);
+                (void) process_item(i);
 
         ORDERED_HASHMAP_FOREACH(i, users, iterator)
-                process_item(i);
+                (void) process_item(i);
 
         r = write_files();
         if (r < 0)
                 log_error_errno(r, "Failed to write files: %m");
 
 finish:
+        pager_close();
+
         ordered_hashmap_free_with_destructor(groups, item_free);
         ordered_hashmap_free_with_destructor(users, item_free);
 
@@ -1993,6 +2014,8 @@ finish:
 
         free_database(database_user, database_uid);
         free_database(database_group, database_gid);
+
+        free(uid_range);
 
         free(arg_root);
 

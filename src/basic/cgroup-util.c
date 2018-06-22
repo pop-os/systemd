@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <dirent.h>
 #include <errno.h>
@@ -434,7 +416,7 @@ int cg_migrate(
                          * exist in the root cgroup, we only check for
                          * them there. */
                         if (cfrom &&
-                            (isempty(pfrom) || path_equal(pfrom, "/")) &&
+                            empty_or_root(pfrom) &&
                             is_kernel_thread(pid) > 0)
                                 continue;
 
@@ -641,7 +623,7 @@ int cg_get_path(const char *controller, const char *path, const char *suffix, ch
                 if (!t)
                         return -ENOMEM;
 
-                *fs = path_kill_slashes(t);
+                *fs = path_simplify(t, false);
                 return 0;
         }
 
@@ -658,7 +640,7 @@ int cg_get_path(const char *controller, const char *path, const char *suffix, ch
         if (r < 0)
                 return r;
 
-        path_kill_slashes(*fs);
+        path_simplify(*fs, false);
         return 0;
 }
 
@@ -767,6 +749,9 @@ int cg_trim(const char *controller, const char *path, bool delete_root) {
         return r;
 }
 
+/* Create a cgroup in the hierarchy of controller.
+ * Returns 0 if the group already existed, 1 on success, negative otherwise.
+ */
 int cg_create(const char *controller, const char *path) {
         _cleanup_free_ char *fs = NULL;
         int r;
@@ -1198,7 +1183,7 @@ int cg_is_empty_recursive(const char *controller, const char *path) {
         assert(path);
 
         /* The root cgroup is always populated */
-        if (controller && (isempty(path) || path_equal(path, "/")))
+        if (controller && empty_or_root(path))
                 return false;
 
         r = cg_unified_controller(controller);
@@ -1263,7 +1248,7 @@ int cg_split_spec(const char *spec, char **controller, char **path) {
                         if (!t)
                                 return -ENOMEM;
 
-                        *path = path_kill_slashes(t);
+                        *path = path_simplify(t, false);
                 }
 
                 if (controller)
@@ -1315,7 +1300,7 @@ int cg_split_spec(const char *spec, char **controller, char **path) {
                         return -EINVAL;
                 }
 
-                path_kill_slashes(u);
+                path_simplify(u, false);
         }
 
         if (controller)
@@ -1346,7 +1331,7 @@ int cg_mangle_path(const char *path, char **result) {
                 if (!t)
                         return -ENOMEM;
 
-                *result = path_kill_slashes(t);
+                *result = path_simplify(t, false);
                 return 0;
         }
 
@@ -1424,10 +1409,9 @@ int cg_pid_get_path_shifted(pid_t pid, const char *root, char **cgroup) {
         if (r < 0)
                 return r;
 
-        if (c == raw) {
-                *cgroup = raw;
-                raw = NULL;
-        } else {
+        if (c == raw)
+                *cgroup = TAKE_PTR(raw);
+        else {
                 char *n;
 
                 n = strdup(c);
@@ -1977,6 +1961,14 @@ int cg_slice_to_path(const char *unit, char **ret) {
                 _cleanup_free_ char *escaped = NULL;
                 char n[dash - p + sizeof(".slice")];
 
+#if HAS_FEATURE_MEMORY_SANITIZER
+                /* msan doesn't instrument stpncpy, so it thinks
+                 * n is later used unitialized:
+                 * https://github.com/google/sanitizers/issues/926
+                 */
+                zero(n);
+#endif
+
                 /* Don't allow trailing or double dashes */
                 if (IN_SET(dash[1], 0, '-'))
                         return -EINVAL;
@@ -2002,8 +1994,7 @@ int cg_slice_to_path(const char *unit, char **ret) {
         if (!strextend(&s, e, NULL))
                 return -ENOMEM;
 
-        *ret = s;
-        s = NULL;
+        *ret = TAKE_PTR(s);
 
         return 0;
 }
@@ -2038,7 +2029,6 @@ int cg_get_keyed_attribute(
                 char **ret_values) {
 
         _cleanup_free_ char *filename = NULL, *contents = NULL;
-        _cleanup_fclose_ FILE *f = NULL;
         const char *p;
         size_t n, i, n_done = 0;
         char **v;
@@ -2112,23 +2102,29 @@ done:
 
 int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path) {
         CGroupController c;
+        bool created;
         int r;
 
         /* This one will create a cgroup in our private tree, but also
          * duplicate it in the trees specified in mask, and remove it
-         * in all others */
+         * in all others.
+         *
+         * Returns 0 if the group already existed in the systemd hierarchy,
+         * 1 on success, negative otherwise.
+         */
 
         /* First create the cgroup in our own hierarchy. */
         r = cg_create(SYSTEMD_CGROUP_CONTROLLER, path);
         if (r < 0)
                 return r;
+        created = !!r;
 
         /* If we are in the unified hierarchy, we are done now */
         r = cg_all_unified();
         if (r < 0)
                 return r;
         if (r > 0)
-                return 0;
+                return created;
 
         /* Otherwise, do the same in the other hierarchies */
         for (c = 0; c < _CGROUP_CONTROLLER_MAX; c++) {
@@ -2143,7 +2139,7 @@ int cg_create_everywhere(CGroupMask supported, CGroupMask mask, const char *path
                         (void) cg_trim(n, path, true);
         }
 
-        return 0;
+        return created;
 }
 
 int cg_attach_everywhere(CGroupMask supported, const char *path, pid_t pid, cg_migrate_callback_t path_callback, void *userdata) {
@@ -2294,8 +2290,7 @@ int cg_mask_to_string(CGroupMask mask, char **ret) {
         assert(s);
 
         s[n] = 0;
-        *ret = s;
-        s = NULL;
+        *ret = TAKE_PTR(s);
 
         return 0;
 }
@@ -2444,8 +2439,7 @@ int cg_kernel_controllers(Set **ret) {
                         return r;
         }
 
-        *ret = controllers;
-        controllers = NULL;
+        *ret = TAKE_PTR(controllers);
 
         return 0;
 }
@@ -2476,7 +2470,7 @@ static int cg_unified_update(void) {
                 return 0;
 
         if (statfs("/sys/fs/cgroup/", &fs) < 0)
-                return log_debug_errno(errno, "statfs(\"/sys/fs/cgroup/\" failed: %m");
+                return log_debug_errno(errno, "statfs(\"/sys/fs/cgroup/\") failed: %m");
 
         if (F_TYPE_EQUAL(fs.f_type, CGROUP2_SUPER_MAGIC)) {
                 log_debug("Found cgroup2 on /sys/fs/cgroup/, full unified hierarchy");
@@ -2599,8 +2593,10 @@ int cg_enable_everywhere(CGroupMask supported, CGroupMask mask, const char *p) {
                         }
 
                         r = write_string_stream(f, s, 0);
-                        if (r < 0)
+                        if (r < 0) {
                                 log_debug_errno(r, "Failed to enable controller %s for %s (%s): %m", n, p, fs);
+                                clearerr(f);
+                        }
                 }
         }
 

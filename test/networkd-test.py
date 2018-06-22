@@ -15,21 +15,8 @@
 # ATTENTION: This uses the *installed* networkd, not the one from the built
 # source tree.
 #
-# (C) 2015 Canonical Ltd.
+# © 2015 Canonical Ltd.
 # Author: Martin Pitt <martin.pitt@ubuntu.com>
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 import errno
 import os
@@ -217,6 +204,29 @@ Priority=0
 ''')
         subprocess.check_call(['systemctl', 'restart', 'systemd-networkd'])
         self.assertEqual(self.read_attr('port2', 'brport/priority'), '0')
+
+    def test_bridge_port_property(self):
+        """Test the "[Bridge]" section keys"""
+        self.assertEqual(self.read_attr('port2', 'brport/priority'), '32')
+        self.write_network_dropin('port2.network', 'property', '''\
+[Bridge]
+UnicastFlood=true
+HairPin=true
+UseBPDU=true
+FastLeave=true
+AllowPortToBeRoot=true
+Cost=555
+Priority=23
+''')
+        subprocess.check_call(['systemctl', 'restart', 'systemd-networkd'])
+
+        self.assertEqual(self.read_attr('port2', 'brport/priority'), '23')
+        self.assertEqual(self.read_attr('port2', 'brport/hairpin_mode'), '1')
+        self.assertEqual(self.read_attr('port2', 'brport/path_cost'), '555')
+        self.assertEqual(self.read_attr('port2', 'brport/multicast_fast_leave'), '1')
+        self.assertEqual(self.read_attr('port2', 'brport/unicast_flood'), '1')
+        self.assertEqual(self.read_attr('port2', 'brport/bpdu_guard'), '1')
+        self.assertEqual(self.read_attr('port2', 'brport/root_block'), '1')
 
 class ClientTestBase(NetworkdTestingUtilities):
     """Provide common methods for testing networkd against servers."""

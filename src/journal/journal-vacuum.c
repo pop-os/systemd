@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -299,7 +281,7 @@ int journal_directory_vacuum(
                         goto finish;
                 }
 
-                list[n_list].filename = p;
+                list[n_list].filename = TAKE_PTR(p);
                 list[n_list].usage = size;
                 list[n_list].seqnum = seqnum;
                 list[n_list].realtime = realtime;
@@ -307,7 +289,6 @@ int journal_directory_vacuum(
                 list[n_list].have_seqnum = have_seqnum;
                 n_list++;
 
-                p = NULL;
                 sum += size;
         }
 

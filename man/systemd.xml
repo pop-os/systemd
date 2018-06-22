@@ -4,23 +4,6 @@
 
 <!--
   SPDX-License-Identifier: LGPL-2.1+
-
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="systemd"
@@ -29,15 +12,6 @@
   <refentryinfo>
     <title>systemd</title>
     <productname>systemd</productname>
-
-    <authorgroup>
-      <author>
-        <contrib>Developer</contrib>
-        <firstname>Lennart</firstname>
-        <surname>Poettering</surname>
-        <email>lennart@poettering.net</email>
-      </author>
-    </authorgroup>
   </refentryinfo>
 
   <refmeta>
@@ -108,6 +82,13 @@
         <listitem><para>Dump understood unit configuration items. This
         outputs a terse but complete list of configuration items
         understood in unit definition files.</para></listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><option>--dump-bus-properties</option></term>
+
+        <listitem><para>Dump exposed bus properties. This outputs
+        a terse but complete list of properties exposed to dbus.
+        </para></listitem>
       </varlistentry>
       <varlistentry>
         <term><option>--unit=</option></term>
@@ -755,15 +736,18 @@
 
       <varlistentry>
         <term><constant>SIGRTMIN+22</constant></term>
+
+        <listitem><para>Sets the service manager's log level to <literal>debug</literal>, in a fashion equivalent to
+        <varname>systemd.log_level=debug</varname> on the kernel command line.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><constant>SIGRTMIN+23</constant></term>
 
-        <listitem><para>Sets the log level to <literal>debug</literal>
-        (or <literal>info</literal> on
-        <constant>SIGRTMIN+23</constant>), as controlled via
-        <varname>systemd.log_level=debug</varname> (or
-        <varname>systemd.log_level=info</varname> on
-        <constant>SIGRTMIN+23</constant>) on the kernel command
-        line.</para></listitem>
+        <listitem><para>Restores the log level to its configured value. The configured value is derived from – in order
+        of priority – the value specified with <varname>systemd.log-level=</varname> on the kernel command line, or the
+        value specified with <option>LogLevel=</option> in the configuration file, or the built-in default of
+        <literal>info</literal>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -775,20 +759,21 @@
 
       <varlistentry>
         <term><constant>SIGRTMIN+26</constant></term>
+
+        <listitem><para>Restores the log target to its configured value. The configured value is derived from – in
+        order of priority – the value specified with <varname>systemd.log-target=</varname> on the kernel command line,
+        or the value specified with <option>LogTarget=</option> in the configuration file, or the built-in
+        default.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><constant>SIGRTMIN+27</constant></term>
         <term><constant>SIGRTMIN+28</constant></term>
 
-        <listitem><para>Sets the log target to
-        <literal>journal-or-kmsg</literal> (or
-        <literal>console</literal> on
-        <constant>SIGRTMIN+27</constant>, <literal>kmsg</literal> on
-        <constant>SIGRTMIN+28</constant>), as controlled via
-        <varname>systemd.log_target=journal-or-kmsg</varname> (or
-        <varname>systemd.log_target=console</varname> on
-        <constant>SIGRTMIN+27</constant> or
-        <varname>systemd.log_target=kmsg</varname> on
-        <constant>SIGRTMIN+28</constant>) on the kernel command
-        line.</para></listitem>
+        <listitem><para>Sets the log target to <literal>console</literal> on <constant>SIGRTMIN+27</constant> (or
+        <literal>kmsg</literal> on <constant>SIGRTMIN+28</constant>), in a fashion equivalent to
+        <varname>systemd.log_target=console</varname> (or <varname>systemd.log_target=kmsg</varname> on
+        <constant>SIGRTMIN+28</constant>) on the kernel command line.</para></listitem>
       </varlistentry>
     </variablelist>
   </refsect1>
@@ -865,6 +850,15 @@
         <listitem><para>The value must be a boolean. Controls whether colorized output should be
         generated. This can be specified to override the decision that <command>systemd</command>
         makes based on <varname>$TERM</varname> and what the console is connected to.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>$SYSTEMD_URLIFY</varname></term>
+
+        <listitem><para>The value must be a boolean. Controls whether clickable links should be generated in the output
+        for terminal emulators supporting this. This can be specified to override the decision that
+        <command>systemd</command> makes based on <varname>$TERM</varname> and other conditions.</para>
         </listitem>
       </varlistentry>
 

@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1+
-#
-# Copyright 2017 Zbigniew Jędrzejewski-Szmek
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
 
 libcore_la_sources = '''
         audit-fd.c
@@ -140,7 +125,7 @@ load_fragment_gperf_gperf = custom_target(
         'load-fragment-gperf.gperf',
         input : 'load-fragment-gperf.gperf.m4',
         output: 'load-fragment-gperf.gperf',
-        command : [m4, '-P'] + m4_defines + ['@INPUT@'],
+        command : [meson_apply_m4, config_h, '@INPUT@'],
         capture : true)
 
 load_fragment_gperf_c = custom_target(
@@ -163,13 +148,14 @@ libcore = static_library(
         load_fragment_gperf_c,
         load_fragment_gperf_nulstr_c,
         include_directories : includes,
-        link_with : [libshared_static],
         dependencies : [threads,
+                        librt,
                         libseccomp,
                         libpam,
                         libaudit,
                         libkmod,
                         libapparmor,
+                        libselinux,
                         libmount])
 
 systemd_sources = files('main.c')

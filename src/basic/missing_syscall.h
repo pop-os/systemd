@@ -1,26 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-  Copyright 2016 Zbigniew Jędrzejewski-Szmek
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 /* Missing glibc definitions to access certain kernel APIs */
 
 #include <sys/types.h>
@@ -269,7 +249,6 @@ static inline int missing_kcmp(pid_t pid1, pid_t pid2, int type, unsigned long i
 #  define kcmp missing_kcmp
 #endif
 
-
 /* ======================================================================= */
 
 #if !HAVE_KEYCTL
@@ -416,8 +395,14 @@ static inline int missing_bpf(int cmd, union bpf_attr *attr, size_t size) {
 
 #if !HAVE_STATX
 #  ifndef __NR_statx
-#    if defined __i386__
+#    if defined __aarch64__ || defined __arm__
+#      define __NR_statx 397
+#    elif defined __alpha__
+#      define __NR_statx 522
+#    elif defined __i386__ || defined __powerpc64__
 #      define __NR_statx 383
+#    elif defined __sparc__
+#      define __NR_statx 360
 #    elif defined __x86_64__
 #      define __NR_statx 332
 #    else

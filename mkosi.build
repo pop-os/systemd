@@ -1,25 +1,16 @@
 #!/bin/sh
 set -ex
 
-# This file is part of systemd.
-#
-# Copyright 2016 Lennart Poettering
-#
-# systemd is free software; you can redistribute it and/or modify it
-# under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation; either version 2.1 of the License, or
-# (at your option) any later version.
-#
-# systemd is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# Lesser General Public License for more details.
-#
-# You should have received a copy of the GNU Lesser General Public License
-# along with systemd; If not, see <http://www.gnu.org/licenses/>.
-
 # This is a build script for OS image generation using mkosi (https://github.com/systemd/mkosi).
 # Simply invoke "mkosi" in the project directory to build an OS image.
+
+# Reset the permissions of the tree. Since Meson keeps the permissions
+# all the way to the installed files, reset them to one of 0644 or 0755
+# so the files keep those permissions, otherwise details of what umask
+# was set at the time the git tree was cloned will leak all the way
+# through. Also set umask explicitly during the build.
+chmod -R u+w,go-w,a+rX .
+umask 022
 
 # If mkosi.builddir/ exists mkosi will set $BUILDDIR to it, let's then use it
 # as out-of-tree build dir. Otherwise, let's make up our own builddir.
@@ -89,7 +80,7 @@ if [ ! -f "$BUILDDIR"/build.ninja ] ; then
 fi
 
 ninja -C "$BUILDDIR" all
-[ "$WITH_TESTS" = 0 ] || ninja -C "$BUILDDIR" test || ( RET="$?" ; cat "$BUILDDIR"/meson-logs/testlog.txt ; exit "$RET" )
+[ "$WITH_TESTS" = 0 ] || ninja -C "$BUILDDIR" test
 ninja -C "$BUILDDIR" install
 
 mkdir -p "$DESTDIR"/etc

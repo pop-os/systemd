@@ -1,21 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 /***
-  This file is part of systemd.
-
-  Copyright (C) 2017 Intel Corporation. All rights reserved.
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+  Copyright © 2017 Intel Corporation. All rights reserved.
 ***/
 
 #include <netinet/icmp6.h>
@@ -51,8 +36,7 @@ _public_ int sd_radv_new(sd_radv **ret) {
 
         LIST_HEAD_INIT(ra->prefixes);
 
-        *ret = ra;
-        ra = NULL;
+        *ret = TAKE_PTR(ra);
 
         return 0;
 }
@@ -91,6 +75,7 @@ _public_ sd_event *sd_radv_get_event(sd_radv *ra) {
 }
 
 static void radv_reset(sd_radv *ra) {
+        assert(ra);
 
         ra->timeout_event_source =
                 sd_event_source_unref(ra->timeout_event_source);
@@ -134,6 +119,9 @@ _public_ sd_radv *sd_radv_unref(sd_radv *ra) {
         radv_reset(ra);
 
         sd_radv_detach_event(ra);
+
+        ra->fd = safe_close(ra->fd);
+
         return mfree(ra);
 }
 
@@ -288,7 +276,7 @@ static int radv_recv(sd_event_source *s, int fd, uint32_t revents, void *userdat
 
         r = radv_send(ra, &src, ra->lifetime);
         if (r < 0)
-                log_radv_warning_errno(r, "Unable to send solicited Router Advertisment to %s: %m", addr);
+                log_radv_warning_errno(r, "Unable to send solicited Router Advertisement to %s: %m", addr);
         else
                 log_radv("Sent solicited Router Advertisement to %s", addr);
 
@@ -365,6 +353,9 @@ _public_ int sd_radv_stop(sd_radv *ra) {
         int r;
 
         assert_return(ra, -EINVAL);
+
+        if (ra->state == SD_RADV_STATE_IDLE)
+                return 0;
 
         log_radv("Stopping IPv6 Router Advertisement daemon");
 
@@ -618,8 +609,8 @@ _public_ int sd_radv_add_prefix(sd_radv *ra, sd_radv_prefix *p, bool dynamic) {
 }
 
 _public_ sd_radv_prefix *sd_radv_remove_prefix(sd_radv *ra,
-                                               struct in6_addr *prefix,
-                                               uint8_t prefixlen) {
+                                               const struct in6_addr *prefix,
+                                               unsigned char prefixlen) {
         sd_radv_prefix *cur, *next;
 
         assert_return(ra, NULL);
@@ -670,9 +661,7 @@ _public_ int sd_radv_set_rdnss(sd_radv *ra, uint32_t lifetime,
 
         memcpy(opt_rdnss + 1, dns, n_dns * sizeof(struct in6_addr));
 
-        free(ra->rdnss);
-        ra->rdnss = opt_rdnss;
-        opt_rdnss = NULL;
+        free_and_replace(ra->rdnss, opt_rdnss);
 
         ra->n_rdnss = n_dns;
 
@@ -688,9 +677,8 @@ _public_ int sd_radv_set_dnssl(sd_radv *ra, uint32_t lifetime,
 
         assert_return(ra, -EINVAL);
 
-        if (!search_list || *search_list == NULL) {
+        if (strv_isempty(search_list)) {
                 ra->dnssl = mfree(ra->dnssl);
-
                 return 0;
         }
 
@@ -724,9 +712,7 @@ _public_ int sd_radv_set_dnssl(sd_radv *ra, uint32_t lifetime,
                 len -= r;
         }
 
-        free(ra->dnssl);
-        ra->dnssl = opt_dnssl;
-        opt_dnssl = NULL;
+        free_and_replace(ra->dnssl, opt_dnssl);
 
         return 0;
 }
@@ -755,8 +741,7 @@ _public_ int sd_radv_prefix_new(sd_radv_prefix **ret) {
 
         LIST_INIT(prefix, p);
 
-        *ret = p;
-        p = NULL;
+        *ret = TAKE_PTR(p);
 
         return 0;
 }
@@ -784,7 +769,7 @@ _public_ sd_radv_prefix *sd_radv_prefix_unref(sd_radv_prefix *p) {
         return mfree(p);
 }
 
-_public_ int sd_radv_prefix_set_prefix(sd_radv_prefix *p, struct in6_addr *in6_addr,
+_public_ int sd_radv_prefix_set_prefix(sd_radv_prefix *p, const struct in6_addr *in6_addr,
                                        unsigned char prefixlen) {
         assert_return(p, -EINVAL);
         assert_return(in6_addr, -EINVAL);

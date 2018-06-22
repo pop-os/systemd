@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-    This file is part of systemd.
-
-    Copyright 2014 Susant Sahani
-
-    systemd is free software; you can redistribute it and/or modify it
-    under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation; either version 2.1 of the License, or
-    (at your option) any later version.
-
-    systemd is distributed in the hope that it will be useful, but
-    WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-    Lesser General Public License for more details.
-
-    You should have received a copy of the GNU Lesser General Public License
-    along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <arpa/inet.h>
 #include <net/if.h>
@@ -414,10 +396,10 @@ static int netdev_tunnel_verify(NetDev *netdev, const char *filename) {
                 return -EINVAL;
         }
 
-        if (netdev->kind == NETDEV_KIND_VTI &&
+        if (IN_SET(netdev->kind, NETDEV_KIND_VTI, NETDEV_KIND_IPIP, NETDEV_KIND_GRE, NETDEV_KIND_GRETAP) &&
             (t->family != AF_INET || in_addr_is_null(t->family, &t->local))) {
                 log_netdev_error(netdev,
-                                 "vti tunnel without a local IPv4 address configured in %s. Ignoring", filename);
+                                 "vti/ipip/gre/gretap tunnel without a local IPv4 address configured in %s. Ignoring", filename);
                 return -EINVAL;
         }
 

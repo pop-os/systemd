@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd
-
-  Copyright 2014 Ronny Chevalier
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -118,6 +100,19 @@ static void test_socket_address_parse_netlink(void) {
         assert_se(socket_address_parse_netlink(&a, "route 10") >= 0);
         assert_se(a.sockaddr.sa.sa_family == AF_NETLINK);
         assert_se(a.protocol == NETLINK_ROUTE);
+
+        /* With spaces and tabs */
+        assert_se(socket_address_parse_netlink(&a, " kobject-uevent ") >= 0);
+        assert_se(socket_address_parse_netlink(&a, " \t kobject-uevent \t 10 \t") >= 0);
+        assert_se(a.sockaddr.sa.sa_family == AF_NETLINK);
+        assert_se(a.protocol == NETLINK_KOBJECT_UEVENT);
+
+        assert_se(socket_address_parse_netlink(&a, "kobject-uevent\t10") >= 0);
+        assert_se(a.sockaddr.sa.sa_family == AF_NETLINK);
+        assert_se(a.protocol == NETLINK_KOBJECT_UEVENT);
+
+        /* oss-fuzz #6884 */
+        assert_se(socket_address_parse_netlink(&a, "\xff") < 0);
 }
 
 static void test_socket_address_equal(void) {
