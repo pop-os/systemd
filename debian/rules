@@ -57,6 +57,7 @@ CONFFLAGS = \
 	-Dvconsole=false \
 	-Dfirstboot=false \
 	-Dxkbcommon=false \
+	-Dportabled=false \
 	-Dwheel-group=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
 	-Dlink-udev-shared=false \
