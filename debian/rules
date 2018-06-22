@@ -35,7 +35,6 @@ CONFFLAGS = \
 	-Dsplit-usr=true \
 	-Dquotaon-path=/sbin/quotaon \
 	-Dquotacheck-path=/sbin/quotacheck \
-	-Dkill-path=/bin/kill \
 	-Dkmod-path=/bin/kmod \
 	-Dkexec-path=/sbin/kexec \
 	-Dsulogin-path=/sbin/sulogin \
