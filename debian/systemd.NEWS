@@ -1,12 +1,14 @@
-systemd (236-1) unstable; urgency=medium
+systemd (239-1) unstable; urgency=medium
 
   DynamicUser=yes has been enabled for systemd-journal-upload.service,
-  systemd-journal-gatewayd.service and systemd-timesyncd.service.
-  This means we no longer need to statically allocate a systemd-journal-upload,
-  systemd-journal-gateway and systemd-timesync user and you can now safely
-  remove those system users along with their associated groups.
+  systemd-journal-gatewayd.service, systemd-timesyncd.service,
+  systemd-networkd.service and systemd-resolved.service.
+  This means it is no longer necessary to statically allocate a
+  systemd-journal-upload, systemd-journal-gateway, systemd-timesync,
+  systemd-network and systemd-resolve user and you can now safely remove
+  those system users along with their associated groups.
 
- -- Michael Biebl <biebl@debian.org>  Sun, 17 Dec 2017 21:17:32 +0100
+ -- Michael Biebl <biebl@debian.org>  Sat, 23 Jun 2018 00:07:22 +0200
 
 systemd (231-1) unstable; urgency=low
 
