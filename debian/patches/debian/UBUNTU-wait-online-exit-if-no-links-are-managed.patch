@@ -8,10 +8,10 @@ Subject: wait-online: exit, if no links are managed.
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/wait-online/manager.c b/src/network/wait-online/manager.c
-index 05f030d..aa963cb 100644
+index ccda93b..c971f91 100644
 --- a/src/network/wait-online/manager.c
 +++ b/src/network/wait-online/manager.c
-@@ -54,6 +54,7 @@ bool manager_all_configured(Manager *m) {
+@@ -36,6 +36,7 @@ bool manager_all_configured(Manager *m) {
          Link *l;
          char **ifname;
          bool one_ready = false;
@@ -19,7 +19,7 @@ index 05f030d..aa963cb 100644
  
          /* wait for all the links given on the command line to appear */
          STRV_FOREACH(ifname, m->interfaces) {
-@@ -84,6 +85,11 @@ bool manager_all_configured(Manager *m) {
+@@ -66,6 +67,11 @@ bool manager_all_configured(Manager *m) {
                          return false;
                  }
  
@@ -31,7 +31,7 @@ index 05f030d..aa963cb 100644
                  if (l->operational_state &&
                      STR_IN_SET(l->operational_state, "degraded", "routable"))
                          /* we wait for at least one link to be ready,
-@@ -91,7 +97,7 @@ bool manager_all_configured(Manager *m) {
+@@ -73,7 +79,7 @@ bool manager_all_configured(Manager *m) {
                          one_ready = true;
          }
  
