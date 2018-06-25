@@ -1,3 +1,52 @@
+systemd (239-1ubuntu1) cosmic; urgency=medium
+
+  Merged from Debian Unstable, remaining changes are:
+
+  * Set UseDomains to true, by default, on Ubuntu.
+  * Enable systemd-resolved by default.
+  * postinst: Create /etc/resolv.conf at postinst, pointing at the stub
+    resolver.
+  * postinst: drop empty/stock /etc/rc.local.
+  * postinst: enable persistent journal.
+  * Drop systemd.prerm safety check.
+  * Ship systemd sysctl settings.
+  * libnss-resolve: do not disable and stop systemd-resolved.
+  * boot-smoke: refactor ADT test.
+  * Fix test-functions failing with Ubuntu units.
+  * units: set ConditionVirtualization=!private-users on journald audit socket.
+  * units: drop resolvconf.conf drop-in, resolved integration moved to
+    resolvconf package.
+  * debian/tests: Switch to gdm3, enforce udev upgrade.
+  * Ubuntu/extra: ship dhclient-enter hook.
+  * Ignore failures to set Nice priority on services in containers.
+  * systemd-fsckd: Fix ADT tests to work on s390x too.
+  * Disable LLMNR and MulticastDNS by default.
+  * Enable qemu tests on most architectures.
+  * debian/tests/systemd-fsckd: update assertions expectations for v237.
+  * test/test-fs-util: detect container, in addition to root.
+  * test/test-functions: launch qemu-system with -vga none.
+  * Blacklist TEST-16-EXTEND-TIMEOUT.
+  * tests/boot-smoke: ignore udevd connection timeouts resolving colord group.
+  * tests/systemd-fsckd: ignore systemd_fsck_with_plymouth_failure.
+  * tests/control: ensure boot-smoke uses latest systemd & udev.
+  * wait-online: do not wait, if no links are managed (neither configured, or
+    failed).
+  * journald.service: set Nice=-1 to dodge watchdog on soft lockups.
+  * Workaround captive portals not responding to EDNS0 queries.
+  * resolved: Listen on both TCP and UDP by default.
+  * Recommend networkd-dispatcher
+  * networkd: if RA was implicit, do not await ndisc_configured.
+  * udev-udeb: ship modprobe.d snippet to force scsi_mod.scan=sync in d-i.
+  * Skip starting systemd-remount-fs.service in containers.
+  * Add "AssumedApparmorLabel=unconfined" to timedate1 dbus service file.
+  * Disable dh_installinit generation of tmpfiles for the systemd package.
+    Replace with a manual safe call to systemd-tmpfiles which will process any
+    updates to the tmpfiles shipped by systemd package, taking into account any
+    overrides shipped by other packages, sysadmin, or specified in the runtime
+    directories. (LP: #1748147)
+
+ -- Dimitri John Ledkov 🌈 <xnox@ubuntu.com>  Mon, 25 Jun 2018 15:55:43 +0100
+
 systemd (239-1) unstable; urgency=medium
 
   [ Michael Biebl ]
