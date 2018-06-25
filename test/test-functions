@@ -4,9 +4,9 @@
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 export PATH
 
-LOOKS_LIKE_DEBIAN=$(source /etc/os-release && [[ "$ID" = "debian" || "$ID_LIKE" = "debian" ]] && echo yes || true)
-LOOKS_LIKE_ARCH=$(source /etc/os-release && [[ "$ID" = "arch" ]] && echo yes || true)
-LOOKS_LIKE_SUSE=$(source /etc/os-release && [[ "$ID_LIKE" = "suse" ]] && echo yes || true)
+LOOKS_LIKE_DEBIAN=$(source /etc/os-release && [[ "$ID" = "debian" || " $ID_LIKE " = *" debian "* ]] && echo yes || true)
+LOOKS_LIKE_ARCH=$(source /etc/os-release && [[ "$ID" = "arch" || " $ID_LIKE " = *" arch "* ]] && echo yes || true)
+LOOKS_LIKE_SUSE=$(source /etc/os-release && [[ " $ID_LIKE " = *" suse "* ]] && echo yes || true)
 KERNEL_VER=${KERNEL_VER-$(uname -r)}
 KERNEL_MODS="/lib/modules/$KERNEL_VER/"
 QEMU_TIMEOUT="${QEMU_TIMEOUT:-infinity}"
@@ -29,9 +29,12 @@ STATEFILE="$STATEDIR/.testdir"
 TESTLOG="$STATEDIR/test.log"
 
 function find_qemu_bin() {
-    # SUSE and Red Hat call the binary qemu-kvm
-    # Debian and Gentoo call it kvm
-    [ "$QEMU_BIN" ] || QEMU_BIN=$(which -a kvm qemu-kvm 2>/dev/null | grep '^/' -m1)
+    # SUSE and Red Hat call the binary qemu-kvm. Debian and Gentoo call it kvm.
+    # Either way, only use this version if we aren't running in KVM, because
+    # nested KVM is flaky still.
+    if [ `systemd-detect-virt -v` != kvm ] ; then
+        [ "$QEMU_BIN" ] || QEMU_BIN=$(which -a kvm qemu-kvm 2>/dev/null | grep '^/' -m1)
+    fi
 
     [ "$ARCH" ] || ARCH=$(uname -m)
     case $ARCH in
@@ -121,6 +124,7 @@ loglevel=2 \
 init=$ROOTLIBDIR/systemd \
 console=ttyS0 \
 selinux=0 \
+printk.devkmsg=on \
 $_cgroup_args \
 $KERNEL_APPEND \
 "
@@ -137,7 +141,8 @@ $KERNEL_APPEND \
         QEMU_OPTIONS="$QEMU_OPTIONS -initrd $INITRD"
     fi
 
-    if [ -c /dev/kvm ]; then
+    # Let's use KVM if it is available, but let's avoid using nested KVM as that is still flaky
+    if [ -c /dev/kvm -a `systemd-detect-virt -v` != kvm ]; then
         QEMU_OPTIONS="$QEMU_OPTIONS -machine accel=kvm -enable-kvm -cpu host"
     fi
 
@@ -364,6 +369,8 @@ create_empty_image() {
 ,390M
 ,
 EOF
+
+    udevadm settle
 
     local _label="-L systemd"
     # mkfs.reiserfs doesn't know -L. so, use --label instead

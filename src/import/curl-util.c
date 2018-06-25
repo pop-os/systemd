@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include "alloc-util.h"
 #include "curl-util.h"
@@ -50,7 +32,7 @@ static int curl_glue_on_io(sd_event_source *s, int fd, uint32_t revents, void *u
 
         translated_fd = PTR_TO_FD(hashmap_get(g->translate_fds, FD_TO_PTR(fd)));
 
-        if ((revents & (EPOLLIN|EPOLLOUT)) == (EPOLLIN|EPOLLOUT))
+        if (FLAGS_SET(revents, EPOLLIN | EPOLLOUT))
                 action = CURL_POLL_INOUT;
         else if (revents & EPOLLIN)
                 action = CURL_POLL_IN;
@@ -272,8 +254,7 @@ int curl_glue_new(CurlGlue **glue, sd_event *event) {
         if (curl_multi_setopt(g->curl, CURLMOPT_TIMERFUNCTION, curl_glue_timer_callback) != CURLM_OK)
                 return -EINVAL;
 
-        *glue = g;
-        g = NULL;
+        *glue = TAKE_PTR(g);
 
         return 0;
 }
@@ -379,19 +360,14 @@ struct curl_slist *curl_slist_new(const char *first, ...) {
 }
 
 int curl_header_strdup(const void *contents, size_t sz, const char *field, char **value) {
-        const char *p = contents;
-        size_t l;
+        const char *p;
         char *s;
 
-        l = strlen(field);
-        if (sz < l)
+        p = memory_startswith(contents, sz, field);
+        if (!p)
                 return 0;
 
-        if (memcmp(p, field, l) != 0)
-                return 0;
-
-        p += l;
-        sz -= l;
+        sz -= p - (const char*) contents;
 
         if (memchr(p, 0, sz))
                 return 0;

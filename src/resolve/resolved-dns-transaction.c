@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include "sd-messages.h"
 
@@ -31,8 +13,15 @@
 #include "resolved-llmnr.h"
 #include "string-table.h"
 
+#if ENABLE_DNS_OVER_TLS
+#include <gnutls/socket.h>
+#endif
+
 #define TRANSACTIONS_MAX 4096
 #define TRANSACTION_TCP_TIMEOUT_USEC (10U*USEC_PER_SEC)
+
+/* After how much time to repeat classic DNS requests */
+#define DNS_TIMEOUT_USEC (SD_RESOLVED_QUERY_TIMEOUT_USEC / DNS_TRANSACTION_ATTEMPTS_MAX)
 
 static void dns_transaction_reset_answer(DnsTransaction *t) {
         assert(t);
@@ -64,9 +53,11 @@ static void dns_transaction_close_connection(DnsTransaction *t) {
 
         if (t->stream) {
                 /* Let's detach the stream from our transaction, in case something else keeps a reference to it. */
-                t->stream->complete = NULL;
-                t->stream->on_packet = NULL;
-                t->stream->transaction = NULL;
+                LIST_REMOVE(transactions_by_stream, t->stream->transactions, t);
+
+                /* Remove packet in case it's still in the queue */
+                dns_packet_unref(ordered_set_remove(t->stream->write_queue, t->sent));
+
                 t->stream = dns_stream_unref(t->stream);
         }
 
@@ -326,8 +317,7 @@ void dns_transaction_complete(DnsTransaction *t, DnsTransactionState state) {
                            "DNS_QUESTION=%s", key_str,
                            "DNSSEC_RESULT=%s", dnssec_result_to_string(t->answer_dnssec_result),
                            "DNS_SERVER=%s", dns_server_string(t->server),
-                           "DNS_SERVER_FEATURE_LEVEL=%s", dns_server_feature_level_to_string(t->server->possible_feature_level),
-                           NULL);
+                           "DNS_SERVER_FEATURE_LEVEL=%s", dns_server_feature_level_to_string(t->server->possible_feature_level));
         }
 
         /* Note that this call might invalidate the query. Callers
@@ -462,42 +452,33 @@ static int dns_transaction_maybe_restart(DnsTransaction *t) {
         return 1;
 }
 
-static int on_stream_complete(DnsStream *s, int error) {
-        _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
-        DnsTransaction *t;
-
-        assert(s);
-        assert(s->transaction);
-
-        /* Copy the data we care about out of the stream before we
-         * destroy it. */
-        t = s->transaction;
-        p = dns_packet_ref(s->read_packet);
+static void on_transaction_stream_error(DnsTransaction *t, int error) {
+        assert(t);
 
         dns_transaction_close_connection(t);
 
         if (ERRNO_IS_DISCONNECT(error)) {
-                usec_t usec;
-
                 if (t->scope->protocol == DNS_PROTOCOL_LLMNR) {
                         /* If the LLMNR/TCP connection failed, the host doesn't support LLMNR, and we cannot answer the
                          * question on this scope. */
                         dns_transaction_complete(t, DNS_TRANSACTION_NOT_FOUND);
-                        return 0;
+                        return;
                 }
 
-                log_debug_errno(error, "Connection failure for DNS TCP stream: %m");
-                assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
-                dns_server_packet_lost(t->server, IPPROTO_TCP, t->current_feature_level, usec - t->start_usec);
-
                 dns_transaction_retry(t, true);
-                return 0;
+                return;
         }
         if (error != 0) {
                 t->answer_errno = error;
                 dns_transaction_complete(t, DNS_TRANSACTION_ERRNO);
-                return 0;
         }
+}
+
+static int dns_transaction_on_stream_packet(DnsTransaction *t, DnsPacket *p) {
+        assert(t);
+        assert(p);
+
+        dns_transaction_close_connection(t);
 
         if (dns_packet_validate_reply(p) <= 0) {
                 log_debug("Invalid TCP reply packet.");
@@ -522,9 +503,83 @@ static int on_stream_complete(DnsStream *s, int error) {
         return 0;
 }
 
-static int dns_transaction_open_tcp(DnsTransaction *t) {
+static int on_stream_connection(DnsStream *s) {
+#if ENABLE_DNS_OVER_TLS
+        /* Store TLS Ticket for faster succesive TLS handshakes */
+        if (s->tls_session && s->server) {
+                if (s->server->tls_session_data.data)
+                        gnutls_free(s->server->tls_session_data.data);
+
+                gnutls_session_get_data2(s->tls_session, &s->server->tls_session_data);
+        }
+#endif
+
+        return 0;
+}
+
+static int on_stream_complete(DnsStream *s, int error) {
+        DnsTransaction *t, *n;
+        int r = 0;
+
+        /* Do not let new transactions use this stream */
+        if (s->server && s->server->stream == s)
+                s->server->stream = dns_stream_unref(s->server->stream);
+
+        if (ERRNO_IS_DISCONNECT(error) && s->protocol != DNS_PROTOCOL_LLMNR) {
+                usec_t usec;
+
+                log_debug_errno(error, "Connection failure for DNS TCP stream: %m");
+
+                if (s->transactions) {
+                        t = s->transactions;
+                        assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
+                        dns_server_packet_lost(t->server, IPPROTO_TCP, t->current_feature_level);
+                }
+        }
+
+        LIST_FOREACH_SAFE(transactions_by_stream, t, n, s->transactions)
+                if (error != 0)
+                        on_transaction_stream_error(t, error);
+                else if (DNS_PACKET_ID(s->read_packet) == t->id)
+                        /* As each transaction have a unique id the return code is only set once */
+                        r = dns_transaction_on_stream_packet(t, s->read_packet);
+
+        return r;
+}
+
+static int dns_stream_on_packet(DnsStream *s) {
+        _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
+        int r = 0;
+        DnsTransaction *t;
+
+        /* Take ownership of packet to be able to receive new packets */
+        p = TAKE_PTR(s->read_packet);
+        s->n_read = 0;
+
+        t = hashmap_get(s->manager->dns_transactions, UINT_TO_PTR(DNS_PACKET_ID(p)));
+
+        /* Ignore incorrect transaction id as transaction can have been canceled */
+        if (t)
+                r = dns_transaction_on_stream_packet(t, p);
+        else {
+                if (dns_packet_validate_reply(p) <= 0) {
+                        log_debug("Invalid TCP reply packet.");
+                        on_stream_complete(s, 0);
+                }
+                return 0;
+        }
+
+        return r;
+}
+
+static int dns_transaction_emit_tcp(DnsTransaction *t) {
         _cleanup_close_ int fd = -1;
+        _cleanup_(dns_stream_unrefp) DnsStream *s = NULL;
+        union sockaddr_union sa;
         int r;
+#if ENABLE_DNS_OVER_TLS
+        gnutls_session_t gs;
+#endif
 
         assert(t);
 
@@ -544,13 +599,17 @@ static int dns_transaction_open_tcp(DnsTransaction *t) {
                 if (r < 0)
                         return r;
 
-                fd = dns_scope_socket_tcp(t->scope, AF_UNSPEC, NULL, t->server, 53);
+                if (t->server->stream && (DNS_SERVER_FEATURE_LEVEL_IS_TLS(t->current_feature_level) == t->server->stream->encrypted))
+                        s = dns_stream_ref(t->server->stream);
+                else
+                        fd = dns_scope_socket_tcp(t->scope, AF_UNSPEC, NULL, t->server, DNS_SERVER_FEATURE_LEVEL_IS_TLS(t->current_feature_level) ? 853 : 53, &sa);
+
                 break;
 
         case DNS_PROTOCOL_LLMNR:
                 /* When we already received a reply to this (but it was truncated), send to its sender address */
                 if (t->received)
-                        fd = dns_scope_socket_tcp(t->scope, t->received->family, &t->received->sender, NULL, t->received->sender_port);
+                        fd = dns_scope_socket_tcp(t->scope, t->received->family, &t->received->sender, NULL, t->received->sender_port, &sa);
                 else {
                         union in_addr_union address;
                         int family = AF_UNSPEC;
@@ -567,7 +626,7 @@ static int dns_transaction_open_tcp(DnsTransaction *t) {
                         if (family != t->scope->family)
                                 return -ESRCH;
 
-                        fd = dns_scope_socket_tcp(t->scope, family, &address, NULL, LLMNR_PORT);
+                        fd = dns_scope_socket_tcp(t->scope, family, &address, NULL, LLMNR_PORT, &sa);
                 }
 
                 break;
@@ -576,27 +635,66 @@ static int dns_transaction_open_tcp(DnsTransaction *t) {
                 return -EAFNOSUPPORT;
         }
 
-        if (fd < 0)
-                return fd;
+        if (!s) {
+                if (fd < 0)
+                        return fd;
 
-        r = dns_stream_new(t->scope->manager, &t->stream, t->scope->protocol, fd);
-        if (r < 0)
-                return r;
-        fd = -1;
+                r = dns_stream_new(t->scope->manager, &s, t->scope->protocol, fd, &sa);
+                if (r < 0)
+                        return r;
+
+                fd = -1;
+
+                if (t->server) {
+                        dns_stream_unref(t->server->stream);
+                        t->server->stream = dns_stream_ref(s);
+                        s->server = dns_server_ref(t->server);
+                }
+
+#if ENABLE_DNS_OVER_TLS
+                if (DNS_SERVER_FEATURE_LEVEL_IS_TLS(t->current_feature_level)) {
+                        r = gnutls_init(&gs, GNUTLS_CLIENT | GNUTLS_ENABLE_FALSE_START | GNUTLS_NONBLOCK);
+                        if (r < 0)
+                                return r;
+
+                        /* As DNS-over-TLS is a recent protocol, older TLS versions can be disabled */
+                        r = gnutls_priority_set_direct(gs, "NORMAL:-VERS-ALL:+VERS-TLS1.2", NULL);
+                        if (r < 0)
+                                return r;
+
+                        r = gnutls_credentials_set(gs, GNUTLS_CRD_CERTIFICATE, t->server->tls_cert_cred);
+                        if (r < 0)
+                                return r;
+
+                        if (t->server && t->server->tls_session_data.size > 0)
+                                gnutls_session_set_data(gs, t->server->tls_session_data.data, t->server->tls_session_data.size);
+
+                        gnutls_handshake_set_timeout(gs, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT);
+
+                        r = dns_stream_connect_tls(s, gs);
+                        if (r < 0)
+                                return r;
+                }
+#endif
+
+                s->on_connection = on_stream_connection;
+                s->complete = on_stream_complete;
+                s->on_packet = dns_stream_on_packet;
+
+                /* The interface index is difficult to determine if we are
+                 * connecting to the local host, hence fill this in right away
+                 * instead of determining it from the socket */
+                s->ifindex = dns_scope_ifindex(t->scope);
+        }
+
+        t->stream = TAKE_PTR(s);
+        LIST_PREPEND(transactions_by_stream, t->stream->transactions, t);
 
         r = dns_stream_write_packet(t->stream, t->sent);
         if (r < 0) {
-                t->stream = dns_stream_unref(t->stream);
+                dns_transaction_close_connection(t);
                 return r;
         }
-
-        t->stream->complete = on_stream_complete;
-        t->stream->transaction = t;
-
-        /* The interface index is difficult to determine if we are
-         * connecting to the local host, hence fill this in right away
-         * instead of determining it from the socket */
-        t->stream->ifindex = dns_scope_ifindex(t->scope);
 
         dns_transaction_reset_answer(t);
 
@@ -690,7 +788,6 @@ static int dns_transaction_dnssec_ready(DnsTransaction *t) {
                         t->answer_dnssec_result = dt->answer_dnssec_result; /* Copy error code over */
                         dns_transaction_complete(t, DNS_TRANSACTION_DNSSEC_FAILED);
                         return 0;
-
 
                 default:
                         log_debug("Auxiliary DNSSEC RR query failed with %s", dns_transaction_state_to_string(dt->state));
@@ -845,7 +942,8 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
          * should hence not attempt to access the query or transaction
          * after calling this function. */
 
-        log_debug("Processing incoming packet on transaction %" PRIu16". (rcode=%s)", t->id, dns_rcode_to_string(DNS_PACKET_RCODE(p)));
+        log_debug("Processing incoming packet on transaction %" PRIu16" (rcode=%s).",
+                  t->id, dns_rcode_to_string(DNS_PACKET_RCODE(p)));
 
         switch (t->scope->protocol) {
 
@@ -944,7 +1042,17 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                         }
 
                         /* Reduce this feature level by one and try again. */
-                        t->clamp_feature_level = t->current_feature_level - 1;
+                        switch (t->current_feature_level) {
+                        case DNS_SERVER_FEATURE_LEVEL_TLS_DO:
+                                t->clamp_feature_level = DNS_SERVER_FEATURE_LEVEL_TLS_PLAIN;
+                                break;
+                        case DNS_SERVER_FEATURE_LEVEL_TLS_PLAIN + 1:
+                                /* Skip plain TLS when TLS is not supported */
+                                t->clamp_feature_level = DNS_SERVER_FEATURE_LEVEL_TLS_PLAIN - 1;
+                                break;
+                        default:
+                                t->clamp_feature_level = t->current_feature_level - 1;
+                        }
 
                         log_debug("Server returned error %s, retrying transaction with reduced feature level %s.",
                                   dns_rcode_to_string(DNS_PACKET_RCODE(p)),
@@ -986,7 +1094,7 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                 log_debug("Reply truncated, retrying via TCP.");
 
                 /* Response was truncated, let's try again with good old TCP */
-                r = dns_transaction_open_tcp(t);
+                r = dns_transaction_emit_tcp(t);
                 if (r == -ESRCH) {
                         /* No servers found? Damn! */
                         dns_transaction_complete(t, DNS_TRANSACTION_NO_SERVERS);
@@ -1030,7 +1138,7 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                         dns_server_packet_bad_opt(t->server, t->current_feature_level);
 
                 /* Report that we successfully received a packet */
-                dns_server_packet_received(t->server, p->ipproto, t->current_feature_level, ts - t->start_usec, p->size);
+                dns_server_packet_received(t->server, p->ipproto, t->current_feature_level, p->size);
         }
 
         /* See if we know things we didn't know before that indicate we better restart the lookup immediately. */
@@ -1119,7 +1227,7 @@ static int on_dns_packet(sd_event_source *s, int fd, uint32_t revents, void *use
 
                 log_debug_errno(r, "Connection failure for DNS UDP packet: %m");
                 assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &usec) >= 0);
-                dns_server_packet_lost(t->server, IPPROTO_UDP, t->current_feature_level, usec - t->start_usec);
+                dns_server_packet_lost(t->server, IPPROTO_UDP, t->current_feature_level);
 
                 dns_transaction_retry(t, true);
                 return 0;
@@ -1160,7 +1268,7 @@ static int dns_transaction_emit_udp(DnsTransaction *t) {
                 if (r < 0)
                         return r;
 
-                if (t->current_feature_level < DNS_SERVER_FEATURE_LEVEL_UDP)
+                if (t->current_feature_level < DNS_SERVER_FEATURE_LEVEL_UDP || DNS_SERVER_FEATURE_LEVEL_IS_TLS(t->current_feature_level))
                         return -EAGAIN; /* Sorry, can't do UDP, try TCP! */
 
                 if (!dns_server_dnssec_supported(t->server) && dns_type_is_dnssec(t->key->type))
@@ -1212,7 +1320,7 @@ static int on_transaction_timeout(sd_event_source *s, usec_t usec, void *userdat
 
                 case DNS_PROTOCOL_DNS:
                         assert(t->server);
-                        dns_server_packet_lost(t->server, t->stream ? IPPROTO_TCP : IPPROTO_UDP, t->current_feature_level, usec - t->start_usec);
+                        dns_server_packet_lost(t->server, t->stream ? IPPROTO_TCP : IPPROTO_UDP, t->current_feature_level);
                         break;
 
                 case DNS_PROTOCOL_LLMNR:
@@ -1238,7 +1346,6 @@ static usec_t transaction_get_resend_timeout(DnsTransaction *t) {
         assert(t);
         assert(t->scope);
 
-
         switch (t->scope->protocol) {
 
         case DNS_PROTOCOL_DNS:
@@ -1249,8 +1356,7 @@ static usec_t transaction_get_resend_timeout(DnsTransaction *t) {
                 if (t->stream)
                         return TRANSACTION_TCP_TIMEOUT_USEC;
 
-                assert(t->server);
-                return t->server->resend_timeout;
+                return DNS_TIMEOUT_USEC;
 
         case DNS_PROTOCOL_MDNS:
                 assert(t->n_attempts > 0);
@@ -1530,8 +1636,7 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
         }
         DNS_PACKET_HEADER(p)->nscount = htobe16(nscount);
 
-        t->sent = p;
-        p = NULL;
+        t->sent = TAKE_PTR(p);
 
         return 0;
 }
@@ -1559,8 +1664,7 @@ static int dns_transaction_make_packet(DnsTransaction *t) {
         DNS_PACKET_HEADER(p)->qdcount = htobe16(1);
         DNS_PACKET_HEADER(p)->id = t->id;
 
-        t->sent = p;
-        p = NULL;
+        t->sent = TAKE_PTR(p);
 
         return 0;
 }
@@ -1645,7 +1749,7 @@ int dns_transaction_go(DnsTransaction *t) {
 
                 /* RFC 4795, Section 2.4. says reverse lookups shall
                  * always be made via TCP on LLMNR */
-                r = dns_transaction_open_tcp(t);
+                r = dns_transaction_emit_tcp(t);
         } else {
                 /* Try via UDP, and if that fails due to large size or lack of
                  * support try via TCP */
@@ -1653,9 +1757,9 @@ int dns_transaction_go(DnsTransaction *t) {
                 if (r == -EMSGSIZE)
                         log_debug("Sending query via TCP since it is too large.");
                 else if (r == -EAGAIN)
-                        log_debug("Sending query via TCP since server doesn't support UDP.");
+                        log_debug("Sending query via TCP since UDP isn't supported.");
                 if (IN_SET(r, -EMSGSIZE, -EAGAIN))
-                        r = dns_transaction_open_tcp(t);
+                        r = dns_transaction_emit_tcp(t);
         }
 
         if (r == -ESRCH) {
@@ -3079,8 +3183,7 @@ int dns_transaction_validate_dnssec(DnsTransaction *t) {
         }
 
         dns_answer_unref(t->answer);
-        t->answer = validated;
-        validated = NULL;
+        t->answer = TAKE_PTR(validated);
 
         /* At this point the answer only contains validated
          * RRsets. Now, let's see if it actually answers the question

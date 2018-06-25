@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2013 Tom Gundersen <teg@jklm.no>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
- ***/
 
 #include <sys/socket.h>
 #include <linux/if.h>
@@ -144,7 +126,7 @@ int manager_connect_bus(Manager *m) {
         if (m->bus)
                 return 0;
 
-        r = bus_open_system_watch_bind(&m->bus);
+        r = bus_open_system_watch_bind_with_description(&m->bus, "bus-api-network");
         if (r < 0)
                 return log_error_errno(r, "Failed to connect to bus: %m");
 
@@ -168,7 +150,7 @@ int manager_connect_bus(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to add network enumerator: %m");
 
-        r = sd_bus_request_name_async(m->bus, NULL, "org.freedesktop.network1", 0, NULL, NULL);
+        r = bus_request_name_async_may_reload_dbus(m->bus, NULL, "org.freedesktop.network1", 0, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request name: %m");
 
@@ -233,7 +215,7 @@ static int manager_udev_process_link(Manager *m, struct udev_device *device) {
 static int manager_dispatch_link_udev(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
         Manager *m = userdata;
         struct udev_monitor *monitor = m->udev_monitor;
-        _cleanup_udev_device_unref_ struct udev_device *device = NULL;
+        _cleanup_(udev_device_unrefp) struct udev_device *device = NULL;
 
         device = udev_monitor_receive_device(monitor);
         if (!device)
@@ -781,7 +763,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
                 } else if (r >= 0) {
                         r = sd_rtnl_message_routing_policy_rule_get_rtm_src_prefixlen(message, &from_prefixlen);
                         if (r < 0) {
-                                log_warning_errno(r, "rtnl: failed to retrive rule from prefix length, ignoring: %m");
+                                log_warning_errno(r, "rtnl: failed to retrieve rule from prefix length, ignoring: %m");
                                 return 0;
                         }
                 }
@@ -793,7 +775,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
                 } else if (r >= 0) {
                         r = sd_rtnl_message_routing_policy_rule_get_rtm_dst_prefixlen(message, &to_prefixlen);
                         if (r < 0) {
-                                log_warning_errno(r, "rtnl: failed to retrive rule to prefix length, ignoring: %m");
+                                log_warning_errno(r, "rtnl: failed to retrieve rule to prefix length, ignoring: %m");
                                 return 0;
                         }
                 }
@@ -808,7 +790,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
                 } else if (r >= 0) {
                         r = sd_rtnl_message_routing_policy_rule_get_rtm_src_prefixlen(message, &from_prefixlen);
                         if (r < 0) {
-                                log_warning_errno(r, "rtnl: failed to retrive rule from prefix length, ignoring: %m");
+                                log_warning_errno(r, "rtnl: failed to retrieve rule from prefix length, ignoring: %m");
                                 return 0;
                         }
                 }
@@ -820,7 +802,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
                 } else if (r >= 0) {
                         r = sd_rtnl_message_routing_policy_rule_get_rtm_dst_prefixlen(message, &to_prefixlen);
                         if (r < 0) {
-                                log_warning_errno(r, "rtnl: failed to retrive rule to prefix length, ignoring: %m");
+                                log_warning_errno(r, "rtnl: failed to retrieve rule to prefix length, ignoring: %m");
                                 return 0;
                         }
                 }
@@ -1389,7 +1371,7 @@ static const struct hash_ops dhcp6_prefixes_hash_ops = {
 };
 
 int manager_new(Manager **ret, sd_event *event) {
-        _cleanup_manager_free_ Manager *m = NULL;
+        _cleanup_(manager_freep) Manager *m = NULL;
         int r;
 
         m = new0(Manager, 1);
@@ -1444,8 +1426,7 @@ int manager_new(Manager **ret, sd_event *event) {
 
         (void) routing_policy_load_rules(m->state_file, &m->rules_saved);
 
-        *ret = m;
-        m = NULL;
+        *ret = TAKE_PTR(m);
 
         return 0;
 }
@@ -1498,7 +1479,6 @@ void manager_free(Manager *m) {
         sd_bus_unref(m->bus);
         sd_bus_slot_unref(m->prepare_for_sleep_slot);
         sd_bus_slot_unref(m->connected_slot);
-        sd_event_source_unref(m->bus_retry_event_source);
 
         free(m->dynamic_timezone);
         free(m->dynamic_hostname);
@@ -1825,7 +1805,7 @@ int manager_set_timezone(Manager *m, const char *tz) {
                 return log_oom();
 
         if (!m->bus || sd_bus_is_ready(m->bus) <= 0) {
-                log_info("Not connected to system bus, not setting hostname.");
+                log_info("Not connected to system bus, not setting timezone.");
                 return 0;
         }
 

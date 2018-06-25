@@ -1,25 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 #include <stdbool.h>
 
 typedef struct LookupPaths LookupPaths;
@@ -30,6 +11,7 @@ typedef struct LookupPaths LookupPaths;
 typedef enum LookupPathsFlags {
         LOOKUP_PATHS_EXCLUDE_GENERATED   = 1 << 0,
         LOOKUP_PATHS_TEMPORARY_GENERATED = 1 << 1,
+        LOOKUP_PATHS_SPLIT_USR           = 1 << 2,
 } LookupPathsFlags;
 
 struct LookupPaths {
@@ -82,6 +64,5 @@ void lookup_paths_trim_generator(LookupPaths *p);
 void lookup_paths_flush_generator(LookupPaths *p);
 
 void lookup_paths_free(LookupPaths *p);
-#define _cleanup_lookup_paths_free_ _cleanup_(lookup_paths_free)
 
 char **generator_binary_paths(UnitFileScope scope);

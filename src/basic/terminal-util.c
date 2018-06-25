@@ -1,45 +1,30 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/inotify.h>
-#include <sys/socket.h>
-#include <sys/sysmacros.h>
-#include <sys/time.h>
 #include <linux/kd.h>
 #include <linux/tiocl.h>
 #include <linux/vt.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/inotify.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <sys/sysmacros.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <termios.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "copy.h"
+#include "def.h"
 #include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -47,6 +32,7 @@
 #include "io-util.h"
 #include "log.h"
 #include "macro.h"
+#include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
@@ -496,10 +482,7 @@ int acquire_terminal(
                 fd = safe_close(fd);
         }
 
-        r = fd;
-        fd = -1;
-
-        return r;
+        return TAKE_FD(fd);
 }
 
 int release_terminal(void) {
@@ -707,10 +690,9 @@ int vtnr_from_tty(const char *tty) {
                 tty = active;
         }
 
-        if (tty == active) {
-                *ret = active;
-                active = NULL;
-        } else {
+        if (tty == active)
+                *ret = TAKE_PTR(active);
+        else {
                 char *tmp;
 
                 tmp = strdup(tty);
@@ -778,8 +760,7 @@ int get_kernel_consoles(char ***ret) {
                 goto fallback;
         }
 
-        *ret = l;
-        l = NULL;
+        *ret = TAKE_PTR(l);
 
         return 0;
 
@@ -788,8 +769,7 @@ fallback:
         if (r < 0)
                 return r;
 
-        *ret = l;
-        l = NULL;
+        *ret = TAKE_PTR(l);
 
         return 0;
 }
@@ -899,8 +879,17 @@ void reset_terminal_feature_caches(void) {
 }
 
 bool on_tty(void) {
+
+        /* We check both stdout and stderr, so that situations where pipes on the shell are used are reliably
+         * recognized, regardless if only the output or the errors are piped to some place. Since on_tty() is generally
+         * used to default to a safer, non-interactive, non-color mode of operation it's probably good to be defensive
+         * here, and check for both. Note that we don't check for STDIN_FILENO, because it should fine to use fancy
+         * terminal functionality when outputting stuff, even if the input is piped to us. */
+
         if (cached_on_tty < 0)
-                cached_on_tty = isatty(STDOUT_FILENO) > 0;
+                cached_on_tty =
+                        isatty(STDOUT_FILENO) > 0 &&
+                        isatty(STDERR_FILENO) > 0;
 
         return cached_on_tty;
 }
@@ -1287,4 +1276,176 @@ int vt_reset_keyboard(int fd) {
                 return -errno;
 
         return 0;
+}
+
+static bool urlify_enabled(void) {
+        static int cached_urlify_enabled = -1;
+
+        /* Unfortunately 'less' doesn't support links like this yet 😭, hence let's disable this as long as there's a
+         * pager in effect. Let's drop this check as soon as less got fixed a and enough time passed so that it's safe
+         * to assume that a link-enabled 'less' version has hit most installations. */
+
+        if (cached_urlify_enabled < 0) {
+                int val;
+
+                val = getenv_bool("SYSTEMD_URLIFY");
+                if (val >= 0)
+                        cached_urlify_enabled = val;
+                else
+                        cached_urlify_enabled = colors_enabled() && !pager_have();
+        }
+
+        return cached_urlify_enabled;
+}
+
+int terminal_urlify(const char *url, const char *text, char **ret) {
+        char *n;
+
+        assert(url);
+
+        /* Takes an URL and a pretty string and formats it as clickable link for the terminal. See
+         * https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda for details. */
+
+        if (isempty(text))
+                text = url;
+
+        if (urlify_enabled())
+                n = strjoin("\x1B]8;;", url, "\a", text, "\x1B]8;;\a");
+        else
+                n = strdup(text);
+        if (!n)
+                return -ENOMEM;
+
+        *ret = n;
+        return 0;
+}
+
+int terminal_urlify_path(const char *path, const char *text, char **ret) {
+        _cleanup_free_ char *absolute = NULL;
+        struct utsname u;
+        const char *url;
+        int r;
+
+        assert(path);
+
+        /* Much like terminal_urlify() above, but takes a file system path as input
+         * and turns it into a proper file:// URL first. */
+
+        if (isempty(path))
+                return -EINVAL;
+
+        if (isempty(text))
+                text = path;
+
+        if (!urlify_enabled()) {
+                char *n;
+
+                n = strdup(text);
+                if (!n)
+                        return -ENOMEM;
+
+                *ret = n;
+                return 0;
+        }
+
+        if (uname(&u) < 0)
+                return -errno;
+
+        if (!path_is_absolute(path)) {
+                r = path_make_absolute_cwd(path, &absolute);
+                if (r < 0)
+                        return r;
+
+                path = absolute;
+        }
+
+        /* As suggested by https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda, let's include the local
+         * hostname here. Note that we don't use gethostname_malloc() or gethostname_strict() since we are interested
+         * in the raw string the kernel has set, whatever it may be, under the assumption that terminals are not overly
+         * careful with validating the strings either. */
+
+        url = strjoina("file://", u.nodename, path);
+
+        return terminal_urlify(url, text, ret);
+}
+
+static int cat_file(const char *filename, bool newline) {
+        _cleanup_fclose_ FILE *f = NULL;
+        _cleanup_free_ char *urlified = NULL;
+        int r;
+
+        f = fopen(filename, "re");
+        if (!f)
+                return -errno;
+
+        r = terminal_urlify_path(filename, NULL, &urlified);
+        if (r < 0)
+                return r;
+
+        printf("%s%s# %s%s\n",
+               newline ? "\n" : "",
+               ansi_highlight_blue(),
+               urlified,
+               ansi_normal());
+        fflush(stdout);
+
+        for (;;) {
+                _cleanup_free_ char *line = NULL;
+
+                r = read_line(f, LONG_LINE_MAX, &line);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read \"%s\": %m", filename);
+                if (r == 0)
+                        break;
+
+                puts(line);
+        }
+
+        return 0;
+}
+
+int cat_files(const char *file, char **dropins, CatFlags flags) {
+        char **path;
+        int r;
+
+        if (file) {
+                r = cat_file(file, false);
+                if (r == -ENOENT && (flags & CAT_FLAGS_MAIN_FILE_OPTIONAL))
+                        printf("%s# config file %s not found%s\n",
+                               ansi_highlight_magenta(),
+                               file,
+                               ansi_normal());
+                else if (r < 0)
+                        return log_warning_errno(r, "Failed to cat %s: %m", file);
+        }
+
+        STRV_FOREACH(path, dropins) {
+                r = cat_file(*path, file || path != dropins);
+                if (r < 0)
+                        return log_warning_errno(r, "Failed to cat %s: %m", *path);
+        }
+
+        return 0;
+}
+
+void print_separator(void) {
+
+        /* Outputs a separator line that resolves to whitespace when copied from the terminal. We do that by outputting
+         * one line filled with spaces with ANSI underline set, followed by a second (empty) line. */
+
+        if (underline_enabled()) {
+                size_t i, c;
+
+                c = columns();
+
+                flockfile(stdout);
+                fputs_unlocked(ANSI_UNDERLINE, stdout);
+
+                for (i = 0; i < c; i++)
+                        fputc_unlocked(' ', stdout);
+
+                fputs_unlocked(ANSI_NORMAL "\n\n", stdout);
+                funlockfile(stdout);
+        } else
+                fputs("\n\n", stdout);
 }

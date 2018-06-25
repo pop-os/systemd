@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <string.h>
@@ -45,6 +27,7 @@
 #include "machine-dbus.h"
 #include "machine.h"
 #include "mkdir.h"
+#include "os-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "signal-util.h"
@@ -52,31 +35,8 @@
 #include "terminal-util.h"
 #include "user-util.h"
 
-static int property_get_state(
-                sd_bus *bus,
-                const char *path,
-                const char *interface,
-                const char *property,
-                sd_bus_message *reply,
-                void *userdata,
-                sd_bus_error *error) {
-
-        Machine *m = userdata;
-        const char *state;
-        int r;
-
-        assert(bus);
-        assert(reply);
-        assert(m);
-
-        state = machine_state_to_string(machine_get_state(m));
-
-        r = sd_bus_message_append_basic(reply, 's', state);
-        if (r < 0)
-                return r;
-
-        return 1;
-}
+static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_class, machine_class, MachineClass);
+static BUS_DEFINE_PROPERTY_GET2(property_get_state, "s", Machine, machine_get_state, machine_state_to_string);
 
 static int property_get_netif(
                 sd_bus *bus,
@@ -97,8 +57,6 @@ static int property_get_netif(
 
         return sd_bus_message_append_array(reply, 'i', m->netif, m->n_netif * sizeof(int));
 }
-
-static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_class, machine_class, MachineClass);
 
 int bus_machine_method_terminate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Machine *m = userdata;
@@ -368,7 +326,7 @@ int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, s
         switch (m->class) {
 
         case MACHINE_HOST:
-                r = load_env_file_pairs(NULL, "/etc/os-release", NULL, &l);
+                r = load_os_release_pairs(NULL, &l);
                 if (r < 0)
                         return r;
 
@@ -399,13 +357,10 @@ int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, s
                         if (r < 0)
                                 _exit(EXIT_FAILURE);
 
-                        fd = open("/etc/os-release", O_RDONLY|O_CLOEXEC|O_NOCTTY);
-                        if (fd < 0 && errno == ENOENT) {
-                                fd = open("/usr/lib/os-release", O_RDONLY|O_CLOEXEC|O_NOCTTY);
-                                if (fd < 0 && errno == ENOENT)
-                                        _exit(EXIT_NOT_FOUND);
-                        }
-                        if (fd < 0)
+                        r = open_os_release(NULL, NULL, &fd);
+                        if (r == -ENOENT)
+                                _exit(EXIT_NOT_FOUND);
+                        if (r < 0)
                                 _exit(EXIT_FAILURE);
 
                         r = copy_bytes(fd, pair[1], (uint64_t) -1, 0);
@@ -522,8 +477,7 @@ static int container_bus_new(Machine *m, sd_bus_error *error, sd_bus **ret) {
                 if (r < 0)
                         return r;
 
-                *ret = bus;
-                bus = NULL;
+                *ret = TAKE_PTR(bus);
                 break;
         }
 
@@ -647,8 +601,7 @@ int bus_machine_method_open_shell(sd_bus_message *message, void *userdata, sd_bu
         } else {
                 if (!path_is_absolute(path))
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Specified path '%s' is not absolute", path);
-                args = args_wire;
-                args_wire = NULL;
+                args = TAKE_PTR(args_wire);
                 if (strv_isempty(args)) {
                         args = strv_free(args);
 
@@ -907,7 +860,7 @@ int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bu
         if (laccess(p, F_OK) < 0)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Container does not allow propagation of mount points.");
 
-        r = chase_symlinks(src, NULL, 0, &chased_src);
+        r = chase_symlinks(src, NULL, CHASE_TRAIL_SLASH, &chased_src);
         if (r < 0)
                 return sd_bus_error_set_errnof(error, r, "Failed to resolve source path: %m");
 
@@ -1475,8 +1428,7 @@ int machine_node_enumerator(sd_bus *bus, const char *path, void *userdata, char 
                         return r;
         }
 
-        *nodes = l;
-        l = NULL;
+        *nodes = TAKE_PTR(l);
 
         return 1;
 }
@@ -1507,8 +1459,7 @@ int machine_send_create_reply(Machine *m, sd_bus_error *error) {
         if (!m->create_message)
                 return 0;
 
-        c = m->create_message;
-        m->create_message = NULL;
+        c = TAKE_PTR(m->create_message);
 
         if (error)
                 return sd_bus_reply_method_error(c, error);

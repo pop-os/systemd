@@ -4,23 +4,6 @@
 
 <!--
   SPDX-License-Identifier: LGPL-2.1+
-
-  This file is part of systemd.
-
-  Copyright 2010-2013 Kay Sievers
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="udevadm"
@@ -29,14 +12,6 @@
   <refentryinfo>
     <title>udevadm</title>
     <productname>systemd</productname>
-    <authorgroup>
-      <author>
-        <contrib>Developer</contrib>
-        <firstname>Kay</firstname>
-        <surname>Sievers</surname>
-        <email>kay@vrfy.org</email>
-      </author>
-    </authorgroup>
   </refentryinfo>
 
   <refmeta>
@@ -91,11 +66,11 @@
         <term><option>-d</option></term>
         <term><option>--debug</option></term>
         <listitem>
-          <para>Print debug messages to standard error.</para>
+          <para>Print debug messages to standard error. This option is implied in <command>udevadm test</command> and
+          <command>udevadm test-builtin</command> commands.</para>
         </listitem>
       </varlistentry>
 
-      <xi:include href="standard-options.xml" xpointer="version" />
       <xi:include href="standard-options.xml" xpointer="help" />
     </variablelist>
 
@@ -131,9 +106,9 @@
             <filename><optional>/sys</optional>/class/block/sda</filename>.
             Note that this option usually is not very useful, since
             <command>udev</command> can guess the type of the
-            argument, so <command>udevadm
-            --devpath=/class/block/sda</command> is equivalent to
-            <command>udevadm /sys/class/block/sda</command>.</para>
+            argument, so <command>udevadm info
+            --path=/class/block/sda</command> is equivalent to
+            <command>udevadm info /sys/class/block/sda</command>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -144,8 +119,8 @@
             e.g. <filename><optional>/dev</optional>/sda</filename>.
             Note that this option usually is not very useful, since
             <command>udev</command> can guess the type of the
-            argument, so <command>udevadm --name=sda</command> is
-            equivalent to <command>udevadm /dev/sda</command>.</para>
+            argument, so <command>udevadm info --name=sda</command> is
+            equivalent to <command>udevadm info /dev/sda</command>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -202,7 +177,6 @@
           </listitem>
         </varlistentry>
 
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
 
@@ -312,11 +286,11 @@
           <term><option>-y</option></term>
           <term><option>--sysname-match=<replaceable>PATH</replaceable></option></term>
           <listitem>
-	    <para>Trigger events for devices for which the last component
-	    (i.e. the filename) of the <filename>/sys</filename> path matches
-	    the specified <replaceable>PATH</replaceable>. This option can be
-	    specified multiple times and also supports shell style pattern
-	    matching.</para>
+            <para>Trigger events for devices for which the last component
+            (i.e. the filename) of the <filename>/sys</filename> path matches
+            the specified <replaceable>PATH</replaceable>. This option can be
+            specified multiple times and also supports shell style pattern
+            matching.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -347,7 +321,6 @@
           </listitem>
         </varlistentry>
 
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
 
@@ -380,7 +353,6 @@
           </listitem>
         </varlistentry>
 
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
     </refsect2>
@@ -456,7 +428,6 @@
           </listitem>
         </varlistentry>
 
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
     </refsect2>
@@ -505,7 +476,6 @@
           </listitem>
         </varlistentry>
 
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
     </refsect2>
@@ -537,7 +507,6 @@
           </listitem>
         </varlistentry>
 
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
     </refsect2>
@@ -551,7 +520,6 @@
       for device <replaceable>DEVPATH</replaceable>, and print debug
       output.</para>
       <variablelist>
-        <xi:include href="standard-options.xml" xpointer="version" />
         <xi:include href="standard-options.xml" xpointer="help" />
       </variablelist>
     </refsect2>

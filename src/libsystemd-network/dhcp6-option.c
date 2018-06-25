@@ -1,21 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 /***
-  This file is part of systemd.
-
-  Copyright (C) 2014-2015 Intel Corporation. All rights reserved.
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+  Copyright © 2014-2015 Intel Corporation. All rights reserved.
 ***/
 
 #include <errno.h>
@@ -154,7 +139,7 @@ int dhcp6_option_append_ia(uint8_t **buf, size_t *buflen, DHCP6IA *ia) {
 }
 
 int dhcp6_option_append_fqdn(uint8_t **buf, size_t *buflen, const char *fqdn) {
-        uint8_t buffer[1 + DNS_WIRE_FOMAT_HOSTNAME_MAX];
+        uint8_t buffer[1 + DNS_WIRE_FORMAT_HOSTNAME_MAX];
         int r;
 
         assert_return(buf && *buf && buflen && fqdn, -EINVAL);
@@ -617,8 +602,7 @@ int dhcp6_option_parse_domainname(const uint8_t *optval, uint16_t optlen, char *
                 idx++;
         }
 
-        *str_arr = names;
-        names = NULL;
+        *str_arr = TAKE_PTR(names);
 
         return idx;
 

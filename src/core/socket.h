@@ -1,31 +1,13 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 typedef struct Socket Socket;
 typedef struct SocketPeer SocketPeer;
 
 #include "mount.h"
 #include "service.h"
 #include "socket-util.h"
+#include "unit.h"
 
 typedef enum SocketExecCommand {
         SOCKET_EXEC_START_PRE,
@@ -67,7 +49,7 @@ typedef struct SocketPort {
         SocketType type;
         int fd;
         int *auxiliary_fds;
-        int n_auxiliary_fds;
+        size_t n_auxiliary_fds;
 
         SocketAddress address;
         char *path;
@@ -85,6 +67,7 @@ struct Socket {
 
         unsigned n_accepted;
         unsigned n_connections;
+        unsigned n_refused;
         unsigned max_connections;
         unsigned max_connections_per_source;
 
@@ -195,3 +178,5 @@ SocketResult socket_result_from_string(const char *s) _pure_;
 
 const char* socket_port_type_to_string(SocketPort *p) _pure_;
 SocketType socket_port_type_from_string(const char *p) _pure_;
+
+DEFINE_CAST(SOCKET, Socket);

@@ -1,21 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 /***
-  This file is part of systemd.
-
-  Copyright 2013 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
 #include <errno.h>
@@ -109,7 +93,7 @@ static void message_reset_containers(sd_bus_message *m) {
         m->root_container.index = 0;
 }
 
-static void message_free(sd_bus_message *m) {
+static sd_bus_message* message_free(sd_bus_message *m) {
         assert(m);
 
         if (m->free_header)
@@ -134,8 +118,10 @@ static void message_free(sd_bus_message *m) {
         free(m->root_container.peeked_signature);
 
         bus_creds_done(&m->creds);
-        free(m);
+        return mfree(m);
 }
+
+DEFINE_TRIVIAL_CLEANUP_FUNC(sd_bus_message*, message_free);
 
 static void *message_extend_fields(sd_bus_message *m, size_t align, size_t sz, bool add_offset) {
         void *op, *np;
@@ -412,7 +398,7 @@ int bus_message_from_header(
                 size_t footer_accessible,
                 size_t message_size,
                 int *fds,
-                unsigned n_fds,
+                size_t n_fds,
                 const char *label,
                 size_t extra,
                 sd_bus_message **ret) {
@@ -513,8 +499,7 @@ int bus_message_from_header(
         }
 
         m->bus = sd_bus_ref(bus);
-        *ret = m;
-        m = NULL;
+        *ret = TAKE_PTR(m);
 
         return 0;
 }
@@ -524,11 +509,11 @@ int bus_message_from_malloc(
                 void *buffer,
                 size_t length,
                 int *fds,
-                unsigned n_fds,
+                size_t n_fds,
                 const char *label,
                 sd_bus_message **ret) {
 
-        sd_bus_message *m;
+        _cleanup_(message_freep) sd_bus_message *m = NULL;
         size_t sz;
         int r;
 
@@ -559,18 +544,14 @@ int bus_message_from_malloc(
 
         r = bus_message_parse_fields(m);
         if (r < 0)
-                goto fail;
+                return r;
 
         /* We take possession of the memory and fds now */
         m->free_header = true;
         m->free_fds = true;
 
-        *ret = m;
+        *ret = TAKE_PTR(m);
         return 0;
-
-fail:
-        message_free(m);
-        return r;
 }
 
 _public_ int sd_bus_message_new(
@@ -612,7 +593,7 @@ _public_ int sd_bus_message_new_signal(
                 const char *interface,
                 const char *member) {
 
-        sd_bus_message *t;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *t = NULL;
         int r;
 
         assert_return(bus, -ENOTCONN);
@@ -632,20 +613,16 @@ _public_ int sd_bus_message_new_signal(
 
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_PATH, SD_BUS_TYPE_OBJECT_PATH, path, &t->path);
         if (r < 0)
-                goto fail;
+                return r;
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_INTERFACE, SD_BUS_TYPE_STRING, interface, &t->interface);
         if (r < 0)
-                goto fail;
+                return r;
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_MEMBER, SD_BUS_TYPE_STRING, member, &t->member);
         if (r < 0)
-                goto fail;
+                return r;
 
-        *m = t;
+        *m = TAKE_PTR(t);
         return 0;
-
-fail:
-        sd_bus_message_unref(t);
-        return r;
 }
 
 _public_ int sd_bus_message_new_method_call(
@@ -656,7 +633,7 @@ _public_ int sd_bus_message_new_method_call(
                 const char *interface,
                 const char *member) {
 
-        sd_bus_message *t;
+        _cleanup_(message_freep) sd_bus_message *t = NULL;
         int r;
 
         assert_return(bus, -ENOTCONN);
@@ -675,29 +652,25 @@ _public_ int sd_bus_message_new_method_call(
 
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_PATH, SD_BUS_TYPE_OBJECT_PATH, path, &t->path);
         if (r < 0)
-                goto fail;
+                return r;
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_MEMBER, SD_BUS_TYPE_STRING, member, &t->member);
         if (r < 0)
-                goto fail;
+                return r;
 
         if (interface) {
                 r = message_append_field_string(t, BUS_MESSAGE_HEADER_INTERFACE, SD_BUS_TYPE_STRING, interface, &t->interface);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
         if (destination) {
                 r = message_append_field_string(t, BUS_MESSAGE_HEADER_DESTINATION, SD_BUS_TYPE_STRING, destination, &t->destination);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
-        *m = t;
+        *m = TAKE_PTR(t);
         return 0;
-
-fail:
-        message_free(t);
-        return r;
 }
 
 static int message_new_reply(
@@ -705,7 +678,7 @@ static int message_new_reply(
                 uint8_t type,
                 sd_bus_message **m) {
 
-        sd_bus_message *t;
+        _cleanup_(message_freep) sd_bus_message *t = NULL;
         uint64_t cookie;
         int r;
 
@@ -729,23 +702,19 @@ static int message_new_reply(
         t->reply_cookie = cookie;
         r = message_append_reply_cookie(t, t->reply_cookie);
         if (r < 0)
-                goto fail;
+                return r;
 
         if (call->sender) {
                 r = message_append_field_string(t, BUS_MESSAGE_HEADER_DESTINATION, SD_BUS_TYPE_STRING, call->sender, &t->destination);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
         t->dont_send = !!(call->header->flags & BUS_MESSAGE_NO_REPLY_EXPECTED);
         t->enforced_reply_signature = call->enforced_reply_signature;
 
-        *m = t;
+        *m = TAKE_PTR(t);
         return 0;
-
-fail:
-        message_free(t);
-        return r;
 }
 
 _public_ int sd_bus_message_new_method_return(
@@ -760,7 +729,7 @@ _public_ int sd_bus_message_new_method_error(
                 sd_bus_message **m,
                 const sd_bus_error *e) {
 
-        sd_bus_message *t;
+        _cleanup_(message_freep) sd_bus_message *t = NULL;
         int r;
 
         assert_return(sd_bus_error_is_set(e), -EINVAL);
@@ -772,22 +741,18 @@ _public_ int sd_bus_message_new_method_error(
 
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_ERROR_NAME, SD_BUS_TYPE_STRING, e->name, &t->error.name);
         if (r < 0)
-                goto fail;
+                return r;
 
         if (e->message) {
                 r = message_append_basic(t, SD_BUS_TYPE_STRING, e->message, (const void**) &t->error.message);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
         t->error._need_free = -1;
 
-        *m = t;
+        *m = TAKE_PTR(t);
         return 0;
-
-fail:
-        message_free(t);
-        return r;
 }
 
 _public_ int sd_bus_message_new_method_errorf(
@@ -867,7 +832,7 @@ int bus_message_new_synthetic_error(
                 const sd_bus_error *e,
                 sd_bus_message **m) {
 
-        sd_bus_message *t;
+        _cleanup_(message_freep) sd_bus_message *t = NULL;
         int r;
 
         assert(bus);
@@ -885,34 +850,30 @@ int bus_message_new_synthetic_error(
 
         r = message_append_reply_cookie(t, t->reply_cookie);
         if (r < 0)
-                goto fail;
+                return r;
 
         if (bus && bus->unique_name) {
                 r = message_append_field_string(t, BUS_MESSAGE_HEADER_DESTINATION, SD_BUS_TYPE_STRING, bus->unique_name, &t->destination);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
         r = message_append_field_string(t, BUS_MESSAGE_HEADER_ERROR_NAME, SD_BUS_TYPE_STRING, e->name, &t->error.name);
         if (r < 0)
-                goto fail;
+                return r;
 
         if (e->message) {
                 r = message_append_basic(t, SD_BUS_TYPE_STRING, e->message, (const void**) &t->error.message);
                 if (r < 0)
-                        goto fail;
+                        return r;
         }
 
         t->error._need_free = -1;
 
         bus_message_set_sender_driver(bus, t);
 
-        *m = t;
+        *m = TAKE_PTR(t);
         return 0;
-
-fail:
-        message_free(t);
-        return r;
 }
 
 _public_ sd_bus_message* sd_bus_message_ref(sd_bus_message *m) {
@@ -937,8 +898,7 @@ _public_ sd_bus_message* sd_bus_message_unref(sd_bus_message *m) {
         if (m->n_ref > 0)
                 return NULL;
 
-        message_free(m);
-        return NULL;
+        return message_free(m);
 }
 
 _public_ int sd_bus_message_get_type(sd_bus_message *m, uint8_t *type) {
@@ -1085,10 +1045,10 @@ _public_ int sd_bus_message_is_signal(
         if (m->header->type != SD_BUS_MESSAGE_SIGNAL)
                 return 0;
 
-        if (interface && (!m->interface || !streq(m->interface, interface)))
+        if (interface && !streq_ptr(m->interface, interface))
                 return 0;
 
-        if (member &&  (!m->member || !streq(m->member, member)))
+        if (member && !streq_ptr(m->member, member))
                 return 0;
 
         return 1;
@@ -1104,10 +1064,10 @@ _public_ int sd_bus_message_is_method_call(
         if (m->header->type != SD_BUS_MESSAGE_METHOD_CALL)
                 return 0;
 
-        if (interface && (!m->interface || !streq(m->interface, interface)))
+        if (interface && !streq_ptr(m->interface, interface))
                 return 0;
 
-        if (member &&  (!m->member || !streq(m->member, member)))
+        if (member && !streq_ptr(m->member, member))
                 return 0;
 
         return 1;
@@ -1119,7 +1079,7 @@ _public_ int sd_bus_message_is_method_error(sd_bus_message *m, const char *name)
         if (m->header->type != SD_BUS_MESSAGE_METHOD_ERROR)
                 return 0;
 
-        if (name && (!m->error.name || !streq(m->error.name, name)))
+        if (name && !streq_ptr(m->error.name, name))
                 return 0;
 
         return 1;
@@ -1665,7 +1625,7 @@ _public_ int sd_bus_message_append_string_space(
 _public_ int sd_bus_message_append_string_iovec(
                 sd_bus_message *m,
                 const struct iovec *iov,
-                unsigned n) {
+                unsigned n /* should be size_t, but is API now… 😞 */) {
 
         size_t size;
         unsigned i;
@@ -1991,7 +1951,7 @@ _public_ int sd_bus_message_open_container(
 
         struct bus_container *c, *w;
         uint32_t *array_size = NULL;
-        char *signature;
+        _cleanup_free_ char *signature = NULL;
         size_t before, begin = 0;
         bool need_offsets = false;
         int r;
@@ -2030,16 +1990,13 @@ _public_ int sd_bus_message_open_container(
                 r = bus_message_open_dict_entry(m, c, contents, &begin, &need_offsets);
         else
                 r = -EINVAL;
-
-        if (r < 0) {
-                free(signature);
+        if (r < 0)
                 return r;
-        }
 
         /* OK, let's fill it in */
         w = m->containers + m->n_containers++;
         w->enclosing = type;
-        w->signature = signature;
+        w->signature = TAKE_PTR(signature);
         w->index = 0;
         w->array_size = array_size;
         w->before = before;
@@ -2589,7 +2546,7 @@ _public_ int sd_bus_message_append_array_iovec(
                 sd_bus_message *m,
                 char type,
                 const struct iovec *iov,
-                unsigned n) {
+                unsigned n /* should be size_t, but is API now… 😞 */) {
 
         size_t size;
         unsigned i;
@@ -3234,7 +3191,6 @@ end:
         c->item_size = 0;
         return 0;
 }
-
 
 static int message_peek_body(
                 sd_bus_message *m,
@@ -4012,9 +3968,9 @@ _public_ int sd_bus_message_enter_container(sd_bus_message *m,
                                             const char *contents) {
         struct bus_container *c, *w;
         uint32_t *array_size = NULL;
-        char *signature;
+        _cleanup_free_ char *signature = NULL;
         size_t before;
-        size_t *offsets = NULL;
+        _cleanup_free_ size_t *offsets = NULL;
         size_t n_offsets = 0, item_size = 0;
         int r;
 
@@ -4088,17 +4044,13 @@ _public_ int sd_bus_message_enter_container(sd_bus_message *m,
                 r = bus_message_enter_dict_entry(m, c, contents, &item_size, &offsets, &n_offsets);
         else
                 r = -EINVAL;
-
-        if (r <= 0) {
-                free(signature);
-                free(offsets);
+        if (r <= 0)
                 return r;
-        }
 
         /* OK, let's fill it in */
         w = m->containers + m->n_containers++;
         w->enclosing = type;
-        w->signature = signature;
+        w->signature = TAKE_PTR(signature);
         w->peeked_signature = NULL;
         w->index = 0;
 
@@ -4115,7 +4067,7 @@ _public_ int sd_bus_message_enter_container(sd_bus_message *m,
 
         w->array_size = array_size;
         w->item_size = item_size;
-        w->offsets = offsets;
+        w->offsets = TAKE_PTR(offsets);
         w->n_offsets = n_offsets;
         w->offset_index = 0;
 
@@ -4384,7 +4336,7 @@ static int message_read_ap(
         /* Ideally, we'd just call ourselves recursively on every
          * complex type. However, the state of a va_list that is
          * passed to a function is undefined after that function
-         * returns. This means we need to docode the va_list linearly
+         * returns. This means we need to decode the va_list linearly
          * in a single stackframe. We hence implement our own
          * home-grown stack in an array. */
 
@@ -5329,7 +5281,6 @@ int bus_message_parse_fields(sd_bus_message *m) {
 
                         break;
 
-
                 case BUS_MESSAGE_HEADER_SIGNATURE: {
                         const char *s;
                         char *c;
@@ -5351,8 +5302,7 @@ int bus_message_parse_fields(sd_bus_message *m) {
                         if (!c)
                                 return -ENOMEM;
 
-                        free(m->root_container.signature);
-                        m->root_container.signature = c;
+                        free_and_replace(m->root_container.signature, c);
                         break;
                 }
 
@@ -5501,7 +5451,7 @@ _public_ int sd_bus_message_set_sender(sd_bus_message *m, const char *sender) {
 int bus_message_get_blob(sd_bus_message *m, void **buffer, size_t *sz) {
         size_t total;
         void *p, *e;
-        unsigned i;
+        size_t i;
         struct bus_body_part *part;
 
         assert(m);
@@ -5553,7 +5503,7 @@ int bus_message_read_strv_extend(sd_bus_message *m, char ***l) {
 }
 
 _public_ int sd_bus_message_read_strv(sd_bus_message *m, char ***l) {
-        char **strv = NULL;
+        _cleanup_strv_free_ char **strv = NULL;
         int r;
 
         assert_return(m, -EINVAL);
@@ -5561,12 +5511,10 @@ _public_ int sd_bus_message_read_strv(sd_bus_message *m, char ***l) {
         assert_return(l, -EINVAL);
 
         r = bus_message_read_strv_extend(m, &strv);
-        if (r <= 0) {
-                strv_free(strv);
+        if (r <= 0)
                 return r;
-        }
 
-        *l = strv;
+        *l = TAKE_PTR(strv);
         return 1;
 }
 
@@ -5869,8 +5817,7 @@ int bus_message_remarshal(sd_bus *bus, sd_bus_message **m) {
                 return r;
 
         sd_bus_message_unref(*m);
-        *m = n;
-        n = NULL;
+        *m = TAKE_PTR(n);
 
         return 0;
 }

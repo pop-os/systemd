@@ -1,21 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 /***
-  This file is part of systemd.
-
-  Copyright 2010 ProFUSION embedded systems
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
+  Copyright © 2010 ProFUSION embedded systems
 ***/
 
 #include <errno.h>
@@ -51,8 +36,6 @@
 #include "util.h"
 #include "virt.h"
 #include "watchdog.h"
-
-#define FINALIZE_ATTEMPTS 50
 
 #define SYNC_PROGRESS_ATTEMPTS 3
 #define SYNC_TIMEOUT_USEC (10*USEC_PER_SEC)
@@ -269,11 +252,10 @@ static void sync_with_progress(void) {
 
 int main(int argc, char *argv[]) {
         bool need_umount, need_swapoff, need_loop_detach, need_dm_detach;
-        bool in_container, use_watchdog = false;
+        bool in_container, use_watchdog = false, can_initrd;
         _cleanup_free_ char *cgroup = NULL;
         char *arguments[3];
-        unsigned retries;
-        int cmd, r;
+        int cmd, r, umount_log_level = LOG_INFO;
         static const char* const dirs[] = {SYSTEM_SHUTDOWN_PATH, NULL};
         char *watchdog_device;
 
@@ -318,7 +300,7 @@ int main(int argc, char *argv[]) {
         (void) cg_get_root_path(&cgroup);
         in_container = detect_container() > 0;
 
-        use_watchdog = !!getenv("WATCHDOG_USEC");
+        use_watchdog = getenv("WATCHDOG_USEC");
         watchdog_device = getenv("WATCHDOG_DEVICE");
         if (watchdog_device) {
                 r = watchdog_set_device(watchdog_device);
@@ -349,9 +331,10 @@ int main(int argc, char *argv[]) {
         need_swapoff = !in_container;
         need_loop_detach = !in_container;
         need_dm_detach = !in_container;
+        can_initrd = !in_container && !in_initrd() && access("/run/initramfs/shutdown", X_OK) == 0;
 
         /* Unmount all mountpoints, swaps, and loopback devices */
-        for (retries = 0; retries < FINALIZE_ATTEMPTS; retries++) {
+        for (;;) {
                 bool changed = false;
 
                 if (use_watchdog)
@@ -366,7 +349,7 @@ int main(int argc, char *argv[]) {
 
                 if (need_umount) {
                         log_info("Unmounting file systems.");
-                        r = umount_all(&changed);
+                        r = umount_all(&changed, umount_log_level);
                         if (r == 0) {
                                 need_umount = false;
                                 log_info("All filesystems unmounted.");
@@ -390,7 +373,7 @@ int main(int argc, char *argv[]) {
 
                 if (need_loop_detach) {
                         log_info("Detaching loop devices.");
-                        r = loopback_detach_all(&changed);
+                        r = loopback_detach_all(&changed, umount_log_level);
                         if (r == 0) {
                                 need_loop_detach = false;
                                 log_info("All loop devices detached.");
@@ -402,7 +385,7 @@ int main(int argc, char *argv[]) {
 
                 if (need_dm_detach) {
                         log_info("Detaching DM devices.");
-                        r = dm_detach_all(&changed);
+                        r = dm_detach_all(&changed, umount_log_level);
                         if (r == 0) {
                                 need_dm_detach = false;
                                 log_info("All DM devices detached.");
@@ -413,10 +396,19 @@ int main(int argc, char *argv[]) {
                 }
 
                 if (!need_umount && !need_swapoff && !need_loop_detach && !need_dm_detach) {
-                        if (retries > 0)
-                                log_info("All filesystems, swaps, loop devices, DM devices detached.");
+                        log_info("All filesystems, swaps, loop devices and DM devices detached.");
                         /* Yay, done */
-                        goto initrd_jump;
+                        break;
+                }
+
+                if (!changed && umount_log_level == LOG_INFO && !can_initrd) {
+                        /* There are things we cannot get rid of. Loop one more time
+                         * with LOG_ERR to inform the user. Note that we don't need
+                         * to do this if there is a initrd to switch to, because that
+                         * one is likely to get rid of the remounting mounts. If not,
+                         * it will log about them. */
+                        umount_log_level = LOG_ERR;
+                        continue;
                 }
 
                 /* If in this iteration we didn't manage to
@@ -427,20 +419,15 @@ int main(int argc, char *argv[]) {
                                  need_swapoff ? " swap devices," : "",
                                  need_loop_detach ? " loop devices," : "",
                                  need_dm_detach ? " DM devices," : "");
-                        goto initrd_jump;
+                        break;
                 }
 
-                log_debug("After %u retries, couldn't finalize remaining %s%s%s%s trying again.",
-                          retries + 1,
+                log_debug("Couldn't finalize remaining %s%s%s%s trying again.",
                           need_umount ? " file systems," : "",
                           need_swapoff ? " swap devices," : "",
                           need_loop_detach ? " loop devices," : "",
                           need_dm_detach ? " DM devices," : "");
         }
-
-        log_error("Too many iterations, giving up.");
-
- initrd_jump:
 
         /* We're done with the watchdog. */
         watchdog_free_device();
@@ -450,8 +437,7 @@ int main(int argc, char *argv[]) {
         arguments[2] = NULL;
         execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments);
 
-        if (!in_container && !in_initrd() &&
-            access("/run/initramfs/shutdown", X_OK) == 0) {
+        if (can_initrd) {
                 r = switch_root_initramfs();
                 if (r >= 0) {
                         argv[0] = (char*) "/shutdown";

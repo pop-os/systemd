@@ -2,22 +2,6 @@
 #pragma once
 
 /***
-  This file is part of systemd.
-
-  Copyright 2013 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 ***/
 
 #include <pthread.h>
@@ -140,8 +124,17 @@ struct sd_bus_slot {
         unsigned n_ref;
         sd_bus *bus;
         void *userdata;
+        sd_bus_destroy_t destroy_callback;
         BusSlotType type:5;
+
+        /* Slots can be "floating" or not. If they are not floating (the usual case) then they reference the bus object
+         * they are associated with. This means the bus object stays allocated at least as long as there is a slot
+         * around associated with it. If it is floating, then the slot's lifecycle is bound to the lifecycle of the
+         * bus: it will be disconnected from the bus when the bus is destroyed, and it keeping the slot reffed hence
+         * won't mean the bus stays reffed too. Internally this means the reference direction is reversed: floating
+         * slots objects are referenced by the bus object, and not vice versa. */
         bool floating:1;
+
         bool match_added:1;
         char *description;
 
@@ -278,7 +271,7 @@ struct sd_bus {
         uint64_t creds_mask;
 
         int *fds;
-        unsigned n_fds;
+        size_t n_fds;
 
         char *exec_path;
         char **exec_argv;
@@ -338,7 +331,7 @@ struct sd_bus {
 #define BUS_WQUEUE_MAX (192*1024)
 #define BUS_RQUEUE_MAX (192*1024)
 
-#define BUS_MESSAGE_SIZE_MAX (64*1024*1024)
+#define BUS_MESSAGE_SIZE_MAX (128*1024*1024)
 #define BUS_AUTH_SIZE_MAX (64*1024)
 
 #define BUS_CONTAINER_DEPTH 128

@@ -1,25 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 typedef struct ExecStatus ExecStatus;
 typedef struct ExecCommand ExecCommand;
 typedef struct ExecContext ExecContext;
@@ -218,9 +199,9 @@ struct ExecContext {
         char **read_write_paths, **read_only_paths, **inaccessible_paths;
         unsigned long mount_flags;
         BindMount *bind_mounts;
-        unsigned n_bind_mounts;
+        size_t n_bind_mounts;
         TemporaryFileSystem *temporary_filesystems;
-        unsigned n_temporary_filesystems;
+        size_t n_temporary_filesystems;
 
         uint64_t capability_bounding_set;
         uint64_t capability_ambient_set;
@@ -241,6 +222,7 @@ struct ExecContext {
         bool private_network;
         bool private_devices;
         bool private_users;
+        bool private_mounts;
         ProtectSystem protect_system;
         ProtectHome protect_home;
         bool protect_kernel_tunables;
@@ -292,20 +274,20 @@ static inline bool exec_context_restrict_namespaces_set(const ExecContext *c) {
 }
 
 typedef enum ExecFlags {
-        EXEC_APPLY_SANDBOXING  = 1U << 0,
-        EXEC_APPLY_CHROOT      = 1U << 1,
-        EXEC_APPLY_TTY_STDIN   = 1U << 2,
-        EXEC_NEW_KEYRING       = 1U << 3,
-        EXEC_PASS_LOG_UNIT     = 1U << 4, /* Whether to pass the unit name to the service's journal stream connection */
-        EXEC_CHOWN_DIRECTORIES = 1U << 5, /* chown() the runtime/state/cache/log directories to the user we run as, under all conditions */
-        EXEC_NSS_BYPASS_BUS    = 1U << 6, /* Set the SYSTEMD_NSS_BYPASS_BUS environment variable, to disable nss-systemd for dbus */
-        EXEC_CGROUP_DELEGATE   = 1U << 7,
+        EXEC_APPLY_SANDBOXING  = 1 << 0,
+        EXEC_APPLY_CHROOT      = 1 << 1,
+        EXEC_APPLY_TTY_STDIN   = 1 << 2,
+        EXEC_NEW_KEYRING       = 1 << 3,
+        EXEC_PASS_LOG_UNIT     = 1 << 4, /* Whether to pass the unit name to the service's journal stream connection */
+        EXEC_CHOWN_DIRECTORIES = 1 << 5, /* chown() the runtime/state/cache/log directories to the user we run as, under all conditions */
+        EXEC_NSS_BYPASS_BUS    = 1 << 6, /* Set the SYSTEMD_NSS_BYPASS_BUS environment variable, to disable nss-systemd for dbus */
+        EXEC_CGROUP_DELEGATE   = 1 << 7,
 
         /* The following are not used by execute.c, but by consumers internally */
-        EXEC_PASS_FDS          = 1U << 8,
-        EXEC_IS_CONTROL        = 1U << 9,
-        EXEC_SETENV_RESULT     = 1U << 10,
-        EXEC_SET_WATCHDOG      = 1U << 11,
+        EXEC_PASS_FDS          = 1 << 8,
+        EXEC_IS_CONTROL        = 1 << 9,
+        EXEC_SETENV_RESULT     = 1 << 10,
+        EXEC_SET_WATCHDOG      = 1 << 11,
 } ExecFlags;
 
 struct ExecParameters {
@@ -314,8 +296,8 @@ struct ExecParameters {
 
         int *fds;
         char **fd_names;
-        unsigned n_storage_fds;
-        unsigned n_socket_fds;
+        size_t n_storage_fds;
+        size_t n_socket_fds;
 
         ExecFlags flags;
         bool selinux_context_net:1;
@@ -347,10 +329,10 @@ int exec_spawn(Unit *unit,
                DynamicCreds *dynamic_creds,
                pid_t *ret);
 
-void exec_command_done_array(ExecCommand *c, unsigned n);
+void exec_command_done_array(ExecCommand *c, size_t n);
 
 ExecCommand* exec_command_free_list(ExecCommand *c);
-void exec_command_free_array(ExecCommand **c, unsigned n);
+void exec_command_free_array(ExecCommand **c, size_t n);
 
 void exec_command_dump_list(ExecCommand *c, FILE *f, const char *prefix);
 void exec_command_append_list(ExecCommand **l, ExecCommand *e);

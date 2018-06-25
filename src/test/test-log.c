@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2012 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <stddef.h>
 #include <unistd.h>
@@ -42,22 +24,19 @@ assert_cc((LOG_REALM_PLUS_LEVEL(LOG_REALM_UDEV, LOG_USER | LOG_INFO) & LOG_PRIMA
 static void test_log_console(void) {
         log_struct(LOG_INFO,
                    "MESSAGE=Waldo PID="PID_FMT, getpid_cached(),
-                   "SERVICE=piepapo",
-                   NULL);
+                   "SERVICE=piepapo");
 }
 
 static void test_log_journal(void) {
         log_struct(LOG_INFO,
                    "MESSAGE=Foobar PID="PID_FMT, getpid_cached(),
-                   "SERVICE=foobar",
-                   NULL);
+                   "SERVICE=foobar");
 
         log_struct(LOG_INFO,
                    "MESSAGE=Foobar PID="PID_FMT, getpid_cached(),
                    "FORMAT_STR_TEST=1=%i A=%c 2=%hi 3=%li 4=%lli 1=%p foo=%s 2.5=%g 3.5=%g 4.5=%Lg",
                    (int) 1, 'A', (short) 2, (long int) 3, (long long int) 4, (void*) 1, "foo", (float) 2.5f, (double) 3.5, (long double) 4.5,
-                   "SUFFIX=GOT IT",
-                   NULL);
+                   "SUFFIX=GOT IT");
 }
 
 static void test_long_lines(void) {

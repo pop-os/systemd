@@ -11,15 +11,15 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c    |  21 ++++-
  src/core/locale-setup.c  |  22 +++++
- src/locale/keymap-util.c | 203 +++++++++++++++++++++++++----------------------
+ src/locale/keymap-util.c | 206 ++++++++++++++++++++++++-----------------------
  src/timedate/timedated.c |  10 +++
- 4 files changed, 159 insertions(+), 97 deletions(-)
+ 4 files changed, 156 insertions(+), 103 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 4a341e2..485dd05 100644
+index fe201c3..fdcdbda 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1387,8 +1387,25 @@ int get_timezone(char **tz) {
+@@ -1395,8 +1395,25 @@ int get_timezone(char **tz) {
          int r;
  
          r = readlink_malloc("/etc/localtime", &t);
@@ -32,11 +32,11 @@ index 4a341e2..485dd05 100644
 +                r = read_one_line_file("/etc/timezone", &t);
 +                if (r < 0) {
 +                        if (r != -ENOENT)
-+                                log_warning("Failed to read /etc/timezone: %s", strerror(-r));
++                                log_warning_errno(r, "Failed to read /etc/timezone: %m");
 +                        return -EINVAL;
 +                }
 +
-+                if (!timezone_is_valid(t))
++                if (!timezone_is_valid(t, LOG_DEBUG))
 +                        return -EINVAL;
 +                z = strdup(t);
 +                if (!z)
@@ -48,15 +48,15 @@ index 4a341e2..485dd05 100644
          e = path_startswith(t, "/usr/share/zoneinfo/");
          if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 0c43cf2..5681ddc 100644
+index c14523f..b35b8e6 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
-@@ -82,6 +82,28 @@ int locale_setup(char ***environment) {
+@@ -64,6 +64,28 @@ int locale_setup(char ***environment) {
                          log_warning_errno(r, "Failed to read /etc/locale.conf: %m");
          }
  
 +        if (r <= 0) {
-+                r = parse_env_file("/etc/default/locale", NEWLINE,
++                r = parse_env_file(NULL, "/etc/default/locale", NEWLINE,
 +                                   "LANG",              &variables[VARIABLE_LANG],
 +                                   "LANGUAGE",          &variables[VARIABLE_LANGUAGE],
 +                                   "LC_CTYPE",          &variables[VARIABLE_LC_CTYPE],
@@ -74,55 +74,72 @@ index 0c43cf2..5681ddc 100644
 +                                   NULL);
 +
 +                if (r < 0 && r != -ENOENT)
-+                        log_warning("Failed to read /etc/default/locale: %s", strerror(-r));
++                        log_warning_errno(r, "Failed to read /etc/default/locale: %m");
 +        }
 +
          add = NULL;
          for (i = 0; i < _VARIABLE_LC_MAX; i++) {
                  char *s;
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index 2d78810..d0bfca6 100644
+index 598b931..0f1aed4 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
-@@ -123,6 +123,24 @@ static int locale_read_data(Context *c) {
-                            "LC_IDENTIFICATION", &c->locale[VARIABLE_LC_IDENTIFICATION],
-                            NULL);
+@@ -85,6 +85,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
+ int locale_read_data(Context *c, sd_bus_message *m) {
+         struct stat st;
+         int r;
++        const char *path = "/etc/locale.conf";
  
-+        if (r == -ENOENT)
-+                r = parse_env_file("/etc/default/locale", NEWLINE,
-+                                   "LANG",              &c->locale[VARIABLE_LANG],
-+                                   "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
-+                                   "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
-+                                   "LC_NUMERIC",        &c->locale[VARIABLE_LC_NUMERIC],
-+                                   "LC_TIME",           &c->locale[VARIABLE_LC_TIME],
-+                                   "LC_COLLATE",        &c->locale[VARIABLE_LC_COLLATE],
-+                                   "LC_MONETARY",       &c->locale[VARIABLE_LC_MONETARY],
-+                                   "LC_MESSAGES",       &c->locale[VARIABLE_LC_MESSAGES],
-+                                   "LC_PAPER",          &c->locale[VARIABLE_LC_PAPER],
-+                                   "LC_NAME",           &c->locale[VARIABLE_LC_NAME],
-+                                   "LC_ADDRESS",        &c->locale[VARIABLE_LC_ADDRESS],
-+                                   "LC_TELEPHONE",      &c->locale[VARIABLE_LC_TELEPHONE],
-+                                   "LC_MEASUREMENT",    &c->locale[VARIABLE_LC_MEASUREMENT],
-+                                   "LC_IDENTIFICATION", &c->locale[VARIABLE_LC_IDENTIFICATION],
-+                                   NULL);
-+
-         if (r == -ENOENT) {
-                 int p;
+         /* Do not try to re-read the file within single bus operation. */
+         if (m && m == c->locale_cache)
+@@ -93,7 +94,11 @@ int locale_read_data(Context *c, sd_bus_message *m) {
+         /* To suppress multiple call of stat(), store the message to cache here. */
+         c->locale_cache = m;
  
-@@ -162,63 +180,19 @@ static int vconsole_read_data(Context *c) {
+-        r = stat("/etc/locale.conf", &st);
++        r = stat(path, &st);
++        if (r < 0 && errno == ENOENT) {
++                path = "/etc/default/locale";
++                r = stat(path, &st);
++        }
+         if (r < 0 && errno != ENOENT)
+                 return -errno;
+ 
+@@ -108,7 +113,7 @@ int locale_read_data(Context *c, sd_bus_message *m) {
+                 c->locale_mtime = t;
+                 context_free_locale(c);
+ 
+-                r = parse_env_file(NULL, "/etc/locale.conf", NEWLINE,
++                r = parse_env_file(NULL, path, NEWLINE,
+                                    "LANG",              &c->locale[VARIABLE_LANG],
+                                    "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
+                                    "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
+@@ -189,9 +194,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
  }
  
- static int x11_read_data(Context *c) {
--        _cleanup_fclose_ FILE *f;
--        char line[LINE_MAX];
+ int x11_read_data(Context *c, sd_bus_message *m) {
+-        _cleanup_fclose_ FILE *f = NULL;
 -        bool in_section = false;
+-        char line[LINE_MAX];
+         struct stat st;
+         usec_t t;
          int r;
+@@ -203,7 +205,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+         /* To suppress multiple call of stat(), store the message to cache here. */
+         c->x11_cache = m;
  
+-        if (stat("/etc/X11/xorg.conf.d/00-keyboard.conf", &st) < 0) {
++        if (stat("/etc/default/keyboard", &st) < 0) {
+                 if (errno != ENOENT)
+                         return -errno;
+ 
+@@ -220,56 +222,15 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+         c->x11_mtime = t;
          context_free_x11(c);
  
 -        f = fopen("/etc/X11/xorg.conf.d/00-keyboard.conf", "re");
 -        if (!f)
--                return errno == ENOENT ? 0 : -errno;
+-                return -errno;
 -
 -        while (fgets(line, sizeof(line), f)) {
 -                char *l;
@@ -166,7 +183,7 @@ index 2d78810..d0bfca6 100644
 -
 -                        if (strv_length(a) == 2 && streq(a[1], "InputClass"))
 -                                in_section = true;
-+        r = parse_env_file("/etc/default/keyboard", NEWLINE,
++        r = parse_env_file(NULL, "/etc/default/keyboard", NEWLINE,
 +                           "XKBMODEL",          &c->x11_model,
 +                           "XKBLAYOUT",         &c->x11_layout,
 +                           "XKBVARIANT",        &c->x11_variant,
@@ -176,29 +193,31 @@ index 2d78810..d0bfca6 100644
 -                } else if (in_section && first_word(l, "EndSection"))
 -                        in_section = false;
 -        }
-+        if (r < 0 && r != -ENOENT)
++        if (r < 0)
 +                return r;
  
          return 0;
  }
-@@ -236,10 +210,15 @@ int context_read_data(Context *c) {
- int locale_write_data(Context *c, char ***settings) {
-         int r, p;
+@@ -278,9 +239,18 @@ int locale_write_data(Context *c, char ***settings) {
          _cleanup_strv_free_ char **l = NULL;
+         struct stat st;
+         int r, p;
 +        const char *path = "/etc/locale.conf";
  
          /* Set values will be returned as strv in *settings on success. */
  
--        r = load_env_file(NULL, "/etc/locale.conf", NULL, &l);
 +        r = load_env_file(NULL, path, NULL, &l);
 +        if (r < 0 && r == -ENOENT) {
 +                path = "/etc/default/locale";
 +                r = load_env_file(NULL, path, NULL, &l);
 +        }
-         if (r < 0 && r != -ENOENT)
-                 return r;
- 
-@@ -268,13 +247,13 @@ int locale_write_data(Context *c, char ***settings) {
++        if (r < 0 && r != -ENOENT)
++                return r;
++
+         for (p = 0; p < _VARIABLE_LC_MAX; p++) {
+                 _cleanup_free_ char *t = NULL;
+                 char **u;
+@@ -303,20 +273,20 @@ int locale_write_data(Context *c, char ***settings) {
          }
  
          if (strv_isempty(l)) {
@@ -206,6 +225,7 @@ index 2d78810..d0bfca6 100644
 +                if (unlink(path) < 0)
                          return errno == ENOENT ? 0 : -errno;
  
+                 c->locale_mtime = USEC_INFINITY;
                  return 0;
          }
  
@@ -214,23 +234,33 @@ index 2d78810..d0bfca6 100644
          if (r < 0)
                  return r;
  
-@@ -338,65 +317,99 @@ int vconsole_write_data(Context *c) {
+         *settings = TAKE_PTR(l);
+ 
+-        if (stat("/etc/locale.conf", &st) >= 0)
++        if (stat(path, &st) >= 0)
+                 c->locale_mtime = timespec_load(&st.st_mtim);
+ 
+         return 0;
+@@ -384,70 +354,104 @@ int vconsole_write_data(Context *c) {
  }
  
  int x11_write_data(Context *c) {
 -        _cleanup_fclose_ FILE *f = NULL;
 -        _cleanup_free_ char *temp_path = NULL;
+         struct stat st;
          int r;
 +        char *t, **u, **l = NULL;
-+
-+        r = load_env_file(NULL, "/etc/default/keyboard", NULL, &l);
-+        if (r < 0 && r != -ENOENT)
-+                return r;
  
 -        if (isempty(c->x11_layout) &&
 -            isempty(c->x11_model) &&
 -            isempty(c->x11_variant) &&
 -            isempty(c->x11_options)) {
++        r = load_env_file(NULL, "/etc/default/keyboard", NULL, &l);
++        if (r < 0 && r != -ENOENT)
++                return r;
+ 
+-                if (unlink("/etc/X11/xorg.conf.d/00-keyboard.conf") < 0)
+-                        return errno == ENOENT ? 0 : -errno;
 +        /* This could perhaps be done more elegantly using an array
 +         * like we do for the locale, instead of struct
 +         */
@@ -242,13 +272,12 @@ index 2d78810..d0bfca6 100644
 +                        return -ENOMEM;
 +                }
  
--                if (unlink("/etc/X11/xorg.conf.d/00-keyboard.conf") < 0)
--                        return errno == ENOENT ? 0 : -errno;
+-                c->vc_mtime = USEC_INFINITY;
+-                return 0;
 +                u = strv_env_set(l, t);
 +                free(t);
 +                strv_free(l);
- 
--                return 0;
++
 +                if (!u)
 +                        return -ENOMEM;
 +
@@ -305,12 +334,12 @@ index 2d78810..d0bfca6 100644
 -                fprintf(f, "        Option \"XkbVariant\" \"%s\"\n", c->x11_variant);
 +                if (!u)
 +                        return -ENOMEM;
++
++                l = u;
++        }
  
 -        if (!isempty(c->x11_options))
 -                fprintf(f, "        Option \"XkbOptions\" \"%s\"\n", c->x11_options);
-+                l = u;
-+        }
-+
 +        if (isempty(c->x11_options)) {
 +                l = strv_env_unset(l, "XKBOPTIONS");
 +        } else {
@@ -336,13 +365,16 @@ index 2d78810..d0bfca6 100644
 +                l = u;
          }
  
--        return 0;
+-        if (stat("/etc/X11/xorg.conf.d/00-keyboard.conf", &st) >= 0)
+-                c->x11_mtime = timespec_load(&st.st_mtim);
 +        if (strv_isempty(l)) {
 +                strv_free(l);
-+
+ 
+-        return 0;
 +                if (unlink("/etc/default/keyboard") < 0)
 +                        return errno == ENOENT ? 0 : -errno;
 +
++                c->vc_mtime = USEC_INFINITY;
 +                return 0;
 +        }
  
@@ -351,14 +383,17 @@ index 2d78810..d0bfca6 100644
 -                (void) unlink(temp_path);
 +        r = write_env_file("/etc/default/keyboard", l);
 +        strv_free(l);
++
++        if (r >= 0 && stat("/etc/default/keyboard", &st) >= 0)
++                c->x11_mtime = timespec_load(&st.st_mtim);
  
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 822835c..8e0d7b6 100644
+index 82eb213..accdffa 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -85,6 +85,7 @@ static int context_read_data(Context *c) {
+@@ -203,6 +203,7 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          int r = 0;
@@ -366,7 +401,7 @@ index 822835c..8e0d7b6 100644
  
          assert(c);
  
-@@ -92,6 +93,9 @@ static int context_write_data_timezone(Context *c) {
+@@ -210,6 +211,9 @@ static int context_write_data_timezone(Context *c) {
                  if (unlink("/etc/localtime") < 0 && errno != ENOENT)
                          r = -errno;
  
@@ -376,7 +411,7 @@ index 822835c..8e0d7b6 100644
                  return r;
          }
  
-@@ -103,6 +107,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -221,6 +225,12 @@ static int context_write_data_timezone(Context *c) {
          if (r < 0)
                  return r;
  

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2012 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <alloca.h>
 #include <errno.h>
@@ -147,7 +129,7 @@ static bool is_root_cgroup(const char *path) {
         if (detect_container() > 0)
                 return false;
 
-        return isempty(path) || path_equal(path, "/");
+        return empty_or_root(path);
 }
 
 static int process(
@@ -483,7 +465,7 @@ static int refresh_one(
                 if (!p)
                         return -ENOMEM;
 
-                path_kill_slashes(p);
+                path_simplify(p, false);
 
                 r = refresh_one(controller, p, a, b, iteration, depth + 1, &child);
                 if (r < 0)
@@ -542,10 +524,6 @@ static int refresh(const char *root, Hashmap *a, Hashmap *b, unsigned iteration)
         return 0;
 }
 
-static const char *empty_to_slash(const char *p) {
-        return isempty(p) ? "/" : p;
-}
-
 static int group_compare(const void*a, const void *b) {
         const Group *x = *(Group**)a, *y = *(Group**)b;
 
@@ -555,9 +533,9 @@ static int group_compare(const void*a, const void *b) {
                  * recursive summing is off, since that is actually
                  * not accumulative for all children. */
 
-                if (path_startswith(empty_to_slash(y->path), empty_to_slash(x->path)))
+                if (path_startswith(empty_to_root(y->path), empty_to_root(x->path)))
                         return -1;
-                if (path_startswith(empty_to_slash(x->path), empty_to_slash(y->path)))
+                if (path_startswith(empty_to_root(x->path), empty_to_root(y->path)))
                         return 1;
         }
 
@@ -640,7 +618,7 @@ static void display(Hashmap *a) {
         if (!terminal_is_dumb())
                 fputs(ANSI_HOME_CLEAR, stdout);
 
-        array = alloca(sizeof(Group*) * hashmap_size(a));
+        array = newa(Group*, hashmap_size(a));
 
         HASHMAP_FOREACH(g, a, i)
                 if (g->n_tasks_valid || g->cpu_valid || g->memory_valid || g->io_valid)
@@ -706,7 +684,7 @@ static void display(Hashmap *a) {
 
                 g = array[j];
 
-                path = empty_to_slash(g->path);
+                path = empty_to_root(g->path);
                 ellipsized = ellipsize(path, path_columns, 33);
                 printf("%-*s", path_columns, ellipsized ?: path);
 

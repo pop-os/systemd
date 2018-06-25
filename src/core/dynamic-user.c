@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2016 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <grp.h>
 #include <pwd.h>
@@ -30,6 +12,7 @@
 #include "io-util.h"
 #include "parse-util.h"
 #include "random-util.h"
+#include "socket-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "user-util.h"
@@ -319,10 +302,7 @@ static int pick_uid(char **suggested_paths, const char *name, uid_t *ret_uid) {
                 (void) make_uid_symlinks(candidate, name, true); /* also add direct lookup symlinks */
 
                 *ret_uid = candidate;
-                r = lock_fd;
-                lock_fd = -1;
-
-                return r;
+                return TAKE_FD(lock_fd);
 
         next:
                 ;
@@ -354,7 +334,7 @@ static int dynamic_user_pop(DynamicUser *d, uid_t *ret_uid, int *ret_lock_fd) {
         /* Read the UID and lock fd that is stored in the storage AF_UNIX socket. This should be called with the lock
          * on the socket taken. */
 
-        k = recvmsg(d->storage_socket[0], &mh, MSG_DONTWAIT|MSG_NOSIGNAL|MSG_CMSG_CLOEXEC);
+        k = recvmsg(d->storage_socket[0], &mh, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
         if (k < 0)
                 return -errno;
 
@@ -563,7 +543,7 @@ static int dynamic_user_realize(
         return 0;
 }
 
-static int dynamic_user_current(DynamicUser *d, uid_t *ret) {
+int dynamic_user_current(DynamicUser *d, uid_t *ret) {
         _cleanup_(unlockfp) int storage_socket0_lock = -1;
         _cleanup_close_ int lock_fd = -1;
         uid_t uid;
@@ -770,8 +750,7 @@ int dynamic_user_lookup_uid(Manager *m, uid_t uid, char **ret) {
         if (check_uid != uid) /* lock file doesn't match our own idea */
                 return -ESRCH;
 
-        *ret = user;
-        user = NULL;
+        *ret = TAKE_PTR(user);
 
         return 0;
 }

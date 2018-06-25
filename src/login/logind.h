@@ -1,31 +1,13 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 #include <stdbool.h>
 
 #include "libudev.h"
 #include "sd-bus.h"
 #include "sd-event.h"
 
+#include "conf-parser.h"
 #include "hashmap.h"
 #include "list.h"
 #include "set.h"
@@ -133,11 +115,14 @@ struct Manager {
         usec_t holdoff_timeout_usec;
         sd_event_source *lid_switch_ignore_event_source;
 
-        size_t runtime_dir_size;
+        uint64_t runtime_dir_size;
         uint64_t user_tasks_max;
         uint64_t sessions_max;
         uint64_t inhibitors_max;
 };
+
+void manager_reset_config(Manager *m);
+int manager_parse_config_file(Manager *m);
 
 int manager_add_device(Manager *m, const char *sysfs, bool master, Device **_device);
 int manager_add_button(Manager *m, const char *name, Button **_button);
@@ -176,8 +161,7 @@ int bus_manager_shutdown_or_sleep_now_or_later(Manager *m, const char *unit_name
 
 int manager_send_changed(Manager *manager, const char *property, ...) _sentinel_;
 
-int manager_start_slice(Manager *manager, const char *slice, const char *description, const char *after, const char *after2, uint64_t tasks_max, sd_bus_error *error, char **job);
-int manager_start_scope(Manager *manager, const char *scope, pid_t pid, const char *slice, const char *description, const char *after, const char *after2, uint64_t tasks_max, sd_bus_error *error, char **job);
+int manager_start_scope(Manager *manager, const char *scope, pid_t pid, const char *slice, const char *description, const char *after, const char *after2, sd_bus_message *more_properties, sd_bus_error *error, char **job);
 int manager_start_unit(Manager *manager, const char *unit, sd_bus_error *error, char **job);
 int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, char **job);
 int manager_abandon_scope(Manager *manager, const char *scope, sd_bus_error *error);
@@ -190,9 +174,8 @@ const struct ConfigPerfItem* logind_gperf_lookup(const char *key, GPERF_LEN_TYPE
 
 int manager_set_lid_switch_ignore(Manager *m, usec_t until);
 
-int config_parse_n_autovts(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
-int config_parse_tmpfs_size(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
-int config_parse_user_tasks_max(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+CONFIG_PARSER_PROTOTYPE(config_parse_n_autovts);
+CONFIG_PARSER_PROTOTYPE(config_parse_tmpfs_size);
 
 int manager_get_session_from_creds(Manager *m, sd_bus_message *message, const char *name, sd_bus_error *error, Session **ret);
 int manager_get_user_from_creds(Manager *m, sd_bus_message *message, uid_t uid, sd_bus_error *error, User **ret);

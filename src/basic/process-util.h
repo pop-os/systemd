@@ -1,25 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
-
 #include <alloca.h>
 #include <errno.h>
 #include <sched.h>
@@ -64,8 +45,8 @@ int get_process_ppid(pid_t pid, pid_t *ppid);
 int wait_for_terminate(pid_t pid, siginfo_t *status);
 
 typedef enum WaitFlags {
-        WAIT_LOG_ABNORMAL             = 1U << 0,
-        WAIT_LOG_NON_ZERO_EXIT_STATUS = 1U << 1,
+        WAIT_LOG_ABNORMAL             = 1 << 0,
+        WAIT_LOG_NON_ZERO_EXIT_STATUS = 1 << 1,
 
         /* A shortcut for requesting the most complete logging */
         WAIT_LOG = WAIT_LOG_ABNORMAL|WAIT_LOG_NON_ZERO_EXIT_STATUS,
@@ -91,7 +72,7 @@ int pid_from_same_root_fs(pid_t pid);
 
 bool is_main_thread(void);
 
-noreturn void freeze(void);
+_noreturn_ void freeze(void);
 
 bool oom_score_adjust_is_valid(int oa);
 
@@ -168,14 +149,15 @@ void reset_cached_pid(void);
 int must_be_root(void);
 
 typedef enum ForkFlags {
-        FORK_RESET_SIGNALS = 1U << 0,
-        FORK_CLOSE_ALL_FDS = 1U << 1,
-        FORK_DEATHSIG      = 1U << 2,
-        FORK_NULL_STDIO    = 1U << 3,
-        FORK_REOPEN_LOG    = 1U << 4,
-        FORK_LOG           = 1U << 5,
-        FORK_WAIT          = 1U << 6,
-        FORK_NEW_MOUNTNS   = 1U << 7,
+        FORK_RESET_SIGNALS = 1 << 0,
+        FORK_CLOSE_ALL_FDS = 1 << 1,
+        FORK_DEATHSIG      = 1 << 2,
+        FORK_NULL_STDIO    = 1 << 3,
+        FORK_REOPEN_LOG    = 1 << 4,
+        FORK_LOG           = 1 << 5,
+        FORK_WAIT          = 1 << 6,
+        FORK_NEW_MOUNTNS   = 1 << 7,
+        FORK_MOUNTNS_SLAVE = 1 << 8,
 } ForkFlags;
 
 int safe_fork_full(const char *name, const int except_fds[], size_t n_except_fds, ForkFlags flags, pid_t *ret_pid);
@@ -184,7 +166,9 @@ static inline int safe_fork(const char *name, ForkFlags flags, pid_t *ret_pid) {
         return safe_fork_full(name, NULL, 0, flags, ret_pid);
 }
 
-int fork_agent(const char *name, const int except[], unsigned n_except, pid_t *pid, const char *path, ...);
+int fork_agent(const char *name, const int except[], size_t n_except, pid_t *pid, const char *path, ...);
+
+int set_oom_score_adjust(int value);
 
 #if SIZEOF_PID_T == 4
 /* The highest possibly (theoretic) pid_t value on this architecture. */
@@ -204,3 +188,11 @@ int fork_agent(const char *name, const int except[], unsigned n_except, pid_t *p
 #endif
 
 assert_cc(TASKS_MAX <= (unsigned long) PID_T_MAX)
+
+/* Like TAKE_PTR() but for child PIDs, resetting them to 0 */
+#define TAKE_PID(pid)                           \
+        ({                                      \
+                pid_t _pid_ = (pid);            \
+                (pid) = 0;                      \
+                _pid_;                          \
+        })

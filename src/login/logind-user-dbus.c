@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2011 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <string.h>
@@ -29,6 +11,8 @@
 #include "signal-util.h"
 #include "strv.h"
 #include "user-util.h"
+
+static BUS_DEFINE_PROPERTY_GET2(property_get_state, "s", User, user_get_state, user_state_to_string);
 
 static int property_get_display(
                 sd_bus *bus,
@@ -51,24 +35,6 @@ static int property_get_display(
                 return -ENOMEM;
 
         return sd_bus_message_append(reply, "(so)", u->display ? u->display->id : "", p);
-}
-
-static int property_get_state(
-                sd_bus *bus,
-                const char *path,
-                const char *interface,
-                const char *property,
-                sd_bus_message *reply,
-                void *userdata,
-                sd_bus_error *error) {
-
-        User *u = userdata;
-
-        assert(bus);
-        assert(reply);
-        assert(u);
-
-        return sd_bus_message_append(reply, "s", user_state_to_string(user_get_state(u)));
 }
 
 static int property_get_sessions(
@@ -354,8 +320,7 @@ int user_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***
                 }
         }
 
-        *nodes = l;
-        l = NULL;
+        *nodes = TAKE_PTR(l);
 
         return 1;
 }

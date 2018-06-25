@@ -3,13 +3,14 @@
 #include "log.h"
 #include "manager.h"
 #include "rm-rf.h"
+#include "service.h"
 #include "test-helper.h"
 #include "tests.h"
 
 int main(int argc, char *argv[]) {
         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
+        _cleanup_(manager_freep) Manager *m = NULL;
         Unit *a, *b, *c, *u;
-        Manager *m;
         int r;
 
         log_set_max_level(LOG_DEBUG);
@@ -89,8 +90,6 @@ int main(int argc, char *argv[]) {
 
         unit_unwatch_pid(c, 4711);
         assert_se(manager_get_unit_by_pid(m, 4711) == NULL);
-
-        manager_free(m);
 
         return 0;
 }

@@ -7,23 +7,6 @@
 
 <!--
   SPDX-License-Identifier: LGPL-2.1+
-
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
 -->
 
 <refentry id="systemctl"
@@ -32,15 +15,6 @@
   <refentryinfo>
     <title>systemctl</title>
     <productname>systemd</productname>
-
-    <authorgroup>
-      <author>
-        <contrib>Developer</contrib>
-        <firstname>Lennart</firstname>
-        <surname>Poettering</surname>
-        <email>lennart@poettering.net</email>
-      </author>
-    </authorgroup>
   </refentryinfo>
 
   <refmeta>
@@ -583,19 +557,19 @@
         <term><option>--runtime</option></term>
 
         <listitem>
-          <para>When used with <command>enable</command>,
-          <command>disable</command>, <command>edit</command>,
-          (and related commands), make changes only temporarily, so
-          that they are lost on the next reboot. This will have the
-          effect that changes are not made in subdirectories of
-          <filename>/etc</filename> but in <filename>/run</filename>,
-          with identical immediate effects, however, since the latter
+          <para>When used with <command>set-property</command>, make changes only
+          temporarily, so that they are lost on the next reboot.</para>
+
+          <para>Similarily, when used with <command>enable</command>, <command>mask</command>,
+          <command>edit</command> and related commands, make temporary changes, which are lost on
+          the next reboot. Changes are not made in subdirectories of <filename>/etc</filename>, but
+          in <filename>/run</filename>. The immediate effect is identical, however since the latter
           is lost on reboot, the changes are lost too.</para>
 
-          <para>Similarly, when used with
-          <command>set-property</command>, make changes only
-          temporarily, so that they are lost on the next
-          reboot.</para>
+          <para>Note: this option cannot be used with <command>disable</command>,
+          <command>unmask</command>, <command>preset</command>, or <command>preset-all</command>,
+          because those operations sometimes need to remove symlinks under <filename>/etc</filename>
+          to have the desired effect, which would cause a persistent change.</para>
         </listitem>
       </varlistentry>
 
@@ -692,6 +666,38 @@
             that are shown are additionally filtered by <option>--type=</option> and <option>--state=</option> if those
             options are specified.</para>
 
+            <para>Produces output similar to
+            <programlisting>  UNIT                         LOAD   ACTIVE SUB     DESCRIPTION
+  sys-module-fuse.device       loaded active plugged /sys/module/fuse
+  -.mount                      loaded active mounted Root Mount
+  boot-efi.mount               loaded active mounted /boot/efi
+  systemd-journald.service     loaded active running Journal Service
+  systemd-logind.service       loaded active running Login Service
+● user@1000.service            loaded active running User Manager for UID 1000
+…
+  systemd-tmpfiles-clean.timer loaded active waiting Daily Cleanup of Temporary Directories
+
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
+SUB    = The low-level unit activation state, values depend on unit type.
+
+123 loaded units listed. Pass --all to see loaded but inactive units, too.
+To show all installed unit files use 'systemctl list-unit-files'.
+            </programlisting>
+            The header and the last unit of a given type are underlined if the
+            terminal supports that. A colored dot is shown next to services which
+            were masked, not found, or otherwise failed.</para>
+
+            <para>The LOAD column shows the load state, one of <constant>loaded</constant>,
+            <constant>not-found</constant>, <constant>bad-setting</constant>, <constant>error</constant>,
+            <constant>masked</constant>. The ACTIVE columns shows the general unit state, one of
+            <constant>active</constant>, <constant>reloading</constant>, <constant>inactive</constant>,
+            <constant>failed</constant>, <constant>activating</constant>, <constant>deactivating</constant>. The SUB
+            column shows the unit-type-specific detailed state of the unit, possible values vary by unit type. The list
+            of possible LOAD, ACTIVE, and SUB states is not constant and new systemd releases may both add and remove
+            values. <programlisting>systemctl --state=help</programlisting> command maybe be used to display the
+            current set of possible values.</para>
+
             <para>This is the default command.</para>
           </listitem>
         </varlistentry>
@@ -738,7 +744,7 @@ Sun 2017-02-26 20:57:49 EST  2h 3min left  Sun 2017-02-26 11:56:36 EST  6h ago  
             <para><emphasis>NEXT</emphasis> shows the next time the timer will run.</para>
             <para><emphasis>LEFT</emphasis> shows how long till the next time the timer runs.</para>
             <para><emphasis>LAST</emphasis> shows the last time the timer ran.</para>
-            <para><emphasis>PASSED</emphasis> shows has long as passed since the timer laset ran.</para>
+            <para><emphasis>PASSED</emphasis> shows how long has passed since the timer last ran.</para>
             <para><emphasis>UNIT</emphasis> shows the name of the timer</para>
             <para><emphasis>ACTIVATES</emphasis> shows the name the service the timer activates when it runs.</para>
 
@@ -952,10 +958,12 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
 
             <para>The "Loaded:" line in the output will show <literal>loaded</literal> if the unit has been loaded into
             memory. Other possible values for "Loaded:" include: <literal>error</literal> if there was a problem
-            loading it, <literal>not-found</literal>, and <literal>masked</literal>. Along with showing the path to
-            the unit file, this line will also show the enablement state.  Enabled commands start at boot.  See the
-            full table of possible enablement states — including the definition of <literal>masked</literal> — in the
-            documentation for the <command>is-enabled</command> command.
+            loading it, <literal>not-found</literal> if not unit file was found for this unit,
+            <literal>bad-setting</literal> if an essential unit file setting could not be parsed and
+            <literal>masked</literal> if the unit file has been masked. Along with showing the path to the unit file,
+            this line will also show the enablement state.  Enabled commands start at boot.  See the full table of
+            possible enablement states — including the definition of <literal>masked</literal> — in the documentation
+            for the <command>is-enabled</command> command.
             </para>
 
             <para>The "Active:" line shows active state.  The value is usually <literal>active</literal> or

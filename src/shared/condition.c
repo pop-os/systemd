@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -39,6 +21,7 @@
 #include "cap-list.h"
 #include "cgroup-util.h"
 #include "condition.h"
+#include "efivars.h"
 #include "extract-word.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -116,7 +99,7 @@ static int condition_test_kernel_command_line(Condition *c) {
         if (r < 0)
                 return r;
 
-        equal = !!strchr(c->parameter, '=');
+        equal = strchr(c->parameter, '=');
 
         for (p = line;;) {
                 _cleanup_free_ char *word = NULL;
@@ -264,7 +247,7 @@ static int condition_test_control_group_controller(Condition *c) {
                 return 1;
         }
 
-        return (system_mask & wanted_mask) == wanted_mask;
+        return FLAGS_SET(system_mask, wanted_mask);
 }
 
 static int condition_test_group(Condition *c) {
@@ -394,6 +377,8 @@ static int condition_test_security(Condition *c) {
                 return use_ima();
         if (streq(c->parameter, "tomoyo"))
                 return mac_tomoyo_use();
+        if (streq(c->parameter, "uefi-secureboot"))
+                return is_efi_secure_boot();
 
         return false;
 }
@@ -477,7 +462,7 @@ static int condition_test_needs_update(Condition *c) {
                 uint64_t timestamp;
                 int r;
 
-                r = parse_env_file(p, NULL, "TIMESTAMP_NSEC", &timestamp_str, NULL);
+                r = parse_env_file(NULL, p, NULL, "TIMESTAMP_NSEC", &timestamp_str, NULL);
                 if (r < 0) {
                         log_error_errno(r, "Failed to parse timestamp file '%s', using mtime: %m", p);
                         return true;

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd
-
-  Copyright 2014 Ronny Chevalier
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -31,6 +13,7 @@
 #include "audit-util.h"
 #include "cgroup-util.h"
 #include "condition.h"
+#include "efivars.h"
 #include "hostname-util.h"
 #include "id128-util.h"
 #include "ima-util.h"
@@ -41,6 +24,7 @@
 #include "smack-util.h"
 #include "string-util.h"
 #include "strv.h"
+#include "tomoyo-util.h"
 #include "user-util.h"
 #include "util.h"
 #include "virt.h"
@@ -447,14 +431,19 @@ static void test_condition_test_security(void) {
         assert_se(condition_test(condition) != mac_selinux_use());
         condition_free(condition);
 
-        condition = condition_new(CONDITION_SECURITY, "ima", false, false);
-        assert_se(condition);
-        assert_se(condition_test(condition) == use_ima());
-        condition_free(condition);
-
         condition = condition_new(CONDITION_SECURITY, "apparmor", false, false);
         assert_se(condition);
         assert_se(condition_test(condition) == mac_apparmor_use());
+        condition_free(condition);
+
+        condition = condition_new(CONDITION_SECURITY, "tomoyo", false, false);
+        assert_se(condition);
+        assert_se(condition_test(condition) == mac_tomoyo_use());
+        condition_free(condition);
+
+        condition = condition_new(CONDITION_SECURITY, "ima", false, false);
+        assert_se(condition);
+        assert_se(condition_test(condition) == use_ima());
         condition_free(condition);
 
         condition = condition_new(CONDITION_SECURITY, "smack", false, false);
@@ -466,6 +455,23 @@ static void test_condition_test_security(void) {
         assert_se(condition);
         assert_se(condition_test(condition) == use_audit());
         condition_free(condition);
+
+        condition = condition_new(CONDITION_SECURITY, "uefi-secureboot", false, false);
+        assert_se(condition);
+        assert_se(condition_test(condition) == is_efi_secure_boot());
+        condition_free(condition);
+}
+
+static void print_securities(void) {
+        log_info("------ enabled security technologies ------");
+        log_info("SELinux: %s", yes_no(mac_selinux_use()));
+        log_info("AppArmor: %s", yes_no(mac_apparmor_use()));
+        log_info("Tomoyo: %s", yes_no(mac_tomoyo_use()));
+        log_info("IMA: %s", yes_no(use_ima()));
+        log_info("SMACK: %s", yes_no(mac_smack_use()));
+        log_info("Audit: %s", yes_no(use_audit()));
+        log_info("UEFI secure boot: %s", yes_no(is_efi_secure_boot()));
+        log_info("-------------------------------------------");
 }
 
 static void test_condition_test_virtualization(void) {
@@ -621,7 +627,7 @@ static void test_condition_test_group(void) {
         ngroups_max = sysconf(_SC_NGROUPS_MAX);
         assert(ngroups_max > 0);
 
-        gids = alloca(sizeof(gid_t) * ngroups_max);
+        gids = newa(gid_t, ngroups_max);
 
         ngroups = getgroups(ngroups_max, gids);
         assert(ngroups >= 0);
@@ -681,6 +687,7 @@ int main(int argc, char *argv[]) {
         test_condition_test_kernel_version();
         test_condition_test_null();
         test_condition_test_security();
+        print_securities();
         test_condition_test_virtualization();
         test_condition_test_user();
         test_condition_test_group();

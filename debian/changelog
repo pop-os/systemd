@@ -1,3 +1,44 @@
+systemd (239-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 239
+  * Drop alternative iptables-dev Build-Depends.
+    It is no longer needed as both Ubuntu and Debian now ship libiptc-dev in
+    their latest stable (LTS) release.
+  * Drop alternative btrfs-tools Recommends.
+    It is no longer needed as btrfs-progs is now available in both Debian
+    and Ubuntu and keeping the alternative around prevents the transitional
+    package from being autoremoved.
+  * Disable installation of RPM macros.
+    This avoids having to remove them manually later on.
+  * Drop cleanup rules for libtool .la files.
+    With the switch to Meson, libtool is no longer used.
+  * Drop fallback for older kernels when running the test suite.
+    We now assume that we have a kernel newer then 3.13.
+  * Stop cleaning up .busname units.
+    Those are gone upstream, so we no longer need to remove them manually.
+  * Update symbols file for libsystemd0
+  * Rebase patches
+  * Install new resolvectl tool.
+    Don't ship the /sbin/resolvconf compat symlink in the systemd package,
+    as this would cause a file conflict with the resolvconf and openresolv
+    package.
+  * Disable support for "Portable Services"
+    This is still an experimental feature.
+  * Disable pristine-tar in gbp.conf.
+    It is currently not possible to import the systemd v239 tarball using
+    pristine-tar due to #902115.
+  * Bump Build-Depends on meson to (>= 0.44)
+  * Stop setting the path for the kill binary, no longer necessary
+  * Stop creating systemd-network and systemd-resolve system user
+    systemd-networkd.service and systemd-resolved.service now use
+    DynamicUser=yes.
+
+  [ Dimitri John Ledkov ]
+  * Run all upstream tests, and then report all that failed.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 23 Jun 2018 00:18:08 +0200
+
 systemd (238-5ubuntu1) cosmic; urgency=medium
 
   Merged from Debian Unstable, remaining changes are:

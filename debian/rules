@@ -37,7 +37,6 @@ CONFFLAGS = \
 	-Dsplit-usr=true \
 	-Dquotaon-path=/sbin/quotaon \
 	-Dquotacheck-path=/sbin/quotacheck \
-	-Dkill-path=/bin/kill \
 	-Dkmod-path=/bin/kmod \
 	-Dkexec-path=/sbin/kexec \
 	-Dsulogin-path=/sbin/sulogin \
@@ -54,10 +53,12 @@ CONFFLAGS = \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
 	-Dpamconfdir=no \
+	-Drpmmacrosdir=no \
 	-Dqrencode=false \
 	-Dvconsole=false \
 	-Dfirstboot=false \
 	-Dxkbcommon=false \
+	-Dportabled=false \
 	-Dwheel-group=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
 	-Dlink-udev-shared=false \
@@ -195,14 +196,9 @@ override_dh_install:
 	rm -f debian/install/*/usr/share/doc/systemd/LICENSE.*
 	rm -f debian/install/*/var/log/README
 	rm -f debian/install/*/etc/init.d/README
-	rm -rf debian/install/*/etc/rpm/
-	rm -rf debian/install/*/usr/lib/rpm/
 	rm -f debian/install/*/etc/X11/xinit/xinitrc.d/50-systemd-user.sh
 	rmdir -p --ignore-fail-on-non-empty debian/install/*/etc/X11/xinit/xinitrc.d/
 	rm -f debian/install/*/lib/systemd/system/halt-local.service
-	find debian/install/ -name '*.la' -delete
-	rm -f debian/install/*/lib/systemd/libsystemd-shared.so
-	find debian/install/ -name '*.busname' -delete
 	# remove files related to factory-reset feature
 	find debian/install/ \( -name 'systemd-update-done*' -o \
 		-name systemd-journal-catalog-update.service -o \
@@ -216,6 +212,8 @@ override_dh_install:
 	find debian/install/*/etc/systemd/system/ -type l -delete
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
 	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
+	# remove resolvconf compat symlink
+	rm -f debian/install/*/sbin/resolvconf
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
@@ -256,9 +254,6 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=755 debian/extra/dhclient-enter-resolved-hook debian/systemd/etc/dhcp/dhclient-enter-hooks.d/resolved
 endif
 
-	# https://github.com/systemd/systemd/pull/8623 until 239 gets released/packaged
-	for p in sbin/resolvconf usr/bin/resolvectl; do install -D debian/install/deb/$$p debian/systemd/$$p || true; done
-
 override_dh_missing:
 	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
 
@@ -288,14 +283,9 @@ override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	echo "01234567890123456789012345678901" > build-deb/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	# some tests are known to fail under ancient kernels
 	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id ninja -C build-deb test || ( \
 		cat build-deb/meson-logs/testlog.txt; \
-		if linux-version compare "$$(uname -r)" ge 3.13; then \
-		    exit 1; \
-		else \
-		    echo "Ignoring test failure under too old kernel $$(uname -r)"; \
-		fi)
+		exit 1)
 endif
 
 %:

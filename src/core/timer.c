@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2010 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <errno.h>
 
@@ -91,7 +73,7 @@ static int timer_verify(Timer *t) {
 
         if (!t->values) {
                 log_unit_error(UNIT(t), "Timer unit lacks value setting. Refusing.");
-                return -EINVAL;
+                return -ENOEXEC;
         }
 
         return 0;
@@ -277,7 +259,7 @@ static void timer_set_state(Timer *t, TimerState state) {
         if (state != old_state)
                 log_unit_debug(UNIT(t), "Changed %s -> %s", timer_state_to_string(old_state), timer_state_to_string(state));
 
-        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], true);
+        unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], 0);
 }
 
 static void timer_enter_waiting(Timer *t, bool initial);
@@ -832,6 +814,18 @@ static void timer_time_change(Unit *u) {
         timer_enter_waiting(t, false);
 }
 
+static void timer_timezone_change(Unit *u) {
+        Timer *t = TIMER(u);
+
+        assert(u);
+
+        if (t->state != TIMER_WAITING)
+                return;
+
+        log_unit_debug(u, "Timezone change, recalculating next elapse.");
+        timer_enter_waiting(t, false);
+}
+
 static const char* const timer_base_table[_TIMER_BASE_MAX] = {
         [TIMER_ACTIVE] = "OnActiveSec",
         [TIMER_BOOT] = "OnBootSec",
@@ -881,6 +875,7 @@ const UnitVTable timer_vtable = {
 
         .reset_failed = timer_reset_failed,
         .time_change = timer_time_change,
+        .timezone_change = timer_timezone_change,
 
         .bus_vtable = bus_timer_vtable,
         .bus_set_property = bus_timer_set_property,

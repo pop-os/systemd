@@ -1,26 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <fcntl.h>
 #include <getopt.h>
-#include <shadow.h>
 #include <unistd.h>
 
 #ifdef HAVE_CRYPT_H
@@ -47,6 +28,7 @@
 #include "hostname-util.h"
 #include "locale-util.h"
 #include "mkdir.h"
+#include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
@@ -93,27 +75,16 @@ static bool press_any_key(void) {
 
 static void print_welcome(void) {
         _cleanup_free_ char *pretty_name = NULL;
-        const char *os_release = NULL;
         static bool done = false;
         int r;
 
         if (done)
                 return;
 
-        os_release = prefix_roota(arg_root, "/etc/os-release");
-        r = parse_env_file(os_release, NEWLINE,
-                           "PRETTY_NAME", &pretty_name,
-                           NULL);
-        if (r == -ENOENT) {
-
-                os_release = prefix_roota(arg_root, "/usr/lib/os-release");
-                r = parse_env_file(os_release, NEWLINE,
-                                   "PRETTY_NAME", &pretty_name,
-                                   NULL);
-        }
-
-        if (r < 0 && r != -ENOENT)
-                log_warning_errno(r, "Failed to read os-release file: %m");
+        r = parse_os_release(arg_root, "PRETTY_NAME", &pretty_name, NULL);
+        if (r < 0)
+                log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
+                               "Failed to read os-release file, ignoring: %m");
 
         printf("\nWelcome to your new installation of %s!\nPlease configure a few basic system settings:\n\n",
                isempty(pretty_name) ? "Linux" : pretty_name);
@@ -124,13 +95,13 @@ static void print_welcome(void) {
 }
 
 static int show_menu(char **x, unsigned n_columns, unsigned width, unsigned percentage) {
-        unsigned n, per_column, i, j;
         unsigned break_lines, break_modulo;
+        size_t n, per_column, i, j;
 
         assert(n_columns > 0);
 
         n = strv_length(x);
-        per_column = (n + n_columns - 1) / n_columns;
+        per_column = DIV_ROUND_UP(n, n_columns);
 
         break_lines = lines();
         if (break_lines > 2)
@@ -154,7 +125,7 @@ static int show_menu(char **x, unsigned n_columns, unsigned width, unsigned perc
                         if (!e)
                                 return log_oom();
 
-                        printf("%4u) %-*s", j * per_column + i + 1, width, e);
+                        printf("%4zu) %-*s", j * per_column + i + 1, width, e);
                 }
 
                 putchar('\n');
@@ -378,6 +349,10 @@ static int process_keymap(void) {
         return 0;
 }
 
+static bool timezone_is_valid_log_error(const char *name) {
+        return timezone_is_valid(name, LOG_ERR);
+}
+
 static int prompt_timezone(void) {
         _cleanup_strv_free_ char **zones = NULL;
         int r;
@@ -401,7 +376,7 @@ static int prompt_timezone(void) {
 
         putchar('\n');
 
-        r = prompt_loop("Please enter timezone name or number", zones, timezone_is_valid, &arg_timezone);
+        r = prompt_loop("Please enter timezone name or number", zones, timezone_is_valid_log_error, &arg_timezone);
         if (r < 0)
                 return r;
 
@@ -576,8 +551,7 @@ static int prompt_root_password(void) {
                         continue;
                 }
 
-                arg_root_password = a;
-                a = NULL;
+                arg_root_password = TAKE_PTR(a);
                 break;
         }
 
@@ -586,6 +560,8 @@ static int prompt_root_password(void) {
 
 static int write_root_shadow(const char *path, const struct spwd *p) {
         _cleanup_fclose_ FILE *f = NULL;
+        int r;
+
         assert(path);
         assert(p);
 
@@ -594,9 +570,9 @@ static int write_root_shadow(const char *path, const struct spwd *p) {
         if (!f)
                 return -errno;
 
-        errno = 0;
-        if (putspent(p, f) != 0)
-                return errno > 0 ? -errno : -EIO;
+        r = putspent_sane(p, f);
+        if (r < 0)
+                return r;
 
         return fflush_sync_and_check(f);
 }
@@ -840,7 +816,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TIMEZONE:
-                        if (!timezone_is_valid(optarg)) {
+                        if (!timezone_is_valid(optarg, LOG_ERR)) {
                                 log_error("Timezone %s is not valid.", optarg);
                                 return -EINVAL;
                         }

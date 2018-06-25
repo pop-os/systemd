@@ -19,18 +19,18 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 4b2d149..3124706 100644
+index 44dd834..b85f9b7 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -2278,8 +2278,6 @@ int main(int argc, char *argv[]) {
-                 kernel_timestamp = DUAL_TIMESTAMP_NULL;
-         }
+@@ -2251,8 +2251,6 @@ int main(int argc, char *argv[]) {
+                         kernel_timestamp = DUAL_TIMESTAMP_NULL;
+                 }
  
--        initialize_coredump(skip_setup);
+-                initialize_coredump(skip_setup);
 -
-         r = fixup_environment();
-         if (r < 0) {
-                 log_emergency_errno(r, "Failed to fix up PID 1 environment: %m");
+                 r = fixup_environment();
+                 if (r < 0) {
+                         log_emergency_errno(r, "Failed to fix up PID 1 environment: %m");
 diff --git a/sysctl.d/50-coredump.conf.in b/sysctl.d/50-coredump.conf.in
 index ccd5c2c..53e74a1 100644
 --- a/sysctl.d/50-coredump.conf.in

@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2014 Tom Gundersen <teg@jklm.no>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
- ***/
 
 #include "alloc-util.h"
 #include "conf-parser.h"
@@ -235,8 +217,8 @@ int config_parse_search_domains(
 int config_parse_dnssd_service_name(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata) {
         static const Specifier specifier_table[] = {
                 { 'b', specifier_boot_id,         NULL },
-                { 'H', specifier_host_name, NULL },
-                { 'm', specifier_machine_id, NULL },
+                { 'H', specifier_host_name,       NULL },
+                { 'm', specifier_machine_id,      NULL },
                 { 'v', specifier_kernel_release,  NULL },
                 {}
         };
@@ -337,10 +319,8 @@ int config_parse_dnssd_txt(const char *unit, const char *filename, unsigned line
                 r = split_pair(word, "=", &key, &value);
                 if (r == -ENOMEM)
                         return log_oom();
-                if (r == -EINVAL) {
-                        key = word;
-                        word = NULL;
-                }
+                if (r == -EINVAL)
+                        key = TAKE_PTR(word);
 
                 if (!ascii_is_valid(key)) {
                         log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid syntax, ignoring: %s", key);
@@ -409,6 +389,13 @@ int manager_parse_config_file(Manager *m) {
         if (m->dnssec_mode != DNSSEC_NO) {
                 log_warning("DNSSEC option cannot be enabled or set to allow-downgrade when systemd-resolved is built without gcrypt support. Turning off DNSSEC support.");
                 m->dnssec_mode = DNSSEC_NO;
+        }
+#endif
+
+#if ! ENABLE_DNS_OVER_TLS
+        if (m->dns_over_tls_mode != DNS_OVER_TLS_NO) {
+                log_warning("DNS-over-TLS option cannot be set to opportunistic when systemd-resolved is built without DNS-over-TLS support. Turning off DNS-over-TLS support.");
+                m->dns_over_tls_mode = DNS_OVER_TLS_NO;
         }
 #endif
         return 0;

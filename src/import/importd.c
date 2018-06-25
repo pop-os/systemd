@@ -1,22 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2015 Lennart Poettering
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <sys/prctl.h>
 #include <sys/wait.h>
@@ -187,8 +169,7 @@ static int transfer_new(Manager *m, Transfer **ret) {
         t->manager = m;
         t->id = id;
 
-        *ret = t;
-        t = NULL;
+        *ret = TAKE_PTR(t);
 
         return 0;
 }
@@ -453,8 +434,7 @@ static int transfer_start(Transfer *t) {
         }
 
         pipefd[1] = safe_close(pipefd[1]);
-        t->log_fd = pipefd[0];
-        pipefd[0] = -1;
+        t->log_fd = TAKE_FD(pipefd[0]);
 
         t->stdin_fd = safe_close(t->stdin_fd);
 
@@ -640,8 +620,7 @@ static int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
-        *ret = m;
-        m = NULL;
+        *ret = TAKE_PTR(m);
 
         return 0;
 }
@@ -1083,8 +1062,7 @@ static int transfer_node_enumerator(sd_bus *bus, const char *path, void *userdat
                 k++;
         }
 
-        *nodes = l;
-        l = NULL;
+        *nodes = TAKE_PTR(l);
 
         return 1;
 }

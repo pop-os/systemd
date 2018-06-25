@@ -1,23 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  This file is part of systemd.
-
-  Copyright 2008-2012 Kay Sievers <kay@vrfy.org>
-  Copyright 2014 Tom Gundersen <teg@jklm.no>
-
-  systemd is free software; you can redistribute it and/or modify it
-  under the terms of the GNU Lesser General Public License as published by
-  the Free Software Foundation; either version 2.1 of the License, or
-  (at your option) any later version.
-
-  systemd is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public License
-  along with systemd; If not, see <http://www.gnu.org/licenses/>.
-***/
 
 #include <ctype.h>
 #include <net/if.h>
@@ -46,7 +27,7 @@
 #include "util.h"
 
 int device_new_aux(sd_device **ret) {
-        _cleanup_(sd_device_unrefp) sd_device *device = NULL;
+        sd_device *device = NULL;
 
         assert(ret);
 
@@ -58,7 +39,6 @@ int device_new_aux(sd_device **ret) {
         device->watch_handle = -1;
 
         *ret = device;
-        device = NULL;
 
         return 0;
 }
@@ -168,12 +148,9 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
         if (verify) {
                 r = chase_symlinks(_syspath, NULL, 0, &syspath);
                 if (r == -ENOENT)
-                        /* the device does not exist (any more?) */
-                        return -ENODEV;
-                else if (r < 0) {
-                        log_debug_errno(r, "sd-device: could not get target of '%s': %m", _syspath);
-                        return r;
-                }
+                        return -ENODEV; /* the device does not exist (any more?) */
+                if (r < 0)
+                        return log_debug_errno(r, "sd-device: could not get target of '%s': %m", _syspath);
 
                 if (!path_startswith(syspath, "/sys")) {
                         _cleanup_free_ char *real_sys = NULL, *new_syspath = NULL;
@@ -195,7 +172,7 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
                                 return log_oom();
 
                         free_and_replace(syspath, new_syspath);
-                        path_kill_slashes(syspath);
+                        path_simplify(syspath, false);
                 }
 
                 if (path_startswith(syspath,  "/sys/devices/")) {
@@ -250,8 +227,7 @@ _public_ int sd_device_new_from_syspath(sd_device **ret, const char *syspath) {
         if (r < 0)
                 return r;
 
-        *ret = device;
-        device = NULL;
+        *ret = TAKE_PTR(device);
 
         return 0;
 }
@@ -662,8 +638,7 @@ _public_ int sd_device_new_from_device_id(sd_device **ret, const char *id) {
                 if (ifr.ifr_ifindex != ifindex)
                         return -ENODEV;
 
-                *ret = device;
-                device = NULL;
+                *ret = TAKE_PTR(device);
 
                 return 0;
         }
@@ -1297,8 +1272,7 @@ int device_get_id_filename(sd_device *device, const char **ret) {
                         }
                 }
 
-                device->id_filename = id;
-                id = NULL;
+                device->id_filename = TAKE_PTR(id);
         }
 
         *ret = device->id_filename;
@@ -1837,8 +1811,7 @@ _public_ int sd_device_get_sysattr_value(sd_device *device, const char *sysattr,
         if (r < 0)
                 return r;
 
-        *_value = value;
-        value = NULL;
+        *_value = TAKE_PTR(value);
 
         return 0;
 }
