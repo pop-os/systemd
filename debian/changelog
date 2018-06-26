@@ -1,3 +1,18 @@
+systemd (238-5ubuntu2) cosmic; urgency=medium
+
+  * Disable dh_installinit generation of tmpfiles for the systemd package.
+    Replace with a manual safe call to systemd-tmpfiles which will process any
+    updates to the tmpfiles shipped by systemd package, taking into account any
+    overrides shipped by other packages, sysadmin, or specified in the runtime
+    directories. (LP: #1748147)
+  * Re-cherrypick keyring setreuid/setregid tricks, as that was merged post-v238.
+  * Enable EFI/bootctl on armhf.
+  * boot-and-services: stderr is ok, for status command on the c1 container.
+    systemctl may print warnings on the stderr when checking the status of
+    completed units. This should not, overall fail the autopkgtest run.
+
+ -- Dimitri John Ledkov 🌈 <xnox@ubuntu.com>  Tue, 26 Jun 2018 10:55:51 +0100
+
 systemd (238-5ubuntu1) cosmic; urgency=medium
 
   Merged from Debian Unstable, remaining changes are:
