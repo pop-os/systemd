@@ -246,7 +246,7 @@ poweroff\n''')
         subprocess.call(['journalctl', '--sync'])
         systemctl = subprocess.Popen(
             ['systemctl', 'status', '-overbose', '-l', 'systemd-nspawn@c1'],
-            stdout=subprocess.PIPE)
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out = systemctl.communicate()[0].decode('UTF-8', 'replace')
         self.assertEqual(systemctl.returncode, 3, out)
         self.assertNotIn('failed', out)
