@@ -330,7 +330,7 @@ Depends: ${shlibs:Depends},
          s390-tools (>> 1.6.2) [s390],
          procps
 Conflicts: hal
-Breaks: systemd (<< 233-4),
+Breaks: systemd (<< 239),
         ifupdown (<< 0.8.5~),
         ifplugd (<< 0.28-19.1~),
         joystick (<< 1:1.4.9-1~),
