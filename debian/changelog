@@ -1,3 +1,15 @@
+systemd (239-2) unstable; urgency=medium
+
+  * sleep: Fix printf format of fiemap fields.
+    This should fix a FTBFS on ia64.
+  * timesync: Change type of drift_freq to int64_t.
+    This should fix a FTBFS on x32.
+  * Bump systemd Breaks to ensure it is upgraded in lockstep with udev.
+    The hardening features used by systemd-udevd.service require systemd 239
+    and udev will fail to start with older versions. (Closes: #902185)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 27 Jun 2018 13:59:24 +0200
+
 systemd (239-1) unstable; urgency=medium
 
   [ Michael Biebl ]
