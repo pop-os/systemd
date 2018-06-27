@@ -1,4 +1,5 @@
 sleep-fix-printf-format-of-fiemap-fields.patch
+timesync-changes-type-of-drift_freq-to-int64_t.patch
 debian/Use-Debian-specific-config-files.patch
 debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
 debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
