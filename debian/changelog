@@ -1,3 +1,16 @@
+systemd (239-3) unstable; urgency=medium
+
+  * Revert "systemctl: when removing enablement or mask symlinks, cover both
+    /run and /etc"
+    We currently have packages in the archive which use
+    "systemctl --runtime unmask" and are broken by this change.
+    This is a intermediate step until it is clear whether upstream will
+    revert this commit or whether we will have to update affected packages
+    to deal with this changed behaviour.
+    See #902287 and https://github.com/systemd/systemd/issues/9393
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 27 Jun 2018 14:46:06 +0200
+
 systemd (239-2) unstable; urgency=medium
 
   * sleep: Fix printf format of fiemap fields.
