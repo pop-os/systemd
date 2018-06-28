@@ -96,18 +96,3 @@ dynamically manage /etc/resolv.conf:
   ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
 
 Debian's networkd has been modified to also work with the resolvconf package.
-
-Going back to SysV init
-=======================
-If you upgraded from Debian 7 (or earlier) and you need to switch back to SysV
-init for one boot, add "init=/lib/sysvinit/init" to the kernel command line.
-This will NOT WORK if you installed Debian 8 (or later) and thus do not have no
-/etc/inittab -- you need to create one first before you can use sysvinit.
-
-If want to switch to SysV init permanently, install the "sysvinit-core"
-package; this will provide a SysV /sbin/init and thus remove the "systemd-sysv"
-package.  After that you can do an one-time boot with systemd by adding
-"init=/bin/systemd" to the kernel command line option.
-
-Please do not try to uninstall the "systemd" package itself, parts of it
-(mostly logind) are needed for desktop environments.
