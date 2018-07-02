@@ -79,8 +79,8 @@ Breaks: apparmor (<< 2.9.2-1),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
         laptop-mode-tools (<< 1.68~),
-        python-dbusmock,
-        python3-dbusmock,
+        python-dbusmock (<< 0.18),
+        python3-dbusmock (<< 0.18),
 Replaces: udev (<< 228-5),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
