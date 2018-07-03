@@ -6,10 +6,6 @@ bus-util-make-log-level-lower-in-request_name_destroy_cal.patch
 tmpfiles-specify-access-mode-for-run-systemd-netif.patch
 test-fix-networkd-test.py-rate-limiting-and-dynamic-user.patch
 debian/Use-Debian-specific-config-files.patch
-debian/don-t-try-to-start-autovt-units-when-not-running-wit.patch
-debian/Make-logind-hostnamed-localed-timedated-D-Bus-activa.patch
-debian/Start-logind-on-demand-via-libpam-systemd.patch
-debian/Make-sd_login_monitor_new-work-for-logind-without-sy.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
 debian/Revert-udev-network-device-renaming-immediately-give.patch
