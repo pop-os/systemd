@@ -1,3 +1,28 @@
+systemd (239-4) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Drop outdated section from README.Debian about switching back to SysV init
+  * sleep: Fix one more printf format of a fiemap field
+  * basic: Add missing comma in raw_clone assembly for sparc
+  * bus-util: Make log level lower in request_name_destroy_callback()
+  * tmpfiles: Specify access mode for /run/systemd/netif
+  * Add Breaks against python-dbusmock (<< 0.18) to systemd.
+    The logind and timedated tests in python-dbusmock were broken by the
+    latest systemd release and had to be adjusted to work with systemd 239.
+    See #902602
+  * Drop patches which try to support running systemd services without systemd
+    as pid 1.
+    No one is currently actively maintaining systemd-shim, which means that
+    e.g. running systemd-logind no longer works when systemd is not pid 1.
+    Thus drop our no longer working patches. Bump the Breaks against
+    systemd-shim accordingly.
+    See #895292, #901404, #901405
+
+  [ Martin Pitt ]
+  * test: fix networkd-test.py rate limiting and dynamic user
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 03 Jul 2018 23:36:28 +0200
+
 systemd (239-3) unstable; urgency=medium
 
   * Revert "systemctl: when removing enablement or mask symlinks, cover both
