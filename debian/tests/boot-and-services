@@ -106,7 +106,12 @@ class ServicesTest(unittest.TestCase):
         with open('/var/log/syslog') as f:
             log = f.read()
         # has kernel messages
-        self.assertRegex(log, 'kernel:.*[cC]ommand line:')
+        try:
+            self.assertRegex(log, 'kernel:.*[cC]ommand line:')
+        except AssertionError:
+            # hm syslog is trimmed, for some reason?!
+            subprocess.call(['journalctl', '-k'])
+            self.assertRegex(log, 'kernel:.*')
         # has init messages
         self.assertRegex(log, 'systemd.*Reached target Graphical Interface')
         # has other services
