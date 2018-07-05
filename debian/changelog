@@ -1,3 +1,12 @@
+systemd (239-5) unstable; urgency=medium
+
+  * Add inverse version restriction of the Breaks to the systemd-shim
+    alternative in libpam-systemd.
+    Otherwise apt will fail to find an installation path for libpam-systemd
+    in cases where libpam-systemd is an indirect dependency. (Closes: #902998)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 05 Jul 2018 11:50:10 +0200
+
 systemd (239-4) unstable; urgency=medium
 
   [ Michael Biebl ]
