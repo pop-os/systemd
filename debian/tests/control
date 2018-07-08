@@ -90,6 +90,7 @@ Restrictions: needs-root, isolation-machine, needs-recommends, breaks-testbed
 
 Tests: udev
 Depends: systemd-tests,
+  python3,
   tree,
   perl,
   xz-utils,
