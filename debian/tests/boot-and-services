@@ -264,7 +264,7 @@ class AppArmorTest(unittest.TestCase):
 profile "violator-test" {
   #include <abstractions/base>
 
-  /bin/** rix,
+  /{usr/,}bin/** rix,
   /etc/machine-id r,
 }
 ''')
