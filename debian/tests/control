@@ -132,7 +132,10 @@ Depends: libsystemd-dev,
   systemd-journal-remote,
   systemd-container,
   systemd-coredump,
-  fdisk | util-linux (<< 2.29.2-3~)
+  fdisk | util-linux (<< 2.29.2-3~),
+  netcat-openbsd,
+  busybox-static,
+  plymouth,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
