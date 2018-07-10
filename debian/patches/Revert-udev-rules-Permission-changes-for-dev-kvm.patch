@@ -1,0 +1,47 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Tue, 10 Jul 2018 14:35:44 +0200
+Subject: Revert "udev-rules: Permission changes for /dev/kvm"
+
+This reverts commit b8fd3d82205f632ce001fade74fed287e1564a1a.
+
+We don't want to make /dev/kvm accessible to everyone.
+Instead we are going to keep the uaccess tag in Debian to make it
+accessible dynamically.
+Access can also be granted via group kvm, as the device will be root:kvm
+owned and have 0660 permissions.
+
+See
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=887852
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=892945
+---
+ meson_options.txt          | 2 +-
+ src/login/70-uaccess.rules | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/meson_options.txt b/meson_options.txt
+index 45c6320..46b0503 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -178,7 +178,7 @@ option('nobody-user', type : 'string',
+ option('nobody-group', type : 'string',
+        description : 'The name of the nobody group (the one with GID 65534)',
+        value : 'nobody')
+-option('dev-kvm-mode', type : 'string', value : '0666',
++option('dev-kvm-mode', type : 'string', value : '0660',
+        description : '/dev/kvm access mode')
+ option('default-kill-user-processes', type : 'boolean',
+        description : 'the default value for KillUserProcesses= setting')
+diff --git a/src/login/70-uaccess.rules b/src/login/70-uaccess.rules
+index a10cc20..60da934 100644
+--- a/src/login/70-uaccess.rules
++++ b/src/login/70-uaccess.rules
+@@ -47,6 +47,9 @@ SUBSYSTEM=="firewire", ATTR{units}=="*0x00a02d:0x014001*", TAG+="uaccess"
+ # DRI video devices
+ SUBSYSTEM=="drm", KERNEL=="card*|renderD*", TAG+="uaccess"
+ 
++# KVM
++SUBSYSTEM=="misc", KERNEL=="kvm", TAG+="uaccess"
++
+ # smart-card readers
+ ENV{ID_SMARTCARD_READER}=="?*", TAG+="uaccess"
+ 

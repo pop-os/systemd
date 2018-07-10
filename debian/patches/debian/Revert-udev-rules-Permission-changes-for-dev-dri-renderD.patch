@@ -48,7 +48,7 @@ index 16c1f2b..45c6320 100644
         description : 'the default value for KillUserProcesses= setting')
  option('gshadow', type : 'boolean',
 diff --git a/rules/50-udev-default.rules.in b/rules/50-udev-default.rules.in
-index bd4c215..549a4f0 100644
+index 191f56f..63aa3db 100644
 --- a/rules/50-udev-default.rules.in
 +++ b/rules/50-udev-default.rules.in
 @@ -31,14 +31,11 @@ SUBSYSTEM=="input", KERNEL=="js[0-9]*", MODE="0664"

@@ -99,6 +99,9 @@ case "$1" in
     # Add new system group used by udev rules
     addgroup --quiet --system input
 
+    # Make /dev/kvm accessible to kvm group
+    addgroup --quiet --system kvm
+
     if [ -z "$2" ]; then # first install
       if ! chrooted && ! in_debootstrap; then
 	enable_udev
