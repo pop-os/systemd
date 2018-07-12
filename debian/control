@@ -158,6 +158,8 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
          adduser
+Breaks: systemd (<< 239-6)
+Replaces: systemd (<< 239-6)
 Description: tools for sending and receiving remote journal logs
  This package provides tools for sending and receiving remote journal logs:
   * systemd-journal-remote
