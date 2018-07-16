@@ -96,12 +96,30 @@ systemd-machine-id-setup
 # Setup system users and groups
 addgroup --quiet --system systemd-journal
 
+# We need to stop running services before we call adduser
+RESTART=""
+if dpkg --compare-versions "$2" lt-nl "239-6"; then
+    for s in systemd-networkd systemd-timesyncd systemd-resolved ; do
+        if _systemctl is-active $s; then
+            _systemctl stop $s
+            RESTART="$s $RESTART"
+        fi
+    done
+fi
+
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Time Synchronization" systemd-timesync
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Network Management" systemd-network
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Resolver" systemd-resolve
+
+# Restart services which we stopped earlier
+if dpkg --compare-versions "$2" lt-nl "239-6"; then
+    for s in $RESTART ; do
+        _systemctl start $s
+    done
+fi
 
 # Initial update of the Message Catalogs database
 _update_catalog
