@@ -1,0 +1,92 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Mon, 16 Jul 2018 11:27:44 +0200
+Subject: test: Drop SKIP_INITRD for QEMU-based tests
+
+Not all distros support booting without an initrd. E.g. the Debian
+kernel builds ext4 as a module and so relies on an initrd to
+successfully start the QEMU-based images.
+
+(cherry picked from commit c2d4da002095fe6f86f89a508a81e48fb6d3196f)
+---
+ test/TEST-08-ISSUE-2730/test.sh   | 1 -
+ test/TEST-09-ISSUE-2691/test.sh   | 1 -
+ test/TEST-10-ISSUE-2467/test.sh   | 1 -
+ test/TEST-11-ISSUE-3166/test.sh   | 1 -
+ test/TEST-13-NSPAWN-SMOKE/test.sh | 2 +-
+ test/TEST-14-MACHINE-ID/test.sh   | 2 +-
+ 6 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/test/TEST-08-ISSUE-2730/test.sh b/test/TEST-08-ISSUE-2730/test.sh
+index 68159c3..90bf133 100755
+--- a/test/TEST-08-ISSUE-2730/test.sh
++++ b/test/TEST-08-ISSUE-2730/test.sh
+@@ -6,7 +6,6 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2730"
+ TEST_NO_NSPAWN=1
+ 
+ . $TEST_BASE_DIR/test-functions
+-SKIP_INITRD=yes
+ QEMU_TIMEOUT=180
+ FSTYPE=ext4
+ 
+diff --git a/test/TEST-09-ISSUE-2691/test.sh b/test/TEST-09-ISSUE-2691/test.sh
+index 4c3e949..9b5990b 100755
+--- a/test/TEST-09-ISSUE-2691/test.sh
++++ b/test/TEST-09-ISSUE-2691/test.sh
+@@ -6,7 +6,6 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2691"
+ TEST_NO_NSPAWN=1
+ 
+ . $TEST_BASE_DIR/test-functions
+-SKIP_INITRD=yes
+ QEMU_TIMEOUT=90
+ 
+ test_setup() {
+diff --git a/test/TEST-10-ISSUE-2467/test.sh b/test/TEST-10-ISSUE-2467/test.sh
+index 2f95e90..e61f5ac 100755
+--- a/test/TEST-10-ISSUE-2467/test.sh
++++ b/test/TEST-10-ISSUE-2467/test.sh
+@@ -5,7 +5,6 @@ set -e
+ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2467"
+ 
+ . $TEST_BASE_DIR/test-functions
+-SKIP_INITRD=yes
+ 
+ test_setup() {
+     create_empty_image
+diff --git a/test/TEST-11-ISSUE-3166/test.sh b/test/TEST-11-ISSUE-3166/test.sh
+index 4602bdf..8aae4d5 100755
+--- a/test/TEST-11-ISSUE-3166/test.sh
++++ b/test/TEST-11-ISSUE-3166/test.sh
+@@ -6,7 +6,6 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/3166"
+ TEST_NO_NSPAWN=1
+ 
+ . $TEST_BASE_DIR/test-functions
+-SKIP_INITRD=yes
+ 
+ test_setup() {
+     create_empty_image
+diff --git a/test/TEST-13-NSPAWN-SMOKE/test.sh b/test/TEST-13-NSPAWN-SMOKE/test.sh
+index 6a0cb42..f485a92 100755
+--- a/test/TEST-13-NSPAWN-SMOKE/test.sh
++++ b/test/TEST-13-NSPAWN-SMOKE/test.sh
+@@ -4,7 +4,7 @@
+ set -e
+ TEST_DESCRIPTION="systemd-nspawn smoke test"
+ TEST_NO_NSPAWN=1
+-SKIP_INITRD=yes
++
+ . $TEST_BASE_DIR/test-functions
+ 
+ test_setup() {
+diff --git a/test/TEST-14-MACHINE-ID/test.sh b/test/TEST-14-MACHINE-ID/test.sh
+index 7342645..62003b9 100755
+--- a/test/TEST-14-MACHINE-ID/test.sh
++++ b/test/TEST-14-MACHINE-ID/test.sh
+@@ -4,7 +4,7 @@
+ set -e
+ TEST_DESCRIPTION="/etc/machine-id testing"
+ TEST_NO_NSPAWN=1
+-SKIP_INITRD=yes
++
+ . $TEST_BASE_DIR/test-functions
+ 
+ test_setup() {

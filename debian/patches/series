@@ -6,6 +6,7 @@ bus-util-make-log-level-lower-in-request_name_destroy_cal.patch
 tmpfiles-specify-access-mode-for-run-systemd-netif.patch
 test-fix-networkd-test.py-rate-limiting-and-dynamic-user.patch
 sysusers-tmpfiles-re-create-systemd-network-systemd-resol.patch
+test-Drop-SKIP_INITRD-for-QEMU-based-tests.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
