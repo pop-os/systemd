@@ -100,7 +100,7 @@ addgroup --quiet --system systemd-journal
 RESTART=""
 if dpkg --compare-versions "$2" lt-nl "239-6"; then
     for s in systemd-networkd systemd-timesyncd systemd-resolved ; do
-        if _systemctl is-active $s; then
+        if _systemctl -q is-active $s; then
             _systemctl stop $s
             RESTART="$s $RESTART"
         fi
@@ -114,13 +114,6 @@ adduser --quiet --system --group --no-create-home --home /run/systemd \
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Resolver" systemd-resolve
 
-# Restart services which we stopped earlier
-if dpkg --compare-versions "$2" lt-nl "239-6"; then
-    for s in $RESTART ; do
-        _systemctl start $s
-    done
-fi
-
 # Initial update of the Message Catalogs database
 _update_catalog
 
@@ -132,6 +125,14 @@ if [ -n "$2" ]; then
     _systemctl try-restart systemd-resolved.service || true
     _systemctl try-restart systemd-timesyncd.service || true
     _systemctl try-restart systemd-journald.service || true
+fi
+
+# Restart services which we stopped earlier
+# This needs to run after daemon-rexec
+if dpkg --compare-versions "$2" lt-nl "239-6"; then
+    for s in $RESTART ; do
+        _systemctl start $s
+    done
 fi
 
 # Cleanup hwclock-save.service, which was shipped in jessie.
