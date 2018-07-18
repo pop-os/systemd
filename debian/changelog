@@ -1,3 +1,49 @@
+systemd (239-6) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * autopkgtest: Install libnss-systemd.
+    Make sure that dynamic users can be resolved. This e. g. prevents a
+    startup failure for systemd-resolved.
+  * autopkgtest: Add missing python3 test dependency for udev test
+
+  [ Michael Biebl ]
+  * autopkgtest: Make AppArmor violator test work with merged-usr
+  * Make /dev/kvm accessible to local users and group kvm.
+    Re-add the uaccess tag to /dev/kvm to make it accessible to local
+    users. Access is also granted via group kvm, so create that in
+    udev.postinst. (Closes: #887852)
+  * Move a few man pages from systemd to systemd-journal-remote.
+    The systemd package shipped a few systemd-journal-remote and
+    systemd-journal-upload related man pages which really belong into the
+    systemd-journal-remote package. Move those man pages into the correct
+    package and add a Breaks/Replaces against systemd accordingly.
+    (Closes: #903557)
+  * autopkgtest: Drop no-longer needed workaround from upstream test
+  * Go back to statically allocate system users for timesyncd, networkd and
+    resolved.
+    There are currently too many open issues related to D-Bus and the usage
+    of DynamicUser. (Closes: #902971)
+  * Change python3-minimal dependency to python3.
+    While we strictly only need python3-minimal, the usage of
+    python3-minimal triggers a lintian error: depends-on-python-minimal
+  * test: Drop SKIP_INITRD for QEMU-based tests.
+    The Debian Linux kernel ships ext4 support as a module, so we require an
+    initrd to successfully start the QEMU images.
+  * debian/tests/localed-x11-keymap: Deal with absence of
+    /etc/default/keyboard more gracefully
+  * autopkgtest: Add various dependencies to make upstream test pass on Debian
+    - netcat-openbsd: Required by TEST-12-ISSUE-3171.
+    - busybox-static: Required by TEST-13-NSPAWN-SMOKE.
+    - plymouth: Required by TEST-15-DROPIN and TEST-22-TMPFILES.
+  * Drop seccomp system call filter for udev.
+    The seccomp based system call whitelist requires at least systemd 239 to
+    be the active init and during a dist-upgrade we can't guarantee that
+    systemd has been fully configured before udev is restarted.
+    The versioned systemd Breaks that was added to udev for #902185 didn't
+    really fix this issue, so revert that change again. (Closes: #903224)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 19 Jul 2018 00:04:54 +0200
+
 systemd (239-5) unstable; urgency=medium
 
   * Add inverse version restriction of the Breaks to the systemd-shim
