@@ -26,3 +26,4 @@ debian/Add-env-variable-for-machine-ID-path.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
 debian/Revert-systemctl-when-removing-enablement-or-mask-symlink.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-kvm.patch
+debian/Drop-seccomp-system-call-filter-for-udev.patch
