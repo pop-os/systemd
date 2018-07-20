@@ -105,6 +105,7 @@ Depends: systemd-tests,
   iproute2,
   liblz4-tool,
   acl,
+  iputils-ping,
 Restrictions: needs-root, allow-stderr, isolation-container
 
 Tests: upstream
