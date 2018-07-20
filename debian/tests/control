@@ -98,6 +98,7 @@ Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: root-unittests
 Depends: systemd-tests,
+  libpam-systemd,
   tree,
   perl,
   xz-utils,
@@ -106,6 +107,7 @@ Depends: systemd-tests,
   liblz4-tool,
   acl,
   iputils-ping,
+  dbus-user-session,
 Restrictions: needs-root, allow-stderr, isolation-container
 
 Tests: upstream
