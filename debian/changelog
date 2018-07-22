@@ -1,3 +1,15 @@
+systemd (239-7) unstable; urgency=medium
+
+  * autopkgtest: Add iputils-ping dependency to root-unittests.
+    The ping binary is required by test-bpf.
+  * autopkgtest: Add dbus-user-session and libpam-systemd dependency to
+    root-unittests.
+    Without a working D-Bus user session, a lot of the test-bus-* tests are
+    skipped.
+  * network/link: Fix logic error in matching devices by MAC (Closes: #904198)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 22 Jul 2018 13:40:15 +0200
+
 systemd (239-6) unstable; urgency=medium
 
   [ Martin Pitt ]
