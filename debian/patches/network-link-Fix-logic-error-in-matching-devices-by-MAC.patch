@@ -1,0 +1,26 @@
+From: Dave Reisner <dreisner@archlinux.org>
+Date: Sat, 7 Jul 2018 05:39:01 -0400
+Subject: network/link: Fix logic error in matching devices by MAC
+
+Prior to this commit, a .link file with a [Match] section containing
+MACAddress= would match any device without a MAC. This restores the
+matching logic prior to e90d037.
+
+(cherry picked from commit 25ea58d37385af27301b7ad25e985eb15f421614)
+---
+ src/libsystemd-network/network-internal.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/libsystemd-network/network-internal.c b/src/libsystemd-network/network-internal.c
+index 0849b44..9d16d6c 100644
+--- a/src/libsystemd-network/network-internal.c
++++ b/src/libsystemd-network/network-internal.c
+@@ -124,7 +124,7 @@ bool net_match_config(Set *match_mac,
+         if (match_arch && condition_test(match_arch) <= 0)
+                 return false;
+ 
+-        if (match_mac && dev_mac && !set_contains(match_mac, dev_mac))
++        if (match_mac && (!dev_mac || !set_contains(match_mac, dev_mac)))
+                 return false;
+ 
+         if (!net_condition_test_strv(match_paths, dev_path))
