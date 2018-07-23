@@ -44,8 +44,14 @@ systemd (239-1ubuntu1) cosmic; urgency=medium
     updates to the tmpfiles shipped by systemd package, taking into account any
     overrides shipped by other packages, sysadmin, or specified in the runtime
     directories. (LP: #1748147)
+  * Enable EFI/bootctl on armhf.
+  * boot-and-services: stderr is ok, for status command on the c1 container.
+  * Skip systemd-fsckd on arm64, because of broken/lack of clean shutdown.
+  * adt: boot-and-services: assert any kernel syslog messages.
+  * debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin to the
+    kernel (we previously only set it in modprobe.d) LP: #1779815
 
- -- Dimitri John Ledkov 🌈 <xnox@ubuntu.com>  Mon, 25 Jun 2018 15:55:43 +0100
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 25 Jun 2018 15:55:43 +0100
 
 systemd (239-1) unstable; urgency=medium
 
