@@ -77,10 +77,12 @@ Depends: ${shlibs:Depends},
          adduser,
          procps,
 Breaks: apparmor (<< 2.9.2-1),
-        systemd-shim (<< 10-3~),
+        systemd-shim (<< 10-4~),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
         laptop-mode-tools (<< 1.68~),
+        python-dbusmock (<< 0.18),
+        python3-dbusmock (<< 0.18),
 Replaces: udev (<< 228-5),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
@@ -158,6 +160,8 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
          adduser
+Breaks: systemd (<< 239-6)
+Replaces: systemd (<< 239-6)
 Description: tools for sending and receiving remote journal logs
  This package provides tools for sending and receiving remote journal logs:
   * systemd-journal-remote
@@ -190,7 +194,7 @@ Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
-         python3-minimal,
+         python3,
 Description: tests for systemd
  This package contains the test binaries. Those binaries are primarily used
  for autopkgtest and not meant to be installed on regular user systems.
@@ -206,7 +210,7 @@ Depends: ${shlibs:Depends},
          systemd (= ${binary:Version}),
          libpam-runtime (>= 1.0.1-6),
          dbus,
-         systemd-shim (>= 10-3~) | systemd-sysv
+         systemd-shim (>= 10-4~) | systemd-sysv
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
  the systemd control group hierarchy for logind.

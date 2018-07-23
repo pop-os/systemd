@@ -3,11 +3,19 @@ set -e
 
 . `dirname $0`/assert.sh
 
-ORIG_KBD=`cat /etc/default/keyboard`
+if [ -f /etc/default/keyboard ]; then
+    ORIG_KBD=`cat /etc/default/keyboard`
+else
+    ORIG_KBD=""
+fi
 
 cleanup() {
     # reset locale to original
-    echo "$ORIG_KBD" > /etc/default/keyboard
+    if [ -n "ORIG_KBD" ]; then
+        echo "$ORIG_KBD" > /etc/default/keyboard
+    else
+        rm -f /etc/default/keyboard
+    fi
     rm -f /etc/X11/xorg.conf.d/00-keyboard.conf
 }
 trap cleanup EXIT INT QUIT PIPE

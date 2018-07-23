@@ -1,0 +1,48 @@
+From: Martin Pitt <martin@piware.de>
+Date: Mon, 2 Jul 2018 22:26:31 +0200
+Subject: test: fix networkd-test.py rate limiting and dynamic user
+
+ - Reset systemd-networkd.service before each test run, to avoid running
+   into restart limits.
+ - Our networkd-test-router.service unit needs to run as root and thus
+   can't use `User=`; but networkd still insists on the
+   `systemd-network` system user to exist, so create it.
+
+(cherry picked from commit c44c1b8ab5274c7cdb93d9a80c79bcddb503c235)
+---
+ test/networkd-test.py | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/test/networkd-test.py b/test/networkd-test.py
+index 387cdb6..de16ac1 100755
+--- a/test/networkd-test.py
++++ b/test/networkd-test.py
+@@ -54,6 +54,11 @@ def setUpModule():
+     # Ensure the unit directory exists so tests can dump files into it.
+     os.makedirs(NETWORK_UNITDIR, exist_ok=True)
+ 
++    # create static systemd-network user for networkd-test-router.service (it
++    # needs to do some stuff as root and can't start as user; but networkd
++    # still insists on the user)
++    subprocess.check_call(['adduser', '--system', '--no-create-home', 'systemd-network'])
++
+ 
+ class NetworkdTestingUtilities:
+     """Provide a set of utility functions to facilitate networkd tests.
+@@ -172,6 +177,7 @@ Name=mybridge
+ DNS=192.168.250.1
+ Address=192.168.250.33/24
+ Gateway=192.168.250.1''')
++        subprocess.check_call(['systemctl', 'reset-failed', 'systemd-networkd'])
+         subprocess.check_call(['systemctl', 'start', 'systemd-networkd'])
+ 
+     def tearDown(self):
+@@ -257,6 +263,8 @@ class ClientTestBase(NetworkdTestingUtilities):
+         self.assertTrue(out.startswith('-- cursor:'))
+         self.journal_cursor = out.split()[-1]
+ 
++        subprocess.check_call(['systemctl', 'reset-failed', 'systemd-networkd'])
++
+     def tearDown(self):
+         self.shutdown_iface()
+         subprocess.call(['systemctl', 'stop', 'systemd-networkd'])

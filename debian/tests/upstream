@@ -16,9 +16,6 @@ export BUILD_DIR=.
 # systemd-nspawn from the system.
 sed -i '/DESTDIR.* install/ s%^.*$%    for p in `grep ^Package: '`pwd`'/debian/control | cut -f2 -d\\  |grep -Ev -- "-(udeb|dev)"`; do (cd /tmp; apt-get download $p \&\& dpkg-deb --fsys-tarfile ${p}[._]*deb | tar -C $initdir --dereference -x); done%; s_[^" ]*/systemd-nspawn_systemd-nspawn_g; s/\(_ninja_bin=\).*/\1dummy-ninja/' test/test-functions
 
-# FIXME: avoid building the entire tree when running tests (fixed in master, but not yet 234)
-sed -i '/@make.*all/ d' test/TEST*/Makefile
-
 # adjust path
 sed -i 's_/usr/libexec/selinux/hll/pp_/usr/lib/selinux/hll/pp_' test/TEST-06-SELINUX/test.sh
 
