@@ -1,3 +1,10 @@
+systemd (238-5ubuntu3) cosmic; urgency=medium
+
+  * debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin
+    to the kernel (we previously only set it in modprobe.d) LP: #1779815
+
+ -- Adam Conrad <adconrad@ubuntu.com>  Fri, 20 Jul 2018 11:13:58 -0600
+
 systemd (238-5ubuntu2) cosmic; urgency=medium
 
   * Disable dh_installinit generation of tmpfiles for the systemd package.
