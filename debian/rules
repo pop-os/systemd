@@ -65,7 +65,8 @@ CONFFLAGS = \
 	-Dsystem-uid-max=999 \
 	-Dsystem-gid-max=999 \
 	-Dnobody-user=nobody \
-	-Dnobody-group=nogroup
+	-Dnobody-group=nogroup \
+	-Ddev-kvm-mode=0660
 
 # resolved's DNSSEC support is still not mature enough, don't enable it by
 # default on stable Debian or any Ubuntu releases

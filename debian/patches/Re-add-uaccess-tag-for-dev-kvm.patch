@@ -1,0 +1,30 @@
+From: Michael Biebl <biebl@debian.org>
+Date: Tue, 10 Jul 2018 14:47:58 +0200
+Subject: Re-add uaccess tag for /dev/kvm
+
+If --dev-kvm-mode is set to something different then 0666, which we
+explicitly support, it makes sense to still apply the uaccess tag to
+/dev/kvm. For distros which opt to use the default 0666, this change is
+a nop.
+
+This partially reverts commit b8fd3d82205f632ce001fade74fed287e1564a1a.
+
+(cherry picked from commit fa53e24130af3a389573acb9585eadbf7192955f)
+---
+ src/login/70-uaccess.rules | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/login/70-uaccess.rules b/src/login/70-uaccess.rules
+index 3515d29..6feb957 100644
+--- a/src/login/70-uaccess.rules
++++ b/src/login/70-uaccess.rules
+@@ -47,6 +47,9 @@ SUBSYSTEM=="firewire", ATTR{units}=="*0x00a02d:0x014001*", TAG+="uaccess"
+ # DRI video devices
+ SUBSYSTEM=="drm", KERNEL=="card*", TAG+="uaccess"
+ 
++# KVM
++SUBSYSTEM=="misc", KERNEL=="kvm", TAG+="uaccess"
++
+ # smart-card readers
+ ENV{ID_SMARTCARD_READER}=="?*", TAG+="uaccess"
+ 
