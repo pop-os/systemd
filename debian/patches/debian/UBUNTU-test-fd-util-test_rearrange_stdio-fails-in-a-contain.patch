@@ -1,0 +1,31 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Thu, 26 Jul 2018 16:14:57 +0100
+Subject: test-fd-util: test_rearrange_stdio fails in a container.
+
+In LXD container, test_rearrange_stdio fails / aborts.
+---
+ src/test/test-fd-util.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/test/test-fd-util.c b/src/test/test-fd-util.c
+index a04403d..a567ee0 100644
+--- a/src/test/test-fd-util.c
++++ b/src/test/test-fd-util.c
+@@ -12,6 +12,7 @@
+ #include "random-util.h"
+ #include "string-util.h"
+ #include "util.h"
++#include "virt.h"
+ 
+ static void test_close_many(void) {
+         int fds[3];
+@@ -161,6 +162,9 @@ static void test_rearrange_stdio(void) {
+         pid_t pid;
+         int r;
+ 
++        if (detect_container() > 0)
++                return;
++
+         r = safe_fork("rearrange", FORK_WAIT|FORK_LOG, &pid);
+         assert_se(r >= 0);
+ 

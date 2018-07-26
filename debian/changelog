@@ -51,8 +51,9 @@ systemd (239-7ubuntu1) cosmic; urgency=medium
   * debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin to the
     kernel (we previously only set it in modprobe.d) LP: #1779815
   * units: conditionalize more units to not start in containers.
+  * tests: conditionalize more unit tests to pass in LXD container.
 
- -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 25 Jun 2018 15:55:43 +0100
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 26 Jul 2018 16:26:22 +0100
 
 systemd (239-7) unstable; urgency=medium
 
