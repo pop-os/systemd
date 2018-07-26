@@ -10,6 +10,8 @@ test-Drop-SKIP_INITRD-for-QEMU-based-tests.patch
 network-link-Fix-logic-error-in-matching-devices-by-MAC.patch
 Re-add-uaccess-tag-for-dev-kvm.patch
 Do-not-apply-uaccess-tag-for-dev-kvm-if-mode-is-0666.patch
+timedate-increment-reference-count-of-sd_bus_message.patch
+timedate-defer-the-property-changed-signal-until-job-of-s.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
