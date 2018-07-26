@@ -44,3 +44,4 @@ debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
 debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
 debian/UBUNTU-resolved-Listen-on-both-TCP-and-UDP-by-default.patch
 debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch

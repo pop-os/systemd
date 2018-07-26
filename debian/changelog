@@ -50,6 +50,7 @@ systemd (239-7ubuntu1) cosmic; urgency=medium
   * adt: boot-and-services: assert any kernel syslog messages.
   * debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin to the
     kernel (we previously only set it in modprobe.d) LP: #1779815
+  * units: conditionalize more units to not start in containers.
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 25 Jun 2018 15:55:43 +0100
 
