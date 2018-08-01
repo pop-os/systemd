@@ -47,3 +47,4 @@ debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
 debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
 debian/UBUNTU-test-execute-fix-execution-expectations-in-container.patch
 debian/UBUNTU-test-fd-util-test_rearrange_stdio-fails-in-a-contain.patch
+debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
