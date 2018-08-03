@@ -1,3 +1,11 @@
+systemd (239-7ubuntu2) cosmic; urgency=medium
+
+  * test-sleep: skip test_fiemap upon inapproriate ioctl for device.
+    On v4.4 kernels, on top of btrfs ephemeral lxd v3.0 containers generate this
+    other error code, instead of not supported. Skip the test for both error codes.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 03 Aug 2018 16:49:10 +0100
+
 systemd (239-7ubuntu1) cosmic; urgency=medium
 
   Merged from Debian Unstable, remaining changes are:
