@@ -1,3 +1,12 @@
+systemd (239-7ubuntu3) cosmic; urgency=medium
+
+  * Revert "networkd: Unify set MTU"
+    This reverts commit 44b598a1c9d11c23420a5ef45ff11bcb0ed195eb due to regression
+    of ignoring LinkLocalAddressing=no.
+    Bug-Upstream: https://github.com/systemd/systemd/issues/9890
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 21 Aug 2018 21:51:31 +0100
+
 systemd (239-7ubuntu2) cosmic; urgency=medium
 
   * test-sleep: skip test_fiemap upon inapproriate ioctl for device.
