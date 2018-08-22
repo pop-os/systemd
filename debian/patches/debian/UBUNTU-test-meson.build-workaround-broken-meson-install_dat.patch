@@ -1,0 +1,66 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Wed, 22 Aug 2018 14:06:28 +0100
+Subject: meson.build: workaround broken meson install_data function
+
+Bug-Upstream: https://github.com/mesonbuild/meson/issues/4069
+Bug-Upstream: https://github.com/systemd/systemd/issues/9906
+---
+ meson.build            |  1 +
+ test/meson.build       | 13 ++++++++++---
+ units/user/meson.build |  6 ++++--
+ 3 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index 7d3fa6a..64cb92e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -525,6 +525,7 @@ perl = find_program('perl', required : false)
+ 
+ meson_make_symlink = meson.source_root() + '/tools/meson-make-symlink.sh'
+ mkdir_p = 'mkdir -p $DESTDIR/@0@'
++cp_cmd = 'cp @0@ $DESTDIR/@1@'
+ test_efi_create_disk_sh = find_program('test/test-efi-create-disk.sh')
+ splash_bmp = files('test/splash.bmp')
+ 
+diff --git a/test/meson.build b/test/meson.build
+index 826e684..ec6ab5f 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -198,9 +198,16 @@ if install_tests
+                 if subdir == file
+                         subdir = ''
+                 endif
+-
+-                install_data(file,
+-                             install_dir : testsdir + '/testdata/' + subdir)
++                # because install_data is broken, and instead of copying test
++                # files as real files into target dir it now copies them as
++                # dangling symlinks, if the source file is a symlink to another
++                # file in the tree
++                src = meson.current_source_dir() + '/' + file
++                target = testsdir + '/testdata/' + subdir
++                meson.add_install_script('sh', '-c',
++                                         mkdir_p.format(target))
++                meson.add_install_script('sh', '-c',
++                                         cp_cmd.format(src, target))
+         endforeach
+ endif
+ 
+diff --git a/units/user/meson.build b/units/user/meson.build
+index b1c2e95..67dbef9 100644
+--- a/units/user/meson.build
++++ b/units/user/meson.build
+@@ -17,9 +17,11 @@ units = [
+         'systemd-tmpfiles-clean.timer',
+ ]
+ 
++meson.add_install_script('sh', '-c',
++                         mkdir_p.format(userunitdir))
+ foreach file : units
+-        install_data(file,
+-                     install_dir : userunitdir)
++        meson.add_install_script(
++            'sh', '-c', cp_cmd.format(meson.current_source_dir() + '/' + file, userunitdir))
+ endforeach
+ 
+ in_units = [
