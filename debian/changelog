@@ -1,3 +1,9 @@
+systemd (239-7ubuntu4) cosmic; urgency=medium
+
+  * Workaround broken meson copying symlinked data files, as dangling symlinks.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 22 Aug 2018 14:11:35 +0100
+
 systemd (239-7ubuntu3) cosmic; urgency=medium
 
   * Revert "networkd: Unify set MTU"
