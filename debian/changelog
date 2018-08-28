@@ -1,3 +1,27 @@
+systemd (239-7ubuntu5) cosmic; urgency=medium
+
+  [ Michael Biebl ]
+  * Clean up dbus-org.freedesktop.timesync1.service Alias on purge
+    (Closes: #904290)
+
+  [ Martin Pitt ]
+  * timedated: Fix wrong PropertyChanged values and refcounting
+
+  [ Dimitri John Ledkov ]
+  * autopkgtest: drop gdm3 on arm64 as well.
+    The cloud instances are configured without a graphics card, and thus X fails to
+    start, hence the gdm test fails.
+  * Revert "Workaround broken meson copying symlinked data files, as dangling symlinks."
+    This reverts commit 059bfb5349123fabc8c92324e0473193f01fc87c.
+  * Cherrypick v239-stable patches.
+  * cryptsetup: add support for sector-size= option (LP: #1776626)
+  * Cherrypick upstrem patches to fix ftbfs with new glibc.
+
+  [ Michael Vogt ]
+  * Re-add support for /etc/writable for core18. (LP: #1778936)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 28 Aug 2018 17:35:51 +0100
+
 systemd (239-7ubuntu4) cosmic; urgency=medium
 
   * Workaround broken meson copying symlinked data files, as dangling symlinks.
