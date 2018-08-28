@@ -390,10 +390,10 @@ index 598b931..0f1aed4 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 82eb213..accdffa 100644
+index 3b70939..cffaf07 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -203,6 +203,7 @@ static int context_read_data(Context *c) {
+@@ -211,6 +211,7 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          int r = 0;
@@ -401,7 +401,7 @@ index 82eb213..accdffa 100644
  
          assert(c);
  
-@@ -210,6 +211,9 @@ static int context_write_data_timezone(Context *c) {
+@@ -218,6 +219,9 @@ static int context_write_data_timezone(Context *c) {
                  if (unlink("/etc/localtime") < 0 && errno != ENOENT)
                          r = -errno;
  
@@ -411,7 +411,7 @@ index 82eb213..accdffa 100644
                  return r;
          }
  
-@@ -221,6 +225,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -229,6 +233,12 @@ static int context_write_data_timezone(Context *c) {
          if (r < 0)
                  return r;
  

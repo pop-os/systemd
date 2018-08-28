@@ -9,6 +9,10 @@ test-fix-networkd-test.py-rate-limiting-and-dynamic-user.patch
 sysusers-tmpfiles-re-create-systemd-network-systemd-resol.patch
 test-Drop-SKIP_INITRD-for-QEMU-based-tests.patch
 network-link-Fix-logic-error-in-matching-devices-by-MAC.patch
+Re-add-uaccess-tag-for-dev-kvm.patch
+Do-not-apply-uaccess-tag-for-dev-kvm-if-mode-is-0666.patch
+timedate-increment-reference-count-of-sd_bus_message.patch
+timedate-defer-the-property-changed-signal-until-job-of-s.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -27,7 +31,6 @@ debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
 debian/Revert-systemctl-when-removing-enablement-or-mask-symlink.patch
-debian/Revert-udev-rules-Permission-changes-for-dev-kvm.patch
 debian/Drop-seccomp-system-call-filter-for-udev.patch
 debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
 debian/Ubuntu-UseDomains-by-default.patch
