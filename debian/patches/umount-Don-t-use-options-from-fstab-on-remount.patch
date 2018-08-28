@@ -1,0 +1,77 @@
+From: aszlig <aszlig@nix.build>
+Date: Mon, 20 Aug 2018 05:33:58 +0200
+Subject: umount: Don't use options from fstab on remount
+
+The fstab entry may contain comment/application-specific options, like
+for example x-systemd.automount or x-initrd.mount.
+
+With the recent switch to libmount, the mount options during remount are
+now gathered via mnt_fs_get_options(), which returns the merged fstab
+options with the effective options in mountinfo.
+
+Unfortunately if one of these application-specific options are set in
+fstab, the remount will fail with -EINVAL.
+
+In systemd 238:
+
+  Remounting '/test-x-initrd-mount' read-only in with options
+  'errors=continue,user_xattr,acl'.
+
+In systemd 239:
+
+  Remounting '/test-x-initrd-mount' read-only in with options
+  'errors=continue,user_xattr,acl,x-initrd.mount'.
+  Failed to remount '/test-x-initrd-mount' read-only: Invalid argument
+
+So instead of using mnt_fs_get_options(), we're now using both
+mnt_fs_get_fs_options() and mnt_fs_get_vfs_options() and merging the
+results together so we don't get any non-relevant options from fstab.
+
+Signed-off-by: aszlig <aszlig@nix.build>
+(cherry picked from commit 66c91c3a23f684482e33e54c7bbaaf69384b7d11)
+(cherry picked from commit c38499d476026d999558a7eee9c95ca2fa41e115)
+---
+ src/core/umount.c | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/umount.c b/src/core/umount.c
+index 241fe6f..8ed1074 100644
+--- a/src/core/umount.c
++++ b/src/core/umount.c
+@@ -72,7 +72,8 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
+ 
+         for (;;) {
+                 struct libmnt_fs *fs;
+-                const char *path, *options, *fstype;
++                const char *path, *fstype;
++                _cleanup_free_ char *options = NULL;
+                 _cleanup_free_ char *p = NULL;
+                 unsigned long remount_flags = 0u;
+                 _cleanup_free_ char *remount_options = NULL;
+@@ -92,9 +93,25 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
+                 if (cunescape(path, UNESCAPE_RELAX, &p) < 0)
+                         return log_oom();
+ 
+-                options = mnt_fs_get_options(fs);
+                 fstype = mnt_fs_get_fstype(fs);
+ 
++                /* Combine the generic VFS options with the FS-specific
++                 * options. Duplicates are not a problem here, because the only
++                 * options that should come up twice are typically ro/rw, which
++                 * are turned into MS_RDONLY or the invertion of it.
++                 *
++                 * Even if there are duplicates later in mount_option_mangle()
++                 * it shouldn't hurt anyways as they override each other.
++                 */
++                if (!strextend_with_separator(&options, ",",
++                                              mnt_fs_get_vfs_options(fs),
++                                              NULL))
++                        return log_oom();
++                if (!strextend_with_separator(&options, ",",
++                                              mnt_fs_get_fs_options(fs),
++                                              NULL))
++                        return log_oom();
++
+                 /* Ignore mount points we can't unmount because they
+                  * are API or because we are keeping them open (like
+                  * /dev/console). Also, ignore all mounts below API

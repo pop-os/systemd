@@ -1,0 +1,27 @@
+From: YmrDtnJu <YmrDtnJu@users.noreply.github.com>
+Date: Fri, 22 Jun 2018 23:17:07 +0000
+Subject: core: Actually use the resolved path for TemporaryFileSystem=
+ (#9385)
+
+The code already resolves specifiers using unit_full_printf() but then uses the
+unresolved version again for temporary_filesystem_add().
+
+(cherry picked from commit a26fec240862c7bc466f468490bae2395f263708)
+(cherry picked from commit 46e98d5acef33196ca84945af3a0c1c928a05130)
+---
+ src/core/load-fragment.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index d9a5094..fa36052 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -3904,7 +3904,7 @@ int config_parse_temporary_filesystems(
+                 if (r < 0)
+                         continue;
+ 
+-                r = temporary_filesystem_add(&c->temporary_filesystems, &c->n_temporary_filesystems, path, w);
++                r = temporary_filesystem_add(&c->temporary_filesystems, &c->n_temporary_filesystems, resolved, w);
+                 if (r == -ENOMEM)
+                         return log_oom();
+                 if (r < 0) {
