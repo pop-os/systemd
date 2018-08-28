@@ -15,6 +15,7 @@ timedate-increment-reference-count-of-sd_bus_message.patch
 timedate-defer-the-property-changed-signal-until-job-of-s.patch
 core-Actually-use-the-resolved-path-for-TemporaryFileSyst.patch
 umount-Don-t-use-options-from-fstab-on-remount.patch
+cryptsetup-add-support-for-sector-size-option-8881.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
