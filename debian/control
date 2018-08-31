@@ -76,8 +76,8 @@ Depends: ${shlibs:Depends},
          mount (>= 2.26),
          adduser,
          procps,
+Conflicts: systemd-shim (<< 10-4~),
 Breaks: apparmor (<< 2.9.2-1),
-        systemd-shim (<< 10-4~),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
         laptop-mode-tools (<< 1.68~),
@@ -114,7 +114,8 @@ Replaces: sysvinit (<< 2.88dsf-44~),
           upstart-sysv,
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
-         ${misc:Depends}
+         ${misc:Depends},
+         systemd (= ${binary:Version}),
 Recommends: libnss-systemd
 Description: system and service manager - SysV links
  systemd is a system and service manager for Linux. It provides aggressive
