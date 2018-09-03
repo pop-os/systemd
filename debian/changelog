@@ -1,3 +1,11 @@
+systemd (239-7ubuntu7) cosmic; urgency=medium
+
+  * boot-and-services: skip gdm test, when gdm-x-session fails.
+    Across all architectures, gdm fails to come up reliably since cosmic.
+    (LP: #1790478)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 03 Sep 2018 16:33:00 +0100
+
 systemd (239-7ubuntu6) cosmic; urgency=medium
 
   [ Dimitri John Ledkov ]
