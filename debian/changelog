@@ -1,3 +1,20 @@
+systemd (239-7ubuntu6) cosmic; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * debian/control: strengthen dependencies.
+    Make systemd-sysv depend on matching version of systemd. Autopkgtests at times
+    upgrade systemd-sysv without upgrading systemd. However, upgrading systemd-sysv
+    alone makes little sense.
+    Make systemd conflict, rather than just break, systemd-shim. As there are
+    upgrade failures cause by systemd-shim presence whilst upgrading to new
+    systemd.
+  * Correct gdm3 exclution on arm64, in boot-and-services test.
+
+  [ Christian Ehrhardt ]
+  * Improve autopkgtest success rate, by bumping up timeouts. (LP: #1789841)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 31 Aug 2018 14:17:54 +0100
+
 systemd (239-7ubuntu5) cosmic; urgency=medium
 
   [ Michael Biebl ]
