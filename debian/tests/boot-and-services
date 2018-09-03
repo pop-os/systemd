@@ -62,6 +62,7 @@ class ServicesTest(unittest.TestCase):
             self.assertEqual(failed, [])
 
     @unittest.skipUnless(subprocess.call(['which', 'gdm3'], stdout=subprocess.DEVNULL) == 0, 'gdm3 not found')
+    @unittest.skipUnless(subprocess.call(['ps', 'u', '-C', 'gdm-x-session'], stdout=subprocess.DEVNULL) == 0, 'gdm-x-session failed to start')
     def test_gdm3(self):
         out = subprocess.check_output(['ps', 'u', '-C', 'gdm-x-session'])
         self.assertIn(b'gdm-x-session gnome-session', out)
