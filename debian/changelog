@@ -1,3 +1,23 @@
+systemd (239-8) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Clean up dbus-org.freedesktop.timesync1.service Alias on purge
+    (Closes: #904290)
+  * user-runtime-dir: Fix wrong SELinux context (Closes: #908026)
+  * core: Fix gid when DynamicUser=yes with static user (Closes: #904335)
+  * Remove udev control socket on shutdown under sysvinit.
+    The udev control socket is no longer removed automatically when the
+    daemon is stopped. As this can confuse other software, update the SysV
+    init script to remove the control socket manually and make sure the init
+    script is executed on shutdown (runlevel 0) and reboot (runlevel 6).
+    (Closes: #791944)
+  * Bump Standards-Version to 4.2.1
+
+  [ Martin Pitt ]
+  * timedated: Fix wrong PropertyChanged values and refcounting
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 07 Sep 2018 08:41:12 +0200
+
 systemd (239-7) unstable; urgency=medium
 
   * autopkgtest: Add iputils-ping dependency to root-unittests.
