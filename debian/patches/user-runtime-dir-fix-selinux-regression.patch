@@ -1,0 +1,40 @@
+From: Alan Jenkins <alan.christopher.jenkins@gmail.com>
+Date: Mon, 3 Sep 2018 11:10:24 +0100
+Subject: user-runtime-dir: fix selinux regression
+
+Fix #9993.  When this code was split out to user-runtime-dir, it forgot to
+include the call to mac_selinux_init().  So mkdir_label() stopped working.
+
+Fixes: a9f0f5e50104 ("logind: split %t directory creation to a helper
+unit")
+
+(cherry picked from commit 81375d802672f34205bef9f301c58854af5fc568)
+---
+ src/login/user-runtime-dir.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/login/user-runtime-dir.c b/src/login/user-runtime-dir.c
+index 1bb26c9..790de0e 100644
+--- a/src/login/user-runtime-dir.c
++++ b/src/login/user-runtime-dir.c
+@@ -10,6 +10,7 @@
+ #include "mount-util.h"
+ #include "path-util.h"
+ #include "rm-rf.h"
++#include "selinux-util.h"
+ #include "smack-util.h"
+ #include "stdio-util.h"
+ #include "string-util.h"
+@@ -144,6 +145,12 @@ int main(int argc, char *argv[]) {
+                 return EXIT_FAILURE;
+         }
+ 
++        r = mac_selinux_init();
++        if (r < 0) {
++                log_error_errno(r, "Could not initialize labelling: %m\n");
++                return EXIT_FAILURE;
++        }
++
+         umask(0022);
+ 
+         user = argv[2];
