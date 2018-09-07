@@ -2,11 +2,19 @@
 ### BEGIN INIT INFO
 # Provides:          udev
 # Required-Start:    mountkernfs
-# Required-Stop:
+# Required-Stop:     umountroot
 # Default-Start:     S
-# Default-Stop:
+# Default-Stop:      0 6
 # Short-Description: Start systemd-udevd, populate /dev and load drivers.
 ### END INIT INFO
+
+PATH="/sbin:/bin"
+NAME="systemd-udevd"
+DAEMON="/lib/systemd/systemd-udevd"
+DESC="hotplug events dispatcher"
+PIDFILE="/run/udev.pid"
+CTRLFILE="/run/udev/control"
+OMITDIR="/run/sendsigs.omit.d"
 
 # we need to unmount /dev/pts/ and remount it later over the devtmpfs
 unmount_devpts() {
@@ -98,10 +106,6 @@ make_static_nodes() {
 
 ##############################################################################
 
-PATH="/sbin:/bin"
-NAME="systemd-udevd"
-DAEMON="/lib/systemd/systemd-udevd"
-DESC="the hotplug events dispatcher"
 
 [ -x $DAEMON ] || exit 0
 
@@ -175,7 +179,11 @@ case "$1" in
     [ -x /sbin/restorecon ] && /sbin/restorecon -R /dev
 
     log_daemon_msg "Starting $DESC" "$NAME"
-    if $DAEMON --daemon; then
+    if start-stop-daemon --start --name $NAME --user root --quiet \
+        --pidfile $PIDFILE --exec $DAEMON --background --make-pidfile; then
+        # prevents udevd to be killed by sendsigs (see #791944)
+        mkdir -p $OMITDIR
+        ln -sf $PIDFILE $OMITDIR/$NAME
 	log_end_msg $?
     else
 	log_warning_msg $?
@@ -203,7 +211,10 @@ case "$1" in
 
     stop)
     log_daemon_msg "Stopping $DESC" "$NAME"
-    if start-stop-daemon --stop --name $NAME --user root --quiet --oknodo --retry 5; then
+    if start-stop-daemon --stop --name $NAME --user root --quiet \
+        --pidfile $PIDFILE --remove-pidfile --oknodo --retry 5; then
+        # prevents cryptsetup/dmsetup hangs (see #791944)
+        rm -f $CTRLFILE
 	log_end_msg $?
     else
 	log_end_msg $?
@@ -212,14 +223,21 @@ case "$1" in
 
     restart)
     log_daemon_msg "Stopping $DESC" "$NAME"
-    if start-stop-daemon --stop --name $NAME --user root --quiet --oknodo --retry 5; then
+    if start-stop-daemon --stop --name $NAME --user root --quiet \
+        --pidfile $PIDFILE --remove-pidfile --oknodo --retry 5; then
+        # prevents cryptsetup/dmsetup hangs (see #791944)
+        rm -f $CTRLFILE
 	log_end_msg $?
     else
 	log_end_msg $? || true
     fi
 
     log_daemon_msg "Starting $DESC" "$NAME"
-    if $DAEMON --daemon; then
+    if start-stop-daemon --start --name $NAME --user root --quiet \
+        --pidfile $PIDFILE --exec $DAEMON --background --make-pidfile; then
+        # prevents udevd to be killed by sendsigs (see #791944)
+        mkdir -p $OMITDIR
+        ln -sf $PIDFILE $OMITDIR/$NAME
 	log_end_msg $?
     else
 	log_end_msg $?
