@@ -79,7 +79,8 @@ CONFFLAGS_deb = \
 	-Dinstall-tests=true \
 	-Defi=true \
 	-Dnss-systemd=true \
-	-Dresolve=true
+	-Dresolve=true \
+	-Dlink-systemctl-shared=false
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS_deb += \
@@ -269,7 +270,6 @@ PROJECT_VERSION ?= $(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.
 override_dh_shlibdeps:
 	dh_shlibdeps -psystemd -- -dPre-Depends \
 		-edebian/systemd/bin/systemctl \
-		-edebian/systemd/lib/systemd/libsystemd-shared-$(PROJECT_VERSION).so \
 		-dDepends
 	dh_shlibdeps --remaining-packages -Lsystemd
 
