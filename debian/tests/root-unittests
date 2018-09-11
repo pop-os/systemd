@@ -3,12 +3,6 @@ set -eu
 
 EXFAIL=""
 
-# No items in catalog.
-# Assertion 'r >= 0' failed at ../src/journal/test-catalog.c:252, function main(). Aborting.
-EXFAIL="$EXFAIL
-test-catalog
-"
-
 res=0
 for t in /usr/lib/systemd/tests/test-*; do
     tname=$(basename $t)

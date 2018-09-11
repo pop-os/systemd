@@ -1,0 +1,100 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 11 Sep 2018 09:18:33 +0900
+Subject: test: make test-catalog relocatable
+
+Fixes #10045.
+
+(cherry picked from commit d9b6baa69968132d33e4ad8627c7fe0bd527c859)
+---
+ catalog/meson.build        |  1 -
+ src/journal/test-catalog.c | 27 +++++++++++++++++++--------
+ src/test/meson.build       |  2 +-
+ 3 files changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/catalog/meson.build b/catalog/meson.build
+index 1b13150..3db8e39 100644
+--- a/catalog/meson.build
++++ b/catalog/meson.build
+@@ -17,7 +17,6 @@ in_files = '''
+ 
+ support_url = get_option('support-url')
+ support_sed = 's~%SUPPORT_URL%~@0@~'.format(support_url)
+-build_catalog_dir = meson.current_build_dir()
+ 
+ foreach file : in_files
+         custom_target(
+diff --git a/src/journal/test-catalog.c b/src/journal/test-catalog.c
+index 8eae993..0c4da29 100644
+--- a/src/journal/test-catalog.c
++++ b/src/journal/test-catalog.c
+@@ -14,14 +14,13 @@
+ #include "fileio.h"
+ #include "log.h"
+ #include "macro.h"
++#include "path-util.h"
+ #include "string-util.h"
++#include "strv.h"
++#include "tests.h"
+ #include "util.h"
+ 
+-static const char *catalog_dirs[] = {
+-        CATALOG_DIR,
+-        NULL,
+-};
+-
++static char** catalog_dirs = NULL;
+ static const char *no_catalog_dirs[] = {
+         "/bin/hopefully/with/no/catalog",
+         NULL
+@@ -167,8 +166,8 @@ static void test_catalog_update(const char *database) {
+         assert_se(r == 0);
+ 
+         /* Make sure that we at least have some files loaded or the
+-           catalog_list below will fail. */
+-        r = catalog_update(database, NULL, catalog_dirs);
++         * catalog_list below will fail. */
++        r = catalog_update(database, NULL, (const char * const *) catalog_dirs);
+         assert_se(r == 0);
+ }
+ 
+@@ -202,14 +201,26 @@ static void test_catalog_file_lang(void) {
+ 
+ int main(int argc, char *argv[]) {
+         _cleanup_(unlink_tempfilep) char database[] = "/tmp/test-catalog.XXXXXX";
+-        _cleanup_free_ char *text = NULL;
++        _cleanup_free_ char *text = NULL, *catalog_dir = NULL;
+         int r;
+ 
+         setlocale(LC_ALL, "de_DE.UTF-8");
+ 
++        log_set_max_level(LOG_DEBUG);
+         log_parse_environment();
+         log_open();
+ 
++        /* If test-catalog is located at the build directory, then use catalogs in that.
++         * If it is not, e.g. installed by systemd-tests package, then use installed catalogs. */
++        if (test_is_running_from_builddir(NULL)) {
++                assert_se(catalog_dir = path_join(NULL, ABS_BUILD_DIR, "catalog"));
++                catalog_dirs = STRV_MAKE(catalog_dir);
++        } else
++                catalog_dirs = STRV_MAKE(CATALOG_DIR);
++
++        assert_se(access(catalog_dirs[0], F_OK) >= 0);
++        log_notice("Using catalog directory '%s'", catalog_dirs[0]);
++
+         test_catalog_file_lang();
+ 
+         test_catalog_import_invalid();
+diff --git a/src/test/meson.build b/src/test/meson.build
+index 7da7e3a..1ef7ac6 100644
+--- a/src/test/meson.build
++++ b/src/test/meson.build
+@@ -757,7 +757,7 @@ tests += [
+          [threads,
+           libxz,
+           liblz4],
+-         '', '', '-DCATALOG_DIR="@0@"'.format(build_catalog_dir)],
++         '', '', '-DCATALOG_DIR="@0@"'.format(catalogdir)],
+ 
+         [['src/journal/test-compress.c'],
+          [libjournal_core,

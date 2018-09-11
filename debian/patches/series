@@ -14,6 +14,8 @@ timedate-increment-reference-count-of-sd_bus_message.patch
 timedate-defer-the-property-changed-signal-until-job-of-s.patch
 user-runtime-dir-fix-selinux-regression.patch
 core-fix-gid-when-DynamicUser-yes-with-static-User.patch
+test-introduce-test_is_running_from_builddir.patch
+test-make-test-catalog-relocatable.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
