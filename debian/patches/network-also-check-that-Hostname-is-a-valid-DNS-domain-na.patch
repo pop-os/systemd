@@ -1,0 +1,48 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 2 Aug 2018 16:28:23 +0900
+Subject: network: also check that Hostname= is a valid DNS domain name
+
+(cherry picked from commit 6528693a94821e0e13a8e112fb481c4ab0c62688)
+---
+ src/network/networkd-network.c | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index 429aac5..ccf5d6d 100644
+--- a/src/network/networkd-network.c
++++ b/src/network/networkd-network.c
+@@ -966,7 +966,8 @@ int config_parse_hostname(
+                 void *data,
+                 void *userdata) {
+ 
+-        char **hostname = data, *hn = NULL;
++        _cleanup_free_ char *hn = NULL;
++        char **hostname = data;
+         int r;
+ 
+         assert(filename);
+@@ -979,13 +980,20 @@ int config_parse_hostname(
+ 
+         if (!hostname_is_valid(hn, false)) {
+                 log_syntax(unit, LOG_ERR, filename, line, 0, "Hostname is not valid, ignoring assignment: %s", rvalue);
+-                free(hn);
+                 return 0;
+         }
+ 
+-        free(*hostname);
+-        *hostname = hostname_cleanup(hn);
+-        return 0;
++        r = dns_name_is_valid(hn);
++        if (r < 0) {
++                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to check validity of hostname '%s', ignoring assignment: %m", rvalue);
++                return 0;
++        }
++        if (r == 0) {
++                log_syntax(unit, LOG_ERR, filename, line, 0, "Hostname is not a valid DNS domain name, ignoring assignment: %s", rvalue);
++                return 0;
++        }
++
++        return free_and_replace(*hostname, hn);
+ }
+ 
+ int config_parse_timezone(

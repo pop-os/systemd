@@ -23,7 +23,7 @@ Users may override this setting in the .network files by specifying
  2 files changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index fc8e0ae..256a5f4 100644
+index f0076cd..5f3eba3 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
 @@ -301,7 +301,7 @@
@@ -35,7 +35,7 @@ index fc8e0ae..256a5f4 100644
              See option <option>UseDomains=</option> below.</para>
  
              <para>See the <literal>[DHCP]</literal> section below for further configuration options for the DHCP client
-@@ -1213,7 +1213,7 @@
+@@ -1214,7 +1214,7 @@
              the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name received from
              the DHCP server will be used for routing DNS queries only, but not for searching, similar to the effect of
              the <option>Domains=</option> setting when the argument is prefixed with <literal>~</literal>. Defaults to
@@ -44,7 +44,7 @@ index fc8e0ae..256a5f4 100644
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-@@ -1389,7 +1389,7 @@
+@@ -1390,7 +1390,7 @@
              the effect of the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name
              received via IPv6 RA will be used for routing DNS queries only, but not for searching, similar to the
              effect of the <option>Domains=</option> setting when the argument is prefixed with
@@ -54,7 +54,7 @@ index fc8e0ae..256a5f4 100644
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 429aac5..5978f8b 100644
+index 6bfd017..fa18617 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
 @@ -194,6 +194,7 @@ static int network_load_one(Manager *manager, const char *filename) {

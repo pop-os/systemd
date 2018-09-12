@@ -1,0 +1,25 @@
+From: Evgeny Vereshchagin <evvers@ya.ru>
+Date: Fri, 10 Aug 2018 12:52:07 +0000
+Subject: journald: free the allocated memory before returning from
+ dev_kmsg_record
+
+This fixes a minor memory leak.
+
+(cherry picked from commit 30eddcd51b8a472e05d3b8d1f0b89fbd3e094d71)
+---
+ src/journal/journald-kmsg.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/journal/journald-kmsg.c b/src/journal/journald-kmsg.c
+index 7ad6733..7644beb 100644
+--- a/src/journal/journald-kmsg.c
++++ b/src/journal/journald-kmsg.c
+@@ -191,7 +191,7 @@ static void dev_kmsg_record(Server *s, char *p, size_t l) {
+ 
+                 e = memchr(k, '\n', l);
+                 if (!e)
+-                        return;
++                        goto finish;
+ 
+                 *e = 0;
+ 

@@ -1,0 +1,27 @@
+From: Evgeny Vereshchagin <evvers@ya.ru>
+Date: Fri, 10 Aug 2018 12:45:42 +0000
+Subject: journald: make it clear that dev_kmsg_record modifies the string
+ passed to it
+
+The function replaces a couple commas, a semicolon and the final newline with
+zero bytes in the string passed to it. The 'const' seems to have been added
+by accident during a bulk edit (more specifically 3b3154df7e2773332bb814).
+
+(cherry picked from commit 1e0c5fc2a76e4f3d508331f410899c50493e1fc9)
+---
+ src/journal/journald-kmsg.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/journal/journald-kmsg.c b/src/journal/journald-kmsg.c
+index e9aff13..7ad6733 100644
+--- a/src/journal/journald-kmsg.c
++++ b/src/journal/journald-kmsg.c
+@@ -93,7 +93,7 @@ static bool is_us(const char *identifier, const char *pid) {
+                streq(identifier, program_invocation_short_name);
+ }
+ 
+-static void dev_kmsg_record(Server *s, const char *p, size_t l) {
++static void dev_kmsg_record(Server *s, char *p, size_t l) {
+ 
+         _cleanup_free_ char *message = NULL, *syslog_priority = NULL, *syslog_pid = NULL, *syslog_facility = NULL, *syslog_identifier = NULL, *source_time = NULL, *identifier = NULL, *pid = NULL;
+         struct iovec iovec[N_IOVEC_META_FIELDS + 7 + N_IOVEC_KERNEL_FIELDS + 2 + N_IOVEC_UDEV_FIELDS];

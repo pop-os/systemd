@@ -1,0 +1,27 @@
+From: Filipe Brandenburger <filbranden@google.com>
+Date: Tue, 12 Jun 2018 14:20:04 -0700
+Subject: core/job: add check for return of job_type_merge_and_collapse()
+
+Using an assertion is fine, since calls to job_merge_into_installed()
+are protected by a check for job_type_is_conflicting().
+
+Uncovered by Coverity, fixes CID 996307.
+
+(cherry picked from commit 53a2383b8bd978cdd98debb69dea95bf0091116a)
+---
+ src/core/job.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/job.c b/src/core/job.c
+index 734756b..2f37ff5 100644
+--- a/src/core/job.c
++++ b/src/core/job.c
+@@ -174,7 +174,7 @@ static void job_merge_into_installed(Job *j, Job *other) {
+         assert(j->unit == other->unit);
+ 
+         if (j->type != JOB_NOP)
+-                job_type_merge_and_collapse(&j->type, other->type, j->unit);
++                assert_se(job_type_merge_and_collapse(&j->type, other->type, j->unit) == 0);
+         else
+                 assert(other->type == JOB_NOP);
+ 

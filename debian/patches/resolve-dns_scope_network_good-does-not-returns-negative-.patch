@@ -1,0 +1,25 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 25 Jun 2018 13:20:35 +0900
+Subject: resolve: dns_scope_network_good() does not returns negative errno
+
+(cherry picked from commit 86b112a315464604f4b40222d8bbd912432d640c)
+---
+ src/resolve/resolved-dns-transaction.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 905cad6..d61ec09 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -1408,10 +1408,7 @@ static int dns_transaction_prepare(DnsTransaction *t, usec_t ts) {
+ 
+         dns_transaction_stop_timeout(t);
+ 
+-        r = dns_scope_network_good(t->scope);
+-        if (r < 0)
+-                return r;
+-        if (r == 0) {
++        if (!dns_scope_network_good(t->scope)) {
+                 dns_transaction_complete(t, DNS_TRANSACTION_NETWORK_DOWN);
+                 return 0;
+         }

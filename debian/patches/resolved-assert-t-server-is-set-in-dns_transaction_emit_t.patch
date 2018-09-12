@@ -1,0 +1,33 @@
+From: Filipe Brandenburger <filbranden@google.com>
+Date: Tue, 12 Jun 2018 12:52:39 -0700
+Subject: resolved: assert t->server is set in dns_transaction_emit_tcp.
+
+Uncovered by Coverity. Fixes CID 1393390.
+
+(cherry picked from commit b02a7e1aeadda724976290528fb864f99f1e396b)
+---
+ src/resolve/resolved-dns-transaction.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index d61ec09..663c343 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -653,6 +653,8 @@ static int dns_transaction_emit_tcp(DnsTransaction *t) {
+ 
+ #if ENABLE_DNS_OVER_TLS
+                 if (DNS_SERVER_FEATURE_LEVEL_IS_TLS(t->current_feature_level)) {
++                        assert(t->server);
++
+                         r = gnutls_init(&gs, GNUTLS_CLIENT | GNUTLS_ENABLE_FALSE_START | GNUTLS_NONBLOCK);
+                         if (r < 0)
+                                 return r;
+@@ -666,7 +668,7 @@ static int dns_transaction_emit_tcp(DnsTransaction *t) {
+                         if (r < 0)
+                                 return r;
+ 
+-                        if (t->server && t->server->tls_session_data.size > 0)
++                        if (t->server->tls_session_data.size > 0)
+                                 gnutls_session_set_data(gs, t->server->tls_session_data.data, t->server->tls_session_data.size);
+ 
+                         gnutls_handshake_set_timeout(gs, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT);

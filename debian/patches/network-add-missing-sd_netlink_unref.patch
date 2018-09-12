@@ -1,0 +1,21 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 20 Jul 2018 11:23:24 +0900
+Subject: network: add missing sd_netlink_unref()
+
+(cherry picked from commit e42699438a2c8a28ef1319e55409b706c341fb02)
+---
+ src/network/networkd-manager.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/network/networkd-manager.c b/src/network/networkd-manager.c
+index 1c48660..e80d7f5 100644
+--- a/src/network/networkd-manager.c
++++ b/src/network/networkd-manager.c
+@@ -1468,6 +1468,7 @@ void manager_free(Manager *m) {
+         set_free_with_destructor(m->rules_saved, routing_policy_rule_free);
+ 
+         sd_netlink_unref(m->rtnl);
++        sd_netlink_unref(m->genl);
+         sd_event_unref(m->event);
+ 
+         sd_resolve_unref(m->resolve);

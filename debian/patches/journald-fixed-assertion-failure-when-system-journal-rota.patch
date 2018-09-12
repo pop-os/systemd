@@ -1,0 +1,25 @@
+From: =?utf-8?q?Renaud_M=C3=A9trich?=
+ <1163635+rmetrich@users.noreply.github.com>
+Date: Mon, 3 Sep 2018 05:42:39 +0200
+Subject: journald: fixed assertion failure when system journal rotation fails
+ (#9893)
+
+(cherry picked from commit fd790d6f09b10a87b007b71403cb018f18ff91c9)
+---
+ src/journal/journald-server.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
+index 4f1550e..b6e7a9c 100644
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -1036,7 +1036,8 @@ int server_flush_to_var(Server *s, bool require_flag_file) {
+         r = 0;
+ 
+ finish:
+-        journal_file_post_change(s->system_journal);
++        if (s->system_journal)
++                journal_file_post_change(s->system_journal);
+ 
+         s->runtime_journal = journal_file_close(s->runtime_journal);
+ 

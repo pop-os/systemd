@@ -1,0 +1,35 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 18 Jul 2018 13:07:27 +0900
+Subject: network: free routes assigned to link
+
+(cherry picked from commit ddfc4f6e348ef8909f7c1df22f50a446d2b468ee)
+---
+ src/network/networkd-link.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index bc5d72a..7cbb979 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -492,11 +492,21 @@ static int link_new(Manager *manager, sd_netlink_message *message, Link **ret) {
+ static void link_free(Link *link) {
+         Address *address;
+         Link *carrier;
++        Route *route;
+         Iterator i;
+ 
+         if (!link)
+                 return;
+ 
++        while ((route = set_first(link->routes)))
++                route_free(route);
++
++        while ((route = set_first(link->routes_foreign)))
++                route_free(route);
++
++        link->routes = set_free(link->routes);
++        link->routes_foreign = set_free(link->routes_foreign);
++
+         while ((address = set_first(link->addresses)))
+                 address_free(address);
+ 

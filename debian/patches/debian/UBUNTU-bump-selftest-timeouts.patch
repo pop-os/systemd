@@ -1,4 +1,7 @@
-Description: Bump the self-test timeouts to increase autopkgtest success rate
+From: Christian Ehrhardt <christian.ehrhardt@canonical.com>
+Date: Wed, 12 Sep 2018 13:10:24 +0100
+Subject: Bump the self-test timeouts to increase autopkgtest success rate
+
 Especially on i386 tests the systemd selftests were flaky for quite a while.
 It turned out that 5/8 tests checked seemed to have worked fine but were
 killed early by the timeouts expiring.
@@ -15,9 +18,19 @@ Forward-info: need to prove with test success rate
 Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1789841
 Last-Update: 2018-08-30
+---
+ test/TEST-08-ISSUE-2730/test.sh    | 2 +-
+ test/TEST-09-ISSUE-2691/test.sh    | 2 +-
+ test/TEST-17-UDEV-WANTS/test.sh    | 2 +-
+ test/TEST-18-FAILUREACTION/test.sh | 2 +-
+ test/TEST-19-DELEGATE/test.sh      | 2 +-
+ 5 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/test/TEST-08-ISSUE-2730/test.sh b/test/TEST-08-ISSUE-2730/test.sh
+index 90bf133..50d8ef1 100755
 --- a/test/TEST-08-ISSUE-2730/test.sh
 +++ b/test/TEST-08-ISSUE-2730/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="https://github.com/sys
+@@ -6,7 +6,7 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2730"
  TEST_NO_NSPAWN=1
  
  . $TEST_BASE_DIR/test-functions
@@ -26,9 +39,11 @@ Last-Update: 2018-08-30
  FSTYPE=ext4
  
  test_setup() {
+diff --git a/test/TEST-09-ISSUE-2691/test.sh b/test/TEST-09-ISSUE-2691/test.sh
+index 9b5990b..c6f0fb5 100755
 --- a/test/TEST-09-ISSUE-2691/test.sh
 +++ b/test/TEST-09-ISSUE-2691/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="https://github.com/sys
+@@ -6,7 +6,7 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2691"
  TEST_NO_NSPAWN=1
  
  . $TEST_BASE_DIR/test-functions
@@ -37,9 +52,11 @@ Last-Update: 2018-08-30
  
  test_setup() {
      create_empty_image
+diff --git a/test/TEST-17-UDEV-WANTS/test.sh b/test/TEST-17-UDEV-WANTS/test.sh
+index 24989eb..074771a 100755
 --- a/test/TEST-17-UDEV-WANTS/test.sh
 +++ b/test/TEST-17-UDEV-WANTS/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="UDEV SYSTEMD_WANTS pro
+@@ -6,7 +6,7 @@ TEST_DESCRIPTION="UDEV SYSTEMD_WANTS property"
  TEST_NO_NSPAWN=1
  
  . $TEST_BASE_DIR/test-functions
@@ -48,6 +65,8 @@ Last-Update: 2018-08-30
  
  test_setup() {
      create_empty_image
+diff --git a/test/TEST-18-FAILUREACTION/test.sh b/test/TEST-18-FAILUREACTION/test.sh
+index e48ba9b..ab9efd8 100755
 --- a/test/TEST-18-FAILUREACTION/test.sh
 +++ b/test/TEST-18-FAILUREACTION/test.sh
 @@ -5,7 +5,7 @@ set -e
@@ -59,9 +78,11 @@ Last-Update: 2018-08-30
  
  test_setup() {
      create_empty_image
+diff --git a/test/TEST-19-DELEGATE/test.sh b/test/TEST-19-DELEGATE/test.sh
+index 841a29c..0038be3 100755
 --- a/test/TEST-19-DELEGATE/test.sh
 +++ b/test/TEST-19-DELEGATE/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="test cgroup delegation
+@@ -6,7 +6,7 @@ TEST_DESCRIPTION="test cgroup delegation in the unifier hierarchy"
  TEST_NO_NSPAWN=1
  
  . $TEST_BASE_DIR/test-functions

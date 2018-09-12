@@ -1,0 +1,26 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 8 Aug 2018 14:30:40 +0900
+Subject: resolve: do not compress target names in SRV records
+
+Fixes #9793.
+
+(cherry picked from commit b2776a60f371de0cefd4141a68ada8f594f14560)
+---
+ src/resolve/resolved-dns-packet.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved-dns-packet.c b/src/resolve/resolved-dns-packet.c
+index 5266014..c218033 100644
+--- a/src/resolve/resolved-dns-packet.c
++++ b/src/resolve/resolved-dns-packet.c
+@@ -854,7 +854,9 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
+                 if (r < 0)
+                         goto fail;
+ 
+-                r = dns_packet_append_name(p, rr->srv.name, true, false, NULL);
++                /* RFC 2782 states "Unless and until permitted by future standards
++                 * action, name compression is not to be used for this field." */
++                r = dns_packet_append_name(p, rr->srv.name, false, false, NULL);
+                 break;
+ 
+         case DNS_TYPE_PTR:

@@ -1,0 +1,105 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 8 Aug 2018 18:27:15 +0900
+Subject: syslog: fix segfault in syslog_parse_priority()
+
+(cherry picked from commit a5ee33b951cfa22db53d0274c9c6c0d9d4dae39d)
+---
+ src/basic/syslog-util.c           | 20 +++++++++++---------
+ src/journal/test-journal-syslog.c | 20 ++++++++++++++++++++
+ 2 files changed, 31 insertions(+), 9 deletions(-)
+
+diff --git a/src/basic/syslog-util.c b/src/basic/syslog-util.c
+index 21461fa..fe12948 100644
+--- a/src/basic/syslog-util.c
++++ b/src/basic/syslog-util.c
+@@ -10,7 +10,8 @@
+ 
+ int syslog_parse_priority(const char **p, int *priority, bool with_facility) {
+         int a = 0, b = 0, c = 0;
+-        int k;
++        const char *end;
++        size_t k;
+ 
+         assert(p);
+         assert(*p);
+@@ -19,21 +20,22 @@ int syslog_parse_priority(const char **p, int *priority, bool with_facility) {
+         if ((*p)[0] != '<')
+                 return 0;
+ 
+-        if (!strchr(*p, '>'))
++        end = strchr(*p, '>');
++        if (!end)
+                 return 0;
+ 
+-        if ((*p)[2] == '>') {
++        k = end - *p;
++        assert(k > 0);
++
++        if (k == 2)
+                 c = undecchar((*p)[1]);
+-                k = 3;
+-        } else if ((*p)[3] == '>') {
++        else if (k == 3) {
+                 b = undecchar((*p)[1]);
+                 c = undecchar((*p)[2]);
+-                k = 4;
+-        } else if ((*p)[4] == '>') {
++        } else if (k == 4) {
+                 a = undecchar((*p)[1]);
+                 b = undecchar((*p)[2]);
+                 c = undecchar((*p)[3]);
+-                k = 5;
+         } else
+                 return 0;
+ 
+@@ -46,7 +48,7 @@ int syslog_parse_priority(const char **p, int *priority, bool with_facility) {
+         else
+                 *priority = (*priority & LOG_FACMASK) | c;
+ 
+-        *p += k;
++        *p += k + 1;
+         return 1;
+ }
+ 
+diff --git a/src/journal/test-journal-syslog.c b/src/journal/test-journal-syslog.c
+index 9ba86f6..c6aadbb 100644
+--- a/src/journal/test-journal-syslog.c
++++ b/src/journal/test-journal-syslog.c
+@@ -4,6 +4,7 @@
+ #include "journald-syslog.h"
+ #include "macro.h"
+ #include "string-util.h"
++#include "syslog-util.h"
+ 
+ static void test_syslog_parse_identifier(const char* str,
+                                          const char *ident, const char*pid, int ret) {
+@@ -18,10 +19,29 @@ static void test_syslog_parse_identifier(const char* str,
+         assert_se(pid == pid2 || streq_ptr(pid, pid2));
+ }
+ 
++static void test_syslog_parse_priority(const char *str, int priority, int ret) {
++        const char *buf = str;
++        int priority2, ret2;
++
++        ret2 = syslog_parse_priority(&buf, &priority2, false);
++
++        assert_se(ret == ret2);
++        if (ret2 == 1)
++                assert_se(priority == priority2);
++}
++
+ int main(void) {
+         test_syslog_parse_identifier("pidu[111]: xxx", "pidu", "111", 11);
+         test_syslog_parse_identifier("pidu: xxx", "pidu", NULL, 6);
+         test_syslog_parse_identifier("pidu xxx", NULL, NULL, 0);
+ 
++        test_syslog_parse_priority("<>", 0, 0);
++        test_syslog_parse_priority("<>aaa", 0, 0);
++        test_syslog_parse_priority("<aaaa>", 0, 0);
++        test_syslog_parse_priority("<aaaa>aaa", 0, 0);
++        test_syslog_parse_priority(" <aaaa>", 0, 0);
++        test_syslog_parse_priority(" <aaaa>aaa", 0, 0);
++        /* TODO: add test cases of valid priorities */
++
+         return 0;
+ }

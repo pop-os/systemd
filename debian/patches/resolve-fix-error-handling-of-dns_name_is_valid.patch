@@ -1,0 +1,37 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 2 Aug 2018 16:54:27 +0900
+Subject: resolve: fix error handling of dns_name_is_valid()
+
+(cherry picked from commit 10c6e7e51ec515a509698120ea13cb2e0a325a3a)
+---
+ src/resolve/resolved-dns-trust-anchor.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/resolve/resolved-dns-trust-anchor.c b/src/resolve/resolved-dns-trust-anchor.c
+index 533e438..bf5b07c 100644
+--- a/src/resolve/resolved-dns-trust-anchor.c
++++ b/src/resolve/resolved-dns-trust-anchor.c
+@@ -218,7 +218,10 @@ static int dns_trust_anchor_load_positive(DnsTrustAnchor *d, const char *path, u
+         if (r < 0)
+                 return log_warning_errno(r, "Unable to parse domain in line %s:%u: %m", path, line);
+ 
+-        if (!dns_name_is_valid(domain)) {
++        r = dns_name_is_valid(domain);
++        if (r < 0)
++                return log_warning_errno(r, "Failed to chack validity of domain name '%s', at line %s:%u, ignoring line: %m", domain, path, line);
++        if (r == 0) {
+                 log_warning("Domain name %s is invalid, at line %s:%u, ignoring line.", domain, path, line);
+                 return -EINVAL;
+         }
+@@ -385,7 +388,10 @@ static int dns_trust_anchor_load_negative(DnsTrustAnchor *d, const char *path, u
+         if (r < 0)
+                 return log_warning_errno(r, "Unable to parse line %s:%u: %m", path, line);
+ 
+-        if (!dns_name_is_valid(domain)) {
++        r = dns_name_is_valid(domain);
++        if (r < 0)
++                return log_warning_errno(r, "Failed to chack validity of domain name '%s', at line %s:%u, ignoring line: %m", domain, path, line);
++        if (r == 0) {
+                 log_warning("Domain name %s is invalid, at line %s:%u, ignoring line.", domain, path, line);
+                 return -EINVAL;
+         }
