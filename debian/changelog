@@ -1,3 +1,15 @@
+systemd (239-7ubuntu8) cosmic; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * Cherrypick many bugfixes from master.
+  * systemctl: correctly proceed to immediate shutdown if scheduling fails
+    (LP: #1670291)
+
+  [ Julian Andres Klode ]
+  * Improve networkd states documentation.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 12 Sep 2018 16:03:08 +0100
+
 systemd (239-7ubuntu7) cosmic; urgency=medium
 
   * boot-and-services: skip gdm test, when gdm-x-session fails.
