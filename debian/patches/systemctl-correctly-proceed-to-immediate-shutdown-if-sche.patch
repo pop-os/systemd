@@ -1,0 +1,33 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Tue, 11 Sep 2018 10:41:56 +0100
+Subject: systemctl: correctly proceed to immediate shutdown if scheduling
+ fails
+
+Actually check the return code from logind_schedule_shutdown() and proceed to
+immediate shutdown if that fails. Negative return codes can be returned if
+systemctl is compiled without logind support, or if logind otherwise failed
+(either too old, disabled/masked, or it is incomplete
+systemd-shim/systemd-service implementation).
+
+(cherry picked from commit 940bec70bb29b105acefd540cd4c7b0b29571de1)
+---
+ src/systemctl/systemctl.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index f072ad0..79de664 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
+@@ -8394,8 +8394,10 @@ static int halt_main(void) {
+         if (r < 0)
+                 return r;
+ 
+-        if (arg_when > 0)
+-                return logind_schedule_shutdown();
++        /* Delayed shutdown requested, and was successful */
++        if (arg_when > 0 && logind_schedule_shutdown() == 0)
++                return 0;
++        /* no delay, or logind failed or is not at all available */
+ 
+         if (geteuid() != 0) {
+                 if (arg_dry_run || arg_force > 0) {

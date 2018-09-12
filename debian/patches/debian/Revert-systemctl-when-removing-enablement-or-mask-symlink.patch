@@ -369,7 +369,7 @@ index 77ae812..e53f09f 100644
  
  static void unit_file_list_free_one(UnitFileList *f) {
 diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
-index f072ad0..fc0baa8 100644
+index 79de664..a76c105 100644
 --- a/src/systemctl/systemctl.c
 +++ b/src/systemctl/systemctl.c
 @@ -7683,11 +7683,6 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
