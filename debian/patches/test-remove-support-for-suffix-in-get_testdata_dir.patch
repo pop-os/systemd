@@ -1,0 +1,305 @@
+From: Filipe Brandenburger <filbranden@google.com>
+Date: Tue, 11 Sep 2018 23:15:09 -0700
+Subject: test: remove support for suffix in get_testdata_dir()
+
+Instead, use path_join() in callers wherever needed.
+
+(cherry picked from commit 55890a40c3ec0c061c04d1395a38c26313132d12)
+---
+ src/resolve/test-dns-packet.c    |  5 ++++-
+ src/shared/tests.c               |  4 +---
+ src/shared/tests.h               |  2 +-
+ src/test/test-bpf.c              |  2 +-
+ src/test/test-cgroup-mask.c      |  2 +-
+ src/test/test-engine.c           |  2 +-
+ src/test/test-execute.c          |  4 +++-
+ src/test/test-journal-importer.c | 10 ++++++++--
+ src/test/test-path.c             |  5 ++++-
+ src/test/test-sched-prio.c       |  2 +-
+ src/test/test-umount.c           | 18 ++++++++++++++----
+ src/test/test-watch-pid.c        |  2 +-
+ 12 files changed, 40 insertions(+), 18 deletions(-)
+
+diff --git a/src/resolve/test-dns-packet.c b/src/resolve/test-dns-packet.c
+index 905f000..0dac05e 100644
+--- a/src/resolve/test-dns-packet.c
++++ b/src/resolve/test-dns-packet.c
+@@ -12,6 +12,7 @@
+ #include "macro.h"
+ #include "resolved-dns-packet.h"
+ #include "resolved-dns-rr.h"
++#include "path-util.h"
+ #include "string-util.h"
+ #include "strv.h"
+ #include "tests.h"
+@@ -92,6 +93,7 @@ static void test_packet_from_file(const char* filename, bool canonical) {
+ 
+ int main(int argc, char **argv) {
+         int i, N;
++        _cleanup_free_ char *pkts_glob = NULL;
+         _cleanup_globfree_ glob_t g = {};
+         char **fnames;
+ 
+@@ -101,7 +103,8 @@ int main(int argc, char **argv) {
+                 N = argc - 1;
+                 fnames = argv + 1;
+         } else {
+-                assert_se(glob(get_testdata_dir("/test-resolve/*.pkts"), GLOB_NOSORT, NULL, &g) == 0);
++                pkts_glob = path_join(NULL, get_testdata_dir(), "test-resolve/*.pkts");
++                assert_se(glob(pkts_glob, GLOB_NOSORT, NULL, &g) == 0);
+                 N = g.gl_pathc;
+                 fnames = g.gl_pathv;
+         }
+diff --git a/src/shared/tests.c b/src/shared/tests.c
+index c3704c7..a002260 100644
+--- a/src/shared/tests.c
++++ b/src/shared/tests.c
+@@ -37,7 +37,7 @@ bool test_is_running_from_builddir(char **exedir) {
+         return r;
+ }
+ 
+-const char* get_testdata_dir(const char *suffix) {
++const char* get_testdata_dir(void) {
+         const char *env;
+         /* convenience: caller does not need to free result */
+         static char testdir[PATH_MAX];
+@@ -61,13 +61,11 @@ const char* get_testdata_dir(const char *suffix) {
+                         /* Try relative path, according to the install-test layout */
+                         assert_se(snprintf(testdir, sizeof(testdir), "%s/testdata", exedir) > 0);
+ 
+-                /* test this without the suffix, as it may contain a glob */
+                 if (access(testdir, F_OK) < 0) {
+                         fputs("ERROR: Cannot find testdata directory, set $SYSTEMD_TEST_DATA\n", stderr);
+                         exit(EXIT_FAILURE);
+                 }
+         }
+ 
+-        strncpy(testdir + strlen(testdir), suffix, sizeof(testdir) - strlen(testdir) - 1);
+         return testdir;
+ }
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index c9fa11f..da4155e 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -3,4 +3,4 @@
+ 
+ char* setup_fake_runtime_dir(void);
+ bool test_is_running_from_builddir(char **exedir);
+-const char* get_testdata_dir(const char *suffix);
++const char* get_testdata_dir(void);
+diff --git a/src/test/test-bpf.c b/src/test/test-bpf.c
+index 4d89bd4..6f4a22a 100644
+--- a/src/test/test-bpf.c
++++ b/src/test/test-bpf.c
+@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
+                 return EXIT_TEST_SKIP;
+         }
+ 
+-        assert_se(set_unit_path(get_testdata_dir("")) >= 0);
++        assert_se(set_unit_path(get_testdata_dir()) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+ 
+         r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &p);
+diff --git a/src/test/test-cgroup-mask.c b/src/test/test-cgroup-mask.c
+index d65959e..48d58f6 100644
+--- a/src/test/test-cgroup-mask.c
++++ b/src/test/test-cgroup-mask.c
+@@ -26,7 +26,7 @@ static int test_cgroup_mask(void) {
+         }
+ 
+         /* Prepare the manager. */
+-        assert_se(set_unit_path(get_testdata_dir("")) >= 0);
++        assert_se(set_unit_path(get_testdata_dir()) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m);
+         if (IN_SET(r, -EPERM, -EACCES)) {
+diff --git a/src/test/test-engine.c b/src/test/test-engine.c
+index d072a15..0f3e244 100644
+--- a/src/test/test-engine.c
++++ b/src/test/test-engine.c
+@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
+         }
+ 
+         /* prepare the test */
+-        assert_se(set_unit_path(get_testdata_dir("")) >= 0);
++        assert_se(set_unit_path(get_testdata_dir()) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m);
+         if (MANAGER_SKIP_TEST(r)) {
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index fa8efdd..1b308a8 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -648,6 +648,7 @@ static int run_tests(UnitFileScope scope, const test_function_t *tests) {
+ 
+ int main(int argc, char *argv[]) {
+         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
++        _cleanup_free_ char *test_execute_path = NULL;
+         static const test_function_t user_tests[] = {
+                 test_exec_basic,
+                 test_exec_ambientcapabilities,
+@@ -711,7 +712,8 @@ int main(int argc, char *argv[]) {
+         }
+ 
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+-        assert_se(set_unit_path(get_testdata_dir("/test-execute")) >= 0);
++        test_execute_path = path_join(NULL, get_testdata_dir(), "test-execute");
++        assert_se(set_unit_path(test_execute_path) >= 0);
+ 
+         /* Unset VAR1, VAR2 and VAR3 which are used in the PassEnvironment test
+          * cases, otherwise (and if they are present in the environment),
+diff --git a/src/test/test-journal-importer.c b/src/test/test-journal-importer.c
+index 56bf6a1..8f09d5a 100644
+--- a/src/test/test-journal-importer.c
++++ b/src/test/test-journal-importer.c
+@@ -4,8 +4,10 @@
+ #include <sys/stat.h>
+ #include <fcntl.h>
+ 
++#include "alloc-util.h"
+ #include "log.h"
+ #include "journal-importer.h"
++#include "path-util.h"
+ #include "string-util.h"
+ #include "tests.h"
+ 
+@@ -20,9 +22,11 @@ static void assert_iovec_entry(const struct iovec *iovec, const char* content) {
+ 
+ static void test_basic_parsing(void) {
+         _cleanup_(journal_importer_cleanup) JournalImporter imp = {};
++        _cleanup_free_ char *journal_data_path = NULL;
+         int r;
+ 
+-        imp.fd = open(get_testdata_dir("/journal-data/journal-1.txt"), O_RDONLY|O_CLOEXEC);
++        journal_data_path = path_join(NULL, get_testdata_dir(), "journal-data/journal-1.txt");
++        imp.fd = open(journal_data_path, O_RDONLY|O_CLOEXEC);
+         assert_se(imp.fd >= 0);
+ 
+         do
+@@ -49,9 +53,11 @@ static void test_basic_parsing(void) {
+ 
+ static void test_bad_input(void) {
+         _cleanup_(journal_importer_cleanup) JournalImporter imp = {};
++        _cleanup_free_ char *journal_data_path = NULL;
+         int r;
+ 
+-        imp.fd = open(get_testdata_dir("/journal-data/journal-2.txt"), O_RDONLY|O_CLOEXEC);
++        journal_data_path = path_join(NULL, get_testdata_dir(), "journal-data/journal-2.txt");
++        imp.fd = open(journal_data_path, O_RDONLY|O_CLOEXEC);
+         assert_se(imp.fd >= 0);
+ 
+         do
+diff --git a/src/test/test-path.c b/src/test/test-path.c
+index 209eb2e..5e78a56 100644
+--- a/src/test/test-path.c
++++ b/src/test/test-path.c
+@@ -12,6 +12,7 @@
+ #include "macro.h"
+ #include "manager.h"
+ #include "mkdir.h"
++#include "path-util.h"
+ #include "rm-rf.h"
+ #include "string-util.h"
+ #include "strv.h"
+@@ -247,6 +248,7 @@ int main(int argc, char *argv[]) {
+         };
+ 
+         _cleanup_(rm_rf_physical_and_freep) char *runtime_dir = NULL;
++        _cleanup_free_ char *test_path = NULL;
+         const test_function_t *test = NULL;
+         Manager *m = NULL;
+ 
+@@ -255,7 +257,8 @@ int main(int argc, char *argv[]) {
+         log_parse_environment();
+         log_open();
+ 
+-        assert_se(set_unit_path(get_testdata_dir("/test-path")) >= 0);
++        test_path = path_join(NULL, get_testdata_dir(), "test-path");
++        assert_se(set_unit_path(test_path) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+ 
+         for (test = tests; test && *test; test++) {
+diff --git a/src/test/test-sched-prio.c b/src/test/test-sched-prio.c
+index c986284..60012e4 100644
+--- a/src/test/test-sched-prio.c
++++ b/src/test/test-sched-prio.c
+@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
+         }
+ 
+         /* prepare the test */
+-        assert_se(set_unit_path(get_testdata_dir("")) >= 0);
++        assert_se(set_unit_path(get_testdata_dir()) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m);
+         if (MANAGER_SKIP_TEST(r)) {
+diff --git a/src/test/test-umount.c b/src/test/test-umount.c
+index 770d1a7..c068f7a 100644
+--- a/src/test/test-umount.c
++++ b/src/test/test-umount.c
+@@ -1,6 +1,8 @@
+ /* SPDX-License-Identifier: LGPL-2.1+ */
+ 
++#include "alloc-util.h"
+ #include "log.h"
++#include "path-util.h"
+ #include "string-util.h"
+ #include "tests.h"
+ #include "umount.h"
+@@ -8,10 +10,14 @@
+ 
+ static void test_mount_points_list(const char *fname) {
+         _cleanup_(mount_points_list_free) LIST_HEAD(MountPoint, mp_list_head);
++        _cleanup_free_ char *testdata_fname = NULL;
+         MountPoint *m;
+ 
+         log_info("/* %s(\"%s\") */", __func__, fname ?: "/proc/self/mountinfo");
+ 
++        if (fname)
++                fname = testdata_fname = path_join(NULL, get_testdata_dir(), fname);
++
+         LIST_HEAD_INIT(mp_list_head);
+         assert_se(mount_points_list_get(fname, &mp_list_head) >= 0);
+ 
+@@ -26,10 +32,14 @@ static void test_mount_points_list(const char *fname) {
+ 
+ static void test_swap_list(const char *fname) {
+         _cleanup_(mount_points_list_free) LIST_HEAD(MountPoint, mp_list_head);
++        _cleanup_free_ char *testdata_fname = NULL;
+         MountPoint *m;
+ 
+         log_info("/* %s(\"%s\") */", __func__, fname ?: "/proc/swaps");
+ 
++        if (fname)
++                fname = testdata_fname = path_join(NULL, get_testdata_dir(), fname);
++
+         LIST_HEAD_INIT(mp_list_head);
+         assert_se(swap_list_get(fname, &mp_list_head) >= 0);
+ 
+@@ -48,10 +58,10 @@ int main(int argc, char **argv) {
+         log_open();
+ 
+         test_mount_points_list(NULL);
+-        test_mount_points_list(get_testdata_dir("/test-umount/empty.mountinfo"));
+-        test_mount_points_list(get_testdata_dir("/test-umount/garbled.mountinfo"));
+-        test_mount_points_list(get_testdata_dir("/test-umount/rhbug-1554943.mountinfo"));
++        test_mount_points_list("/test-umount/empty.mountinfo");
++        test_mount_points_list("/test-umount/garbled.mountinfo");
++        test_mount_points_list("/test-umount/rhbug-1554943.mountinfo");
+ 
+         test_swap_list(NULL);
+-        test_swap_list(get_testdata_dir("/test-umount/example.swaps"));
++        test_swap_list("/test-umount/example.swaps");
+ }
+diff --git a/src/test/test-watch-pid.c b/src/test/test-watch-pid.c
+index cb43b35..4e349ab 100644
+--- a/src/test/test-watch-pid.c
++++ b/src/test/test-watch-pid.c
+@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
+                 return EXIT_TEST_SKIP;
+         }
+ 
+-        assert_se(set_unit_path(get_testdata_dir("")) >= 0);
++        assert_se(set_unit_path(get_testdata_dir()) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());
+ 
+         assert_se(manager_new(UNIT_FILE_USER, true, &m) >= 0);

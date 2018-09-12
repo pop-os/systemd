@@ -16,6 +16,9 @@ user-runtime-dir-fix-selinux-regression.patch
 core-fix-gid-when-DynamicUser-yes-with-static-User.patch
 test-introduce-test_is_running_from_builddir.patch
 test-make-test-catalog-relocatable.patch
+test-remove-support-for-suffix-in-get_testdata_dir.patch
+test-use-builddir-systemd-runtest.env-to-set-SYSTEMD_TEST.patch
+test-use-builddir-systemd-runtest.env-for-SYSTEMD_CATALOG.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

@@ -15,10 +15,10 @@ This reverts commit 4e15a7343cb389e97f3eb4f49699161862d8b8b2.
  4 files changed, 2 insertions(+), 9 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index de71606..d6717ce 100644
+index f9baed4..98661eb 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -744,7 +744,6 @@ conf.set10('ENABLE_WHEEL_GROUP', get_option('wheel-group'))
+@@ -743,7 +743,6 @@ conf.set10('ENABLE_WHEEL_GROUP', get_option('wheel-group'))
  dev_kvm_mode = get_option('dev-kvm-mode')
  substs.set('DEV_KVM_MODE', dev_kvm_mode)
  conf.set10('DEV_KVM_UACCESS', dev_kvm_mode != '0666')
@@ -26,7 +26,7 @@ index de71606..d6717ce 100644
  
  kill_user_processes = get_option('default-kill-user-processes')
  conf.set10('KILL_USER_PROCESSES', kill_user_processes)
-@@ -2876,7 +2875,6 @@ status = [
+@@ -2884,7 +2883,6 @@ status = [
          'minimum container UID base:        @0@'.format(container_uid_base_min),
          'maximum container UID base:        @0@'.format(container_uid_base_max),
          '/dev/kvm access mode:              @0@'.format(get_option('dev-kvm-mode')),
