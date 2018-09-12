@@ -1,3 +1,21 @@
+systemd (239-9) unstable; urgency=medium
+
+  * autopkgtest: Remove needs-recommends runtime restriction.
+    This restriction has been deprecated and there are plans to remove it
+    altogether. The tests pass withouth needs-recommends, so it seems safe
+    to remove.
+  * test: Use installed catalogs when test-catalog is not located at build
+    dir.
+    This makes it possible to run test-catalog as installed test, so we no
+    longer need to mark it as EXFAIL in our root-unittests autopkgtest.
+  * test: Use "systemd-runtest.env" to set $SYSTEMD_TEST_DATA and
+    $SYSTEMD_CATALOG_DIR.
+    This avoids embedding ABS_{SRC,BUILD}_DIR into libsystemd-shared.so and
+    the test binaries and should make the build reproducible.
+    (Closes: #908365)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 12 Sep 2018 19:07:38 +0200
+
 systemd (239-8) unstable; urgency=medium
 
   [ Michael Biebl ]
