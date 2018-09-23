@@ -15,7 +15,7 @@ This reverts commit 4e15a7343cb389e97f3eb4f49699161862d8b8b2.
  4 files changed, 2 insertions(+), 9 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index f9baed4..98661eb 100644
+index 1d6144e..b16c9ca 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -743,7 +743,6 @@ conf.set10('ENABLE_WHEEL_GROUP', get_option('wheel-group'))
@@ -35,7 +35,7 @@ index f9baed4..98661eb 100644
          'support URL:                       @0@'.format(support_url),
          'nobody user name:                  @0@'.format(nobody_user),
 diff --git a/meson_options.txt b/meson_options.txt
-index 16c1f2b..45c6320 100644
+index dc7951b..fd0def4 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
 @@ -180,8 +180,6 @@ option('nobody-group', type : 'string',

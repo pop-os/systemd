@@ -19,6 +19,7 @@ test-make-test-catalog-relocatable.patch
 test-remove-support-for-suffix-in-get_testdata_dir.patch
 test-use-builddir-systemd-runtest.env-to-set-SYSTEMD_TEST.patch
 test-use-builddir-systemd-runtest.env-for-SYSTEMD_CATALOG.patch
+meson-rename-Ddebug-to-Ddebug-extra.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
