@@ -1,3 +1,21 @@
+systemd (239-10) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * meson: Rename -Ddebug to -Ddebug-extra.
+    Meson added -Doptimization and -Ddebug options, which obviously causes
+    a conflict with our -Ddebug options. Let's rename it.
+    (Closes: #909455)
+  * Add conflicts against consolekit.
+    Letting both ConsoleKit and logind manage dynamic device permissions
+    will only lead to inconsistent and unexpected results.
+
+  [ Felipe Sateler ]
+  * Link systemctl binary statically against libshared.
+    This reduces the Pre-Depends list considerably, and is more resilient
+    against borked installs.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 25 Sep 2018 16:11:12 +0200
+
 systemd (239-9) unstable; urgency=medium
 
   * autopkgtest: Remove needs-recommends runtime restriction.
