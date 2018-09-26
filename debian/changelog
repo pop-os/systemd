@@ -1,3 +1,12 @@
+systemd (239-7ubuntu9) cosmic; urgency=medium
+
+  * core: export environment when running generators.
+    Ensure that manager's environment (including e.g. PATH) is exported when
+    running generators. Otherwise, one is at a mercy of running without PATH which
+    can lead to buggy generator behaviour. (LP: #1771858)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 26 Sep 2018 11:01:58 +0100
+
 systemd (239-7ubuntu8) cosmic; urgency=medium
 
   [ Dimitri John Ledkov ]
