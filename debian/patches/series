@@ -42,6 +42,9 @@ journald-fixed-assertion-failure-when-system-journal-rota.patch
 resolve-fix-error-handling-of-dns_name_is_valid.patch
 man-Document-networkd-states-in-networkctl-1-10033.patch
 systemctl-correctly-proceed-to-immediate-shutdown-if-sche.patch
+exec-util-in-execute_directories-support-initial-exec-env.patch
+core-execute-environment_generators-with-manager-s-enviro.patch
+core-execute-generators-with-manager-s-environmnet.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

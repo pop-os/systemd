@@ -1,0 +1,229 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Wed, 12 Sep 2018 18:19:13 +0100
+Subject: exec-util: in execute_directories, support initial exec environment
+
+(cherry picked from commit 78ec1bb436fb18df3b56212c442cc4775a136d1a)
+---
+ src/basic/exec-util.c     | 13 +++++++++----
+ src/basic/exec-util.h     |  3 ++-
+ src/core/manager.c        |  4 ++--
+ src/core/shutdown.c       |  2 +-
+ src/sleep/sleep.c         |  4 ++--
+ src/test/test-exec-util.c | 43 ++++++++++++++++++++++++++++++++++++-------
+ 6 files changed, 52 insertions(+), 17 deletions(-)
+
+diff --git a/src/basic/exec-util.c b/src/basic/exec-util.c
+index 7e336f9..e8af191 100644
+--- a/src/basic/exec-util.c
++++ b/src/basic/exec-util.c
+@@ -71,11 +71,12 @@ static int do_execute(
+                 gather_stdout_callback_t const callbacks[_STDOUT_CONSUME_MAX],
+                 void* const callback_args[_STDOUT_CONSUME_MAX],
+                 int output_fd,
+-                char *argv[]) {
++                char *argv[],
++                char *envp[]) {
+ 
+         _cleanup_hashmap_free_free_ Hashmap *pids = NULL;
+         _cleanup_strv_free_ char **paths = NULL;
+-        char **path;
++        char **path, **e;
+         int r;
+ 
+         /* We fork this all off from a child process so that we can somewhat cleanly make
+@@ -100,6 +101,9 @@ static int do_execute(
+         if (timeout != USEC_INFINITY)
+                 alarm(DIV_ROUND_UP(timeout, USEC_PER_SEC));
+ 
++        STRV_FOREACH(e, envp)
++                putenv(*e);
++
+         STRV_FOREACH(path, paths) {
+                 _cleanup_free_ char *t = NULL;
+                 _cleanup_close_ int fd = -1;
+@@ -166,7 +170,8 @@ int execute_directories(
+                 usec_t timeout,
+                 gather_stdout_callback_t const callbacks[_STDOUT_CONSUME_MAX],
+                 void* const callback_args[_STDOUT_CONSUME_MAX],
+-                char *argv[]) {
++                char *argv[],
++                char *envp[]) {
+ 
+         char **dirs = (char**) directories;
+         _cleanup_close_ int fd = -1;
+@@ -197,7 +202,7 @@ int execute_directories(
+         if (r < 0)
+                 return r;
+         if (r == 0) {
+-                r = do_execute(dirs, timeout, callbacks, callback_args, fd, argv);
++                r = do_execute(dirs, timeout, callbacks, callback_args, fd, argv, envp);
+                 _exit(r < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
+         }
+ 
+diff --git a/src/basic/exec-util.h b/src/basic/exec-util.h
+index 8b1f181..003814c 100644
+--- a/src/basic/exec-util.h
++++ b/src/basic/exec-util.h
+@@ -18,6 +18,7 @@ int execute_directories(
+                 usec_t timeout,
+                 gather_stdout_callback_t const callbacks[_STDOUT_CONSUME_MAX],
+                 void* const callback_args[_STDOUT_CONSUME_MAX],
+-                char *argv[]);
++                char *argv[],
++                char *envp[]);
+ 
+ extern const gather_stdout_callback_t gather_environment[_STDOUT_CONSUME_MAX];
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 930df4e..c12eb05 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -3736,7 +3736,7 @@ static int manager_run_environment_generators(Manager *m) {
+         if (!generator_path_any(paths))
+                 return 0;
+ 
+-        return execute_directories(paths, DEFAULT_TIMEOUT_USEC, gather_environment, args, NULL);
++        return execute_directories(paths, DEFAULT_TIMEOUT_USEC, gather_environment, args, NULL, NULL);
+ }
+ 
+ static int manager_run_generators(Manager *m) {
+@@ -3768,7 +3768,7 @@ static int manager_run_generators(Manager *m) {
+ 
+         RUN_WITH_UMASK(0022)
+                 execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC,
+-                                    NULL, NULL, (char**) argv);
++                                    NULL, NULL, (char**) argv, NULL);
+ 
+ finish:
+         lookup_paths_trim_generator(&m->lookup_paths);
+diff --git a/src/core/shutdown.c b/src/core/shutdown.c
+index 038345b..5bf332d 100644
+--- a/src/core/shutdown.c
++++ b/src/core/shutdown.c
+@@ -435,7 +435,7 @@ int main(int argc, char *argv[]) {
+         arguments[0] = NULL;
+         arguments[1] = arg_verb;
+         arguments[2] = NULL;
+-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments);
++        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL);
+ 
+         if (can_initrd) {
+                 r = switch_root_initramfs();
+diff --git a/src/sleep/sleep.c b/src/sleep/sleep.c
+index f26aa45..f16e8c2 100644
+--- a/src/sleep/sleep.c
++++ b/src/sleep/sleep.c
+@@ -162,7 +162,7 @@ static int execute(char **modes, char **states) {
+                         return log_error_errno(r, "Failed to write mode to /sys/power/disk: %m");;
+         }
+ 
+-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments);
++        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL);
+ 
+         log_struct(LOG_INFO,
+                    "MESSAGE_ID=" SD_MESSAGE_SLEEP_START_STR,
+@@ -179,7 +179,7 @@ static int execute(char **modes, char **states) {
+                    "SLEEP=%s", arg_verb);
+ 
+         arguments[1] = (char*) "post";
+-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments);
++        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL);
+ 
+         return r;
+ }
+diff --git a/src/test/test-exec-util.c b/src/test/test-exec-util.c
+index cfc8b5f..e7690ed 100644
+--- a/src/test/test-exec-util.c
++++ b/src/test/test-exec-util.c
+@@ -16,6 +16,7 @@
+ #include "fs-util.h"
+ #include "log.h"
+ #include "macro.h"
++#include "path-util.h"
+ #include "rm-rf.h"
+ #include "string-util.h"
+ #include "strv.h"
+@@ -115,9 +116,9 @@ static void test_execute_directory(bool gather_stdout) {
+         assert_se(chmod(mask2e, 0755) == 0);
+ 
+         if (gather_stdout)
+-                execute_directories(dirs, DEFAULT_TIMEOUT_USEC, ignore_stdout, ignore_stdout_args, NULL);
++                execute_directories(dirs, DEFAULT_TIMEOUT_USEC, ignore_stdout, ignore_stdout_args, NULL, NULL);
+         else
+-                execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, NULL);
++                execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, NULL, NULL);
+ 
+         assert_se(chdir(template_lo) == 0);
+         assert_se(access("it_works", F_OK) >= 0);
+@@ -182,7 +183,7 @@ static void test_execution_order(void) {
+         assert_se(chmod(override, 0755) == 0);
+         assert_se(chmod(masked, 0755) == 0);
+ 
+-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, ignore_stdout, ignore_stdout_args, NULL);
++        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, ignore_stdout, ignore_stdout_args, NULL, NULL);
+ 
+         assert_se(read_full_file(output, &contents, NULL) >= 0);
+         assert_se(streq(contents, "30-override\n80-foo\n90-bar\nlast\n"));
+@@ -264,7 +265,7 @@ static void test_stdout_gathering(void) {
+         assert_se(chmod(name2, 0755) == 0);
+         assert_se(chmod(name3, 0755) == 0);
+ 
+-        r = execute_directories(dirs, DEFAULT_TIMEOUT_USEC, gather_stdout, args, NULL);
++        r = execute_directories(dirs, DEFAULT_TIMEOUT_USEC, gather_stdout, args, NULL, NULL);
+         assert_se(r >= 0);
+ 
+         log_info("got: %s", output);
+@@ -275,7 +276,7 @@ static void test_stdout_gathering(void) {
+ static void test_environment_gathering(void) {
+         char template[] = "/tmp/test-exec-util.XXXXXXX", **p;
+         const char *dirs[] = {template, NULL};
+-        const char *name, *name2, *name3;
++        const char *name, *name2, *name3, *old;
+         int r;
+ 
+         char **tmp = NULL; /* this is only used in the forked process, no cleanup here */
+@@ -321,7 +322,32 @@ static void test_environment_gathering(void) {
+         assert_se(chmod(name2, 0755) == 0);
+         assert_se(chmod(name3, 0755) == 0);
+ 
+-        r = execute_directories(dirs, DEFAULT_TIMEOUT_USEC, gather_environment, args, NULL);
++        /* When booting in containers or without initramfs there might not be
++         * any PATH in the environ and if there is no PATH /bin/sh built-in
++         * PATH may leak and override systemd's DEFAULT_PATH which is not
++         * good. Force our own PATH in environment, to prevent expansion of sh
++         * built-in $PATH */
++        old = getenv("PATH");
++        r = setenv("PATH", "no-sh-built-in-path", 1);
++        assert_se(r >= 0);
++
++        r = execute_directories(dirs, DEFAULT_TIMEOUT_USEC, gather_environment, args, NULL, NULL);
++        assert_se(r >= 0);
++
++        STRV_FOREACH(p, env)
++                log_info("got env: \"%s\"", *p);
++
++        assert_se(streq(strv_env_get(env, "A"), "22:23:24"));
++        assert_se(streq(strv_env_get(env, "B"), "12"));
++        assert_se(streq(strv_env_get(env, "C"), "001"));
++        assert_se(streq(strv_env_get(env, "PATH"), "no-sh-built-in-path:/no/such/file"));
++
++        /* now retest with "default" path passed in, as created by
++         * manager_default_environment */
++        env = strv_free(env);
++        env = strv_new("PATH=" DEFAULT_PATH, NULL);
++
++        r = execute_directories(dirs, DEFAULT_TIMEOUT_USEC, gather_environment, args, NULL, env);
+         assert_se(r >= 0);
+ 
+         STRV_FOREACH(p, env)
+@@ -330,7 +356,10 @@ static void test_environment_gathering(void) {
+         assert_se(streq(strv_env_get(env, "A"), "22:23:24"));
+         assert_se(streq(strv_env_get(env, "B"), "12"));
+         assert_se(streq(strv_env_get(env, "C"), "001"));
+-        assert_se(endswith(strv_env_get(env, "PATH"), ":/no/such/file"));
++        assert_se(streq(strv_env_get(env, "PATH"), DEFAULT_PATH ":/no/such/file"));
++
++        /* reset environ PATH */
++        (void) setenv("PATH", old, 1);
+ }
+ 
+ int main(int argc, char *argv[]) {

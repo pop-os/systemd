@@ -1,0 +1,22 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Wed, 12 Sep 2018 19:52:30 +0100
+Subject: core: execute generators with manager's environmnet
+
+(cherry picked from commit a3156a8ee4d68b09715225cc04674eea7b5aaec4)
+---
+ src/core/manager.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 134e4c5..8dad2f0 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -3768,7 +3768,7 @@ static int manager_run_generators(Manager *m) {
+ 
+         RUN_WITH_UMASK(0022)
+                 execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC,
+-                                    NULL, NULL, (char**) argv, NULL);
++                                    NULL, NULL, (char**) argv, m->environment);
+ 
+ finish:
+         lookup_paths_trim_generator(&m->lookup_paths);
