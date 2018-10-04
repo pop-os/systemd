@@ -76,7 +76,7 @@ Depends: ${shlibs:Depends},
          mount (>= 2.26),
          adduser,
          procps,
-Conflicts: systemd-shim (<< 10-4~),
+Conflicts: systemd-shim, upstart
 Breaks: apparmor (<< 2.9.2-1),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
@@ -211,7 +211,7 @@ Depends: ${shlibs:Depends},
          systemd (= ${binary:Version}),
          libpam-runtime (>= 1.0.1-6),
          dbus,
-         systemd-shim (>= 10-4~) | systemd-sysv
+         systemd-sysv
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
  the systemd control group hierarchy for logind.
