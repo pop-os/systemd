@@ -1,0 +1,22 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Thu, 4 Oct 2018 15:25:50 +0100
+Subject: units: Disable journald Watchdog
+ https://github.com/systemd/systemd/issues/9079
+
+LP: #1773148
+---
+ units/systemd-journald.service.in | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
+index 6fa4362..b3e5499 100644
+--- a/units/systemd-journald.service.in
++++ b/units/systemd-journald.service.in
+@@ -23,7 +23,6 @@ Restart=always
+ RestartSec=0
+ StandardOutput=null
+ Nice=-1
+-WatchdogSec=3min
+ FileDescriptorStoreMax=4224
+ CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_SYS_PTRACE CAP_SYSLOG CAP_AUDIT_CONTROL CAP_AUDIT_READ CAP_CHOWN CAP_DAC_READ_SEARCH CAP_FOWNER CAP_SETUID CAP_SETGID CAP_MAC_OVERRIDE
+ MemoryDenyWriteExecute=yes
