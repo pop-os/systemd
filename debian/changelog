@@ -1,7 +1,7 @@
 systemd (239-7ubuntu10) cosmic; urgency=medium
 
   * units: Disable journald Watchdog (LP: #1773148)
-  * Add conflicts with upstart and systemd-shim. (LP: #1793092)
+  * Add conflicts with upstart and systemd-shim. (LP: #1773859)
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 04 Oct 2018 15:58:51 +0100
 
