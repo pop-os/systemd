@@ -25,7 +25,7 @@ for t in test/TEST*; do
     echo "$BLACKLIST" | grep -q "$(basename $t)" && continue
     echo "========== `basename $t` =========="
     rm -rf /var/tmp/systemd-test.*
-    if ! make -C $t clean setup run; then
+    if ! make -C $t setup run clean; then
         for j in /var/tmp/systemd-test.*/journal/*; do
             [ -e "$j" ] || continue
             # keep the entire journal in artifacts, in case one needs the debug messages
