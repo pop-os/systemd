@@ -21,6 +21,10 @@ test-use-builddir-systemd-runtest.env-to-set-SYSTEMD_TEST.patch
 test-use-builddir-systemd-runtest.env-for-SYSTEMD_CATALOG.patch
 meson-rename-Ddebug-to-Ddebug-extra.patch
 dhcp6-make-sure-we-have-enough-space-for-the-DHCP6-option.patch
+chown-recursive-let-s-rework-the-recursive-logic-to-use-O.patch
+chown-recursive-also-drop-ACLs-when-recursively-chown-ing.patch
+chown-recursive-TAKE_FD-is-your-friend.patch
+test-add-test-case-for-recursive-chown-ing.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
