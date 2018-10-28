@@ -1,3 +1,36 @@
+systemd (239-11) unstable; urgency=high
+
+  [ Michael Biebl ]
+  * debian/tests/upstream: Clean up after each test run.
+    Otherwise the loopback images used by qemu are not properly released and
+    we might run out of disk space.
+  * dhcp6: Make sure we have enough space for the DHCP6 option header.
+    Fixes out-of-bounds heap write in systemd-networkd dhcpv6 option
+    handling.
+    (CVE-2018-15688, LP: #1795921, Closes: #912008)
+  * chown-recursive: Rework the recursive logic to use O_PATH.
+    Fixes a race condition in chown_one() which allows an attacker to cause
+    systemd to set arbitrary permissions on arbitrary files.
+    (CVE-2018-15687, LP: #1796692, Closes: #912007)
+
+  [ Martin Pitt ]
+  * debian/tests/boot-and-services: Use gdm instead of lightdm.
+    This seems to work more reliably, on Ubuntu CI's i386 instances lightdm
+    fails.
+
+  [ Manuel A. Fernandez Montecelo ]
+  * Run "meson test" instead of "ninja test"
+    Upstream developers of meson recommend to run it in this way, because
+    "ninja test" just calls "meson test", and by using meson directly and
+    using extra command line arguments it is possible to control aspects of
+    how the tests are run.
+  * Increase timeout for test in riscv64.
+    The buildds for the riscv64 arch used at the moment are slow, so increase
+    the timeouts for this arch by a factor of 10, for good measure.
+    (Closes: #906429)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 28 Oct 2018 13:02:18 +0100
+
 systemd (239-10) unstable; urgency=medium
 
   [ Michael Biebl ]
