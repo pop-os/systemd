@@ -159,7 +159,8 @@ if dpkg --compare-versions "$2" gt "234-2ubuntu8~" &&
     systemctl disable systemd-networkd-wait-online.service || true
 fi
 
-if [ -n "$2" ]; then
+# skip daemon-reexec and try-restarts during shutdown to avoid hitting LP: #1803391
+if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
     _systemctl daemon-reexec || true
     # don't restart logind; this can be done again once this gets implemented:
     # https://github.com/systemd/systemd/issues/1163
