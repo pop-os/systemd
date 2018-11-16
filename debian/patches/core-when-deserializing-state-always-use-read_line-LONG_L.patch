@@ -1,0 +1,238 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 17 Oct 2018 18:36:24 +0200
+Subject: =?utf-8?q?core=3A_when_deserializing_state_always_use_read=5Fline?=
+ =?utf-8?q?=28=E2=80=A6=2C_LONG=5FLINE=5FMAX=2C_=E2=80=A6=29?=
+
+This should be much better than fgets(), as we can read substantially
+longer lines and overly long lines result in proper errors.
+
+Fixes a vulnerability discovered by Jann Horn at Google.
+
+CVE-2018-15686
+LP: #1796402
+https://bugzilla.redhat.com/show_bug.cgi?id=1639071
+
+(cherry picked from commit 8948b3415d762245ebf5e19d80b97d4d8cc208c1)
+(cherry picked from commit 1a05ff4948d778280ec155a9abe69d3360bfddd9)
+---
+ src/core/job.c     | 19 +++++++++++--------
+ src/core/manager.c | 44 ++++++++++++++++++++------------------------
+ src/core/unit.c    | 34 ++++++++++++++++++----------------
+ src/core/unit.h    |  2 +-
+ 4 files changed, 50 insertions(+), 49 deletions(-)
+
+diff --git a/src/core/job.c b/src/core/job.c
+index 734756b..8552ffb 100644
+--- a/src/core/job.c
++++ b/src/core/job.c
+@@ -10,6 +10,7 @@
+ #include "dbus-job.h"
+ #include "dbus.h"
+ #include "escape.h"
++#include "fileio.h"
+ #include "job.h"
+ #include "log.h"
+ #include "macro.h"
+@@ -1091,24 +1092,26 @@ int job_serialize(Job *j, FILE *f) {
+ }
+ 
+ int job_deserialize(Job *j, FILE *f) {
++        int r;
++
+         assert(j);
+         assert(f);
+ 
+         for (;;) {
+-                char line[LINE_MAX], *l, *v;
++                _cleanup_free_ char *line = NULL;
++                char *l, *v;
+                 size_t k;
+ 
+-                if (!fgets(line, sizeof(line), f)) {
+-                        if (feof(f))
+-                                return 0;
+-                        return -errno;
+-                }
++                r = read_line(f, LONG_LINE_MAX, &line);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to read serialization line: %m");
++                if (r == 0)
++                        return 0;
+ 
+-                char_array_0(line);
+                 l = strstrip(line);
+ 
+                 /* End marker */
+-                if (l[0] == 0)
++                if (isempty(l))
+                         return 0;
+ 
+                 k = strcspn(l, "=");
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 930df4e..5438207 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -3130,22 +3130,19 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
+         m->n_reloading++;
+ 
+         for (;;) {
+-                char line[LINE_MAX];
++                _cleanup_free_ char *line = NULL;
+                 const char *val, *l;
+ 
+-                if (!fgets(line, sizeof(line), f)) {
+-                        if (feof(f))
+-                                r = 0;
+-                        else
+-                                r = -errno;
+-
++                r = read_line(f, LONG_LINE_MAX, &line);
++                if (r < 0) {
++                        log_error_errno(r, "Failed to read serialization line: %m");
+                         goto finish;
+                 }
++                if (r == 0)
++                        break;
+ 
+-                char_array_0(line);
+                 l = strstrip(line);
+-
+-                if (l[0] == 0)
++                if (isempty(l)) /* end marker */
+                         break;
+ 
+                 if ((val = startswith(l, "current-job-id="))) {
+@@ -3312,29 +3309,31 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
+         }
+ 
+         for (;;) {
+-                Unit *u;
+-                char name[UNIT_NAME_MAX+2];
++                _cleanup_free_ char *line = NULL;
+                 const char* unit_name;
++                Unit *u;
+ 
+                 /* Start marker */
+-                if (!fgets(name, sizeof(name), f)) {
+-                        if (feof(f))
+-                                r = 0;
+-                        else
+-                                r = -errno;
+-
++                r = read_line(f, LONG_LINE_MAX, &line);
++                if (r < 0) {
++                        log_error_errno(r, "Failed to read serialization line: %m");
+                         goto finish;
+                 }
++                if (r == 0)
++                        break;
+ 
+-                char_array_0(name);
+-                unit_name = strstrip(name);
++                unit_name = strstrip(line);
+ 
+                 r = manager_load_unit(m, unit_name, NULL, NULL, &u);
+                 if (r < 0) {
+                         log_notice_errno(r, "Failed to load unit \"%s\", skipping deserialization: %m", unit_name);
+                         if (r == -ENOMEM)
+                                 goto finish;
+-                        unit_deserialize_skip(f);
++
++                        r = unit_deserialize_skip(f);
++                        if (r < 0)
++                                goto finish;
++
+                         continue;
+                 }
+ 
+@@ -3347,9 +3346,6 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
+         }
+ 
+ finish:
+-        if (ferror(f))
+-                r = -EIO;
+-
+         assert(m->n_reloading > 0);
+         m->n_reloading--;
+ 
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 113205b..a3556cc 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -3368,21 +3368,19 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
+         assert(fds);
+ 
+         for (;;) {
+-                char line[LINE_MAX], *l, *v;
++                _cleanup_free_ char *line = NULL;
+                 CGroupIPAccountingMetric m;
++                char *l, *v;
+                 size_t k;
+ 
+-                if (!fgets(line, sizeof(line), f)) {
+-                        if (feof(f))
+-                                return 0;
+-                        return -errno;
+-                }
++                r = read_line(f, LONG_LINE_MAX, &line);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to read serialization line: %m");
++                if (r == 0) /* eof */
++                        break;
+ 
+-                char_array_0(line);
+                 l = strstrip(line);
+-
+-                /* End marker */
+-                if (isempty(l))
++                if (isempty(l)) /* End marker */
+                         break;
+ 
+                 k = strcspn(l, "=");
+@@ -3657,23 +3655,27 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
+         return 0;
+ }
+ 
+-void unit_deserialize_skip(FILE *f) {
++int unit_deserialize_skip(FILE *f) {
++        int r;
+         assert(f);
+ 
+         /* Skip serialized data for this unit. We don't know what it is. */
+ 
+         for (;;) {
+-                char line[LINE_MAX], *l;
++                _cleanup_free_ char *line = NULL;
++                char *l;
+ 
+-                if (!fgets(line, sizeof line, f))
+-                        return;
++                r = read_line(f, LONG_LINE_MAX, &line);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to read serialization line: %m");
++                if (r == 0)
++                        return 0;
+ 
+-                char_array_0(line);
+                 l = strstrip(line);
+ 
+                 /* End marker */
+                 if (isempty(l))
+-                        return;
++                        return 1;
+         }
+ }
+ 
+diff --git a/src/core/unit.h b/src/core/unit.h
+index b3131eb..e1a60da 100644
+--- a/src/core/unit.h
++++ b/src/core/unit.h
+@@ -679,7 +679,7 @@ bool unit_can_serialize(Unit *u) _pure_;
+ 
+ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs);
+ int unit_deserialize(Unit *u, FILE *f, FDSet *fds);
+-void unit_deserialize_skip(FILE *f);
++int unit_deserialize_skip(FILE *f);
+ 
+ int unit_serialize_item(Unit *u, FILE *f, const char *key, const char *value);
+ int unit_serialize_item_escaped(Unit *u, FILE *f, const char *key, const char *value);
