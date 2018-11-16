@@ -152,7 +152,6 @@ CONFFLAGS_udeb = \
 	-Dhwdb=false \
 	-Dman=false \
 	-Defi=false \
-	-Dgnuefi=false \
 	-Dseccomp=false \
 	-Dsysusers=false
 
