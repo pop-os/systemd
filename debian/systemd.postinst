@@ -155,4 +155,13 @@ if dpkg --compare-versions "$2" lt-nl "236-1~"; then
     rm -f /var/lib/systemd/clock
 fi
 
+if dpkg --compare-versions "$2" lt-nl "239-12~"; then
+    # clean up bogus "nobody" group from #912525; ensure that it's a system group
+    gid=$(grep '^nobody:x:' /etc/group | cut -f3 -d:)
+    if [ -n "$gid" ] && [ "$gid" -gt 0 ] && [ "$gid" -lt 1000 ]; then
+        echo "Cleaning up erroneous nobody group"
+        sed -i '/^nobody:x:/d' /etc/group
+    fi
+fi
+
 #DEBHELPER#

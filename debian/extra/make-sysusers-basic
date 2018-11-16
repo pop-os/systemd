@@ -14,4 +14,5 @@ done < /usr/share/base-passwd/group.master
 
 echo
 
-awk -F:  '{ i = ($3 == $4) ? $3 : $3":"$4; printf("u %-10s %-7s - %-20s %s\n", $1,i,$6,$7) }'  < /usr/share/base-passwd/passwd.master
+# treat "nobody:nogroup" specially: same ID, but different name, so prevent creating a "nobody" group
+awk -F:  '{ i = ($3 == $4 && $4 != 65534) ? $3 : $3":"$4; printf("u %-10s %-7s - %-20s %s\n", $1,i,$6,$7) }'  < /usr/share/base-passwd/passwd.master
