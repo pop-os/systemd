@@ -140,6 +140,7 @@ Depends: libsystemd-dev,
   netcat-openbsd,
   busybox-static,
   plymouth,
+  e2fsprogs,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
