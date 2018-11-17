@@ -29,6 +29,10 @@ meson-use-the-host-architecture-compiler-linker-for-src-b.patch
 meson-use-an-array-option-for-efi-cc.patch
 meson-avoid-calling-the-shell-to-resolve-efi_libdir.patch
 systemd-do-not-pass-.wants-fragment-path-to-manager_load_.patch
+core-add-namespace_fork-helper-that-forks-joins-a-set-of-.patch
+sd-bus-port-over-to-namespace_fork.patch
+machined-when-reading-os-release-file-join-PID-namespace-.patch
+tree-wide-port-over-other-candidates-for-namespace_fork.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

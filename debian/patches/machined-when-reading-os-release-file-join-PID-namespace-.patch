@@ -1,0 +1,67 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 12 Nov 2018 23:40:09 +0100
+Subject: machined: when reading os-release file, join PID namespace too
+
+This is required for /proc/self/fd/xyz to work, but that's what we need
+to convert the O_PATH fd returned by chase_symlinks() back to a regular
+file fd. Hence, let's do the joining of the namespaces fully and
+correctly, by doing fork()+setns()+fork() with the PID and fs
+namespaces.
+
+This makes use of the new namespace_fork() helper we just added.
+
+Fixes: #10549
+(cherry picked from commit 2bb21fc9288100e12f3dc1a0ede1e8487f7f5223)
+---
+ src/machine/machine-dbus.c | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/src/machine/machine-dbus.c b/src/machine/machine-dbus.c
+index 7f41465..9035e50 100644
+--- a/src/machine/machine-dbus.c
++++ b/src/machine/machine-dbus.c
+@@ -333,19 +333,21 @@ int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, s
+                 break;
+ 
+         case MACHINE_CONTAINER: {
+-                _cleanup_close_ int mntns_fd = -1, root_fd = -1;
++                _cleanup_close_ int mntns_fd = -1, root_fd = -1, pidns_fd = -1;
+                 _cleanup_close_pair_ int pair[2] = { -1, -1 };
+                 _cleanup_fclose_ FILE *f = NULL;
+                 pid_t child;
+ 
+-                r = namespace_open(m->leader, NULL, &mntns_fd, NULL, NULL, &root_fd);
++                r = namespace_open(m->leader, &pidns_fd, &mntns_fd, NULL, NULL, &root_fd);
+                 if (r < 0)
+                         return r;
+ 
+                 if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, pair) < 0)
+                         return -errno;
+ 
+-                r = safe_fork("(sd-osrel)", FORK_RESET_SIGNALS|FORK_DEATHSIG, &child);
++                r = namespace_fork("(sd-osrelns)", "(sd-osrel)", NULL, 0, FORK_RESET_SIGNALS|FORK_DEATHSIG,
++                                   pidns_fd, mntns_fd, -1, -1, root_fd,
++                                   &child);
+                 if (r < 0)
+                         return sd_bus_error_set_errnof(error, r, "Failed to fork(): %m");
+                 if (r == 0) {
+@@ -353,10 +355,6 @@ int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, s
+ 
+                         pair[0] = safe_close(pair[0]);
+ 
+-                        r = namespace_enter(-1, mntns_fd, -1, -1, root_fd);
+-                        if (r < 0)
+-                                _exit(EXIT_FAILURE);
+-
+                         r = open_os_release(NULL, NULL, &fd);
+                         if (r == -ENOENT)
+                                 _exit(EXIT_NOT_FOUND);
+@@ -382,7 +380,7 @@ int bus_machine_method_get_os_release(sd_bus_message *message, void *userdata, s
+                 if (r < 0)
+                         return r;
+ 
+-                r = wait_for_terminate_and_check("(sd-osrel)", child, 0);
++                r = wait_for_terminate_and_check("(sd-osrelns)", child, 0);
+                 if (r < 0)
+                         return sd_bus_error_set_errnof(error, r, "Failed to wait for child: %m");
+                 if (r == EXIT_NOT_FOUND)
