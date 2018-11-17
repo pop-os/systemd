@@ -35,7 +35,7 @@ index 1d6144e..b16c9ca 100644
          'support URL:                       @0@'.format(support_url),
          'nobody user name:                  @0@'.format(nobody_user),
 diff --git a/meson_options.txt b/meson_options.txt
-index dc7951b..fd0def4 100644
+index 1b78cf0..712f300 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
 @@ -180,8 +180,6 @@ option('nobody-group', type : 'string',
