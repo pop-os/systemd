@@ -1,3 +1,40 @@
+systemd (239-12) unstable; urgency=high
+
+  [ Martin Pitt ]
+  * Enable QEMU on more architectures in "upstream" autopkgtest.
+    Taken from the Ubuntu package, so apparently QEMU works well enough on
+    these architectures now.
+  * autopkgtest: Avoid test bed reset for boot-smoke.
+    Make "boot-smoke"'s dependencies a strict superset of "upstream"'s, so
+    that autopkgtest doesn't have to provide a new testbed.
+  * Fix wrong "nobody" group from sysusers.d.
+    Fix our make-sysusers-basic sysusers.d generator to special-case the
+    nobody group. "nobody" user and "nogroup" group both have the same ID
+    65534, which is the only special case for Debian's static users/groups.
+    So specify the gid explicitly, to avoid systemd-sysusers creating a
+    dynamic system group for "nobody".
+    Also clean up the group on upgrades.
+    Thanks to Keh-Ming Luoh for the original patch! (Closes: #912525)
+
+  [ Michael Biebl ]
+  * autopkgtest: Use shutil.which() which is provided by Python 3
+  * Drop non-existing gnuefi=false build option.
+    This was mistakenly added when converting from autotools to meson.
+  * core: When deserializing state always use read_line(…, LONG_LINE_MAX, …)
+    Fixes a vulnerability in unit_deserialize which allows an attacker to
+    supply arbitrary state across systemd re-execution via NotifyAccess.
+    (CVE-2018-15686, Closes: #912005)
+  * meson: Use the host architecture compiler/linker for src/boot/efi.
+    Fixes cross build failure for arm64. (Closes: #905381)
+  * systemd: Do not pass .wants fragment path to manager_load_unit.
+    Fixes an issue with overridden units in /etc not being used due to a
+    .wants/ symlink pointing to /lib. (Closes: #907054)
+  * machined: When reading os-release file, join PID namespace too.
+    This ensures that we properly acquire the os-release file from containers.
+    (Closes: #911231)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 17 Nov 2018 18:39:21 +0100
+
 systemd (239-11) unstable; urgency=high
 
   [ Michael Biebl ]
