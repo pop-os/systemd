@@ -42,7 +42,6 @@ debian/Add-support-for-TuxOnIce-hibernation.patch
 debian/Re-enable-journal-forwarding-to-syslog.patch
 debian/Don-t-enable-audit-by-default.patch
 debian/Only-start-logind-if-dbus-is-installed.patch
-debian/cgroup-don-t-trim-cgroup-trees-created-by-someone-el.patch
 debian/fsckd-daemon-for-inter-fsckd-communication.patch
 debian/Skip-filesystem-check-if-already-done-by-the-initram.patch
 debian/Revert-core-one-step-back-again-for-nspawn-we-actual.patch
