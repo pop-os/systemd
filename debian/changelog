@@ -1,3 +1,21 @@
+systemd (239-13) unstable; urgency=medium
+
+  * autopktest: Add e2fsprogs dependency to upstream test.
+    Some of the upstream tests require mkfs.ext4. (Closes: #887250)
+  * systemctl: Tell update-rc.d to skip creating any systemd symlinks.
+    When calling update-rc.d via systemd-sysv-install, tell it to skip
+    creating any systemd symlinks as we want to handle those directly in
+    systemctl. Older update-rc.d versions will ignore that request, but
+    that's ok. This means we don't need a versioned dependency against
+    init-system-helpers. (Closes: #743217)
+  * pam_systemd: Suppress LOG_DEBUG log messages if debugging is off
+    (Closes: #825949)
+  * Drop cgroup-don-t-trim-cgroup-trees-created-by-someone-el.patch.
+    The patch is no longer necessary as lxc.service now uses Delegate=yes.
+  * Remove obsolete Replaces from pre-jessie
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 20 Nov 2018 19:44:39 +0100
+
 systemd (239-12) unstable; urgency=high
 
   [ Martin Pitt ]
