@@ -378,34 +378,6 @@ ExecStart=/bin/sleep 500
         subprocess.check_call(['systemctl', 'stop', self.service])
         self.assertNoControllers()
 
-    @unittest.skipIf('TEST_UPSTREAM' in os.environ,
-                     'fix not applied upstream')
-    def test_custom_cgroup_cleanup(self):
-        '''cgroup cleanup does not touch manually created cgroups'''
-
-        # reproduces https://bugs.debian.org/777601
-        self.create_service()
-        os.mkdir('/sys/fs/cgroup/blkio/aux')
-        os.mkdir('/sys/fs/cgroup/perf_event/aux')
-        self.addCleanup(os.rmdir, '/sys/fs/cgroup/blkio/aux')
-        self.addCleanup(os.rmdir, '/sys/fs/cgroup/perf_event/aux')
-        subprocess.check_call(['systemctl', 'start', self.service])
-        self.assertController('systemd')
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/blkio/aux'))
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
-
-        subprocess.check_call(['systemctl', 'daemon-reload'])
-        time.sleep(1)
-        subprocess.check_call(['systemctl', 'restart', self.service])
-        time.sleep(1)
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/blkio/aux'))
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
-
-        subprocess.check_call(['systemctl', 'stop', self.service])
-        self.assertNoControllers()
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/blkio/aux'))
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
-
 
 class SeccompTest(unittest.TestCase):
     '''Check seccomp syscall filtering'''
