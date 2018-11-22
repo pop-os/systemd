@@ -87,3 +87,7 @@ debian/UBUNTU-revert-networkd-unify-set-MTU.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch
 debian/UBUNTU-bump-selftest-timeouts.patch
 debian/UBUNTU-units-disable-journald-watchdog.patch
+CVE-2018-15688.patch
+CVE-2018-15686.patch
+CVE-2018-15687.patch
+CVE-2018-6954_2.patch

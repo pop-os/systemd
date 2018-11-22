@@ -1,3 +1,38 @@
+systemd (239-7ubuntu10.4) cosmic-security; urgency=medium
+
+  [ Chris Coulson ]
+  * SECURITY UPDATE: symlink mishandling in systemd-tmpfiles
+    - debian/patches/CVE-2018-6954_2.patch: backport the remaining patches to
+      resolve this completely
+    - CVE-2018-6954
+
+  [ Balint Reczey ]
+  * Fix LP: #1803391 - Skip daemon-reexec and try-restarts during shutdown
+    - update debian/systemd.postinst
+
+ -- Chris Coulson <chris.coulson@canonical.com>  Thu, 15 Nov 2018 20:42:32 +0000
+
+systemd (239-7ubuntu10.3) cosmic-security; urgency=medium
+
+  * SECURITY UPDATE: reexec state injection
+    - debian/patches/CVE-2018-15686.patch: when deserializing state always use
+      read_line(…, LONG_LINE_MAX, …) rather than fgets()
+    - CVE-2018-15686
+  * SECURITY UPDATE: chown_one() can dereference symlinks
+    - debian/patches/CVE-2018-15687.patch: rework recursive logic to use O_PATH
+    - CVE-2018-15687
+
+ -- Chris Coulson <chris.coulson@canonical.com>  Tue, 06 Nov 2018 20:52:41 +0000
+
+systemd (239-7ubuntu10.1) cosmic-security; urgency=medium
+
+  * SECURITY UPDATE: buffer overflow in dhcp6 client
+    - debian/patches/CVE-2018-15688.patch:  make sure we have enough space
+      for the DHCP6 option header in src/libsystemd-network/dhcp6-option.c.
+    - CVE-2018-15688
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Wed, 31 Oct 2018 11:36:32 -0400
+
 systemd (239-7ubuntu10) cosmic; urgency=medium
 
   * units: Disable journald Watchdog (LP: #1773148)
@@ -1580,7 +1615,7 @@ systemd (233-6ubuntu2) artful; urgency=medium
 
 systemd (233-6ubuntu1) artful; urgency=medium
 
-  Merge from Debian, existing changes: 
+  Merge from Debian, existing changes:
   * ubuntu: udev.postinst preserve virtio interfaces names on upgrades, on s390x.
     New udev generates stable interface names on s390x kvm instances, however, upon
     upgrades existing ethX names should be preserved to prevent breaking networking
