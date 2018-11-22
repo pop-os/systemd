@@ -1,0 +1,48 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 6 Aug 2018 19:32:00 +0200
+Subject: btrfs-util: unbreak tmpfiles' subvol creation
+
+tmpfiles now passes an O_PATH fd to btrfs_subvol_make_fd() under the
+assumption it will accept it like mkdirat() does. So far this assumption
+was wrong, let's correct that.
+
+Without that tmpfiles' on btrfs file systems failed systematically...
+
+(cherry picked from commit 2e6e61688748473c4230ca49b402aea2bec9b8ab)
+---
+ src/basic/btrfs-util.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/basic/btrfs-util.c b/src/basic/btrfs-util.c
+index cb071a1..113cdc4 100644
+--- a/src/basic/btrfs-util.c
++++ b/src/basic/btrfs-util.c
+@@ -134,6 +134,7 @@ int btrfs_is_subvol(const char *path) {
+ 
+ int btrfs_subvol_make_fd(int fd, const char *subvolume) {
+         struct btrfs_ioctl_vol_args args = {};
++        _cleanup_close_ int real_fd = -1;
+         int r;
+ 
+         assert(subvolume);
+@@ -142,6 +143,20 @@ int btrfs_subvol_make_fd(int fd, const char *subvolume) {
+         if (r < 0)
+                 return r;
+ 
++        r = fcntl(fd, F_GETFL);
++        if (r < 0)
++                return -errno;
++        if (FLAGS_SET(r, O_PATH)) {
++                /* An O_PATH fd was specified, let's convert here to a proper one, as btrfs ioctl's can't deal with
++                 * O_PATH. */
++
++                real_fd = fd_reopen(fd, O_RDONLY|O_CLOEXEC|O_DIRECTORY);
++                if (real_fd < 0)
++                        return real_fd;
++
++                fd = real_fd;
++        }
++
+         strncpy(args.name, subvolume, sizeof(args.name)-1);
+ 
+         if (ioctl(fd, BTRFS_IOC_SUBVOL_CREATE, &args) < 0)
