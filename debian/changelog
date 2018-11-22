@@ -1,3 +1,21 @@
+systemd (239-7ubuntu11) disco; urgency=medium
+
+  * hwdb: Fix wlan keycode for all Dell Latitude and Precision systems
+    (LP: #1799364)
+    Author: Shih-Yuan Lee (FourDollars)
+    File: debian/patches/hwdb-Fix-wlan-keycode-for-all-Dell-Latitude-and-Precision.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d8ac9a5640be39ede9cebcd8c4cc44e8811e0e49
+
+  * hwdb: Update PNP IDs of Goldstar (now: LG Electronics) (LP: #1804584)
+    File: debian/patches/hwdb-Update-PNP-IDs-of-Goldstar-now-LG-Electronics-.-1005.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=10204fb5761c759be6ddf27dc43c851ef24c96cb
+
+  * btrfs-util: unbreak tmpfiles' subvol creation
+    File: debian/patches/btrfs-util-unbreak-tmpfiles-subvol-creation.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4ab5b8275a0487e301553fb6de6a905abb7ea833
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 22 Nov 2018 16:30:28 +0000
+
 systemd (239-7ubuntu10.4) cosmic-security; urgency=medium
 
   [ Chris Coulson ]
