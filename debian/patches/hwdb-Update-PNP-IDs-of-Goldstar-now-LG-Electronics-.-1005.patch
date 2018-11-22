@@ -1,0 +1,38 @@
+From: Dariusz Gadomski <dgadomski@gmail.com>
+Date: Tue, 11 Sep 2018 00:35:30 +0200
+Subject: hwdb: Update PNP IDs of Goldstar (now: LG Electronics). (#10051)
+
+hwdb: Update PNP IDs of Goldstar (now: LG Electronics)
+(cherry picked from commit c6d7a5e9a3836f837cd3574495f54637073325ee)
+---
+ hwdb/20-acpi-vendor.hwdb.patch | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/hwdb/20-acpi-vendor.hwdb.patch b/hwdb/20-acpi-vendor.hwdb.patch
+index 308d135..31f29e6 100644
+--- a/hwdb/20-acpi-vendor.hwdb.patch
++++ b/hwdb/20-acpi-vendor.hwdb.patch
+@@ -1,5 +1,5 @@
+---- 20-acpi-vendor.hwdb.base	2018-06-12 15:51:50.897235123 +0200
+-+++ 20-acpi-vendor.hwdb	2018-06-12 15:51:50.907235139 +0200
++--- 20-acpi-vendor.hwdb.base	2018-09-10 15:32:43.974756901 +0200
+++++ 20-acpi-vendor.hwdb	2018-09-10 15:33:36.434997668 +0200
+ @@ -3,6 +3,8 @@
+  # Data imported from:
+  #     http://www.uefi.org/uefi-pnp-export
+@@ -166,6 +166,15 @@
+  acpi:FCS*:
+   ID_VENDOR_FROM_DATABASE=Focus Enhancements, Inc.
+  
++@@ -2807,7 +2842,7 @@
++  ID_VENDOR_FROM_DATABASE=General Standards Corporation
++ 
++ acpi:GSM*:
++- ID_VENDOR_FROM_DATABASE=Goldstar Company Ltd
+++ ID_VENDOR_FROM_DATABASE=LG Electronics
++ 
++ acpi:GSN*:
++  ID_VENDOR_FROM_DATABASE=Grandstream Networks, Inc.
+ @@ -2908,6 +2943,9 @@
+  acpi:HEC*:
+   ID_VENDOR_FROM_DATABASE=Hisense Electric Co., Ltd.
