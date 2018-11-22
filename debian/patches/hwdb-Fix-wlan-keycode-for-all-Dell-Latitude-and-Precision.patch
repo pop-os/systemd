@@ -1,0 +1,27 @@
+From: "Shih-Yuan Lee (FourDollars)" <fourdollars@debian.org>
+Date: Tue, 14 Aug 2018 18:40:37 +0800
+Subject: hwdb: Fix wlan keycode for all Dell Latitude and Precision systems
+
+Removing this line is because cab01e9ecf1c69656785e64f5fc94cd4ed09e57f
+has contained the wlan keycode fix.
+
+This line will only break the wlan keycode for all Dell Latitude and
+Precision systems after cab01e9ecf1c69656785e64f5fc94cd4ed09e57f.
+
+(cherry picked from commit 9e2629919f0cd4d48d179fa5ae5e46c3267c1cdc)
+---
+ hwdb/60-keyboard.hwdb | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/hwdb/60-keyboard.hwdb b/hwdb/60-keyboard.hwdb
+index ae3ec3c..4509069 100644
+--- a/hwdb/60-keyboard.hwdb
++++ b/hwdb/60-keyboard.hwdb
+@@ -315,7 +315,6 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDell*:pnStudio*155[78]:pvr*
+ # Dell Touchpad
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDell*:pnLatitude*:pvr*
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnDell*:pnPrecision*:pvr*
+- KEYBOARD_KEY_88=!                                      # wireless switch
+  KEYBOARD_KEY_9e=!f21
+ 
+ # Dell Latitude E7*
