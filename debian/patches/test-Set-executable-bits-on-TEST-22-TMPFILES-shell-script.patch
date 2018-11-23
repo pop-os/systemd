@@ -1,0 +1,22 @@
+From: Dimitri John Ledkov <xnox@ubuntu.com>
+Date: Fri, 23 Nov 2018 16:27:17 +0000
+Subject: test: Set executable bits on TEST-22-TMPFILES shell scripts.
+
+---
+ test/TEST-22-TMPFILES/test-02.sh | 0
+ test/TEST-22-TMPFILES/test-03.sh | 0
+ test/TEST-22-TMPFILES/test-04.sh | 0
+ 3 files changed, 0 insertions(+), 0 deletions(-)
+ mode change 100644 => 100755 test/TEST-22-TMPFILES/test-02.sh
+ mode change 100644 => 100755 test/TEST-22-TMPFILES/test-03.sh
+ mode change 100644 => 100755 test/TEST-22-TMPFILES/test-04.sh
+
+diff --git a/test/TEST-22-TMPFILES/test-02.sh b/test/TEST-22-TMPFILES/test-02.sh
+old mode 100644
+new mode 100755
+diff --git a/test/TEST-22-TMPFILES/test-03.sh b/test/TEST-22-TMPFILES/test-03.sh
+old mode 100644
+new mode 100755
+diff --git a/test/TEST-22-TMPFILES/test-04.sh b/test/TEST-22-TMPFILES/test-04.sh
+old mode 100644
+new mode 100755

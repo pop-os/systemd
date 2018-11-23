@@ -95,3 +95,4 @@ CVE-2018-15686.patch
 CVE-2018-15687.patch
 CVE-2018-6954_2.patch
 btrfs-util-unbreak-tmpfiles-subvol-creation.patch
+test-Set-executable-bits-on-TEST-22-TMPFILES-shell-script.patch
