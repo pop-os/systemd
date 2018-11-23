@@ -1,3 +1,21 @@
+systemd (239-7ubuntu12) disco; urgency=medium
+
+  * hwdb: Revert wlan keycode changes, rely on xkeyboard-config fixes instead.
+    (LP: #1799364)
+    Author: seb128
+    File: debian/patches/hwdb-revert-airplane-mode-keys-handling-on-Dell.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cabc076fdd67ced21fc789e44e0366a2f561a5bc
+
+  * test: Set executable bits on TEST-22-TMPFILES shell scripts. (LP: #1804864)
+    File: debian/patches/test-Set-executable-bits-on-TEST-22-TMPFILES-shell-script.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0e5b6e44a962f299565949e1006a4ba86d171dc3
+
+  * Switch gbp.conf to disco.
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fea585b259e3e766d8d3dbc9690e879c054ddc87
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 23 Nov 2018 18:38:43 +0000
+
 systemd (239-7ubuntu11) disco; urgency=medium
 
   * hwdb: Fix wlan keycode for all Dell Latitude and Precision systems
