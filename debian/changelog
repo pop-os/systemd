@@ -1,3 +1,15 @@
+systemd (239-7ubuntu13) disco; urgency=medium
+
+  * Stop testing that gdm3 is up.
+    Ubuntu Desktop is only supported on amd64, and on real hardware. Testing that
+    gdm3 fails to start (yet continues to be running, with a half broken logind
+    session) is not useful on dummy xorg video cards in nested VMs.
+    (LP: #1805358)
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3006fedda1d1ca3f04c5f593e8018bb6d1196025
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 28 Nov 2018 16:02:25 +0000
+
 systemd (239-7ubuntu12) disco; urgency=medium
 
   * hwdb: Revert wlan keycode changes, rely on xkeyboard-config fixes instead.
