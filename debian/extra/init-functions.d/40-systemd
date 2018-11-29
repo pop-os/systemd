@@ -4,7 +4,13 @@
 _use_systemctl=0
 if [ -d /run/systemd/system ]; then
 
-    prog=${0##*/}
+    if [ -n "${__init_d_script_name:-}" ]; then
+        executable="$__init_d_script_name"
+    else
+        executable="$0"
+    fi
+
+    prog=${executable##*/}
     service="${prog%.sh}.service"
 
     # Don't try to run masked services. systemctl <= 230 always succeeds here,
@@ -14,7 +20,7 @@ if [ -d /run/systemd/system ]; then
 
     # Redirect SysV init scripts when executed by the user
     if [ $PPID -ne 1 ] && [ -z "${SYSTEMCTL_SKIP_REDIRECT:-}" ]; then
-        case $(readlink -f "$0") in
+        case $(readlink -f "$executable") in
             /etc/init.d/*)
                 # If the state is not-found, this might be a newly installed SysV init
                 # script where systemd-sysv-generator has not been run yet.
@@ -88,7 +94,7 @@ if [ "$_use_systemctl" = "1" ]; then
         "x$1" = xtry-restart -o \
         "x$1" = xstatus ] ; then
 
-        systemctl_redirect $0 $1
+        systemctl_redirect $executable $1
         exit $?
     fi
 fi
