@@ -34,6 +34,7 @@ sd-bus-port-over-to-namespace_fork.patch
 machined-when-reading-os-release-file-join-PID-namespace-.patch
 tree-wide-port-over-other-candidates-for-namespace_fork.patch
 pam_systemd-suppress-LOG_DEBUG-log-messages-if-debugging-.patch
+resolved-Increase-size-of-TCP-stub-replies.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
