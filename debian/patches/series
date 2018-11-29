@@ -48,6 +48,7 @@ core-execute-generators-with-manager-s-environmnet.patch
 hwdb-Fix-wlan-keycode-for-all-Dell-Latitude-and-Precision.patch
 hwdb-Update-PNP-IDs-of-Goldstar-now-LG-Electronics-.-1005.patch
 hwdb-revert-airplane-mode-keys-handling-on-Dell.patch
+meson-rename-Ddebug-to-Ddebug-extra.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
