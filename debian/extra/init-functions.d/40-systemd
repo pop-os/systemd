@@ -4,10 +4,16 @@
 _use_systemctl=0
 if [ -d /run/systemd/system ]; then
 
-    if [ -n "${__init_d_script_name:-}" ]; then
+    if [ -n "${__init_d_script_name:-}" ]; then # scripts run with new init-d-script
         executable="$__init_d_script_name"
-    else
+        argument="$1"
+    elif [ "${0##*/}" = "init-d-script" ] ||
+         [ "${0##*/}" = "${1##*/}" ]; then # scripts run with old  init-d-script
+        executable="$1"
+        argument="$2"
+    else # plain old scripts
         executable="$0"
+        argument="$1"
     fi
 
     prog=${executable##*/}
@@ -29,7 +35,7 @@ if [ -d /run/systemd/system ]; then
                 _use_systemctl=1
                 # Some services can't reload through the .service file,
                 # but can through the init script.
-                if [ "$(systemctl -p CanReload --value show $service 2>/dev/null)" = "no" ] && [ "${1:-}" = "reload" ]; then
+                if [ "$(systemctl -p CanReload --value show $service 2>/dev/null)" = "no" ] && [ "${argument:-}" = "reload" ]; then
                     _use_systemctl=0
                 fi
                 ;;
@@ -86,15 +92,15 @@ if [ "$_use_systemctl" = "1" ]; then
     set +e
     set +u
 
-    if  [ "x$1" = xstart -o \
-        "x$1" = xstop -o \
-        "x$1" = xrestart -o \
-        "x$1" = xreload -o \
-        "x$1" = xforce-reload -o \
-        "x$1" = xtry-restart -o \
-        "x$1" = xstatus ] ; then
+    if  [ "x$argument" = xstart -o \
+        "x$argument" = xstop -o \
+        "x$argument" = xrestart -o \
+        "x$argument" = xreload -o \
+        "x$argument" = xforce-reload -o \
+        "x$argument" = xtry-restart -o \
+        "x$argument" = xstatus ] ; then
 
-        systemctl_redirect $executable $1
+        systemctl_redirect $executable $argument
         exit $?
     fi
 fi
