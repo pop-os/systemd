@@ -1,3 +1,11 @@
+systemd (239-7ubuntu14) disco; urgency=medium
+
+  * Fix compat with new meson.
+    File: debian/patches/meson-rename-Ddebug-to-Ddebug-extra.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3b764ec1b76768a8c40635019fa5a8acb81b223e
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 29 Nov 2018 16:53:00 +0000
+
 systemd (239-7ubuntu13) disco; urgency=medium
 
   * Stop testing that gdm3 is up.
