@@ -92,15 +92,10 @@ if [ "$_use_systemctl" = "1" ]; then
     set +e
     set +u
 
-    if  [ "x$argument" = xstart -o \
-        "x$argument" = xstop -o \
-        "x$argument" = xrestart -o \
-        "x$argument" = xreload -o \
-        "x$argument" = xforce-reload -o \
-        "x$argument" = xtry-restart -o \
-        "x$argument" = xstatus ] ; then
-
-        systemctl_redirect $executable $argument
-        exit $?
-    fi
+    case "$argument" in
+        start|stop|restart|reload|force-reload|try-restart|status)
+            systemctl_redirect $executable $argument
+            exit $?
+            ;;
+    esac
 fi
