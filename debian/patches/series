@@ -35,6 +35,8 @@ machined-when-reading-os-release-file-join-PID-namespace-.patch
 tree-wide-port-over-other-candidates-for-namespace_fork.patch
 pam_systemd-suppress-LOG_DEBUG-log-messages-if-debugging-.patch
 resolved-Increase-size-of-TCP-stub-replies.patch
+build-sys-Detect-whether-struct-statx-is-defined-in-sys-s.patch
+meson-unify-linux-stat.h-check-with-other-checks-and-use-.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
