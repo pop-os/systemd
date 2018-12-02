@@ -1,3 +1,31 @@
+systemd (239-14) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * autopkgtest: Drop test_custom_cgroup_cleanup from boot-and-services
+  * resolved: Increase size of TCP stub replies (Closes: #915049)
+  * meson: Unify linux/stat.h check with other checks and use _GNU_SOURCE.
+    Fixes a build failure with glibc 2.28.
+  * Drop procps dependency from systemd.
+    The systemd-exit.service user service no longer uses the "kill" binary.
+  * Simplify container check in udev SysV init script.
+    Instead of using "ps" to detect a container environment, simply test if
+    /sys is writable. This matches what's used in systemd-udevd.service via
+    ConditionPathIsReadWrite=/sys and follows
+    https://www.freedesktop.org/wiki/Software/systemd/ContainerInterface/
+    This means we no longer need procps, so drop that dependency from the
+    udev package. (Closes: #915095)
+
+  [ Mert Dirik ]
+  * 40-systemd: Honour __init_d_script_name.
+    Make /lib/lsb/init-functions.d/40-systemd use __init_d_script_name
+    (if available) to figure out real script name. (Closes: #826214)
+  * 40-systemd: Improve heuristics for init-d-script.
+    Improve heuristics for scripts run via init-d-script so that the
+    redirection works even for older init-d-script versions without the
+    __init_d_script_name variable.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 02 Dec 2018 01:00:01 +0100
+
 systemd (239-13) unstable; urgency=medium
 
   * autopktest: Add e2fsprogs dependency to upstream test.
