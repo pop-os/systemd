@@ -124,7 +124,7 @@ if [ ! -d /sys/class/ ]; then
   log_end_msg 1
 fi
 
-if [ -w /sys ]; then
+if [ ! -w /sys ]; then
   log_warning_msg "udev does not support containers, not started"
   exit 0
 fi
