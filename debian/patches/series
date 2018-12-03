@@ -91,6 +91,7 @@ debian/UBUNTU-revert-networkd-unify-set-MTU.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch
 debian/UBUNTU-bump-selftest-timeouts.patch
 debian/UBUNTU-units-disable-journald-watchdog.patch
+debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
 CVE-2018-15688.patch
 CVE-2018-15686.patch
 CVE-2018-15687.patch
