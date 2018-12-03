@@ -1,0 +1,39 @@
+From: Victor Tapia <victor.tapia@canonical.com>
+Date: Wed, 21 Nov 2018 14:01:04 +0100
+Subject: resolved: Increase size of TCP stub replies
+
+DNS_PACKET_PAYLOAD_SIZE_MAX is limiting the size of the stub replies to
+512 with EDNS off or 4096 with EDNS on, without checking the protocol
+used. This makes TCP replies for clients without EDNS support to be
+limited to 512, making the truncate flag useless if the query result is
+bigger than 512 bytes.
+
+This commit increases the size of TCP replies to DNS_PACKET_SIZE_MAX
+
+LP: #1804487
+Fixes: #10816
+(cherry picked from commit e6eed9445956cfa496e1db933bfd3530db23bfce)
+---
+ src/resolve/resolved-dns-packet.h | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved-dns-packet.h b/src/resolve/resolved-dns-packet.h
+index 8e9d74a..22ef871 100644
+--- a/src/resolve/resolved-dns-packet.h
++++ b/src/resolve/resolved-dns-packet.h
+@@ -120,11 +120,14 @@ static inline uint16_t DNS_PACKET_RCODE(DnsPacket *p) {
+ 
+ static inline uint16_t DNS_PACKET_PAYLOAD_SIZE_MAX(DnsPacket *p) {
+ 
+-        /* Returns the advertised maximum datagram size for replies, or the DNS default if there's nothing defined. */
++        /* Returns the advertised maximum size for replies, or the DNS default if there's nothing defined. */
+ 
+         if (p->opt)
+                 return MAX(DNS_PACKET_UNICAST_SIZE_MAX, p->opt->key->class);
+ 
++        if (p->ipproto == IPPROTO_TCP)
++                return DNS_PACKET_SIZE_MAX;
++
+         return DNS_PACKET_UNICAST_SIZE_MAX;
+ }
+ 
