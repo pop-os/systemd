@@ -1,3 +1,29 @@
+systemd (239-7ubuntu15) disco; urgency=medium
+
+  * core: set /run size to 10%, like initramfs-tools does.
+    Currently there is a difference between initrd and initrd-less boots,
+    w.r.t. size= mount option of /run. This yields different runtime journald caps
+    (1% vs 10%), and on dense deployments of containers may result in OOM kills.
+    (LP: #1799251)
+    File: debian/patches/debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1fac2568fe716dc1a41bada78293dc6327a6df0d
+
+  * resolved: Increase size of TCP stub replies.
+    DNS_PACKET_PAYLOAD_SIZE_MAX is limiting the size of the stub replies to
+    512 with EDNS off or 4096 with EDNS on, without checking the protocol
+    used. This makes TCP replies for clients without EDNS support to be
+    limited to 512, making the truncate flag useless if the query result is
+    bigger than 512 bytes.
+    This commit increases the size of TCP replies to DNS_PACKET_SIZE_MAX
+    Fixes: #10816
+    (cherry picked from commit e6eed9445956cfa496e1db933bfd3530db23bfce)
+    (LP: #1804487)
+    Author: Victor Tapia
+    File: debian/patches/resolved-Increase-size-of-TCP-stub-replies.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=702a4566174c4d2bd84b70805107cfc1a7c128cc
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 03 Dec 2018 13:49:24 +0000
+
 systemd (239-7ubuntu14) disco; urgency=medium
 
   * Fix compat with new meson.
