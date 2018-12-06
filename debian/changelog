@@ -1,3 +1,24 @@
+systemd (239-15) unstable; urgency=medium
+
+  [ Felipe Sateler ]
+  * Fix container check in udev init script.
+    Udev needs writable /sys, so the init script tried to check before
+    starting. Unfortunately, the check was inverted. Let's add the missing
+    '!' to negate the check.
+    (Closes: #915261)
+  * Add myself to uploaders
+
+  [ Michael Biebl ]
+  * Remove obsolete systemd-shim conffile on upgrades.
+    The D-Bus policy file was dropped from the systemd-shim package in
+    version 8-4, but apparently there are cases where users removed the
+    package before that cleanup happened. The D-Bus policy file that was
+    shipped by systemd-shim was much more restrictive and now prevents
+    calling GetDynamicUsers() and other recent APIs on systemd Manager.
+    (Closes: #914285)
+
+ -- Felipe Sateler <fsateler@debian.org>  Wed, 05 Dec 2018 21:03:34 -0300
+
 systemd (239-14) unstable; urgency=medium
 
   [ Michael Biebl ]
