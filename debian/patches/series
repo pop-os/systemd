@@ -37,6 +37,7 @@ pam_systemd-suppress-LOG_DEBUG-log-messages-if-debugging-.patch
 resolved-Increase-size-of-TCP-stub-replies.patch
 build-sys-Detect-whether-struct-statx-is-defined-in-sys-s.patch
 meson-unify-linux-stat.h-check-with-other-checks-and-use-.patch
+Revert-systemctl-when-removing-enablement-or-mask-symlink.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -53,5 +54,4 @@ debian/Revert-core-enable-TasksMax-for-all-services-by-default-a.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
-debian/Revert-systemctl-when-removing-enablement-or-mask-symlink.patch
 debian/Drop-seccomp-system-call-filter-for-udev.patch

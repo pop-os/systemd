@@ -3,15 +3,25 @@ Date: Wed, 27 Jun 2018 14:31:42 +0200
 Subject: Revert "systemctl: when removing enablement or mask symlinks,
  cover both /run and /etc"
 
-We currently have packages in the archive which use
-"systemctl --runtime unmask" and are broken by this change.
-This is a intermediate step until it is clear whether upstream will
-revert this commit or whether we will have to update affected packages
-to deal with this changed behaviour.
+Having systemctl disable/unmask remove all symlinks in /etc and /run is
+unintuitive and breaks existing use cases.
+systemctl should behave symmetrically.
+A "systemctl --runtime unmask" should undo a "systemctl --runtime mask"
+action.
+Say you have a service, which was masked by the admin in /etc.
+If you temporarily want to mask the execution of the service (say in a
+script), you'd create a runtime mask via "systemctl --runtime mask".
+It is is now no longer possible to undo this temporary mask without
+nuking the admin changes, unless you start rm'ing files manually.
 
-See #902287 and https://github.com/systemd/systemd/issues/9393
+While it is useful to be able to remove all enablement/mask symlinks in
+one go, this should be done via a separate command line switch, like
+"systemctl --all unmask".
 
 This reverts commit 4910b35078ad24dcbc63f372b2fee087640201d0.
+
+Fixes: #9393
+(cherry picked from commit 1830ac51a4ad1d82a198e587207df451b581c821)
 ---
  man/systemctl.xml         |  22 +++----
  src/shared/install.c      | 162 +++++++++++++++++++++++++---------------------
