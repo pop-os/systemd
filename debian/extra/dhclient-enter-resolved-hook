@@ -28,6 +28,9 @@ if [ -x /lib/systemd/systemd-resolved ] ; then
               fi
               statedir="/run/systemd/resolved.conf.d"
               mkdir -p $statedir
+
+              oldstate="$(mktemp)"
+              md5sum $statedir/isc-dhcp-v4-$interface.conf $statedir/isc-dhcp-v6-$interface.conf &> $oldstate
               if [ -n "$new_domain_name_servers" ] ; then
                   cat <<EOF >$statedir/isc-dhcp-v4-$interface.conf
 [Resolve]
@@ -50,7 +53,12 @@ Domains=$new_dhcp6_domain_search
 EOF
                   fi
               fi
-              systemctl try-reload-or-restart systemd-resolved.service
+
+              if ! cmp --quiet $oldstate <(md5sum $statedir/isc-dhcp-v4-$interface.conf $statedir/isc-dhcp-v6-$interface.conf 2>&1); then
+                  systemctl try-reload-or-restart systemd-resolved.service
+              fi
+
+              rm $oldstate
           }
                 ;;
 
