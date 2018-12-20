@@ -265,7 +265,7 @@ override_dh_missing:
 override_dh_installinit:
 	dh_installinit --no-start
 
-PROJECT_VERSION ?= $(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.h | tr -d \")
+PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' build-deb/config.h | tr -d \")
 
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends
