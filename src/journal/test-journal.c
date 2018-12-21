@@ -3,11 +3,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "io-util.h"
 #include "journal-authenticate.h"
 #include "journal-file.h"
 #include "journal-vacuum.h"
 #include "log.h"
 #include "rm-rf.h"
+#include "tests.h"
 
 static bool arg_keep = false;
 
@@ -21,7 +23,7 @@ static void test_non_empty(void) {
         sd_id128_t fake_boot_id;
         char t[] = "/tmp/journal-XXXXXX";
 
-        log_set_max_level(LOG_DEBUG);
+        test_setup_logging(LOG_DEBUG);
 
         assert_se(mkdtemp(t));
         assert_se(chdir(t) >= 0);
@@ -31,16 +33,13 @@ static void test_non_empty(void) {
         assert_se(dual_timestamp_get(&ts));
         assert_se(sd_id128_randomize(&fake_boot_id) == 0);
 
-        iovec.iov_base = (void*) test;
-        iovec.iov_len = strlen(test);
+        iovec = IOVEC_MAKE_STRING(test);
         assert_se(journal_file_append_entry(f, &ts, NULL, &iovec, 1, NULL, NULL, NULL) == 0);
 
-        iovec.iov_base = (void*) test2;
-        iovec.iov_len = strlen(test2);
+        iovec = IOVEC_MAKE_STRING(test2);
         assert_se(journal_file_append_entry(f, &ts, NULL, &iovec, 1, NULL, NULL, NULL) == 0);
 
-        iovec.iov_base = (void*) test;
-        iovec.iov_len = strlen(test);
+        iovec = IOVEC_MAKE_STRING(test);
         assert_se(journal_file_append_entry(f, &ts, &fake_boot_id, &iovec, 1, NULL, NULL, NULL) == 0);
 
 #if HAVE_GCRYPT
@@ -112,7 +111,7 @@ static void test_empty(void) {
         JournalFile *f1, *f2, *f3, *f4;
         char t[] = "/tmp/journal-XXXXXX";
 
-        log_set_max_level(LOG_DEBUG);
+        test_setup_logging(LOG_DEBUG);
 
         assert_se(mkdtemp(t));
         assert_se(chdir(t) >= 0);
@@ -164,7 +163,7 @@ static bool check_compressed(uint64_t compress_threshold, uint64_t data_size) {
 
         assert_se(data_size <= sizeof(data));
 
-        log_set_max_level(LOG_DEBUG);
+        test_setup_logging(LOG_DEBUG);
 
         assert_se(mkdtemp(t));
         assert_se(chdir(t) >= 0);
@@ -173,8 +172,7 @@ static bool check_compressed(uint64_t compress_threshold, uint64_t data_size) {
 
         dual_timestamp_get(&ts);
 
-        iovec.iov_base = (void*) data;
-        iovec.iov_len = data_size;
+        iovec = IOVEC_MAKE(data, data_size);
         assert_se(journal_file_append_entry(f, &ts, NULL, &iovec, 1, NULL, NULL, NULL) == 0);
 
 #if HAVE_GCRYPT
@@ -238,9 +236,11 @@ static void test_min_compress_size(void) {
 int main(int argc, char *argv[]) {
         arg_keep = argc > 1;
 
+        test_setup_logging(LOG_INFO);
+
         /* journal_file_open requires a valid machine id */
         if (access("/etc/machine-id", F_OK) != 0)
-                return EXIT_TEST_SKIP;
+                return log_tests_skipped("/etc/machine-id not found");
 
         test_non_empty();
         test_empty();

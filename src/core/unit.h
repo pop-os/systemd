@@ -19,7 +19,7 @@ typedef enum KillOperation {
         KILL_TERMINATE,
         KILL_TERMINATE_AND_LOG,
         KILL_KILL,
-        KILL_ABORT,
+        KILL_WATCHDOG,
         _KILL_OPERATION_MAX,
         _KILL_OPERATION_INVALID = -1
 } KillOperation;
@@ -105,12 +105,6 @@ struct UnitRef {
         LIST_FIELDS(UnitRef, refs_by_target);
 };
 
-typedef enum UnitCGroupBPFState {
-        UNIT_CGROUP_BPF_OFF = 0,
-        UNIT_CGROUP_BPF_ON = 1,
-        UNIT_CGROUP_BPF_INVALIDATED = -1,
-} UnitCGroupBPFState;
-
 typedef struct Unit {
         Manager *manager;
 
@@ -188,9 +182,6 @@ typedef struct Unit {
         /* Per type list */
         LIST_FIELDS(Unit, units_by_type);
 
-        /* All units which have requires_mounts_for set */
-        LIST_FIELDS(Unit, has_requires_mounts_for);
-
         /* Load queue */
         LIST_FIELDS(Unit, load_queue);
 
@@ -212,6 +203,9 @@ typedef struct Unit {
         /* Target dependencies queue */
         LIST_FIELDS(Unit, target_deps_queue);
 
+        /* Queue of units with StopWhenUnneeded set that shell be checked for clean-up. */
+        LIST_FIELDS(Unit, stop_when_unneeded_queue);
+
         /* PIDs we keep an eye on. Note that a unit might have many
          * more, but these are the ones we care enough about to
          * process SIGCHLD for */
@@ -232,8 +226,9 @@ typedef struct Unit {
         RateLimit start_limit;
         EmergencyAction start_limit_action;
 
-        EmergencyAction failure_action;
-        EmergencyAction success_action;
+        /* What to do on failure or success */
+        EmergencyAction success_action, failure_action;
+        int success_action_exit_status, failure_action_exit_status;
         char *reboot_arg;
 
         /* Make sure we never enter endless loops with the check unneeded logic, or the BindsTo= logic */
@@ -253,11 +248,14 @@ typedef struct Unit {
 
         /* Counterparts in the cgroup filesystem */
         char *cgroup_path;
-        CGroupMask cgroup_realized_mask;
-        CGroupMask cgroup_enabled_mask;
-        CGroupMask cgroup_subtree_mask;
-        CGroupMask cgroup_members_mask;
+        CGroupMask cgroup_realized_mask;           /* In which hierarchies does this unit's cgroup exist? (only relevant on cgroupsv1) */
+        CGroupMask cgroup_enabled_mask;            /* Which controllers are enabled (or more correctly: enabled for the children) for this unit's cgroup? (only relevant on cgroupsv2) */
+        CGroupMask cgroup_invalidated_mask;        /* A mask specifiying controllers which shall be considered invalidated, and require re-realization */
+        CGroupMask cgroup_members_mask;            /* A cache for the controllers required by all children of this cgroup (only relevant for slice units) */
         int cgroup_inotify_wd;
+
+        /* Device Controller BPF program */
+        BPFProgram *bpf_device_control_installed;
 
         /* IP BPF Firewalling/accounting */
         int ip_accounting_ingress_map_fd;
@@ -315,6 +313,7 @@ typedef struct Unit {
         /* Is this a unit that is always running and cannot be stopped? */
         bool perpetual;
 
+        /* Booleans indicating membership of this unit in the various queues */
         bool in_load_queue:1;
         bool in_dbus_queue:1;
         bool in_cleanup_queue:1;
@@ -322,6 +321,7 @@ typedef struct Unit {
         bool in_cgroup_realize_queue:1;
         bool in_cgroup_empty_queue:1;
         bool in_target_deps_queue:1;
+        bool in_stop_when_unneeded_queue:1;
 
         bool sent_dbus_new_signal:1;
 
@@ -330,9 +330,6 @@ typedef struct Unit {
 
         bool cgroup_realized:1;
         bool cgroup_members_mask_valid:1;
-        bool cgroup_subtree_mask_valid:1;
-
-        UnitCGroupBPFState cgroup_bpf_state:2;
 
         /* Reset cgroup accounting next time we fork something off */
         bool reset_accounting:1;
@@ -349,10 +346,12 @@ typedef struct Unit {
         bool exported_invocation_id:1;
         bool exported_log_level_max:1;
         bool exported_log_extra_fields:1;
+        bool exported_log_rate_limit_interval:1;
+        bool exported_log_rate_limit_burst:1;
 
         /* When writing transient unit files, stores which section we stored last. If < 0, we didn't write any yet. If
          * == 0 we are in the [Unit] section, if > 0 we are in the unit type-specific section. */
-        int last_section_private:2;
+        signed int last_section_private:2;
 } Unit;
 
 typedef struct UnitStatusMessageFormats {
@@ -380,7 +379,9 @@ typedef enum UnitWriteFlags {
 } UnitWriteFlags;
 
 /* Returns true if neither persistent, nor runtime storage is requested, i.e. this is a check invocation only */
-#define UNIT_WRITE_FLAGS_NOOP(flags) (((flags) & (UNIT_RUNTIME|UNIT_PERSISTENT)) == 0)
+static inline bool UNIT_WRITE_FLAGS_NOOP(UnitWriteFlags flags) {
+        return (flags & (UNIT_RUNTIME|UNIT_PERSISTENT)) == 0;
+}
 
 #include "kill.h"
 
@@ -432,11 +433,16 @@ typedef struct UnitVTable {
         int (*load)(Unit *u);
 
         /* During deserialization we only record the intended state to return to. With coldplug() we actually put the
-         * deserialized state in effect. This is where unit_notify() should be called to start things up. */
+         * deserialized state in effect. This is where unit_notify() should be called to start things up. Note that
+         * this callback is invoked *before* we leave the reloading state of the manager, i.e. *before* we consider the
+         * reloading to be complete. Thus, this callback should just restore the exact same state for any unit that was
+         * in effect before the reload, i.e. units should not catch up with changes happened during the reload. That's
+         * what catchup() below is for. */
         int (*coldplug)(Unit *u);
 
-        /* This is called shortly after all units' coldplug() call was invoked. It's supposed to catch up state changes
-         * we missed so far (for example because they took place while we were reloading/reexecing) */
+        /* This is called shortly after all units' coldplug() call was invoked, and *after* the manager left the
+         * reloading state. It's supposed to catch up with state changes due to external events we missed so far (for
+         * example because they took place while we were reloading/reexecing) */
         void (*catchup)(Unit *u);
 
         void (*dump)(Unit *u, FILE *f, const char *prefix);
@@ -529,6 +535,10 @@ typedef struct UnitVTable {
         /* Returns true if the unit currently needs access to the console */
         bool (*needs_console)(Unit *u);
 
+        /* Returns the exit status to propagate in case of FailureAction=exit/SuccessAction=exit; usually returns the
+         * exit code of the "main" process of the service or similar. */
+        int (*exit_status)(Unit *u);
+
         /* Like the enumerate() callback further down, but only enumerates the perpetual units, i.e. all units that
          * unconditionally exist and are always active. The main reason to keep both enumeration functions separate is
          * philosophical: the state of perpetual units should be put in place by coldplug(), while the state of those
@@ -568,7 +578,9 @@ typedef struct UnitVTable {
 
 extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
 
-#define UNIT_VTABLE(u) unit_vtable[(u)->type]
+static inline const UnitVTable* UNIT_VTABLE(Unit *u) {
+        return unit_vtable[u->type];
+}
 
 /* For casting a unit into the various unit types */
 #define DEFINE_CAST(UPPERCASE, MixedCase)                               \
@@ -580,13 +592,20 @@ extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
         }
 
 /* For casting the various unit types into a unit */
-#define UNIT(u) (&(u)->meta)
+#define UNIT(u)                                         \
+        ({                                              \
+                typeof(u) _u_ = (u);                    \
+                Unit *_w_ = _u_ ? &(_u_)->meta : NULL;  \
+                _w_;                                    \
+        })
 
 #define UNIT_HAS_EXEC_CONTEXT(u) (UNIT_VTABLE(u)->exec_context_offset > 0)
 #define UNIT_HAS_CGROUP_CONTEXT(u) (UNIT_VTABLE(u)->cgroup_context_offset > 0)
 #define UNIT_HAS_KILL_CONTEXT(u) (UNIT_VTABLE(u)->kill_context_offset > 0)
 
-#define UNIT_TRIGGER(u) ((Unit*) hashmap_first_key((u)->dependencies[UNIT_TRIGGERS]))
+static inline Unit* UNIT_TRIGGER(Unit *u) {
+        return hashmap_first_key(u->dependencies[UNIT_TRIGGERS]);
+}
 
 Unit *unit_new(Manager *m, size_t size);
 void unit_free(Unit *u);
@@ -598,8 +617,8 @@ int unit_add_name(Unit *u, const char *name);
 int unit_add_dependency(Unit *u, UnitDependency d, Unit *other, bool add_reference, UnitDependencyMask mask);
 int unit_add_two_dependencies(Unit *u, UnitDependency d, UnitDependency e, Unit *other, bool add_reference, UnitDependencyMask mask);
 
-int unit_add_dependency_by_name(Unit *u, UnitDependency d, const char *name, const char *filename, bool add_reference, UnitDependencyMask mask);
-int unit_add_two_dependencies_by_name(Unit *u, UnitDependency d, UnitDependency e, const char *name, const char *path, bool add_reference, UnitDependencyMask mask);
+int unit_add_dependency_by_name(Unit *u, UnitDependency d, const char *name, bool add_reference, UnitDependencyMask mask);
+int unit_add_two_dependencies_by_name(Unit *u, UnitDependency d, UnitDependency e, const char *name, bool add_reference, UnitDependencyMask mask);
 
 int unit_add_exec_dependencies(Unit *u, ExecContext *c);
 
@@ -613,6 +632,7 @@ void unit_add_to_dbus_queue(Unit *u);
 void unit_add_to_cleanup_queue(Unit *u);
 void unit_add_to_gc_queue(Unit *u);
 void unit_add_to_target_deps_queue(Unit *u);
+void unit_submit_to_stop_when_unneeded_queue(Unit *u);
 
 int unit_merge(Unit *u, Unit *other);
 int unit_merge_by_name(Unit *u, const char *other);
@@ -628,7 +648,7 @@ int unit_set_default_slice(Unit *u);
 
 const char *unit_description(Unit *u) _pure_;
 
-bool unit_has_name(Unit *u, const char *name);
+bool unit_has_name(const Unit *u, const char *name);
 
 UnitActiveState unit_active_state(Unit *u);
 
@@ -679,12 +699,7 @@ bool unit_can_serialize(Unit *u) _pure_;
 
 int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs);
 int unit_deserialize(Unit *u, FILE *f, FDSet *fds);
-void unit_deserialize_skip(FILE *f);
-
-int unit_serialize_item(Unit *u, FILE *f, const char *key, const char *value);
-int unit_serialize_item_escaped(Unit *u, FILE *f, const char *key, const char *value);
-int unit_serialize_item_fd(Unit *u, FILE *f, FDSet *fds, const char *key, int fd);
-void unit_serialize_item_format(Unit *u, FILE *f, const char *key, const char *value, ...) _printf_(4,5);
+int unit_deserialize_skip(FILE *f);
 
 int unit_add_node_dependency(Unit *u, const char *what, bool wants, UnitDependency d, UnitDependencyMask mask);
 
@@ -692,7 +707,6 @@ int unit_coldplug(Unit *u);
 void unit_catchup(Unit *u);
 
 void unit_status_printf(Unit *u, const char *status, const char *unit_status_msg_format) _printf_(3, 0);
-void unit_status_emit_starting_stopping_reloading(Unit *u, JobType t);
 
 bool unit_need_daemon_reload(Unit *u);
 
@@ -749,6 +763,8 @@ bool unit_type_supported(UnitType t);
 
 bool unit_is_pristine(Unit *u);
 
+bool unit_is_unneeded(Unit *u);
+
 pid_t unit_control_pid(Unit *u);
 pid_t unit_main_pid(Unit *u);
 
@@ -777,7 +793,7 @@ int unit_acquire_invocation_id(Unit *u);
 
 bool unit_shall_confirm_spawn(Unit *u);
 
-void unit_set_exec_params(Unit *s, ExecParameters *p);
+int unit_set_exec_params(Unit *s, ExecParameters *p);
 
 int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret);
 
@@ -795,6 +811,21 @@ bool unit_needs_console(Unit *u);
 const char *unit_label_path(Unit *u);
 
 int unit_pid_attachable(Unit *unit, pid_t pid, sd_bus_error *error);
+
+void unit_log_success(Unit *u);
+void unit_log_failure(Unit *u, const char *result);
+static inline void unit_log_result(Unit *u, bool success, const char *result) {
+        if (success)
+                unit_log_success(u);
+        else
+                unit_log_failure(u, result);
+}
+
+void unit_log_process_exit(Unit *u, int level, const char *kind, const char *command, int code, int status);
+
+int unit_exit_status(Unit *u);
+int unit_success_action_exit_status(Unit *u);
+int unit_failure_action_exit_status(Unit *u);
 
 /* Macros which append UNIT= or USER_UNIT= to the message */
 

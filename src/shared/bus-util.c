@@ -28,7 +28,7 @@
 #include "escape.h"
 #include "fd-util.h"
 #include "missing.h"
-#include "mount-util.h"
+#include "mountpoint-util.h"
 #include "nsflags.h"
 #include "parse-util.h"
 #include "proc-cmdline.h"
@@ -500,7 +500,7 @@ int bus_verify_polkit_async(
         if (r < 0)
                 return r;
 
-        r = sd_bus_message_append(pk, "us", !!interactive, NULL);
+        r = sd_bus_message_append(pk, "us", interactive, NULL);
         if (r < 0)
                 return r;
 
@@ -628,15 +628,43 @@ int bus_connect_user_systemd(sd_bus **_bus) {
         return 0;
 }
 
-#define print_property(name, fmt, ...)                                  \
-        do {                                                            \
-                if (value)                                              \
-                        printf(fmt "\n", __VA_ARGS__);                  \
-                else                                                    \
-                        printf("%s=" fmt "\n", name, __VA_ARGS__);      \
-        } while (0)
+int bus_print_property_value(const char *name, const char *expected_value, bool only_value, const char *fmt, ...) {
+        va_list ap;
+        int r;
 
-int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all) {
+        assert(name);
+        assert(fmt);
+
+        if (expected_value) {
+                _cleanup_free_ char *s = NULL;
+
+                va_start(ap, fmt);
+                r = vasprintf(&s, fmt, ap);
+                va_end(ap);
+                if (r < 0)
+                        return -ENOMEM;
+
+                if (streq_ptr(expected_value, s)) {
+                        if (only_value)
+                                puts(s);
+                        else
+                                printf("%s=%s\n", name, s);
+                }
+
+                return 0;
+        }
+
+        if (!only_value)
+                printf("%s=", name);
+        va_start(ap, fmt);
+        vprintf(fmt, ap);
+        va_end(ap);
+        puts("");
+
+        return 0;
+}
+
+static int bus_print_property(const char *name, const char *expected_value, sd_bus_message *m, bool value, bool all) {
         char type;
         const char *contents;
         int r;
@@ -663,7 +691,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                         /* This property has a single value, so we need to take
                          * care not to print a new line, everything else is OK. */
                         good = !strchr(s, '\n');
-                        print_property(name, "%s", good ? s : "[unprintable]");
+                        bus_print_property_value(name, expected_value, value, "%s", good ? s : "[unprintable]");
                 }
 
                 return 1;
@@ -676,8 +704,10 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                 if (r < 0)
                         return r;
 
-                print_property(name, "%s", yes_no(b));
+                if (expected_value && parse_boolean(expected_value) != b)
+                        return 1;
 
+                bus_print_property_value(name, NULL, value, "%s", yes_no(b));
                 return 1;
         }
 
@@ -698,12 +728,14 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
 
                         t = format_timestamp(timestamp, sizeof(timestamp), u);
                         if (t || all)
-                                print_property(name, "%s", strempty(t));
+                                bus_print_property_value(name, expected_value, value, "%s", strempty(t));
 
                 } else if (strstr(name, "USec")) {
                         char timespan[FORMAT_TIMESPAN_MAX];
 
-                        print_property(name, "%s", format_timespan(timespan, sizeof(timespan), u, 0));
+                        (void) format_timespan(timespan, sizeof(timespan), u, 0);
+                        bus_print_property_value(name, expected_value, value, "%s", timespan);
+
                 } else if (streq(name, "RestrictNamespaces")) {
                         _cleanup_free_ char *s = NULL;
                         const char *result;
@@ -720,7 +752,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                                 result = s;
                         }
 
-                        print_property(name, "%s", result);
+                        bus_print_property_value(name, expected_value, value, "%s", result);
 
                 } else if (streq(name, "MountFlags")) {
                         const char *result;
@@ -729,7 +761,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                         if (!result)
                                 return -EINVAL;
 
-                        print_property(name, "%s", result);
+                        bus_print_property_value(name, expected_value, value, "%s", result);
 
                 } else if (STR_IN_SET(name, "CapabilityBoundingSet", "AmbientCapabilities")) {
                         _cleanup_free_ char *s = NULL;
@@ -738,7 +770,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                         if (r < 0)
                                 return r;
 
-                        print_property(name, "%s", s);
+                        bus_print_property_value(name, expected_value, value, "%s", s);
 
                 } else if ((STR_IN_SET(name, "CPUWeight", "StartupCPUWeight", "IOWeight", "StartupIOWeight") && u == CGROUP_WEIGHT_INVALID) ||
                            (STR_IN_SET(name, "CPUShares", "StartupCPUShares") && u == CGROUP_CPU_SHARES_INVALID) ||
@@ -746,16 +778,16 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                            (STR_IN_SET(name, "MemoryCurrent", "TasksCurrent") && u == (uint64_t) -1) ||
                            (endswith(name, "NSec") && u == (uint64_t) -1))
 
-                        print_property(name, "%s", "[not set]");
+                        bus_print_property_value(name, expected_value, value, "%s", "[not set]");
 
                 else if ((STR_IN_SET(name, "MemoryLow", "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryLimit") && u == CGROUP_LIMIT_MAX) ||
                          (STR_IN_SET(name, "TasksMax", "DefaultTasksMax") && u == (uint64_t) -1) ||
                          (startswith(name, "Limit") && u == (uint64_t) -1) ||
                          (startswith(name, "DefaultLimit") && u == (uint64_t) -1))
 
-                        print_property(name, "%s", "infinity");
+                        bus_print_property_value(name, expected_value, value, "%s", "infinity");
                 else
-                        print_property(name, "%"PRIu64, u);
+                        bus_print_property_value(name, expected_value, value, "%"PRIu64, u);
 
                 return 1;
         }
@@ -767,8 +799,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                 if (r < 0)
                         return r;
 
-                print_property(name, "%"PRIi64, i);
-
+                bus_print_property_value(name, expected_value, value, "%"PRIi64, i);
                 return 1;
         }
 
@@ -780,19 +811,20 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                         return r;
 
                 if (strstr(name, "UMask") || strstr(name, "Mode"))
-                        print_property(name, "%04o", u);
+                        bus_print_property_value(name, expected_value, value, "%04o", u);
+
                 else if (streq(name, "UID")) {
                         if (u == UID_INVALID)
-                                print_property(name, "%s", "[not set]");
+                                bus_print_property_value(name, expected_value, value, "%s", "[not set]");
                         else
-                                print_property(name, "%"PRIu32, u);
+                                bus_print_property_value(name, expected_value, value, "%"PRIu32, u);
                 } else if (streq(name, "GID")) {
                         if (u == GID_INVALID)
-                                print_property(name, "%s", "[not set]");
+                                bus_print_property_value(name, expected_value, value, "%s", "[not set]");
                         else
-                                print_property(name, "%"PRIu32, u);
+                                bus_print_property_value(name, expected_value, value, "%"PRIu32, u);
                 } else
-                        print_property(name, "%"PRIu32, u);
+                        bus_print_property_value(name, expected_value, value, "%"PRIu32, u);
 
                 return 1;
         }
@@ -804,7 +836,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                 if (r < 0)
                         return r;
 
-                print_property(name, "%"PRIi32, i);
+                bus_print_property_value(name, expected_value, value, "%"PRIi32, i);
                 return 1;
         }
 
@@ -815,7 +847,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                 if (r < 0)
                         return r;
 
-                print_property(name, "%g", d);
+                bus_print_property_value(name, expected_value, value, "%g", d);
                 return 1;
         }
 
@@ -865,7 +897,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                                 return r;
 
                         if (all || n > 0) {
-                                unsigned int i;
+                                unsigned i;
 
                                 if (!value)
                                         printf("%s=", name);
@@ -887,7 +919,7 @@ int bus_print_property(const char *name, sd_bus_message *m, bool value, bool all
                                 return r;
 
                         if (all || n > 0) {
-                                unsigned int i;
+                                unsigned i;
 
                                 if (!value)
                                         printf("%s=", name);
@@ -924,8 +956,8 @@ int bus_message_print_all_properties(
                 return r;
 
         while ((r = sd_bus_message_enter_container(m, SD_BUS_TYPE_DICT_ENTRY, "sv")) > 0) {
-                const char *name;
-                const char *contents;
+                _cleanup_free_ char *name_with_equal = NULL;
+                const char *name, *contents, *expected_value = NULL;
 
                 r = sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &name);
                 if (r < 0)
@@ -937,11 +969,16 @@ int bus_message_print_all_properties(
                                 return log_oom();
 
                         r = set_put(*found_properties, name);
-                        if (r < 0 && r != EEXIST)
+                        if (r < 0 && r != -EEXIST)
                                 return log_oom();
                 }
 
-                if (!filter || strv_find(filter, name)) {
+                name_with_equal = strappend(name, "=");
+                if (!name_with_equal)
+                        return log_oom();
+
+                if (!filter || strv_find(filter, name) ||
+                    (expected_value = strv_find_startswith(filter, name_with_equal))) {
                         r = sd_bus_message_peek_type(m, NULL, &contents);
                         if (r < 0)
                                 return r;
@@ -951,13 +988,13 @@ int bus_message_print_all_properties(
                                 return r;
 
                         if (func)
-                                r = func(name, m, value, all);
+                                r = func(name, expected_value, m, value, all);
                         if (!func || r == 0)
-                                r = bus_print_property(name, m, value, all);
+                                r = bus_print_property(name, expected_value, m, value, all);
                         if (r < 0)
                                 return r;
                         if (r == 0) {
-                                if (all)
+                                if (all && !expected_value)
                                         printf("%s=[unprintable]\n", name);
                                 /* skip what we didn't read */
                                 r = sd_bus_message_skip(m, contents);
@@ -1200,44 +1237,6 @@ int bus_message_map_all_properties(
         return sd_bus_message_exit_container(m);
 }
 
-int bus_message_map_properties_changed(
-                sd_bus_message *m,
-                const struct bus_properties_map *map,
-                unsigned flags,
-                sd_bus_error *error,
-                void *userdata) {
-
-        const char *member;
-        int r, invalidated, i;
-
-        assert(m);
-        assert(map);
-
-        r = bus_message_map_all_properties(m, map, flags, error, userdata);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "s");
-        if (r < 0)
-                return r;
-
-        invalidated = 0;
-        while ((r = sd_bus_message_read_basic(m, SD_BUS_TYPE_STRING, &member)) > 0)
-                for (i = 0; map[i].member; i++)
-                        if (streq(map[i].member, member)) {
-                                ++invalidated;
-                                break;
-                        }
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_exit_container(m);
-        if (r < 0)
-                return r;
-
-        return invalidated;
-}
-
 int bus_map_all_properties(
                 sd_bus *bus,
                 const char *destination,
@@ -1345,12 +1344,10 @@ int bus_connect_transport_systemd(BusTransport transport, const char *host, bool
                 if (user)
                         r = bus_connect_user_systemd(bus);
                 else {
-                        if (sd_booted() <= 0) {
+                        if (sd_booted() <= 0)
                                 /* Print a friendly message when the local system is actually not running systemd as PID 1. */
-                                log_error("System has not been booted with systemd as init system (PID 1). Can't operate.");
-
-                                return -EHOSTDOWN;
-                        }
+                                return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
+                                                       "System has not been booted with systemd as init system (PID 1). Can't operate.");
                         r = bus_connect_system_systemd(bus);
                 }
                 break;
@@ -1720,169 +1717,6 @@ int bus_open_system_watch_bind_with_description(sd_bus **ret, const char *descri
                 return r;
 
         *ret = TAKE_PTR(bus);
-
-        return 0;
-}
-
-struct request_name_data {
-        unsigned n_ref;
-
-        const char *name;
-        uint64_t flags;
-        void *userdata;
-};
-
-static void request_name_destroy_callback(void *userdata) {
-        struct request_name_data *data = userdata;
-
-        assert(data);
-        assert(data->n_ref > 0);
-
-        log_info("%s n_ref=%u", __func__, data->n_ref);
-
-        data->n_ref--;
-        if (data->n_ref == 0)
-                free(data);
-}
-
-static int reload_dbus_handler(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-        struct request_name_data *data = userdata;
-        const sd_bus_error *e;
-        int r;
-
-        assert(data);
-        assert(data->name);
-        assert(data->n_ref > 0);
-
-        e = sd_bus_message_get_error(m);
-        if (e) {
-                log_error_errno(sd_bus_error_get_errno(e), "Failed to reload DBus configuration: %s", e->message);
-                return 1;
-        }
-
-        /* Here, use the default request name handler to avoid an infinite loop of reloading and requesting. */
-        r = sd_bus_request_name_async(sd_bus_message_get_bus(m), NULL, data->name, data->flags, NULL, data->userdata);
-        if (r < 0)
-                log_error_errno(r, "Failed to request name: %m");
-
-        return 1;
-}
-
-static int request_name_handler_may_reload_dbus(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
-        struct request_name_data *data = userdata;
-        uint32_t ret;
-        int r;
-
-        assert(m);
-        assert(data);
-
-        if (sd_bus_message_is_method_error(m, NULL)) {
-                const sd_bus_error *e = sd_bus_message_get_error(m);
-                _cleanup_(sd_bus_slot_unrefp) sd_bus_slot *slot = NULL;
-
-                if (!sd_bus_error_has_name(e, SD_BUS_ERROR_ACCESS_DENIED)) {
-                        log_debug_errno(sd_bus_error_get_errno(e),
-                                        "Unable to request name, failing connection: %s",
-                                        e->message);
-
-                        bus_enter_closing(sd_bus_message_get_bus(m));
-                        return 1;
-                }
-
-                log_debug_errno(sd_bus_error_get_errno(e),
-                                "Unable to request name, will retry after reloading DBus configuration: %s",
-                                e->message);
-
-                /* If systemd-timesyncd.service enables DynamicUser= and dbus.service
-                 * started before the dynamic user is realized, then the DBus policy
-                 * about timesyncd has not been enabled yet. So, let's try to reload
-                 * DBus configuration, and after that request the name again. Note that it
-                 * seems that no privileges are necessary to call the following method. */
-
-                r = sd_bus_call_method_async(
-                                sd_bus_message_get_bus(m),
-                                &slot,
-                                "org.freedesktop.DBus",
-                                "/org/freedesktop/DBus",
-                                "org.freedesktop.DBus",
-                                "ReloadConfig",
-                                reload_dbus_handler,
-                                data, NULL);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to reload DBus configuration: %m");
-                        bus_enter_closing(sd_bus_message_get_bus(m));
-                        return 1;
-                }
-
-                data->n_ref ++;
-                assert_se(sd_bus_slot_set_destroy_callback(slot, request_name_destroy_callback) >= 0);
-
-                r = sd_bus_slot_set_floating(slot, true);
-                if (r < 0)
-                        return r;
-
-                return 1;
-        }
-
-        r = sd_bus_message_read(m, "u", &ret);
-        if (r < 0)
-                return r;
-
-        switch (ret) {
-
-        case BUS_NAME_ALREADY_OWNER:
-                log_debug("Already owner of requested service name, ignoring.");
-                return 1;
-
-        case BUS_NAME_IN_QUEUE:
-                log_debug("In queue for requested service name.");
-                return 1;
-
-        case BUS_NAME_PRIMARY_OWNER:
-                log_debug("Successfully acquired requested service name.");
-                return 1;
-
-        case BUS_NAME_EXISTS:
-                log_debug("Requested service name already owned, failing connection.");
-                bus_enter_closing(sd_bus_message_get_bus(m));
-                return 1;
-        }
-
-        log_debug("Unexpected response from RequestName(), failing connection.");
-        bus_enter_closing(sd_bus_message_get_bus(m));
-        return 1;
-}
-
-int bus_request_name_async_may_reload_dbus(sd_bus *bus, sd_bus_slot **ret_slot, const char *name, uint64_t flags, void *userdata) {
-        _cleanup_free_ struct request_name_data *data = NULL;
-        _cleanup_(sd_bus_slot_unrefp) sd_bus_slot *slot = NULL;
-        int r;
-
-        data = new(struct request_name_data, 1);
-        if (!data)
-                return -ENOMEM;
-
-        *data = (struct request_name_data) {
-                .n_ref = 1,
-                .name = name,
-                .flags = flags,
-                .userdata = userdata,
-        };
-
-        r = sd_bus_request_name_async(bus, &slot, name, flags, request_name_handler_may_reload_dbus, data);
-        if (r < 0)
-                return r;
-
-        assert_se(sd_bus_slot_set_destroy_callback(slot, request_name_destroy_callback) >= 0);
-        TAKE_PTR(data);
-
-        if (ret_slot)
-                *ret_slot = TAKE_PTR(slot);
-        else {
-                r = sd_bus_slot_set_floating(slot, true);
-                if (r < 0)
-                        return r;
-        }
 
         return 0;
 }

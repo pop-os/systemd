@@ -526,7 +526,9 @@ static int transaction_is_destructive(Transaction *tr, JobMode mode, sd_bus_erro
                 if (j->unit->job && (mode == JOB_FAIL || j->unit->job->irreversible) &&
                     job_type_is_conflicting(j->unit->job->type, j->type))
                         return sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_IS_DESTRUCTIVE,
-                                                 "Transaction is destructive.");
+                                                 "Transaction for %s/%s is destructive (%s has '%s' job queued, but '%s' is included in transaction).",
+                                                 tr->anchor_job->unit->id, job_type_to_string(tr->anchor_job->type),
+                                                 j->unit->id, job_type_to_string(j->unit->job->type), job_type_to_string(j->type));
         }
 
         return 0;
@@ -695,10 +697,8 @@ int transaction_activate(Transaction *tr, Manager *m, JobMode mode, sd_bus_error
                 if (r >= 0)
                         break;
 
-                if (r != -EAGAIN) {
-                        log_warning("Requested transaction contains an unfixable cyclic ordering dependency: %s", bus_error_message(e, r));
-                        return r;
-                }
+                if (r != -EAGAIN)
+                        return log_warning_errno(r, "Requested transaction contains an unfixable cyclic ordering dependency: %s", bus_error_message(e, r));
 
                 /* Let's see if the resulting transaction ordering
                  * graph is still cyclic... */
@@ -712,10 +712,8 @@ int transaction_activate(Transaction *tr, Manager *m, JobMode mode, sd_bus_error
                 if (r >= 0)
                         break;
 
-                if (r != -EAGAIN) {
-                        log_warning("Requested transaction contains unmergeable jobs: %s", bus_error_message(e, r));
-                        return r;
-                }
+                if (r != -EAGAIN)
+                        return log_warning_errno(r, "Requested transaction contains unmergeable jobs: %s", bus_error_message(e, r));
 
                 /* Seventh step: an entry got dropped, let's garbage
                  * collect its dependencies. */
@@ -731,10 +729,8 @@ int transaction_activate(Transaction *tr, Manager *m, JobMode mode, sd_bus_error
 
         /* Ninth step: check whether we can actually apply this */
         r = transaction_is_destructive(tr, mode, e);
-        if (r < 0) {
-                log_notice("Requested transaction contradicts existing jobs: %s", bus_error_message(e, r));
-                return r;
-        }
+        if (r < 0)
+                return log_notice_errno(r, "Requested transaction contradicts existing jobs: %s", bus_error_message(e, r));
 
         /* Tenth step: apply changes */
         r = transaction_apply(tr, m, mode);

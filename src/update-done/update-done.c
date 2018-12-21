@@ -37,9 +37,7 @@ int main(int argc, char *argv[]) {
         struct stat st;
         int r, q = 0;
 
-        log_set_target(LOG_TARGET_AUTO);
-        log_parse_environment();
-        log_open();
+        log_setup_service();
 
         if (stat("/usr", &st) < 0) {
                 log_error_errno(errno, "Failed to stat /usr: %m");
@@ -49,12 +47,11 @@ int main(int argc, char *argv[]) {
         r = mac_selinux_init();
         if (r < 0) {
                 log_error_errno(r, "SELinux setup failed: %m");
-                goto finish;
+                return EXIT_FAILURE;
         }
 
         r = apply_timestamp("/etc/.updated", &st.st_mtim);
         q = apply_timestamp("/var/.updated", &st.st_mtim);
 
-finish:
         return r < 0 || q < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

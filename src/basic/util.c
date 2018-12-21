@@ -23,6 +23,8 @@
 #include "def.h"
 #include "device-nodes.h"
 #include "dirent-util.h"
+#include "env-file.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
@@ -77,31 +79,6 @@ bool display_is_local(const char *display) {
                 display[1] <= '9';
 }
 
-int socket_from_display(const char *display, char **path) {
-        size_t k;
-        char *f, *c;
-
-        assert(display);
-        assert(path);
-
-        if (!display_is_local(display))
-                return -EINVAL;
-
-        k = strspn(display+1, "0123456789");
-
-        f = new(char, STRLEN("/tmp/.X11-unix/X") + k + 1);
-        if (!f)
-                return -ENOMEM;
-
-        c = stpcpy(f, "/tmp/.X11-unix/X");
-        memcpy(c, display+1, k);
-        c[k] = 0;
-
-        *path = f;
-
-        return 0;
-}
-
 bool kexec_loaded(void) {
        _cleanup_free_ char *s = NULL;
 
@@ -131,6 +108,7 @@ int prot_from_flags(int flags) {
 
 bool in_initrd(void) {
         struct statfs s;
+        int r;
 
         if (saved_in_initrd >= 0)
                 return saved_in_initrd;
@@ -145,9 +123,16 @@ bool in_initrd(void) {
          * emptying when transititioning to the main systemd.
          */
 
-        saved_in_initrd = access("/etc/initrd-release", F_OK) >= 0 &&
-                          statfs("/", &s) >= 0 &&
-                          is_temporary_fs(&s);
+        r = getenv_bool_secure("SYSTEMD_IN_INITRD");
+        if (r < 0 && r != -ENXIO)
+                log_debug_errno(r, "Failed to parse $SYSTEMD_IN_INITRD, ignoring: %m");
+
+        if (r >= 0)
+                saved_in_initrd = r > 0;
+        else
+                saved_in_initrd = access("/etc/initrd-release", F_OK) >= 0 &&
+                                  statfs("/", &s) >= 0 &&
+                                  is_temporary_fs(&s);
 
         return saved_in_initrd;
 }
@@ -158,7 +143,7 @@ void in_initrd_force(bool value) {
 
 /* hey glibc, APIs with callbacks without a user pointer are so useless */
 void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
-                 int (*compar) (const void *, const void *, void *), void *arg) {
+                 __compar_d_fn_t compar, void *arg) {
         size_t l, u, idx;
         const void *p;
         int comparison;
@@ -179,6 +164,28 @@ void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
                         return (void *)p;
         }
         return NULL;
+}
+
+bool memeqzero(const void *data, size_t length) {
+        /* Does the buffer consist entirely of NULs?
+         * Copied from https://github.com/systemd/casync/, copied in turn from
+         * https://github.com/rustyrussell/ccan/blob/master/ccan/mem/mem.c#L92,
+         * which is licensed CC-0.
+         */
+
+        const uint8_t *p = data;
+        size_t i;
+
+        /* Check first 16 bytes manually */
+        for (i = 0; i < 16; i++, length--) {
+                if (length == 0)
+                        return true;
+                if (p[i])
+                        return false;
+        }
+
+        /* Now we know first 16 bytes are NUL, memcmp with self.  */
+        return memcmp(data, p + i, length) == 0;
 }
 
 int on_ac_power(void) {
@@ -255,11 +262,18 @@ int container_get_leader(const char *machine, pid_t *pid) {
         assert(machine);
         assert(pid);
 
+        if (streq(machine, ".host")) {
+                *pid = 1;
+                return 0;
+        }
+
         if (!machine_name_is_valid(machine))
                 return -EINVAL;
 
         p = strjoina("/run/systemd/machines/", machine);
-        r = parse_env_file(NULL, p, NEWLINE, "LEADER", &s, "CLASS", &class, NULL);
+        r = parse_env_file(NULL, p,
+                           "LEADER", &s,
+                           "CLASS", &class);
         if (r == -ENOENT)
                 return -EHOSTDOWN;
         if (r < 0)
@@ -617,7 +631,7 @@ void disable_coredumps(void) {
         if (detect_container() > 0)
                 return;
 
-        r = write_string_file("/proc/sys/kernel/core_pattern", "|/bin/false", 0);
+        r = write_string_file("/proc/sys/kernel/core_pattern", "|/bin/false", WRITE_STRING_FILE_DISABLE_BUFFER);
         if (r < 0)
                 log_debug_errno(r, "Failed to turn off coredumps, ignoring: %m");
 }

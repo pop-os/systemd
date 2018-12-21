@@ -12,8 +12,8 @@
 #include "bus-util.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
+#include "env-file.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "format-util.h"
 #include "locale-util.h"
 #include "macro.h"
@@ -38,7 +38,7 @@ static void show_pid_array(
         if (n_pids == 0)
                 return;
 
-        qsort(pids, n_pids, sizeof(pid_t), pid_compare_func);
+        typesafe_qsort(pids, n_pids, pid_compare_func);
 
         /* Filter duplicates */
         for (j = 0, i = 1; i < n_pids; i++) {
@@ -63,9 +63,9 @@ static void show_pid_array(
                 (void) get_process_cmdline(pids[i], n_columns, true, &t);
 
                 if (extra)
-                        printf("%s%s ", prefix, special_glyph(TRIANGULAR_BULLET));
+                        printf("%s%s ", prefix, special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET));
                 else
-                        printf("%s%s", prefix, special_glyph(((more || i < n_pids-1) ? TREE_BRANCH : TREE_RIGHT)));
+                        printf("%s%s", prefix, special_glyph(((more || i < n_pids-1) ? SPECIAL_GLYPH_TREE_BRANCH : SPECIAL_GLYPH_TREE_RIGHT)));
 
                 printf("%*"PID_PRI" %s\n", pid_width, pids[i], strna(t));
         }
@@ -159,10 +159,10 @@ int show_cgroup_by_path(
                 }
 
                 if (last) {
-                        printf("%s%s%s\n", prefix, special_glyph(TREE_BRANCH), cg_unescape(basename(last)));
+                        printf("%s%s%s\n", prefix, special_glyph(SPECIAL_GLYPH_TREE_BRANCH), cg_unescape(basename(last)));
 
                         if (!p1) {
-                                p1 = strappend(prefix, special_glyph(TREE_VERTICAL));
+                                p1 = strappend(prefix, special_glyph(SPECIAL_GLYPH_TREE_VERTICAL));
                                 if (!p1)
                                         return -ENOMEM;
                         }
@@ -181,7 +181,7 @@ int show_cgroup_by_path(
                 show_cgroup_one_by_path(path, prefix, n_columns, !!last, flags);
 
         if (last) {
-                printf("%s%s%s\n", prefix, special_glyph(TREE_RIGHT), cg_unescape(basename(last)));
+                printf("%s%s%s\n", prefix, special_glyph(SPECIAL_GLYPH_TREE_RIGHT), cg_unescape(basename(last)));
 
                 if (!p2) {
                         p2 = strappend(prefix, "  ");
@@ -277,26 +277,6 @@ int show_cgroup_and_extra(
         return show_extra_pids(controller, path, prefix, n_columns, extra_pids, n_extra_pids, flags);
 }
 
-int show_cgroup_and_extra_by_spec(
-                const char *spec,
-                const char *prefix,
-                unsigned n_columns,
-                const pid_t extra_pids[],
-                unsigned n_extra_pids,
-                OutputFlags flags) {
-
-        _cleanup_free_ char *controller = NULL, *path = NULL;
-        int r;
-
-        assert(spec);
-
-        r = cg_split_spec(spec, &controller, &path);
-        if (r < 0)
-                return r;
-
-        return show_cgroup_and_extra(controller, path, prefix, n_columns, extra_pids, n_extra_pids, flags);
-}
-
 int show_cgroup_get_unit_path_and_warn(
                 sd_bus *bus,
                 const char *unit,
@@ -339,7 +319,7 @@ int show_cgroup_get_path_and_warn(
                 const char *m;
 
                 m = strjoina("/run/systemd/machines/", machine);
-                r = parse_env_file(NULL, m, NEWLINE, "SCOPE", &unit, NULL);
+                r = parse_env_file(NULL, m, "SCOPE", &unit);
                 if (r < 0)
                         return log_error_errno(r, "Failed to load machine data: %m");
 

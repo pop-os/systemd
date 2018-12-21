@@ -1,7 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  Copyright © 2012 Harald Hoyer
-***/
 
 #include <errno.h>
 #include <fcntl.h>
@@ -19,6 +16,7 @@
 #include "missing.h"
 #include "mkdir.h"
 #include "mount-util.h"
+#include "mountpoint-util.h"
 #include "path-util.h"
 #include "rm-rf.h"
 #include "stdio-util.h"

@@ -3,18 +3,15 @@
 
 #include "in-addr-util.h"
 
-#if ENABLE_DNS_OVER_TLS
-#include <gnutls/gnutls.h>
-#endif
-
 typedef struct DnsServer DnsServer;
 
 typedef enum DnsServerType {
         DNS_SERVER_SYSTEM,
         DNS_SERVER_FALLBACK,
         DNS_SERVER_LINK,
+        _DNS_SERVER_TYPE_MAX,
+        _DNS_SERVER_TYPE_INVALID = -1
 } DnsServerType;
-#define _DNS_SERVER_TYPE_MAX (DNS_SERVER_LINK + 1)
 
 const char* dns_server_type_to_string(DnsServerType i) _const_;
 DnsServerType dns_server_type_from_string(const char *s) _pure_;
@@ -40,6 +37,9 @@ int dns_server_feature_level_from_string(const char *s) _pure_;
 
 #include "resolved-link.h"
 #include "resolved-manager.h"
+#if ENABLE_DNS_OVER_TLS
+#include "resolved-dnstls.h"
+#endif
 
 struct DnsServer {
         Manager *manager;
@@ -54,11 +54,12 @@ struct DnsServer {
         int ifindex; /* for IPv6 link-local DNS servers */
 
         char *server_string;
+
+        /* The long-lived stream towards this server. */
         DnsStream *stream;
 
 #if ENABLE_DNS_OVER_TLS
-        gnutls_certificate_credentials_t tls_cert_cred;
-        gnutls_datum_t tls_session_data;
+        DnsTlsServerData dnstls_data;
 #endif
 
         DnsServerFeatureLevel verified_feature_level;
@@ -121,8 +122,6 @@ bool dns_server_dnssec_supported(DnsServer *server);
 
 void dns_server_warn_downgrade(DnsServer *server);
 
-bool dns_server_limited_domains(DnsServer *server);
-
 DnsServer *dns_server_find(DnsServer *first, int family, const union in_addr_union *in_addr, int ifindex);
 
 void dns_server_unlink_all(DnsServer *first);
@@ -150,3 +149,7 @@ void dns_server_reset_features(DnsServer *s);
 void dns_server_reset_features_all(DnsServer *s);
 
 void dns_server_dump(DnsServer *s, FILE *f);
+
+void dns_server_unref_stream(DnsServer *s);
+
+DnsScope *dns_server_scope(DnsServer *s);

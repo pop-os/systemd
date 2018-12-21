@@ -4,6 +4,7 @@
 #include "bus-common-errors.h"
 #include "bus-util.h"
 #include "dns-domain.h"
+#include "missing_capability.h"
 #include "resolved-bus.h"
 #include "resolved-def.h"
 #include "resolved-dns-synthesize.h"
@@ -191,7 +192,7 @@ static void bus_method_resolve_hostname_complete(DnsQuery *q) {
 
         /* The key names are not necessarily normalized, make sure that they are when we return them to our bus
          * clients. */
-        r = dns_name_normalize(dns_resource_key_name(canonical->key), &normalized);
+        r = dns_name_normalize(dns_resource_key_name(canonical->key), 0, &normalized);
         if (r < 0)
                 goto finish;
 
@@ -404,7 +405,7 @@ static void bus_method_resolve_address_complete(DnsQuery *q) {
                 if (r == 0)
                         continue;
 
-                r = dns_name_normalize(rr->ptr.name, &normalized);
+                r = dns_name_normalize(rr->ptr.name, 0, &normalized);
                 if (r < 0)
                         goto finish;
 
@@ -742,7 +743,7 @@ static int append_srv(DnsQuery *q, sd_bus_message *reply, DnsResourceRecord *rr)
         if (r < 0)
                 return r;
 
-        r = dns_name_normalize(rr->srv.name, &normalized);
+        r = dns_name_normalize(rr->srv.name, 0, &normalized);
         if (r < 0)
                 return r;
 
@@ -798,7 +799,7 @@ static int append_srv(DnsQuery *q, sd_bus_message *reply, DnsResourceRecord *rr)
         if (canonical) {
                 normalized = mfree(normalized);
 
-                r = dns_name_normalize(dns_resource_key_name(canonical->key), &normalized);
+                r = dns_name_normalize(dns_resource_key_name(canonical->key), 0, &normalized);
                 if (r < 0)
                         return r;
         }
@@ -1529,6 +1530,10 @@ static int bus_method_set_link_domains(sd_bus_message *message, void *userdata, 
         return call_link_method(userdata, message, bus_link_method_set_domains, error);
 }
 
+static int bus_method_set_link_default_route(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return call_link_method(userdata, message, bus_link_method_set_default_route, error);
+}
+
 static int bus_method_set_link_llmnr(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         return call_link_method(userdata, message, bus_link_method_set_llmnr, error);
 }
@@ -1854,6 +1859,7 @@ static const sd_bus_vtable resolve_vtable[] = {
         SD_BUS_METHOD("GetLink", "i", "o", bus_method_get_link, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetLinkDNS", "ia(iay)", NULL, bus_method_set_link_dns_servers, 0),
         SD_BUS_METHOD("SetLinkDomains", "ia(sb)", NULL, bus_method_set_link_domains, 0),
+        SD_BUS_METHOD("SetLinkDefaultRoute", "ib", NULL, bus_method_set_link_default_route, 0),
         SD_BUS_METHOD("SetLinkLLMNR", "is", NULL, bus_method_set_link_llmnr, 0),
         SD_BUS_METHOD("SetLinkMulticastDNS", "is", NULL, bus_method_set_link_mdns, 0),
         SD_BUS_METHOD("SetLinkDNSOverTLS", "is", NULL, bus_method_set_link_dns_over_tls, 0),
@@ -1920,7 +1926,7 @@ int manager_connect_bus(Manager *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to register dnssd enumerator: %m");
 
-        r = bus_request_name_async_may_reload_dbus(m->bus, NULL, "org.freedesktop.resolve1", 0, NULL);
+        r = sd_bus_request_name_async(m->bus, NULL, "org.freedesktop.resolve1", 0, NULL, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request name: %m");
 
@@ -1930,7 +1936,7 @@ int manager_connect_bus(Manager *m) {
 
         r = sd_bus_match_signal_async(
                         m->bus,
-                        &m->prepare_for_sleep_slot,
+                        NULL,
                         "org.freedesktop.login1",
                         "/org/freedesktop/login1",
                         "org.freedesktop.login1.Manager",

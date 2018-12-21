@@ -12,6 +12,7 @@
 #include "dbus-execute.h"
 #include "dbus-job.h"
 #include "dbus-manager.h"
+#include "dbus-scope.h"
 #include "dbus-unit.h"
 #include "dbus.h"
 #include "env-util.h"
@@ -216,6 +217,30 @@ static int property_get_progress(
         return sd_bus_message_append(reply, "d", d);
 }
 
+static int property_get_environment(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        _cleanup_strv_free_ char **l = NULL;
+        Manager *m = userdata;
+        int r;
+
+        assert(bus);
+        assert(reply);
+        assert(m);
+
+        r = manager_get_effective_environment(m, &l);
+        if (r < 0)
+                return r;
+
+        return sd_bus_message_append_strv(reply, l);
+}
+
 static int property_get_show_status(
                 sd_bus *bus,
                 const char *path,
@@ -232,7 +257,7 @@ static int property_get_show_status(
         assert(reply);
         assert(m);
 
-        b = m->show_status > 0;
+        b = IN_SET(m->show_status, SHOW_STATUS_TEMPORARY, SHOW_STATUS_YES);
         return sd_bus_message_append_basic(reply, 'b', &b);
 }
 
@@ -1298,9 +1323,9 @@ int verify_run_space_and_log(const char *message) {
 
         r = verify_run_space(message, &error);
         if (r < 0)
-                log_error_errno(r, "%s", bus_error_message(&error, r));
+                return log_error_errno(r, "%s", bus_error_message(&error, r));
 
-        return r;
+        return 0;
 }
 
 static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1329,12 +1354,12 @@ static int method_reload(sd_bus_message *message, void *userdata, sd_bus_error *
          * is finished. That way the caller knows when the reload
          * finished. */
 
-        assert(!m->queued_message);
-        r = sd_bus_message_new_method_return(message, &m->queued_message);
+        assert(!m->pending_reload_message);
+        r = sd_bus_message_new_method_return(message, &m->pending_reload_message);
         if (r < 0)
                 return r;
 
-        m->exit_code = MANAGER_RELOAD;
+        m->objective = MANAGER_RELOAD;
 
         return 1;
 }
@@ -1363,7 +1388,7 @@ static int method_reexecute(sd_bus_message *message, void *userdata, sd_bus_erro
         /* We don't send a reply back here, the client should
          * just wait for us disconnecting. */
 
-        m->exit_code = MANAGER_REEXECUTE;
+        m->objective = MANAGER_REEXECUTE;
         return 1;
 }
 
@@ -1383,7 +1408,7 @@ static int method_exit(sd_bus_message *message, void *userdata, sd_bus_error *er
          * systemd-shutdown if it cannot do the exit() because it isn't a
          * container. */
 
-        m->exit_code = MANAGER_EXIT;
+        m->objective = MANAGER_EXIT;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -1402,7 +1427,7 @@ static int method_reboot(sd_bus_message *message, void *userdata, sd_bus_error *
         if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Reboot is only supported for system managers.");
 
-        m->exit_code = MANAGER_REBOOT;
+        m->objective = MANAGER_REBOOT;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -1421,7 +1446,7 @@ static int method_poweroff(sd_bus_message *message, void *userdata, sd_bus_error
         if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Powering off is only supported for system managers.");
 
-        m->exit_code = MANAGER_POWEROFF;
+        m->objective = MANAGER_POWEROFF;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -1440,7 +1465,7 @@ static int method_halt(sd_bus_message *message, void *userdata, sd_bus_error *er
         if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Halt is only supported for system managers.");
 
-        m->exit_code = MANAGER_HALT;
+        m->objective = MANAGER_HALT;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -1459,7 +1484,7 @@ static int method_kexec(sd_bus_message *message, void *userdata, sd_bus_error *e
         if (!MANAGER_IS_SYSTEM(m))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "KExec is only supported for system managers.");
 
-        m->exit_code = MANAGER_KEXEC;
+        m->objective = MANAGER_KEXEC;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -1549,7 +1574,7 @@ static int method_switch_root(sd_bus_message *message, void *userdata, sd_bus_er
         free(m->switch_root_init);
         m->switch_root_init = ri;
 
-        m->exit_code = MANAGER_SWITCH_ROOT;
+        m->objective = MANAGER_SWITCH_ROOT;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -1578,7 +1603,7 @@ static int method_set_environment(sd_bus_message *message, void *userdata, sd_bu
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = manager_environment_add(m, NULL, plus);
+        r = manager_client_environment_modify(m, NULL, plus);
         if (r < 0)
                 return r;
 
@@ -1610,7 +1635,7 @@ static int method_unset_environment(sd_bus_message *message, void *userdata, sd_
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = manager_environment_add(m, minus, NULL);
+        r = manager_client_environment_modify(m, minus, NULL);
         if (r < 0)
                 return r;
 
@@ -1648,7 +1673,7 @@ static int method_unset_and_set_environment(sd_bus_message *message, void *userd
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = manager_environment_add(m, minus, plus);
+        r = manager_client_environment_modify(m, minus, plus);
         if (r < 0)
                 return r;
 
@@ -2398,6 +2423,29 @@ static int method_get_job_waiting(sd_bus_message *message, void *userdata, sd_bu
         return bus_job_method_get_waiting_jobs(message, j, error);
 }
 
+static int method_abandon_scope(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = userdata;
+        const char *name;
+        Unit *u;
+        int r;
+
+        assert(message);
+        assert(m);
+
+        r = sd_bus_message_read(message, "s", &name);
+        if (r < 0)
+                return r;
+
+        r = bus_get_unit_by_name(m, message, name, &u, error);
+        if (r < 0)
+                return r;
+
+        if (u->type != UNIT_SCOPE)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unit '%s' is not a scope unit, refusing.", name);
+
+        return bus_scope_method_abandon(message, u, error);
+}
+
 const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_VTABLE_START(0),
 
@@ -2418,6 +2466,12 @@ const sd_bus_vtable bus_manager_vtable[] = {
         BUS_PROPERTY_DUAL_TIMESTAMP("GeneratorsFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_GENERATORS_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
         BUS_PROPERTY_DUAL_TIMESTAMP("UnitsLoadStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_UNITS_LOAD_START]), SD_BUS_VTABLE_PROPERTY_CONST),
         BUS_PROPERTY_DUAL_TIMESTAMP("UnitsLoadFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_UNITS_LOAD_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDSecurityStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD_SECURITY_START]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDSecurityFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD_SECURITY_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDGeneratorsStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD_GENERATORS_START]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDGeneratorsFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD_GENERATORS_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDUnitsLoadStartTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD_UNITS_LOAD_START]), SD_BUS_VTABLE_PROPERTY_CONST),
+        BUS_PROPERTY_DUAL_TIMESTAMP("InitRDUnitsLoadFinishTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_INITRD_UNITS_LOAD_FINISH]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_WRITABLE_PROPERTY("LogLevel", "s", property_get_log_level, property_set_log_level, 0, 0),
         SD_BUS_WRITABLE_PROPERTY("LogTarget", "s", property_get_log_target, property_set_log_target, 0, 0),
         SD_BUS_PROPERTY("NNames", "u", property_get_hashmap_size, offsetof(Manager, units), 0),
@@ -2426,7 +2480,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("NInstalledJobs", "u", bus_property_get_unsigned, offsetof(Manager, n_installed_jobs), 0),
         SD_BUS_PROPERTY("NFailedJobs", "u", bus_property_get_unsigned, offsetof(Manager, n_failed_jobs), 0),
         SD_BUS_PROPERTY("Progress", "d", property_get_progress, 0, 0),
-        SD_BUS_PROPERTY("Environment", "as", NULL, offsetof(Manager, environment), 0),
+        SD_BUS_PROPERTY("Environment", "as", property_get_environment, 0, 0),
         SD_BUS_PROPERTY("ConfirmSpawn", "b", bus_property_get_bool, offsetof(Manager, confirm_spawn), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ShowStatus", "b", property_get_show_status, 0, 0),
         SD_BUS_PROPERTY("UnitPath", "as", NULL, offsetof(Manager, lookup_paths.search_path), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -2507,6 +2561,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_METHOD("StartTransientUnit", "ssa(sv)a(sa(sv))", "o", method_start_transient_unit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetUnitProcesses", "s", "a(sus)", method_get_unit_processes, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("AttachProcessesToUnit", "ssau", NULL, method_attach_processes_to_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("AbandonScope", "s", NULL, method_abandon_scope, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetJob", "u", "o", method_get_job, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetJobAfter", "u", "a(usssoo)", method_get_job_waiting, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetJobBefore", "u", "a(usssoo)", method_get_job_waiting, SD_BUS_VTABLE_UNPRIVILEGED),

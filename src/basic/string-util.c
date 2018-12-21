@@ -128,7 +128,7 @@ static size_t strcspn_escaped(const char *s, const char *reject) {
 }
 
 /* Split a string into words. */
-const char* split(const char **state, size_t *l, const char *separator, bool quoted) {
+const char* split(const char **state, size_t *l, const char *separator, SplitFlags flags) {
         const char *current;
 
         current = *state;
@@ -144,20 +144,24 @@ const char* split(const char **state, size_t *l, const char *separator, bool quo
                 return NULL;
         }
 
-        if (quoted && strchr("\'\"", *current)) {
+        if (flags & SPLIT_QUOTES && strchr("\'\"", *current)) {
                 char quotechars[2] = {*current, '\0'};
 
                 *l = strcspn_escaped(current + 1, quotechars);
                 if (current[*l + 1] == '\0' || current[*l + 1] != quotechars[0] ||
                     (current[*l + 2] && !strchr(separator, current[*l + 2]))) {
                         /* right quote missing or garbage at the end */
+                        if (flags & SPLIT_RELAX) {
+                                *state = current + *l + 1 + (current[*l + 1] != '\0');
+                                return current + 1;
+                        }
                         *state = current;
                         return NULL;
                 }
                 *state = current++ + *l + 2;
-        } else if (quoted) {
+        } else if (flags & SPLIT_QUOTES) {
                 *l = strcspn_escaped(current, separator);
-                if (current[*l] && !strchr(separator, current[*l])) {
+                if (current[*l] && !strchr(separator, current[*l]) && !(flags & SPLIT_RELAX)) {
                         /* unfinished escape */
                         *state = current;
                         return NULL;
@@ -394,12 +398,7 @@ int ascii_strcasecmp_nn(const char *a, size_t n, const char *b, size_t m) {
         if (r != 0)
                 return r;
 
-        if (n < m)
-                return -1;
-        else if (n > m)
-                return 1;
-        else
-                return 0;
+        return CMP(n, m);
 }
 
 bool chars_intersect(const char *a, const char *b) {
@@ -1004,7 +1003,7 @@ int free_and_strdup(char **p, const char *s) {
 
         assert(p);
 
-        /* Replaces a string pointer with an strdup()ed new string,
+        /* Replaces a string pointer with a strdup()ed new string,
          * possibly freeing the old one. */
 
         if (streq_ptr(*p, s))
@@ -1023,6 +1022,32 @@ int free_and_strdup(char **p, const char *s) {
         return 1;
 }
 
+int free_and_strndup(char **p, const char *s, size_t l) {
+        char *t;
+
+        assert(p);
+        assert(s || l == 0);
+
+        /* Replaces a string pointer with a strndup()ed new string,
+         * freeing the old one. */
+
+        if (!*p && !s)
+                return 0;
+
+        if (*p && s && strneq(*p, s, l) && (l > strlen(*p) || (*p)[l] == '\0'))
+                return 0;
+
+        if (s) {
+                t = strndup(s, l);
+                if (!t)
+                        return -ENOMEM;
+        } else
+                t = NULL;
+
+        free_and_replace(*p, t);
+        return 1;
+}
+
 #if !HAVE_EXPLICIT_BZERO
 /*
  * Pointer to memset is volatile so that compiler must de-reference
@@ -1034,8 +1059,11 @@ typedef void *(*memset_t)(void *,int,size_t);
 
 static volatile memset_t memset_func = memset;
 
-void explicit_bzero(void *p, size_t l) {
-        memset_func(p, '\0', l);
+void* explicit_bzero_safe(void *p, size_t l) {
+        if (l > 0)
+                memset_func(p, '\0', l);
+
+        return p;
 }
 #endif
 
@@ -1045,7 +1073,7 @@ char* string_erase(char *x) {
 
         /* A delicious drop of snake-oil! To be called on memory where
          * we stored passphrases or so, after we used them. */
-        explicit_bzero(x, strlen(x));
+        explicit_bzero_safe(x, strlen(x));
         return x;
 }
 

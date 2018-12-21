@@ -314,6 +314,7 @@ int in_addr_from_string_auto(const char *s, int *ret_family, union in_addr_union
 }
 
 int in_addr_ifindex_from_string_auto(const char *s, int *family, union in_addr_union *ret, int *ifindex) {
+        _cleanup_free_ char *buf = NULL;
         const char *suffix;
         int r, ifi = 0;
 
@@ -341,7 +342,11 @@ int in_addr_ifindex_from_string_auto(const char *s, int *family, union in_addr_u
                         }
                 }
 
-                s = strndupa(s, suffix - s);
+                buf = strndup(s, suffix - s);
+                if (!buf)
+                        return -ENOMEM;
+
+                s = buf;
         }
 
         r = in_addr_from_string_auto(s, family, ret);
@@ -357,7 +362,7 @@ int in_addr_ifindex_from_string_auto(const char *s, int *family, union in_addr_u
 unsigned char in4_addr_netmask_to_prefixlen(const struct in_addr *addr) {
         assert(addr);
 
-        return 32 - u32ctz(be32toh(addr->s_addr));
+        return 32U - u32ctz(be32toh(addr->s_addr));
 }
 
 struct in_addr* in4_addr_prefixlen_to_netmask(struct in_addr *addr, unsigned char prefixlen) {
@@ -490,12 +495,14 @@ int in_addr_parse_prefixlen(int family, const char *p, unsigned char *ret) {
         return 0;
 }
 
-int in_addr_prefix_from_string(
+int in_addr_prefix_from_string_internal(
                 const char *p,
+                bool use_default_prefixlen,
                 int family,
                 union in_addr_union *ret_prefix,
                 unsigned char *ret_prefixlen) {
 
+        _cleanup_free_ char *str = NULL;
         union in_addr_union buffer;
         const char *e, *l;
         unsigned char k;
@@ -507,9 +514,13 @@ int in_addr_prefix_from_string(
                 return -EAFNOSUPPORT;
 
         e = strchr(p, '/');
-        if (e)
-                l = strndupa(p, e - p);
-        else
+        if (e) {
+                str = strndup(p, e - p);
+                if (!str)
+                        return -ENOMEM;
+
+                l = str;
+        } else
                 l = p;
 
         r = in_addr_from_string(family, l, &buffer);
@@ -520,6 +531,13 @@ int in_addr_prefix_from_string(
                 r = in_addr_parse_prefixlen(family, e+1, &k);
                 if (r < 0)
                         return r;
+        } else if (use_default_prefixlen) {
+                if (family == AF_INET) {
+                        r = in4_addr_default_prefixlen(&buffer.in, &k);
+                        if (r < 0)
+                                return r;
+                } else
+                        k = 0;
         } else
                 k = FAMILY_ADDRESS_SIZE(family) * 8;
 
@@ -531,12 +549,14 @@ int in_addr_prefix_from_string(
         return 0;
 }
 
-int in_addr_prefix_from_string_auto(
+int in_addr_prefix_from_string_auto_internal(
                 const char *p,
+                bool use_default_prefixlen,
                 int *ret_family,
                 union in_addr_union *ret_prefix,
                 unsigned char *ret_prefixlen) {
 
+        _cleanup_free_ char *str = NULL;
         union in_addr_union buffer;
         const char *e, *l;
         unsigned char k;
@@ -545,9 +565,13 @@ int in_addr_prefix_from_string_auto(
         assert(p);
 
         e = strchr(p, '/');
-        if (e)
-                l = strndupa(p, e - p);
-        else
+        if (e) {
+                str = strndup(p, e - p);
+                if (!str)
+                        return -ENOMEM;
+
+                l = str;
+        } else
                 l = p;
 
         r = in_addr_from_string_auto(l, &family, &buffer);
@@ -558,6 +582,13 @@ int in_addr_prefix_from_string_auto(
                 r = in_addr_parse_prefixlen(family, e+1, &k);
                 if (r < 0)
                         return r;
+        } else if (use_default_prefixlen) {
+                if (family == AF_INET) {
+                        r = in4_addr_default_prefixlen(&buffer.in, &k);
+                        if (r < 0)
+                                return r;
+                } else
+                        k = 0;
         } else
                 k = FAMILY_ADDRESS_SIZE(family) * 8;
 
@@ -571,3 +602,20 @@ int in_addr_prefix_from_string_auto(
         return 0;
 
 }
+
+static void in_addr_data_hash_func(const struct in_addr_data *a, struct siphash *state) {
+        siphash24_compress(&a->family, sizeof(a->family), state);
+        siphash24_compress(&a->address, FAMILY_ADDRESS_SIZE(a->family), state);
+}
+
+static int in_addr_data_compare_func(const struct in_addr_data *x, const struct in_addr_data *y) {
+        int r;
+
+        r = CMP(x->family, y->family);
+        if (r != 0)
+                return r;
+
+        return memcmp(&x->address, &y->address, FAMILY_ADDRESS_SIZE(x->family));
+}
+
+DEFINE_HASH_OPS(in_addr_data_hash_ops, struct in_addr_data, in_addr_data_hash_func, in_addr_data_compare_func);

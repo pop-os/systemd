@@ -16,6 +16,7 @@
 #include "dhcp-lease-internal.h"
 #include "dhcp-protocol.h"
 #include "dns-domain.h"
+#include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "hexdecoct.h"
@@ -25,6 +26,8 @@
 #include "parse-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
+#include "strv.h"
+#include "tmpfile-util.h"
 #include "unaligned.h"
 
 int sd_dhcp_lease_get_address(sd_dhcp_lease *lease, struct in_addr *addr) {
@@ -245,27 +248,8 @@ int sd_dhcp_lease_get_vendor_specific(sd_dhcp_lease *lease, const void **data, s
         return 0;
 }
 
-sd_dhcp_lease *sd_dhcp_lease_ref(sd_dhcp_lease *lease) {
-
-        if (!lease)
-                return NULL;
-
-        assert(lease->n_ref >= 1);
-        lease->n_ref++;
-
-        return lease;
-}
-
-sd_dhcp_lease *sd_dhcp_lease_unref(sd_dhcp_lease *lease) {
-
-        if (!lease)
-                return NULL;
-
-        assert(lease->n_ref >= 1);
-        lease->n_ref--;
-
-        if (lease->n_ref > 0)
-                return NULL;
+static sd_dhcp_lease *dhcp_lease_free(sd_dhcp_lease *lease) {
+        assert(lease);
 
         while (lease->private_options) {
                 struct sd_dhcp_raw_option *option = lease->private_options;
@@ -276,6 +260,8 @@ sd_dhcp_lease *sd_dhcp_lease_unref(sd_dhcp_lease *lease) {
                 free(option);
         }
 
+        free(lease->root_path);
+        free(lease->timezone);
         free(lease->hostname);
         free(lease->domainname);
         free(lease->dns);
@@ -286,6 +272,8 @@ sd_dhcp_lease *sd_dhcp_lease_unref(sd_dhcp_lease *lease) {
         strv_free(lease->search_domains);
         return mfree(lease);
 }
+
+DEFINE_TRIVIAL_REF_UNREF_FUNC(sd_dhcp_lease, sd_dhcp_lease, dhcp_lease_free);
 
 static int lease_parse_u32(const uint8_t *option, size_t len, uint32_t *ret, uint32_t min) {
         assert(option);
@@ -346,8 +334,7 @@ static int lease_parse_string(const uint8_t *option, size_t len, char **ret) {
                 if (!string)
                         return -ENOMEM;
 
-                free(*ret);
-                *ret = string;
+                free_and_replace(*ret, string);
         }
 
         return 0;
@@ -368,7 +355,7 @@ static int lease_parse_domain(const uint8_t *option, size_t len, char **ret) {
                 return 0;
         }
 
-        r = dns_name_normalize(name, &normalized);
+        r = dns_name_normalize(name, 0, &normalized);
         if (r < 0)
                 return r;
 
@@ -1031,7 +1018,7 @@ int dhcp_lease_load(sd_dhcp_lease **ret, const char *lease_file) {
         if (r < 0)
                 return r;
 
-        r = parse_env_file(NULL, lease_file, NEWLINE,
+        r = parse_env_file(NULL, lease_file,
                            "ADDRESS", &address,
                            "ROUTER", &router,
                            "NETMASK", &netmask,
@@ -1082,8 +1069,7 @@ int dhcp_lease_load(sd_dhcp_lease **ret, const char *lease_file) {
                            "OPTION_251", &options[27],
                            "OPTION_252", &options[28],
                            "OPTION_253", &options[29],
-                           "OPTION_254", &options[30],
-                           NULL);
+                           "OPTION_254", &options[30]);
         if (r < 0)
                 return r;
 
@@ -1314,4 +1300,10 @@ int sd_dhcp_route_get_gateway(sd_dhcp_route *route, struct in_addr *gateway) {
 
         *gateway = route->gw_addr;
         return 0;
+}
+
+int sd_dhcp_route_get_option(sd_dhcp_route *route) {
+        assert_return(route, -EINVAL);
+
+        return route->option;
 }

@@ -20,10 +20,10 @@
 #include "hwdb-util.h"
 #include "refcnt.h"
 #include "string-util.h"
+#include "util.h"
 
 struct sd_hwdb {
         RefCount n_ref;
-        int refcount;
 
         FILE *f;
         struct stat st;
@@ -147,7 +147,6 @@ static int hwdb_add_property(sd_hwdb *hwdb, const struct trie_value_entry_f *ent
                 old = ordered_hashmap_get(hwdb->properties, key);
                 if (old) {
                         /* On duplicates, we order by filename priority and line-number.
-                         *
                          *
                          * v2 of the format had 64 bits for the line number.
                          * v3 reuses top 32 bits of line_number to store the priority.
@@ -327,25 +326,25 @@ _public_ int sd_hwdb_new(sd_hwdb **ret) {
                 else if (errno == ENOENT)
                         continue;
                 else
-                        return log_debug_errno(errno, "error reading %s: %m", hwdb_bin_path);
+                        return log_debug_errno(errno, "Failed to open %s: %m", hwdb_bin_path);
         }
 
         if (!hwdb->f) {
-                log_debug("hwdb.bin does not exist, please run systemd-hwdb update");
+                log_debug("hwdb.bin does not exist, please run 'systemd-hwdb update'");
                 return -ENOENT;
         }
 
         if (fstat(fileno(hwdb->f), &hwdb->st) < 0 ||
-            (size_t)hwdb->st.st_size < offsetof(struct trie_header_f, strings_len) + 8)
-                return log_debug_errno(errno, "error reading %s: %m", hwdb_bin_path);
+            (size_t) hwdb->st.st_size < offsetof(struct trie_header_f, strings_len) + 8)
+                return log_debug_errno(errno, "Failed to read %s: %m", hwdb_bin_path);
 
         hwdb->map = mmap(0, hwdb->st.st_size, PROT_READ, MAP_SHARED, fileno(hwdb->f), 0);
         if (hwdb->map == MAP_FAILED)
-                return log_debug_errno(errno, "error mapping %s: %m", hwdb_bin_path);
+                return log_debug_errno(errno, "Failed to map %s: %m", hwdb_bin_path);
 
         if (memcmp(hwdb->map, sig, sizeof(hwdb->head->signature)) != 0 ||
-            (size_t)hwdb->st.st_size != le64toh(hwdb->head->file_size)) {
-                log_debug("error recognizing the format of %s", hwdb_bin_path);
+            (size_t) hwdb->st.st_size != le64toh(hwdb->head->file_size)) {
+                log_debug("Failed to recognize the format of %s", hwdb_bin_path);
                 return -EINVAL;
         }
 
@@ -361,25 +360,17 @@ _public_ int sd_hwdb_new(sd_hwdb **ret) {
         return 0;
 }
 
-_public_ sd_hwdb *sd_hwdb_ref(sd_hwdb *hwdb) {
-        assert_return(hwdb, NULL);
+static sd_hwdb *hwdb_free(sd_hwdb *hwdb) {
+        assert(hwdb);
 
-        assert_se(REFCNT_INC(hwdb->n_ref) >= 2);
-
-        return hwdb;
+        if (hwdb->map)
+                munmap((void *)hwdb->map, hwdb->st.st_size);
+        safe_fclose(hwdb->f);
+        ordered_hashmap_free(hwdb->properties);
+        return mfree(hwdb);
 }
 
-_public_ sd_hwdb *sd_hwdb_unref(sd_hwdb *hwdb) {
-        if (hwdb && REFCNT_DEC(hwdb->n_ref) == 0) {
-                if (hwdb->map)
-                        munmap((void *)hwdb->map, hwdb->st.st_size);
-                safe_fclose(hwdb->f);
-                ordered_hashmap_free(hwdb->properties);
-                free(hwdb);
-        }
-
-        return NULL;
-}
+DEFINE_PUBLIC_ATOMIC_REF_UNREF_FUNC(sd_hwdb, sd_hwdb, hwdb_free)
 
 bool hwdb_validate(sd_hwdb *hwdb) {
         bool found = false;

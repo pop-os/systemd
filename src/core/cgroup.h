@@ -12,6 +12,7 @@ typedef struct CGroupContext CGroupContext;
 typedef struct CGroupDeviceAllow CGroupDeviceAllow;
 typedef struct CGroupIODeviceWeight CGroupIODeviceWeight;
 typedef struct CGroupIODeviceLimit CGroupIODeviceLimit;
+typedef struct CGroupIODeviceLatency CGroupIODeviceLatency;
 typedef struct CGroupBlockIODeviceWeight CGroupBlockIODeviceWeight;
 typedef struct CGroupBlockIODeviceBandwidth CGroupBlockIODeviceBandwidth;
 
@@ -51,6 +52,12 @@ struct CGroupIODeviceLimit {
         uint64_t limits[_CGROUP_IO_LIMIT_TYPE_MAX];
 };
 
+struct CGroupIODeviceLatency {
+        LIST_FIELDS(CGroupIODeviceLatency, device_latencies);
+        char *path;
+        usec_t target_usec;
+};
+
 struct CGroupBlockIODeviceWeight {
         LIST_FIELDS(CGroupBlockIODeviceWeight, device_weights);
         char *path;
@@ -81,7 +88,9 @@ struct CGroupContext {
         uint64_t startup_io_weight;
         LIST_HEAD(CGroupIODeviceWeight, io_device_weights);
         LIST_HEAD(CGroupIODeviceLimit, io_device_limits);
+        LIST_HEAD(CGroupIODeviceLatency, io_device_latencies);
 
+        uint64_t memory_min;
         uint64_t memory_low;
         uint64_t memory_high;
         uint64_t memory_max;
@@ -109,6 +118,8 @@ struct CGroupContext {
 
         bool delegate;
         CGroupMask delegate_controllers;
+
+        CGroupMask disable_controllers;
 };
 
 /* Used when querying IP accounting data */
@@ -128,29 +139,32 @@ void cgroup_context_init(CGroupContext *c);
 void cgroup_context_done(CGroupContext *c);
 void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix);
 
-CGroupMask cgroup_context_get_mask(CGroupContext *c);
-
 void cgroup_context_free_device_allow(CGroupContext *c, CGroupDeviceAllow *a);
 void cgroup_context_free_io_device_weight(CGroupContext *c, CGroupIODeviceWeight *w);
 void cgroup_context_free_io_device_limit(CGroupContext *c, CGroupIODeviceLimit *l);
+void cgroup_context_free_io_device_latency(CGroupContext *c, CGroupIODeviceLatency *l);
 void cgroup_context_free_blockio_device_weight(CGroupContext *c, CGroupBlockIODeviceWeight *w);
 void cgroup_context_free_blockio_device_bandwidth(CGroupContext *c, CGroupBlockIODeviceBandwidth *b);
+
+int cgroup_add_device_allow(CGroupContext *c, const char *dev, const char *mode);
 
 CGroupMask unit_get_own_mask(Unit *u);
 CGroupMask unit_get_delegate_mask(Unit *u);
 CGroupMask unit_get_members_mask(Unit *u);
 CGroupMask unit_get_siblings_mask(Unit *u);
 CGroupMask unit_get_subtree_mask(Unit *u);
+CGroupMask unit_get_disable_mask(Unit *u);
+CGroupMask unit_get_ancestor_disable_mask(Unit *u);
 
 CGroupMask unit_get_target_mask(Unit *u);
 CGroupMask unit_get_enable_mask(Unit *u);
 
-bool unit_get_needs_bpf(Unit *u);
+void unit_invalidate_cgroup_members_masks(Unit *u);
 
-void unit_update_cgroup_members_masks(Unit *u);
+void unit_add_to_cgroup_realize_queue(Unit *u);
 
 const char *unit_get_realized_cgroup_path(Unit *u, CGroupMask mask);
-char *unit_default_cgroup_path(Unit *u);
+char *unit_default_cgroup_path(const Unit *u);
 int unit_set_cgroup_path(Unit *u, const char *path);
 int unit_pick_cgroup_path(Unit *u);
 
@@ -191,8 +205,8 @@ int unit_reset_ip_accounting(Unit *u);
         cc ? cc->name : false;                          \
         })
 
-bool manager_owns_root_cgroup(Manager *m);
-bool unit_has_root_cgroup(Unit *u);
+bool manager_owns_host_root_cgroup(Manager *m);
+bool unit_has_host_root_cgroup(Unit *u);
 
 int manager_notify_cgroup_empty(Manager *m, const char *group);
 

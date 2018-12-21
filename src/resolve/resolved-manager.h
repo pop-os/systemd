@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-
 #include "sd-event.h"
 #include "sd-netlink.h"
 #include "sd-network.h"
@@ -21,8 +20,14 @@ typedef struct Manager Manager;
 #include "resolved-dns-trust-anchor.h"
 #include "resolved-link.h"
 
-#define MANAGER_SEARCH_DOMAINS_MAX 32
-#define MANAGER_DNS_SERVERS_MAX 32
+#define MANAGER_SEARCH_DOMAINS_MAX 256
+#define MANAGER_DNS_SERVERS_MAX 256
+
+typedef struct EtcHosts {
+        Hashmap *by_address;
+        Hashmap *by_name;
+        Set *no_address;
+} EtcHosts;
 
 struct Manager {
         sd_event *event;
@@ -107,9 +112,6 @@ struct Manager {
         int hostname_fd;
         sd_event_source *hostname_event_source;
 
-        /* Watch for system suspends */
-        sd_bus_slot *prepare_for_sleep_slot;
-
         sd_event_source *sigusr1_event_source;
         sd_event_source *sigusr2_event_source;
         sd_event_source *sigrtmin1_event_source;
@@ -118,9 +120,9 @@ struct Manager {
         unsigned n_dnssec_verdict[_DNSSEC_VERDICT_MAX];
 
         /* Data from /etc/hosts */
-        Set* etc_hosts_by_address;
-        Hashmap* etc_hosts_by_name;
+        EtcHosts etc_hosts;
         usec_t etc_hosts_last, etc_hosts_mtime;
+        bool read_etc_hosts;
 
         /* Local DNS stub on 127.0.0.53:53 */
         int dns_stub_udp_fd;

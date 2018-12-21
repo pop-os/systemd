@@ -1,4 +1,4 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd" [
 <!ENTITY % entities SYSTEM "custom-entities.ent" >
@@ -124,6 +124,16 @@
         <command>systemd-nspawn</command> command line. This option may not be combined with
         <varname>ProcessTwo=yes</varname>. This option is the default if the
         <filename>systemd-nspawn@.service</filename> template unit file is used.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Ephemeral=</varname></term>
+
+        <listitem><para>Takes a boolean argument, which defaults to off, If enabled, the container is run with
+        a temporary snapshot of its file system that is removed immediately when the container terminates.
+        This is equivalent to the <option>--ephemeral</option> command line switch. See
+        <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry> for details
+        about the specific options supported.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -340,7 +350,7 @@
         <term><varname>Timezone=</varname></term>
 
         <listitem><para>Configures how <filename>/etc/localtime</filename> in the container shall be handled. This is
-        equivalent to the <option>--localtime=</option> command line switch, and takes the same argument. See
+        equivalent to the <option>--timezone=</option> command line switch, and takes the same argument. See
         <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
         details.</para></listitem>
       </varlistentry>

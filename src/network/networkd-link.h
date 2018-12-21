@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-
 #include <endian.h>
 
 #include "sd-bus.h"
+#include "sd-device.h"
 #include "sd-dhcp-client.h"
 #include "sd-dhcp-server.h"
 #include "sd-dhcp6-client.h"
@@ -19,9 +19,7 @@
 
 typedef enum LinkState {
         LINK_STATE_PENDING,
-        LINK_STATE_ENSLAVING,
-        LINK_STATE_SETTING_ADDRESSES,
-        LINK_STATE_SETTING_ROUTES,
+        LINK_STATE_CONFIGURING,
         LINK_STATE_CONFIGURED,
         LINK_STATE_UNMANAGED,
         LINK_STATE_FAILED,
@@ -44,13 +42,15 @@ typedef enum LinkOperationalState {
 typedef struct Manager Manager;
 typedef struct Network Network;
 typedef struct Address Address;
+typedef struct DUID DUID;
 
 typedef struct Link {
         Manager *manager;
 
-        int n_ref;
+        unsigned n_ref;
 
         int ifindex;
+        int master_ifindex;
         char *ifname;
         char *kind;
         unsigned short iftype;
@@ -58,7 +58,7 @@ typedef struct Link {
         struct ether_addr mac;
         struct in6_addr ipv6ll_address;
         uint32_t mtu;
-        struct udev_device *udev_device;
+        sd_device *sd_device;
 
         unsigned flags;
         uint8_t kernel_operstate;
@@ -70,6 +70,7 @@ typedef struct Link {
 
         unsigned address_messages;
         unsigned address_label_messages;
+        unsigned neighbor_messages;
         unsigned route_messages;
         unsigned routing_policy_rule_messages;
         unsigned routing_policy_rule_remove_messages;
@@ -79,6 +80,8 @@ typedef struct Link {
         Set *addresses_foreign;
         Set *routes;
         Set *routes_foreign;
+
+        bool addresses_configured;
 
         sd_dhcp_client *dhcp_client;
         sd_dhcp_lease *dhcp_lease;
@@ -94,6 +97,8 @@ typedef struct Link {
         sd_ipv4ll *ipv4ll;
         bool ipv4ll_address:1;
         bool ipv4ll_route:1;
+
+        bool neighbors_configured;
 
         bool static_routes_configured;
         bool routing_policy_rules_configured;
@@ -124,8 +129,15 @@ typedef struct Link {
         Hashmap *bound_to_links;
 } Link;
 
+typedef int (*link_netlink_message_handler_t)(sd_netlink*, sd_netlink_message*, Link*);
+
+DUID *link_get_duid(Link *link);
+int get_product_uuid_handler(sd_bus_message *m, void *userdata, sd_bus_error *ret_error);
+
 Link *link_unref(Link *link);
 Link *link_ref(Link *link);
+DEFINE_TRIVIAL_DESTRUCTOR(link_netlink_destroy_callback, Link, link_unref);
+
 int link_get(Manager *m, int ifindex, Link **ret);
 int link_add(Manager *manager, sd_netlink_message *message, Link **ret);
 void link_drop(Link *link);
@@ -133,11 +145,8 @@ void link_drop(Link *link);
 int link_up(Link *link);
 int link_down(Link *link);
 
-int link_address_remove_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userdata);
-int link_route_remove_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userdata);
-
 void link_enter_failed(Link *link);
-int link_initialized(Link *link, struct udev_device *device);
+int link_initialized(Link *link, sd_device *device);
 
 void link_check_ready(Link *link);
 
@@ -157,9 +166,12 @@ int link_set_mtu(Link *link, uint32_t mtu);
 
 int ipv4ll_configure(Link *link);
 int dhcp4_configure(Link *link);
+int dhcp4_set_client_identifier(Link *link);
 int dhcp4_set_promote_secondaries(Link *link);
+int dhcp6_request_prefix_delegation(Link *link);
 int dhcp6_configure(Link *link);
 int dhcp6_request_address(Link *link, int ir);
+int dhcp6_lease_pd_prefix_lost(sd_dhcp6_client *client, Link* link);
 
 const char* link_state_to_string(LinkState s) _const_;
 LinkState link_state_from_string(const char *s) _pure_;
@@ -172,8 +184,6 @@ extern const sd_bus_vtable link_vtable[];
 int link_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error);
 int link_object_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error);
 int link_send_changed(Link *link, const char *property, ...) _sentinel_;
-
-DEFINE_TRIVIAL_CLEANUP_FUNC(Link*, link_unref);
 
 /* Macros which append INTERFACE= to the message */
 

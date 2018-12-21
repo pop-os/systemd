@@ -10,7 +10,10 @@
 #include "path-util.h"
 #include "process-util.h"
 #include "random-util.h"
+#include "serialize.h"
 #include "string-util.h"
+#include "tests.h"
+#include "tmpfile-util.h"
 #include "util.h"
 
 static void test_close_many(void) {
@@ -316,7 +319,7 @@ static void test_read_nr_open(void) {
 
 int main(int argc, char *argv[]) {
 
-        log_set_max_level(LOG_DEBUG);
+        test_setup_logging(LOG_DEBUG);
 
         test_close_many();
         test_close_nointr();

@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-
 #include <inttypes.h>
 #include <stdbool.h>
 
@@ -19,7 +18,6 @@ typedef struct NetworkConfigSection NetworkConfigSection;
 
 struct AddressLabel {
         Network *network;
-        Link *link;
         NetworkConfigSection *section;
 
         unsigned char prefixlen;
@@ -30,12 +28,11 @@ struct AddressLabel {
         LIST_FIELDS(AddressLabel, labels);
 };
 
-int address_label_new(AddressLabel **ret);
 void address_label_free(AddressLabel *label);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(AddressLabel*, address_label_free);
 
-int address_label_configure(AddressLabel *address, Link *link, sd_netlink_message_handler_t callback, bool update);
+int address_label_configure(AddressLabel *address, Link *link, link_netlink_message_handler_t callback, bool update);
 
 CONFIG_PARSER_PROTOTYPE(config_parse_address_label);
 CONFIG_PARSER_PROTOTYPE(config_parse_address_label_prefix);

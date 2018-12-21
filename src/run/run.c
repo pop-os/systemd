@@ -14,8 +14,10 @@
 #include "env-util.h"
 #include "fd-util.h"
 #include "format-util.h"
+#include "main-func.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pretty-print.h"
 #include "process-util.h"
 #include "ptyfwd.h"
 #include "signal-util.h"
@@ -57,8 +59,26 @@ static char **arg_timer_property = NULL;
 static bool with_timer = false;
 static bool arg_quiet = false;
 static bool arg_aggressive_gc = false;
+static char *arg_working_directory = NULL;
+static bool arg_shell = false;
+static char **arg_cmdline = NULL;
 
-static void help(void) {
+STATIC_DESTRUCTOR_REGISTER(arg_environment, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_property, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_path_property, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_socket_property, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_timer_property, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_working_directory, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_cmdline, strv_freep);
+
+static int help(void) {
+        _cleanup_free_ char *link = NULL;
+        int r;
+
+        r = terminal_urlify_man("systemd-run", "1", &link);
+        if (r < 0)
+                return log_oom();
+
         printf("%s [OPTIONS...] {COMMAND} [ARGS...]\n\n"
                "Run the specified command in a transient scope or service.\n\n"
                "  -h --help                       Show this help\n"
@@ -80,12 +100,15 @@ static void help(void) {
                "     --uid=USER                   Run as system user\n"
                "     --gid=GROUP                  Run as system group\n"
                "     --nice=NICE                  Nice level\n"
+               "     --working-directory=PATH     Set working directory\n"
+               "  -d --same-dir                   Inherit working directory from caller\n"
                "  -E --setenv=NAME=VALUE          Set environment\n"
                "  -t --pty                        Run service on pseudo TTY as STDIN/STDOUT/\n"
                "                                  STDERR\n"
                "  -P --pipe                       Pass STDIN/STDOUT/STDERR directly to service\n"
                "  -q --quiet                      Suppress information messages during runtime\n"
-               "  -G --collect                    Unload unit after it ran, even when failed\n\n"
+               "  -G --collect                    Unload unit after it ran, even when failed\n"
+               "  -S --shell                      Invoke a $SHELL interactively\n\n"
                "Path options:\n"
                "     --path-property=NAME=VALUE   Set path unit property\n\n"
                "Socket options:\n"
@@ -98,7 +121,12 @@ static void help(void) {
                "     --on-unit-inactive=SECONDS   Run SECONDS after the last deactivation\n"
                "     --on-calendar=SPEC           Realtime timer\n"
                "     --timer-property=NAME=VALUE  Set timer unit property\n"
-               , program_invocation_short_name);
+               "\nSee the %s for details.\n"
+               , program_invocation_short_name
+               , link
+        );
+
+        return 0;
 }
 
 static int add_timer_property(const char *name, const char *val) {
@@ -144,44 +172,49 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_NO_BLOCK,
                 ARG_NO_ASK_PASSWORD,
                 ARG_WAIT,
+                ARG_WORKING_DIRECTORY,
+                ARG_SHELL,
         };
 
         static const struct option options[] = {
-                { "help",              no_argument,       NULL, 'h'                  },
-                { "version",           no_argument,       NULL, ARG_VERSION          },
-                { "user",              no_argument,       NULL, ARG_USER             },
-                { "system",            no_argument,       NULL, ARG_SYSTEM           },
-                { "scope",             no_argument,       NULL, ARG_SCOPE            },
-                { "unit",              required_argument, NULL, ARG_UNIT             },
-                { "description",       required_argument, NULL, ARG_DESCRIPTION      },
-                { "slice",             required_argument, NULL, ARG_SLICE            },
-                { "remain-after-exit", no_argument,       NULL, 'r'                  },
-                { "send-sighup",       no_argument,       NULL, ARG_SEND_SIGHUP      },
-                { "host",              required_argument, NULL, 'H'                  },
-                { "machine",           required_argument, NULL, 'M'                  },
-                { "service-type",      required_argument, NULL, ARG_SERVICE_TYPE     },
-                { "wait",              no_argument,       NULL, ARG_WAIT             },
-                { "uid",               required_argument, NULL, ARG_EXEC_USER        },
-                { "gid",               required_argument, NULL, ARG_EXEC_GROUP       },
-                { "nice",              required_argument, NULL, ARG_NICE             },
-                { "setenv",            required_argument, NULL, 'E'                  },
-                { "property",          required_argument, NULL, 'p'                  },
-                { "tty",               no_argument,       NULL, 't'                  }, /* deprecated alias */
-                { "pty",               no_argument,       NULL, 't'                  },
-                { "pipe",              no_argument,       NULL, 'P'                  },
-                { "quiet",             no_argument,       NULL, 'q'                  },
-                { "on-active",         required_argument, NULL, ARG_ON_ACTIVE        },
-                { "on-boot",           required_argument, NULL, ARG_ON_BOOT          },
-                { "on-startup",        required_argument, NULL, ARG_ON_STARTUP       },
-                { "on-unit-active",    required_argument, NULL, ARG_ON_UNIT_ACTIVE   },
-                { "on-unit-inactive",  required_argument, NULL, ARG_ON_UNIT_INACTIVE },
-                { "on-calendar",       required_argument, NULL, ARG_ON_CALENDAR      },
-                { "timer-property",    required_argument, NULL, ARG_TIMER_PROPERTY   },
-                { "path-property",     required_argument, NULL, ARG_PATH_PROPERTY    },
-                { "socket-property",   required_argument, NULL, ARG_SOCKET_PROPERTY  },
-                { "no-block",          no_argument,       NULL, ARG_NO_BLOCK         },
-                { "no-ask-password",   no_argument,       NULL, ARG_NO_ASK_PASSWORD  },
-                { "collect",           no_argument,       NULL, 'G'                  },
+                { "help",              no_argument,       NULL, 'h'                   },
+                { "version",           no_argument,       NULL, ARG_VERSION           },
+                { "user",              no_argument,       NULL, ARG_USER              },
+                { "system",            no_argument,       NULL, ARG_SYSTEM            },
+                { "scope",             no_argument,       NULL, ARG_SCOPE             },
+                { "unit",              required_argument, NULL, ARG_UNIT              },
+                { "description",       required_argument, NULL, ARG_DESCRIPTION       },
+                { "slice",             required_argument, NULL, ARG_SLICE             },
+                { "remain-after-exit", no_argument,       NULL, 'r'                   },
+                { "send-sighup",       no_argument,       NULL, ARG_SEND_SIGHUP       },
+                { "host",              required_argument, NULL, 'H'                   },
+                { "machine",           required_argument, NULL, 'M'                   },
+                { "service-type",      required_argument, NULL, ARG_SERVICE_TYPE      },
+                { "wait",              no_argument,       NULL, ARG_WAIT              },
+                { "uid",               required_argument, NULL, ARG_EXEC_USER         },
+                { "gid",               required_argument, NULL, ARG_EXEC_GROUP        },
+                { "nice",              required_argument, NULL, ARG_NICE              },
+                { "setenv",            required_argument, NULL, 'E'                   },
+                { "property",          required_argument, NULL, 'p'                   },
+                { "tty",               no_argument,       NULL, 't'                   }, /* deprecated alias */
+                { "pty",               no_argument,       NULL, 't'                   },
+                { "pipe",              no_argument,       NULL, 'P'                   },
+                { "quiet",             no_argument,       NULL, 'q'                   },
+                { "on-active",         required_argument, NULL, ARG_ON_ACTIVE         },
+                { "on-boot",           required_argument, NULL, ARG_ON_BOOT           },
+                { "on-startup",        required_argument, NULL, ARG_ON_STARTUP        },
+                { "on-unit-active",    required_argument, NULL, ARG_ON_UNIT_ACTIVE    },
+                { "on-unit-inactive",  required_argument, NULL, ARG_ON_UNIT_INACTIVE  },
+                { "on-calendar",       required_argument, NULL, ARG_ON_CALENDAR       },
+                { "timer-property",    required_argument, NULL, ARG_TIMER_PROPERTY    },
+                { "path-property",     required_argument, NULL, ARG_PATH_PROPERTY     },
+                { "socket-property",   required_argument, NULL, ARG_SOCKET_PROPERTY   },
+                { "no-block",          no_argument,       NULL, ARG_NO_BLOCK          },
+                { "no-ask-password",   no_argument,       NULL, ARG_NO_ASK_PASSWORD   },
+                { "collect",           no_argument,       NULL, 'G'                   },
+                { "working-directory", required_argument, NULL, ARG_WORKING_DIRECTORY },
+                { "same-dir",          no_argument,       NULL, 'd'                   },
+                { "shell",             no_argument,       NULL, 'S'                   },
                 {},
         };
 
@@ -191,13 +224,12 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "+hrH:M:E:p:tPqG", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "+hrH:M:E:p:tPqGdS", options, NULL)) >= 0)
 
                 switch (c) {
 
                 case 'h':
-                        help();
-                        return 0;
+                        return help();
 
                 case ARG_VERSION:
                         return version();
@@ -352,12 +384,13 @@ static int parse_argv(int argc, char *argv[]) {
                                 return log_oom();
 
                         with_timer = with_timer ||
-                                !!startswith(optarg, "OnActiveSec=") ||
-                                !!startswith(optarg, "OnBootSec=") ||
-                                !!startswith(optarg, "OnStartupSec=") ||
-                                !!startswith(optarg, "OnUnitActiveSec=") ||
-                                !!startswith(optarg, "OnUnitInactiveSec=") ||
-                                !!startswith(optarg, "OnCalendar=");
+                                STARTSWITH_SET(optarg,
+                                               "OnActiveSec=",
+                                               "OnBootSec=",
+                                               "OnStartupSec=",
+                                               "OnUnitActiveSec=",
+                                               "OnUnitInactiveSec=",
+                                               "OnCalendar=");
                         break;
 
                 case ARG_PATH_PROPERTY:
@@ -382,8 +415,33 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_wait = true;
                         break;
 
+                case ARG_WORKING_DIRECTORY:
+                        r = parse_path_argument_and_warn(optarg, true, &arg_working_directory);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
+                case 'd': {
+                        _cleanup_free_ char *p = NULL;
+
+                        r = safe_getcwd(&p);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to get current working directory: %m");
+
+                        if (empty_or_root(p))
+                                arg_working_directory = mfree(arg_working_directory);
+                        else
+                                free_and_replace(arg_working_directory, p);
+                        break;
+                }
+
                 case 'G':
                         arg_aggressive_gc = true;
+                        break;
+
+                case 'S':
+                        arg_shell = true;
                         break;
 
                 case '?':
@@ -396,9 +454,34 @@ static int parse_argv(int argc, char *argv[]) {
         with_trigger = !!arg_path_property || !!arg_socket_property || with_timer;
 
         /* currently, only single trigger (path, socket, timer) unit can be created simultaneously */
-        if ((int) !!arg_path_property + (int) !!arg_socket_property + (int) with_timer > 1) {
-                log_error("Only single trigger (path, socket, timer) unit can be created.");
-                return -EINVAL;
+        if ((int) !!arg_path_property + (int) !!arg_socket_property + (int) with_timer > 1)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Only single trigger (path, socket, timer) unit can be created.");
+
+        if (arg_shell) {
+                /* If --shell is imply --pty --pipe --same-dir --service-type=exec --wait --collect, unless otherwise
+                 * specified. */
+
+                if (!arg_scope) {
+                        if (arg_stdio == ARG_STDIO_NONE)
+                                arg_stdio = ARG_STDIO_AUTO;
+
+                        if (!arg_working_directory) {
+                                r = safe_getcwd(&arg_working_directory);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to get current working directory: %m");
+                        }
+
+                        if (!arg_service_type) {
+                                arg_service_type = strdup("exec");
+                                if (!arg_service_type)
+                                        return log_oom();
+                        }
+
+                        arg_wait = true;
+                }
+
+                arg_aggressive_gc = true;
         }
 
         if (arg_stdio == ARG_STDIO_AUTO) {
@@ -410,66 +493,79 @@ static int parse_argv(int argc, char *argv[]) {
                         ARG_STDIO_DIRECT;
         }
 
-        if ((optind >= argc) && (!arg_unit || !with_trigger)) {
-                log_error("Command line to execute required.");
-                return -EINVAL;
-        }
+        if (argc > optind) {
+                char **l;
 
-        if (arg_user && arg_transport != BUS_TRANSPORT_LOCAL) {
-                log_error("Execution in user context is not supported on non-local systems.");
-                return -EINVAL;
-        }
+                if (arg_shell)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "If --shell is used, no command line is expected.");
 
-        if (arg_scope && arg_transport != BUS_TRANSPORT_LOCAL) {
-                log_error("Scope execution is not supported on non-local systems.");
-                return -EINVAL;
-        }
+                l = strv_copy(argv + optind);
+                if (!l)
+                        return log_oom();
 
-        if (arg_scope && (arg_remain_after_exit || arg_service_type)) {
-                log_error("--remain-after-exit and --service-type= are not supported in --scope mode.");
-                return -EINVAL;
-        }
+                strv_free_and_replace(arg_cmdline, l);
 
-        if (arg_stdio != ARG_STDIO_NONE && (with_trigger || arg_scope)) {
-                log_error("--pty/--pipe is not compatible in timer or --scope mode.");
-                return -EINVAL;
-        }
+        } else if (arg_shell) {
+                _cleanup_free_ char *s = NULL;
+                char **l;
 
-        if (arg_stdio != ARG_STDIO_NONE && arg_transport == BUS_TRANSPORT_REMOTE) {
-                log_error("--pty/--pipe is only supported when connecting to the local system or containers.");
-                return -EINVAL;
-        }
+                r = get_shell(&s);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to determine shell: %m");
 
-        if (arg_stdio != ARG_STDIO_NONE && arg_no_block) {
-                log_error("--pty/--pipe is not compatible with --no-block.");
-                return -EINVAL;
-        }
+                l = strv_new(s);
+                if (!l)
+                        return log_oom();
 
-        if (arg_scope && with_trigger) {
-                log_error("Path, socket or timer options are not supported in --scope mode.");
-                return -EINVAL;
-        }
+                strv_free_and_replace(arg_cmdline, l);
 
-        if (arg_timer_property && !with_timer) {
-                log_error("--timer-property= has no effect without any other timer options.");
-                return -EINVAL;
-        }
+        } else if (!arg_unit || !with_trigger)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Command line to execute required.");
+
+        if (arg_user && arg_transport != BUS_TRANSPORT_LOCAL)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Execution in user context is not supported on non-local systems.");
+
+        if (arg_scope && arg_transport != BUS_TRANSPORT_LOCAL)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Scope execution is not supported on non-local systems.");
+
+        if (arg_scope && (arg_remain_after_exit || arg_service_type))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--remain-after-exit and --service-type= are not supported in --scope mode.");
+
+        if (arg_stdio != ARG_STDIO_NONE && (with_trigger || arg_scope))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--pty/--pipe is not compatible in timer or --scope mode.");
+
+        if (arg_stdio != ARG_STDIO_NONE && arg_transport == BUS_TRANSPORT_REMOTE)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--pty/--pipe is only supported when connecting to the local system or containers.");
+
+        if (arg_stdio != ARG_STDIO_NONE && arg_no_block)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--pty/--pipe is not compatible with --no-block.");
+
+        if (arg_scope && with_trigger)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Path, socket or timer options are not supported in --scope mode.");
+
+        if (arg_timer_property && !with_timer)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--timer-property= has no effect without any other timer options.");
 
         if (arg_wait) {
-                if (arg_no_block) {
-                        log_error("--wait may not be combined with --no-block.");
-                        return -EINVAL;
-                }
+                if (arg_no_block)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "--wait may not be combined with --no-block.");
 
-                if (with_trigger) {
-                        log_error("--wait may not be combined with path, socket or timer operations.");
-                        return -EINVAL;
-                }
+                if (with_trigger)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "--wait may not be combined with path, socket or timer operations.");
 
-                if (arg_scope) {
-                        log_error("--wait may not be combined with --scope.");
-                        return -EINVAL;
-                }
+                if (arg_scope)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "--wait may not be combined with --scope.");
         }
 
         return 1;
@@ -528,7 +624,7 @@ static int transient_kill_set_properties(sd_bus_message *m) {
         return 0;
 }
 
-static int transient_service_set_properties(sd_bus_message *m, char **argv, const char *pty_path) {
+static int transient_service_set_properties(sd_bus_message *m, const char *pty_path) {
         bool send_term = false;
         int r;
 
@@ -578,6 +674,12 @@ static int transient_service_set_properties(sd_bus_message *m, char **argv, cons
 
         if (arg_nice_set) {
                 r = sd_bus_message_append(m, "(sv)", "Nice", "i", arg_nice);
+                if (r < 0)
+                        return bus_log_create_error(r);
+        }
+
+        if (arg_working_directory) {
+                r = sd_bus_message_append(m, "(sv)", "WorkingDirectory", "s", arg_working_directory);
                 if (r < 0)
                         return bus_log_create_error(r);
         }
@@ -649,7 +751,7 @@ static int transient_service_set_properties(sd_bus_message *m, char **argv, cons
         }
 
         /* Exec container */
-        {
+        if (!strv_isempty(arg_cmdline)) {
                 r = sd_bus_message_open_container(m, 'r', "sv");
                 if (r < 0)
                         return bus_log_create_error(r);
@@ -670,11 +772,11 @@ static int transient_service_set_properties(sd_bus_message *m, char **argv, cons
                 if (r < 0)
                         return bus_log_create_error(r);
 
-                r = sd_bus_message_append(m, "s", argv[0]);
+                r = sd_bus_message_append(m, "s", arg_cmdline[0]);
                 if (r < 0)
                         return bus_log_create_error(r);
 
-                r = sd_bus_message_append_strv(m, argv);
+                r = sd_bus_message_append_strv(m, arg_cmdline);
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -775,10 +877,10 @@ static int make_unit_name(sd_bus *bus, UnitType t, char **ret) {
          * name our transient units. */
 
         id = startswith(unique, ":1.");
-        if (!id) {
-                log_error("Unique name %s has unexpected format.", unique);
-                return -EINVAL;
-        }
+        if (!id)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Unique name %s has unexpected format.",
+                                       unique);
 
         p = strjoin("run-u", id, ".", unit_type_to_string(t));
         if (!p)
@@ -895,7 +997,6 @@ static int pty_forward_handler(PTYForward *f, int rcode, void *userdata) {
 
 static int start_transient_service(
                 sd_bus *bus,
-                char **argv,
                 int *retval) {
 
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
@@ -906,7 +1007,6 @@ static int start_transient_service(
         int r;
 
         assert(bus);
-        assert(argv);
         assert(retval);
 
         if (arg_stdio == ARG_STDIO_PTY) {
@@ -940,10 +1040,8 @@ static int start_transient_service(
                                                &error,
                                                &pty_reply,
                                                "s", arg_host);
-                        if (r < 0) {
-                                log_error("Failed to get machine PTY: %s", bus_error_message(&error, -r));
-                                return r;
-                        }
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to get machine PTY: %s", bus_error_message(&error, -r));
 
                         r = sd_bus_message_read(pty_reply, "hs", &master, &s);
                         if (r < 0)
@@ -1000,7 +1098,7 @@ static int start_transient_service(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        r = transient_service_set_properties(m, argv, pty_path);
+        r = transient_service_set_properties(m, pty_path);
         if (r < 0)
                 return r;
 
@@ -1150,20 +1248,50 @@ static int start_transient_service(
         return 0;
 }
 
-static int start_transient_scope(
-                sd_bus *bus,
-                char **argv) {
+static int acquire_invocation_id(sd_bus *bus, sd_id128_t *ret) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        const void *p;
+        size_t l;
+        int r;
 
+        assert(bus);
+        assert(ret);
+
+        r = sd_bus_get_property(bus,
+                                "org.freedesktop.systemd1",
+                                "/org/freedesktop/systemd1/unit/self",
+                                "org.freedesktop.systemd1.Unit",
+                                "InvocationID",
+                                &error,
+                                &reply,
+                                "ay");
+        if (r < 0)
+                return log_error_errno(r, "Failed to request invocation ID for scope: %s", bus_error_message(&error, r));
+
+        r = sd_bus_message_read_array(reply, 'y', &p, &l);
+        if (r < 0)
+                return bus_log_parse_error(r);
+
+        if (l != sizeof(sd_id128_t))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid UUID size, %zu != %zu.", l, sizeof(sd_id128_t));
+
+        memcpy(ret, p, l);
+        return 0;
+}
+
+static int start_transient_scope(sd_bus *bus) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
         _cleanup_(bus_wait_for_jobs_freep) BusWaitForJobs *w = NULL;
         _cleanup_strv_free_ char **env = NULL, **user_env = NULL;
         _cleanup_free_ char *scope = NULL;
         const char *object = NULL;
+        sd_id128_t invocation_id;
         int r;
 
         assert(bus);
-        assert(argv);
+        assert(!strv_isempty(arg_cmdline));
 
         r = bus_wait_for_jobs_new(bus, &w);
         if (r < 0)
@@ -1219,10 +1347,24 @@ static int start_transient_scope(
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
-        if (r < 0) {
-                log_error("Failed to start transient scope unit: %s", bus_error_message(&error, -r));
+        if (r < 0)
+                return log_error_errno(r, "Failed to start transient scope unit: %s", bus_error_message(&error, -r));
+
+        r = sd_bus_message_read(reply, "o", &object);
+        if (r < 0)
+                return bus_log_parse_error(r);
+
+        r = bus_wait_for_jobs_one(w, object, arg_quiet);
+        if (r < 0)
                 return r;
-        }
+
+        r = acquire_invocation_id(bus, &invocation_id);
+        if (r < 0)
+                return r;
+
+        r = strv_extendf(&user_env, "INVOCATION_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(invocation_id));
+        if (r < 0)
+                return log_oom();
 
         if (arg_nice_set) {
                 if (setpriority(PRIO_PROCESS, 0, arg_nice) < 0)
@@ -1232,7 +1374,7 @@ static int start_transient_scope(
         if (arg_exec_group) {
                 gid_t gid;
 
-                r = get_group_creds(&arg_exec_group, &gid);
+                r = get_group_creds(&arg_exec_group, &gid, 0);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve group %s: %m", arg_exec_group);
 
@@ -1245,7 +1387,7 @@ static int start_transient_scope(
                 uid_t uid;
                 gid_t gid;
 
-                r = get_user_creds_clean(&arg_exec_user, &uid, &gid, &home, &shell);
+                r = get_user_creds(&arg_exec_user, &uid, &gid, &home, &shell, USER_CREDS_CLEAN|USER_CREDS_PREFER_NSS);
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve user %s: %m", arg_exec_user);
 
@@ -1282,25 +1424,16 @@ static int start_transient_scope(
         if (!env)
                 return log_oom();
 
-        r = sd_bus_message_read(reply, "o", &object);
-        if (r < 0)
-                return bus_log_parse_error(r);
-
-        r = bus_wait_for_jobs_one(w, object, arg_quiet);
-        if (r < 0)
-                return r;
-
         if (!arg_quiet)
                 log_info("Running scope as unit: %s", scope);
 
-        execvpe(argv[0], argv, env);
+        execvpe(arg_cmdline[0], arg_cmdline, env);
 
         return log_error_errno(errno, "Failed to execute: %m");
 }
 
 static int start_transient_trigger(
                 sd_bus *bus,
-                char **argv,
                 const char *suffix) {
 
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -1311,7 +1444,6 @@ static int start_transient_trigger(
         int r;
 
         assert(bus);
-        assert(argv);
 
         r = bus_wait_for_jobs_new(bus, &w);
         if (r < 0)
@@ -1404,7 +1536,7 @@ static int start_transient_trigger(
         if (r < 0)
                 return bus_log_create_error(r);
 
-        if (!strv_isempty(argv)) {
+        if (!strv_isempty(arg_cmdline)) {
                 r = sd_bus_message_open_container(m, 'r', "sa(sv)");
                 if (r < 0)
                         return bus_log_create_error(r);
@@ -1417,7 +1549,7 @@ static int start_transient_trigger(
                 if (r < 0)
                         return bus_log_create_error(r);
 
-                r = transient_service_set_properties(m, argv, NULL);
+                r = transient_service_set_properties(m, NULL);
                 if (r < 0)
                         return r;
 
@@ -1437,10 +1569,8 @@ static int start_transient_trigger(
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
-        if (r < 0) {
-                log_error("Failed to start transient %s unit: %s", suffix + 1, bus_error_message(&error, -r));
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to start transient %s unit: %s", suffix + 1, bus_error_message(&error, -r));
 
         r = sd_bus_message_read(reply, "o", &object);
         if (r < 0)
@@ -1452,16 +1582,16 @@ static int start_transient_trigger(
 
         if (!arg_quiet) {
                 log_info("Running %s as unit: %s", suffix + 1, trigger);
-                if (argv[0])
+                if (!strv_isempty(arg_cmdline))
                         log_info("Will run service as unit: %s", service);
         }
 
         return 0;
 }
 
-int main(int argc, char* argv[]) {
+static int run(int argc, char* argv[]) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
-        _cleanup_free_ char *description = NULL, *command = NULL;
+        _cleanup_free_ char *description = NULL;
         int r, retval = EXIT_SUCCESS;
 
         log_parse_environment();
@@ -1469,31 +1599,29 @@ int main(int argc, char* argv[]) {
 
         r = parse_argv(argc, argv);
         if (r <= 0)
-                goto finish;
+                return r;
 
-        if (argc > optind && arg_transport == BUS_TRANSPORT_LOCAL) {
+        if (!strv_isempty(arg_cmdline) && arg_transport == BUS_TRANSPORT_LOCAL) {
+                _cleanup_free_ char *command = NULL;
+
                 /* Patch in an absolute path */
 
-                r = find_binary(argv[optind], &command);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to find executable %s: %m", argv[optind]);
-                        goto finish;
-                }
+                r = find_binary(arg_cmdline[0], &command);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to find executable %s: %m", arg_cmdline[0]);
 
-                argv[optind] = command;
+                free_and_replace(arg_cmdline[0], command);
         }
 
         if (!arg_description) {
-                description = strv_join(argv + optind, " ");
-                if (!description) {
-                        r = log_oom();
-                        goto finish;
-                }
+                description = strv_join(arg_cmdline, " ");
+                if (!description)
+                        return log_oom();
 
                 if (arg_unit && isempty(description)) {
                         r = free_and_strdup(&description, arg_unit);
                         if (r < 0)
-                                goto finish;
+                                return log_oom();
                 }
 
                 arg_description = description;
@@ -1505,28 +1633,23 @@ int main(int argc, char* argv[]) {
                 r = bus_connect_transport(arg_transport, arg_host, arg_user, &bus);
         else
                 r = bus_connect_transport_systemd(arg_transport, arg_host, arg_user, &bus);
-        if (r < 0) {
-                log_error_errno(r, "Failed to create bus connection: %m");
-                goto finish;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to create bus connection: %m");
 
         if (arg_scope)
-                r = start_transient_scope(bus, argv + optind);
+                r = start_transient_scope(bus);
         else if (arg_path_property)
-                r = start_transient_trigger(bus, argv + optind, ".path");
+                r = start_transient_trigger(bus, ".path");
         else if (arg_socket_property)
-                r = start_transient_trigger(bus, argv + optind, ".socket");
+                r = start_transient_trigger(bus, ".socket");
         else if (with_timer)
-                r = start_transient_trigger(bus, argv + optind, ".timer");
+                r = start_transient_trigger(bus, ".timer");
         else
-                r = start_transient_service(bus, argv + optind, &retval);
+                r = start_transient_service(bus, &retval);
+        if (r < 0)
+                return r;
 
-finish:
-        strv_free(arg_environment);
-        strv_free(arg_property);
-        strv_free(arg_path_property);
-        strv_free(arg_socket_property);
-        strv_free(arg_timer_property);
-
-        return r < 0 ? EXIT_FAILURE : retval;
+        return retval;
 }
+
+DEFINE_MAIN_FUNCTION_WITH_POSITIVE_FAILURE(run);

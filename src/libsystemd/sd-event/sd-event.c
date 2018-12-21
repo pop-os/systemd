@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
@@ -11,6 +9,7 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "event-source.h"
 #include "fd-util.h"
 #include "fs-util.h"
 #include "hashmap.h"
@@ -27,24 +26,6 @@
 #include "util.h"
 
 #define DEFAULT_ACCURACY_USEC (250 * USEC_PER_MSEC)
-
-typedef enum EventSourceType {
-        SOURCE_IO,
-        SOURCE_TIME_REALTIME,
-        SOURCE_TIME_BOOTTIME,
-        SOURCE_TIME_MONOTONIC,
-        SOURCE_TIME_REALTIME_ALARM,
-        SOURCE_TIME_BOOTTIME_ALARM,
-        SOURCE_SIGNAL,
-        SOURCE_CHILD,
-        SOURCE_DEFER,
-        SOURCE_POST,
-        SOURCE_EXIT,
-        SOURCE_WATCHDOG,
-        SOURCE_INOTIFY,
-        _SOURCE_EVENT_SOURCE_TYPE_MAX,
-        _SOURCE_EVENT_SOURCE_TYPE_INVALID = -1
-} EventSourceType;
 
 static const char* const event_source_type_table[_SOURCE_EVENT_SOURCE_TYPE_MAX] = {
         [SOURCE_IO] = "io",
@@ -64,182 +45,7 @@ static const char* const event_source_type_table[_SOURCE_EVENT_SOURCE_TYPE_MAX] 
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(event_source_type, int);
 
-/* All objects we use in epoll events start with this value, so that
- * we know how to dispatch it */
-typedef enum WakeupType {
-        WAKEUP_NONE,
-        WAKEUP_EVENT_SOURCE,
-        WAKEUP_CLOCK_DATA,
-        WAKEUP_SIGNAL_DATA,
-        WAKEUP_INOTIFY_DATA,
-        _WAKEUP_TYPE_MAX,
-        _WAKEUP_TYPE_INVALID = -1,
-} WakeupType;
-
 #define EVENT_SOURCE_IS_TIME(t) IN_SET((t), SOURCE_TIME_REALTIME, SOURCE_TIME_BOOTTIME, SOURCE_TIME_MONOTONIC, SOURCE_TIME_REALTIME_ALARM, SOURCE_TIME_BOOTTIME_ALARM)
-
-struct inode_data;
-
-struct sd_event_source {
-        WakeupType wakeup;
-
-        unsigned n_ref;
-
-        sd_event *event;
-        void *userdata;
-        sd_event_handler_t prepare;
-
-        char *description;
-
-        EventSourceType type:5;
-        int enabled:3;
-        bool pending:1;
-        bool dispatching:1;
-        bool floating:1;
-
-        int64_t priority;
-        unsigned pending_index;
-        unsigned prepare_index;
-        uint64_t pending_iteration;
-        uint64_t prepare_iteration;
-
-        sd_event_destroy_t destroy_callback;
-
-        LIST_FIELDS(sd_event_source, sources);
-
-        union {
-                struct {
-                        sd_event_io_handler_t callback;
-                        int fd;
-                        uint32_t events;
-                        uint32_t revents;
-                        bool registered:1;
-                        bool owned:1;
-                } io;
-                struct {
-                        sd_event_time_handler_t callback;
-                        usec_t next, accuracy;
-                        unsigned earliest_index;
-                        unsigned latest_index;
-                } time;
-                struct {
-                        sd_event_signal_handler_t callback;
-                        struct signalfd_siginfo siginfo;
-                        int sig;
-                } signal;
-                struct {
-                        sd_event_child_handler_t callback;
-                        siginfo_t siginfo;
-                        pid_t pid;
-                        int options;
-                } child;
-                struct {
-                        sd_event_handler_t callback;
-                } defer;
-                struct {
-                        sd_event_handler_t callback;
-                } post;
-                struct {
-                        sd_event_handler_t callback;
-                        unsigned prioq_index;
-                } exit;
-                struct {
-                        sd_event_inotify_handler_t callback;
-                        uint32_t mask;
-                        struct inode_data *inode_data;
-                        LIST_FIELDS(sd_event_source, by_inode_data);
-                } inotify;
-        };
-};
-
-struct clock_data {
-        WakeupType wakeup;
-        int fd;
-
-        /* For all clocks we maintain two priority queues each, one
-         * ordered for the earliest times the events may be
-         * dispatched, and one ordered by the latest times they must
-         * have been dispatched. The range between the top entries in
-         * the two prioqs is the time window we can freely schedule
-         * wakeups in */
-
-        Prioq *earliest;
-        Prioq *latest;
-        usec_t next;
-
-        bool needs_rearm:1;
-};
-
-struct signal_data {
-        WakeupType wakeup;
-
-        /* For each priority we maintain one signal fd, so that we
-         * only have to dequeue a single event per priority at a
-         * time. */
-
-        int fd;
-        int64_t priority;
-        sigset_t sigset;
-        sd_event_source *current;
-};
-
-/* A structure listing all event sources currently watching a specific inode */
-struct inode_data {
-        /* The identifier for the inode, the combination of the .st_dev + .st_ino fields of the file */
-        ino_t ino;
-        dev_t dev;
-
-        /* An fd of the inode to watch. The fd is kept open until the next iteration of the loop, so that we can
-         * rearrange the priority still until then, as we need the original inode to change the priority as we need to
-         * add a watch descriptor to the right inotify for the priority which we can only do if we have a handle to the
-         * original inode. We keep a list of all inode_data objects with an open fd in the to_close list (see below) of
-         * the sd-event object, so that it is efficient to close everything, before entering the next event loop
-         * iteration. */
-        int fd;
-
-        /* The inotify "watch descriptor" */
-        int wd;
-
-        /* The combination of the mask of all inotify watches on this inode we manage. This is also the mask that has
-         * most recently been set on the watch descriptor. */
-        uint32_t combined_mask;
-
-        /* All event sources subscribed to this inode */
-        LIST_HEAD(sd_event_source, event_sources);
-
-        /* The inotify object we watch this inode with */
-        struct inotify_data *inotify_data;
-
-        /* A linked list of all inode data objects with fds to close (see above) */
-        LIST_FIELDS(struct inode_data, to_close);
-};
-
-/* A structure encapsulating an inotify fd */
-struct inotify_data {
-        WakeupType wakeup;
-
-        /* For each priority we maintain one inotify fd, so that we only have to dequeue a single event per priority at
-         * a time */
-
-        int fd;
-        int64_t priority;
-
-        Hashmap *inodes; /* The inode_data structures keyed by dev+ino */
-        Hashmap *wd;     /* The inode_data structures keyed by the watch descriptor for each */
-
-        /* The buffer we read inotify events into */
-        union inotify_event_buffer buffer;
-        size_t buffer_filled; /* fill level of the buffer */
-
-        /* How many event sources are currently marked pending for this inotify. We won't read new events off the
-         * inotify fd as long as there are still pending events on the inotify (because we have no strategy of queuing
-         * the events locally if they can't be coalesced). */
-        unsigned n_pending;
-
-        /* A linked list of all inotify objects with data already read, that still need processing. We keep this list
-         * to make it efficient to figure out what inotify objects to process data on next. */
-        LIST_FIELDS(struct inotify_data, buffered);
-};
 
 struct sd_event {
         unsigned n_ref;
@@ -316,6 +122,7 @@ static sd_event *event_resolve(sd_event *e) {
 
 static int pending_prioq_compare(const void *a, const void *b) {
         const sd_event_source *x = a, *y = b;
+        int r;
 
         assert(x->pending);
         assert(y->pending);
@@ -327,22 +134,17 @@ static int pending_prioq_compare(const void *a, const void *b) {
                 return 1;
 
         /* Lower priority values first */
-        if (x->priority < y->priority)
-                return -1;
-        if (x->priority > y->priority)
-                return 1;
+        r = CMP(x->priority, y->priority);
+        if (r != 0)
+                return r;
 
         /* Older entries first */
-        if (x->pending_iteration < y->pending_iteration)
-                return -1;
-        if (x->pending_iteration > y->pending_iteration)
-                return 1;
-
-        return 0;
+        return CMP(x->pending_iteration, y->pending_iteration);
 }
 
 static int prepare_prioq_compare(const void *a, const void *b) {
         const sd_event_source *x = a, *y = b;
+        int r;
 
         assert(x->prepare);
         assert(y->prepare);
@@ -356,18 +158,12 @@ static int prepare_prioq_compare(const void *a, const void *b) {
         /* Move most recently prepared ones last, so that we can stop
          * preparing as soon as we hit one that has already been
          * prepared in the current iteration */
-        if (x->prepare_iteration < y->prepare_iteration)
-                return -1;
-        if (x->prepare_iteration > y->prepare_iteration)
-                return 1;
+        r = CMP(x->prepare_iteration, y->prepare_iteration);
+        if (r != 0)
+                return r;
 
         /* Lower priority values first */
-        if (x->priority < y->priority)
-                return -1;
-        if (x->priority > y->priority)
-                return 1;
-
-        return 0;
+        return CMP(x->priority, y->priority);
 }
 
 static int earliest_time_prioq_compare(const void *a, const void *b) {
@@ -389,12 +185,7 @@ static int earliest_time_prioq_compare(const void *a, const void *b) {
                 return 1;
 
         /* Order by time */
-        if (x->time.next < y->time.next)
-                return -1;
-        if (x->time.next > y->time.next)
-                return 1;
-
-        return 0;
+        return CMP(x->time.next, y->time.next);
 }
 
 static usec_t time_event_source_latest(const sd_event_source *s) {
@@ -420,12 +211,7 @@ static int latest_time_prioq_compare(const void *a, const void *b) {
                 return 1;
 
         /* Order by time */
-        if (time_event_source_latest(x) < time_event_source_latest(y))
-                return -1;
-        if (time_event_source_latest(x) > time_event_source_latest(y))
-                return 1;
-
-        return 0;
+        return CMP(time_event_source_latest(x), time_event_source_latest(y));
 }
 
 static int exit_prioq_compare(const void *a, const void *b) {
@@ -441,12 +227,7 @@ static int exit_prioq_compare(const void *a, const void *b) {
                 return 1;
 
         /* Lower priority values first */
-        if (x->priority < y->priority)
-                return -1;
-        if (x->priority > y->priority)
-                return 1;
-
-        return 0;
+        return CMP(x->priority, y->priority);
 }
 
 static void free_clock_data(struct clock_data *d) {
@@ -458,7 +239,7 @@ static void free_clock_data(struct clock_data *d) {
         prioq_free(d->latest);
 }
 
-static void event_free(sd_event *e) {
+static sd_event *event_free(sd_event *e) {
         sd_event_source *s;
 
         assert(e);
@@ -494,7 +275,8 @@ static void event_free(sd_event *e) {
 
         hashmap_free(e->child_sources);
         set_free(e->post_sources);
-        free(e);
+
+        return mfree(e);
 }
 
 _public_ int sd_event_new(sd_event** ret) {
@@ -555,30 +337,7 @@ fail:
         return r;
 }
 
-_public_ sd_event* sd_event_ref(sd_event *e) {
-
-        if (!e)
-                return NULL;
-
-        assert(e->n_ref >= 1);
-        e->n_ref++;
-
-        return e;
-}
-
-_public_ sd_event* sd_event_unref(sd_event *e) {
-
-        if (!e)
-                return NULL;
-
-        assert(e->n_ref >= 1);
-        e->n_ref--;
-
-        if (e->n_ref <= 0)
-                event_free(e);
-
-        return NULL;
-}
+DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_event, sd_event, event_free);
 
 static bool event_pid_changed(sd_event *e) {
         assert(e);
@@ -974,7 +733,7 @@ static void source_disconnect(sd_event_source *s) {
                          * continued to being watched. That's because inotify doesn't really have an API for that: we
                          * can only change watch masks with access to the original inode either by fd or by path. But
                          * paths aren't stable, and keeping an O_PATH fd open all the time would mean wasting an fd
-                         * continously and keeping the mount busy which we can't really do. We could reconstruct the
+                         * continuously and keeping the mount busy which we can't really do. We could reconstruct the
                          * original inode from /proc/self/fdinfo/$INOTIFY_FD (as all watch descriptors are listed
                          * there), but given the need for open_by_handle_at() which is privileged and not universally
                          * available this would be quite an incomplete solution. Hence we go the other way, leave the
@@ -1023,6 +782,7 @@ static void source_free(sd_event_source *s) {
         free(s->description);
         free(s);
 }
+DEFINE_TRIVIAL_CLEANUP_FUNC(sd_event_source*, source_free);
 
 static int source_set_pending(sd_event_source *s, bool b) {
         int r;
@@ -1116,7 +876,7 @@ _public_ int sd_event_add_io(
                 sd_event_io_handler_t callback,
                 void *userdata) {
 
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         int r;
 
         assert_return(e, -EINVAL);
@@ -1139,13 +899,12 @@ _public_ int sd_event_add_io(
         s->enabled = SD_EVENT_ON;
 
         r = source_io_register(s, s->enabled, events);
-        if (r < 0) {
-                source_free(s);
+        if (r < 0)
                 return r;
-        }
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
 }
@@ -1154,7 +913,7 @@ static void initialize_perturb(sd_event *e) {
         sd_id128_t bootid = {};
 
         /* When we sleep for longer, we try to realign the wakeup to
-           the same time wihtin each minute/second/250ms, so that
+           the same time within each minute/second/250ms, so that
            events all across the system can be coalesced into a single
            CPU wakeup. However, let's take some system-specific
            randomness for this value, so that in a network of systems
@@ -1220,7 +979,7 @@ _public_ int sd_event_add_time(
                 void *userdata) {
 
         EventSourceType type;
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         struct clock_data *d;
         int r;
 
@@ -1272,20 +1031,17 @@ _public_ int sd_event_add_time(
 
         r = prioq_put(d->earliest, s, &s->time.earliest_index);
         if (r < 0)
-                goto fail;
+                return r;
 
         r = prioq_put(d->latest, s, &s->time.latest_index);
         if (r < 0)
-                goto fail;
+                return r;
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
-
-fail:
-        source_free(s);
-        return r;
 }
 
 static int signal_exit_callback(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
@@ -1301,7 +1057,7 @@ _public_ int sd_event_add_signal(
                 sd_event_signal_handler_t callback,
                 void *userdata) {
 
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         struct signal_data *d;
         sigset_t ss;
         int r;
@@ -1341,16 +1097,15 @@ _public_ int sd_event_add_signal(
         e->signal_sources[sig] = s;
 
         r = event_make_signal_data(e, sig, &d);
-        if (r < 0) {
-                source_free(s);
+        if (r < 0)
                 return r;
-        }
 
         /* Use the signal name as description for the event source by default */
         (void) sd_event_source_set_description(s, signal_to_string(sig));
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
 }
@@ -1363,7 +1118,7 @@ _public_ int sd_event_add_child(
                 sd_event_child_handler_t callback,
                 void *userdata) {
 
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         int r;
 
         assert_return(e, -EINVAL);
@@ -1393,17 +1148,14 @@ _public_ int sd_event_add_child(
         s->enabled = SD_EVENT_ONESHOT;
 
         r = hashmap_put(e->child_sources, PID_TO_PTR(pid), s);
-        if (r < 0) {
-                source_free(s);
+        if (r < 0)
                 return r;
-        }
 
         e->n_enabled_child_sources++;
 
         r = event_make_signal_data(e, SIGCHLD, NULL);
         if (r < 0) {
                 e->n_enabled_child_sources--;
-                source_free(s);
                 return r;
         }
 
@@ -1411,6 +1163,7 @@ _public_ int sd_event_add_child(
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
 }
@@ -1421,7 +1174,7 @@ _public_ int sd_event_add_defer(
                 sd_event_handler_t callback,
                 void *userdata) {
 
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         int r;
 
         assert_return(e, -EINVAL);
@@ -1439,13 +1192,12 @@ _public_ int sd_event_add_defer(
         s->enabled = SD_EVENT_ONESHOT;
 
         r = source_set_pending(s, true);
-        if (r < 0) {
-                source_free(s);
+        if (r < 0)
                 return r;
-        }
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
 }
@@ -1456,7 +1208,7 @@ _public_ int sd_event_add_post(
                 sd_event_handler_t callback,
                 void *userdata) {
 
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         int r;
 
         assert_return(e, -EINVAL);
@@ -1478,13 +1230,12 @@ _public_ int sd_event_add_post(
         s->enabled = SD_EVENT_ON;
 
         r = set_put(e->post_sources, s);
-        if (r < 0) {
-                source_free(s);
+        if (r < 0)
                 return r;
-        }
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
 }
@@ -1495,7 +1246,7 @@ _public_ int sd_event_add_exit(
                 sd_event_handler_t callback,
                 void *userdata) {
 
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         int r;
 
         assert_return(e, -EINVAL);
@@ -1518,13 +1269,12 @@ _public_ int sd_event_add_exit(
         s->enabled = SD_EVENT_ONESHOT;
 
         r = prioq_put(s->event->exit, s, &s->exit.prioq_index);
-        if (r < 0) {
-                source_free(s);
+        if (r < 0)
                 return r;
-        }
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
 }
@@ -1621,38 +1371,27 @@ static int event_make_inotify_data(
         return 1;
 }
 
-static int inode_data_compare(const void *a, const void *b) {
-        const struct inode_data *x = a, *y = b;
+static int inode_data_compare(const struct inode_data *x, const struct inode_data *y) {
+        int r;
 
         assert(x);
         assert(y);
 
-        if (x->dev < y->dev)
-                return -1;
-        if (x->dev > y->dev)
-                return 1;
+        r = CMP(x->dev, y->dev);
+        if (r != 0)
+                return r;
 
-        if (x->ino < y->ino)
-                return -1;
-        if (x->ino > y->ino)
-                return 1;
-
-        return 0;
+        return CMP(x->ino, y->ino);
 }
 
-static void inode_data_hash_func(const void *p, struct siphash *state) {
-        const struct inode_data *d = p;
-
-        assert(p);
+static void inode_data_hash_func(const struct inode_data *d, struct siphash *state) {
+        assert(d);
 
         siphash24_compress(&d->dev, sizeof(d->dev), state);
         siphash24_compress(&d->ino, sizeof(d->ino), state);
 }
 
-const struct hash_ops inode_data_hash_ops = {
-        .hash = inode_data_hash_func,
-        .compare = inode_data_compare
-};
+DEFINE_PRIVATE_HASH_OPS(inode_data_hash_ops, struct inode_data, inode_data_hash_func, inode_data_compare);
 
 static void event_free_inode_data(
                 sd_event *e,
@@ -1779,7 +1518,7 @@ static uint32_t inode_data_determine_mask(struct inode_data *d) {
          *
          * Note that we add all sources to the mask here, regardless whether enabled, disabled or oneshot. That's
          * because we cannot change the mask anymore after the event source was created once, since the kernel has no
-         * API for that. Hence we need to subscribe to the maximum mask we ever might be interested in, and supress
+         * API for that. Hence we need to subscribe to the maximum mask we ever might be interested in, and suppress
          * events we don't care for client-side. */
 
         LIST_FOREACH(inotify.by_inode_data, s, d->event_sources) {
@@ -1841,11 +1580,10 @@ _public_ int sd_event_add_inotify(
                 sd_event_inotify_handler_t callback,
                 void *userdata) {
 
-        bool rm_inotify = false, rm_inode = false;
         struct inotify_data *inotify_data = NULL;
         struct inode_data *inode_data = NULL;
         _cleanup_close_ int fd = -1;
-        sd_event_source *s;
+        _cleanup_(source_freep) sd_event_source *s = NULL;
         struct stat st;
         int r;
 
@@ -1883,13 +1621,13 @@ _public_ int sd_event_add_inotify(
         /* Allocate an inotify object for this priority, and an inode object within it */
         r = event_make_inotify_data(e, SD_EVENT_PRIORITY_NORMAL, &inotify_data);
         if (r < 0)
-                goto fail;
-        rm_inotify = r > 0;
+                return r;
 
         r = event_make_inode_data(e, inotify_data, st.st_dev, st.st_ino, &inode_data);
-        if (r < 0)
-                goto fail;
-        rm_inode = r > 0;
+        if (r < 0) {
+                event_free_inotify_data(e, inotify_data);
+                return r;
+        }
 
         /* Keep the O_PATH fd around until the first iteration of the loop, so that we can still change the priority of
          * the event source, until then, for which we need the original inode. */
@@ -1902,71 +1640,44 @@ _public_ int sd_event_add_inotify(
         LIST_PREPEND(inotify.by_inode_data, inode_data->event_sources, s);
         s->inotify.inode_data = inode_data;
 
-        rm_inode = rm_inotify = false;
-
         /* Actually realize the watch now */
         r = inode_data_realize_watch(e, inode_data);
         if (r < 0)
-                goto fail;
+                return r;
 
         (void) sd_event_source_set_description(s, path);
 
         if (ret)
                 *ret = s;
+        TAKE_PTR(s);
 
         return 0;
-
-fail:
-        source_free(s);
-
-        if (rm_inode)
-                event_free_inode_data(e, inode_data);
-
-        if (rm_inotify)
-                event_free_inotify_data(e, inotify_data);
-
-        return r;
 }
 
-_public_ sd_event_source* sd_event_source_ref(sd_event_source *s) {
-
+static sd_event_source* event_source_free(sd_event_source *s) {
         if (!s)
                 return NULL;
 
-        assert(s->n_ref >= 1);
-        s->n_ref++;
+        /* Here's a special hack: when we are called from a
+         * dispatch handler we won't free the event source
+         * immediately, but we will detach the fd from the
+         * epoll. This way it is safe for the caller to unref
+         * the event source and immediately close the fd, but
+         * we still retain a valid event source object after
+         * the callback. */
 
-        return s;
-}
+        if (s->dispatching) {
+                if (s->type == SOURCE_IO)
+                        source_io_unregister(s);
 
-_public_ sd_event_source* sd_event_source_unref(sd_event_source *s) {
-
-        if (!s)
-                return NULL;
-
-        assert(s->n_ref >= 1);
-        s->n_ref--;
-
-        if (s->n_ref <= 0) {
-                /* Here's a special hack: when we are called from a
-                 * dispatch handler we won't free the event source
-                 * immediately, but we will detach the fd from the
-                 * epoll. This way it is safe for the caller to unref
-                 * the event source and immediately close the fd, but
-                 * we still retain a valid event source object after
-                 * the callback. */
-
-                if (s->dispatching) {
-                        if (s->type == SOURCE_IO)
-                                source_io_unregister(s);
-
-                        source_disconnect(s);
-                } else
-                        source_free(s);
-        }
+                source_disconnect(s);
+        } else
+                source_free(s);
 
         return NULL;
 }
+
+DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_event_source, sd_event_source, event_source_free);
 
 _public_ int sd_event_source_set_description(sd_event_source *s, const char *description) {
         assert_return(s, -EINVAL);
@@ -1978,8 +1689,10 @@ _public_ int sd_event_source_set_description(sd_event_source *s, const char *des
 _public_ int sd_event_source_get_description(sd_event_source *s, const char **description) {
         assert_return(s, -EINVAL);
         assert_return(description, -EINVAL);
-        assert_return(s->description, -ENXIO);
         assert_return(!event_pid_changed(s->event), -ECHILD);
+
+        if (!s->description)
+                return -ENXIO;
 
         *description = s->description;
         return 0;
@@ -2232,11 +1945,11 @@ fail:
 
 _public_ int sd_event_source_get_enabled(sd_event_source *s, int *m) {
         assert_return(s, -EINVAL);
-        assert_return(m, -EINVAL);
         assert_return(!event_pid_changed(s->event), -ECHILD);
 
-        *m = s->enabled;
-        return 0;
+        if (m)
+                *m = s->enabled;
+        return s->enabled != SD_EVENT_OFF;
 }
 
 _public_ int sd_event_source_set_enabled(sd_event_source *s, int m) {
@@ -3792,4 +3505,32 @@ _public_ int sd_event_source_get_destroy_callback(sd_event_source *s, sd_event_d
                 *ret = s->destroy_callback;
 
         return !!s->destroy_callback;
+}
+
+_public_ int sd_event_source_get_floating(sd_event_source *s) {
+        assert_return(s, -EINVAL);
+
+        return s->floating;
+}
+
+_public_ int sd_event_source_set_floating(sd_event_source *s, int b) {
+        assert_return(s, -EINVAL);
+
+        if (s->floating == !!b)
+                return 0;
+
+        if (!s->event) /* Already disconnected */
+                return -ESTALE;
+
+        s->floating = b;
+
+        if (b) {
+                sd_event_source_ref(s);
+                sd_event_unref(s->event);
+        } else {
+                sd_event_ref(s->event);
+                sd_event_source_unref(s);
+        }
+
+        return 1;
 }

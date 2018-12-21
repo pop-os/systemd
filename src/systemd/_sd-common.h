@@ -3,7 +3,6 @@
 #define foosdcommonhfoo
 
 /***
-
   systemd is free software; you can redistribute it and/or modify it
   under the terms of the GNU Lesser General Public License as published by
   the Free Software Foundation; either version 2.1 of the License, or
@@ -24,24 +23,26 @@
 #  error "Do not include _sd-common.h directly; it is a private header."
 #endif
 
+typedef void (*_sd_destroy_t)(void *userdata);
+
 #ifndef _sd_printf_
 #  if __GNUC__ >= 4
-#    define _sd_printf_(a,b) __attribute__ ((format (printf, a, b)))
+#    define _sd_printf_(a,b) __attribute__((__format__(printf, a, b)))
 #  else
 #    define _sd_printf_(a,b)
 #  endif
 #endif
 
 #ifndef _sd_sentinel_
-#  define _sd_sentinel_ __attribute__((sentinel))
+#  define _sd_sentinel_ __attribute__((__sentinel__))
 #endif
 
 #ifndef _sd_packed_
-#  define _sd_packed_ __attribute__((packed))
+#  define _sd_packed_ __attribute__((__packed__))
 #endif
 
 #ifndef _sd_pure_
-#  define _sd_pure_ __attribute__((pure))
+#  define _sd_pure_ __attribute__((__pure__))
 #endif
 
 #ifndef _SD_STRINGIFY

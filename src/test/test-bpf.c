@@ -28,17 +28,13 @@ int main(int argc, char *argv[]) {
         char log_buf[65535];
         int r;
 
-        log_set_max_level(LOG_DEBUG);
-        log_parse_environment();
-        log_open();
+        test_setup_logging(LOG_DEBUG);
 
         r = enter_cgroup_subroot();
-        if (r == -ENOMEDIUM) {
-                log_notice("cgroupfs not available, skipping tests");
-                return EXIT_TEST_SKIP;
-        }
+        if (r == -ENOMEDIUM)
+                return log_tests_skipped("cgroupfs not available");
 
-        assert_se(set_unit_path(get_testdata_dir("")) >= 0);
+        assert_se(set_unit_path(get_testdata_dir()) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
 
         r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &p);
@@ -47,16 +43,12 @@ int main(int argc, char *argv[]) {
         r = bpf_program_add_instructions(p, exit_insn, ELEMENTSOF(exit_insn));
         assert(r == 0);
 
-        if (getuid() != 0) {
-                log_notice("Not running as root, skipping kernel related tests.");
-                return EXIT_TEST_SKIP;
-        }
+        if (getuid() != 0)
+                return log_tests_skipped("not running as root");
 
         r = bpf_firewall_supported();
-        if (r == BPF_FIREWALL_UNSUPPORTED) {
-                log_notice("BPF firewalling not supported, skipping");
-                return EXIT_TEST_SKIP;
-        }
+        if (r == BPF_FIREWALL_UNSUPPORTED)
+                return log_tests_skipped("BPF firewalling not supported");
         assert_se(r > 0);
 
         if (r == BPF_FIREWALL_SUPPORTED_WITH_MULTI)
@@ -71,7 +63,7 @@ int main(int argc, char *argv[]) {
 
         /* The simple tests suceeded. Now let's try full unit-based use-case. */
 
-        assert_se(manager_new(UNIT_FILE_USER, true, &m) >= 0);
+        assert_se(manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m) >= 0);
         assert_se(manager_startup(m, NULL, NULL) >= 0);
 
         assert_se(u = unit_new(m, sizeof(Service)));
@@ -110,9 +102,8 @@ int main(int argc, char *argv[]) {
         unit_dump(u, stdout, NULL);
 
         r = bpf_firewall_compile(u);
-        if (IN_SET(r, -ENOTTY, -ENOSYS, -EPERM ))
-                /* Kernel doesn't support the necessary bpf bits, or masked out via seccomp? */
-                return EXIT_TEST_SKIP;
+        if (IN_SET(r, -ENOTTY, -ENOSYS, -EPERM))
+                return log_tests_skipped("Kernel doesn't support the necessary bpf bits (masked out via seccomp?)");
         assert_se(r >= 0);
 
         assert(u->ip_bpf_ingress);

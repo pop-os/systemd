@@ -26,37 +26,32 @@ static int ipv4ll_address_lost(Link *link) {
         log_link_debug(link, "IPv4 link-local release %u.%u.%u.%u", ADDRESS_FMT_VAL(addr));
 
         r = address_new(&address);
-        if (r < 0) {
-                log_link_error_errno(link, r, "Could not allocate address: %m");
-                return r;
-        }
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not allocate address: %m");
 
         address->family = AF_INET;
         address->in_addr.in = addr;
         address->prefixlen = 16;
         address->scope = RT_SCOPE_LINK;
 
-        address_remove(address, link, link_address_remove_handler);
+        address_remove(address, link, NULL);
 
         r = route_new(&route);
-        if (r < 0) {
-                log_link_error_errno(link, r, "Could not allocate route: %m");
-                return r;
-        }
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not allocate route: %m");
 
         route->family = AF_INET;
         route->scope = RT_SCOPE_LINK;
         route->priority = IPV4LL_ROUTE_METRIC;
 
-        route_remove(route, link, link_route_remove_handler);
+        route_remove(route, link, NULL);
 
         link_check_ready(link);
 
         return 0;
 }
 
-static int ipv4ll_route_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userdata) {
-        _cleanup_(link_unrefp) Link *link = userdata;
+static int ipv4ll_route_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
         int r;
 
         assert(link);
@@ -76,8 +71,7 @@ static int ipv4ll_route_handler(sd_netlink *rtnl, sd_netlink_message *m, void *u
         return 1;
 }
 
-static int ipv4ll_address_handler(sd_netlink *rtnl, sd_netlink_message *m, void *userdata) {
-        _cleanup_(link_unrefp) Link *link = userdata;
+static int ipv4ll_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
         int r;
 
         assert(link);
@@ -206,13 +200,11 @@ int ipv4ll_configure(Link *link) {
                         return r;
         }
 
-        if (link->udev_device) {
-                r = net_get_unique_predictable_data(link->udev_device, &seed);
-                if (r >= 0) {
-                        r = sd_ipv4ll_set_address_seed(link->ipv4ll, seed);
-                        if (r < 0)
-                                return r;
-                }
+        if (link->sd_device &&
+            net_get_unique_predictable_data(link->sd_device, &seed) >= 0) {
+                r = sd_ipv4ll_set_address_seed(link->ipv4ll, seed);
+                if (r < 0)
+                        return r;
         }
 
         r = sd_ipv4ll_attach_event(link->ipv4ll, NULL, 0);

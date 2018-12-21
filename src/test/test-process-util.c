@@ -17,6 +17,7 @@
 #include "fd-util.h"
 #include "log.h"
 #include "macro.h"
+#include "missing.h"
 #include "parse-util.h"
 #include "process-util.h"
 #include "signal-util.h"
@@ -24,6 +25,7 @@
 #include "string-util.h"
 #include "terminal-util.h"
 #include "test-helper.h"
+#include "tests.h"
 #include "util.h"
 #include "virt.h"
 
@@ -180,15 +182,24 @@ static void test_get_process_cmdline_harder(void) {
         _cleanup_free_ char *line = NULL;
         pid_t pid;
 
-        if (geteuid() != 0)
+        if (geteuid() != 0) {
+                log_info("Skipping %s: not root", __func__);
                 return;
+        }
+
+        if (!have_namespaces()) {
+                log_notice("Testing without namespaces, skipping %s", __func__);
+                return;
+        }
 
 #if HAVE_VALGRIND_VALGRIND_H
         /* valgrind patches open(/proc//cmdline)
          * so, test_get_process_cmdline_harder fails always
          * See https://github.com/systemd/systemd/pull/3555#issuecomment-226564908 */
-        if (RUNNING_ON_VALGRIND)
+        if (RUNNING_ON_VALGRIND) {
+                log_info("Skipping %s: running on valgrind", __func__);
                 return;
+        }
 #endif
 
         pid = fork();
@@ -206,15 +217,21 @@ static void test_get_process_cmdline_harder(void) {
         assert_se(pid == 0);
         assert_se(unshare(CLONE_NEWNS) >= 0);
 
-        assert_se(mount(NULL, "/", NULL, MS_PRIVATE|MS_REC, NULL) >= 0);
+        if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL) < 0) {
+                log_warning_errno(errno, "mount(..., \"/\", MS_SLAVE|MS_REC, ...) failed: %m");
+                assert_se(IN_SET(errno, EPERM, EACCES));
+                return;
+        }
 
         fd = mkostemp(path, O_CLOEXEC);
         assert_se(fd >= 0);
 
+        /* Note that we don't unmount the following bind-mount at the end of the test because the kernel
+         * will clear up its /proc/PID/ hierarchy automatically as soon as the test stops. */
         if (mount(path, "/proc/self/cmdline", "bind", MS_BIND, NULL) < 0) {
                 /* This happens under selinux… Abort the test in this case. */
                 log_warning_errno(errno, "mount(..., \"/proc/self/cmdline\", \"bind\", ...) failed: %m");
-                assert(errno == EACCES);
+                assert_se(IN_SET(errno, EPERM, EACCES));
                 return;
         }
 
@@ -394,12 +411,17 @@ static void test_rename_process_now(const char *p, int ret) {
         log_info("comm = <%s>", comm);
         assert_se(strneq(comm, p, TASK_COMM_LEN-1));
 
-        assert_se(get_process_cmdline(0, 0, false, &cmdline) >= 0);
+        r = get_process_cmdline(0, 0, false, &cmdline);
+        assert_se(r >= 0);
         /* we cannot expect cmdline to be renamed properly without privileges */
         if (geteuid() == 0) {
-                log_info("cmdline = <%s>", cmdline);
-                assert_se(strneq(p, cmdline, STRLEN("test-process-util")));
-                assert_se(startswith(p, cmdline));
+                if (r == 0 && detect_container() > 0)
+                        log_info("cmdline = <%s> (not verified, Running in unprivileged container?)", cmdline);
+                else {
+                        log_info("cmdline = <%s>", cmdline);
+                        assert_se(strneq(p, cmdline, STRLEN("test-process-util")));
+                        assert_se(startswith(p, cmdline));
+                }
         } else
                 log_info("cmdline = <%s> (not verified)", cmdline);
 }
@@ -581,9 +603,7 @@ static void test_ioprio_class_from_to_string(void) {
 }
 
 int main(int argc, char *argv[]) {
-        log_set_max_level(LOG_DEBUG);
-        log_parse_environment();
-        log_open();
+        test_setup_logging(LOG_DEBUG);
 
         saved_argc = argc;
         saved_argv = argv;

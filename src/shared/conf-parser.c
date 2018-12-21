@@ -18,9 +18,11 @@
 #include "fs-util.h"
 #include "log.h"
 #include "macro.h"
+#include "missing.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "rlimit-util.h"
 #include "signal-util.h"
 #include "socket-util.h"
 #include "string-util.h"
@@ -28,7 +30,6 @@
 #include "syslog-util.h"
 #include "time-util.h"
 #include "utf8.h"
-#include "rlimit-util.h"
 
 int config_item_table_lookup(
                 const void *table,
@@ -82,19 +83,13 @@ int config_item_perf_lookup(
         assert(ltype);
         assert(data);
 
-        if (!section)
-                p = lookup(lvalue, strlen(lvalue));
-        else {
-                char *key;
+        if (section) {
+                const char *key;
 
-                key = strjoin(section, ".", lvalue);
-                if (!key)
-                        return -ENOMEM;
-
+                key = strjoina(section, ".", lvalue);
                 p = lookup(key, strlen(key));
-                free(key);
-        }
-
+        } else
+                p = lookup(lvalue, strlen(lvalue));
         if (!p)
                 return 0;
 
@@ -132,7 +127,6 @@ static int next_assignment(
         r = lookup(table, section, lvalue, &func, &ltype, &data, userdata);
         if (r < 0)
                 return r;
-
         if (r > 0) {
                 if (func)
                         return func(unit, filename, line, section, section_line,
@@ -174,7 +168,7 @@ static int parse_line(
         if (!*l)
                 return 0;
 
-        if (strchr(COMMENTS "\n", *l))
+        if (*l == '\n')
                 return 0;
 
         include = first_word(l, ".include");
@@ -326,6 +320,9 @@ int config_parse(const char *unit,
 
                         return r;
                 }
+
+                if (strchr(COMMENTS, *buf))
+                        continue;
 
                 l = buf;
                 if (!(flags & CONFIG_PARSE_REFUSE_BOM)) {
@@ -532,8 +529,10 @@ int config_parse_iec_size(const char* unit,
         assert(data);
 
         r = parse_size(rvalue, 1024, &v);
-        if (r < 0 || (uint64_t) (size_t) v != v) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse size value, ignoring: %s", rvalue);
+        if (r >= 0 && (uint64_t) (size_t) v != v)
+                r = -ERANGE;
+        if (r < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse size value '%s', ignoring: %m", rvalue);
                 return 0;
         }
 
@@ -563,8 +562,10 @@ int config_parse_si_size(
         assert(data);
 
         r = parse_size(rvalue, 1000, &v);
-        if (r < 0 || (uint64_t) (size_t) v != v) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse size value, ignoring: %s", rvalue);
+        if (r >= 0 && (uint64_t) (size_t) v != v)
+                r = -ERANGE;
+        if (r < 0) {
+                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse size value '%s', ignoring: %m", rvalue);
                 return 0;
         }
 
@@ -1002,121 +1003,6 @@ int config_parse_ip_port(
         }
 
         *s = port;
-
-        return 0;
-}
-
-int config_parse_join_controllers(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        char ****ret = data;
-        const char *whole_rvalue = rvalue;
-        unsigned n = 0;
-        _cleanup_(strv_free_freep) char ***controllers = NULL;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-        assert(ret);
-
-        for (;;) {
-                _cleanup_free_ char *word = NULL;
-                char **l;
-                int r;
-
-                r = extract_first_word(&rvalue, &word, NULL, EXTRACT_QUOTES);
-                if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r, "Invalid value for %s: %s", lvalue, whole_rvalue);
-                        return r;
-                }
-                if (r == 0)
-                        break;
-
-                l = strv_split(word, ",");
-                if (!l)
-                        return log_oom();
-                strv_uniq(l);
-
-                if (strv_length(l) <= 1) {
-                        strv_free(l);
-                        continue;
-                }
-
-                if (!controllers) {
-                        controllers = new(char**, 2);
-                        if (!controllers) {
-                                strv_free(l);
-                                return log_oom();
-                        }
-
-                        controllers[0] = l;
-                        controllers[1] = NULL;
-
-                        n = 1;
-                } else {
-                        char ***a;
-                        char ***t;
-
-                        t = new0(char**, n+2);
-                        if (!t) {
-                                strv_free(l);
-                                return log_oom();
-                        }
-
-                        n = 0;
-
-                        for (a = controllers; *a; a++)
-                                if (strv_overlap(*a, l)) {
-                                        if (strv_extend_strv(&l, *a, false) < 0) {
-                                                strv_free(l);
-                                                strv_free_free(t);
-                                                return log_oom();
-                                        }
-
-                                } else {
-                                        char **c;
-
-                                        c = strv_copy(*a);
-                                        if (!c) {
-                                                strv_free(l);
-                                                strv_free_free(t);
-                                                return log_oom();
-                                        }
-
-                                        t[n++] = c;
-                                }
-
-                        t[n++] = strv_uniq(l);
-
-                        strv_free_free(controllers);
-                        controllers = t;
-                }
-        }
-        if (!isempty(rvalue))
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Trailing garbage, ignoring.");
-
-        /* As a special case, return a single empty strv, to override the default */
-        if (!controllers) {
-                controllers = new(char**, 2);
-                if (!controllers)
-                        return log_oom();
-                controllers[0] = strv_new(NULL, NULL);
-                if (!controllers[0])
-                        return log_oom();
-                controllers[1] = NULL;
-        }
-
-        strv_free_free(*ret);
-        *ret = TAKE_PTR(controllers);
 
         return 0;
 }

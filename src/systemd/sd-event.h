@@ -3,7 +3,6 @@
 #define foosdeventhfoo
 
 /***
-
   systemd is free software; you can redistribute it and/or modify it
   under the terms of the GNU Lesser General Public License as published by
   the Free Software Foundation; either version 2.1 of the License, or
@@ -34,7 +33,8 @@
   - Supports event source prioritization
   - Scales better with a large number of time events because it does not require one timerfd each
   - Automatically tries to coalesce timer events system-wide
-  - Handles signals and child PIDs
+  - Handles signals, child PIDs, inotify events
+  - Supports systemd-style automatic watchdog event generation
 */
 
 _SD_BEGIN_DECLARATIONS;
@@ -77,7 +77,7 @@ typedef int (*sd_event_child_handler_t)(sd_event_source *s, const siginfo_t *si,
 typedef void* sd_event_child_handler_t;
 #endif
 typedef int (*sd_event_inotify_handler_t)(sd_event_source *s, const struct inotify_event *event, void *userdata);
-typedef void (*sd_event_destroy_t)(void *userdata);
+typedef _sd_destroy_t sd_event_destroy_t;
 
 int sd_event_default(sd_event **e);
 
@@ -143,6 +143,8 @@ int sd_event_source_get_child_pid(sd_event_source *s, pid_t *pid);
 int sd_event_source_get_inotify_mask(sd_event_source *s, uint32_t *ret);
 int sd_event_source_set_destroy_callback(sd_event_source *s, sd_event_destroy_t callback);
 int sd_event_source_get_destroy_callback(sd_event_source *s, sd_event_destroy_t *ret);
+int sd_event_source_get_floating(sd_event_source *s);
+int sd_event_source_set_floating(sd_event_source *s, int b);
 
 /* Define helpers so that __attribute__((cleanup(sd_event_unrefp))) and similar may be used. */
 _SD_DEFINE_POINTER_CLEANUP_FUNC(sd_event, sd_event_unref);

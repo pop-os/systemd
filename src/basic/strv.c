@@ -169,7 +169,7 @@ char **strv_new_ap(const char *x, va_list ap) {
         return TAKE_PTR(a);
 }
 
-char **strv_new(const char *x, ...) {
+char **strv_new_internal(const char *x, ...) {
         char **r;
         va_list ap;
 
@@ -245,7 +245,7 @@ int strv_extend_strv_concat(char ***a, char **b, const char *suffix) {
         return 0;
 }
 
-char **strv_split(const char *s, const char *separator) {
+char **strv_split_full(const char *s, const char *separator, SplitFlags flags) {
         const char *word, *state;
         size_t l;
         size_t n, i;
@@ -253,8 +253,15 @@ char **strv_split(const char *s, const char *separator) {
 
         assert(s);
 
+        if (!separator)
+                separator = WHITESPACE;
+
+        s += strspn(s, separator);
+        if (isempty(s))
+                return new0(char*, 1);
+
         n = 0;
-        FOREACH_WORD_SEPARATOR(word, l, s, separator, state)
+        _FOREACH_WORD(word, l, s, separator, flags, state)
                 n++;
 
         r = new(char*, n+1);
@@ -262,7 +269,7 @@ char **strv_split(const char *s, const char *separator) {
                 return NULL;
 
         i = 0;
-        FOREACH_WORD_SEPARATOR(word, l, s, separator, state) {
+        _FOREACH_WORD(word, l, s, separator, flags, state) {
                 r[i] = strndup(word, l);
                 if (!r[i]) {
                         strv_free(r);
@@ -335,21 +342,22 @@ int strv_split_extract(char ***t, const char *s, const char *separators, Extract
         return (int) n;
 }
 
-char *strv_join(char **l, const char *separator) {
+char *strv_join_prefix(char **l, const char *separator, const char *prefix) {
         char *r, *e;
         char **s;
-        size_t n, k;
+        size_t n, k, m;
 
         if (!separator)
                 separator = " ";
 
         k = strlen(separator);
+        m = strlen_ptr(prefix);
 
         n = 0;
         STRV_FOREACH(s, l) {
                 if (s != l)
                         n += k;
-                n += strlen(*s);
+                n += m + strlen(*s);
         }
 
         r = new(char, n+1);
@@ -360,6 +368,9 @@ char *strv_join(char **l, const char *separator) {
         STRV_FOREACH(s, l) {
                 if (s != l)
                         e = stpcpy(e, separator);
+
+                if (prefix)
+                        e = stpcpy(e, prefix);
 
                 e = stpcpy(e, *s);
         }
@@ -647,7 +658,7 @@ char **strv_split_nulstr(const char *s) {
                 }
 
         if (!r)
-                return strv_new(NULL, NULL);
+                return strv_new(NULL);
 
         return r;
 }
@@ -707,14 +718,12 @@ bool strv_overlap(char **a, char **b) {
         return false;
 }
 
-static int str_compare(const void *_a, const void *_b) {
-        const char **a = (const char**) _a, **b = (const char**) _b;
-
+static int str_compare(char * const *a, char * const *b) {
         return strcmp(*a, *b);
 }
 
 char **strv_sort(char **l) {
-        qsort_safe(l, strv_length(l), sizeof(char*), str_compare);
+        typesafe_qsort(l, strv_length(l), str_compare);
         return l;
 }
 

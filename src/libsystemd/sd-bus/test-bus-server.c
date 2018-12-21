@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include <pthread.h>
 #include <stdlib.h>
@@ -130,10 +128,8 @@ static int client(struct context *c) {
                 return log_error_errno(r, "Failed to allocate method call: %m");
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
-        if (r < 0) {
-                log_error("Failed to issue method call: %s", bus_error_message(&error, -r));
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to issue method call: %s", bus_error_message(&error, -r));
 
         return 0;
 }

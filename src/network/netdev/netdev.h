@@ -1,17 +1,17 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-
 #include "sd-netlink.h"
 
+#include "conf-parser.h"
 #include "list.h"
+#include "../networkd-link.h"
 #include "time-util.h"
 
 typedef struct netdev_join_callback netdev_join_callback;
-typedef struct Link Link;
 
 struct netdev_join_callback {
-        sd_netlink_message_handler_t callback;
+        link_netlink_message_handler_t callback;
         Link *link;
 
         LIST_FIELDS(netdev_join_callback, callbacks);
@@ -44,6 +44,8 @@ typedef enum NetDevKind {
         NETDEV_KIND_VXCAN,
         NETDEV_KIND_WIREGUARD,
         NETDEV_KIND_NETDEVSIM,
+        NETDEV_KIND_FOU,
+        NETDEV_KIND_ERSPAN,
         _NETDEV_KIND_MAX,
         _NETDEV_KIND_INVALID = -1
 } NetDevKind;
@@ -72,7 +74,7 @@ typedef struct Condition Condition;
 typedef struct NetDev {
         Manager *manager;
 
-        int n_ref;
+        unsigned n_ref;
 
         char *filename;
 
@@ -146,23 +148,23 @@ extern const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX];
 #define NETDEV(n) (&(n)->meta)
 
 int netdev_load(Manager *manager);
+int netdev_load_one(Manager *manager, const char *filename);
 void netdev_drop(NetDev *netdev);
 
 NetDev *netdev_unref(NetDev *netdev);
 NetDev *netdev_ref(NetDev *netdev);
-
+DEFINE_TRIVIAL_DESTRUCTOR(netdev_destroy_callback, NetDev, netdev_unref);
 DEFINE_TRIVIAL_CLEANUP_FUNC(NetDev*, netdev_unref);
 
 int netdev_get(Manager *manager, const char *name, NetDev **ret);
 int netdev_set_ifindex(NetDev *netdev, sd_netlink_message *newlink);
-int netdev_enslave(NetDev *netdev, Link *link, sd_netlink_message_handler_t callback);
 int netdev_get_mac(const char *ifname, struct ether_addr **ret);
-int netdev_join(NetDev *netdev, Link *link, sd_netlink_message_handler_t cb);
+int netdev_join(NetDev *netdev, Link *link, link_netlink_message_handler_t cb);
 
 const char *netdev_kind_to_string(NetDevKind d) _const_;
 NetDevKind netdev_kind_from_string(const char *d) _pure_;
 
-int config_parse_netdev_kind(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+CONFIG_PARSER_PROTOTYPE(config_parse_netdev_kind);
 
 /* gperf */
 const struct ConfigPerfItem* network_netdev_gperf_lookup(const char *key, GPERF_LEN_TYPE length);

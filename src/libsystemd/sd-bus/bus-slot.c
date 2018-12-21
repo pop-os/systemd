@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include "sd-bus.h"
 
@@ -39,18 +37,7 @@ sd_bus_slot *bus_slot_allocate(
         return slot;
 }
 
-_public_ sd_bus_slot* sd_bus_slot_ref(sd_bus_slot *slot) {
-
-        if (!slot)
-                return NULL;
-
-        assert(slot->n_ref > 0);
-
-        slot->n_ref++;
-        return slot;
-}
-
-void bus_slot_disconnect(sd_bus_slot *slot) {
+void bus_slot_disconnect(sd_bus_slot *slot, bool unref) {
         sd_bus *bus;
 
         assert(slot);
@@ -81,7 +68,7 @@ void bus_slot_disconnect(sd_bus_slot *slot) {
                         (void) bus_remove_match_internal(slot->bus, slot->match_callback.match_string);
 
                 if (slot->match_callback.install_slot) {
-                        bus_slot_disconnect(slot->match_callback.install_slot);
+                        bus_slot_disconnect(slot->match_callback.install_slot, true);
                         slot->match_callback.install_slot = sd_bus_slot_unref(slot->match_callback.install_slot);
                 }
 
@@ -185,21 +172,14 @@ void bus_slot_disconnect(sd_bus_slot *slot) {
 
         if (!slot->floating)
                 sd_bus_unref(bus);
+        else if (unref)
+                sd_bus_slot_unref(slot);
 }
 
-_public_ sd_bus_slot* sd_bus_slot_unref(sd_bus_slot *slot) {
+static sd_bus_slot* bus_slot_free(sd_bus_slot *slot) {
+        assert(slot);
 
-        if (!slot)
-                return NULL;
-
-        assert(slot->n_ref > 0);
-
-        if (slot->n_ref > 1) {
-                slot->n_ref--;
-                return NULL;
-        }
-
-        bus_slot_disconnect(slot);
+        bus_slot_disconnect(slot, false);
 
         if (slot->destroy_callback)
                 slot->destroy_callback(slot->userdata);
@@ -207,6 +187,8 @@ _public_ sd_bus_slot* sd_bus_slot_unref(sd_bus_slot *slot) {
         free(slot->description);
         return mfree(slot);
 }
+
+DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_bus_slot, sd_bus_slot, bus_slot_free);
 
 _public_ sd_bus* sd_bus_slot_get_bus(sd_bus_slot *slot) {
         assert_return(slot, NULL);

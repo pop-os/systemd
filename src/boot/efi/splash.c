@@ -1,7 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/*
- * Copyright © 2012 Harald Hoyer <harald@redhat.com>
- */
 
 #include <efi.h>
 #include <efilib.h>
@@ -283,7 +280,7 @@ EFI_STATUS graphics_splash(UINT8 *content, UINTN len, const EFI_GRAPHICS_OUTPUT_
                           GraphicsOutput->Mode->Info->VerticalResolution, 0);
 
         /* EFI buffer */
-        blt_size = dib->x * dib->y * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL);
+        blt_size = sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL) * dib->x * dib->y;
         blt = AllocatePool(blt_size);
         if (!blt)
                 return EFI_OUT_OF_RESOURCES;

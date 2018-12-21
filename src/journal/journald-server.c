@@ -9,7 +9,6 @@
 #include <sys/statvfs.h>
 #include <linux/sockios.h>
 
-#include "libudev.h"
 #include "sd-daemon.h"
 #include "sd-journal.h"
 #include "sd-messages.h"
@@ -74,6 +73,8 @@
 /* Pick a good default that is likely to fit into AF_UNIX and AF_INET SOCK_DGRAM datagrams, and even leaves some room
  * for a bit of additional metadata. */
 #define DEFAULT_LINE_MAX (48*1024)
+
+#define DEFERRED_CLOSES_MAX (4096)
 
 static int determine_path_usage(Server *s, const char *path, uint64_t *ret_used, uint64_t *ret_free) {
         _cleanup_closedir_ DIR *d = NULL;
@@ -253,8 +254,9 @@ static int open_journal(
                 bool seal,
                 JournalMetrics *metrics,
                 JournalFile **ret) {
-        int r;
+
         JournalFile *f;
+        int r;
 
         assert(s);
         assert(fname);
@@ -309,7 +311,7 @@ static int system_journal_open(Server *s, bool flush_requested) {
                         server_add_acls(s->system_journal, 0);
                         (void) cache_space_refresh(s, &s->system_storage);
                         patch_min_use(&s->system_storage);
-                } else if (r < 0) {
+                } else {
                         if (!IN_SET(r, -ENOENT, -EROFS))
                                 log_warning_errno(r, "Failed to open system journal: %m");
 
@@ -400,17 +402,21 @@ static JournalFile* find_journal(Server *s, uid_t uid) {
         if (uid_for_system_journal(uid))
                 return s->system_journal;
 
-        r = sd_id128_get_machine(&machine);
-        if (r < 0)
-                return s->system_journal;
-
         f = ordered_hashmap_get(s->user_journals, UID_TO_PTR(uid));
         if (f)
                 return f;
 
-        if (asprintf(&p, "/var/log/journal/" SD_ID128_FORMAT_STR "/user-"UID_FMT".journal",
-                     SD_ID128_FORMAT_VAL(machine), uid) < 0)
+        r = sd_id128_get_machine(&machine);
+        if (r < 0) {
+                log_debug_errno(r, "Failed to determine machine ID, using system log: %m");
                 return s->system_journal;
+        }
+
+        if (asprintf(&p, "/var/log/journal/" SD_ID128_FORMAT_STR "/user-"UID_FMT".journal",
+                     SD_ID128_FORMAT_VAL(machine), uid) < 0) {
+                log_oom();
+                return s->system_journal;
+        }
 
         while (ordered_hashmap_size(s->user_journals) >= USER_JOURNALS_MAX) {
                 /* Too many open? Then let's close one */
@@ -460,17 +466,81 @@ static int do_rotate(
         return r;
 }
 
-void server_rotate(Server *s) {
+static void server_process_deferred_closes(Server *s) {
         JournalFile *f;
-        void *k;
         Iterator i;
+
+        /* Perform any deferred closes which aren't still offlining. */
+        SET_FOREACH(f, s->deferred_closes, i) {
+                if (journal_file_is_offlining(f))
+                        continue;
+
+                (void) set_remove(s->deferred_closes, f);
+                (void) journal_file_close(f);
+        }
+}
+
+static void server_vacuum_deferred_closes(Server *s) {
+        assert(s);
+
+        /* Make some room in the deferred closes list, so that it doesn't grow without bounds */
+        if (set_size(s->deferred_closes) < DEFERRED_CLOSES_MAX)
+                return;
+
+        /* Let's first remove all journal files that might already have completed closing */
+        server_process_deferred_closes(s);
+
+        /* And now, let's close some more until we reach the limit again. */
+        while (set_size(s->deferred_closes) >= DEFERRED_CLOSES_MAX) {
+                JournalFile *f;
+
+                assert_se(f = set_steal_first(s->deferred_closes));
+                journal_file_close(f);
+        }
+}
+
+static int open_user_journal_directory(Server *s, DIR **ret_dir, char **ret_path) {
+        _cleanup_closedir_ DIR *dir = NULL;
+        _cleanup_free_ char *path = NULL;
+        sd_id128_t machine;
+        int r;
+
+        assert(s);
+
+        r = sd_id128_get_machine(&machine);
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine machine ID, ignoring: %m");
+
+        if (asprintf(&path, "/var/log/journal/" SD_ID128_FORMAT_STR "/", SD_ID128_FORMAT_VAL(machine)) < 0)
+                return log_oom();
+
+        dir = opendir(path);
+        if (!dir)
+                return log_error_errno(errno, "Failed to open user journal directory '%s': %m", path);
+
+        if (ret_dir)
+                *ret_dir = TAKE_PTR(dir);
+        if (ret_path)
+                *ret_path = TAKE_PTR(path);
+
+        return 0;
+}
+
+void server_rotate(Server *s) {
+        _cleanup_free_ char *path = NULL;
+        _cleanup_closedir_ DIR *d = NULL;
+        JournalFile *f;
+        Iterator i;
+        void *k;
         int r;
 
         log_debug("Rotating...");
 
+        /* First, rotate the system journal (either in its runtime flavour or in its runtime flavour) */
         (void) do_rotate(s, &s->runtime_journal, "runtime", false, 0);
         (void) do_rotate(s, &s->system_journal, "system", s->seal, 0);
 
+        /* Then, rotate all user journals we have open (keeping them open) */
         ORDERED_HASHMAP_FOREACH_KEY(f, k, s->user_journals, i) {
                 r = do_rotate(s, &f, "user", s->seal, PTR_TO_UID(k));
                 if (r >= 0)
@@ -480,12 +550,94 @@ void server_rotate(Server *s) {
                         ordered_hashmap_remove(s->user_journals, k);
         }
 
-        /* Perform any deferred closes which aren't still offlining. */
-        SET_FOREACH(f, s->deferred_closes, i)
-                if (!journal_file_is_offlining(f)) {
-                        (void) set_remove(s->deferred_closes, f);
-                        (void) journal_file_close(f);
+        /* Finally, also rotate all user journals we currently do not have open. (But do so only if we actually have
+         * access to /var, i.e. are not in the log-to-runtime-journal mode). */
+        if (!s->runtime_journal &&
+            open_user_journal_directory(s, &d, &path) >= 0) {
+
+                struct dirent *de;
+
+                FOREACH_DIRENT(de, d, log_warning_errno(errno, "Failed to enumerate %s, ignoring: %m", path)) {
+                        _cleanup_free_ char *u = NULL, *full = NULL;
+                        _cleanup_close_ int fd = -1;
+                        const char *a, *b;
+                        uid_t uid;
+
+                        a = startswith(de->d_name, "user-");
+                        if (!a)
+                                continue;
+                        b = endswith(de->d_name, ".journal");
+                        if (!b)
+                                continue;
+
+                        u = strndup(a, b-a);
+                        if (!u) {
+                                log_oom();
+                                break;
+                        }
+
+                        r = parse_uid(u, &uid);
+                        if (r < 0) {
+                                log_debug_errno(r, "Failed to parse UID from file name '%s', ignoring: %m", de->d_name);
+                                continue;
+                        }
+
+                        /* Already rotated in the above loop? i.e. is it an open user journal? */
+                        if (ordered_hashmap_contains(s->user_journals, UID_TO_PTR(uid)))
+                                continue;
+
+                        full = strjoin(path, de->d_name);
+                        if (!full) {
+                                log_oom();
+                                break;
+                        }
+
+                        fd = openat(dirfd(d), de->d_name, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW|O_NONBLOCK);
+                        if (fd < 0) {
+                                log_full_errno(IN_SET(errno, ELOOP, ENOENT) ? LOG_DEBUG : LOG_WARNING, errno,
+                                               "Failed to open journal file '%s' for rotation: %m", full);
+                                continue;
+                        }
+
+                        /* Make some room in the set of deferred close()s */
+                        server_vacuum_deferred_closes(s);
+
+                        /* Open the file briefly, so that we can archive it */
+                        r = journal_file_open(fd,
+                                              full,
+                                              O_RDWR,
+                                              0640,
+                                              s->compress.enabled,
+                                              s->compress.threshold_bytes,
+                                              s->seal,
+                                              &s->system_storage.metrics,
+                                              s->mmap,
+                                              s->deferred_closes,
+                                              NULL,
+                                              &f);
+                        if (r < 0) {
+                                log_warning_errno(r, "Failed to read journal file %s for rotation, trying to move it out of the way: %m", full);
+
+                                r = journal_file_dispose(dirfd(d), de->d_name);
+                                if (r < 0)
+                                        log_warning_errno(r, "Failed to move %s out of the way, ignoring: %m", full);
+                                else
+                                        log_debug("Successfully moved %s out of the way.", full);
+
+                                continue;
+                        }
+
+                        TAKE_FD(fd); /* Donated to journal_file_open() */
+
+                        r = journal_file_archive(f);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to archive journal file '%s', ignoring: %m", full);
+
+                        f = journal_initiate_close(f, s->deferred_closes);
                 }
+        }
+
+        server_process_deferred_closes(s);
 }
 
 void server_sync(Server *s) {
@@ -938,7 +1090,7 @@ void server_dispatch_message(
         if (c && c->unit) {
                 (void) determine_space(s, &available, NULL);
 
-                rl = journal_rate_limit_test(s->rate_limit, c->unit, priority & LOG_PRIMASK, available);
+                rl = journal_rate_limit_test(s->rate_limit, c->unit, c->log_rate_limit_interval, c->log_rate_limit_burst, priority & LOG_PRIMASK, available);
                 if (rl == 0)
                         return;
 
@@ -1036,7 +1188,8 @@ int server_flush_to_var(Server *s, bool require_flag_file) {
         r = 0;
 
 finish:
-        journal_file_post_change(s->system_journal);
+        if (s->system_journal)
+                journal_file_post_change(s->system_journal);
 
         s->runtime_journal = journal_file_close(s->runtime_journal);
 
@@ -1096,10 +1249,10 @@ int server_process_datagram(sd_event_source *es, int fd, uint32_t revents, void 
         assert(s);
         assert(fd == s->native_fd || fd == s->syslog_fd || fd == s->audit_fd);
 
-        if (revents != EPOLLIN) {
-                log_error("Got invalid event from epoll for datagram fd: %"PRIx32, revents);
-                return -EIO;
-        }
+        if (revents != EPOLLIN)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "Got invalid event from epoll for datagram fd: %" PRIx32,
+                                       revents);
 
         /* Try to get the right size, if we can. (Not all sockets support SIOCINQ, hence we just try, but don't rely on
          * it.) */
@@ -1113,8 +1266,7 @@ int server_process_datagram(sd_event_source *es, int fd, uint32_t revents, void 
         if (!GREEDY_REALLOC(s->buffer, s->buffer_size, m))
                 return log_oom();
 
-        iovec.iov_base = s->buffer;
-        iovec.iov_len = s->buffer_size - 1; /* Leave room for trailing NUL we add later */
+        iovec = IOVEC_MAKE(s->buffer, s->buffer_size - 1); /* Leave room for trailing NUL we add later */
 
         n = recvmsg(fd, &msghdr, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
         if (n < 0) {
@@ -1595,11 +1747,9 @@ static int dispatch_watchdog(sd_event_source *es, uint64_t usec, void *userdata)
 }
 
 static int server_connect_notify(Server *s) {
-        union sockaddr_union sa = {
-                .un.sun_family = AF_UNIX,
-        };
+        union sockaddr_union sa = {};
         const char *e;
-        int r;
+        int r, salen;
 
         assert(s);
         assert(s->notify_fd < 0);
@@ -1628,15 +1778,9 @@ static int server_connect_notify(Server *s) {
         if (!e)
                 return 0;
 
-        if (!IN_SET(e[0], '@', '/') || e[1] == 0) {
-                log_error("NOTIFY_SOCKET set to an invalid value: %s", e);
-                return -EINVAL;
-        }
-
-        if (strlen(e) > sizeof(sa.un.sun_path)) {
-                log_error("NOTIFY_SOCKET path too long: %s", e);
-                return -EINVAL;
-        }
+        salen = sockaddr_un_set_path(&sa.un, e);
+        if (salen < 0)
+                return log_error_errno(salen, "NOTIFY_SOCKET set to invalid value '%s': %m", e);
 
         s->notify_fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
         if (s->notify_fd < 0)
@@ -1644,11 +1788,7 @@ static int server_connect_notify(Server *s) {
 
         (void) fd_inc_sndbuf(s->notify_fd, NOTIFY_SNDBUF_SIZE);
 
-        strncpy(sa.un.sun_path, e, sizeof(sa.un.sun_path));
-        if (sa.un.sun_path[0] == '@')
-                sa.un.sun_path[0] = 0;
-
-        r = connect(s->notify_fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
+        r = connect(s->notify_fd, &sa.sa, salen);
         if (r < 0)
                 return log_error_errno(errno, "Failed to connect to notify socket: %m");
 
@@ -1745,38 +1885,34 @@ int server_init(Server *s) {
 
                 if (sd_is_socket_unix(fd, SOCK_DGRAM, -1, "/run/systemd/journal/socket", 0) > 0) {
 
-                        if (s->native_fd >= 0) {
-                                log_error("Too many native sockets passed.");
-                                return -EINVAL;
-                        }
+                        if (s->native_fd >= 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Too many native sockets passed.");
 
                         s->native_fd = fd;
 
                 } else if (sd_is_socket_unix(fd, SOCK_STREAM, 1, "/run/systemd/journal/stdout", 0) > 0) {
 
-                        if (s->stdout_fd >= 0) {
-                                log_error("Too many stdout sockets passed.");
-                                return -EINVAL;
-                        }
+                        if (s->stdout_fd >= 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Too many stdout sockets passed.");
 
                         s->stdout_fd = fd;
 
                 } else if (sd_is_socket_unix(fd, SOCK_DGRAM, -1, "/dev/log", 0) > 0 ||
                            sd_is_socket_unix(fd, SOCK_DGRAM, -1, "/run/systemd/journal/dev-log", 0) > 0) {
 
-                        if (s->syslog_fd >= 0) {
-                                log_error("Too many /dev/log sockets passed.");
-                                return -EINVAL;
-                        }
+                        if (s->syslog_fd >= 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Too many /dev/log sockets passed.");
 
                         s->syslog_fd = fd;
 
                 } else if (sd_is_socket(fd, AF_NETLINK, SOCK_RAW, -1) > 0) {
 
-                        if (s->audit_fd >= 0) {
-                                log_error("Too many audit sockets passed.");
-                                return -EINVAL;
-                        }
+                        if (s->audit_fd >= 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Too many audit sockets passed.");
 
                         s->audit_fd = fd;
 
@@ -1845,11 +1981,7 @@ int server_init(Server *s) {
         if (r < 0)
                 return r;
 
-        s->udev = udev_new();
-        if (!s->udev)
-                return -ENOMEM;
-
-        s->rate_limit = journal_rate_limit_new(s->rate_limit_interval, s->rate_limit_burst);
+        s->rate_limit = journal_rate_limit_new();
         if (!s->rate_limit)
                 return -ENOMEM;
 
@@ -1949,8 +2081,6 @@ void server_done(Server *s) {
 
         if (s->mmap)
                 mmap_cache_unref(s->mmap);
-
-        udev_unref(s->udev);
 }
 
 static const char* const storage_table[_STORAGE_MAX] = {

@@ -110,10 +110,7 @@ int path_make_absolute_cwd(const char *p, char **ret) {
                 if (r < 0)
                         return r;
 
-                if (endswith(cwd, "/"))
-                        c = strjoin(cwd, p);
-                else
-                        c = strjoin(cwd, "/", p);
+                c = path_join(cwd, p);
         }
         if (!c)
                 return -ENOMEM;
@@ -336,11 +333,14 @@ char *path_simplify(char *path, bool kill_dots) {
         /* Removes redundant inner and trailing slashes. Also removes unnecessary dots
          * if kill_dots is true. Modifies the passed string in-place.
          *
-         * ///foo//./bar/.   becomes /foo/./bar/.  (if kill_dots is false)
-         * ///foo//./bar/.   becomes /foo/bar      (if kill_dots is true)
-         * .//./foo//./bar/. becomes ./foo/bar     (if kill_dots is false)
-         * .//./foo//./bar/. becomes foo/bar       (if kill_dots is true)
+         * ///foo//./bar/.   becomes /foo/./bar/.      (if kill_dots is false)
+         * ///foo//./bar/.   becomes /foo/bar          (if kill_dots is true)
+         * .//./foo//./bar/. becomes ././foo/./bar/.   (if kill_dots is false)
+         * .//./foo//./bar/. becomes foo/bar           (if kill_dots is true)
          */
+
+        if (isempty(path))
+                return path;
 
         absolute = path_is_absolute(path);
 
@@ -371,9 +371,14 @@ char *path_simplify(char *path, bool kill_dots) {
                 *(t++) = *f;
         }
 
-        /* Special rule, if we are talking of the root directory, a trailing slash is good */
-        if (absolute && t == path)
-                *(t++) = '/';
+        /* Special rule, if we stripped everything, we either need a "/" (for the root directory)
+         * or "." for the current directory */
+        if (t == path) {
+                if (absolute)
+                        *(t++) = '/';
+                else
+                        *(t++) = '.';
+        }
 
         *t = 0;
         return path;
@@ -428,7 +433,7 @@ int path_compare(const char *a, const char *b) {
         assert(a);
         assert(b);
 
-        /* A relative path and an abolute path must not compare as equal.
+        /* A relative path and an absolute path must not compare as equal.
          * Which one is sorted before the other does not really matter.
          * Here a relative path is ordered before an absolute path. */
         d = (a[0] == '/') - (b[0] == '/');
@@ -476,18 +481,62 @@ bool path_equal_or_files_same(const char *a, const char *b, int flags) {
         return path_equal(a, b) || files_same(a, b, flags) > 0;
 }
 
-char* path_join(const char *root, const char *path, const char *rest) {
-        assert(path);
+char* path_join_internal(const char *first, ...) {
+        char *joined, *q;
+        const char *p;
+        va_list ap;
+        bool slash;
+        size_t sz;
 
-        if (!isempty(root))
-                return strjoin(root, endswith(root, "/") ? "" : "/",
-                               path[0] == '/' ? path+1 : path,
-                               rest ? (endswith(path, "/") ? "" : "/") : NULL,
-                               rest && rest[0] == '/' ? rest+1 : rest);
-        else
-                return strjoin(path,
-                               rest ? (endswith(path, "/") ? "" : "/") : NULL,
-                               rest && rest[0] == '/' ? rest+1 : rest);
+        /* Joins all listed strings until the sentinel and places a "/" between them unless the strings end/begin
+         * already with one so that it is unnecessary. Note that slashes which are already duplicate won't be
+         * removed. The string returned is hence always equal to or longer than the sum of the lengths of each
+         * individual string.
+         *
+         * Note: any listed empty string is simply skipped. This can be useful for concatenating strings of which some
+         * are optional.
+         *
+         * Examples:
+         *
+         * path_join("foo", "bar") → "foo/bar"
+         * path_join("foo/", "bar") → "foo/bar"
+         * path_join("", "foo", "", "bar", "") → "foo/bar" */
+
+        sz = strlen_ptr(first);
+        va_start(ap, first);
+        while ((p = va_arg(ap, char*)) != (const char*) -1)
+                if (!isempty(p))
+                        sz += 1 + strlen(p);
+        va_end(ap);
+
+        joined = new(char, sz + 1);
+        if (!joined)
+                return NULL;
+
+        if (!isempty(first)) {
+                q = stpcpy(joined, first);
+                slash = endswith(first, "/");
+        } else {
+                /* Skip empty items */
+                joined[0] = 0;
+                q = joined;
+                slash = true; /* no need to generate a slash anymore */
+        }
+
+        va_start(ap, first);
+        while ((p = va_arg(ap, char*)) != (const char*) -1) {
+                if (isempty(p))
+                        continue;
+
+                if (!slash && p[0] != '/')
+                        *(q++) = '/';
+
+                q = stpcpy(q, p);
+                slash = endswith(p, "/");
+        }
+        va_end(ap);
+
+        return joined;
 }
 
 int find_binary(const char *name, char **ret) {
@@ -745,6 +794,9 @@ const char *last_path_component(const char *path) {
 
         unsigned l, k;
 
+        if (!path)
+                return NULL;
+
         l = k = strlen(path);
         if (l == 0) /* special case — an empty string */
                 return path;
@@ -761,6 +813,37 @@ const char *last_path_component(const char *path) {
         return path + k;
 }
 
+int path_extract_filename(const char *p, char **ret) {
+        _cleanup_free_ char *a = NULL;
+        const char *c, *e = NULL, *q;
+
+        /* Extracts the filename part (i.e. right-most component) from a path, i.e. string that passes
+         * filename_is_valid(). A wrapper around last_path_component(), but eats up trailing slashes. */
+
+        if (!p)
+                return -EINVAL;
+
+        c = last_path_component(p);
+
+        for (q = c; *q != 0; q++)
+                if (*q != '/')
+                        e = q + 1;
+
+        if (!e) /* no valid character? */
+                return -EINVAL;
+
+        a = strndup(c, e - c);
+        if (!a)
+                return -ENOMEM;
+
+        if (!filename_is_valid(a))
+                return -EINVAL;
+
+        *ret = TAKE_PTR(a);
+
+        return 0;
+}
+
 bool filename_is_valid(const char *p) {
         const char *e;
 
@@ -774,7 +857,18 @@ bool filename_is_valid(const char *p) {
         if (*e != 0)
                 return false;
 
-        if (e - p > FILENAME_MAX)
+        if (e - p > FILENAME_MAX) /* FILENAME_MAX is counted *without* the trailing NUL byte */
+                return false;
+
+        return true;
+}
+
+bool path_is_valid(const char *p) {
+
+        if (isempty(p))
+                return false;
+
+        if (strlen(p) >= PATH_MAX) /* PATH_MAX is counted *with* the trailing NUL byte */
                 return false;
 
         return true;
@@ -782,16 +876,13 @@ bool filename_is_valid(const char *p) {
 
 bool path_is_normalized(const char *p) {
 
-        if (isempty(p))
+        if (!path_is_valid(p))
                 return false;
 
         if (dot_or_dot_dot(p))
                 return false;
 
         if (startswith(p, "../") || endswith(p, "/..") || strstr(p, "/../"))
-                return false;
-
-        if (strlen(p)+1 > PATH_MAX)
                 return false;
 
         if (startswith(p, "./") || endswith(p, "/.") || strstr(p, "/./"))
@@ -906,8 +997,7 @@ bool valid_device_allow_pattern(const char *path) {
         /* Like valid_device_node_path(), but also allows full-subsystem expressions, like DeviceAllow= and DeviceDeny=
          * accept it */
 
-        if (startswith(path, "block-") ||
-            startswith(path, "char-"))
+        if (STARTSWITH_SET(path, "block-", "char-"))
                 return true;
 
         return valid_device_node_path(path);
@@ -1046,6 +1136,13 @@ int path_simplify_and_warn(
                 log_syntax(unit, LOG_ERR, filename, line, 0,
                            "%s= path is not normalized%s: %s",
                            lvalue, fatal ? "" : ", ignoring", path);
+                return -EINVAL;
+        }
+
+        if (!path_is_valid(path)) {
+                log_syntax(unit, LOG_ERR, filename, line, 0,
+                           "%s= path has invalid length (%zu bytes)%s.",
+                           lvalue, strlen(path), fatal ? "" : ", ignoring");
                 return -EINVAL;
         }
 

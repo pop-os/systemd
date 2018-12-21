@@ -1537,7 +1537,11 @@ sub udev_setup {
         system("umount", $udev_tmpfs);
         rmdir($udev_tmpfs);
         mkdir($udev_tmpfs) || die "unable to create udev_tmpfs: $udev_tmpfs\n";
-        system("mount", "-o", "rw,mode=755,nosuid,noexec,nodev", "-t", "tmpfs", "tmpfs", $udev_tmpfs) && die "unable to mount tmpfs";
+
+        if (system("mount", "-o", "rw,mode=755,nosuid,noexec", "-t", "tmpfs", "tmpfs", $udev_tmpfs)) {
+                warn "unable to mount tmpfs";
+                return 0;
+        }
 
         mkdir($udev_dev) || die "unable to create udev_dev: $udev_dev\n";
         # setting group and mode of udev_dev ensures the tests work
@@ -1545,9 +1549,29 @@ sub udev_setup {
         chown (0, 0, $udev_dev) || die "unable to chown $udev_dev\n";
         chmod (0755, $udev_dev) || die "unable to chmod $udev_dev\n";
 
+        if (system("mknod", $udev_dev . "/null", "c", "1", "3")) {
+                warn "unable to create $udev_dev/null";
+                return 0;
+        }
+
+        # check if we are permitted to create block device nodes
+        my $block_device_filename = $udev_dev . "/sda";
+        if (system("mknod", $block_device_filename, "b", "8", "0")) {
+                warn "unable to create $block_device_filename";
+                return 0;
+        }
+        unlink $block_device_filename;
+
         system("cp", "-r", "test/sys/", $udev_sys) && die "unable to copy test/sys";
 
         system("rm", "-rf", "$udev_run");
+
+        if (!mkdir($udev_run)) {
+                warn "unable to create directory $udev_run";
+                return 0;
+        }
+
+        return 1;
 }
 
 sub run_test {
@@ -1645,14 +1669,15 @@ if ($? >> 8 == 0) {
         exit($EXIT_TEST_SKIP);
 }
 
-# skip the test when running in a container
-system("systemd-detect-virt", "-c", "-q");
-if ($? >> 8 == 0) {
-        print "Running in a container, skipping the test.\n";
+if (!udev_setup()) {
+        warn "Failed to set up the environment, skipping the test";
         exit($EXIT_TEST_SKIP);
 }
 
-udev_setup();
+if (system($udev_bin, "check")) {
+        warn "$udev_bin failed to set up the environment, skipping the test";
+        exit($EXIT_TEST_SKIP);
+}
 
 my $test_num = 1;
 my @list;

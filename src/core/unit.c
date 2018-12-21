@@ -10,8 +10,8 @@
 #include "sd-id128.h"
 #include "sd-messages.h"
 
-#include "alloc-util.h"
 #include "all-units.h"
+#include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-util.h"
 #include "cgroup-util.h"
@@ -22,6 +22,7 @@
 #include "execute.h"
 #include "fd-util.h"
 #include "fileio-label.h"
+#include "fileio.h"
 #include "format-util.h"
 #include "fs-util.h"
 #include "id128-util.h"
@@ -35,6 +36,7 @@
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "serialize.h"
 #include "set.h"
 #include "signal-util.h"
 #include "sparse-endian.h"
@@ -45,6 +47,8 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
+#include "terminal-util.h"
+#include "tmpfile-util.h"
 #include "umask-util.h"
 #include "unit-name.h"
 #include "unit.h"
@@ -93,7 +97,8 @@ Unit *unit_new(Manager *m, size_t size) {
         u->ref_uid = UID_INVALID;
         u->ref_gid = GID_INVALID;
         u->cpu_usage_last = NSEC_INFINITY;
-        u->cgroup_bpf_state = UNIT_CGROUP_BPF_INVALIDATED;
+        u->cgroup_invalidated_mask |= CGROUP_MASK_BPF_FIREWALL;
+        u->failure_action_exit_status = u->success_action_exit_status = -1;
 
         u->ip_accounting_ingress_map_fd = -1;
         u->ip_accounting_egress_map_fd = -1;
@@ -127,7 +132,7 @@ int unit_new_for_name(Manager *m, size_t size, const char *name, Unit **ret) {
         return r;
 }
 
-bool unit_has_name(Unit *u, const char *name) {
+bool unit_has_name(const Unit *u, const char *name) {
         assert(u);
         assert(name);
 
@@ -438,6 +443,22 @@ void unit_add_to_dbus_queue(Unit *u) {
         u->in_dbus_queue = true;
 }
 
+void unit_submit_to_stop_when_unneeded_queue(Unit *u) {
+        assert(u);
+
+        if (u->in_stop_when_unneeded_queue)
+                return;
+
+        if (!u->stop_when_unneeded)
+                return;
+
+        if (!UNIT_IS_ACTIVE_OR_RELOADING(unit_active_state(u)))
+                return;
+
+        LIST_PREPEND(stop_when_unneeded_queue, u->manager->stop_when_unneeded_queue, u);
+        u->in_stop_when_unneeded_queue = true;
+}
+
 static void bidi_set_free(Unit *u, Hashmap *h) {
         Unit *other;
         Iterator i;
@@ -553,6 +574,14 @@ void unit_free(Unit *u) {
         if (!u)
                 return;
 
+        if (UNIT_ISSET(u->slice)) {
+                /* A unit is being dropped from the tree, make sure our parent slice recalculates the member mask */
+                unit_invalidate_cgroup_members_masks(UNIT_DEREF(u->slice));
+
+                /* And make sure the parent is realized again, updating cgroup memberships */
+                unit_add_to_cgroup_realize_queue(UNIT_DEREF(u->slice));
+        }
+
         u->transient_file = safe_fclose(u->transient_file);
 
         if (!MANAGER_IS_RELOADING(u->manager))
@@ -634,6 +663,9 @@ void unit_free(Unit *u) {
         if (u->in_target_deps_queue)
                 LIST_REMOVE(target_deps_queue, u->manager->target_deps_queue, u);
 
+        if (u->in_stop_when_unneeded_queue)
+                LIST_REMOVE(stop_when_unneeded_queue, u->manager->stop_when_unneeded_queue, u);
+
         safe_close(u->ip_accounting_ingress_map_fd);
         safe_close(u->ip_accounting_egress_map_fd);
 
@@ -646,6 +678,8 @@ void unit_free(Unit *u) {
         bpf_program_unref(u->ip_bpf_ingress_installed);
         bpf_program_unref(u->ip_bpf_egress);
         bpf_program_unref(u->ip_bpf_egress_installed);
+
+        bpf_program_unref(u->bpf_device_control_installed);
 
         condition_free_list(u->conditions);
         condition_free_list(u->asserts);
@@ -943,7 +977,7 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
         assert(u);
         assert(c);
 
-        if (c->working_directory) {
+        if (c->working_directory && !c->working_directory_missing_ok) {
                 r = unit_require_mounts_for(u, c->working_directory, UNIT_DEPENDENCY_FILE);
                 if (r < 0)
                         return r;
@@ -990,7 +1024,7 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
                                 return r;
                 }
 
-                r = unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_TMPFILES_SETUP_SERVICE, NULL, true, UNIT_DEPENDENCY_FILE);
+                r = unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_TMPFILES_SETUP_SERVICE, true, UNIT_DEPENDENCY_FILE);
                 if (r < 0)
                         return r;
         }
@@ -1008,7 +1042,7 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
         /* If syslog or kernel logging is requested, make sure our own
          * logging daemon is run first. */
 
-        r = unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_JOURNALD_SOCKET, NULL, true, UNIT_DEPENDENCY_FILE);
+        r = unit_add_dependency_by_name(u, UNIT_AFTER, SPECIAL_JOURNALD_SOCKET, true, UNIT_DEPENDENCY_FILE);
         if (r < 0)
                 return r;
 
@@ -1133,22 +1167,32 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
                 (void) cg_mask_to_string(u->cgroup_realized_mask, &s);
                 fprintf(f, "%s\tCGroup realized mask: %s\n", prefix, strnull(s));
         }
+
         if (u->cgroup_enabled_mask != 0) {
                 _cleanup_free_ char *s = NULL;
                 (void) cg_mask_to_string(u->cgroup_enabled_mask, &s);
                 fprintf(f, "%s\tCGroup enabled mask: %s\n", prefix, strnull(s));
         }
+
         m = unit_get_own_mask(u);
         if (m != 0) {
                 _cleanup_free_ char *s = NULL;
                 (void) cg_mask_to_string(m, &s);
                 fprintf(f, "%s\tCGroup own mask: %s\n", prefix, strnull(s));
         }
+
         m = unit_get_members_mask(u);
         if (m != 0) {
                 _cleanup_free_ char *s = NULL;
                 (void) cg_mask_to_string(m, &s);
                 fprintf(f, "%s\tCGroup members mask: %s\n", prefix, strnull(s));
+        }
+
+        m = unit_get_delegate_mask(u);
+        if (m != 0) {
+                _cleanup_free_ char *s = NULL;
+                (void) cg_mask_to_string(m, &s);
+                fprintf(f, "%s\tCGroup delegate mask: %s\n", prefix, strnull(s));
         }
 
         SET_FOREACH(t, u->names, i)
@@ -1184,8 +1228,12 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
 
         if (u->failure_action != EMERGENCY_ACTION_NONE)
                 fprintf(f, "%s\tFailure Action: %s\n", prefix, emergency_action_to_string(u->failure_action));
+        if (u->failure_action_exit_status >= 0)
+                fprintf(f, "%s\tFailure Action Exit Status: %i\n", prefix, u->failure_action_exit_status);
         if (u->success_action != EMERGENCY_ACTION_NONE)
                 fprintf(f, "%s\tSuccess Action: %s\n", prefix, emergency_action_to_string(u->success_action));
+        if (u->success_action_exit_status >= 0)
+                fprintf(f, "%s\tSuccess Action Exit Status: %i\n", prefix, u->success_action_exit_status);
 
         if (u->job_timeout != USEC_INFINITY)
                 fprintf(f, "%s\tJob Timeout: %s\n", prefix, format_timespan(timespan, sizeof(timespan), u->job_timeout, 0));
@@ -1379,7 +1427,7 @@ static int unit_add_slice_dependencies(Unit *u) {
         if (unit_has_name(u, SPECIAL_ROOT_SLICE))
                 return 0;
 
-        return unit_add_two_dependencies_by_name(u, UNIT_AFTER, UNIT_REQUIRES, SPECIAL_ROOT_SLICE, NULL, true, mask);
+        return unit_add_two_dependencies_by_name(u, UNIT_AFTER, UNIT_REQUIRES, SPECIAL_ROOT_SLICE, true, mask);
 }
 
 static int unit_add_mount_dependencies(Unit *u) {
@@ -1469,6 +1517,9 @@ int unit_load(Unit *u) {
                 return 0;
 
         if (u->transient_file) {
+                /* Finalize transient file: if this is a transient unit file, as soon as we reach unit_load() the setup
+                 * is complete, hence let's synchronize the unit file we just wrote to disk. */
+
                 r = fflush_and_check(u->transient_file);
                 if (r < 0)
                         goto fail;
@@ -1512,7 +1563,8 @@ int unit_load(Unit *u) {
                 if (u->job_running_timeout != USEC_INFINITY && u->job_running_timeout > u->job_timeout)
                         log_unit_warning(u, "JobRunningTimeoutSec= is greater than JobTimeoutSec=, it has no effect.");
 
-                unit_update_cgroup_members_masks(u);
+                /* We finished loading, let's ensure our parents recalculate the members mask */
+                unit_invalidate_cgroup_members_masks(u);
         }
 
         assert((u->load_state != UNIT_MERGED) == !u->merged_into);
@@ -1587,6 +1639,8 @@ static bool unit_condition_test(Unit *u) {
         dual_timestamp_get(&u->condition_timestamp);
         u->condition_result = unit_condition_test_list(u, u->conditions, condition_type_to_string);
 
+        unit_add_to_dbus_queue(u);
+
         return u->condition_result;
 }
 
@@ -1596,103 +1650,26 @@ static bool unit_assert_test(Unit *u) {
         dual_timestamp_get(&u->assert_timestamp);
         u->assert_result = unit_condition_test_list(u, u->asserts, assert_type_to_string);
 
+        unit_add_to_dbus_queue(u);
+
         return u->assert_result;
 }
 
 void unit_status_printf(Unit *u, const char *status, const char *unit_status_msg_format) {
-        DISABLE_WARNING_FORMAT_NONLITERAL;
-        manager_status_printf(u->manager, STATUS_TYPE_NORMAL, status, unit_status_msg_format, unit_description(u));
-        REENABLE_WARNING;
-}
+        const char *d;
 
-_pure_ static const char* unit_get_status_message_format(Unit *u, JobType t) {
-        const char *format;
-        const UnitStatusMessageFormats *format_table;
-
-        assert(u);
-        assert(IN_SET(t, JOB_START, JOB_STOP, JOB_RELOAD));
-
-        if (t != JOB_RELOAD) {
-                format_table = &UNIT_VTABLE(u)->status_message_formats;
-                if (format_table) {
-                        format = format_table->starting_stopping[t == JOB_STOP];
-                        if (format)
-                                return format;
-                }
-        }
-
-        /* Return generic strings */
-        if (t == JOB_START)
-                return "Starting %s.";
-        else if (t == JOB_STOP)
-                return "Stopping %s.";
-        else
-                return "Reloading %s.";
-}
-
-static void unit_status_print_starting_stopping(Unit *u, JobType t) {
-        const char *format;
-
-        assert(u);
-
-        /* Reload status messages have traditionally not been printed to console. */
-        if (!IN_SET(t, JOB_START, JOB_STOP))
-                return;
-
-        format = unit_get_status_message_format(u, t);
+        d = unit_description(u);
+        if (log_get_show_color())
+                d = strjoina(ANSI_HIGHLIGHT, d, ANSI_NORMAL);
 
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        unit_status_printf(u, "", format);
+        manager_status_printf(u->manager, STATUS_TYPE_NORMAL, status, unit_status_msg_format, d);
         REENABLE_WARNING;
-}
-
-static void unit_status_log_starting_stopping_reloading(Unit *u, JobType t) {
-        const char *format, *mid;
-        char buf[LINE_MAX];
-
-        assert(u);
-
-        if (!IN_SET(t, JOB_START, JOB_STOP, JOB_RELOAD))
-                return;
-
-        if (log_on_console())
-                return;
-
-        /* We log status messages for all units and all operations. */
-
-        format = unit_get_status_message_format(u, t);
-
-        DISABLE_WARNING_FORMAT_NONLITERAL;
-        (void) snprintf(buf, sizeof buf, format, unit_description(u));
-        REENABLE_WARNING;
-
-        mid = t == JOB_START ? "MESSAGE_ID=" SD_MESSAGE_UNIT_STARTING_STR :
-              t == JOB_STOP  ? "MESSAGE_ID=" SD_MESSAGE_UNIT_STOPPING_STR :
-                               "MESSAGE_ID=" SD_MESSAGE_UNIT_RELOADING_STR;
-
-        /* Note that we deliberately use LOG_MESSAGE() instead of
-         * LOG_UNIT_MESSAGE() here, since this is supposed to mimic
-         * closely what is written to screen using the status output,
-         * which is supposed the highest level, friendliest output
-         * possible, which means we should avoid the low-level unit
-         * name. */
-        log_struct(LOG_INFO,
-                   LOG_MESSAGE("%s", buf),
-                   LOG_UNIT_ID(u),
-                   LOG_UNIT_INVOCATION_ID(u),
-                   mid);
-}
-
-void unit_status_emit_starting_stopping_reloading(Unit *u, JobType t) {
-        assert(u);
-        assert(t >= 0);
-        assert(t < _JOB_TYPE_MAX);
-
-        unit_status_log_starting_stopping_reloading(u, t);
-        unit_status_print_starting_stopping(u, t);
 }
 
 int unit_start_limit_test(Unit *u) {
+        const char *reason;
+
         assert(u);
 
         if (ratelimit_below(&u->start_limit)) {
@@ -1703,7 +1680,11 @@ int unit_start_limit_test(Unit *u) {
         log_unit_warning(u, "Start request repeated too quickly.");
         u->start_limit_hit = true;
 
-        return emergency_action(u->manager, u->start_limit_action, u->reboot_arg, "unit failed");
+        reason = strjoina("unit ", u->id, " failed");
+
+        return emergency_action(u->manager, u->start_limit_action,
+                                EMERGENCY_ACTION_IS_WATCHDOG|EMERGENCY_ACTION_WARN,
+                                u->reboot_arg, -1, reason);
 }
 
 bool unit_shall_confirm_spawn(Unit *u) {
@@ -1784,7 +1765,7 @@ int unit_start(Unit *u) {
         if (state != UNIT_ACTIVATING &&
             !unit_condition_test(u)) {
                 log_unit_debug(u, "Starting requested but condition failed. Not starting unit.");
-                return -EALREADY;
+                return -ECOMM;
         }
 
         /* If the asserts failed, fail the entire job */
@@ -1950,55 +1931,71 @@ bool unit_can_reload(Unit *u) {
         return UNIT_VTABLE(u)->reload;
 }
 
-static void unit_check_unneeded(Unit *u) {
-
-        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
-
-        static const UnitDependency needed_dependencies[] = {
+bool unit_is_unneeded(Unit *u) {
+        static const UnitDependency deps[] = {
                 UNIT_REQUIRED_BY,
                 UNIT_REQUISITE_OF,
                 UNIT_WANTED_BY,
                 UNIT_BOUND_BY,
         };
-
-        unsigned j;
-        int r;
+        size_t j;
 
         assert(u);
 
-        /* If this service shall be shut down when unneeded then do
-         * so. */
-
         if (!u->stop_when_unneeded)
-                return;
+                return false;
 
-        if (!UNIT_IS_ACTIVE_OR_ACTIVATING(unit_active_state(u)))
-                return;
+        /* Don't clean up while the unit is transitioning or is even inactive. */
+        if (!UNIT_IS_ACTIVE_OR_RELOADING(unit_active_state(u)))
+                return false;
+        if (u->job)
+                return false;
 
-        for (j = 0; j < ELEMENTSOF(needed_dependencies); j++) {
+        for (j = 0; j < ELEMENTSOF(deps); j++) {
                 Unit *other;
                 Iterator i;
                 void *v;
 
-                HASHMAP_FOREACH_KEY(v, other, u->dependencies[needed_dependencies[j]], i)
-                        if (unit_active_or_pending(other) || unit_will_restart(other))
-                                return;
+                /* If a dependent unit has a job queued, is active or transitioning, or is marked for
+                 * restart, then don't clean this one up. */
+
+                HASHMAP_FOREACH_KEY(v, other, u->dependencies[deps[j]], i) {
+                        if (other->job)
+                                return false;
+
+                        if (!UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(other)))
+                                return false;
+
+                        if (unit_will_restart(other))
+                                return false;
+                }
         }
 
-        /* If stopping a unit fails continuously we might enter a stop
-         * loop here, hence stop acting on the service being
-         * unnecessary after a while. */
-        if (!ratelimit_below(&u->auto_stop_ratelimit)) {
-                log_unit_warning(u, "Unit not needed anymore, but not stopping since we tried this too often recently.");
-                return;
+        return true;
+}
+
+static void check_unneeded_dependencies(Unit *u) {
+
+        static const UnitDependency deps[] = {
+                UNIT_REQUIRES,
+                UNIT_REQUISITE,
+                UNIT_WANTS,
+                UNIT_BINDS_TO,
+        };
+        size_t j;
+
+        assert(u);
+
+        /* Add all units this unit depends on to the queue that processes StopWhenUnneeded= behaviour. */
+
+        for (j = 0; j < ELEMENTSOF(deps); j++) {
+                Unit *other;
+                Iterator i;
+                void *v;
+
+                HASHMAP_FOREACH_KEY(v, other, u->dependencies[deps[j]], i)
+                        unit_submit_to_stop_when_unneeded_queue(other);
         }
-
-        log_unit_info(u, "Unit not needed anymore. Stopping.");
-
-        /* Ok, nobody needs us anymore. Sniff. Then let's commit suicide */
-        r = manager_add_job(u->manager, JOB_STOP, u, JOB_FAIL, &error, NULL);
-        if (r < 0)
-                log_unit_warning_errno(u, r, "Failed to enqueue stop job, ignoring: %s", bus_error_message(&error, r));
 }
 
 static void unit_check_binds_to(Unit *u) {
@@ -2098,29 +2095,6 @@ static void retroactively_stop_dependencies(Unit *u) {
                         manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL);
 }
 
-static void check_unneeded_dependencies(Unit *u) {
-        Unit *other;
-        Iterator i;
-        void *v;
-
-        assert(u);
-        assert(UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(u)));
-
-        /* Garbage collect services that might not be needed anymore, if enabled */
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REQUIRES], i)
-                if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        unit_check_unneeded(other);
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_WANTS], i)
-                if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        unit_check_unneeded(other);
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REQUISITE], i)
-                if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        unit_check_unneeded(other);
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_BINDS_TO], i)
-                if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        unit_check_unneeded(other);
-}
-
 void unit_start_on_failure(Unit *u) {
         Unit *other;
         Iterator i;
@@ -2156,8 +2130,9 @@ void unit_trigger_notify(Unit *u) {
 }
 
 static int unit_log_resources(Unit *u) {
-
         struct iovec iovec[1 + _CGROUP_IP_ACCOUNTING_METRIC_MAX + 4];
+        bool any_traffic = false, have_ip_accounting = false;
+        _cleanup_free_ char *igress = NULL, *egress = NULL;
         size_t n_message_parts = 0, n_iovec = 0;
         char* message_parts[3 + 1], *t;
         nsec_t nsec = NSEC_INFINITY;
@@ -2190,7 +2165,7 @@ static int unit_log_resources(Unit *u) {
 
                 /* Format the CPU time for inclusion in the human language message string */
                 format_timespan(buf, sizeof(buf), nsec / NSEC_PER_USEC, USEC_PER_MSEC);
-                t = strjoin(n_message_parts > 0 ? "consumed " : "Consumed ", buf, " CPU time");
+                t = strjoin("consumed ", buf, " CPU time");
                 if (!t) {
                         r = log_oom();
                         goto finish;
@@ -2209,6 +2184,10 @@ static int unit_log_resources(Unit *u) {
                 if (value == UINT64_MAX)
                         continue;
 
+                have_ip_accounting = true;
+                if (value > 0)
+                        any_traffic = true;
+
                 /* Format IP accounting data for inclusion in the structured log message */
                 if (asprintf(&t, "%s=%" PRIu64, ip_fields[m], value) < 0) {
                         r = log_oom();
@@ -2218,22 +2197,41 @@ static int unit_log_resources(Unit *u) {
 
                 /* Format the IP accounting data for inclusion in the human language message string, but only for the
                  * bytes counters (and not for the packets counters) */
-                if (m == CGROUP_IP_INGRESS_BYTES)
-                        t = strjoin(n_message_parts > 0 ? "received " : "Received ",
-                                    format_bytes(buf, sizeof(buf), value),
-                                    " IP traffic");
-                else if (m == CGROUP_IP_EGRESS_BYTES)
-                        t = strjoin(n_message_parts > 0 ? "sent " : "Sent ",
-                                    format_bytes(buf, sizeof(buf), value),
-                                    " IP traffic");
-                else
-                        continue;
-                if (!t) {
-                        r = log_oom();
-                        goto finish;
+                if (m == CGROUP_IP_INGRESS_BYTES) {
+                        assert(!igress);
+                        igress = strjoin("received ", format_bytes(buf, sizeof(buf), value), " IP traffic");
+                        if (!igress) {
+                                r = log_oom();
+                                goto finish;
+                        }
+                } else if (m == CGROUP_IP_EGRESS_BYTES) {
+                        assert(!egress);
+                        egress = strjoin("sent ", format_bytes(buf, sizeof(buf), value), " IP traffic");
+                        if (!egress) {
+                                r = log_oom();
+                                goto finish;
+                        }
                 }
+        }
 
-                message_parts[n_message_parts++] = t;
+        if (have_ip_accounting) {
+                if (any_traffic) {
+                        if (igress)
+                                message_parts[n_message_parts++] = TAKE_PTR(igress);
+                        if (egress)
+                                message_parts[n_message_parts++] = TAKE_PTR(egress);
+
+                } else {
+                        char *k;
+
+                        k = strdup("no IP traffic");
+                        if (!k) {
+                                r = log_oom();
+                                goto finish;
+                        }
+
+                        message_parts[n_message_parts++] = k;
+                }
         }
 
         /* Is there any accounting data available at all? */
@@ -2243,7 +2241,7 @@ static int unit_log_resources(Unit *u) {
         }
 
         if (n_message_parts == 0)
-                t = strjoina("MESSAGE=", u->id, ": Completed");
+                t = strjoina("MESSAGE=", u->id, ": Completed.");
         else {
                 _cleanup_free_ char *joined;
 
@@ -2255,7 +2253,8 @@ static int unit_log_resources(Unit *u) {
                         goto finish;
                 }
 
-                t = strjoina("MESSAGE=", u->id, ": ", joined);
+                joined[0] = ascii_toupper(joined[0]);
+                t = strjoina("MESSAGE=", u->id, ": ", joined, ".");
         }
 
         /* The following four fields we allocate on the stack or are static strings, we hence don't want to free them,
@@ -2299,8 +2298,105 @@ static void unit_update_on_console(Unit *u) {
                 manager_unref_console(u->manager);
 }
 
+static void unit_emit_audit_start(Unit *u) {
+        assert(u);
+
+        if (u->type != UNIT_SERVICE)
+                return;
+
+        /* Write audit record if we have just finished starting up */
+        manager_send_unit_audit(u->manager, u, AUDIT_SERVICE_START, true);
+        u->in_audit = true;
+}
+
+static void unit_emit_audit_stop(Unit *u, UnitActiveState state) {
+        assert(u);
+
+        if (u->type != UNIT_SERVICE)
+                return;
+
+        if (u->in_audit) {
+                /* Write audit record if we have just finished shutting down */
+                manager_send_unit_audit(u->manager, u, AUDIT_SERVICE_STOP, state == UNIT_INACTIVE);
+                u->in_audit = false;
+        } else {
+                /* Hmm, if there was no start record written write it now, so that we always have a nice pair */
+                manager_send_unit_audit(u->manager, u, AUDIT_SERVICE_START, state == UNIT_INACTIVE);
+
+                if (state == UNIT_INACTIVE)
+                        manager_send_unit_audit(u->manager, u, AUDIT_SERVICE_STOP, true);
+        }
+}
+
+static bool unit_process_job(Job *j, UnitActiveState ns, UnitNotifyFlags flags) {
+        bool unexpected = false;
+
+        assert(j);
+
+        if (j->state == JOB_WAITING)
+
+                /* So we reached a different state for this job. Let's see if we can run it now if it failed previously
+                 * due to EAGAIN. */
+                job_add_to_run_queue(j);
+
+        /* Let's check whether the unit's new state constitutes a finished job, or maybe contradicts a running job and
+         * hence needs to invalidate jobs. */
+
+        switch (j->type) {
+
+        case JOB_START:
+        case JOB_VERIFY_ACTIVE:
+
+                if (UNIT_IS_ACTIVE_OR_RELOADING(ns))
+                        job_finish_and_invalidate(j, JOB_DONE, true, false);
+                else if (j->state == JOB_RUNNING && ns != UNIT_ACTIVATING) {
+                        unexpected = true;
+
+                        if (UNIT_IS_INACTIVE_OR_FAILED(ns))
+                                job_finish_and_invalidate(j, ns == UNIT_FAILED ? JOB_FAILED : JOB_DONE, true, false);
+                }
+
+                break;
+
+        case JOB_RELOAD:
+        case JOB_RELOAD_OR_START:
+        case JOB_TRY_RELOAD:
+
+                if (j->state == JOB_RUNNING) {
+                        if (ns == UNIT_ACTIVE)
+                                job_finish_and_invalidate(j, (flags & UNIT_NOTIFY_RELOAD_FAILURE) ? JOB_FAILED : JOB_DONE, true, false);
+                        else if (!IN_SET(ns, UNIT_ACTIVATING, UNIT_RELOADING)) {
+                                unexpected = true;
+
+                                if (UNIT_IS_INACTIVE_OR_FAILED(ns))
+                                        job_finish_and_invalidate(j, ns == UNIT_FAILED ? JOB_FAILED : JOB_DONE, true, false);
+                        }
+                }
+
+                break;
+
+        case JOB_STOP:
+        case JOB_RESTART:
+        case JOB_TRY_RESTART:
+
+                if (UNIT_IS_INACTIVE_OR_FAILED(ns))
+                        job_finish_and_invalidate(j, JOB_DONE, true, false);
+                else if (j->state == JOB_RUNNING && ns != UNIT_DEACTIVATING) {
+                        unexpected = true;
+                        job_finish_and_invalidate(j, JOB_FAILED, true, false);
+                }
+
+                break;
+
+        default:
+                assert_not_reached("Job type unknown");
+        }
+
+        return unexpected;
+}
+
 void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlags flags) {
-        bool unexpected;
+        const char *reason;
         Manager *m;
 
         assert(u);
@@ -2312,6 +2408,10 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
          * remounted this function will be called too! */
 
         m = u->manager;
+
+        /* Let's enqueue the change signal early. In case this unit has a job associated we want that this unit is in
+         * the bus queue, so that any job change signal queued will force out the unit change signal first. */
+        unit_add_to_dbus_queue(u);
 
         /* Update timestamps for state changes */
         if (!MANAGER_IS_RELOADING(m)) {
@@ -2329,7 +2429,7 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
         }
 
         /* Keep track of failed units */
-        (void) manager_update_failed_units(u->manager, u, ns == UNIT_FAILED);
+        (void) manager_update_failed_units(m, u, ns == UNIT_FAILED);
 
         /* Make sure the cgroup and state files are always removed when we become inactive */
         if (UNIT_IS_INACTIVE_OR_FAILED(ns)) {
@@ -2339,81 +2439,18 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
 
         unit_update_on_console(u);
 
-        if (u->job) {
-                unexpected = false;
-
-                if (u->job->state == JOB_WAITING)
-
-                        /* So we reached a different state for this
-                         * job. Let's see if we can run it now if it
-                         * failed previously due to EAGAIN. */
-                        job_add_to_run_queue(u->job);
-
-                /* Let's check whether this state change constitutes a
-                 * finished job, or maybe contradicts a running job and
-                 * hence needs to invalidate jobs. */
-
-                switch (u->job->type) {
-
-                case JOB_START:
-                case JOB_VERIFY_ACTIVE:
-
-                        if (UNIT_IS_ACTIVE_OR_RELOADING(ns))
-                                job_finish_and_invalidate(u->job, JOB_DONE, true, false);
-                        else if (u->job->state == JOB_RUNNING && ns != UNIT_ACTIVATING) {
-                                unexpected = true;
-
-                                if (UNIT_IS_INACTIVE_OR_FAILED(ns))
-                                        job_finish_and_invalidate(u->job, ns == UNIT_FAILED ? JOB_FAILED : JOB_DONE, true, false);
-                        }
-
-                        break;
-
-                case JOB_RELOAD:
-                case JOB_RELOAD_OR_START:
-                case JOB_TRY_RELOAD:
-
-                        if (u->job->state == JOB_RUNNING) {
-                                if (ns == UNIT_ACTIVE)
-                                        job_finish_and_invalidate(u->job, (flags & UNIT_NOTIFY_RELOAD_FAILURE) ? JOB_FAILED : JOB_DONE, true, false);
-                                else if (!IN_SET(ns, UNIT_ACTIVATING, UNIT_RELOADING)) {
-                                        unexpected = true;
-
-                                        if (UNIT_IS_INACTIVE_OR_FAILED(ns))
-                                                job_finish_and_invalidate(u->job, ns == UNIT_FAILED ? JOB_FAILED : JOB_DONE, true, false);
-                                }
-                        }
-
-                        break;
-
-                case JOB_STOP:
-                case JOB_RESTART:
-                case JOB_TRY_RESTART:
-
-                        if (UNIT_IS_INACTIVE_OR_FAILED(ns))
-                                job_finish_and_invalidate(u->job, JOB_DONE, true, false);
-                        else if (u->job->state == JOB_RUNNING && ns != UNIT_DEACTIVATING) {
-                                unexpected = true;
-                                job_finish_and_invalidate(u->job, JOB_FAILED, true, false);
-                        }
-
-                        break;
-
-                default:
-                        assert_not_reached("Job type unknown");
-                }
-
-        } else
-                unexpected = true;
-
         if (!MANAGER_IS_RELOADING(m)) {
+                bool unexpected;
 
-                /* If this state change happened without being
-                 * requested by a job, then let's retroactively start
-                 * or stop dependencies. We skip that step when
-                 * deserializing, since we don't want to create any
-                 * additional jobs just because something is already
-                 * activated. */
+                /* Let's propagate state changes to the job */
+                if (u->job)
+                        unexpected = unit_process_job(u->job, ns, flags);
+                else
+                        unexpected = true;
+
+                /* If this state change happened without being requested by a job, then let's retroactively start or
+                 * stop dependencies. We skip that step when deserializing, since we don't want to create any
+                 * additional jobs just because something is already activated. */
 
                 if (unexpected) {
                         if (UNIT_IS_INACTIVE_OR_FAILED(os) && UNIT_IS_ACTIVE_OR_ACTIVATING(ns))
@@ -2423,7 +2460,7 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
                 }
 
                 /* stop unneeded units regardless if going down was expected or not */
-                if (UNIT_IS_INACTIVE_OR_DEACTIVATING(ns))
+                if (UNIT_IS_INACTIVE_OR_FAILED(ns))
                         check_unneeded_dependencies(u);
 
                 if (ns != os && ns == UNIT_FAILED) {
@@ -2432,46 +2469,18 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
                         if (!(flags & UNIT_NOTIFY_WILL_AUTO_RESTART))
                                 unit_start_on_failure(u);
                 }
-        }
 
-        if (UNIT_IS_ACTIVE_OR_RELOADING(ns)) {
+                if (UNIT_IS_ACTIVE_OR_RELOADING(ns) && !UNIT_IS_ACTIVE_OR_RELOADING(os)) {
+                        /* This unit just finished starting up */
 
-                if (u->type == UNIT_SERVICE &&
-                    !UNIT_IS_ACTIVE_OR_RELOADING(os) &&
-                    !MANAGER_IS_RELOADING(m)) {
-                        /* Write audit record if we have just finished starting up */
-                        manager_send_unit_audit(m, u, AUDIT_SERVICE_START, true);
-                        u->in_audit = true;
+                        unit_emit_audit_start(u);
+                        manager_send_unit_plymouth(m, u);
                 }
 
-                if (!UNIT_IS_ACTIVE_OR_RELOADING(os))
-                        manager_send_unit_plymouth(m, u);
-
-        } else {
-
-                if (UNIT_IS_INACTIVE_OR_FAILED(ns) &&
-                    !UNIT_IS_INACTIVE_OR_FAILED(os)
-                    && !MANAGER_IS_RELOADING(m)) {
-
+                if (UNIT_IS_INACTIVE_OR_FAILED(ns) && !UNIT_IS_INACTIVE_OR_FAILED(os)) {
                         /* This unit just stopped/failed. */
-                        if (u->type == UNIT_SERVICE) {
 
-                                /* Hmm, if there was no start record written
-                                 * write it now, so that we always have a nice
-                                 * pair */
-                                if (!u->in_audit) {
-                                        manager_send_unit_audit(m, u, AUDIT_SERVICE_START, ns == UNIT_INACTIVE);
-
-                                        if (ns == UNIT_INACTIVE)
-                                                manager_send_unit_audit(m, u, AUDIT_SERVICE_STOP, true);
-                                } else
-                                        /* Write audit record if we have just finished shutting down */
-                                        manager_send_unit_audit(m, u, AUDIT_SERVICE_STOP, ns == UNIT_INACTIVE);
-
-                                u->in_audit = false;
-                        }
-
-                        /* Write a log message about consumed resources */
+                        unit_emit_audit_stop(u, ns);
                         unit_log_resources(u);
                 }
         }
@@ -2481,22 +2490,24 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
 
         unit_trigger_notify(u);
 
-        if (!MANAGER_IS_RELOADING(u->manager)) {
+        if (!MANAGER_IS_RELOADING(m)) {
                 /* Maybe we finished startup and are now ready for being stopped because unneeded? */
-                unit_check_unneeded(u);
+                unit_submit_to_stop_when_unneeded_queue(u);
 
                 /* Maybe we finished startup, but something we needed has vanished? Let's die then. (This happens when
                  * something BindsTo= to a Type=oneshot unit, as these units go directly from starting to inactive,
                  * without ever entering started.) */
                 unit_check_binds_to(u);
 
-                if (os != UNIT_FAILED && ns == UNIT_FAILED)
-                        (void) emergency_action(u->manager, u->failure_action, u->reboot_arg, "unit failed");
-                else if (!UNIT_IS_INACTIVE_OR_FAILED(os) && ns == UNIT_INACTIVE)
-                        (void) emergency_action(u->manager, u->success_action, u->reboot_arg, "unit succeeded");
+                if (os != UNIT_FAILED && ns == UNIT_FAILED) {
+                        reason = strjoina("unit ", u->id, " failed");
+                        (void) emergency_action(m, u->failure_action, 0, u->reboot_arg, unit_failure_action_exit_status(u), reason);
+                } else if (!UNIT_IS_INACTIVE_OR_FAILED(os) && ns == UNIT_INACTIVE) {
+                        reason = strjoina("unit ", u->id, " succeeded");
+                        (void) emergency_action(m, u->success_action, 0, u->reboot_arg, unit_success_action_exit_status(u), reason);
+                }
         }
 
-        unit_add_to_dbus_queue(u);
         unit_add_to_gc_queue(u);
 }
 
@@ -2882,16 +2893,13 @@ int unit_add_two_dependencies(Unit *u, UnitDependency d, UnitDependency e, Unit 
         return unit_add_dependency(u, e, other, add_reference, mask);
 }
 
-static int resolve_template(Unit *u, const char *name, const char*path, char **buf, const char **ret) {
+static int resolve_template(Unit *u, const char *name, char **buf, const char **ret) {
         int r;
 
         assert(u);
-        assert(name || path);
+        assert(name);
         assert(buf);
         assert(ret);
-
-        if (!name)
-                name = basename(path);
 
         if (!unit_name_is_valid(name, UNIT_NAME_TEMPLATE)) {
                 *buf = NULL;
@@ -2917,38 +2925,38 @@ static int resolve_template(Unit *u, const char *name, const char*path, char **b
         return 0;
 }
 
-int unit_add_dependency_by_name(Unit *u, UnitDependency d, const char *name, const char *path, bool add_reference, UnitDependencyMask mask) {
+int unit_add_dependency_by_name(Unit *u, UnitDependency d, const char *name, bool add_reference, UnitDependencyMask mask) {
         _cleanup_free_ char *buf = NULL;
         Unit *other;
         int r;
 
         assert(u);
-        assert(name || path);
+        assert(name);
 
-        r = resolve_template(u, name, path, &buf, &name);
+        r = resolve_template(u, name, &buf, &name);
         if (r < 0)
                 return r;
 
-        r = manager_load_unit(u->manager, name, path, NULL, &other);
+        r = manager_load_unit(u->manager, name, NULL, NULL, &other);
         if (r < 0)
                 return r;
 
         return unit_add_dependency(u, d, other, add_reference, mask);
 }
 
-int unit_add_two_dependencies_by_name(Unit *u, UnitDependency d, UnitDependency e, const char *name, const char *path, bool add_reference, UnitDependencyMask mask) {
+int unit_add_two_dependencies_by_name(Unit *u, UnitDependency d, UnitDependency e, const char *name, bool add_reference, UnitDependencyMask mask) {
         _cleanup_free_ char *buf = NULL;
         Unit *other;
         int r;
 
         assert(u);
-        assert(name || path);
+        assert(name);
 
-        r = resolve_template(u, name, path, &buf, &name);
+        r = resolve_template(u, name, &buf, &name);
         if (r < 0)
                 return r;
 
-        r = manager_load_unit(u->manager, name, path, NULL, &other);
+        r = manager_load_unit(u->manager, name, NULL, NULL, &other);
         if (r < 0)
                 return r;
 
@@ -3019,7 +3027,6 @@ int unit_set_slice(Unit *u, Unit *slice) {
 }
 
 int unit_set_default_slice(Unit *u) {
-        _cleanup_free_ char *b = NULL;
         const char *slice_name;
         Unit *slice;
         int r;
@@ -3047,13 +3054,9 @@ int unit_set_default_slice(Unit *u) {
                         return -ENOMEM;
 
                 if (MANAGER_IS_SYSTEM(u->manager))
-                        b = strjoin("system-", escaped, ".slice");
+                        slice_name = strjoina("system-", escaped, ".slice");
                 else
-                        b = strappend(escaped, ".slice");
-                if (!b)
-                        return -ENOMEM;
-
-                slice_name = b;
+                        slice_name = strjoina(escaped, ".slice");
         } else
                 slice_name =
                         MANAGER_IS_SYSTEM(u->manager) && !unit_has_name(u, SPECIAL_INIT_SCOPE)
@@ -3178,23 +3181,21 @@ bool unit_can_serialize(Unit *u) {
         return UNIT_VTABLE(u)->serialize && UNIT_VTABLE(u)->deserialize_item;
 }
 
-static int unit_serialize_cgroup_mask(FILE *f, const char *key, CGroupMask mask) {
+static int serialize_cgroup_mask(FILE *f, const char *key, CGroupMask mask) {
         _cleanup_free_ char *s = NULL;
-        int r = 0;
+        int r;
 
         assert(f);
         assert(key);
 
-        if (mask != 0) {
-                r = cg_mask_to_string(mask, &s);
-                if (r >= 0) {
-                        fputs(key, f);
-                        fputc('=', f);
-                        fputs(s, f);
-                        fputc('\n', f);
-                }
-        }
-        return r;
+        if (mask == 0)
+                return 0;
+
+        r = cg_mask_to_string(mask, &s);
+        if (r < 0)
+                return log_error_errno(r, "Failed to format cgroup mask: %m");
+
+        return serialize_item(f, key, s);
 }
 
 static const char *ip_accounting_metric_field[_CGROUP_IP_ACCOUNTING_METRIC_MAX] = {
@@ -3218,46 +3219,50 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
                         return r;
         }
 
-        dual_timestamp_serialize(f, "state-change-timestamp", &u->state_change_timestamp);
+        (void) serialize_dual_timestamp(f, "state-change-timestamp", &u->state_change_timestamp);
 
-        dual_timestamp_serialize(f, "inactive-exit-timestamp", &u->inactive_exit_timestamp);
-        dual_timestamp_serialize(f, "active-enter-timestamp", &u->active_enter_timestamp);
-        dual_timestamp_serialize(f, "active-exit-timestamp", &u->active_exit_timestamp);
-        dual_timestamp_serialize(f, "inactive-enter-timestamp", &u->inactive_enter_timestamp);
+        (void) serialize_dual_timestamp(f, "inactive-exit-timestamp", &u->inactive_exit_timestamp);
+        (void) serialize_dual_timestamp(f, "active-enter-timestamp", &u->active_enter_timestamp);
+        (void) serialize_dual_timestamp(f, "active-exit-timestamp", &u->active_exit_timestamp);
+        (void) serialize_dual_timestamp(f, "inactive-enter-timestamp", &u->inactive_enter_timestamp);
 
-        dual_timestamp_serialize(f, "condition-timestamp", &u->condition_timestamp);
-        dual_timestamp_serialize(f, "assert-timestamp", &u->assert_timestamp);
+        (void) serialize_dual_timestamp(f, "condition-timestamp", &u->condition_timestamp);
+        (void) serialize_dual_timestamp(f, "assert-timestamp", &u->assert_timestamp);
 
         if (dual_timestamp_is_set(&u->condition_timestamp))
-                unit_serialize_item(u, f, "condition-result", yes_no(u->condition_result));
+                (void) serialize_bool(f, "condition-result", u->condition_result);
 
         if (dual_timestamp_is_set(&u->assert_timestamp))
-                unit_serialize_item(u, f, "assert-result", yes_no(u->assert_result));
+                (void) serialize_bool(f, "assert-result", u->assert_result);
 
-        unit_serialize_item(u, f, "transient", yes_no(u->transient));
+        (void) serialize_bool(f, "transient", u->transient);
+        (void) serialize_bool(f, "in-audit", u->in_audit);
 
-        unit_serialize_item(u, f, "exported-invocation-id", yes_no(u->exported_invocation_id));
-        unit_serialize_item(u, f, "exported-log-level-max", yes_no(u->exported_log_level_max));
-        unit_serialize_item(u, f, "exported-log-extra-fields", yes_no(u->exported_log_extra_fields));
+        (void) serialize_bool(f, "exported-invocation-id", u->exported_invocation_id);
+        (void) serialize_bool(f, "exported-log-level-max", u->exported_log_level_max);
+        (void) serialize_bool(f, "exported-log-extra-fields", u->exported_log_extra_fields);
+        (void) serialize_bool(f, "exported-log-rate-limit-interval", u->exported_log_rate_limit_interval);
+        (void) serialize_bool(f, "exported-log-rate-limit-burst", u->exported_log_rate_limit_burst);
 
-        unit_serialize_item_format(u, f, "cpu-usage-base", "%" PRIu64, u->cpu_usage_base);
+        (void) serialize_item_format(f, "cpu-usage-base", "%" PRIu64, u->cpu_usage_base);
         if (u->cpu_usage_last != NSEC_INFINITY)
-                unit_serialize_item_format(u, f, "cpu-usage-last", "%" PRIu64, u->cpu_usage_last);
+                (void) serialize_item_format(f, "cpu-usage-last", "%" PRIu64, u->cpu_usage_last);
 
         if (u->cgroup_path)
-                unit_serialize_item(u, f, "cgroup", u->cgroup_path);
-        unit_serialize_item(u, f, "cgroup-realized", yes_no(u->cgroup_realized));
-        (void) unit_serialize_cgroup_mask(f, "cgroup-realized-mask", u->cgroup_realized_mask);
-        (void) unit_serialize_cgroup_mask(f, "cgroup-enabled-mask", u->cgroup_enabled_mask);
-        unit_serialize_item_format(u, f, "cgroup-bpf-realized", "%i", u->cgroup_bpf_state);
+                (void) serialize_item(f, "cgroup", u->cgroup_path);
+
+        (void) serialize_bool(f, "cgroup-realized", u->cgroup_realized);
+        (void) serialize_cgroup_mask(f, "cgroup-realized-mask", u->cgroup_realized_mask);
+        (void) serialize_cgroup_mask(f, "cgroup-enabled-mask", u->cgroup_enabled_mask);
+        (void) serialize_cgroup_mask(f, "cgroup-invalidated-mask", u->cgroup_invalidated_mask);
 
         if (uid_is_valid(u->ref_uid))
-                unit_serialize_item_format(u, f, "ref-uid", UID_FMT, u->ref_uid);
+                (void) serialize_item_format(f, "ref-uid", UID_FMT, u->ref_uid);
         if (gid_is_valid(u->ref_gid))
-                unit_serialize_item_format(u, f, "ref-gid", GID_FMT, u->ref_gid);
+                (void) serialize_item_format(f, "ref-gid", GID_FMT, u->ref_gid);
 
         if (!sd_id128_is_null(u->invocation_id))
-                unit_serialize_item_format(u, f, "invocation-id", SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(u->invocation_id));
+                (void) serialize_item_format(f, "invocation-id", SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(u->invocation_id));
 
         bus_track_serialize(u->bus_track, f, "ref");
 
@@ -3266,17 +3271,17 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
 
                 r = unit_get_ip_accounting(u, m, &v);
                 if (r >= 0)
-                        unit_serialize_item_format(u, f, ip_accounting_metric_field[m], "%" PRIu64, v);
+                        (void) serialize_item_format(f, ip_accounting_metric_field[m], "%" PRIu64, v);
         }
 
         if (serialize_jobs) {
                 if (u->job) {
-                        fprintf(f, "job\n");
+                        fputs("job\n", f);
                         job_serialize(u->job, f);
                 }
 
                 if (u->nop_job) {
-                        fprintf(f, "job\n");
+                        fputs("job\n", f);
                         job_serialize(u->nop_job, f);
                 }
         }
@@ -3286,78 +3291,27 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
         return 0;
 }
 
-int unit_serialize_item(Unit *u, FILE *f, const char *key, const char *value) {
-        assert(u);
-        assert(f);
-        assert(key);
-
-        if (!value)
-                return 0;
-
-        fputs(key, f);
-        fputc('=', f);
-        fputs(value, f);
-        fputc('\n', f);
-
-        return 1;
-}
-
-int unit_serialize_item_escaped(Unit *u, FILE *f, const char *key, const char *value) {
-        _cleanup_free_ char *c = NULL;
+static int unit_deserialize_job(Unit *u, FILE *f) {
+        _cleanup_(job_freep) Job *j = NULL;
+        int r;
 
         assert(u);
         assert(f);
-        assert(key);
 
-        if (!value)
-                return 0;
+        j = job_new_raw(u);
+        if (!j)
+                return log_oom();
 
-        c = cescape(value);
-        if (!c)
-                return -ENOMEM;
+        r = job_deserialize(j, f);
+        if (r < 0)
+                return r;
 
-        fputs(key, f);
-        fputc('=', f);
-        fputs(c, f);
-        fputc('\n', f);
+        r = job_install_deserialized(j);
+        if (r < 0)
+                return r;
 
-        return 1;
-}
-
-int unit_serialize_item_fd(Unit *u, FILE *f, FDSet *fds, const char *key, int fd) {
-        int copy;
-
-        assert(u);
-        assert(f);
-        assert(key);
-
-        if (fd < 0)
-                return 0;
-
-        copy = fdset_put_dup(fds, fd);
-        if (copy < 0)
-                return copy;
-
-        fprintf(f, "%s=%i\n", key, copy);
-        return 1;
-}
-
-void unit_serialize_item_format(Unit *u, FILE *f, const char *key, const char *format, ...) {
-        va_list ap;
-
-        assert(u);
-        assert(f);
-        assert(key);
-        assert(format);
-
-        fputs(key, f);
-        fputc('=', f);
-
-        va_start(ap, format);
-        vfprintf(f, format, ap);
-        va_end(ap);
-
-        fputc('\n', f);
+        TAKE_PTR(j);
+        return 0;
 }
 
 int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
@@ -3368,21 +3322,19 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
         assert(fds);
 
         for (;;) {
-                char line[LINE_MAX], *l, *v;
+                _cleanup_free_ char *line = NULL;
                 CGroupIPAccountingMetric m;
+                char *l, *v;
                 size_t k;
 
-                if (!fgets(line, sizeof(line), f)) {
-                        if (feof(f))
-                                return 0;
-                        return -errno;
-                }
+                r = read_line(f, LONG_LINE_MAX, &line);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read serialization line: %m");
+                if (r == 0) /* eof */
+                        break;
 
-                char_array_0(line);
                 l = strstrip(line);
-
-                /* End marker */
-                if (isempty(l))
+                if (isempty(l)) /* End marker */
                         break;
 
                 k = strcspn(l, "=");
@@ -3395,54 +3347,33 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
 
                 if (streq(l, "job")) {
                         if (v[0] == '\0') {
-                                /* new-style serialized job */
-                                Job *j;
-
-                                j = job_new_raw(u);
-                                if (!j)
-                                        return log_oom();
-
-                                r = job_deserialize(j, f);
-                                if (r < 0) {
-                                        job_free(j);
+                                /* New-style serialized job */
+                                r = unit_deserialize_job(u, f);
+                                if (r < 0)
                                         return r;
-                                }
-
-                                r = hashmap_put(u->manager->jobs, UINT32_TO_PTR(j->id), j);
-                                if (r < 0) {
-                                        job_free(j);
-                                        return r;
-                                }
-
-                                r = job_install_deserialized(j);
-                                if (r < 0) {
-                                        hashmap_remove(u->manager->jobs, UINT32_TO_PTR(j->id));
-                                        job_free(j);
-                                        return r;
-                                }
-                        } else  /* legacy for pre-44 */
+                        } else  /* Legacy for pre-44 */
                                 log_unit_warning(u, "Update from too old systemd versions are unsupported, cannot deserialize job: %s", v);
                         continue;
                 } else if (streq(l, "state-change-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->state_change_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->state_change_timestamp);
                         continue;
                 } else if (streq(l, "inactive-exit-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->inactive_exit_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->inactive_exit_timestamp);
                         continue;
                 } else if (streq(l, "active-enter-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->active_enter_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->active_enter_timestamp);
                         continue;
                 } else if (streq(l, "active-exit-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->active_exit_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->active_exit_timestamp);
                         continue;
                 } else if (streq(l, "inactive-enter-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->inactive_enter_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->inactive_enter_timestamp);
                         continue;
                 } else if (streq(l, "condition-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->condition_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->condition_timestamp);
                         continue;
                 } else if (streq(l, "assert-timestamp")) {
-                        dual_timestamp_deserialize(v, &u->assert_timestamp);
+                        (void) deserialize_dual_timestamp(v, &u->assert_timestamp);
                         continue;
                 } else if (streq(l, "condition-result")) {
 
@@ -3474,6 +3405,16 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
 
                         continue;
 
+                } else if (streq(l, "in-audit")) {
+
+                        r = parse_boolean(v);
+                        if (r < 0)
+                                log_unit_debug(u, "Failed to parse in-audit bool %s, ignoring.", v);
+                        else
+                                u->in_audit = r;
+
+                        continue;
+
                 } else if (streq(l, "exported-invocation-id")) {
 
                         r = parse_boolean(v);
@@ -3501,6 +3442,26 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                                 log_unit_debug(u, "Failed to parse exported log extra fields bool %s, ignoring.", v);
                         else
                                 u->exported_log_extra_fields = r;
+
+                        continue;
+
+                } else if (streq(l, "exported-log-rate-limit-interval")) {
+
+                        r = parse_boolean(v);
+                        if (r < 0)
+                                log_unit_debug(u, "Failed to parse exported log rate limit interval %s, ignoring.", v);
+                        else
+                                u->exported_log_rate_limit_interval = r;
+
+                        continue;
+
+                } else if (streq(l, "exported-log-rate-limit-burst")) {
+
+                        r = parse_boolean(v);
+                        if (r < 0)
+                                log_unit_debug(u, "Failed to parse exported log rate limit burst %s, ignoring.", v);
+                        else
+                                u->exported_log_rate_limit_burst = r;
 
                         continue;
 
@@ -3554,18 +3515,11 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                                 log_unit_debug(u, "Failed to parse cgroup-enabled-mask %s, ignoring.", v);
                         continue;
 
-                } else if (streq(l, "cgroup-bpf-realized")) {
-                        int i;
+                } else if (streq(l, "cgroup-invalidated-mask")) {
 
-                        r = safe_atoi(v, &i);
+                        r = cg_mask_from_string(v, &u->cgroup_invalidated_mask);
                         if (r < 0)
-                                log_unit_debug(u, "Failed to parse cgroup BPF state %s, ignoring.", v);
-                        else
-                                u->cgroup_bpf_state =
-                                        i < 0 ? UNIT_CGROUP_BPF_INVALIDATED :
-                                        i > 0 ? UNIT_CGROUP_BPF_ON :
-                                        UNIT_CGROUP_BPF_OFF;
-
+                                log_unit_debug(u, "Failed to parse cgroup-invalidated-mask %s, ignoring.", v);
                         continue;
 
                 } else if (streq(l, "ref-uid")) {
@@ -3588,11 +3542,13 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                         else
                                 unit_ref_uid_gid(u, UID_INVALID, gid);
 
+                        continue;
+
                 } else if (streq(l, "ref")) {
 
                         r = strv_extend(&u->deserialized_refs, v);
                         if (r < 0)
-                                log_oom();
+                                return log_oom();
 
                         continue;
                 } else if (streq(l, "invocation-id")) {
@@ -3657,23 +3613,27 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
         return 0;
 }
 
-void unit_deserialize_skip(FILE *f) {
+int unit_deserialize_skip(FILE *f) {
+        int r;
         assert(f);
 
         /* Skip serialized data for this unit. We don't know what it is. */
 
         for (;;) {
-                char line[LINE_MAX], *l;
+                _cleanup_free_ char *line = NULL;
+                char *l;
 
-                if (!fgets(line, sizeof line, f))
-                        return;
+                r = read_line(f, LONG_LINE_MAX, &line);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read serialization line: %m");
+                if (r == 0)
+                        return 0;
 
-                char_array_0(line);
                 l = strstrip(line);
 
                 /* End marker */
                 if (isempty(l))
-                        return;
+                        return 1;
         }
 }
 
@@ -4143,12 +4103,28 @@ int unit_patch_contexts(Unit *u) {
         }
 
         cc = unit_get_cgroup_context(u);
-        if (cc) {
+        if (cc && ec) {
 
-                if (ec &&
-                    ec->private_devices &&
+                if (ec->private_devices &&
                     cc->device_policy == CGROUP_AUTO)
                         cc->device_policy = CGROUP_CLOSED;
+
+                if (ec->root_image &&
+                    (cc->device_policy != CGROUP_AUTO || cc->device_allow)) {
+
+                        /* When RootImage= is specified, the following devices are touched. */
+                        r = cgroup_add_device_allow(cc, "/dev/loop-control", "rw");
+                        if (r < 0)
+                                return r;
+
+                        r = cgroup_add_device_allow(cc, "block-loop", "rwm");
+                        if (r < 0)
+                                return r;
+
+                        r = cgroup_add_device_allow(cc, "block-blkext", "rwm");
+                        if (r < 0)
+                                return r;
+                }
         }
 
         return 0;
@@ -4479,10 +4455,10 @@ static int operation_to_signal(KillContext *c, KillOperation k) {
                 return c->kill_signal;
 
         case KILL_KILL:
-                return SIGKILL;
+                return c->final_kill_signal;
 
-        case KILL_ABORT:
-                return SIGABRT;
+        case KILL_WATCHDOG:
+                return c->watchdog_signal;
 
         default:
                 assert_not_reached("KillOperation unknown");
@@ -4609,7 +4585,6 @@ int unit_kill_context(
 
 int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask) {
         _cleanup_free_ char *p = NULL;
-        char *prefix;
         UnitDependencyInfo di;
         int r;
 
@@ -4649,7 +4624,7 @@ int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask) 
                 return r;
         p = NULL;
 
-        prefix = alloca(strlen(path) + 1);
+        char prefix[strlen(path) + 1];
         PATH_FOREACH_PREFIX_MORE(prefix, path) {
                 Set *x;
 
@@ -4766,7 +4741,7 @@ void unit_warn_if_dir_nonempty(Unit *u, const char* where) {
 }
 
 int unit_fail_if_noncanonical(Unit *u, const char* where) {
-        _cleanup_free_ char *canonical_where;
+        _cleanup_free_ char *canonical_where = NULL;
         int r;
 
         assert(u);
@@ -4966,7 +4941,7 @@ void unit_notify_user_lookup(Unit *u, uid_t uid, gid_t gid) {
 
         r = unit_ref_uid_gid(u, uid, gid);
         if (r > 0)
-                bus_unit_send_change_signal(u);
+                unit_add_to_dbus_queue(u);
 }
 
 int unit_set_invocation_id(Unit *u, sd_id128_t id) {
@@ -5020,15 +4995,21 @@ int unit_acquire_invocation_id(Unit *u) {
         if (r < 0)
                 return log_unit_error_errno(u, r, "Failed to set invocation ID for unit: %m");
 
+        unit_add_to_dbus_queue(u);
         return 0;
 }
 
-void unit_set_exec_params(Unit *u, ExecParameters *p) {
+int unit_set_exec_params(Unit *u, ExecParameters *p) {
+        int r;
+
         assert(u);
         assert(p);
 
         /* Copy parameters from manager */
-        p->environment = u->manager->environment;
+        r = manager_get_effective_environment(u->manager, &p->environment);
+        if (r < 0)
+                return r;
+
         p->confirm_spawn = manager_get_confirm_spawn(u->manager);
         p->cgroup_supported = u->manager->cgroup_supported;
         p->prefix = u->manager->prefix;
@@ -5037,6 +5018,8 @@ void unit_set_exec_params(Unit *u, ExecParameters *p) {
         /* Copy paramaters from unit */
         p->cgroup_path = u->cgroup_path;
         SET_FLAG(p->flags, EXEC_CGROUP_DELEGATE, unit_cgroup_delegate(u));
+
+        return 0;
 }
 
 int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret) {
@@ -5242,6 +5225,60 @@ fail:
         return r;
 }
 
+static int unit_export_log_rate_limit_interval(Unit *u, const ExecContext *c) {
+        _cleanup_free_ char *buf = NULL;
+        const char *p;
+        int r;
+
+        assert(u);
+        assert(c);
+
+        if (u->exported_log_rate_limit_interval)
+                return 0;
+
+        if (c->log_rate_limit_interval_usec == 0)
+                return 0;
+
+        p = strjoina("/run/systemd/units/log-rate-limit-interval:", u->id);
+
+        if (asprintf(&buf, "%" PRIu64, c->log_rate_limit_interval_usec) < 0)
+                return log_oom();
+
+        r = symlink_atomic(buf, p);
+        if (r < 0)
+                return log_unit_debug_errno(u, r, "Failed to create log rate limit interval symlink %s: %m", p);
+
+        u->exported_log_rate_limit_interval = true;
+        return 0;
+}
+
+static int unit_export_log_rate_limit_burst(Unit *u, const ExecContext *c) {
+        _cleanup_free_ char *buf = NULL;
+        const char *p;
+        int r;
+
+        assert(u);
+        assert(c);
+
+        if (u->exported_log_rate_limit_burst)
+                return 0;
+
+        if (c->log_rate_limit_burst == 0)
+                return 0;
+
+        p = strjoina("/run/systemd/units/log-rate-limit-burst:", u->id);
+
+        if (asprintf(&buf, "%u", c->log_rate_limit_burst) < 0)
+                return log_oom();
+
+        r = symlink_atomic(buf, p);
+        if (r < 0)
+                return log_unit_debug_errno(u, r, "Failed to create log rate limit burst symlink %s: %m", p);
+
+        u->exported_log_rate_limit_burst = true;
+        return 0;
+}
+
 void unit_export_state_files(Unit *u) {
         const ExecContext *c;
 
@@ -5253,7 +5290,7 @@ void unit_export_state_files(Unit *u) {
         if (!MANAGER_IS_SYSTEM(u->manager))
                 return;
 
-        if (u->manager->test_run_flags != 0)
+        if (MANAGER_IS_TEST_RUN(u->manager))
                 return;
 
         /* Exports a couple of unit properties to /run/systemd/units/, so that journald can quickly query this data
@@ -5275,6 +5312,8 @@ void unit_export_state_files(Unit *u) {
         if (c) {
                 (void) unit_export_log_level_max(u, c);
                 (void) unit_export_log_extra_fields(u, c);
+                (void) unit_export_log_rate_limit_interval(u, c);
+                (void) unit_export_log_rate_limit_burst(u, c);
         }
 }
 
@@ -5310,6 +5349,20 @@ void unit_unlink_state_files(Unit *u) {
                 (void) unlink(p);
 
                 u->exported_log_extra_fields = false;
+        }
+
+        if (u->exported_log_rate_limit_interval) {
+                p = strjoina("/run/systemd/units/log-rate-limit-interval:", u->id);
+                (void) unlink(p);
+
+                u->exported_log_rate_limit_interval = false;
+        }
+
+        if (u->exported_log_rate_limit_burst) {
+                p = strjoina("/run/systemd/units/log-rate-limit-burst:", u->id);
+                (void) unlink(p);
+
+                u->exported_log_rate_limit_burst = false;
         }
 }
 
@@ -5431,6 +5484,105 @@ int unit_pid_attachable(Unit *u, pid_t pid, sd_bus_error *error) {
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Process " PID_FMT " is a kernel thread, refusing.", pid);
 
         return 0;
+}
+
+void unit_log_success(Unit *u) {
+        assert(u);
+
+        log_struct(LOG_INFO,
+                   "MESSAGE_ID=" SD_MESSAGE_UNIT_SUCCESS_STR,
+                   LOG_UNIT_ID(u),
+                   LOG_UNIT_INVOCATION_ID(u),
+                   LOG_UNIT_MESSAGE(u, "Succeeded."));
+}
+
+void unit_log_failure(Unit *u, const char *result) {
+        assert(u);
+        assert(result);
+
+        log_struct(LOG_WARNING,
+                   "MESSAGE_ID=" SD_MESSAGE_UNIT_FAILURE_RESULT_STR,
+                   LOG_UNIT_ID(u),
+                   LOG_UNIT_INVOCATION_ID(u),
+                   LOG_UNIT_MESSAGE(u, "Failed with result '%s'.", result),
+                   "UNIT_RESULT=%s", result);
+}
+
+void unit_log_process_exit(
+                Unit *u,
+                int level,
+                const char *kind,
+                const char *command,
+                int code,
+                int status) {
+
+        assert(u);
+        assert(kind);
+
+        if (code != CLD_EXITED)
+                level = LOG_WARNING;
+
+        log_struct(level,
+                   "MESSAGE_ID=" SD_MESSAGE_UNIT_PROCESS_EXIT_STR,
+                   LOG_UNIT_MESSAGE(u, "%s exited, code=%s, status=%i/%s",
+                                    kind,
+                                    sigchld_code_to_string(code), status,
+                                    strna(code == CLD_EXITED
+                                          ? exit_status_to_string(status, EXIT_STATUS_FULL)
+                                          : signal_to_string(status))),
+                   "EXIT_CODE=%s", sigchld_code_to_string(code),
+                   "EXIT_STATUS=%i", status,
+                   "COMMAND=%s", strna(command),
+                   LOG_UNIT_ID(u),
+                   LOG_UNIT_INVOCATION_ID(u));
+}
+
+int unit_exit_status(Unit *u) {
+        assert(u);
+
+        /* Returns the exit status to propagate for the most recent cycle of this unit. Returns a value in the range
+         * 0…255 if there's something to propagate. EOPNOTSUPP if the concept does not apply to this unit type, ENODATA
+         * if no data is currently known (for example because the unit hasn't deactivated yet) and EBADE if the main
+         * service process has exited abnormally (signal/coredump). */
+
+        if (!UNIT_VTABLE(u)->exit_status)
+                return -EOPNOTSUPP;
+
+        return UNIT_VTABLE(u)->exit_status(u);
+}
+
+int unit_failure_action_exit_status(Unit *u) {
+        int r;
+
+        assert(u);
+
+        /* Returns the exit status to propagate on failure, or an error if there's nothing to propagate */
+
+        if (u->failure_action_exit_status >= 0)
+                return u->failure_action_exit_status;
+
+        r = unit_exit_status(u);
+        if (r == -EBADE) /* Exited, but not cleanly (i.e. by signal or such) */
+                return 255;
+
+        return r;
+}
+
+int unit_success_action_exit_status(Unit *u) {
+        int r;
+
+        assert(u);
+
+        /* Returns the exit status to propagate on success, or an error if there's nothing to propagate */
+
+        if (u->success_action_exit_status >= 0)
+                return u->success_action_exit_status;
+
+        r = unit_exit_status(u);
+        if (r == -EBADE) /* Exited, but not cleanly (i.e. by signal or such) */
+                return 255;
+
+        return r;
 }
 
 static const char* const collect_mode_table[_COLLECT_MODE_MAX] = {

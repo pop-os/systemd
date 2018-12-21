@@ -1,39 +1,49 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
-/*
- *
- */
 
+#include <errno.h>
+
+#include "alloc-util.h"
+#include "device-private.h"
 #include "path-util.h"
-#include "string-util.h"
 #include "udevadm-util.h"
+#include "unit-name.h"
 
-struct udev_device *find_device(struct udev *udev,
-                                const char *id,
-                                const char *prefix) {
+int find_device(const char *id, const char *prefix, sd_device **ret) {
+        _cleanup_free_ char *path = NULL;
+        int r;
 
-        assert(udev);
         assert(id);
+        assert(ret);
 
-        if (prefix && !startswith(id, prefix))
-                id = strjoina(prefix, id);
+        if (prefix) {
+                if (!path_startswith(id, prefix)) {
+                        id = path = path_join(prefix, id);
+                        if (!path)
+                                return -ENOMEM;
+                }
+        } else {
+                /* In cases where the argument is generic (no prefix specified),
+                 * check if the argument looks like a device unit name. */
+                if (unit_name_is_valid(id, UNIT_NAME_PLAIN) &&
+                    unit_name_to_type(id) == UNIT_DEVICE) {
+                        r = unit_name_to_path(id, &path);
+                        if (r < 0)
+                                return log_debug_errno(r, "Failed to convert \"%s\" to a device path: %m", id);
+                        id = path;
+                }
+        }
+
+        if (path_startswith(id, "/sys/"))
+                return sd_device_new_from_syspath(ret, id);
 
         if (path_startswith(id, "/dev/")) {
-                struct stat statbuf;
-                char type;
+                struct stat st;
 
-                if (stat(id, &statbuf) < 0)
-                        return NULL;
+                if (stat(id, &st) < 0)
+                        return -errno;
 
-                if (S_ISBLK(statbuf.st_mode))
-                        type = 'b';
-                else if (S_ISCHR(statbuf.st_mode))
-                        type = 'c';
-                else
-                        return NULL;
+                return device_new_from_stat_rdev(ret, &st);
+        }
 
-                return udev_device_new_from_devnum(udev, type, statbuf.st_rdev);
-        } else if (path_startswith(id, "/sys/"))
-                return udev_device_new_from_syspath(udev, id);
-        else
-                return NULL;
+        return -EINVAL;
 }

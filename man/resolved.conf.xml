@@ -1,4 +1,4 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
@@ -91,7 +91,7 @@
         <listitem><para>Takes a boolean argument or
         <literal>resolve</literal>. Controls Link-Local Multicast Name
         Resolution support (<ulink
-        url="https://tools.ietf.org/html/rfc4795">RFC 4794</ulink>) on
+        url="https://tools.ietf.org/html/rfc4795">RFC 4795</ulink>) on
         the local host. If true, enables full LLMNR responder and
         resolver support. If false, disables both. If set to
         <literal>resolve</literal>, only resolution support is enabled,
@@ -189,7 +189,7 @@
         domains (TLDs) that are not known by the DNS root server. This
         logic does not work in all private zone setups.</para>
 
-        <para>Defaults to off.</para>
+        <para>Defaults to <literal>allow-downgrade</literal></para>
         </listitem>
       </varlistentry>
 
@@ -227,10 +227,10 @@
 
       <varlistentry>
         <term><varname>Cache=</varname></term>
-        <listitem><para>Takes a boolean argument. If "yes" (the default), resolving a domain name which already got
-        queried earlier will return the previous result as long as it is still valid, and thus does not result in a new
-        network request. Be aware that turning off caching comes at a performance penalty, which is particularly
-        high when DNSSEC is used.</para>
+        <listitem><para>Takes a boolean argument. If <literal>yes</literal> (the default), resolving a domain name
+        which already got queried earlier will return the previous result as long as it is still valid, and thus does
+        not result in a new network request. Be aware that turning off caching comes at a performance penalty, which
+        is particularly high when DNSSEC is used.</para>
 
         <para>Note that caching is turned off implicitly if the configured DNS server is on a host-local IP address
         (such as 127.0.0.1 or ::1), in order to avoid duplicate local caching.</para></listitem>
@@ -239,13 +239,20 @@
       <varlistentry>
         <term><varname>DNSStubListener=</varname></term>
         <listitem><para>Takes a boolean argument or one of <literal>udp</literal> and <literal>tcp</literal>. If
-        <literal>udp</literal> (the default), a DNS stub resolver will listen for UDP requests on address 127.0.0.53
+        <literal>udp</literal>, a DNS stub resolver will listen for UDP requests on address 127.0.0.53
         port 53. If <literal>tcp</literal>, the stub will listen for TCP requests on the same address and port. If
-        <literal>yes</literal>, the stub listens for both UDP and TCP requests.  If <literal>no</literal>, the stub
+        <literal>yes</literal> (the default), the stub listens for both UDP and TCP requests.  If <literal>no</literal>, the stub
         listener is disabled.</para>
 
         <para>Note that the DNS stub listener is turned off implicitly when its listening address and port are already
         in use.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ReadEtcHosts=</varname></term>
+        <listitem><para>Takes a boolean argument. If <literal>yes</literal> (the default), the DNS stub resolver will read
+        <filename>/etc/hosts</filename>, and try to resolve hosts or address by using the entries in the file before
+        sending query to DNS servers.</para></listitem>
       </varlistentry>
 
     </variablelist>

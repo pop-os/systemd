@@ -6,8 +6,8 @@
 #include <string.h>
 
 #include "alloc-util.h"
-#include "hashmap.h"
 #include "fileio.h"
+#include "hashmap.h"
 #include "macro.h"
 #include "mempool.h"
 #include "process-util.h"
@@ -276,7 +276,7 @@ static const struct hashmap_type_info hashmap_type_info[_HASHMAP_TYPE_MAX] = {
 };
 
 #if VALGRIND
-__attribute__((destructor)) static void cleanup_pools(void) {
+_destructor_ static void cleanup_pools(void) {
         _cleanup_free_ char *t = NULL;
         int r;
 
@@ -769,18 +769,17 @@ static void reset_direct_storage(HashmapBase *h) {
 static struct HashmapBase *hashmap_base_new(const struct hash_ops *hash_ops, enum HashmapType type HASHMAP_DEBUG_PARAMS) {
         HashmapBase *h;
         const struct hashmap_type_info *hi = &hashmap_type_info[type];
-        bool use_pool;
+        bool up;
 
-        use_pool = is_main_thread();
+        up = mempool_enabled();
 
-        h = use_pool ? mempool_alloc0_tile(hi->mempool) : malloc0(hi->head_size);
-
+        h = up ? mempool_alloc0_tile(hi->mempool) : malloc0(hi->head_size);
         if (!h)
                 return NULL;
 
         h->type = type;
-        h->from_pool = use_pool;
-        h->hash_ops = hash_ops ? hash_ops : &trivial_hash_ops;
+        h->from_pool = up;
+        h->hash_ops = hash_ops ?: &trivial_hash_ops;
 
         if (type == HASHMAP_TYPE_ORDERED) {
                 OrderedHashmap *lh = (OrderedHashmap*)h;
@@ -849,7 +848,7 @@ int internal_set_ensure_allocated(Set **s, const struct hash_ops *hash_ops  HASH
 
 static void hashmap_free_no_clear(HashmapBase *h) {
         assert(!h->has_indirect);
-        assert(!h->n_direct_entries);
+        assert(h->n_direct_entries == 0);
 
 #if ENABLE_DEBUG_HASHMAP
         assert_se(pthread_mutex_lock(&hashmap_debug_list_mutex) == 0);
@@ -857,52 +856,49 @@ static void hashmap_free_no_clear(HashmapBase *h) {
         assert_se(pthread_mutex_unlock(&hashmap_debug_list_mutex) == 0);
 #endif
 
-        if (h->from_pool)
+        if (h->from_pool) {
+                /* Ensure that the object didn't get migrated between threads. */
+                assert_se(is_main_thread());
                 mempool_free_tile(hashmap_type_info[h->type].mempool, h);
-        else
+        } else
                 free(h);
 }
 
-HashmapBase *internal_hashmap_free(HashmapBase *h) {
-
-        /* Free the hashmap, but nothing in it */
-
+HashmapBase *internal_hashmap_free(HashmapBase *h, free_func_t default_free_key, free_func_t default_free_value) {
         if (h) {
-                internal_hashmap_clear(h);
+                internal_hashmap_clear(h, default_free_key, default_free_value);
                 hashmap_free_no_clear(h);
         }
 
         return NULL;
 }
 
-HashmapBase *internal_hashmap_free_free(HashmapBase *h) {
-
-        /* Free the hashmap and all data objects in it, but not the
-         * keys */
-
-        if (h) {
-                internal_hashmap_clear_free(h);
-                hashmap_free_no_clear(h);
-        }
-
-        return NULL;
-}
-
-Hashmap *hashmap_free_free_free(Hashmap *h) {
-
-        /* Free the hashmap and all data and key objects in it */
-
-        if (h) {
-                hashmap_clear_free_free(h);
-                hashmap_free_no_clear(HASHMAP_BASE(h));
-        }
-
-        return NULL;
-}
-
-void internal_hashmap_clear(HashmapBase *h) {
+void internal_hashmap_clear(HashmapBase *h, free_func_t default_free_key, free_func_t default_free_value) {
+        free_func_t free_key, free_value;
         if (!h)
                 return;
+
+        free_key = h->hash_ops->free_key ?: default_free_key;
+        free_value = h->hash_ops->free_value ?: default_free_value;
+
+        if (free_key || free_value) {
+
+                /* If destructor calls are defined, let's destroy things defensively: let's take the item out of the
+                 * hash table, and only then call the destructor functions. If these destructors then try to unregister
+                 * themselves from our hash table a second time, the entry is already gone. */
+
+                while (internal_hashmap_size(h) > 0) {
+                        void *v, *k;
+
+                        v = internal_hashmap_first_key_and_value(h, true, &k);
+
+                        if (free_key)
+                                free_key(k);
+
+                        if (free_value)
+                                free_value(v);
+                }
+        }
 
         if (h->has_indirect) {
                 free(h->indirect.storage);
@@ -918,35 +914,6 @@ void internal_hashmap_clear(HashmapBase *h) {
         }
 
         base_set_dirty(h);
-}
-
-void internal_hashmap_clear_free(HashmapBase *h) {
-        unsigned idx;
-
-        if (!h)
-                return;
-
-        for (idx = skip_free_buckets(h, 0); idx != IDX_NIL;
-             idx = skip_free_buckets(h, idx + 1))
-                free(entry_value(h, bucket_at(h, idx)));
-
-        internal_hashmap_clear(h);
-}
-
-void hashmap_clear_free_free(Hashmap *h) {
-        unsigned idx;
-
-        if (!h)
-                return;
-
-        for (idx = skip_free_buckets(HASHMAP_BASE(h), 0); idx != IDX_NIL;
-             idx = skip_free_buckets(HASHMAP_BASE(h), idx + 1)) {
-                struct plain_hashmap_entry *e = plain_bucket_at(h, idx);
-                free((void*)e->b.key);
-                free(e->value);
-        }
-
-        internal_hashmap_clear(HASHMAP_BASE(h));
 }
 
 static int resize_buckets(HashmapBase *h, unsigned entries_add);
@@ -1512,8 +1479,8 @@ int hashmap_remove_and_replace(Hashmap *h, const void *old_key, const void *new_
         return 0;
 }
 
-void *hashmap_remove_value(Hashmap *h, const void *key, void *value) {
-        struct plain_hashmap_entry *e;
+void *internal_hashmap_remove_value(HashmapBase *h, const void *key, void *value) {
+        struct hashmap_base_entry *e;
         unsigned hash, idx;
 
         if (!h)
@@ -1524,8 +1491,8 @@ void *hashmap_remove_value(Hashmap *h, const void *key, void *value) {
         if (idx == IDX_NIL)
                 return NULL;
 
-        e = plain_bucket_at(h, idx);
-        if (e->value != value)
+        e = bucket_at(h, idx);
+        if (entry_value(h, e) != value)
                 return NULL;
 
         remove_entry(h, idx);
@@ -1542,47 +1509,9 @@ static unsigned find_first_entry(HashmapBase *h) {
         return hashmap_iterate_entry(h, &i);
 }
 
-void *internal_hashmap_first(HashmapBase *h) {
-        unsigned idx;
-
-        idx = find_first_entry(h);
-        if (idx == IDX_NIL)
-                return NULL;
-
-        return entry_value(h, bucket_at(h, idx));
-}
-
-void *internal_hashmap_first_key(HashmapBase *h) {
+void *internal_hashmap_first_key_and_value(HashmapBase *h, bool remove, void **ret_key) {
         struct hashmap_base_entry *e;
-        unsigned idx;
-
-        idx = find_first_entry(h);
-        if (idx == IDX_NIL)
-                return NULL;
-
-        e = bucket_at(h, idx);
-        return (void*) e->key;
-}
-
-void *internal_hashmap_steal_first(HashmapBase *h) {
-        struct hashmap_base_entry *e;
-        void *data;
-        unsigned idx;
-
-        idx = find_first_entry(h);
-        if (idx == IDX_NIL)
-                return NULL;
-
-        e = bucket_at(h, idx);
-        data = entry_value(h, e);
-        remove_entry(h, idx);
-
-        return data;
-}
-
-void *internal_hashmap_steal_first_key(HashmapBase *h) {
-        struct hashmap_base_entry *e;
-        void *key;
+        void *key, *data;
         unsigned idx;
 
         idx = find_first_entry(h);
@@ -1591,9 +1520,15 @@ void *internal_hashmap_steal_first_key(HashmapBase *h) {
 
         e = bucket_at(h, idx);
         key = (void*) e->key;
-        remove_entry(h, idx);
+        data = entry_value(h, e);
 
-        return key;
+        if (remove)
+                remove_entry(h, idx);
+
+        if (ret_key)
+                *ret_key = key;
+
+        return data;
 }
 
 unsigned internal_hashmap_size(HashmapBase *h) {
@@ -1771,7 +1706,7 @@ HashmapBase *internal_hashmap_copy(HashmapBase *h) {
         }
 
         if (r < 0) {
-                internal_hashmap_free(copy);
+                internal_hashmap_free(copy, false, false);
                 return NULL;
         }
 

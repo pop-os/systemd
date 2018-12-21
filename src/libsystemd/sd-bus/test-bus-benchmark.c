@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include <sys/wait.h>
 
@@ -12,6 +10,7 @@
 #include "bus-util.h"
 #include "def.h"
 #include "fd-util.h"
+#include "missing_resource.h"
 #include "time-util.h"
 #include "util.h"
 
