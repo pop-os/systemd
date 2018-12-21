@@ -31,6 +31,7 @@ usr/bin/systemd-path
 usr/bin/systemd-socket-activate
 usr/bin/systemd-mount
 usr/bin/systemd-umount
+usr/bin/systemd-id128
 usr/bin/kernel-install
 usr/bin/bootctl
 usr/bin/busctl
