@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-/***
- ***/
-
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 
@@ -56,7 +53,7 @@ struct DnsPacketHeader {
 #define DNS_PACKET_UNICAST_SIZE_LARGE_MAX 4096u
 
 struct DnsPacket {
-        int n_ref;
+        unsigned n_ref;
         DnsProtocol protocol;
         size_t size, allocated, rindex, max_size;
         void *_data; /* don't access directly, use DNS_PACKET_DATA()! */
@@ -120,10 +117,13 @@ static inline uint16_t DNS_PACKET_RCODE(DnsPacket *p) {
 
 static inline uint16_t DNS_PACKET_PAYLOAD_SIZE_MAX(DnsPacket *p) {
 
-        /* Returns the advertised maximum datagram size for replies, or the DNS default if there's nothing defined. */
+        /* Returns the advertised maximum size for replies, or the DNS default if there's nothing defined. */
 
         if (p->opt)
                 return MAX(DNS_PACKET_UNICAST_SIZE_MAX, p->opt->key->class);
+
+        if (p->ipproto == IPPROTO_TCP)
+                return DNS_PACKET_SIZE_MAX;
 
         return DNS_PACKET_UNICAST_SIZE_MAX;
 }

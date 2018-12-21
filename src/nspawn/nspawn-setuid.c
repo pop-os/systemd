@@ -12,6 +12,7 @@
 #include "mkdir.h"
 #include "nspawn-setuid.h"
 #include "process-util.h"
+#include "rlimit-util.h"
 #include "signal-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -43,6 +44,8 @@ static int spawn_getent(const char *database, const char *key, pid_t *rpid) {
                         _exit(EXIT_FAILURE);
 
                 close_all_fds(NULL, 0);
+
+                (void) rlimit_nofile_safe();
 
                 execle("/usr/bin/getent", "getent", database, key, NULL, &empty_env);
                 execle("/bin/getent", "getent", database, key, NULL, &empty_env);
@@ -88,75 +91,66 @@ int change_uid_gid(const char *user, char **_home) {
         if (fd < 0)
                 return fd;
 
-        f = fdopen(fd, "re");
+        f = fdopen(fd, "r");
         if (!f)
                 return log_oom();
         fd = -1;
 
         r = read_line(f, LONG_LINE_MAX, &line);
-        if (r == 0) {
-                log_error("Failed to resolve user %s.", user);
-                return -ESRCH;
-        }
+        if (r == 0)
+                return log_error_errno(SYNTHETIC_ERRNO(ESRCH),
+                                       "Failed to resolve user %s.", user);
         if (r < 0)
                 return log_error_errno(r, "Failed to read from getent: %m");
 
         (void) wait_for_terminate_and_check("getent passwd", pid, WAIT_LOG);
 
         x = strchr(line, ':');
-        if (!x) {
-                log_error("/etc/passwd entry has invalid user field.");
-                return -EIO;
-        }
+        if (!x)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "/etc/passwd entry has invalid user field.");
 
         u = strchr(x+1, ':');
-        if (!u) {
-                log_error("/etc/passwd entry has invalid password field.");
-                return -EIO;
-        }
+        if (!u)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "/etc/passwd entry has invalid password field.");
 
         u++;
         g = strchr(u, ':');
-        if (!g) {
-                log_error("/etc/passwd entry has invalid UID field.");
-                return -EIO;
-        }
+        if (!g)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "/etc/passwd entry has invalid UID field.");
 
         *g = 0;
         g++;
         x = strchr(g, ':');
-        if (!x) {
-                log_error("/etc/passwd entry has invalid GID field.");
-                return -EIO;
-        }
+        if (!x)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "/etc/passwd entry has invalid GID field.");
 
         *x = 0;
         h = strchr(x+1, ':');
-        if (!h) {
-                log_error("/etc/passwd entry has invalid GECOS field.");
-                return -EIO;
-        }
+        if (!h)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "/etc/passwd entry has invalid GECOS field.");
 
         h++;
         x = strchr(h, ':');
-        if (!x) {
-                log_error("/etc/passwd entry has invalid home directory field.");
-                return -EIO;
-        }
+        if (!x)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "/etc/passwd entry has invalid home directory field.");
 
         *x = 0;
 
         r = parse_uid(u, &uid);
-        if (r < 0) {
-                log_error("Failed to parse UID of user.");
-                return -EIO;
-        }
+        if (r < 0)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "Failed to parse UID of user.");
 
         r = parse_gid(g, &gid);
-        if (r < 0) {
-                log_error("Failed to parse GID of user.");
-                return -EIO;
-        }
+        if (r < 0)
+                return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                                       "Failed to parse GID of user.");
 
         home = strdup(h);
         if (!home)
@@ -170,16 +164,15 @@ int change_uid_gid(const char *user, char **_home) {
         if (fd < 0)
                 return fd;
 
-        f = fdopen(fd, "re");
+        f = fdopen(fd, "r");
         if (!f)
                 return log_oom();
         fd = -1;
 
         r = read_line(f, LONG_LINE_MAX, &line);
-        if (r == 0) {
-                log_error("Failed to resolve user %s.", user);
-                return -ESRCH;
-        }
+        if (r == 0)
+                return log_error_errno(SYNTHETIC_ERRNO(ESRCH),
+                                       "Failed to resolve user %s.", user);
         if (r < 0)
                 return log_error_errno(r, "Failed to read from getent: %m");
 

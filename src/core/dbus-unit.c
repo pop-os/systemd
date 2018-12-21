@@ -434,7 +434,7 @@ int bus_unit_method_kill(sd_bus_message *message, void *userdata, sd_bus_error *
                         u,
                         "kill",
                         CAP_KILL,
-                        N_("Authentication is required to kill '$(unit)'."),
+                        N_("Authentication is required to send a UNIX signal to the processes of '$(unit)'."),
                         true,
                         message,
                         error);
@@ -561,6 +561,44 @@ int bus_unit_method_unref(sd_bus_message *message, void *userdata, sd_bus_error 
         return sd_bus_reply_method_return(message, NULL);
 }
 
+static int property_get_refs(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Unit *u = userdata;
+        const char *i;
+        int r;
+
+        assert(bus);
+        assert(reply);
+
+        r = sd_bus_message_open_container(reply, 'a', "s");
+        if (r < 0)
+                return r;
+
+        for (i = sd_bus_track_first(u->bus_track); i; i = sd_bus_track_next(u->bus_track)) {
+                int c, k;
+
+                c = sd_bus_track_count_name(u->bus_track, i);
+                if (c < 0)
+                        return c;
+
+                /* Add the item multiple times if the ref count for each is above 1 */
+                for (k = 0; k < c; k++) {
+                        r = sd_bus_message_append(reply, "s", i);
+                        if (r < 0)
+                                return r;
+                }
+        }
+
+        return sd_bus_message_close_container(reply);
+}
+
 const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_VTABLE_START(0),
 
@@ -624,8 +662,8 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("AssertResult", "b", bus_property_get_bool, offsetof(Unit, assert_result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_PROPERTY_DUAL_TIMESTAMP("ConditionTimestamp", offsetof(Unit, condition_timestamp), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_PROPERTY_DUAL_TIMESTAMP("AssertTimestamp", offsetof(Unit, assert_timestamp), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
-        SD_BUS_PROPERTY("Conditions", "a(sbbsi)", property_get_conditions, offsetof(Unit, conditions), 0),
-        SD_BUS_PROPERTY("Asserts", "a(sbbsi)", property_get_conditions, offsetof(Unit, asserts), 0),
+        SD_BUS_PROPERTY("Conditions", "a(sbbsi)", property_get_conditions, offsetof(Unit, conditions), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
+        SD_BUS_PROPERTY("Asserts", "a(sbbsi)", property_get_conditions, offsetof(Unit, asserts), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         SD_BUS_PROPERTY("LoadError", "(ss)", property_get_load_error, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Transient", "b", bus_property_get_bool, offsetof(Unit, transient), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Perpetual", "b", bus_property_get_bool, offsetof(Unit, perpetual), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -633,10 +671,13 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("StartLimitBurst", "u", bus_property_get_unsigned, offsetof(Unit, start_limit.burst), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("StartLimitAction", "s", property_get_emergency_action, offsetof(Unit, start_limit_action), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("FailureAction", "s", property_get_emergency_action, offsetof(Unit, failure_action), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("FailureActionExitStatus", "i", bus_property_get_int, offsetof(Unit, failure_action_exit_status), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SuccessAction", "s", property_get_emergency_action, offsetof(Unit, success_action), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("SuccessActionExitStatus", "i", bus_property_get_int, offsetof(Unit, success_action_exit_status), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RebootArgument", "s", NULL, offsetof(Unit, reboot_arg), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("InvocationID", "ay", bus_property_get_id128, offsetof(Unit, invocation_id), 0),
-        SD_BUS_PROPERTY("CollectMode", "s", property_get_collect_mode, offsetof(Unit, collect_mode), 0),
+        SD_BUS_PROPERTY("InvocationID", "ay", bus_property_get_id128, offsetof(Unit, invocation_id), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("CollectMode", "s", property_get_collect_mode, offsetof(Unit, collect_mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("Refs", "as", property_get_refs, 0, 0),
 
         SD_BUS_METHOD("Start", "s", "o", method_start, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("Stop", "s", "o", method_stop, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -1033,7 +1074,7 @@ int bus_unit_method_attach_processes(sd_bus_message *message, void *userdata, sd
                 if (r < 0)
                         return r;
 
-                /* Let's validate security: if the sender is root, then all is OK. If the sender is is any other unit,
+                /* Let's validate security: if the sender is root, then all is OK. If the sender is any other unit,
                  * then the process' UID and the target unit's UID have to match the sender's UID */
                 if (sender_uid != 0 && sender_uid != getuid()) {
                         r = get_process_uid(pid, &process_uid);
@@ -1161,6 +1202,27 @@ void bus_unit_send_change_signal(Unit *u) {
         u->sent_dbus_new_signal = true;
 }
 
+void bus_unit_send_pending_change_signal(Unit *u, bool including_new) {
+
+        /* Sends out any pending change signals, but only if they really are pending. This call is used when we are
+         * about to change state in order to force out a PropertiesChanged signal beforehand if there was one pending
+         * so that clients can follow the full state transition */
+
+        if (!u->in_dbus_queue) /* If not enqueued, don't bother */
+                return;
+
+        if (!u->sent_dbus_new_signal && !including_new) /* If the unit was never announced, don't bother, it's fine if
+                                                         * the unit appears in the new state right-away (except if the
+                                                         * caller explicitly asked us to send it anyway) */
+                return;
+
+        if (MANAGER_IS_RELOADING(u->manager)) /* Don't generate unnecessary PropertiesChanged signals for the same unit
+                                               * when we are reloading. */
+                return;
+
+        bus_unit_send_change_signal(u);
+}
+
 static int send_removed_signal(sd_bus *bus, void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         _cleanup_free_ char *p = NULL;
@@ -1259,6 +1321,9 @@ int bus_unit_queue_job(
         if (!path)
                 return -ENOMEM;
 
+        /* Before we send the method reply, force out the announcement JobNew for this job */
+        bus_job_send_pending_change_signal(j, true);
+
         return sd_bus_reply_method_return(message, "o", path);
 }
 
@@ -1299,8 +1364,75 @@ static int bus_unit_set_live_property(
         return 0;
 }
 
+static int bus_set_transient_emergency_action(
+                Unit *u,
+                const char *name,
+                EmergencyAction *p,
+                sd_bus_message *message,
+                UnitWriteFlags flags,
+                sd_bus_error *error) {
+
+        const char *s;
+        EmergencyAction v;
+        int r;
+        bool system;
+
+        assert(p);
+
+        r = sd_bus_message_read(message, "s", &s);
+        if (r < 0)
+                return r;
+
+        system = MANAGER_IS_SYSTEM(u->manager);
+        r = parse_emergency_action(s, system, &v);
+        if (v < 0)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
+                                         v == -EOPNOTSUPP ? "EmergencyAction setting invalid for manager type: %s"
+                                                          : "Invalid %s setting: %s",
+                                         name, s);
+
+        if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                *p = v;
+                unit_write_settingf(u, flags, name,
+                                    "%s=%s", name, s);
+        }
+
+        return 1;
+}
+
+static int bus_set_transient_exit_status(
+                Unit *u,
+                const char *name,
+                int *p,
+                sd_bus_message *message,
+                UnitWriteFlags flags,
+                sd_bus_error *error) {
+
+        int32_t k;
+        int r;
+
+        assert(p);
+
+        r = sd_bus_message_read(message, "i", &k);
+        if (r < 0)
+                return r;
+
+        if (k > 255)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Exit status must be in range 0…255 or negative.");
+
+        if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                *p = k < 0 ? -1 : k;
+
+                if (k < 0)
+                        unit_write_settingf(u, flags, name, "%s=", name);
+                else
+                        unit_write_settingf(u, flags, name, "%s=%i", name, k);
+        }
+
+        return 1;
+}
+
 static BUS_DEFINE_SET_TRANSIENT_PARSE(collect_mode, CollectMode, collect_mode_from_string);
-static BUS_DEFINE_SET_TRANSIENT_PARSE(emergency_action, EmergencyAction, emergency_action_from_string);
 static BUS_DEFINE_SET_TRANSIENT_PARSE(job_mode, JobMode, job_mode_from_string);
 
 static int bus_set_transient_conditions(
@@ -1450,6 +1582,12 @@ static int bus_unit_set_transient_property(
         if (streq(name, "SuccessAction"))
                 return bus_set_transient_emergency_action(u, name, &u->success_action, message, flags, error);
 
+        if (streq(name, "FailureActionExitStatus"))
+                return bus_set_transient_exit_status(u, name, &u->failure_action_exit_status, message, flags, error);
+
+        if (streq(name, "SuccessActionExitStatus"))
+                return bus_set_transient_exit_status(u, name, &u->success_action_exit_status, message, flags, error);
+
         if (streq(name, "RebootArgument"))
                 return bus_set_transient_string(u, name, &u->reboot_arg, message, flags, error);
 
@@ -1572,7 +1710,7 @@ static int bus_unit_set_transient_property(
                         if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                                 _cleanup_free_ char *label = NULL;
 
-                                r = unit_add_dependency_by_name(u, d, other, NULL, true, UNIT_DEPENDENCY_FILE);
+                                r = unit_add_dependency_by_name(u, d, other, true, UNIT_DEPENDENCY_FILE);
                                 if (r < 0)
                                         return r;
 
@@ -1726,7 +1864,7 @@ int bus_unit_validate_load_state(Unit *u, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_BAD_UNIT_SETTING, "Unit %s has a bad unit file setting.", u->id);
 
         case UNIT_ERROR: /* Only show .load_error in UNIT_ERROR state */
-                return sd_bus_error_set_errnof(error, u->load_error, "Unit %s failed to loaded properly: %m.", u->id);
+                return sd_bus_error_set_errnof(error, u->load_error, "Unit %s failed to load properly: %m.", u->id);
 
         case UNIT_MASKED:
                 return sd_bus_error_setf(error, BUS_ERROR_UNIT_MASKED, "Unit %s is masked.", u->id);
@@ -1746,7 +1884,13 @@ static int bus_unit_track_handler(sd_bus_track *t, void *userdata) {
 
         u->bus_track = sd_bus_track_unref(u->bus_track); /* make sure we aren't called again */
 
+        /* If the client that tracks us disappeared, then there's reason to believe that the cgroup is empty now too,
+         * let's see */
+        unit_add_to_cgroup_empty_queue(u);
+
+        /* Also add the unit to the GC queue, after all if the client left it might be time to GC this unit */
         unit_add_to_gc_queue(u);
+
         return 0;
 }
 

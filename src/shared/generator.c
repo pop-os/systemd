@@ -103,6 +103,7 @@ static int write_fsck_sysroot_service(const char *dir, const char *what) {
                 "Documentation=man:systemd-fsck-root.service(8)\n"
                 "DefaultDependencies=no\n"
                 "BindsTo=%3$s\n"
+                "Conflicts=shutdown.target\n"
                 "After=initrd-root-device.target local-fs-pre.target %3$s\n"
                 "Before=shutdown.target\n"
                 "\n"
@@ -196,10 +197,9 @@ int generator_write_timeouts(
                 const char *opts,
                 char **filtered) {
 
-        /* Allow configuration how long we wait for a device that
-         * backs a mount point to show up. This is useful to support
-         * endless device timeouts for devices that show up only after
-         * user input, like crypto devices. */
+        /* Configure how long we wait for a device that backs a mount point or a
+         * swap partition to show up. This is useful to support endless device timeouts
+         * for devices that show up only after user input, like crypto devices. */
 
         _cleanup_free_ char *node = NULL, *unit = NULL, *timeout = NULL;
         usec_t u;
@@ -310,10 +310,10 @@ int generator_hook_up_mkswap(
                 return log_oom();
 
         /* Nothing to work on. */
-        if (!is_device_path(node)) {
-                log_error("Cannot format something that is not a device node: %s", node);
-                return -EINVAL;
-        }
+        if (!is_device_path(node))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Cannot format something that is not a device node: %s",
+                                       node);
 
         r = unit_name_from_path_instance("systemd-mkswap", node, ".service", &unit);
         if (r < 0)
@@ -344,9 +344,9 @@ int generator_hook_up_mkswap(
                 "Documentation=man:systemd-mkswap@.service(8)\n"
                 "DefaultDependencies=no\n"
                 "BindsTo=%%i.device\n"
+                "Conflicts=shutdown.target\n"
                 "After=%%i.device\n"
-                "Before=%s\n"
-                "Before=shutdown.target\n"
+                "Before=shutdown.target %s\n"
                 "\n"
                 "[Service]\n"
                 "Type=oneshot\n"
@@ -380,15 +380,15 @@ int generator_hook_up_mkfs(
                 return log_oom();
 
         /* Nothing to work on. */
-        if (!is_device_path(node)) {
-                log_error("Cannot format something that is not a device node: %s", node);
-                return -EINVAL;
-        }
+        if (!is_device_path(node))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Cannot format something that is not a device node: %s",
+                                       node);
 
-        if (!type || streq(type, "auto")) {
-                log_error("Cannot format partition %s, filesystem type is not specified", node);
-                return -EINVAL;
-        }
+        if (!type || streq(type, "auto"))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Cannot format partition %s, filesystem type is not specified",
+                                       node);
 
         r = unit_name_from_path_instance("systemd-mkfs", node, ".service", &unit);
         if (r < 0)
@@ -419,12 +419,11 @@ int generator_hook_up_mkfs(
                 "Documentation=man:systemd-mkfs@.service(8)\n"
                 "DefaultDependencies=no\n"
                 "BindsTo=%%i.device\n"
+                "Conflicts=shutdown.target\n"
                 "After=%%i.device\n"
                 /* fsck might or might not be used, so let's be safe and order
                  * ourselves before both systemd-fsck@.service and the mount unit. */
-                "Before=systemd-fsck@%%i.service\n"
-                "Before=%s\n"
-                "Before=shutdown.target\n"
+                "Before=shutdown.target systemd-fsck@%%i.service %s\n"
                 "\n"
                 "[Service]\n"
                 "Type=oneshot\n"
@@ -483,9 +482,9 @@ int generator_hook_up_growfs(
                 "Documentation=man:systemd-growfs@.service(8)\n"
                 "DefaultDependencies=no\n"
                 "BindsTo=%%i.mount\n"
+                "Conflicts=shutdown.target\n"
                 "After=%%i.mount\n"
-                "Before=shutdown.target\n"
-                "Before=%s\n"
+                "Before=shutdown.target %s\n"
                 "\n"
                 "[Service]\n"
                 "Type=oneshot\n"
@@ -497,4 +496,9 @@ int generator_hook_up_growfs(
                 escaped);
 
         return generator_add_symlink(dir, where_unit, "wants", unit);
+}
+
+void log_setup_generator(void) {
+        log_set_prohibit_ipc(true);
+        log_setup_service();
 }

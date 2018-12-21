@@ -35,11 +35,11 @@ int socket_address_listen(
 
         _cleanup_close_ int fd = -1;
         const char *p;
-        int r, one;
+        int r;
 
         assert(a);
 
-        r = socket_address_verify(a);
+        r = socket_address_verify(a, true);
         if (r < 0)
                 return r;
 
@@ -62,10 +62,9 @@ int socket_address_listen(
                 return r;
 
         if (socket_address_family(a) == AF_INET6 && only != SOCKET_ADDRESS_DEFAULT) {
-                int flag = only == SOCKET_ADDRESS_IPV6_ONLY;
-
-                if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &flag, sizeof(flag)) < 0)
-                        return -errno;
+                r = setsockopt_int(fd, IPPROTO_IPV6, IPV6_V6ONLY, only == SOCKET_ADDRESS_IPV6_ONLY);
+                if (r < 0)
+                        return r;
         }
 
         if (IN_SET(socket_address_family(a), AF_INET, AF_INET6)) {
@@ -74,27 +73,27 @@ int socket_address_listen(
                                 return -errno;
 
                 if (reuse_port) {
-                        one = 1;
-                        if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one)) < 0)
-                                log_warning_errno(errno, "SO_REUSEPORT failed: %m");
+                        r = setsockopt_int(fd, SOL_SOCKET, SO_REUSEPORT, true);
+                        if (r < 0)
+                                log_warning_errno(r, "SO_REUSEPORT failed: %m");
                 }
 
                 if (free_bind) {
-                        one = 1;
-                        if (setsockopt(fd, IPPROTO_IP, IP_FREEBIND, &one, sizeof(one)) < 0)
-                                log_warning_errno(errno, "IP_FREEBIND failed: %m");
+                        r = setsockopt_int(fd, IPPROTO_IP, IP_FREEBIND, true);
+                        if (r < 0)
+                                log_warning_errno(r, "IP_FREEBIND failed: %m");
                 }
 
                 if (transparent) {
-                        one = 1;
-                        if (setsockopt(fd, IPPROTO_IP, IP_TRANSPARENT, &one, sizeof(one)) < 0)
-                                log_warning_errno(errno, "IP_TRANSPARENT failed: %m");
+                        r = setsockopt_int(fd, IPPROTO_IP, IP_TRANSPARENT, true);
+                        if (r < 0)
+                                log_warning_errno(r, "IP_TRANSPARENT failed: %m");
                 }
         }
 
-        one = 1;
-        if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0)
-                return -errno;
+        r = setsockopt_int(fd, SOL_SOCKET, SO_REUSEADDR, true);
+        if (r < 0)
+                return r;
 
         p = socket_address_get_path(a);
         if (p) {

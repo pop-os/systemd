@@ -49,7 +49,7 @@
 
     <para><function>sd_journal_stream_fd()</function> takes a short
     program identifier string as first argument, which will be written
-    to the journal as _SYSLOG_IDENTIFIER= field for each log entry
+    to the journal as SYSLOG_IDENTIFIER= field for each log entry
     (see
     <citerefentry><refentrytitle>systemd.journal-fields</refentrytitle><manvolnum>7</manvolnum></citerefentry>
     for more information). The second argument shall be the default
@@ -92,8 +92,7 @@
   <refsect1>
     <title>Notes</title>
 
-    <para>Function <function>sd_journal_stream_fd()</function> is thread-safe and may be called
-    from multiple threads.</para>
+    <xi:include href="threads-aware.xml" xpointer="safe"/>
 
     <xi:include href="libsystemd-pkgconfig.xml" xpointer="pkgconfig-text"/>
   </refsect1>

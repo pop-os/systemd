@@ -9,8 +9,11 @@
 
 #include "sd-journal.h"
 
+#include "alloc-util.h"
 #include "fd-util.h"
+#include "main-func.h"
 #include "parse-util.h"
+#include "pretty-print.h"
 #include "string-util.h"
 #include "syslog-util.h"
 #include "util.h"
@@ -19,7 +22,14 @@ static const char *arg_identifier = NULL;
 static int arg_priority = LOG_INFO;
 static bool arg_level_prefix = true;
 
-static void help(void) {
+static int help(void) {
+        _cleanup_free_ char *link = NULL;
+        int r;
+
+        r = terminal_urlify_man("systemd-cat", "1", &link);
+        if (r < 0)
+                return log_oom();
+
         printf("%s [OPTIONS...] {COMMAND} ...\n\n"
                "Execute process with stdout/stderr connected to the journal.\n\n"
                "  -h --help               Show this help\n"
@@ -27,7 +37,12 @@ static void help(void) {
                "  -t --identifier=STRING  Set syslog identifier\n"
                "  -p --priority=PRIORITY  Set priority value (0..7)\n"
                "     --level-prefix=BOOL  Control whether level prefix shall be parsed\n"
-               , program_invocation_short_name);
+               "\nSee the %s for details.\n"
+               , program_invocation_short_name
+               , link
+        );
+
+        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -71,10 +86,9 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case 'p':
                         arg_priority = log_level_from_string(optarg);
-                        if (arg_priority < 0) {
-                                log_error("Failed to parse priority value.");
-                                return -EINVAL;
-                        }
+                        if (arg_priority < 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Failed to parse priority value.");
                         break;
 
                 case ARG_LEVEL_PREFIX: {
@@ -98,7 +112,7 @@ static int parse_argv(int argc, char *argv[]) {
         return 1;
 }
 
-int main(int argc, char *argv[]) {
+static int run(int argc, char *argv[]) {
         _cleanup_close_ int  fd = -1, saved_stderr = -1;
         int r;
 
@@ -107,22 +121,18 @@ int main(int argc, char *argv[]) {
 
         r = parse_argv(argc, argv);
         if (r <= 0)
-                goto finish;
+                return r;
 
         fd = sd_journal_stream_fd(arg_identifier, arg_priority, arg_level_prefix);
-        if (fd < 0) {
-                r = log_error_errno(fd, "Failed to create stream fd: %m");
-                goto finish;
-        }
+        if (fd < 0)
+                return log_error_errno(fd, "Failed to create stream fd: %m");
 
         saved_stderr = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 3);
 
         r = rearrange_stdio(STDIN_FILENO, fd, fd); /* Invalidates fd on succcess + error! */
-        fd = -1;
-        if (r < 0) {
-                log_error_errno(r, "Failed to rearrange stdout/stderr: %m");
-                goto finish;
-        }
+        TAKE_FD(fd);
+        if (r < 0)
+                return log_error_errno(r, "Failed to rearrange stdout/stderr: %m");
 
         if (argc <= optind)
                 (void) execl("/bin/cat", "/bin/cat", NULL);
@@ -134,8 +144,7 @@ int main(int argc, char *argv[]) {
         if (saved_stderr >= 0)
                 (void) dup3(saved_stderr, STDERR_FILENO, 0);
 
-        log_error_errno(r, "Failed to execute process: %m");
-
-finish:
-        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+        return log_error_errno(r, "Failed to execute process: %m");
 }
+
+DEFINE_MAIN_FUNCTION(run);

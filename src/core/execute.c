@@ -50,12 +50,12 @@
 #include "chown-recursive.h"
 #include "cpu-set-util.h"
 #include "def.h"
+#include "env-file.h"
 #include "env-util.h"
 #include "errno-list.h"
 #include "execute.h"
 #include "exit-status.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "format-util.h"
 #include "fs-util.h"
 #include "glob-util.h"
@@ -76,7 +76,6 @@
 #if HAVE_SECCOMP
 #include "seccomp-util.h"
 #endif
-#include "securebits.h"
 #include "securebits-util.h"
 #include "selinux-util.h"
 #include "signal-util.h"
@@ -89,6 +88,7 @@
 #include "strv.h"
 #include "syslog-util.h"
 #include "terminal-util.h"
+#include "umask-util.h"
 #include "unit.h"
 #include "user-util.h"
 #include "util.h"
@@ -147,11 +147,11 @@ static int shift_fds(int fds[], size_t n_fds) {
         return 0;
 }
 
-static int flags_fds(const int fds[], size_t n_storage_fds, size_t n_socket_fds, bool nonblock) {
+static int flags_fds(const int fds[], size_t n_socket_fds, size_t n_storage_fds, bool nonblock) {
         size_t i, n_fds;
         int r;
 
-        n_fds = n_storage_fds + n_socket_fds;
+        n_fds = n_socket_fds + n_storage_fds;
         if (n_fds <= 0)
                 return 0;
 
@@ -323,7 +323,8 @@ static int connect_logger_as(
                 uid_t uid,
                 gid_t gid) {
 
-        int fd, r;
+        _cleanup_close_ int fd = -1;
+        int r;
 
         assert(context);
         assert(params);
@@ -339,14 +340,12 @@ static int connect_logger_as(
         if (r < 0)
                 return r;
 
-        if (shutdown(fd, SHUT_RD) < 0) {
-                safe_close(fd);
+        if (shutdown(fd, SHUT_RD) < 0)
                 return -errno;
-        }
 
         (void) fd_inc_sndbuf(fd, SNDBUF_SIZE);
 
-        dprintf(fd,
+        if (dprintf(fd,
                 "%s\n"
                 "%s\n"
                 "%i\n"
@@ -360,10 +359,12 @@ static int connect_logger_as(
                 !!context->syslog_level_prefix,
                 is_syslog_output(output),
                 is_kmsg_output(output),
-                is_terminal_output(output));
+                is_terminal_output(output)) < 0)
+                return -errno;
 
-        return move_fd(fd, nfd, false);
+        return move_fd(TAKE_FD(fd), nfd, false);
 }
+
 static int open_terminal_as(const char *path, int flags, int nfd) {
         int fd;
 
@@ -378,10 +379,9 @@ static int open_terminal_as(const char *path, int flags, int nfd) {
 }
 
 static int acquire_path(const char *path, int flags, mode_t mode) {
-        union sockaddr_union sa = {
-                .sa.sa_family = AF_UNIX,
-        };
-        int fd, r;
+        union sockaddr_union sa = {};
+        _cleanup_close_ int fd = -1;
+        int r, salen;
 
         assert(path);
 
@@ -390,11 +390,11 @@ static int acquire_path(const char *path, int flags, mode_t mode) {
 
         fd = open(path, flags|O_NOCTTY, mode);
         if (fd >= 0)
-                return fd;
+                return TAKE_FD(fd);
 
         if (errno != ENXIO) /* ENXIO is returned when we try to open() an AF_UNIX file system socket on Linux */
                 return -errno;
-        if (strlen(path) > sizeof(sa.un.sun_path)) /* Too long, can't be a UNIX socket */
+        if (strlen(path) >= sizeof(sa.un.sun_path)) /* Too long, can't be a UNIX socket */
                 return -ENXIO;
 
         /* So, it appears the specified path could be an AF_UNIX socket. Let's see if we can connect to it. */
@@ -403,25 +403,24 @@ static int acquire_path(const char *path, int flags, mode_t mode) {
         if (fd < 0)
                 return -errno;
 
-        strncpy(sa.un.sun_path, path, sizeof(sa.un.sun_path));
-        if (connect(fd, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0) {
-                safe_close(fd);
+        salen = sockaddr_un_set_path(&sa.un, path);
+        if (salen < 0)
+                return salen;
+
+        if (connect(fd, &sa.sa, salen) < 0)
                 return errno == EINVAL ? -ENXIO : -errno; /* Propagate initial error if we get EINVAL, i.e. we have
                                                            * indication that his wasn't an AF_UNIX socket after all */
-        }
 
         if ((flags & O_ACCMODE) == O_RDONLY)
                 r = shutdown(fd, SHUT_WR);
         else if ((flags & O_ACCMODE) == O_WRONLY)
                 r = shutdown(fd, SHUT_RD);
         else
-                return fd;
-        if (r < 0) {
-                safe_close(fd);
+                return TAKE_FD(fd);
+        if (r < 0)
                 return -errno;
-        }
 
-        return fd;
+        return TAKE_FD(fd);
 }
 
 static int fixup_input(
@@ -544,6 +543,30 @@ static int setup_input(
         }
 }
 
+static bool can_inherit_stderr_from_stdout(
+                const ExecContext *context,
+                ExecOutput o,
+                ExecOutput e) {
+
+        assert(context);
+
+        /* Returns true, if given the specified STDERR and STDOUT output we can directly dup() the stdout fd to the
+         * stderr fd */
+
+        if (e == EXEC_OUTPUT_INHERIT)
+                return true;
+        if (e != o)
+                return false;
+
+        if (e == EXEC_OUTPUT_NAMED_FD)
+                return streq_ptr(context->stdio_fdname[STDOUT_FILENO], context->stdio_fdname[STDERR_FILENO]);
+
+        if (IN_SET(e, EXEC_OUTPUT_FILE, EXEC_OUTPUT_FILE_APPEND))
+                return streq_ptr(context->stdio_file[STDOUT_FILENO], context->stdio_file[STDERR_FILENO]);
+
+        return true;
+}
+
 static int setup_output(
                 const Unit *unit,
                 const ExecContext *context,
@@ -602,7 +625,7 @@ static int setup_output(
                         return fileno;
 
                 /* Duplicate from stdout if possible */
-                if ((e == o && e != EXEC_OUTPUT_NAMED_FD) || e == EXEC_OUTPUT_INHERIT)
+                if (can_inherit_stderr_from_stdout(context, o, e))
                         return dup2(STDOUT_FILENO, fileno) < 0 ? -errno : fileno;
 
                 o = e;
@@ -675,9 +698,10 @@ static int setup_output(
                 (void) fd_nonblock(named_iofds[fileno], false);
                 return dup2(named_iofds[fileno], fileno) < 0 ? -errno : fileno;
 
-        case EXEC_OUTPUT_FILE: {
+        case EXEC_OUTPUT_FILE:
+        case EXEC_OUTPUT_FILE_APPEND: {
                 bool rw;
-                int fd;
+                int fd, flags;
 
                 assert(context->stdio_file[fileno]);
 
@@ -687,11 +711,15 @@ static int setup_output(
                 if (rw)
                         return dup2(STDIN_FILENO, fileno) < 0 ? -errno : fileno;
 
-                fd = acquire_path(context->stdio_file[fileno], O_WRONLY, 0666 & ~context->umask);
+                flags = O_WRONLY;
+                if (o == EXEC_OUTPUT_FILE_APPEND)
+                        flags |= O_APPEND;
+
+                fd = acquire_path(context->stdio_file[fileno], flags, 0666 & ~context->umask);
                 if (fd < 0)
                         return fd;
 
-                return move_fd(fd, fileno, false);
+                return move_fd(fd, fileno, 0);
         }
 
         default:
@@ -914,7 +942,7 @@ static int get_fixed_user(const ExecContext *c, const char **user,
          * (i.e. are "/" or "/bin/nologin"). */
 
         name = c->user;
-        r = get_user_creds_clean(&name, uid, gid, home, shell);
+        r = get_user_creds(&name, uid, gid, home, shell, USER_CREDS_CLEAN);
         if (r < 0)
                 return r;
 
@@ -932,7 +960,7 @@ static int get_fixed_group(const ExecContext *c, const char **group, gid_t *gid)
                 return 0;
 
         name = c->group;
-        r = get_group_creds(&name, gid);
+        r = get_group_creds(&name, gid, 0);
         if (r < 0)
                 return r;
 
@@ -1004,7 +1032,7 @@ static int get_supplementary_groups(const ExecContext *c, const char *user,
                         return -E2BIG;
 
                 g = *i;
-                r = get_group_creds(&g, l_gids+k);
+                r = get_group_creds(&g, l_gids+k, 0);
                 if (r < 0)
                         return r;
 
@@ -1149,6 +1177,16 @@ static int setup_pam(
         if (pam_code != PAM_SUCCESS) {
                 handle = NULL;
                 goto fail;
+        }
+
+        if (!tty) {
+                _cleanup_free_ char *q = NULL;
+
+                /* Hmm, so no TTY was explicitly passed, but an fd passed to us directly might be a TTY. Let's figure
+                 * out if that's the case, and read the TTY off it. */
+
+                if (getttyname_malloc(STDIN_FILENO, &q) >= 0)
+                        tty = strjoina("/dev/", q);
         }
 
         if (tty) {
@@ -1415,7 +1453,7 @@ static int apply_syscall_filter(const Unit* u, const ExecContext *c, bool needs_
                         return r;
         }
 
-        return seccomp_load_syscall_filter_set_raw(default_action, c->syscall_filter, action);
+        return seccomp_load_syscall_filter_set_raw(default_action, c->syscall_filter, action, false);
 }
 
 static int apply_syscall_archs(const Unit *u, const ExecContext *c) {
@@ -1498,7 +1536,7 @@ static int apply_protect_kernel_modules(const Unit *u, const ExecContext *c) {
         if (skip_seccomp_unavailable(u, "ProtectKernelModules="))
                 return 0;
 
-        return seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + SYSCALL_FILTER_SET_MODULE, SCMP_ACT_ERRNO(EPERM));
+        return seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + SYSCALL_FILTER_SET_MODULE, SCMP_ACT_ERRNO(EPERM), false);
 }
 
 static int apply_private_devices(const Unit *u, const ExecContext *c) {
@@ -1513,7 +1551,7 @@ static int apply_private_devices(const Unit *u, const ExecContext *c) {
         if (skip_seccomp_unavailable(u, "PrivateDevices="))
                 return 0;
 
-        return seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + SYSCALL_FILTER_SET_RAW_IO, SCMP_ACT_ERRNO(EPERM));
+        return seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + SYSCALL_FILTER_SET_RAW_IO, SCMP_ACT_ERRNO(EPERM), false);
 }
 
 static int apply_restrict_namespaces(const Unit *u, const ExecContext *c) {
@@ -1585,6 +1623,8 @@ static void do_idle_pipe_dance(int idle_pipe[4]) {
         idle_pipe[3] = safe_close(idle_pipe[3]);
 }
 
+static const char *exec_directory_env_name_to_string(ExecDirectoryType t);
+
 static int build_environment(
                 const Unit *u,
                 const ExecContext *c,
@@ -1598,14 +1638,16 @@ static int build_environment(
                 char ***ret) {
 
         _cleanup_strv_free_ char **our_env = NULL;
+        ExecDirectoryType t;
         size_t n_env = 0;
         char *x;
 
         assert(u);
         assert(c);
+        assert(p);
         assert(ret);
 
-        our_env = new0(char*, 14);
+        our_env = new0(char*, 14 + _EXEC_DIRECTORY_TYPE_MAX);
         if (!our_env)
                 return -ENOMEM;
 
@@ -1710,8 +1752,37 @@ static int build_environment(
                 our_env[n_env++] = x;
         }
 
+        for (t = 0; t < _EXEC_DIRECTORY_TYPE_MAX; t++) {
+                _cleanup_free_ char *pre = NULL, *joined = NULL;
+                const char *n;
+
+                if (!p->prefix[t])
+                        continue;
+
+                if (strv_isempty(c->directories[t].paths))
+                        continue;
+
+                n = exec_directory_env_name_to_string(t);
+                if (!n)
+                        continue;
+
+                pre = strjoin(p->prefix[t], "/");
+                if (!pre)
+                        return -ENOMEM;
+
+                joined = strv_join_prefix(c->directories[t].paths, ":", pre);
+                if (!joined)
+                        return -ENOMEM;
+
+                x = strjoin(n, "=", joined);
+                if (!x)
+                        return -ENOMEM;
+
+                our_env[n_env++] = x;
+        }
+
         our_env[n_env++] = NULL;
-        assert(n_env <= 12);
+        assert(n_env <= 14 + _EXEC_DIRECTORY_TYPE_MAX);
 
         *ret = TAKE_PTR(our_env);
 
@@ -2010,7 +2081,7 @@ static int setup_exec_directory(
 
                 if (context->dynamic_user &&
                     !IN_SET(type, EXEC_DIRECTORY_RUNTIME, EXEC_DIRECTORY_CONFIGURATION)) {
-                        _cleanup_free_ char *private_root = NULL, *relative = NULL, *parent = NULL;
+                        _cleanup_free_ char *private_root = NULL;
 
                         /* So, here's one extra complication when dealing with DynamicUser=1 units. In that case we
                          * want to avoid leaving a directory around fully accessible that is owned by a dynamic user
@@ -2075,18 +2146,8 @@ static int setup_exec_directory(
                                         goto fail;
                         }
 
-                        parent = dirname_malloc(p);
-                        if (!parent) {
-                                r = -ENOMEM;
-                                goto fail;
-                        }
-
-                        r = path_make_relative(parent, pp, &relative);
-                        if (r < 0)
-                                goto fail;
-
                         /* And link it up from the original place */
-                        r = symlink_idempotent(relative, p);
+                        r = symlink_idempotent(pp, p, true);
                         if (r < 0)
                                 goto fail;
 
@@ -2379,11 +2440,24 @@ static int apply_mount_namespace(
 
         bind_mount_free_many(bind_mounts, n_bind_mounts);
 
-        /* If we couldn't set up the namespace this is probably due to a
-         * missing capability. In this case, silently proceeed. */
-        if (IN_SET(r, -EPERM, -EACCES)) {
-                log_unit_debug_errno(u, r, "Failed to set up namespace, assuming containerized execution, ignoring: %m");
-                return 0;
+        /* If we couldn't set up the namespace this is probably due to a missing capability. setup_namespace() reports
+         * that with a special, recognizable error ENOANO. In this case, silently proceeed, but only if exclusively
+         * sandboxing options were used, i.e. nothing such as RootDirectory= or BindMount= that would result in a
+         * completely different execution environment. */
+        if (r == -ENOANO) {
+                if (n_bind_mounts == 0 &&
+                    context->n_temporary_filesystems == 0 &&
+                    !root_dir && !root_image &&
+                    !context->dynamic_user) {
+                        log_unit_debug(u, "Failed to set up namespace, assuming containerized execution and ignoring.");
+                        return 0;
+                }
+
+                log_unit_debug(u, "Failed to set up namespace, and refusing to continue since the selected namespacing options alter mount environment non-trivially.\n"
+                               "Bind mounts: %zu, temporary filesystems: %zu, root directory: %s, root image: %s, dynamic user: %s",
+                               n_bind_mounts, context->n_temporary_filesystems, yes_no(root_dir), yes_no(root_image), yes_no(context->dynamic_user));
+
+                return -EOPNOTSUPP;
         }
 
         return r;
@@ -2455,9 +2529,6 @@ static int setup_keyring(
          * automatically created on-demand and then linked to the per-UID keyring, by the kernel. The kernel's built-in
          * on-demand behaviour is very appropriate for login users, but probably not so much for system services, where
          * UIDs are not necessarily specific to a service but reused (at least in the case of UID 0). */
-
-        if (!(p->flags & EXEC_NEW_KEYRING))
-                return 0;
 
         if (context->keyring_mode == EXEC_KEYRING_INHERIT)
                 return 0;
@@ -2566,6 +2637,7 @@ static int close_remaining_fds(
                 const DynamicCreds *dcreds,
                 int user_lookup_fd,
                 int socket_fd,
+                int exec_fd,
                 int *fds, size_t n_fds) {
 
         size_t n_dont_close = 0;
@@ -2582,6 +2654,8 @@ static int close_remaining_fds(
 
         if (socket_fd >= 0)
                 dont_close[n_dont_close++] = socket_fd;
+        if (exec_fd >= 0)
+                dont_close[n_dont_close++] = exec_fd;
         if (n_fds > 0) {
                 memcpy(dont_close + n_dont_close, fds, sizeof(int) * n_fds);
                 n_dont_close += n_fds;
@@ -2707,6 +2781,37 @@ static int compile_suggested_paths(const ExecContext *c, const ExecParameters *p
 
 static char *exec_command_line(char **argv);
 
+static int exec_parameters_get_cgroup_path(const ExecParameters *params, char **ret) {
+        bool using_subcgroup;
+        char *p;
+
+        assert(params);
+        assert(ret);
+
+        if (!params->cgroup_path)
+                return -EINVAL;
+
+        /* If we are called for a unit where cgroup delegation is on, and the payload created its own populated
+         * subcgroup (which we expect it to do, after all it asked for delegation), then we cannot place the control
+         * processes started after the main unit's process in the unit's main cgroup because it is now an inner one,
+         * and inner cgroups may not contain processes. Hence, if delegation is on, and this is a control process,
+         * let's use ".control" as subcgroup instead. Note that we do so only for ExecStartPost=, ExecReload=,
+         * ExecStop=, ExecStopPost=, i.e. for the commands where the main process is already forked. For ExecStartPre=
+         * this is not necessary, the cgroup is still empty. We distinguish these cases with the EXEC_CONTROL_CGROUP
+         * flag, which is only passed for the former statements, not for the latter. */
+
+        using_subcgroup = FLAGS_SET(params->flags, EXEC_CONTROL_CGROUP|EXEC_CGROUP_DELEGATE|EXEC_IS_CONTROL);
+        if (using_subcgroup)
+                p = strjoin(params->cgroup_path, "/.control");
+        else
+                p = strdup(params->cgroup_path);
+        if (!p)
+                return -ENOMEM;
+
+        *ret = p;
+        return using_subcgroup;
+}
+
 static int exec_child(
                 Unit *unit,
                 const ExecCommand *command,
@@ -2714,20 +2819,20 @@ static int exec_child(
                 const ExecParameters *params,
                 ExecRuntime *runtime,
                 DynamicCreds *dcreds,
-                char **argv,
                 int socket_fd,
                 int named_iofds[3],
                 int *fds,
-                size_t n_storage_fds,
                 size_t n_socket_fds,
+                size_t n_storage_fds,
                 char **files_env,
                 int user_lookup_fd,
                 int *exit_status) {
 
         _cleanup_strv_free_ char **our_env = NULL, **pass_env = NULL, **accum_env = NULL, **final_argv = NULL;
-        _cleanup_free_ char *home_buffer = NULL;
+        int *fds_with_exec_fd, n_fds_with_exec_fd, r, ngids = 0, exec_fd = -1;
         _cleanup_free_ gid_t *supplementary_gids = NULL;
         const char *username = NULL, *groupname = NULL;
+        _cleanup_free_ char *home_buffer = NULL;
         const char *home = NULL, *shell = NULL;
         dev_t journal_stream_dev = 0;
         ino_t journal_stream_ino = 0;
@@ -2747,7 +2852,6 @@ static int exec_child(
 #endif
         uid_t uid = UID_INVALID;
         gid_t gid = GID_INVALID;
-        int r, ngids = 0;
         size_t n_fds;
         ExecDirectoryType dt;
         int secure_bits;
@@ -2791,8 +2895,8 @@ static int exec_child(
         /* In case anything used libc syslog(), close this here, too */
         closelog();
 
-        n_fds = n_storage_fds + n_socket_fds;
-        r = close_remaining_fds(params, runtime, dcreds, user_lookup_fd, socket_fd, fds, n_fds);
+        n_fds = n_socket_fds + n_storage_fds;
+        r = close_remaining_fds(params, runtime, dcreds, user_lookup_fd, socket_fd, params->exec_fd, fds, n_fds);
         if (r < 0) {
                 *exit_status = EXIT_FDS;
                 return log_unit_error_errno(unit, r, "Failed to close unwanted file descriptors: %m");
@@ -2810,7 +2914,7 @@ static int exec_child(
                 const char *vc = params->confirm_spawn;
                 _cleanup_free_ char *cmdline = NULL;
 
-                cmdline = exec_command_line(argv);
+                cmdline = exec_command_line(command->argv);
                 if (!cmdline) {
                         *exit_status = EXIT_MEMORY;
                         return log_oom();
@@ -2828,10 +2932,22 @@ static int exec_child(
                 }
         }
 
+        /* We are about to invoke NSS and PAM modules. Let's tell them what we are doing here, maybe they care. This is
+         * used by nss-resolve to disable itself when we are about to start systemd-resolved, to avoid deadlocks. Note
+         * that these env vars do not survive the execve(), which means they really only apply to the PAM and NSS
+         * invocations themselves. Also note that while we'll only invoke NSS modules involved in user management they
+         * might internally call into other NSS modules that are involved in hostname resolution, we never know. */
+        if (setenv("SYSTEMD_ACTIVATION_UNIT", unit->id, true) != 0 ||
+            setenv("SYSTEMD_ACTIVATION_SCOPE", MANAGER_IS_SYSTEM(unit->manager) ? "system" : "user", true) != 0) {
+                *exit_status = EXIT_MEMORY;
+                return log_unit_error_errno(unit, errno, "Failed to update environment: %m");
+        }
+
         if (context->dynamic_user && dcreds) {
                 _cleanup_strv_free_ char **suggested_paths = NULL;
 
-                /* Make sure we bypass our own NSS module for any NSS checks */
+                /* On top of that, make sure we bypass our own NSS module nss-systemd comprehensively for any NSS
+                 * checks, if DynamicUser=1 is used, as we shouldn't create a feedback loop with ourselves here.*/
                 if (putenv((char*) "SYSTEMD_NSS_DYNAMIC_BYPASS=1") != 0) {
                         *exit_status = EXIT_USER;
                         return log_unit_error_errno(unit, errno, "Failed to update environment: %m");
@@ -2909,6 +3025,24 @@ static int exec_child(
         if (socket_fd >= 0)
                 (void) fd_nonblock(socket_fd, false);
 
+        /* Journald will try to look-up our cgroup in order to populate _SYSTEMD_CGROUP and _SYSTEMD_UNIT fields.
+         * Hence we need to migrate to the target cgroup from init.scope before connecting to journald */
+        if (params->cgroup_path) {
+                _cleanup_free_ char *p = NULL;
+
+                r = exec_parameters_get_cgroup_path(params, &p);
+                if (r < 0) {
+                        *exit_status = EXIT_CGROUP;
+                        return log_unit_error_errno(unit, r, "Failed to acquire cgroup path: %m");
+                }
+
+                r = cg_attach_everywhere(params->cgroup_supported, p, 0, NULL, NULL);
+                if (r < 0) {
+                        *exit_status = EXIT_CGROUP;
+                        return log_unit_error_errno(unit, r, "Failed to attach to cgroup %s: %m", p);
+                }
+        }
+
         r = setup_input(context, params, socket_fd, named_iofds);
         if (r < 0) {
                 *exit_status = EXIT_STDIN;
@@ -2925,14 +3059,6 @@ static int exec_child(
         if (r < 0) {
                 *exit_status = EXIT_STDERR;
                 return log_unit_error_errno(unit, r, "Failed to set up standard error output: %m");
-        }
-
-        if (params->cgroup_path) {
-                r = cg_attach_everywhere(params->cgroup_supported, params->cgroup_path, 0, NULL, NULL);
-                if (r < 0) {
-                        *exit_status = EXIT_CGROUP;
-                        return log_unit_error_errno(unit, r, "Failed to attach to cgroup %s: %m", params->cgroup_path);
-                }
         }
 
         if (context->oom_score_adjust_set) {
@@ -3130,11 +3256,6 @@ static int exec_child(
                 }
         }
 
-        /* Apply just after mount namespace setup */
-        r = apply_working_directory(context, params, home, needs_mount_namespace, exit_status);
-        if (r < 0)
-                return log_unit_error_errno(unit, r, "Changing to the requested working directory failed: %m");
-
         /* Drop groups as early as possbile */
         if (needs_setuid) {
                 r = enforce_groups(gid, supplementary_gids, ngids);
@@ -3165,17 +3286,58 @@ static int exec_child(
         }
 
         /* We repeat the fd closing here, to make sure that nothing is leaked from the PAM modules. Note that we are
-         * more aggressive this time since socket_fd and the netns fds we don't need anymore. The custom endpoint fd
-         * was needed to upload the policy and can now be closed as well. */
-        r = close_all_fds(fds, n_fds);
+         * more aggressive this time since socket_fd and the netns fds we don't need anymore. We do keep the exec_fd
+         * however if we have it as we want to keep it open until the final execve(). */
+
+        if (params->exec_fd >= 0) {
+                exec_fd = params->exec_fd;
+
+                if (exec_fd < 3 + (int) n_fds) {
+                        int moved_fd;
+
+                        /* Let's move the exec fd far up, so that it's outside of the fd range we want to pass to the
+                         * process we are about to execute. */
+
+                        moved_fd = fcntl(exec_fd, F_DUPFD_CLOEXEC, 3 + (int) n_fds);
+                        if (moved_fd < 0) {
+                                *exit_status = EXIT_FDS;
+                                return log_unit_error_errno(unit, errno, "Couldn't move exec fd up: %m");
+                        }
+
+                        safe_close(exec_fd);
+                        exec_fd = moved_fd;
+                } else {
+                        /* This fd should be FD_CLOEXEC already, but let's make sure. */
+                        r = fd_cloexec(exec_fd, true);
+                        if (r < 0) {
+                                *exit_status = EXIT_FDS;
+                                return log_unit_error_errno(unit, r, "Failed to make exec fd FD_CLOEXEC: %m");
+                        }
+                }
+
+                fds_with_exec_fd = newa(int, n_fds + 1);
+                memcpy_safe(fds_with_exec_fd, fds, n_fds * sizeof(int));
+                fds_with_exec_fd[n_fds] = exec_fd;
+                n_fds_with_exec_fd = n_fds + 1;
+        } else {
+                fds_with_exec_fd = fds;
+                n_fds_with_exec_fd = n_fds;
+        }
+
+        r = close_all_fds(fds_with_exec_fd, n_fds_with_exec_fd);
         if (r >= 0)
                 r = shift_fds(fds, n_fds);
         if (r >= 0)
-                r = flags_fds(fds, n_storage_fds, n_socket_fds, context->non_blocking);
+                r = flags_fds(fds, n_socket_fds, n_storage_fds, context->non_blocking);
         if (r < 0) {
                 *exit_status = EXIT_FDS;
                 return log_unit_error_errno(unit, r, "Failed to adjust passed file descriptors: %m");
         }
+
+        /* At this point, the fds we want to pass to the program are all ready and set up, with O_CLOEXEC turned off
+         * and at the right fd numbers. The are no other fds open, with one exception: the exec_fd if it is defined,
+         * and it has O_CLOEXEC set, after all we want it to be closed by the execve(), so that our parent knows we
+         * came this far. */
 
         secure_bits = context->secure_bits;
 
@@ -3267,6 +3429,12 @@ static int exec_child(
                         }
                 }
         }
+
+        /* Apply working directory here, because the working directory might be on NFS and only the user running
+         * this service might have the correct privilege to change to the working directory */
+        r = apply_working_directory(context, params, home, needs_mount_namespace, exit_status);
+        if (r < 0)
+                return log_unit_error_errno(unit, r, "Changing to the requested working directory failed: %m");
 
         if (needs_sandboxing) {
                 /* Apply other MAC contexts late, but before seccomp syscall filtering, as those should really be last to
@@ -3389,7 +3557,7 @@ static int exec_child(
                 strv_free_and_replace(accum_env, ee);
         }
 
-        final_argv = replace_env_argv(argv, accum_env);
+        final_argv = replace_env_argv(command->argv, accum_env);
         if (!final_argv) {
                 *exit_status = EXIT_MEMORY;
                 return log_oom();
@@ -3407,10 +3575,35 @@ static int exec_child(
                                    LOG_UNIT_INVOCATION_ID(unit));
         }
 
-        execve(command->path, final_argv, accum_env);
+        if (exec_fd >= 0) {
+                uint8_t hot = 1;
 
-        if (errno == ENOENT && (command->flags & EXEC_COMMAND_IGNORE_FAILURE)) {
-                log_struct_errno(LOG_INFO, errno,
+                /* We have finished with all our initializations. Let's now let the manager know that. From this point
+                 * on, if the manager sees POLLHUP on the exec_fd, then execve() was successful. */
+
+                if (write(exec_fd, &hot, sizeof(hot)) < 0) {
+                        *exit_status = EXIT_EXEC;
+                        return log_unit_error_errno(unit, errno, "Failed to enable exec_fd: %m");
+                }
+        }
+
+        execve(command->path, final_argv, accum_env);
+        r = -errno;
+
+        if (exec_fd >= 0) {
+                uint8_t hot = 0;
+
+                /* The execve() failed. This means the exec_fd is still open. Which means we need to tell the manager
+                 * that POLLHUP on it no longer means execve() succeeded. */
+
+                if (write(exec_fd, &hot, sizeof(hot)) < 0) {
+                        *exit_status = EXIT_EXEC;
+                        return log_unit_error_errno(unit, errno, "Failed to disable exec_fd: %m");
+                }
+        }
+
+        if (r == -ENOENT && (command->flags & EXEC_COMMAND_IGNORE_FAILURE)) {
+                log_struct_errno(LOG_INFO, r,
                                  "MESSAGE_ID=" SD_MESSAGE_SPAWN_FAILED_STR,
                                  LOG_UNIT_ID(unit),
                                  LOG_UNIT_INVOCATION_ID(unit),
@@ -3421,7 +3614,7 @@ static int exec_child(
         }
 
         *exit_status = EXIT_EXEC;
-        return log_unit_error_errno(unit, errno, "Failed to execute command: %m");
+        return log_unit_error_errno(unit, r, "Failed to execute command: %m");
 }
 
 static int exec_context_load_environment(const Unit *unit, const ExecContext *c, char ***l);
@@ -3435,13 +3628,11 @@ int exec_spawn(Unit *unit,
                DynamicCreds *dcreds,
                pid_t *ret) {
 
+        int socket_fd, r, named_iofds[3] = { -1, -1, -1 }, *fds = NULL;
+        _cleanup_free_ char *subcgroup_path = NULL;
         _cleanup_strv_free_ char **files_env = NULL;
-        int *fds = NULL;
         size_t n_storage_fds = 0, n_socket_fds = 0;
         _cleanup_free_ char *line = NULL;
-        int socket_fd, r;
-        int named_iofds[3] = { -1, -1, -1 };
-        char **argv;
         pid_t pid;
 
         assert(unit);
@@ -3449,7 +3640,7 @@ int exec_spawn(Unit *unit,
         assert(context);
         assert(ret);
         assert(params);
-        assert(params->fds || (params->n_storage_fds + params->n_socket_fds <= 0));
+        assert(params->fds || (params->n_socket_fds + params->n_storage_fds <= 0));
 
         if (context->std_input == EXEC_INPUT_SOCKET ||
             context->std_output == EXEC_OUTPUT_SOCKET ||
@@ -3469,8 +3660,8 @@ int exec_spawn(Unit *unit,
         } else {
                 socket_fd = -1;
                 fds = params->fds;
-                n_storage_fds = params->n_storage_fds;
                 n_socket_fds = params->n_socket_fds;
+                n_storage_fds = params->n_storage_fds;
         }
 
         r = exec_context_named_iofds(context, params, named_iofds);
@@ -3481,8 +3672,7 @@ int exec_spawn(Unit *unit,
         if (r < 0)
                 return log_unit_error_errno(unit, r, "Failed to load environment files: %m");
 
-        argv = params->argv ?: command->argv;
-        line = exec_command_line(argv);
+        line = exec_command_line(command->argv);
         if (!line)
                 return log_oom();
 
@@ -3491,6 +3681,17 @@ int exec_spawn(Unit *unit,
                    "EXECUTABLE=%s", command->path,
                    LOG_UNIT_ID(unit),
                    LOG_UNIT_INVOCATION_ID(unit));
+
+        if (params->cgroup_path) {
+                r = exec_parameters_get_cgroup_path(params, &subcgroup_path);
+                if (r < 0)
+                        return log_unit_error_errno(unit, r, "Failed to acquire subcgroup path: %m");
+                if (r > 0) { /* We are using a child cgroup */
+                        r = cg_create(SYSTEMD_CGROUP_CONTROLLER, subcgroup_path);
+                        if (r < 0)
+                                return log_unit_error_errno(unit, r, "Failed to create control group '%s': %m", subcgroup_path);
+                }
+        }
 
         pid = fork();
         if (pid < 0)
@@ -3505,12 +3706,11 @@ int exec_spawn(Unit *unit,
                                params,
                                runtime,
                                dcreds,
-                               argv,
                                socket_fd,
                                named_iofds,
                                fds,
-                               n_storage_fds,
                                n_socket_fds,
+                               n_storage_fds,
                                files_env,
                                unit->manager->user_lookup_fds[1],
                                &exit_status);
@@ -3530,13 +3730,11 @@ int exec_spawn(Unit *unit,
 
         log_unit_debug(unit, "Forked %s as "PID_FMT, command->path, pid);
 
-        /* We add the new process to the cgroup both in the child (so
-         * that we can be sure that no user code is ever executed
-         * outside of the cgroup) and in the parent (so that we can be
-         * sure that when we kill the cgroup the process will be
-         * killed too). */
-        if (params->cgroup_path)
-                (void) cg_attach(SYSTEMD_CGROUP_CONTROLLER, params->cgroup_path, pid);
+        /* We add the new process to the cgroup both in the child (so that we can be sure that no user code is ever
+         * executed outside of the cgroup) and in the parent (so that we can be sure that when we kill the cgroup the
+         * process will be killed too). */
+        if (subcgroup_path)
+                (void) cg_attach(SYSTEMD_CGROUP_CONTROLLER, subcgroup_path, pid);
 
         exec_status_start(&command->exec_status, pid);
 
@@ -3624,6 +3822,9 @@ void exec_context_done(ExecContext *c) {
 
         exec_context_free_log_extra_fields(c);
 
+        c->log_rate_limit_interval_usec = 0;
+        c->log_rate_limit_burst = 0;
+
         c->stdin_data = mfree(c->stdin_data);
         c->stdin_data_size = 0;
 }
@@ -3655,7 +3856,6 @@ static void exec_command_done(ExecCommand *c) {
         assert(c);
 
         c->path = mfree(c->path);
-
         c->argv = strv_free(c->argv);
 }
 
@@ -3683,6 +3883,24 @@ void exec_command_free_array(ExecCommand **c, size_t n) {
 
         for (i = 0; i < n; i++)
                 c[i] = exec_command_free_list(c[i]);
+}
+
+void exec_command_reset_status_array(ExecCommand *c, size_t n) {
+        size_t i;
+
+        for (i = 0; i < n; i++)
+                exec_status_reset(&c[i].exec_status);
+}
+
+void exec_command_reset_status_list_array(ExecCommand **c, size_t n) {
+        size_t i;
+
+        for (i = 0; i < n; i++) {
+                ExecCommand *z;
+
+                LIST_FOREACH(command, z, c[i])
+                        exec_status_reset(&z->exec_status);
+        }
 }
 
 typedef struct InvalidEnvInfo {
@@ -3813,7 +4031,7 @@ static int exec_context_load_environment(const Unit *unit, const ExecContext *c,
                 assert(pglob.gl_pathc > 0);
 
                 for (n = 0; n < pglob.gl_pathc; n++) {
-                        k = load_env_file(NULL, pglob.gl_pathv[n], NULL, &p);
+                        k = load_env_file(NULL, pglob.gl_pathv[n], &p);
                         if (k < 0) {
                                 if (ignore)
                                         continue;
@@ -3976,9 +4194,9 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
 
         for (i = 0; i < RLIM_NLIMITS; i++)
                 if (c->rlimit[i]) {
-                        fprintf(f, "Limit%s%s: " RLIM_FMT "\n",
+                        fprintf(f, "%sLimit%s: " RLIM_FMT "\n",
                                 prefix, rlimit_to_string(i), c->rlimit[i]->rlim_max);
-                        fprintf(f, "Limit%s%sSoft: " RLIM_FMT "\n",
+                        fprintf(f, "%sLimit%sSoft: " RLIM_FMT "\n",
                                 prefix, rlimit_to_string(i), c->rlimit[i]->rlim_cur);
                 }
 
@@ -4036,8 +4254,12 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 fprintf(f, "%sStandardInputFile: %s\n", prefix, c->stdio_file[STDIN_FILENO]);
         if (c->std_output == EXEC_OUTPUT_FILE)
                 fprintf(f, "%sStandardOutputFile: %s\n", prefix, c->stdio_file[STDOUT_FILENO]);
+        if (c->std_output == EXEC_OUTPUT_FILE_APPEND)
+                fprintf(f, "%sStandardOutputFileToAppend: %s\n", prefix, c->stdio_file[STDOUT_FILENO]);
         if (c->std_error == EXEC_OUTPUT_FILE)
                 fprintf(f, "%sStandardErrorFile: %s\n", prefix, c->stdio_file[STDERR_FILENO]);
+        if (c->std_error == EXEC_OUTPUT_FILE_APPEND)
+                fprintf(f, "%sStandardErrorFileToAppend: %s\n", prefix, c->stdio_file[STDERR_FILENO]);
 
         if (c->tty_path)
                 fprintf(f,
@@ -4083,6 +4305,17 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
 
                 fprintf(f, "%sLogLevelMax: %s\n", prefix, strna(t));
         }
+
+        if (c->log_rate_limit_interval_usec > 0) {
+                char buf_timespan[FORMAT_TIMESPAN_MAX];
+
+                fprintf(f,
+                        "%sLogRateLimitIntervalSec: %s\n",
+                        prefix, format_timespan(buf_timespan, sizeof(buf_timespan), c->log_rate_limit_interval_usec, USEC_PER_SEC));
+        }
+
+        if (c->log_rate_limit_burst > 0)
+                fprintf(f, "%sLogRateLimitBurst: %u\n", prefix, c->log_rate_limit_burst);
 
         if (c->n_log_extra_fields > 0) {
                 size_t j;
@@ -4331,18 +4564,22 @@ void exec_context_free_log_extra_fields(ExecContext *c) {
 void exec_status_start(ExecStatus *s, pid_t pid) {
         assert(s);
 
-        zero(*s);
-        s->pid = pid;
+        *s = (ExecStatus) {
+                .pid = pid,
+        };
+
         dual_timestamp_get(&s->start_timestamp);
 }
 
 void exec_status_exit(ExecStatus *s, const ExecContext *context, pid_t pid, int code, int status) {
         assert(s);
 
-        if (s->pid && s->pid != pid)
-                zero(*s);
+        if (s->pid != pid) {
+                *s = (ExecStatus) {
+                        .pid = pid,
+                };
+        }
 
-        s->pid = pid;
         dual_timestamp_get(&s->exit_timestamp);
 
         s->code = code;
@@ -4350,10 +4587,16 @@ void exec_status_exit(ExecStatus *s, const ExecContext *context, pid_t pid, int 
 
         if (context) {
                 if (context->utmp_id)
-                        utmp_put_dead_process(context->utmp_id, pid, code, status);
+                        (void) utmp_put_dead_process(context->utmp_id, pid, code, status);
 
                 exec_context_tty_reset(context, NULL);
         }
+}
+
+void exec_status_reset(ExecStatus *s) {
+        assert(s);
+
+        *s = (ExecStatus) {};
 }
 
 void exec_status_dump(const ExecStatus *s, FILE *f, const char *prefix) {
@@ -4487,8 +4730,7 @@ int exec_command_set(ExecCommand *c, const char *path, ...) {
                 return -ENOMEM;
         }
 
-        free(c->path);
-        c->path = p;
+        free_and_replace(c->path, p);
 
         return strv_free_and_replace(c->argv, l);
 }
@@ -4920,10 +5162,8 @@ void exec_runtime_deserialize_one(Manager *m, const char *value, FDSet *fds) {
 finalize:
 
         r = exec_runtime_add(m, id, tmp_dir, var_tmp_dir, (int[]) { fd0, fd1 }, NULL);
-        if (r < 0) {
+        if (r < 0)
                 log_debug_errno(r, "Failed to add exec-runtime: %m");
-                return;
-        }
 }
 
 void exec_runtime_vacuum(Manager *m) {
@@ -4940,6 +5180,13 @@ void exec_runtime_vacuum(Manager *m) {
 
                 (void) exec_runtime_free(rt, false);
         }
+}
+
+void exec_params_clear(ExecParameters *p) {
+        if (!p)
+                return;
+
+        strv_free(p->environment);
 }
 
 static const char* const exec_input_table[_EXEC_INPUT_MAX] = {
@@ -4968,6 +5215,7 @@ static const char* const exec_output_table[_EXEC_OUTPUT_MAX] = {
         [EXEC_OUTPUT_SOCKET] = "socket",
         [EXEC_OUTPUT_NAMED_FD] = "fd",
         [EXEC_OUTPUT_FILE] = "file",
+        [EXEC_OUTPUT_FILE_APPEND] = "append",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(exec_output, ExecOutput);
@@ -4997,6 +5245,16 @@ static const char* const exec_directory_type_table[_EXEC_DIRECTORY_TYPE_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(exec_directory_type, ExecDirectoryType);
+
+static const char* const exec_directory_env_name_table[_EXEC_DIRECTORY_TYPE_MAX] = {
+        [EXEC_DIRECTORY_RUNTIME] = "RUNTIME_DIRECTORY",
+        [EXEC_DIRECTORY_STATE] = "STATE_DIRECTORY",
+        [EXEC_DIRECTORY_CACHE] = "CACHE_DIRECTORY",
+        [EXEC_DIRECTORY_LOGS] = "LOGS_DIRECTORY",
+        [EXEC_DIRECTORY_CONFIGURATION] = "CONFIGURATION_DIRECTORY",
+};
+
+DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(exec_directory_env_name, ExecDirectoryType);
 
 static const char* const exec_keyring_mode_table[_EXEC_KEYRING_MODE_MAX] = {
         [EXEC_KEYRING_INHERIT] = "inherit",

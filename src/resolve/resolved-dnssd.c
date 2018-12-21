@@ -11,7 +11,7 @@ const char* const dnssd_service_dirs[] = {
         "/etc/systemd/dnssd",
         "/run/systemd/dnssd",
         "/usr/lib/systemd/dnssd",
-#ifdef HAVE_SPLIT_USR
+#if HAVE_SPLIT_USR
         "/lib/systemd/dnssd",
 #endif
     NULL
@@ -141,7 +141,7 @@ static int dnssd_service_load(Manager *manager, const char *filename) {
         return 0;
 }
 
-static int specifier_dnssd_host_name(char specifier, void *data, void *userdata, char **ret) {
+static int specifier_dnssd_host_name(char specifier, const void *data, const void *userdata, char **ret) {
         DnssdService *s  = (DnssdService *) userdata;
         char *n;
 
@@ -175,10 +175,10 @@ int dnssd_render_instance_name(DnssdService *s, char **ret_name) {
         if (r < 0)
                 return log_debug_errno(r, "Failed to replace specifiers: %m");
 
-        if (!dns_service_name_is_valid(name)) {
-                log_debug("Service instance name '%s' is invalid.", name);
-                return -EINVAL;
-        }
+        if (!dns_service_name_is_valid(name))
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Service instance name '%s' is invalid.",
+                                       name);
 
         *ret_name = TAKE_PTR(name);
 
@@ -228,10 +228,10 @@ int dnssd_update_rrs(DnssdService *s) {
         if (r < 0)
                 return r;
 
-        r = dns_name_concat(s->type, "local", &service_name);
+        r = dns_name_concat(s->type, "local", 0, &service_name);
         if (r < 0)
                 return r;
-        r = dns_name_concat(n, service_name, &full_name);
+        r = dns_name_concat(n, service_name, 0, &full_name);
         if (r < 0)
                 return r;
 

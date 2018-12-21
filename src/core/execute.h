@@ -16,7 +16,7 @@ typedef struct Manager Manager;
 #include "cgroup-util.h"
 #include "fdset.h"
 #include "list.h"
-#include "missing.h"
+#include "missing_resource.h"
 #include "namespace.h"
 #include "nsflags.h"
 
@@ -56,6 +56,7 @@ typedef enum ExecOutput {
         EXEC_OUTPUT_SOCKET,
         EXEC_OUTPUT_NAMED_FD,
         EXEC_OUTPUT_FILE,
+        EXEC_OUTPUT_FILE_APPEND,
         _EXEC_OUTPUT_MAX,
         _EXEC_OUTPUT_INVALID = -1
 } ExecOutput;
@@ -76,21 +77,23 @@ typedef enum ExecKeyringMode {
         _EXEC_KEYRING_MODE_INVALID = -1,
 } ExecKeyringMode;
 
+/* Contains start and exit information about an executed command.  */
 struct ExecStatus {
+        pid_t pid;
         dual_timestamp start_timestamp;
         dual_timestamp exit_timestamp;
-        pid_t pid;
         int code;     /* as in siginfo_t::si_code */
         int status;   /* as in sigingo_t::si_status */
 };
 
 typedef enum ExecCommandFlags {
-        EXEC_COMMAND_IGNORE_FAILURE = 1,
-        EXEC_COMMAND_FULLY_PRIVILEGED = 2,
-        EXEC_COMMAND_NO_SETUID = 4,
-        EXEC_COMMAND_AMBIENT_MAGIC = 8,
+        EXEC_COMMAND_IGNORE_FAILURE   = 1 << 0,
+        EXEC_COMMAND_FULLY_PRIVILEGED = 1 << 1,
+        EXEC_COMMAND_NO_SETUID        = 1 << 2,
+        EXEC_COMMAND_AMBIENT_MAGIC    = 1 << 3,
 } ExecCommandFlags;
 
+/* Stores information about commands we execute. Covers both configuration settings as well as runtime data. */
 struct ExecCommand {
         char *path;
         char **argv;
@@ -99,13 +102,16 @@ struct ExecCommand {
         LIST_FIELDS(ExecCommand, command); /* useful for chaining commands */
 };
 
+/* Encapsulates certain aspects of the runtime environment that is to be shared between multiple otherwise separate
+ * invocations of commands. Specifically, this allows sharing of /tmp and /var/tmp data as well as network namespaces
+ * between invocations of commands. This is a reference counted object, with one reference taken by each currently
+ * active command invocation that wants to share this runtime. */
 struct ExecRuntime {
-        int n_ref;
+        unsigned n_ref;
 
         Manager *manager;
 
-        /* unit id of the owner */
-        char *id;
+        char *id; /* Unit id of the owner */
 
         char *tmp_dir;
         char *var_tmp_dir;
@@ -130,6 +136,9 @@ typedef struct ExecDirectory {
         mode_t mode;
 } ExecDirectory;
 
+/* Encodes configuration parameters applied to invoked commands. Does not carry runtime data, but only configuration
+ * changes sourced from unit files and suchlike. ExecContext objects are usually embedded into Unit objects, and do not
+ * change after being loaded. */
 struct ExecContext {
         char **environment;
         char **environment_files;
@@ -216,6 +225,9 @@ struct ExecContext {
         struct iovec* log_extra_fields;
         size_t n_log_extra_fields;
 
+        usec_t log_rate_limit_interval_usec;
+        unsigned log_rate_limit_burst;
+
         bool cpu_sched_reset_on_fork;
         bool non_blocking;
         bool private_tmp;
@@ -277,27 +289,28 @@ typedef enum ExecFlags {
         EXEC_APPLY_SANDBOXING  = 1 << 0,
         EXEC_APPLY_CHROOT      = 1 << 1,
         EXEC_APPLY_TTY_STDIN   = 1 << 2,
-        EXEC_NEW_KEYRING       = 1 << 3,
-        EXEC_PASS_LOG_UNIT     = 1 << 4, /* Whether to pass the unit name to the service's journal stream connection */
-        EXEC_CHOWN_DIRECTORIES = 1 << 5, /* chown() the runtime/state/cache/log directories to the user we run as, under all conditions */
-        EXEC_NSS_BYPASS_BUS    = 1 << 6, /* Set the SYSTEMD_NSS_BYPASS_BUS environment variable, to disable nss-systemd for dbus */
-        EXEC_CGROUP_DELEGATE   = 1 << 7,
+        EXEC_PASS_LOG_UNIT     = 1 << 3, /* Whether to pass the unit name to the service's journal stream connection */
+        EXEC_CHOWN_DIRECTORIES = 1 << 4, /* chown() the runtime/state/cache/log directories to the user we run as, under all conditions */
+        EXEC_NSS_BYPASS_BUS    = 1 << 5, /* Set the SYSTEMD_NSS_BYPASS_BUS environment variable, to disable nss-systemd for dbus */
+        EXEC_CGROUP_DELEGATE   = 1 << 6,
+        EXEC_IS_CONTROL        = 1 << 7,
+        EXEC_CONTROL_CGROUP    = 1 << 8, /* Place the process not in the indicated cgroup but in a subcgroup '/.control', but only EXEC_CGROUP_DELEGATE and EXEC_IS_CONTROL is set, too */
 
         /* The following are not used by execute.c, but by consumers internally */
-        EXEC_PASS_FDS          = 1 << 8,
-        EXEC_IS_CONTROL        = 1 << 9,
+        EXEC_PASS_FDS          = 1 << 9,
         EXEC_SETENV_RESULT     = 1 << 10,
         EXEC_SET_WATCHDOG      = 1 << 11,
 } ExecFlags;
 
+/* Parameters for a specific invocation of a command. This structure is put together right before a command is
+ * executed. */
 struct ExecParameters {
-        char **argv;
         char **environment;
 
         int *fds;
         char **fd_names;
-        size_t n_storage_fds;
         size_t n_socket_fds;
+        size_t n_storage_fds;
 
         ExecFlags flags;
         bool selinux_context_net:1;
@@ -316,6 +329,9 @@ struct ExecParameters {
         int stdin_fd;
         int stdout_fd;
         int stderr_fd;
+
+        /* An fd that is closed by the execve(), and thus will result in EOF when the execve() is done */
+        int exec_fd;
 };
 
 #include "unit.h"
@@ -330,14 +346,14 @@ int exec_spawn(Unit *unit,
                pid_t *ret);
 
 void exec_command_done_array(ExecCommand *c, size_t n);
-
 ExecCommand* exec_command_free_list(ExecCommand *c);
 void exec_command_free_array(ExecCommand **c, size_t n);
-
+void exec_command_reset_status_array(ExecCommand *c, size_t n);
+void exec_command_reset_status_list_array(ExecCommand **c, size_t n);
 void exec_command_dump_list(ExecCommand *c, FILE *f, const char *prefix);
 void exec_command_append_list(ExecCommand **l, ExecCommand *e);
-int exec_command_set(ExecCommand *c, const char *path, ...);
-int exec_command_append(ExecCommand *c, const char *path, ...);
+int exec_command_set(ExecCommand *c, const char *path, ...) _sentinel_;
+int exec_command_append(ExecCommand *c, const char *path, ...) _sentinel_;
 
 void exec_context_init(ExecContext *c);
 void exec_context_done(ExecContext *c);
@@ -357,6 +373,7 @@ void exec_context_free_log_extra_fields(ExecContext *c);
 void exec_status_start(ExecStatus *s, pid_t pid);
 void exec_status_exit(ExecStatus *s, const ExecContext *context, pid_t pid, int code, int status);
 void exec_status_dump(const ExecStatus *s, FILE *f, const char *prefix);
+void exec_status_reset(ExecStatus *s);
 
 int exec_runtime_acquire(Manager *m, const ExecContext *c, const char *name, bool create, ExecRuntime **ret);
 ExecRuntime *exec_runtime_unref(ExecRuntime *r, bool destroy);
@@ -365,6 +382,8 @@ int exec_runtime_serialize(const Manager *m, FILE *f, FDSet *fds);
 int exec_runtime_deserialize_compat(Unit *u, const char *key, const char *value, FDSet *fds);
 void exec_runtime_deserialize_one(Manager *m, const char *value, FDSet *fds);
 void exec_runtime_vacuum(Manager *m);
+
+void exec_params_clear(ExecParameters *p);
 
 const char* exec_output_to_string(ExecOutput i) _const_;
 ExecOutput exec_output_from_string(const char *s) _pure_;

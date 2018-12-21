@@ -15,9 +15,11 @@
 #include "hexdecoct.h"
 #include "hostname-util.h"
 #include "in-addr-util.h"
+#include "ip-protocol-list.h"
 #include "list.h"
 #include "locale-util.h"
-#include "mount-util.h"
+#include "missing_fs.h"
+#include "mountpoint-util.h"
 #include "nsflags.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -25,7 +27,6 @@
 #include "rlimit-util.h"
 #include "securebits-util.h"
 #include "signal-util.h"
-#include "socket-protocol-list.h"
 #include "string-util.h"
 #include "syslog-util.h"
 #include "terminal-util.h"
@@ -83,10 +84,8 @@ int bus_parse_unit_info(sd_bus_message *message, UnitInfo *u) {
                 int r;                                                  \
                                                                         \
                 r = parse_func(eq);                                     \
-                if (r < 0) {                                            \
-                        log_error("Failed to parse %s: %s", field, eq); \
-                        return -EINVAL;                                 \
-                }                                                       \
+                if (r < 0)                                              \
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to parse %s: %s", field, eq);                                 \
                                                                         \
                 r = sd_bus_message_append(m, "(sv)", field,             \
                                           bus_type, (int32_t) r);       \
@@ -105,7 +104,7 @@ DEFINE_BUS_APPEND_PARSE("i", parse_errno);
 DEFINE_BUS_APPEND_PARSE("i", sched_policy_from_string);
 DEFINE_BUS_APPEND_PARSE("i", secure_bits_from_string);
 DEFINE_BUS_APPEND_PARSE("i", signal_from_string);
-DEFINE_BUS_APPEND_PARSE("i", socket_protocol_from_name);
+DEFINE_BUS_APPEND_PARSE("i", parse_ip_protocol);
 DEFINE_BUS_APPEND_PARSE_PTR("i", int32_t, int, ioprio_parse_priority);
 DEFINE_BUS_APPEND_PARSE_PTR("i", int32_t, int, parse_nice);
 DEFINE_BUS_APPEND_PARSE_PTR("i", int32_t, int, safe_atoi);
@@ -277,8 +276,8 @@ static int bus_append_exec_command(sd_bus_message *m, const char *field, const c
                 case '+':
                 case '!':
                         /* The bus API doesn't support +, ! and !! currently, unfortunately. :-( */
-                        log_error("Sorry, but +, ! and !! are currently not supported for transient services.");
-                        return -EOPNOTSUPP;
+                        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                               "Sorry, but +, ! and !! are currently not supported for transient services.");
 
                 default:
                         done = true;
@@ -413,7 +412,7 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                 return 1;
         }
 
-        if (STR_IN_SET(field, "MemoryLow", "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryLimit", "TasksMax")) {
+        if (STR_IN_SET(field, "MemoryMin", "MemoryLow", "MemoryHigh", "MemoryMax", "MemorySwapMax", "MemoryLimit", "TasksMax")) {
 
                 if (isempty(eq) || streq(eq, "infinity")) {
                         r = sd_bus_message_append(m, "(sv)", field, "t", CGROUP_LIMIT_MAX);
@@ -422,16 +421,16 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                         return 1;
                 }
 
-                r = parse_percent(eq);
+                r = parse_permille(eq);
                 if (r >= 0) {
                         char *n;
 
-                        /* When this is a percentage we'll convert this into a relative value in the range
-                         * 0…UINT32_MAX and pass it in the MemoryLowScale property (and related
-                         * ones). This way the physical memory size can be determined server-side */
+                        /* When this is a percentage we'll convert this into a relative value in the range 0…UINT32_MAX
+                         * and pass it in the MemoryLowScale property (and related ones). This way the physical memory
+                         * size can be determined server-side. */
 
                         n = strjoina(field, "Scale");
-                        r = sd_bus_message_append(m, "(sv)", n, "u", (uint32_t) (((uint64_t) UINT32_MAX * r) / 100U));
+                        r = sd_bus_message_append(m, "(sv)", n, "u", (uint32_t) (((uint64_t) r * UINT32_MAX) / 1000U));
                         if (r < 0)
                                 return bus_log_create_error(r);
 
@@ -449,13 +448,14 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                 if (isempty(eq))
                         r = sd_bus_message_append(m, "(sv)", "CPUQuotaPerSecUSec", "t", USEC_INFINITY);
                 else {
-                        r = parse_percent_unbounded(eq);
-                        if (r <= 0) {
-                                log_error_errno(r, "CPU quota '%s' invalid.", eq);
-                                return -EINVAL;
-                        }
+                        r = parse_permille_unbounded(eq);
+                        if (r == 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(ERANGE),
+                                                       "CPU quota too small.");
+                        if (r < 0)
+                                return log_error_errno(r, "CPU quota '%s' invalid.", eq);
 
-                        r = sd_bus_message_append(m, "(sv)", "CPUQuotaPerSecUSec", "t", (usec_t) r * USEC_PER_SEC / 100U);
+                        r = sd_bus_message_append(m, "(sv)", "CPUQuotaPerSecUSec", "t", (((uint64_t) r * USEC_PER_SEC) / 1000U));
                 }
 
                 if (r < 0)
@@ -495,17 +495,17 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                         uint64_t bytes;
 
                         e = strchr(eq, ' ');
-                        if (!e) {
-                                log_error("Failed to parse %s value %s.", field, eq);
-                                return -EINVAL;
-                        }
+                        if (!e)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Failed to parse %s value %s.",
+                                                       field, eq);
 
                         path = strndupa(eq, e - eq);
                         bandwidth = e+1;
 
-                        if (streq(bandwidth, "infinity")) {
+                        if (streq(bandwidth, "infinity"))
                                 bytes = CGROUP_LIMIT_MAX;
-                        } else {
+                        else {
                                 r = parse_size(bandwidth, 1000, &bytes);
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to parse byte value %s: %m", bandwidth);
@@ -529,10 +529,10 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                         uint64_t u;
 
                         e = strchr(eq, ' ');
-                        if (!e) {
-                                log_error("Failed to parse %s value %s.", field, eq);
-                                return -EINVAL;
-                        }
+                        if (!e)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Failed to parse %s value %s.",
+                                                       field, eq);
 
                         path = strndupa(eq, e - eq);
                         weight = e+1;
@@ -542,6 +542,37 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                                 return log_error_errno(r, "Failed to parse %s value %s: %m", field, weight);
 
                         r = sd_bus_message_append(m, "(sv)", field, "a(st)", 1, path, u);
+                }
+
+                if (r < 0)
+                        return bus_log_create_error(r);
+
+                return 1;
+        }
+
+        if (streq(field, "IODeviceLatencyTargetSec")) {
+                const char *field_usec = "IODeviceLatencyTargetUSec";
+
+                if (isempty(eq))
+                        r = sd_bus_message_append(m, "(sv)", field_usec, "a(st)", USEC_INFINITY);
+                else {
+                        const char *path, *target, *e;
+                        usec_t usec;
+
+                        e = strchr(eq, ' ');
+                        if (!e)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Failed to parse %s value %s.",
+                                                       field, eq);
+
+                        path = strndupa(eq, e - eq);
+                        target = e+1;
+
+                        r = parse_sec(target, &usec);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse %s value %s: %m", field, target);
+
+                        r = sd_bus_message_append(m, "(sv)", field_usec, "a(st)", 1, path, usec);
                 }
 
                 if (r < 0)
@@ -634,13 +665,25 @@ static int bus_append_cgroup_property(sd_bus_message *m, const char *field, cons
                                 return bus_log_create_error(r);
 
                 } else {
-                        r = in_addr_prefix_from_string_auto(eq, &family, &prefix, &prefixlen);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to parse IP address prefix: %s", eq);
+                        for (;;) {
+                                _cleanup_free_ char *word = NULL;
 
-                        r = bus_append_ip_address_access(m, family, &prefix, prefixlen);
-                        if (r < 0)
-                                return bus_log_create_error(r);
+                                r = extract_first_word(&eq, &word, NULL, 0);
+                                if (r == 0)
+                                        break;
+                                if (r == -ENOMEM)
+                                        return log_oom();
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to parse %s: %s", field, eq);
+
+                                r = in_addr_prefix_from_string_auto(word, &family, &prefix, &prefixlen);
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to parse IP address prefix: %s", word);
+
+                                r = bus_append_ip_address_access(m, family, &prefix, prefixlen);
+                                if (r < 0)
+                                        return bus_log_create_error(r);
+                        }
                 }
 
                 r = sd_bus_message_close_container(m);
@@ -755,6 +798,14 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
 
                 return bus_append_parse_nsec(m, field, eq);
 
+        if (streq(field, "LogRateLimitIntervalSec"))
+
+                return bus_append_parse_sec_rename(m, field, eq);
+
+        if (streq(field, "LogRateLimitBurst"))
+
+                return bus_append_safe_atou(m, field, eq);
+
         if (streq(field, "MountFlags"))
 
                 return bus_append_mount_propagation_flags_from_string(m, field, eq);
@@ -823,9 +874,11 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                 } else if ((n = startswith(eq, "file:"))) {
                         appended = strjoina(field, "File");
                         r = sd_bus_message_append(m, "(sv)", appended, "s", n);
+                } else if ((n = startswith(eq, "append:"))) {
+                        appended = strjoina(field, "FileToAppend");
+                        r = sd_bus_message_append(m, "(sv)", appended, "s", n);
                 } else
                         r = sd_bus_message_append(m, "(sv)", field, "s", eq);
-
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -1072,10 +1125,10 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                                 r = extract_first_word(&p, &destination, ":" WHITESPACE, EXTRACT_QUOTES|EXTRACT_DONT_COALESCE_SEPARATORS);
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to parse argument: %m");
-                                if (r == 0) {
-                                        log_error("Missing argument after ':': %s", eq);
-                                        return -EINVAL;
-                                }
+                                if (r == 0)
+                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                               "Missing argument after ':': %s",
+                                                               eq);
 
                                 d = destination;
 
@@ -1090,10 +1143,10 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                                                 flags = MS_REC;
                                         else if (streq(options, "norbind"))
                                                 flags = 0;
-                                        else {
-                                                log_error("Unknown options: %s", eq);
-                                                return -EINVAL;
-                                        }
+                                        else
+                                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                                       "Unknown options: %s",
+                                                                       eq);
                                 }
                         } else
                                 d = s;
@@ -1151,10 +1204,10 @@ static int bus_append_execute_property(sd_bus_message *m, const char *field, con
                         r = extract_first_word(&w, &path, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse argument: %m");
-                        if (r == 0) {
-                                log_error("Failed to parse argument: %s", p);
-                                return -EINVAL;
-                        }
+                        if (r == 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Failed to parse argument: %s",
+                                                       p);
 
                         r = sd_bus_message_append(m, "(ss)", path, w);
                         if (r < 0)
@@ -1189,7 +1242,7 @@ static int bus_append_kill_property(sd_bus_message *m, const char *field, const 
 
                 return bus_append_parse_boolean(m, field, eq);
 
-        if (streq(field, "KillSignal"))
+        if (STR_IN_SET(field, "KillSignal", "FinalKillSignal", "WatchdogSignal"))
 
                 return bus_append_signal_from_string(m, field, eq);
 
@@ -1414,7 +1467,7 @@ static int bus_append_socket_property(sd_bus_message *m, const char *field, cons
 
         if (streq(field, "SocketProtocol"))
 
-                return bus_append_socket_protocol_from_name(m, field, eq);
+                return bus_append_parse_ip_protocol(m, field, eq);
 
         if (STR_IN_SET(field,
                        "ListenStream", "ListenDatagram", "ListenSequentialPacket", "ListenNetlink",
@@ -1505,6 +1558,25 @@ static int bus_append_unit_property(sd_bus_message *m, const char *field, const 
 
                 return bus_append_safe_atou(m, field, eq);
 
+        if (STR_IN_SET(field, "SuccessActionExitStatus", "FailureActionExitStatus")) {
+
+                if (isempty(eq))
+                        r = sd_bus_message_append(m, "(sv)", field, "i", -1);
+                else {
+                        uint8_t u;
+
+                        r = safe_atou8(eq, &u);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse %s=%s", field, eq);
+
+                        r = sd_bus_message_append(m, "(sv)", field, "i", (int) u);
+                }
+                if (r < 0)
+                        return bus_log_create_error(r);
+
+                return 1;
+        }
+
         if (unit_dependency_from_string(field) >= 0 ||
             STR_IN_SET(field, "Documentation", "RequiresMountsFor"))
 
@@ -1550,10 +1622,9 @@ int bus_append_unit_property_assignment(sd_bus_message *m, UnitType t, const cha
         assert(assignment);
 
         eq = strchr(assignment, '=');
-        if (!eq) {
-                log_error("Not an assignment: %s", assignment);
-                return -EINVAL;
-        }
+        if (!eq)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Not an assignment: %s", assignment);
 
         field = strndupa(assignment, eq - assignment);
         eq++;
@@ -1656,20 +1727,20 @@ int bus_append_unit_property_assignment(sd_bus_message *m, UnitType t, const cha
         case UNIT_TARGET:
         case UNIT_DEVICE:
         case UNIT_SWAP:
-                log_error("Not supported unit type");
-                return -EINVAL;
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Not supported unit type");
 
         default:
-                log_error("Invalid unit type");
-                return -EINVAL;
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Invalid unit type");
         }
 
         r = bus_append_unit_property(m, field, eq);
         if (r != 0)
                 return r;
 
-        log_error("Unknown assignment: %s", assignment);
-        return -EINVAL;
+        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                               "Unknown assignment: %s", assignment);
 }
 
 int bus_append_unit_property_assignment_many(sd_bus_message *m, UnitType t, char **l) {
@@ -1953,8 +2024,8 @@ static int check_wait_response(BusWaitForJobs *d, bool quiet, const char* const*
         else if (STR_IN_SET(d->result, "done", "skipped"))
                 return 0;
 
-        log_debug("Unexpected job result, assuming server side newer than us: %s", d->result);
-        return -EIO;
+        return log_debug_errno(SYNTHETIC_ERRNO(EIO),
+                               "Unexpected job result, assuming server side newer than us: %s", d->result);
 }
 
 int bus_wait_for_jobs(BusWaitForJobs *d, bool quiet, const char* const* extra_args) {
@@ -2173,13 +2244,8 @@ static void remove_cgroup(Hashmap *cgroups, struct CGroupInfo *cg) {
         free(cg);
 }
 
-static int cgroup_info_compare_func(const void *a, const void *b) {
-        const struct CGroupInfo *x = *(const struct CGroupInfo* const*) a, *y = *(const struct CGroupInfo* const*) b;
-
-        assert(x);
-        assert(y);
-
-        return strcmp(x->cgroup_path, y->cgroup_path);
+static int cgroup_info_compare_func(struct CGroupInfo * const *a, struct CGroupInfo * const *b) {
+        return strcmp((*a)->cgroup_path, (*b)->cgroup_path);
 }
 
 static int dump_processes(
@@ -2216,7 +2282,7 @@ static int dump_processes(
                         pids[n++] = PTR_TO_PID(pidp);
 
                 assert(n == hashmap_size(cg->pids));
-                qsort_safe(pids, n, sizeof(pid_t), pid_compare_func);
+                typesafe_qsort(pids, n, pid_compare_func);
 
                 width = DECIMAL_STR_WIDTH(pids[n-1]);
 
@@ -2239,7 +2305,7 @@ static int dump_processes(
                         }
 
                         more = i+1 < n || cg->children;
-                        special = special_glyph(more ? TREE_BRANCH : TREE_RIGHT);
+                        special = special_glyph(more ? SPECIAL_GLYPH_TREE_BRANCH : SPECIAL_GLYPH_TREE_RIGHT);
 
                         fprintf(stdout, "%s%s%*"PID_PRI" %s\n",
                                 prefix,
@@ -2258,7 +2324,7 @@ static int dump_processes(
                 LIST_FOREACH(siblings, child, cg->children)
                         children[n++] = child;
                 assert(n == cg->n_children);
-                qsort_safe(children, n, sizeof(struct CGroupInfo*), cgroup_info_compare_func);
+                typesafe_qsort(children, n, cgroup_info_compare_func);
 
                 if (n_columns != 0)
                         n_columns = MAX(LESS_BY(n_columns, 2U), 20U);
@@ -2276,14 +2342,14 @@ static int dump_processes(
                         name++;
 
                         more = i+1 < n;
-                        special = special_glyph(more ? TREE_BRANCH : TREE_RIGHT);
+                        special = special_glyph(more ? SPECIAL_GLYPH_TREE_BRANCH : SPECIAL_GLYPH_TREE_RIGHT);
 
                         fputs(prefix, stdout);
                         fputs(special, stdout);
                         fputs(name, stdout);
                         fputc('\n', stdout);
 
-                        special = special_glyph(more ? TREE_VERTICAL : TREE_SPACE);
+                        special = special_glyph(more ? SPECIAL_GLYPH_TREE_VERTICAL : SPECIAL_GLYPH_TREE_SPACE);
 
                         pp = strappend(prefix, special);
                         if (!pp)
@@ -2345,7 +2411,7 @@ static int dump_extra_processes(
         if (n == 0)
                 return 0;
 
-        qsort_safe(pids, n, sizeof(pid_t), pid_compare_func);
+        typesafe_qsort(pids, n, pid_compare_func);
         width = DECIMAL_STR_WIDTH(pids[n-1]);
 
         for (k = 0; k < n; k++) {
@@ -2367,7 +2433,7 @@ static int dump_extra_processes(
 
                 fprintf(stdout, "%s%s %*" PID_PRI " %s\n",
                         prefix,
-                        special_glyph(TRIANGULAR_BULLET),
+                        special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET),
                         width, pids[k],
                         name);
         }

@@ -14,9 +14,11 @@
 #include "fstab-util.h"
 #include "generator.h"
 #include "log.h"
+#include "main-func.h"
 #include "mkdir.h"
 #include "mount-setup.h"
 #include "mount-util.h"
+#include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
@@ -38,8 +40,8 @@ typedef enum MountpointFlags {
         GROWFS    = 1 << 4,
 } MountpointFlags;
 
-static const char *arg_dest = "/tmp";
-static const char *arg_dest_late = "/tmp";
+static const char *arg_dest = NULL;
+static const char *arg_dest_late = NULL;
 static bool arg_fstab_enabled = true;
 static char *arg_root_what = NULL;
 static char *arg_root_fstype = NULL;
@@ -50,6 +52,14 @@ static char *arg_usr_what = NULL;
 static char *arg_usr_fstype = NULL;
 static char *arg_usr_options = NULL;
 static VolatileMode arg_volatile_mode = _VOLATILE_MODE_INVALID;
+
+STATIC_DESTRUCTOR_REGISTER(arg_root_what, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_root_fstype, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_root_options, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_root_hash, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_usr_what, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_usr_fstype, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_usr_options, freep);
 
 static int write_options(FILE *f, const char *options) {
         _cleanup_free_ char *o = NULL;
@@ -528,7 +538,7 @@ static int parse_fstab(bool initrd) {
                 if (!what)
                         return log_oom();
 
-                if (is_device_path(what) && path_is_read_only_fs("sys") > 0) {
+                if (is_device_path(what) && path_is_read_only_fs("/sys") > 0) {
                         log_info("Running in a container, ignoring fstab device entry for %s.", what);
                         continue;
                 }
@@ -857,25 +867,11 @@ static int determine_root(void) {
         return 1;
 }
 
-int main(int argc, char *argv[]) {
-        int r = 0;
+static int run(const char *dest, const char *dest_early, const char *dest_late) {
+        int r;
 
-        if (argc > 1 && argc != 4) {
-                log_error("This program takes three or no arguments.");
-                return EXIT_FAILURE;
-        }
-
-        if (argc > 1)
-                arg_dest = argv[1];
-        if (argc > 3)
-                arg_dest_late = argv[3];
-
-        log_set_prohibit_ipc(true);
-        log_set_target(LOG_TARGET_AUTO);
-        log_parse_environment();
-        log_open();
-
-        umask(0022);
+        assert_se(arg_dest = dest);
+        assert_se(arg_dest_late = dest_late);
 
         r = proc_cmdline_parse(parse_proc_cmdline_item, NULL, 0);
         if (r < 0)
@@ -920,14 +916,7 @@ int main(int argc, char *argv[]) {
                 }
         }
 
-        free(arg_root_what);
-        free(arg_root_fstype);
-        free(arg_root_options);
-        free(arg_root_hash);
-
-        free(arg_usr_what);
-        free(arg_usr_fstype);
-        free(arg_usr_options);
-
-        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+        return r;
 }
+
+DEFINE_MAIN_GENERATOR_FUNCTION(run);

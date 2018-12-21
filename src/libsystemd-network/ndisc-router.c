@@ -15,28 +15,7 @@
 #include "ndisc-router.h"
 #include "strv.h"
 
-_public_ sd_ndisc_router* sd_ndisc_router_ref(sd_ndisc_router *rt) {
-        if (!rt)
-                return NULL;
-
-        assert(rt->n_ref > 0);
-        rt->n_ref++;
-
-        return rt;
-}
-
-_public_ sd_ndisc_router* sd_ndisc_router_unref(sd_ndisc_router *rt) {
-        if (!rt)
-                return NULL;
-
-        assert(rt->n_ref > 0);
-        rt->n_ref--;
-
-        if (rt->n_ref > 0)
-                return NULL;
-
-        return mfree(rt);
-}
+DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_ndisc_router, sd_ndisc_router, mfree);
 
 sd_ndisc_router *ndisc_router_new(size_t raw_size) {
         sd_ndisc_router *rt;
@@ -189,7 +168,7 @@ int ndisc_router_parse(sd_ndisc_router *rt) {
 
                         if (has_mtu) {
                                 log_ndisc("MTU option specified twice, ignoring.");
-                                continue;
+                                break;
                         }
 
                         if (length != 8) {
@@ -230,7 +209,7 @@ int ndisc_router_parse(sd_ndisc_router *rt) {
 
                         if (has_flag_extension) {
                                 log_ndisc("Flags extension option specified twice, ignoring.");
-                                continue;
+                                break;
                         }
 
                         if (length < 1*8) {
@@ -697,7 +676,7 @@ _public_ int sd_ndisc_router_dnssl_get_domains(sd_ndisc_router *rt, char ***ret)
                                 _cleanup_free_ char *normalized = NULL;
 
                                 e[n] = 0;
-                                r = dns_name_normalize(e, &normalized);
+                                r = dns_name_normalize(e, 0, &normalized);
                                 if (r < 0)
                                         return r;
 

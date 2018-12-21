@@ -77,7 +77,7 @@ int dns_resource_key_new_append_suffix(DnsResourceKey **ret, DnsResourceKey *key
                 return 0;
         }
 
-        r = dns_name_concat(dns_resource_key_name(key), name, &joined);
+        r = dns_name_concat(dns_resource_key_name(key), name, 0, &joined);
         if (r < 0)
                 return r;
 
@@ -222,7 +222,7 @@ int dns_resource_key_match_rr(const DnsResourceKey *key, DnsResourceRecord *rr, 
         if (search_domain) {
                 _cleanup_free_ char *joined = NULL;
 
-                r = dns_name_concat(dns_resource_key_name(key), search_domain, &joined);
+                r = dns_name_concat(dns_resource_key_name(key), search_domain, 0, &joined);
                 if (r < 0)
                         return r;
 
@@ -254,7 +254,7 @@ int dns_resource_key_match_cname_or_dname(const DnsResourceKey *key, const DnsRe
         if (search_domain) {
                 _cleanup_free_ char *joined = NULL;
 
-                r = dns_name_concat(dns_resource_key_name(key), search_domain, &joined);
+                r = dns_name_concat(dns_resource_key_name(key), search_domain, 0, &joined);
                 if (r < 0)
                         return r;
 
@@ -282,9 +282,7 @@ int dns_resource_key_match_soa(const DnsResourceKey *key, const DnsResourceKey *
         return dns_name_endswith(dns_resource_key_name(key), dns_resource_key_name(soa));
 }
 
-static void dns_resource_key_hash_func(const void *i, struct siphash *state) {
-        const DnsResourceKey *k = i;
-
+static void dns_resource_key_hash_func(const DnsResourceKey *k, struct siphash *state) {
         assert(k);
 
         dns_name_hash_func(dns_resource_key_name(k), state);
@@ -292,31 +290,25 @@ static void dns_resource_key_hash_func(const void *i, struct siphash *state) {
         siphash24_compress(&k->type, sizeof(k->type), state);
 }
 
-static int dns_resource_key_compare_func(const void *a, const void *b) {
-        const DnsResourceKey *x = a, *y = b;
+static int dns_resource_key_compare_func(const DnsResourceKey *x, const DnsResourceKey *y) {
         int ret;
 
         ret = dns_name_compare_func(dns_resource_key_name(x), dns_resource_key_name(y));
         if (ret != 0)
                 return ret;
 
-        if (x->type < y->type)
-                return -1;
-        if (x->type > y->type)
-                return 1;
+        ret = CMP(x->type, y->type);
+        if (ret != 0)
+                return ret;
 
-        if (x->class < y->class)
-                return -1;
-        if (x->class > y->class)
-                return 1;
+        ret = CMP(x->class, y->class);
+        if (ret != 0)
+                return ret;
 
         return 0;
 }
 
-const struct hash_ops dns_resource_key_hash_ops = {
-        .hash = dns_resource_key_hash_func,
-        .compare = dns_resource_key_compare_func
-};
+DEFINE_HASH_OPS(dns_resource_key_hash_ops, DnsResourceKey, dns_resource_key_hash_func, dns_resource_key_compare_func);
 
 char* dns_resource_key_to_string(const DnsResourceKey *key, char *buf, size_t buf_size) {
         const char *c, *t;
@@ -401,26 +393,8 @@ DnsResourceRecord* dns_resource_record_new_full(uint16_t class, uint16_t type, c
         return dns_resource_record_new(key);
 }
 
-DnsResourceRecord* dns_resource_record_ref(DnsResourceRecord *rr) {
-        if (!rr)
-                return NULL;
-
-        assert(rr->n_ref > 0);
-        rr->n_ref++;
-
-        return rr;
-}
-
-DnsResourceRecord* dns_resource_record_unref(DnsResourceRecord *rr) {
-        if (!rr)
-                return NULL;
-
-        assert(rr->n_ref > 0);
-
-        if (rr->n_ref > 1) {
-                rr->n_ref--;
-                return NULL;
-        }
+static DnsResourceRecord* dns_resource_record_free(DnsResourceRecord *rr) {
+        assert(rr);
 
         if (rr->key) {
                 switch(rr->key->type) {
@@ -513,6 +487,8 @@ DnsResourceRecord* dns_resource_record_unref(DnsResourceRecord *rr) {
         free(rr->to_string);
         return mfree(rr);
 }
+
+DEFINE_TRIVIAL_REF_UNREF_FUNC(DnsResourceRecord, dns_resource_record, dns_resource_record_free);
 
 int dns_resource_record_new_reverse(DnsResourceRecord **ret, int family, const union in_addr_union *address, const char *hostname) {
         _cleanup_(dns_resource_key_unrefp) DnsResourceKey *key = NULL;
@@ -1361,9 +1337,7 @@ int dns_resource_record_is_synthetic(DnsResourceRecord *rr) {
         return !r;
 }
 
-void dns_resource_record_hash_func(const void *i, struct siphash *state) {
-        const DnsResourceRecord *rr = i;
-
+void dns_resource_record_hash_func(const DnsResourceRecord *rr, struct siphash *state) {
         assert(rr);
 
         dns_resource_key_hash_func(rr->key, state);
@@ -1504,27 +1478,22 @@ void dns_resource_record_hash_func(const void *i, struct siphash *state) {
         }
 }
 
-static int dns_resource_record_compare_func(const void *a, const void *b) {
-        const DnsResourceRecord *x = a, *y = b;
-        int ret;
+static int dns_resource_record_compare_func(const DnsResourceRecord *x, const DnsResourceRecord *y) {
+        int r;
 
-        ret = dns_resource_key_compare_func(x->key, y->key);
-        if (ret != 0)
-                return ret;
+        r = dns_resource_key_compare_func(x->key, y->key);
+        if (r != 0)
+                return r;
 
         if (dns_resource_record_equal(x, y))
                 return 0;
 
-        /* This is a bit dirty, we don't implement proper ordering, but
-         * the hashtable doesn't need ordering anyway, hence we don't
-         * care. */
-        return x < y ? -1 : 1;
+        /* We still use CMP() here, even though don't implement proper
+         * ordering, since the hashtable doesn't need ordering anyway. */
+        return CMP(x, y);
 }
 
-const struct hash_ops dns_resource_record_hash_ops = {
-        .hash = dns_resource_record_hash_func,
-        .compare = dns_resource_record_compare_func,
-};
+DEFINE_HASH_OPS(dns_resource_record_hash_ops, DnsResourceRecord, dns_resource_record_hash_func, dns_resource_record_compare_func);
 
 DnsResourceRecord *dns_resource_record_copy(DnsResourceRecord *rr) {
         _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *copy = NULL;

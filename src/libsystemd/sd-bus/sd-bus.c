@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include <endian.h>
 #include <netdb.h>
@@ -180,8 +178,7 @@ static sd_bus* bus_free(sd_bus *b) {
                  * apps, but are dead. */
 
                 assert(s->floating);
-                bus_slot_disconnect(s);
-                sd_bus_slot_unref(s);
+                bus_slot_disconnect(s, true);
         }
 
         if (b->default_bus_ptr)
@@ -197,7 +194,6 @@ static sd_bus* bus_free(sd_bus *b) {
         free(b->auth_buffer);
         free(b->address);
         free(b->machine);
-        free(b->cgroup_root);
         free(b->description);
         free(b->patch_sender);
 
@@ -235,18 +231,22 @@ _public_ int sd_bus_new(sd_bus **ret) {
 
         assert_return(ret, -EINVAL);
 
-        b = new0(sd_bus, 1);
+        b = new(sd_bus, 1);
         if (!b)
                 return -ENOMEM;
 
-        b->n_ref = REFCNT_INIT;
-        b->input_fd = b->output_fd = -1;
-        b->inotify_fd = -1;
-        b->message_version = 1;
-        b->creds_mask |= SD_BUS_CREDS_WELL_KNOWN_NAMES|SD_BUS_CREDS_UNIQUE_NAME;
-        b->accept_fd = true;
-        b->original_pid = getpid_cached();
-        b->n_groups = (size_t) -1;
+        *b = (sd_bus) {
+                .n_ref = REFCNT_INIT,
+                .input_fd = -1,
+                .output_fd = -1,
+                .inotify_fd = -1,
+                .message_version = 1,
+                .creds_mask = SD_BUS_CREDS_WELL_KNOWN_NAMES|SD_BUS_CREDS_UNIQUE_NAME,
+                .accept_fd = true,
+                .original_pid = getpid_cached(),
+                .n_groups = (size_t) -1,
+                .close_on_exit = true,
+        };
 
         assert_se(pthread_mutex_init(&b->memfd_cache_mutex, NULL) == 0);
 
@@ -733,20 +733,28 @@ static int parse_unix_address(sd_bus *b, const char **p, char **guid) {
 
         if (path) {
                 l = strlen(path);
-                if (l > sizeof(b->sockaddr.un.sun_path))
+                if (l >= sizeof(b->sockaddr.un.sun_path)) /* We insist on NUL termination */
                         return -E2BIG;
 
-                b->sockaddr.un.sun_family = AF_UNIX;
-                strncpy(b->sockaddr.un.sun_path, path, sizeof(b->sockaddr.un.sun_path));
-                b->sockaddr_size = offsetof(struct sockaddr_un, sun_path) + l;
-        } else if (abstract) {
+                b->sockaddr.un = (struct sockaddr_un) {
+                        .sun_family = AF_UNIX,
+                };
+
+                memcpy(b->sockaddr.un.sun_path, path, l);
+                b->sockaddr_size = offsetof(struct sockaddr_un, sun_path) + l + 1;
+
+        } else {
+                assert(abstract);
+
                 l = strlen(abstract);
-                if (l > sizeof(b->sockaddr.un.sun_path) - 1)
+                if (l >= sizeof(b->sockaddr.un.sun_path) - 1) /* We insist on NUL termination */
                         return -E2BIG;
 
-                b->sockaddr.un.sun_family = AF_UNIX;
-                b->sockaddr.un.sun_path[0] = 0;
-                strncpy(b->sockaddr.un.sun_path+1, abstract, sizeof(b->sockaddr.un.sun_path)-1);
+                b->sockaddr.un = (struct sockaddr_un) {
+                        .sun_family = AF_UNIX,
+                };
+
+                memcpy(b->sockaddr.un.sun_path+1, abstract, l);
                 b->sockaddr_size = offsetof(struct sockaddr_un, sun_path) + 1 + l;
         }
 
@@ -952,7 +960,7 @@ static int parse_container_unix_address(sd_bus *b, const char **p, char **guid) 
                 return -EINVAL;
 
         if (machine) {
-                if (!machine_name_is_valid(machine))
+                if (!streq(machine, ".host") && !machine_name_is_valid(machine))
                         return -EINVAL;
 
                 free_and_replace(b->machine, machine);
@@ -967,9 +975,11 @@ static int parse_container_unix_address(sd_bus *b, const char **p, char **guid) 
         } else
                 b->nspid = 0;
 
-        b->sockaddr.un.sun_family = AF_UNIX;
-        /* Note that we use the old /var/run prefix here, to increase compatibility with really old containers */
-        strncpy(b->sockaddr.un.sun_path, "/var/run/dbus/system_bus_socket", sizeof(b->sockaddr.un.sun_path));
+        b->sockaddr.un = (struct sockaddr_un) {
+                .sun_family = AF_UNIX,
+                /* Note that we use the old /var/run prefix here, to increase compatibility with really old containers */
+                .sun_path = "/var/run/dbus/system_bus_socket",
+        };
         b->sockaddr_size = SOCKADDR_UN_LEN(b->sockaddr.un);
         b->is_local = false;
 
@@ -1360,38 +1370,88 @@ _public_ int sd_bus_open_user(sd_bus **ret) {
 
 int bus_set_address_system_remote(sd_bus *b, const char *host) {
         _cleanup_free_ char *e = NULL;
-        char *m = NULL, *c = NULL, *a;
+        char *m = NULL, *c = NULL, *a, *rbracket = NULL, *p = NULL;
 
         assert(b);
         assert(host);
 
-        /* Let's see if we shall enter some container */
-        m = strchr(host, ':');
-        if (m) {
-                m++;
+        /* Skip ":"s in ipv6 addresses */
+        if (*host == '[') {
+                char *t;
 
-                /* Let's make sure this is not a port of some kind,
-                 * and is a valid machine name. */
-                if (!in_charset(m, DIGITS) && machine_name_is_valid(m)) {
-                        char *t;
+                rbracket = strchr(host, ']');
+                if (!rbracket)
+                        return -EINVAL;
+                t = strndupa(host + 1, rbracket - host - 1);
+                e = bus_address_escape(t);
+                if (!e)
+                        return -ENOMEM;
+        } else if ((a = strchr(host, '@'))) {
+                if (*(a + 1) == '[') {
+                        _cleanup_free_ char *t = NULL;
 
-                        /* Cut out the host part */
-                        t = strndupa(host, m - host - 1);
+                        rbracket = strchr(a + 1, ']');
+                        if (!rbracket)
+                                return -EINVAL;
+                        t = new0(char, strlen(host));
+                        if (!t)
+                                return -ENOMEM;
+                        strncat(t, host, a - host + 1);
+                        strncat(t, a + 2, rbracket - a - 2);
                         e = bus_address_escape(t);
                         if (!e)
                                 return -ENOMEM;
+                } else if (*(a + 1) == '\0' || strchr(a + 1, '@'))
+                        return -EINVAL;
+        }
 
-                        c = strjoina(",argv5=--machine=", m);
+        /* Let's see if a port was given */
+        m = strchr(rbracket ? rbracket + 1 : host, ':');
+        if (m) {
+                char *t;
+                bool got_forward_slash = false;
+
+                p = m + 1;
+
+                t = strchr(p, '/');
+                if (t) {
+                        p = strndupa(p, t - p);
+                        got_forward_slash = true;
+                }
+
+                if (!in_charset(p, "0123456789") || *p == '\0') {
+                        if (!machine_name_is_valid(p) || got_forward_slash)
+                                return -EINVAL;
+
+                        m = TAKE_PTR(p);
+                        goto interpret_port_as_machine_old_syntax;
                 }
         }
 
+        /* Let's see if a machine was given */
+        m = strchr(rbracket ? rbracket + 1 : host, '/');
+        if (m) {
+                m++;
+interpret_port_as_machine_old_syntax:
+                /* Let's make sure this is not a port of some kind,
+                 * and is a valid machine name. */
+                if (!in_charset(m, "0123456789") && machine_name_is_valid(m))
+                        c = strjoina(",argv", p ? "7" : "5", "=--machine=", m);
+        }
+
         if (!e) {
-                e = bus_address_escape(host);
+                char *t;
+
+                t = strndupa(host, strcspn(host, ":/"));
+
+                e = bus_address_escape(t);
                 if (!e)
                         return -ENOMEM;
         }
 
-        a = strjoin("unixexec:path=ssh,argv1=-xT,argv2=--,argv3=", e, ",argv4=systemd-stdio-bridge", c);
+        a = strjoin("unixexec:path=ssh,argv1=-xT", p ? ",argv2=-p,argv3=" : "", strempty(p),
+                                ",argv", p ? "4" : "2", "=--,argv", p ? "5" : "3", "=", e,
+                                ",argv", p ? "6" : "4", "=systemd-stdio-bridge", c);
         if (!a)
                 return -ENOMEM;
 
@@ -1450,7 +1510,7 @@ _public_ int sd_bus_open_system_machine(sd_bus **ret, const char *machine) {
 
         assert_return(machine, -EINVAL);
         assert_return(ret, -EINVAL);
-        assert_return(machine_name_is_valid(machine), -EINVAL);
+        assert_return(streq(machine, ".host") || machine_name_is_valid(machine), -EINVAL);
 
         r = sd_bus_new(&b);
         if (r < 0)
@@ -1518,27 +1578,7 @@ void bus_enter_closing(sd_bus *bus) {
         bus_set_state(bus, BUS_CLOSING);
 }
 
-_public_ sd_bus *sd_bus_ref(sd_bus *bus) {
-        if (!bus)
-                return NULL;
-
-        assert_se(REFCNT_INC(bus->n_ref) >= 2);
-
-        return bus;
-}
-
-_public_ sd_bus *sd_bus_unref(sd_bus *bus) {
-        unsigned i;
-
-        if (!bus)
-                return NULL;
-
-        i = REFCNT_DEC(bus->n_ref);
-        if (i > 0)
-                return NULL;
-
-        return bus_free(bus);
-}
+DEFINE_PUBLIC_ATOMIC_REF_UNREF_FUNC(sd_bus, sd_bus, bus_free);
 
 _public_ int sd_bus_is_open(sd_bus *bus) {
         assert_return(bus, -EINVAL);
@@ -1611,8 +1651,11 @@ static int bus_seal_message(sd_bus *b, sd_bus_message *m, usec_t timeout) {
                 return 0;
         }
 
-        if (timeout == 0)
-                timeout = BUS_DEFAULT_TIMEOUT;
+        if (timeout == 0) {
+                r = sd_bus_get_method_call_timeout(b, &timeout);
+                if (r < 0)
+                        return r;
+        }
 
         if (!m->sender && b->patch_sender) {
                 r = sd_bus_message_set_sender(m, b->patch_sender);
@@ -1913,13 +1956,7 @@ static int timeout_compare(const void *a, const void *b) {
         if (x->timeout_usec == 0 && y->timeout_usec != 0)
                 return 1;
 
-        if (x->timeout_usec < y->timeout_usec)
-                return -1;
-
-        if (x->timeout_usec > y->timeout_usec)
-                return 1;
-
-        return 0;
+        return CMP(x->timeout_usec, y->timeout_usec);
 }
 
 _public_ int sd_bus_call_async(
@@ -2359,10 +2396,8 @@ static int process_timeout(sd_bus *bus) {
         bus->current_slot = NULL;
         bus->current_message = NULL;
 
-        if (slot->floating) {
-                bus_slot_disconnect(slot);
-                sd_bus_slot_unref(slot);
-        }
+        if (slot->floating)
+                bus_slot_disconnect(slot, true);
 
         sd_bus_slot_unref(slot);
 
@@ -2464,10 +2499,8 @@ static int process_reply(sd_bus *bus, sd_bus_message *m) {
         bus->current_handler = NULL;
         bus->current_slot = NULL;
 
-        if (slot->floating) {
-                bus_slot_disconnect(slot);
-                sd_bus_slot_unref(slot);
-        }
+        if (slot->floating)
+                bus_slot_disconnect(slot, true);
 
         sd_bus_slot_unref(slot);
 
@@ -2809,10 +2842,8 @@ static int process_closing_reply_callback(sd_bus *bus, struct reply_callback *c)
         bus->current_slot = NULL;
         bus->current_message = NULL;
 
-        if (slot->floating) {
-                bus_slot_disconnect(slot);
-                sd_bus_slot_unref(slot);
-        }
+        if (slot->floating)
+                bus_slot_disconnect(slot, true);
 
         sd_bus_slot_unref(slot);
 
@@ -2883,7 +2914,6 @@ finish:
 }
 
 static int bus_process_internal(sd_bus *bus, bool hint_priority, int64_t priority, sd_bus_message **ret) {
-        BUS_DONT_DESTROY(bus);
         int r;
 
         /* Returns 0 when we didn't do anything. This should cause the
@@ -2897,7 +2927,9 @@ static int bus_process_internal(sd_bus *bus, bool hint_priority, int64_t priorit
 
         /* We don't allow recursively invoking sd_bus_process(). */
         assert_return(!bus->current_message, -EBUSY);
-        assert(!bus->current_slot);
+        assert(!bus->current_slot); /* This should be NULL whenever bus->current_message is */
+
+        BUS_DONT_DESTROY(bus);
 
         switch (bus->state) {
 
@@ -3166,10 +3198,8 @@ static int add_match_callback(
                 r = 1;
         }
 
-        if (failed && match_slot->floating) {
-                bus_slot_disconnect(match_slot);
-                sd_bus_slot_unref(match_slot);
-        }
+        if (failed && match_slot->floating)
+                bus_slot_disconnect(match_slot, true);
 
         sd_bus_slot_unref(match_slot);
 
@@ -3382,8 +3412,10 @@ static int quit_callback(sd_event_source *event, void *userdata) {
 
         assert(event);
 
-        sd_bus_flush(bus);
-        sd_bus_close(bus);
+        if (bus->close_on_exit) {
+                sd_bus_flush(bus);
+                sd_bus_close(bus);
+        }
 
         return 1;
 }
@@ -3896,24 +3928,6 @@ _public_ int sd_bus_get_description(sd_bus *bus, const char **description) {
         return 0;
 }
 
-int bus_get_root_path(sd_bus *bus) {
-        int r;
-
-        if (bus->cgroup_root)
-                return 0;
-
-        r = cg_get_root_path(&bus->cgroup_root);
-        if (r == -ENOENT) {
-                bus->cgroup_root = strdup("/");
-                if (!bus->cgroup_root)
-                        return -ENOMEM;
-
-                r = 0;
-        }
-
-        return r;
-}
-
 _public_ int sd_bus_get_scope(sd_bus *bus, const char **scope) {
         assert_return(bus, -EINVAL);
         assert_return(bus = bus_resolve(bus), -ENOPKG);
@@ -4074,4 +4088,52 @@ _public_ int sd_bus_get_n_queued_write(sd_bus *bus, uint64_t *ret) {
 
         *ret = bus->wqueue_size;
         return 0;
+}
+
+_public_ int sd_bus_set_method_call_timeout(sd_bus *bus, uint64_t usec) {
+        assert_return(bus, -EINVAL);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
+
+        bus->method_call_timeout = usec;
+        return 0;
+}
+
+_public_ int sd_bus_get_method_call_timeout(sd_bus *bus, uint64_t *ret) {
+        const char *e;
+        usec_t usec;
+
+        assert_return(bus, -EINVAL);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
+        assert_return(ret, -EINVAL);
+
+        if (bus->method_call_timeout != 0) {
+                *ret = bus->method_call_timeout;
+                return 0;
+        }
+
+        e = secure_getenv("SYSTEMD_BUS_TIMEOUT");
+        if (e && parse_sec(e, &usec) >= 0 && usec != 0) {
+                /* Save the parsed value to avoid multiple parsing. To change the timeout value,
+                 * use sd_bus_set_method_call_timeout() instead of setenv(). */
+                *ret = bus->method_call_timeout = usec;
+                return 0;
+        }
+
+        *ret = bus->method_call_timeout = BUS_DEFAULT_TIMEOUT;
+        return 0;
+}
+
+_public_ int sd_bus_set_close_on_exit(sd_bus *bus, int b) {
+        assert_return(bus, -EINVAL);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
+
+        bus->close_on_exit = b;
+        return 0;
+}
+
+_public_ int sd_bus_get_close_on_exit(sd_bus *bus) {
+        assert_return(bus, -EINVAL);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
+
+        return bus->close_on_exit;
 }

@@ -35,6 +35,8 @@ sources = files('''
         netdev/wireguard.h
         netdev/netdevsim.c
         netdev/netdevsim.h
+        netdev/fou-tunnel.c
+        netdev/fou-tunnel.h
         networkd-address-label.c
         networkd-address-label.h
         networkd-address-pool.c
@@ -62,6 +64,8 @@ sources = files('''
         networkd-manager.h
         networkd-ndisc.c
         networkd-ndisc.h
+        networkd-neighbor.c
+        networkd-neighbor.h
         networkd-radv.c
         networkd-radv.h
         networkd-network-bus.c
@@ -130,6 +134,27 @@ if conf.get('ENABLE_NETWORKD') == 1
                 install_data('systemd-networkd.pkla',
                              install_dir : polkitpkladir)
         endif
+
+        install_data('networkd.conf',
+                     install_dir : pkgsysconfdir)
+
+        fuzzers += [
+    [['src/network/fuzz-netdev-parser.c',
+      'src/fuzz/fuzz.h'],
+     [libnetworkd_core,
+      libudev_static,
+      libsystemd_network,
+      libshared],
+     [threads]],
+
+    [['src/network/fuzz-network-parser.c',
+      'src/fuzz/fuzz.h'],
+     [libnetworkd_core,
+      libudev_static,
+      libsystemd_network,
+      libshared],
+     [threads]]
+    ]
 
         tests += [
     [['src/network/test-networkd-conf.c'],

@@ -12,18 +12,21 @@
 #include "def.h"
 #include "device-nodes.h"
 #include "efivars.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "parse-util.h"
+#include "path-util.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "virt.h"
 
-void boot_entry_free(BootEntry *entry) {
+static void boot_entry_free(BootEntry *entry) {
         assert(entry);
 
-        free(entry->filename);
+        free(entry->id);
+        free(entry->path);
         free(entry->title);
         free(entry->show_title);
         free(entry->version);
@@ -36,7 +39,7 @@ void boot_entry_free(BootEntry *entry) {
         free(entry->device_tree);
 }
 
-int boot_entry_load(const char *path, BootEntry *entry) {
+static int boot_entry_load(const char *path, BootEntry *entry) {
         _cleanup_(boot_entry_free) BootEntry tmp = {};
         _cleanup_fclose_ FILE *f = NULL;
         unsigned line = 1;
@@ -53,8 +56,12 @@ int boot_entry_load(const char *path, BootEntry *entry) {
         }
 
         b = basename(path);
-        tmp.filename = strndup(b, c - b);
-        if (!tmp.filename)
+        tmp.id = strndup(b, c - b);
+        if (!tmp.id)
+                return log_oom();
+
+        tmp.path = strdup(path);
+        if (!tmp.path)
                 return log_oom();
 
         f = fopen(path, "re");
@@ -139,7 +146,7 @@ void boot_config_free(BootConfig *config) {
         free(config->entries);
 }
 
-int boot_loader_read_conf(const char *path, BootConfig *config) {
+static int boot_loader_read_conf(const char *path, BootConfig *config) {
         _cleanup_fclose_ FILE *f = NULL;
         unsigned line = 1;
         int r;
@@ -148,8 +155,12 @@ int boot_loader_read_conf(const char *path, BootConfig *config) {
         assert(config);
 
         f = fopen(path, "re");
-        if (!f)
+        if (!f) {
+                if (errno == ENOENT)
+                        return 0;
+
                 return log_error_errno(errno, "Failed to open \"%s\": %m", path);
+        }
 
         for (;;) {
                 _cleanup_free_ char *buf = NULL, *field = NULL;
@@ -199,16 +210,14 @@ int boot_loader_read_conf(const char *path, BootConfig *config) {
                         return log_error_errno(r, "%s:%u: Error while reading: %m", path, line);
         }
 
-        return 0;
+        return 1;
 }
 
-static int boot_entry_compare(const void *a, const void *b) {
-        const BootEntry *aa = a, *bb = b;
-
-        return str_verscmp(aa->filename, bb->filename);
+static int boot_entry_compare(const BootEntry *a, const BootEntry *b) {
+        return str_verscmp(a->id, b->id);
 }
 
-int boot_entries_find(const char *dir, BootEntry **ret_entries, size_t *ret_n_entries) {
+static int boot_entries_find(const char *dir, BootEntry **ret_entries, size_t *ret_n_entries) {
         _cleanup_strv_free_ char **files = NULL;
         char **f;
         int r;
@@ -234,7 +243,7 @@ int boot_entries_find(const char *dir, BootEntry **ret_entries, size_t *ret_n_en
                 n++;
         }
 
-        qsort_safe(array, n, sizeof(BootEntry), boot_entry_compare);
+        typesafe_qsort(array, n, boot_entry_compare);
 
         *ret_entries = array;
         *ret_n_entries = n;
@@ -302,7 +311,7 @@ static int boot_entries_uniquify(BootEntry *entries, size_t n_entries) {
         /* Add file name to non-unique titles */
         for (i = 0; i < n_entries; i++)
                 if (arr[i]) {
-                        r = asprintf(&s, "%s (%s)", boot_entry_title(entries + i), entries[i].filename);
+                        r = asprintf(&s, "%s (%s)", boot_entry_title(entries + i), entries[i].id);
                         if (r < 0)
                                 return -ENOMEM;
 
@@ -319,30 +328,30 @@ static int boot_entries_select_default(const BootConfig *config) {
 
         if (config->entry_oneshot)
                 for (i = config->n_entries - 1; i >= 0; i--)
-                        if (streq(config->entry_oneshot, config->entries[i].filename)) {
-                                log_debug("Found default: filename \"%s\" is matched by LoaderEntryOneShot",
-                                          config->entries[i].filename);
+                        if (streq(config->entry_oneshot, config->entries[i].id)) {
+                                log_debug("Found default: id \"%s\" is matched by LoaderEntryOneShot",
+                                          config->entries[i].id);
                                 return i;
                         }
 
         if (config->entry_default)
                 for (i = config->n_entries - 1; i >= 0; i--)
-                        if (streq(config->entry_default, config->entries[i].filename)) {
-                                log_debug("Found default: filename \"%s\" is matched by LoaderEntryDefault",
-                                          config->entries[i].filename);
+                        if (streq(config->entry_default, config->entries[i].id)) {
+                                log_debug("Found default: id \"%s\" is matched by LoaderEntryDefault",
+                                          config->entries[i].id);
                                 return i;
                         }
 
         if (config->default_pattern)
                 for (i = config->n_entries - 1; i >= 0; i--)
-                        if (fnmatch(config->default_pattern, config->entries[i].filename, FNM_CASEFOLD) == 0) {
-                                log_debug("Found default: filename \"%s\" is matched by pattern \"%s\"",
-                                          config->entries[i].filename, config->default_pattern);
+                        if (fnmatch(config->default_pattern, config->entries[i].id, FNM_CASEFOLD) == 0) {
+                                log_debug("Found default: id \"%s\" is matched by pattern \"%s\"",
+                                          config->entries[i].id, config->default_pattern);
                                 return i;
                         }
 
         if (config->n_entries > 0)
-                log_debug("Found default: last entry \"%s\"", config->entries[config->n_entries - 1].filename);
+                log_debug("Found default: last entry \"%s\"", config->entries[config->n_entries - 1].id);
         else
                 log_debug("Found no default boot entry :(");
 
@@ -359,24 +368,26 @@ int boot_entries_load_config(const char *esp_path, BootConfig *config) {
         p = strjoina(esp_path, "/loader/loader.conf");
         r = boot_loader_read_conf(p, config);
         if (r < 0)
-                return log_error_errno(r, "Failed to read boot config from \"%s\": %m", p);
+                return r;
 
         p = strjoina(esp_path, "/loader/entries");
         r = boot_entries_find(p, &config->entries, &config->n_entries);
         if (r < 0)
-                return log_error_errno(r, "Failed to read boot entries from \"%s\": %m", p);
+                return r;
 
         r = boot_entries_uniquify(config->entries, config->n_entries);
         if (r < 0)
                 return log_error_errno(r, "Failed to uniquify boot entries: %m");
 
-        r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderEntryOneShot", &config->entry_oneshot);
-        if (r < 0 && r != -ENOENT)
-                return log_error_errno(r, "Failed to read EFI var \"LoaderEntryOneShot\": %m");
+        if (is_efi_boot()) {
+                r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderEntryOneShot", &config->entry_oneshot);
+                if (r < 0 && r != -ENOENT)
+                        return log_error_errno(r, "Failed to read EFI var \"LoaderEntryOneShot\": %m");
 
-        r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderEntryDefault", &config->entry_default);
-        if (r < 0 && r != -ENOENT)
-                return log_error_errno(r, "Failed to read EFI var \"LoaderEntryDefault\": %m");
+                r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderEntryDefault", &config->entry_default);
+                if (r < 0 && r != -ENOENT)
+                        return log_error_errno(r, "Failed to read EFI var \"LoaderEntryDefault\": %m");
+        }
 
         config->default_entry = boot_entries_select_default(config);
         return 0;
@@ -394,7 +405,7 @@ static int verify_esp(
                 sd_id128_t *ret_uuid) {
 #if HAVE_BLKID
         _cleanup_(blkid_free_probep) blkid_probe b = NULL;
-        char t[DEV_NUM_PATH_MAX];
+        _cleanup_free_ char *node = NULL;
         const char *v;
 #endif
         uint64_t pstart = 0, psize = 0;
@@ -403,28 +414,33 @@ static int verify_esp(
         struct statfs sfs;
         sd_id128_t uuid = SD_ID128_NULL;
         uint32_t part = 0;
+        bool relax_checks;
         int r;
 
         assert(p);
 
+        relax_checks = getenv_bool("SYSTEMD_RELAX_ESP_CHECKS") > 0;
+
         /* Non-root user can only check the status, so if an error occured in the following, it does not cause any
          * issues. Let's also, silence the error messages. */
 
-        if (statfs(p, &sfs) < 0) {
-                /* If we are searching for the mount point, don't generate a log message if we can't find the path */
-                if (errno == ENOENT && searching)
-                        return -ENOENT;
+        if (!relax_checks) {
+                if (statfs(p, &sfs) < 0) {
+                        /* If we are searching for the mount point, don't generate a log message if we can't find the path */
+                        if (errno == ENOENT && searching)
+                                return -ENOENT;
 
-                return log_full_errno(unprivileged_mode && errno == EACCES ? LOG_DEBUG : LOG_ERR, errno,
-                                      "Failed to check file system type of \"%s\": %m", p);
-        }
+                        return log_full_errno(unprivileged_mode && errno == EACCES ? LOG_DEBUG : LOG_ERR, errno,
+                                              "Failed to check file system type of \"%s\": %m", p);
+                }
 
-        if (!F_TYPE_EQUAL(sfs.f_type, MSDOS_SUPER_MAGIC)) {
-                if (searching)
-                        return -EADDRNOTAVAIL;
+                if (!F_TYPE_EQUAL(sfs.f_type, MSDOS_SUPER_MAGIC)) {
+                        if (searching)
+                                return -EADDRNOTAVAIL;
 
-                log_error("File system \"%s\" is not a FAT EFI System Partition (ESP) file system.", p);
-                return -ENODEV;
+                        log_error("File system \"%s\" is not a FAT EFI System Partition (ESP) file system.", p);
+                        return -ENODEV;
+                }
         }
 
         if (stat(p, &st) < 0)
@@ -449,13 +465,15 @@ static int verify_esp(
 
         /* In a container we don't have access to block devices, skip this part of the verification, we trust the
          * container manager set everything up correctly on its own. Also skip the following verification for non-root user. */
-        if (detect_container() > 0 || unprivileged_mode)
+        if (detect_container() > 0 || unprivileged_mode || relax_checks)
                 goto finish;
 
 #if HAVE_BLKID
-        xsprintf_dev_num_path(t, "block", st.st_dev);
+        r = device_path_make_major_minor(S_IFBLK, st.st_dev, &node);
+        if (r < 0)
+                return log_error_errno(r, "Failed to format major/minor device path: %m");
         errno = 0;
-        b = blkid_new_probe_from_filename(t);
+        b = blkid_new_probe_from_filename(node);
         if (!b)
                 return log_error_errno(errno ?: ENOMEM, "Failed to open file system \"%s\": %m", p);
 
@@ -575,6 +593,18 @@ int find_esp_and_warn(
                 goto found;
         }
 
+        path = getenv("SYSTEMD_ESP_PATH");
+        if (path) {
+                if (!path_is_valid(path) || !path_is_absolute(path))
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "$SYSTEMD_ESP_PATH does not refer to absolute path, refusing to use it: %s",
+                                               path);
+
+                /* Note: when the user explicitly configured things with an env var we won't validate the mount
+                 * point. After all we want this to be useful for testing. */
+                goto found;
+        }
+
         FOREACH_STRING(path, "/efi", "/boot", "/boot/efi") {
 
                 r = verify_esp(path, true, unprivileged_mode, ret_part, ret_pstart, ret_psize, ret_uuid);
@@ -597,6 +627,39 @@ found:
 
                 *ret_path = c;
         }
+
+        return 0;
+}
+
+int find_default_boot_entry(
+                const char *esp_path,
+                char **esp_where,
+                BootConfig *config,
+                const BootEntry **e) {
+
+        _cleanup_free_ char *where = NULL;
+        int r;
+
+        assert(config);
+        assert(e);
+
+        r = find_esp_and_warn(esp_path, false, &where, NULL, NULL, NULL, NULL);
+        if (r < 0)
+                return r;
+
+        r = boot_entries_load_config(where, config);
+        if (r < 0)
+                return log_error_errno(r, "Failed to load bootspec config from \"%s/loader\": %m", where);
+
+        if (config->default_entry < 0)
+                return log_error_errno(SYNTHETIC_ERRNO(ENOENT),
+                                       "No entry suitable as default, refusing to guess.");
+
+        *e = &config->entries[config->default_entry];
+        log_debug("Found default boot entry in file \"%s\"", (*e)->path);
+
+        if (esp_where)
+                *esp_where = TAKE_PTR(where);
 
         return 0;
 }

@@ -58,7 +58,6 @@ loginctl_sources = files('''
 
 user_runtime_dir_sources = files('''
         user-runtime-dir.c
-        logind.h
 '''.split())
 
 if conf.get('ENABLE_LOGIND') == 1
@@ -81,16 +80,21 @@ if conf.get('ENABLE_LOGIND') == 1
 
         install_data('70-power-switch.rules', install_dir : udevrulesdir)
 
-        if conf.get('HAVE_ACL') == 1
-                install_data('70-uaccess.rules', install_dir : udevrulesdir)
-        endif
-
         seat_rules = configure_file(
                 input : '71-seat.rules.in',
                 output : '71-seat.rules',
                 configuration : substs)
         install_data(seat_rules,
                      install_dir : udevrulesdir)
+
+        custom_target(
+                '70-uaccess.rules',
+                input : '70-uaccess.rules.m4',
+                output: '70-uaccess.rules',
+                command : [meson_apply_m4, config_h, '@INPUT@'],
+                capture : true,
+                install : conf.get('HAVE_ACL') == 1,
+                install_dir : udevrulesdir)
 
         custom_target(
                 '73-seat-late.rules',

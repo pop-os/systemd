@@ -21,10 +21,12 @@
 #include "machine-image.h"
 #include "machine-pool.h"
 #include "machined.h"
+#include "missing_capability.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "stdio-util.h"
 #include "strv.h"
+#include "tmpfile-util.h"
 #include "unit-name.h"
 #include "user-util.h"
 
@@ -41,14 +43,9 @@ static int property_get_pool_usage(
 
         _cleanup_close_ int fd = -1;
         uint64_t usage = (uint64_t) -1;
-        struct stat st;
 
         assert(bus);
         assert(reply);
-
-        /* We try to read the quota info from /var/lib/machines, as
-         * well as the usage of the loopback file
-         * /var/lib/machines.raw, and pick the larger value. */
 
         fd = open("/var/lib/machines", O_RDONLY|O_CLOEXEC|O_DIRECTORY);
         if (fd >= 0) {
@@ -56,11 +53,6 @@ static int property_get_pool_usage(
 
                 if (btrfs_subvol_get_subtree_quota_fd(fd, 0, &q) >= 0)
                         usage = q.referenced;
-        }
-
-        if (stat("/var/lib/machines.raw", &st) >= 0) {
-                if (usage == (uint64_t) -1 || st.st_blocks * 512ULL > usage)
-                        usage = st.st_blocks * 512ULL;
         }
 
         return sd_bus_message_append(reply, "t", usage);
@@ -77,14 +69,9 @@ static int property_get_pool_limit(
 
         _cleanup_close_ int fd = -1;
         uint64_t size = (uint64_t) -1;
-        struct stat st;
 
         assert(bus);
         assert(reply);
-
-        /* We try to read the quota limit from /var/lib/machines, as
-         * well as the size of the loopback file
-         * /var/lib/machines.raw, and pick the smaller value. */
 
         fd = open("/var/lib/machines", O_RDONLY|O_CLOEXEC|O_DIRECTORY);
         if (fd >= 0) {
@@ -92,11 +79,6 @@ static int property_get_pool_limit(
 
                 if (btrfs_subvol_get_subtree_quota_fd(fd, 0, &q) >= 0)
                         size = q.referenced_max;
-        }
-
-        if (stat("/var/lib/machines.raw", &st) >= 0) {
-                if (size == (uint64_t) -1 || (uint64_t) st.st_size < size)
-                        size = st.st_size;
         }
 
         return sd_bus_message_append(reply, "t", size);
@@ -483,7 +465,7 @@ static int method_get_machine_os_release(sd_bus_message *message, void *userdata
 
 static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
-        _cleanup_(image_hashmap_freep) Hashmap *images = NULL;
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
         Manager *m = userdata;
         Image *image;
         Iterator i;
@@ -492,7 +474,7 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
         assert(message);
         assert(m);
 
-        images = hashmap_new(&string_hash_ops);
+        images = hashmap_new(&image_hash_ops);
         if (!images)
                 return -ENOMEM;
 
@@ -633,7 +615,7 @@ static int clean_pool_done(Operation *operation, int ret, sd_bus_error *error) {
         if (lseek(operation->extra_fd, 0, SEEK_SET) == (off_t) -1)
                 return -errno;
 
-        f = fdopen(operation->extra_fd, "re");
+        f = fdopen(operation->extra_fd, "r");
         if (!f)
                 return -errno;
 
@@ -655,8 +637,8 @@ static int clean_pool_done(Operation *operation, int ret, sd_bus_error *error) {
                 if (success) /* The resulting temporary file could not be updated, ignore it. */
                         return ret;
 
-                r = read_nul_string(f, &name);
-                if (r < 0 || isempty(name)) /* Same here... */
+                r = read_nul_string(f, LONG_LINE_MAX, &name);
+                if (r <= 0) /* Same here... */
                         return ret;
 
                 return sd_bus_error_set_errnof(error, ret, "Failed to remove image %s: %m", name);
@@ -678,10 +660,10 @@ static int clean_pool_done(Operation *operation, int ret, sd_bus_error *error) {
                 _cleanup_free_ char *name = NULL;
                 uint64_t size;
 
-                r = read_nul_string(f, &name);
+                r = read_nul_string(f, LONG_LINE_MAX, &name);
                 if (r < 0)
                         return r;
-                if (isempty(name)) /* reached the end */
+                if (r == 0) /* reached the end */
                         break;
 
                 errno = 0;
@@ -760,7 +742,7 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
         if (r < 0)
                 return sd_bus_error_set_errnof(error, r, "Failed to fork(): %m");
         if (r == 0) {
-                _cleanup_(image_hashmap_freep) Hashmap *images = NULL;
+                _cleanup_hashmap_free_ Hashmap *images = NULL;
                 bool success = true;
                 Image *image;
                 Iterator i;
@@ -768,7 +750,7 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
 
                 errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
 
-                images = hashmap_new(&string_hash_ops);
+                images = hashmap_new(&image_hash_ops);
                 if (!images) {
                         r = -ENOMEM;
                         goto child_fail;
@@ -877,18 +859,9 @@ static int method_set_pool_limit(sd_bus_message *message, void *userdata, sd_bus
                 return 1; /* Will call us back */
 
         /* Set up the machine directory if necessary */
-        r = setup_machine_directory(limit, error);
+        r = setup_machine_directory(error);
         if (r < 0)
                 return r;
-
-        /* Resize the backing loopback device, if there is one, except if we asked to drop any limit */
-        if (limit != (uint64_t) -1) {
-                r = btrfs_resize_loopback("/var/lib/machines", limit, false);
-                if (r == -ENOTTY)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Quota is only supported on btrfs.");
-                if (r < 0 && r != -ENODEV) /* ignore ENODEV, as that's what is returned if the file system is not on loopback */
-                        return sd_bus_error_set_errnof(error, r, "Failed to adjust loopback limit: %m");
-        }
 
         (void) btrfs_qgroup_set_limit("/var/lib/machines", 0, limit);
 
@@ -1363,17 +1336,14 @@ int manager_start_scope(
                         return r;
         }
 
-        r = sd_bus_message_append(m, "(sv)", "PIDs", "au", 1, pid);
+        r = sd_bus_message_append(m, "(sv)(sv)(sv)(sv)(sv)",
+                                  "PIDs", "au", 1, pid,
+                                  "Delegate", "b", 1,
+                                  "CollectMode", "s", "inactive-or-failed",
+                                  "AddRef", "b", 1,
+                                  "TasksMax", "t", UINT64_C(16384));
         if (r < 0)
                 return r;
-
-        r = sd_bus_message_append(m, "(sv)", "Delegate", "b", 1);
-        if (r < 0)
-                return r;
-
-        r = sd_bus_message_append(m, "(sv)", "TasksMax", "t", UINT64_C(16384));
-        if (r < 0)
-                return bus_log_create_error(r);
 
         if (more_properties) {
                 r = sd_bus_message_copy(m, more_properties, true);
@@ -1409,6 +1379,26 @@ int manager_start_scope(
         }
 
         return 1;
+}
+
+int manager_unref_unit(
+                Manager *m,
+                const char *unit,
+                sd_bus_error *error) {
+
+        assert(m);
+        assert(unit);
+
+        return sd_bus_call_method(
+                        m->bus,
+                        "org.freedesktop.systemd1",
+                        "/org/freedesktop/systemd1",
+                        "org.freedesktop.systemd1.Manager",
+                        "UnrefUnit",
+                        error,
+                        NULL,
+                        "s",
+                        unit);
 }
 
 int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, char **job) {

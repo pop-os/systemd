@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-
 #include <linux/if_link.h>
 
-#include "missing.h"
+#include "missing_if_link.h"
 #include "netdev/netdev.h"
 
 typedef enum IPVlanMode {
@@ -39,5 +38,5 @@ IPVlanMode ipvlan_mode_from_string(const char *d) _pure_;
 const char *ipvlan_flags_to_string(IPVlanFlags d) _const_;
 IPVlanFlags ipvlan_flags_from_string(const char *d) _pure_;
 
-int config_parse_ipvlan_mode(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
-int config_parse_ipvlan_flags(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+CONFIG_PARSER_PROTOTYPE(config_parse_ipvlan_mode);
+CONFIG_PARSER_PROTOTYPE(config_parse_ipvlan_flags);

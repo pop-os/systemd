@@ -17,8 +17,9 @@
 
 #include "fd-util.h"
 #include "icmp6-util.h"
-#include "socket-util.h"
 #include "in-addr-util.h"
+#include "io-util.h"
+#include "socket-util.h"
 
 #define IN6ADDR_ALL_ROUTERS_MULTICAST_INIT \
         { { { 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
@@ -33,7 +34,6 @@ static int icmp6_bind_router_message(const struct icmp6_filter *filter,
         int index = mreq->ipv6mr_interface;
         _cleanup_close_ int s = -1;
         char ifname[IF_NAMESIZE] = "";
-        static const int zero = 0, one = 1, hops = 255;
         int r;
 
         s = socket(AF_INET6, SOCK_RAW | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_ICMPV6);
@@ -52,29 +52,29 @@ static int icmp6_bind_router_message(const struct icmp6_filter *filter,
            IPV6_PKTINFO socket option also applies for ICMPv6 multicast.
            Empirical experiments indicates otherwise and therefore an
            IPV6_MULTICAST_IF socket option is used here instead */
-        r = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_IF, &index, sizeof(index));
+        r = setsockopt_int(s, IPPROTO_IPV6, IPV6_MULTICAST_IF, index);
         if (r < 0)
-                return -errno;
+                return r;
 
-        r = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &zero, sizeof(zero));
+        r = setsockopt_int(s, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, false);
         if (r < 0)
-                return -errno;
+                return r;
 
-        r = setsockopt(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof(hops));
+        r = setsockopt_int(s, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, 255);
         if (r < 0)
-                return -errno;
+                return r;
 
-        r = setsockopt(s, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hops, sizeof(hops));
+        r = setsockopt_int(s, IPPROTO_IPV6, IPV6_UNICAST_HOPS, 255);
         if (r < 0)
-                return -errno;
+                return r;
 
-        r = setsockopt(s, SOL_IPV6, IPV6_RECVHOPLIMIT, &one, sizeof(one));
+        r = setsockopt_int(s, SOL_IPV6, IPV6_RECVHOPLIMIT, true);
         if (r < 0)
-                return -errno;
+                return r;
 
-        r = setsockopt(s, SOL_SOCKET, SO_TIMESTAMP, &one, sizeof(one));
+        r = setsockopt_int(s, SOL_SOCKET, SO_TIMESTAMP, true);
         if (r < 0)
-                return -errno;
+                return r;
 
         if (if_indextoname(index, ifname) == 0)
                 return -errno;
@@ -170,16 +170,11 @@ int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *dst,
         struct cmsghdr *cmsg;
         ssize_t len;
 
-        iov.iov_base = buffer;
-        iov.iov_len = size;
+        iov = IOVEC_MAKE(buffer, size);
 
         len = recvmsg(fd, &msg, MSG_DONTWAIT);
-        if (len < 0) {
-                if (IN_SET(errno, EAGAIN, EINTR))
-                        return 0;
-
+        if (len < 0)
                 return -errno;
-        }
 
         if ((size_t) len != size)
                 return -EINVAL;

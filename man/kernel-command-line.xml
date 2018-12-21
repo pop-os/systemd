@@ -55,6 +55,7 @@
         <term><varname>systemd.unit=</varname></term>
         <term><varname>rd.systemd.unit=</varname></term>
         <term><varname>systemd.dump_core</varname></term>
+        <term><varname>systemd.early_core_pattern=</varname></term>
         <term><varname>systemd.crash_chvt</varname></term>
         <term><varname>systemd.crash_shell</varname></term>
         <term><varname>systemd.crash_reboot</varname></term>
@@ -87,6 +88,27 @@
           <citerefentry><refentrytitle>systemd-debug-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
           to mask or start specific units at boot, or invoke a debug
           shell on tty9.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.run=</varname></term>
+        <term><varname>systemd.run_success_action=</varname></term>
+        <term><varname>systemd.run_failure_action=</varname></term>
+        <listitem>
+          <para>Additional parameters understood by
+          <citerefentry><refentrytitle>systemd-run-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>, to
+          run a command line specified on the kernel command line as system service after booting up.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>systemd.early_core_pattern=</varname></term>
+        <listitem>
+          <para>During early boot, the generation of core dump files is disabled until a core dump handler (if any)
+          takes over. This parameter allows to specifies an absolute path where core dump files should be stored until
+          a handler is installed. The path should be absolute and may contain specifiers, see
+          <citerefentry><refentrytitle>core</refentrytitle><manvolnum>5</manvolnum></citerefentry> for details.</para>
         </listitem>
       </varlistentry>
 
@@ -246,6 +268,7 @@
         <term><varname>udev.event_timeout=</varname></term>
         <term><varname>rd.udev.event_timeout=</varname></term>
         <term><varname>net.ifnames=</varname></term>
+        <term><varname>net.naming-scheme=</varname></term>
 
         <listitem>
           <para>Parameters understood by the device event managing

@@ -21,7 +21,6 @@
 
 #include <inttypes.h>
 #include <net/ethernet.h>
-#include <stdbool.h>
 #include <sys/types.h>
 
 #include "sd-dhcp6-lease.h"
@@ -102,6 +101,9 @@ int sd_dhcp6_client_set_duid(
                 uint16_t duid_type,
                 const void *duid,
                 size_t duid_len);
+int sd_dhcp6_client_set_duid_llt(
+                sd_dhcp6_client *client,
+                uint64_t llt_time);
 int sd_dhcp6_client_set_iaid(
                 sd_dhcp6_client *client,
                 uint32_t iaid);
@@ -117,8 +119,15 @@ int sd_dhcp6_client_get_information_request(
 int sd_dhcp6_client_set_request_option(
                 sd_dhcp6_client *client,
                 uint16_t option);
+int sd_dhcp6_client_get_prefix_delegation(sd_dhcp6_client *client,
+                                          int *delegation);
 int sd_dhcp6_client_set_prefix_delegation(sd_dhcp6_client *client,
-                                          bool delegation);
+                                          int delegation);
+int sd_dhcp6_client_get_address_request(sd_dhcp6_client *client,
+                                        int *request);
+int sd_dhcp6_client_set_address_request(sd_dhcp6_client *client,
+                                        int request);
+int sd_dhcp6_client_set_transaction_id(sd_dhcp6_client *client, uint32_t transaction_id);
 
 int sd_dhcp6_client_get_lease(
                 sd_dhcp6_client *client,

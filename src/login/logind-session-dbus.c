@@ -11,7 +11,9 @@
 #include "logind-session-device.h"
 #include "logind-session.h"
 #include "logind.h"
+#include "missing_capability.h"
 #include "signal-util.h"
+#include "stat-util.h"
 #include "strv.h"
 #include "util.h"
 
@@ -380,6 +382,9 @@ static int method_take_device(sd_bus_message *message, void *userdata, sd_bus_er
         if (r < 0)
                 return r;
 
+        if (!DEVICE_MAJOR_VALID(major) || !DEVICE_MINOR_VALID(minor))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Device major/minor is not valid.");
+
         if (!session_is_controller(s, sd_bus_message_get_sender(message)))
                 return sd_bus_error_setf(error, BUS_ERROR_NOT_IN_CONTROL, "You are not in control of this session");
 
@@ -427,6 +432,9 @@ static int method_release_device(sd_bus_message *message, void *userdata, sd_bus
         if (r < 0)
                 return r;
 
+        if (!DEVICE_MAJOR_VALID(major) || !DEVICE_MINOR_VALID(minor))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Device major/minor is not valid.");
+
         if (!session_is_controller(s, sd_bus_message_get_sender(message)))
                 return sd_bus_error_setf(error, BUS_ERROR_NOT_IN_CONTROL, "You are not in control of this session");
 
@@ -454,6 +462,9 @@ static int method_pause_device_complete(sd_bus_message *message, void *userdata,
         r = sd_bus_message_read(message, "uu", &major, &minor);
         if (r < 0)
                 return r;
+
+        if (!DEVICE_MAJOR_VALID(major) || !DEVICE_MINOR_VALID(minor))
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Device major/minor is not valid.");
 
         if (!session_is_controller(s, sd_bus_message_get_sender(message)))
                 return sd_bus_error_setf(error, BUS_ERROR_NOT_IN_CONTROL, "You are not in control of this session");
@@ -689,6 +700,15 @@ int session_send_lock_all(Manager *m, bool lock) {
         return r;
 }
 
+static bool session_ready(Session *s) {
+        assert(s);
+
+        /* Returns true when the session is ready, i.e. all jobs we enqueued for it are done (regardless if successful or not) */
+
+        return !s->scope_job &&
+                !s->user->service_job;
+}
+
 int session_send_create_reply(Session *s, sd_bus_error *error) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *c = NULL;
         _cleanup_close_ int fifo_fd = -1;
@@ -696,19 +716,16 @@ int session_send_create_reply(Session *s, sd_bus_error *error) {
 
         assert(s);
 
-        /* This is called after the session scope and the user service
-         * were successfully created, and finishes where
+        /* This is called after the session scope and the user service were successfully created, and finishes where
          * bus_manager_create_session() left off. */
 
         if (!s->create_message)
                 return 0;
 
-        if (!sd_bus_error_is_set(error) && (s->scope_job || s->user->service_job))
+        if (!sd_bus_error_is_set(error) && !session_ready(s))
                 return 0;
 
-        c = s->create_message;
-        s->create_message = NULL;
-
+        c = TAKE_PTR(s->create_message);
         if (error)
                 return sd_bus_reply_method_error(c, error);
 
@@ -716,8 +733,7 @@ int session_send_create_reply(Session *s, sd_bus_error *error) {
         if (fifo_fd < 0)
                 return fifo_fd;
 
-        /* Update the session state file before we notify the client
-         * about the result. */
+        /* Update the session state file before we notify the client about the result. */
         session_save(s);
 
         p = session_bus_path(s);

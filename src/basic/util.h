@@ -25,7 +25,6 @@
 
 #include "format-util.h"
 #include "macro.h"
-#include "missing.h"
 #include "time-util.h"
 
 size_t page_size(void) _pure_;
@@ -50,7 +49,6 @@ static inline const char* enable_disable(bool b) {
 bool plymouth_running(void);
 
 bool display_is_local(const char *display) _pure_;
-int socket_from_display(const char *display, char **path);
 
 #define NULSTR_FOREACH(i, l)                                    \
         for ((i) = (l); (i) && *(i); (i) = strchr((i), 0)+1)
@@ -69,15 +67,21 @@ bool in_initrd(void);
 void in_initrd_force(bool value);
 
 void *xbsearch_r(const void *key, const void *base, size_t nmemb, size_t size,
-                 int (*compar) (const void *, const void *, void *),
-                 void *arg);
+                 __compar_d_fn_t compar, void *arg);
+
+#define typesafe_bsearch_r(k, b, n, func, userdata)                     \
+        ({                                                              \
+                const typeof(b[0]) *_k = k;                             \
+                int (*_func_)(const typeof(b[0])*, const typeof(b[0])*, typeof(userdata)) = func; \
+                xbsearch_r((const void*) _k, (b), (n), sizeof((b)[0]), (__compar_d_fn_t) _func_, userdata); \
+        })
 
 /**
  * Normal bsearch requires base to be nonnull. Here were require
  * that only if nmemb > 0.
  */
 static inline void* bsearch_safe(const void *key, const void *base,
-                                 size_t nmemb, size_t size, comparison_fn_t compar) {
+                                 size_t nmemb, size_t size, __compar_fn_t compar) {
         if (nmemb <= 0)
                 return NULL;
 
@@ -85,11 +89,18 @@ static inline void* bsearch_safe(const void *key, const void *base,
         return bsearch(key, base, nmemb, size, compar);
 }
 
+#define typesafe_bsearch(k, b, n, func)                                 \
+        ({                                                              \
+                const typeof(b[0]) *_k = k;                             \
+                int (*_func_)(const typeof(b[0])*, const typeof(b[0])*) = func; \
+                bsearch_safe((const void*) _k, (b), (n), sizeof((b)[0]), (__compar_fn_t) _func_); \
+        })
+
 /**
  * Normal qsort requires base to be nonnull. Here were require
  * that only if nmemb > 0.
  */
-static inline void qsort_safe(void *base, size_t nmemb, size_t size, comparison_fn_t compar) {
+static inline void qsort_safe(void *base, size_t nmemb, size_t size, __compar_fn_t compar) {
         if (nmemb <= 1)
                 return;
 
@@ -105,7 +116,7 @@ static inline void qsort_safe(void *base, size_t nmemb, size_t size, comparison_
                 qsort_safe((p), (n), sizeof((p)[0]), (__compar_fn_t) _func_); \
         })
 
-static inline void qsort_r_safe(void *base, size_t nmemb, size_t size, int (*compar)(const void*, const void*, void*), void *userdata) {
+static inline void qsort_r_safe(void *base, size_t nmemb, size_t size, __compar_d_fn_t compar, void *userdata) {
         if (nmemb <= 1)
                 return;
 
@@ -113,9 +124,13 @@ static inline void qsort_r_safe(void *base, size_t nmemb, size_t size, int (*com
         qsort_r(base, nmemb, size, compar, userdata);
 }
 
-/**
- * Normal memcpy requires src to be nonnull. We do nothing if n is 0.
- */
+#define typesafe_qsort_r(p, n, func, userdata)                          \
+        ({                                                              \
+                int (*_func_)(const typeof(p[0])*, const typeof(p[0])*, typeof(userdata)) = func; \
+                qsort_r_safe((p), (n), sizeof((p)[0]), (__compar_d_fn_t) _func_, userdata); \
+        })
+
+/* Normal memcpy requires src to be nonnull. We do nothing if n is 0. */
 static inline void memcpy_safe(void *dst, const void *src, size_t n) {
         if (n == 0)
                 return;
@@ -123,10 +138,35 @@ static inline void memcpy_safe(void *dst, const void *src, size_t n) {
         memcpy(dst, src, n);
 }
 
+/* Normal memcmp requires s1 and s2 to be nonnull. We do nothing if n is 0. */
+static inline int memcmp_safe(const void *s1, const void *s2, size_t n) {
+        if (n == 0)
+                return 0;
+        assert(s1);
+        assert(s2);
+        return memcmp(s1, s2, n);
+}
+
+/* Compare s1 (length n1) with s2 (length n2) in lexicographic order. */
+static inline int memcmp_nn(const void *s1, size_t n1, const void *s2, size_t n2) {
+        return memcmp_safe(s1, s2, MIN(n1, n2))
+            ?: CMP(n1, n2);
+}
+
 int on_ac_power(void);
 
-#define memzero(x,l) (memset((x), 0, (l)))
+#define memzero(x,l)                                            \
+        ({                                                      \
+                size_t _l_ = (l);                               \
+                void *_x_ = (x);                                \
+                _l_ == 0 ? _x_ : memset(_x_, 0, _l_);           \
+        })
+
 #define zero(x) (memzero(&(x), sizeof(x)))
+
+bool memeqzero(const void *data, size_t length);
+
+#define eqzero(x) memeqzero(x, sizeof(x))
 
 static inline void *mempset(void *s, int c, size_t n) {
         memset(s, c, n);
@@ -137,7 +177,8 @@ static inline void _reset_errno_(int *saved_errno) {
         errno = *saved_errno;
 }
 
-#define PROTECT_ERRNO _cleanup_(_reset_errno_) __attribute__((unused)) int _saved_errno_ = errno
+#define PROTECT_ERRNO                                                   \
+        _cleanup_(_reset_errno_) _unused_ int _saved_errno_ = errno
 
 static inline int negative_errno(void) {
         /* This helper should be used to shut up gcc if you know 'errno' is
@@ -158,7 +199,7 @@ static inline unsigned u64log2(uint64_t n) {
 
 static inline unsigned u32ctz(uint32_t n) {
 #if __SIZEOF_INT__ == 4
-        return __builtin_ctz(n);
+        return n != 0 ? __builtin_ctz(n) : 32;
 #else
 #error "Wut?"
 #endif

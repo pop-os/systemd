@@ -8,12 +8,14 @@
 #include "bus-error.h"
 #include "bus-util.h"
 #include "dbus-path.h"
+#include "dbus-unit.h"
 #include "fd-util.h"
 #include "fs-util.h"
 #include "glob-util.h"
 #include "macro.h"
 #include "mkdir.h"
 #include "path.h"
+#include "serialize.h"
 #include "special.h"
 #include "stat-util.h"
 #include "string-table.h"
@@ -145,10 +147,9 @@ int path_spec_fd_event(PathSpec *s, uint32_t revents) {
         ssize_t l;
         int r = 0;
 
-        if (revents != EPOLLIN) {
-                log_error("Got invalid poll event on inotify.");
-                return -EINVAL;
-        }
+        if (revents != EPOLLIN)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Got invalid poll event on inotify.");
 
         l = read(s->inotify_fd, &buffer, sizeof(buffer));
         if (l < 0) {
@@ -298,17 +299,17 @@ static int path_add_default_dependencies(Path *p) {
         if (!UNIT(p)->default_dependencies)
                 return 0;
 
-        r = unit_add_dependency_by_name(UNIT(p), UNIT_BEFORE, SPECIAL_PATHS_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_dependency_by_name(UNIT(p), UNIT_BEFORE, SPECIAL_PATHS_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 
         if (MANAGER_IS_SYSTEM(UNIT(p)->manager)) {
-                r = unit_add_two_dependencies_by_name(UNIT(p), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+                r = unit_add_two_dependencies_by_name(UNIT(p), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
                 if (r < 0)
                         return r;
         }
 
-        return unit_add_two_dependencies_by_name(UNIT(p), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+        return unit_add_two_dependencies_by_name(UNIT(p), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
 }
 
 static int path_add_trigger_dependencies(Path *p) {
@@ -410,6 +411,9 @@ static void path_set_state(Path *p, PathState state) {
         PathState old_state;
         assert(p);
 
+        if (p->state != state)
+                bus_unit_send_pending_change_signal(UNIT(p), false);
+
         old_state = p->state;
         p->state = state;
 
@@ -448,9 +452,7 @@ static void path_enter_dead(Path *p, PathResult f) {
         if (p->result == PATH_SUCCESS)
                 p->result = f;
 
-        if (p->result != PATH_SUCCESS)
-                log_unit_warning(UNIT(p), "Failed with result '%s'.", path_result_to_string(p->result));
-
+        unit_log_result(UNIT(p), p->result == PATH_SUCCESS, path_result_to_string(p->result));
         path_set_state(p, p->result != PATH_SUCCESS ? PATH_FAILED : PATH_DEAD);
 }
 
@@ -600,8 +602,8 @@ static int path_serialize(Unit *u, FILE *f, FDSet *fds) {
         assert(f);
         assert(fds);
 
-        unit_serialize_item(u, f, "state", path_state_to_string(p->state));
-        unit_serialize_item(u, f, "result", path_result_to_string(p->result));
+        (void) serialize_item(f, "state", path_state_to_string(p->state));
+        (void) serialize_item(f, "result", path_result_to_string(p->result));
 
         return 0;
 }

@@ -81,16 +81,21 @@ char *endswith_no_case(const char *s, const char *postfix) _pure_;
 
 char *first_word(const char *s, const char *word) _pure_;
 
-const char* split(const char **state, size_t *l, const char *separator, bool quoted);
+typedef enum SplitFlags {
+        SPLIT_QUOTES                     = 0x01 << 0,
+        SPLIT_RELAX                      = 0x01 << 1,
+} SplitFlags;
+
+const char* split(const char **state, size_t *l, const char *separator, SplitFlags flags);
 
 #define FOREACH_WORD(word, length, s, state)                            \
-        _FOREACH_WORD(word, length, s, WHITESPACE, false, state)
+        _FOREACH_WORD(word, length, s, WHITESPACE, 0, state)
 
 #define FOREACH_WORD_SEPARATOR(word, length, s, separator, state)       \
-        _FOREACH_WORD(word, length, s, separator, false, state)
+        _FOREACH_WORD(word, length, s, separator, 0, state)
 
-#define _FOREACH_WORD(word, length, s, separator, quoted, state)        \
-        for ((state) = (s), (word) = split(&(state), &(length), (separator), (quoted)); (word); (word) = split(&(state), &(length), (separator), (quoted)))
+#define _FOREACH_WORD(word, length, s, separator, flags, state)         \
+        for ((state) = (s), (word) = split(&(state), &(length), (separator), (flags)); (word); (word) = split(&(state), &(length), (separator), (flags)))
 
 char *strappend(const char *s, const char *suffix);
 char *strnappend(const char *s, const char *suffix, size_t length);
@@ -176,6 +181,7 @@ char *strrep(const char *s, unsigned n);
 int split_pair(const char *s, const char *sep, char **l, char **r);
 
 int free_and_strdup(char **p, const char *s);
+int free_and_strndup(char **p, const char *s, size_t l);
 
 /* Normal memmem() requires haystack to be nonnull, which is annoying for zero-length buffers */
 static inline void *memmem_safe(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen) {
@@ -192,8 +198,15 @@ static inline void *memmem_safe(const void *haystack, size_t haystacklen, const 
         return memmem(haystack, haystacklen, needle, needlelen);
 }
 
-#if !HAVE_EXPLICIT_BZERO
-void explicit_bzero(void *p, size_t l);
+#if HAVE_EXPLICIT_BZERO
+static inline void* explicit_bzero_safe(void *p, size_t l) {
+        if (l > 0)
+                explicit_bzero(p, l);
+
+        return p;
+}
+#else
+void *explicit_bzero_safe(void *p, size_t l);
 #endif
 
 char *string_erase(char *x);
@@ -225,6 +238,28 @@ static inline void *memory_startswith(const void *p, size_t sz, const char *toke
 
         if (memcmp(p, token, n) != 0)
                 return NULL;
+
+        return (uint8_t*) p + n;
+}
+
+/* Like startswith_no_case(), but operates on arbitrary memory blocks.
+ * It works only for ASCII strings.
+ */
+static inline void *memory_startswith_no_case(const void *p, size_t sz, const char *token) {
+        size_t n, i;
+
+        assert(token);
+
+        n = strlen(token);
+        if (sz < n)
+                return NULL;
+
+        assert(p);
+
+        for (i = 0; i < n; i++) {
+                if (ascii_tolower(((char *)p)[i]) != ascii_tolower(token[i]))
+                        return NULL;
+        }
 
         return (uint8_t*) p + n;
 }

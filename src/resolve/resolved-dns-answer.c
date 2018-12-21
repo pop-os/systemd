@@ -19,15 +19,6 @@ DnsAnswer *dns_answer_new(size_t n) {
         return a;
 }
 
-DnsAnswer *dns_answer_ref(DnsAnswer *a) {
-        if (!a)
-                return NULL;
-
-        assert(a->n_ref > 0);
-        a->n_ref++;
-        return a;
-}
-
 static void dns_answer_flush(DnsAnswer *a) {
         DnsResourceRecord *rr;
 
@@ -40,20 +31,14 @@ static void dns_answer_flush(DnsAnswer *a) {
         a->n_rrs = 0;
 }
 
-DnsAnswer *dns_answer_unref(DnsAnswer *a) {
-        if (!a)
-                return NULL;
+static DnsAnswer *dns_answer_free(DnsAnswer *a) {
+        assert(a);
 
-        assert(a->n_ref > 0);
-
-        if (a->n_ref == 1) {
-                dns_answer_flush(a);
-                free(a);
-        } else
-                a->n_ref--;
-
-        return NULL;
+        dns_answer_flush(a);
+        return mfree(a);
 }
+
+DEFINE_TRIVIAL_REF_UNREF_FUNC(DnsAnswer, dns_answer, dns_answer_free);
 
 static int dns_answer_add_raw(DnsAnswer *a, DnsResourceRecord *rr, int ifindex, DnsAnswerFlags flags) {
         assert(rr);
@@ -211,70 +196,6 @@ int dns_answer_match_key(DnsAnswer *a, const DnsResourceKey *key, DnsAnswerFlags
 
                 if (!ret_flags)
                         return 1;
-
-                if (found)
-                        flags &= i_flags;
-                else {
-                        flags = i_flags;
-                        found = true;
-                }
-        }
-
-        if (ret_flags)
-                *ret_flags = flags;
-
-        return found;
-}
-
-int dns_answer_contains_rr(DnsAnswer *a, DnsResourceRecord *rr, DnsAnswerFlags *ret_flags) {
-        DnsAnswerFlags flags = 0, i_flags;
-        DnsResourceRecord *i;
-        bool found = false;
-        int r;
-
-        assert(rr);
-
-        DNS_ANSWER_FOREACH_FLAGS(i, i_flags, a) {
-                r = dns_resource_record_equal(i, rr);
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        continue;
-
-                if (!ret_flags)
-                        return 1;
-
-                if (found)
-                        flags &= i_flags;
-                else {
-                        flags = i_flags;
-                        found = true;
-                }
-        }
-
-        if (ret_flags)
-                *ret_flags = flags;
-
-        return found;
-}
-
-int dns_answer_contains_key(DnsAnswer *a, const DnsResourceKey *key, DnsAnswerFlags *ret_flags) {
-        DnsAnswerFlags flags = 0, i_flags;
-        DnsResourceRecord *i;
-        bool found = false;
-        int r;
-
-        assert(key);
-
-        DNS_ANSWER_FOREACH_FLAGS(i, i_flags, a) {
-                r = dns_resource_key_equal(i->key, key);
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        continue;
-
-                if (!ret_flags)
-                        return true;
 
                 if (found)
                         flags &= i_flags;
@@ -799,7 +720,7 @@ void dns_answer_dump(DnsAnswer *answer, FILE *f) {
         }
 }
 
-bool dns_answer_has_dname_for_cname(DnsAnswer *a, DnsResourceRecord *cname) {
+int dns_answer_has_dname_for_cname(DnsAnswer *a, DnsResourceRecord *cname) {
         DnsResourceRecord *rr;
         int r;
 
@@ -830,7 +751,6 @@ bool dns_answer_has_dname_for_cname(DnsAnswer *a, DnsResourceRecord *cname) {
                         return r;
                 if (r > 0)
                         return 1;
-
         }
 
         return 0;

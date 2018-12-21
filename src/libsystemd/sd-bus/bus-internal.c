@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include "alloc-util.h"
 #include "bus-internal.h"
@@ -151,26 +149,6 @@ bool service_name_is_valid(const char *p) {
                 return false;
 
         return true;
-}
-
-char* service_name_startswith(const char *a, const char *b) {
-        const char *p;
-
-        if (!service_name_is_valid(a) ||
-            !service_name_is_valid(b))
-                return NULL;
-
-        p = startswith(a, b);
-        if (!p)
-                return NULL;
-
-        if (*p == 0)
-                return (char*) p;
-
-        if (*p == '.')
-                return (char*) p + 1;
-
-        return NULL;
 }
 
 bool member_name_is_valid(const char *p) {

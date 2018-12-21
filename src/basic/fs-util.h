@@ -37,11 +37,12 @@ int fd_warn_permissions(const char *path, int fd);
 int touch_file(const char *path, bool parents, usec_t stamp, uid_t uid, gid_t gid, mode_t mode);
 int touch(const char *path);
 
-int symlink_idempotent(const char *from, const char *to);
+int symlink_idempotent(const char *from, const char *to, bool make_relative);
 
 int symlink_atomic(const char *from, const char *to);
 int mknod_atomic(const char *path, mode_t mode, dev_t dev);
 int mkfifo_atomic(const char *path, mode_t mode);
+int mkfifoat_atomic(int dir_fd, const char *path, mode_t mode);
 
 int get_files_in_directory(const char *path, char ***list);
 
@@ -72,6 +73,8 @@ enum {
         CHASE_OPEN        = 1 << 4, /* If set, return an O_PATH object to the final component */
         CHASE_TRAIL_SLASH = 1 << 5, /* If set, any trailing slash will be preserved */
         CHASE_STEP        = 1 << 6, /* If set, just execute a single step of the normalization */
+        CHASE_NOFOLLOW    = 1 << 7, /* Only valid with CHASE_OPEN: when the path's right-most component refers to symlink return O_PATH fd of the symlink, rather than following it. */
+        CHASE_WARN        = 1 << 8, /* Emit an appropriate warning when an error is encountered */
 };
 
 /* How many iterations to execute before returning -ELOOP */
@@ -103,3 +106,6 @@ void unlink_tempfilep(char (*p)[]);
 int unlinkat_deallocate(int fd, const char *name, int flags);
 
 int fsync_directory_of_file(int fd);
+int fsync_path_at(int at_fd, const char *path);
+
+int open_parent(const char *path, int flags, mode_t mode);

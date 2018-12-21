@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
-
-#include "libudev.h"
+#include "sd-device.h"
 
 #include "condition.h"
+#include "conf-parser.h"
 #include "ethtool-util.h"
 #include "list.h"
 #include "set.h"
@@ -55,9 +55,10 @@ struct link_config {
         size_t speed;
         Duplex duplex;
         int autonegotiation;
+        uint32_t advertise[2];
         WakeOnLan wol;
         NetDevPort port;
-        NetDevFeature features[_NET_DEV_FEAT_MAX];
+        int features[_NET_DEV_FEAT_MAX];
         netdev_channels channels;
 
         LIST_FIELDS(link_config, links);
@@ -69,10 +70,9 @@ void link_config_ctx_free(link_config_ctx *ctx);
 int link_config_load(link_config_ctx *ctx);
 bool link_config_should_reload(link_config_ctx *ctx);
 
-int link_config_get(link_config_ctx *ctx, struct udev_device *device, struct link_config **ret);
-int link_config_apply(link_config_ctx *ctx, struct link_config *config, struct udev_device *device, const char **name);
-
-int link_get_driver(link_config_ctx *ctx, struct udev_device *device, char **ret);
+int link_config_get(link_config_ctx *ctx, sd_device *device, struct link_config **ret);
+int link_config_apply(link_config_ctx *ctx, struct link_config *config, sd_device *device, const char **name);
+int link_get_driver(link_config_ctx *ctx, sd_device *device, char **ret);
 
 const char *name_policy_to_string(NamePolicy p) _const_;
 NamePolicy name_policy_from_string(const char *p) _pure_;
@@ -83,5 +83,5 @@ MACPolicy mac_policy_from_string(const char *p) _pure_;
 /* gperf lookup function */
 const struct ConfigPerfItem* link_config_gperf_lookup(const char *key, GPERF_LEN_TYPE length);
 
-int config_parse_mac_policy(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
-int config_parse_name_policy(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata);
+CONFIG_PARSER_PROTOTYPE(config_parse_mac_policy);
+CONFIG_PARSER_PROTOTYPE(config_parse_name_policy);

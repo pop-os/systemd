@@ -19,6 +19,7 @@ _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #include "netdev/netdev.h"
 #include "netdev/vxcan.h"
 #include "netdev/wireguard.h"
+#include "netdev/fou-tunnel.h"
 #include "vlan-util.h"
 %}
 struct ConfigPerfItem;
@@ -65,6 +66,17 @@ Tunnel.CopyDSCP,                   config_parse_bool,                    0,     
 Tunnel.EncapsulationLimit,         config_parse_encap_limit,             0,                             offsetof(Tunnel, encap_limit)
 Tunnel.Independent,                config_parse_bool,                    0,                             offsetof(Tunnel, independent)
 Tunnel.AllowLocalRemote,           config_parse_tristate,                0,                             offsetof(Tunnel, allow_localremote)
+Tunnel.FooOverUDP,                 config_parse_bool,                    0,                             offsetof(Tunnel, fou_tunnel)
+Tunnel.FOUDestinationPort,         config_parse_ip_port,                 0,                             offsetof(Tunnel, fou_destination_port)
+Tunnel.FOUSourcePort,              config_parse_ip_port,                 0,                             offsetof(Tunnel, encap_src_port)
+Tunnel.Encapsulation,              config_parse_fou_encap_type,          0,                             offsetof(Tunnel, fou_encap_type)
+Tunnel.IPv6RapidDeploymentPrefix,  config_parse_6rd_prefix,              0,                             0
+Tunnel.ERSPANIndex,                config_parse_uint32,                  0,                             offsetof(Tunnel, erspan_index)
+Tunnel.SerializeTunneledPackets,   config_parse_tristate,                0,                             offsetof(Tunnel, erspan_sequence)
+Tunnel.ISATAP,                     config_parse_tristate,                0,                             offsetof(Tunnel, isatap)
+FooOverUDP.Protocol,               config_parse_uint8,                   0,                             offsetof(FouTunnel, fou_protocol)
+FooOverUDP.Encapsulation,          config_parse_fou_encap_type,          0,                             offsetof(FouTunnel, fou_encap_type)
+FooOverUDP.Port,                   config_parse_ip_port,                 0,                             offsetof(FouTunnel, port)
 Peer.Name,                         config_parse_ifname,                  0,                             offsetof(Veth, ifname_peer)
 Peer.MACAddress,                   config_parse_hwaddr,                  0,                             offsetof(Veth, mac_peer)
 VXCAN.Peer,                        config_parse_ifname,                  0,                             offsetof(VxCan, ifname_peer)
@@ -100,7 +112,9 @@ GENEVE.TOS,                        config_parse_uint8,                   0,     
 GENEVE.TTL,                        config_parse_uint8,                   0,                             offsetof(Geneve, ttl)
 GENEVE.UDPChecksum,                config_parse_bool,                    0,                             offsetof(Geneve, udpcsum)
 GENEVE.UDP6ZeroCheckSumRx,         config_parse_bool,                    0,                             offsetof(Geneve, udp6zerocsumrx)
+GENEVE.UDP6ZeroChecksumRx,         config_parse_bool,                    0,                             offsetof(Geneve, udp6zerocsumrx)
 GENEVE.UDP6ZeroCheckSumTx,         config_parse_bool,                    0,                             offsetof(Geneve, udp6zerocsumtx)
+GENEVE.UDP6ZeroChecksumTx,         config_parse_bool,                    0,                             offsetof(Geneve, udp6zerocsumtx)
 GENEVE.DestinationPort,            config_parse_ip_port,                 0,                             offsetof(Geneve, dest_port)
 GENEVE.FlowLabel,                  config_parse_geneve_flow_label,       0,                             0
 Tun.OneQueue,                      config_parse_bool,                    0,                             offsetof(TunTap, one_queue)
@@ -126,13 +140,17 @@ Bond.PrimaryReselectPolicy,        config_parse_bond_primary_reselect,   0,     
 Bond.ResendIGMP,                   config_parse_unsigned,                0,                             offsetof(Bond, resend_igmp)
 Bond.PacketsPerSlave,              config_parse_unsigned,                0,                             offsetof(Bond, packets_per_slave)
 Bond.GratuitousARP,                config_parse_unsigned,                0,                             offsetof(Bond, num_grat_arp)
-Bond.AllSlavesActive,              config_parse_unsigned,                0,                             offsetof(Bond, all_slaves_active)
+Bond.AllSlavesActive,              config_parse_bool,                    0,                             offsetof(Bond, all_slaves_active)
+Bond.DynamicTransmitLoadBalancing, config_parse_tristate,                0,                             offsetof(Bond, tlb_dynamic_lb)
 Bond.MinLinks,                     config_parse_unsigned,                0,                             offsetof(Bond, min_links)
 Bond.MIIMonitorSec,                config_parse_sec,                     0,                             offsetof(Bond, miimon)
 Bond.UpDelaySec,                   config_parse_sec,                     0,                             offsetof(Bond, updelay)
 Bond.DownDelaySec,                 config_parse_sec,                     0,                             offsetof(Bond, downdelay)
 Bond.ARPIntervalSec,               config_parse_sec,                     0,                             offsetof(Bond, arp_interval)
 Bond.LearnPacketIntervalSec,       config_parse_sec,                     0,                             offsetof(Bond, lp_interval)
+Bond.AdActorSystemPriority,        config_parse_ad_actor_sys_prio,       0,                             offsetof(Bond, ad_actor_sys_prio)
+Bond.AdUserPortKey,                config_parse_ad_user_port_key,        0,                             offsetof(Bond, ad_user_port_key)
+Bond.AdActorSystem,                config_parse_ad_actor_system,         0,                             offsetof(Bond, ad_actor_system)
 Bridge.HelloTimeSec,               config_parse_sec,                     0,                             offsetof(Bridge, hello_time)
 Bridge.MaxAgeSec,                  config_parse_sec,                     0,                             offsetof(Bridge, max_age)
 Bridge.AgeingTimeSec,              config_parse_sec,                     0,                             offsetof(Bridge, ageing_time)

@@ -2,7 +2,6 @@
 /*
  * Copyright © IBM Corp. 2003
  * Copyright © SUSE Linux Products GmbH, 2006
- *
  */
 
 #include <ctype.h>
@@ -18,12 +17,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "libudev.h"
-
+#include "alloc-util.h"
 #include "fd-util.h"
-#include "libudev-private.h"
+#include "libudev-util.h"
 #include "scsi_id.h"
 #include "string-util.h"
+#include "strxcpyx.h"
 #include "udev-util.h"
 
 static const struct option options[] = {
@@ -55,8 +54,7 @@ static char model_enc_str[256];
 static char revision_str[16];
 static char type_str[16];
 
-static void set_type(const char *from, char *to, size_t len)
-{
+static void set_type(const char *from, char *to, size_t len) {
         int type_num;
         char *eptr;
         const char *type = "generic";
@@ -101,8 +99,7 @@ static void set_type(const char *from, char *to, size_t len)
  * Return a pointer to the NUL terminated string, returns NULL if no
  * matches.
  */
-static char *get_value(char **buffer)
-{
+static char *get_value(char **buffer) {
         static const char *quote_string = "\"\n";
         static const char *comma_string = ",\n";
         char *val;
@@ -130,8 +127,7 @@ static char *get_value(char **buffer)
         return val;
 }
 
-static int argc_count(char *opts)
-{
+static int argc_count(char *opts) {
         int i = 0;
         while (*opts != '\0')
                 if (*opts++ == ' ')
@@ -148,10 +144,8 @@ static int argc_count(char *opts)
  *
  * vendor and model can end in '\n'.
  */
-static int get_file_options(struct udev *udev,
-                            const char *vendor, const char *model,
-                            int *argc, char ***newargv)
-{
+static int get_file_options(const char *vendor, const char *model,
+                            int *argc, char ***newargv) {
         _cleanup_free_ char *buffer = NULL;
         _cleanup_fclose_ FILE *f;
         char *buf;
@@ -311,10 +305,8 @@ static void help(void) {
 
 }
 
-static int set_options(struct udev *udev,
-                       int argc, char **argv,
-                       char *maj_min_dev)
-{
+static int set_options(int argc, char **argv,
+                       char *maj_min_dev) {
         int option;
 
         /*
@@ -400,9 +392,7 @@ static int set_options(struct udev *udev,
         return 0;
 }
 
-static int per_dev_options(struct udev *udev,
-                           struct scsi_id_device *dev_scsi, int *good_bad, int *page_code)
-{
+static int per_dev_options(struct scsi_id_device *dev_scsi, int *good_bad, int *page_code) {
         int retval;
         int newargc;
         char **newargv = NULL;
@@ -411,7 +401,7 @@ static int per_dev_options(struct udev *udev,
         *good_bad = all_good;
         *page_code = default_page_code;
 
-        retval = get_file_options(udev, vendor_str, model_str, &newargc, &newargv);
+        retval = get_file_options(vendor_str, model_str, &newargc, &newargv);
 
         optind = 1; /* reset this global extern */
         while (retval == 0) {
@@ -455,25 +445,24 @@ static int per_dev_options(struct udev *udev,
         return retval;
 }
 
-static int set_inq_values(struct udev *udev, struct scsi_id_device *dev_scsi, const char *path)
-{
+static int set_inq_values(struct scsi_id_device *dev_scsi, const char *path) {
         int retval;
 
         dev_scsi->use_sg = sg_version;
 
-        retval = scsi_std_inquiry(udev, dev_scsi, path);
+        retval = scsi_std_inquiry(dev_scsi, path);
         if (retval)
                 return retval;
 
         udev_util_encode_string(dev_scsi->vendor, vendor_enc_str, sizeof(vendor_enc_str));
         udev_util_encode_string(dev_scsi->model, model_enc_str, sizeof(model_enc_str));
 
-        util_replace_whitespace(dev_scsi->vendor, vendor_str, sizeof(vendor_str));
+        util_replace_whitespace(dev_scsi->vendor, vendor_str, sizeof(vendor_str)-1);
         util_replace_chars(vendor_str, NULL);
-        util_replace_whitespace(dev_scsi->model, model_str, sizeof(model_str));
+        util_replace_whitespace(dev_scsi->model, model_str, sizeof(model_str)-1);
         util_replace_chars(model_str, NULL);
         set_type(dev_scsi->type, type_str, sizeof(type_str));
-        util_replace_whitespace(dev_scsi->revision, revision_str, sizeof(revision_str));
+        util_replace_whitespace(dev_scsi->revision, revision_str, sizeof(revision_str)-1);
         util_replace_chars(revision_str, NULL);
         return 0;
 }
@@ -482,27 +471,26 @@ static int set_inq_values(struct udev *udev, struct scsi_id_device *dev_scsi, co
  * scsi_id: try to get an id, if one is found, printf it to stdout.
  * returns a value passed to exit() - 0 if printed an id, else 1.
  */
-static int scsi_id(struct udev *udev, char *maj_min_dev)
-{
+static int scsi_id(char *maj_min_dev) {
         struct scsi_id_device dev_scsi = {};
         int good_dev;
         int page_code;
         int retval = 0;
 
-        if (set_inq_values(udev, &dev_scsi, maj_min_dev) < 0) {
+        if (set_inq_values(&dev_scsi, maj_min_dev) < 0) {
                 retval = 1;
                 goto out;
         }
 
         /* get per device (vendor + model) options from the config file */
-        per_dev_options(udev, &dev_scsi, &good_dev, &page_code);
+        per_dev_options(&dev_scsi, &good_dev, &page_code);
         if (!good_dev) {
                 retval = 1;
                 goto out;
         }
 
         /* read serial number from mode pages (no values for optical drives) */
-        scsi_get_serial(udev, &dev_scsi, maj_min_dev, page_code, MAX_SERIAL_LEN);
+        scsi_get_serial(&dev_scsi, maj_min_dev, page_code, MAX_SERIAL_LEN);
 
         if (export) {
                 char serial_str[MAX_SERIAL_LEN];
@@ -515,10 +503,10 @@ static int scsi_id(struct udev *udev, char *maj_min_dev)
                 printf("ID_REVISION=%s\n", revision_str);
                 printf("ID_TYPE=%s\n", type_str);
                 if (dev_scsi.serial[0] != '\0') {
-                        util_replace_whitespace(dev_scsi.serial, serial_str, sizeof(serial_str));
+                        util_replace_whitespace(dev_scsi.serial, serial_str, sizeof(serial_str)-1);
                         util_replace_chars(serial_str, NULL);
                         printf("ID_SERIAL=%s\n", serial_str);
-                        util_replace_whitespace(dev_scsi.serial_short, serial_str, sizeof(serial_str));
+                        util_replace_whitespace(dev_scsi.serial_short, serial_str, sizeof(serial_str)-1);
                         util_replace_chars(serial_str, NULL);
                         printf("ID_SERIAL_SHORT=%s\n", serial_str);
                 }
@@ -545,7 +533,7 @@ static int scsi_id(struct udev *udev, char *maj_min_dev)
         if (reformat_serial) {
                 char serial_str[MAX_SERIAL_LEN];
 
-                util_replace_whitespace(dev_scsi.serial, serial_str, sizeof(serial_str));
+                util_replace_whitespace(dev_scsi.serial, serial_str, sizeof(serial_str)-1);
                 util_replace_chars(serial_str, NULL);
                 printf("%s\n", serial_str);
                 goto out;
@@ -557,7 +545,6 @@ out:
 }
 
 int main(int argc, char **argv) {
-        _cleanup_(udev_unrefp) struct udev *udev;
         int retval = 0;
         char maj_min_dev[MAX_PATH_LEN];
         int newargc;
@@ -568,14 +555,10 @@ int main(int argc, char **argv) {
         log_parse_environment();
         log_open();
 
-        udev = udev_new();
-        if (udev == NULL)
-                goto exit;
-
         /*
          * Get config file options.
          */
-        retval = get_file_options(udev, NULL, NULL, &newargc, &newargv);
+        retval = get_file_options(NULL, NULL, &newargc, &newargv);
         if (retval < 0) {
                 retval = 1;
                 goto exit;
@@ -583,7 +566,7 @@ int main(int argc, char **argv) {
         if (retval == 0) {
                 assert(newargv);
 
-                if (set_options(udev, newargc, newargv, maj_min_dev) < 0) {
+                if (set_options(newargc, newargv, maj_min_dev) < 0) {
                         retval = 2;
                         goto exit;
                 }
@@ -592,7 +575,7 @@ int main(int argc, char **argv) {
         /*
          * Get command line options (overriding any config file settings).
          */
-        if (set_options(udev, argc, argv, maj_min_dev) < 0)
+        if (set_options(argc, argv, maj_min_dev) < 0)
                 exit(EXIT_FAILURE);
 
         if (!dev_specified) {
@@ -601,7 +584,7 @@ int main(int argc, char **argv) {
                 goto exit;
         }
 
-        retval = scsi_id(udev, maj_min_dev);
+        retval = scsi_id(maj_min_dev);
 
 exit:
         if (newargv) {

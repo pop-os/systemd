@@ -4,7 +4,9 @@
 
 #include "alloc-util.h"
 #include "dbus-slice.h"
+#include "dbus-unit.h"
 #include "log.h"
+#include "serialize.h"
 #include "slice.h"
 #include "special.h"
 #include "string-util.h"
@@ -27,6 +29,9 @@ static void slice_init(Unit *u) {
 static void slice_set_state(Slice *t, SliceState state) {
         SliceState old_state;
         assert(t);
+
+        if (t->state != state)
+                bus_unit_send_pending_change_signal(UNIT(t), false);
 
         old_state = t->state;
         t->state = state;
@@ -74,7 +79,7 @@ static int slice_add_default_dependencies(Slice *s) {
         r = unit_add_two_dependencies_by_name(
                         UNIT(s),
                         UNIT_BEFORE, UNIT_CONFLICTS,
-                        SPECIAL_SHUTDOWN_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+                        SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 
@@ -123,7 +128,7 @@ static int slice_load_root_slice(Unit *u) {
         if (!u->description)
                 u->description = strdup("Root Slice");
         if (!u->documentation)
-                u->documentation = strv_new("man:systemd.special(7)", NULL);
+                u->documentation = strv_new("man:systemd.special(7)");
 
         return 1;
 }
@@ -146,7 +151,7 @@ static int slice_load_system_slice(Unit *u) {
         if (!u->description)
                 u->description = strdup("System Slice");
         if (!u->documentation)
-                u->documentation = strv_new("man:systemd.special(7)", NULL);
+                u->documentation = strv_new("man:systemd.special(7)");
 
         return 1;
 }
@@ -256,7 +261,8 @@ static int slice_serialize(Unit *u, FILE *f, FDSet *fds) {
         assert(f);
         assert(fds);
 
-        unit_serialize_item(u, f, "state", slice_state_to_string(s->state));
+        (void) serialize_item(f, "state", slice_state_to_string(s->state));
+
         return 0;
 }
 
@@ -328,7 +334,7 @@ static void slice_enumerate_perpetual(Manager *m) {
         assert(m);
 
         r = slice_make_perpetual(m, SPECIAL_ROOT_SLICE, &u);
-        if (r >= 0 && manager_owns_root_cgroup(m)) {
+        if (r >= 0 && manager_owns_host_root_cgroup(m)) {
                 Slice *s = SLICE(u);
 
                 /* If we are managing the root cgroup then this means our root slice covers the whole system, which

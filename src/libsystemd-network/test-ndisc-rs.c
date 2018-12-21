@@ -14,6 +14,7 @@
 #include "socket-util.h"
 #include "strv.h"
 #include "ndisc-internal.h"
+#include "tests.h"
 
 static struct ether_addr mac_addr = {
         .ether_addr_octet = {'A', 'B', 'C', '1', '2', '3'}
@@ -175,7 +176,7 @@ static int test_rs_hangcheck(sd_event_source *s, uint64_t usec,
 int icmp6_bind_router_solicitation(int index) {
         assert_se(index == 42);
 
-        if (socketpair(AF_UNIX, SOCK_DGRAM, 0, test_fd) < 0)
+        if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, test_fd) < 0)
                 return -errno;
 
         return test_fd[0];
@@ -407,9 +408,7 @@ static void test_timeout(void) {
 
 int main(int argc, char *argv[]) {
 
-        log_set_max_level(LOG_DEBUG);
-        log_parse_environment();
-        log_open();
+        test_setup_logging(LOG_DEBUG);
 
         test_rs();
         test_timeout();

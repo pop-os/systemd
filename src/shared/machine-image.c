@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <linux/fs.h>
@@ -17,9 +18,9 @@
 #include "copy.h"
 #include "dirent-util.h"
 #include "dissect-image.h"
+#include "env-file.h"
 #include "env-util.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "fs-util.h"
 #include "hashmap.h"
 #include "hostname-util.h"
@@ -56,15 +57,8 @@ static const char* const image_search_path[_IMAGE_CLASS_MAX] = {
                            "/usr/lib/portables\0",
 };
 
-Image *image_unref(Image *i) {
-        if (!i)
-                return NULL;
-
-        assert(i->n_ref > 0);
-        i->n_ref--;
-
-        if (i->n_ref > 0)
-                return NULL;
+static Image *image_free(Image *i) {
+        assert(i);
 
         free(i->name);
         free(i->path);
@@ -76,15 +70,9 @@ Image *image_unref(Image *i) {
         return mfree(i);
 }
 
-Image *image_ref(Image *i) {
-        if (!i)
-                return NULL;
-
-        assert(i->n_ref > 0);
-        i->n_ref++;
-
-        return i;
-}
+DEFINE_TRIVIAL_REF_UNREF_FUNC(Image, image, image_free);
+DEFINE_HASH_OPS_WITH_VALUE_DESTRUCTOR(image_hash_ops, char, string_hash_func, string_compare_func,
+                                      Image, image_unref);
 
 static char **image_settings_path(Image *image) {
         _cleanup_strv_free_ char **l = NULL;
@@ -652,7 +640,7 @@ int image_remove(Image *i) {
 
         case IMAGE_DIRECTORY:
                 /* Allow deletion of read-only directories */
-                (void) chattr_path(i->path, 0, FS_IMMUTABLE_FL);
+                (void) chattr_path(i->path, 0, FS_IMMUTABLE_FL, NULL);
                 r = rm_rf(i->path, REMOVE_ROOT|REMOVE_PHYSICAL|REMOVE_SUBVOLUME);
                 if (r < 0)
                         return r;
@@ -751,7 +739,7 @@ int image_rename(Image *i, const char *new_name) {
                 (void) read_attr_path(i->path, &file_attr);
 
                 if (file_attr & FS_IMMUTABLE_FL)
-                        (void) chattr_path(i->path, 0, FS_IMMUTABLE_FL);
+                        (void) chattr_path(i->path, 0, FS_IMMUTABLE_FL, NULL);
 
                 _fallthrough_;
         case IMAGE_SUBVOLUME:
@@ -792,7 +780,7 @@ int image_rename(Image *i, const char *new_name) {
 
         /* Restore the immutable bit, if it was set before */
         if (file_attr & FS_IMMUTABLE_FL)
-                (void) chattr_path(new_path, FS_IMMUTABLE_FL, FS_IMMUTABLE_FL);
+                (void) chattr_path(new_path, FS_IMMUTABLE_FL, FS_IMMUTABLE_FL, NULL);
 
         free_and_replace(i->path, new_path);
         free_and_replace(i->name, nn);
@@ -942,7 +930,7 @@ int image_read_only(Image *i, bool b) {
                    a read-only subvolume, but at least something, and
                    we can read the value back. */
 
-                r = chattr_path(i->path, b ? FS_IMMUTABLE_FL : 0, FS_IMMUTABLE_FL);
+                r = chattr_path(i->path, b ? FS_IMMUTABLE_FL : 0, FS_IMMUTABLE_FL, NULL);
                 if (r < 0)
                         return r;
 
@@ -1129,7 +1117,7 @@ int image_read_metadata(Image *i) {
                 if (r < 0 && r != -ENOENT)
                         log_debug_errno(r, "Failed to chase /etc/machine-info in image %s: %m", i->name);
                 else if (r >= 0) {
-                        r = load_env_file_pairs(NULL, path, NULL, &machine_info);
+                        r = load_env_file_pairs(NULL, path, &machine_info);
                         if (r < 0)
                                 log_debug_errno(r, "Failed to parse machine-info data of %s: %m", i->name);
                 }

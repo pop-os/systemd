@@ -16,6 +16,7 @@
 #include "bus-error.h"
 #include "bus-util.h"
 #include "dbus-automount.h"
+#include "dbus-unit.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "io-util.h"
@@ -23,9 +24,11 @@
 #include "mkdir.h"
 #include "mount-util.h"
 #include "mount.h"
+#include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "serialize.h"
 #include "special.h"
 #include "stdio-util.h"
 #include "string-table.h"
@@ -85,7 +88,7 @@ static void unmount_autofs(Automount *a) {
         a->pipe_fd = safe_close(a->pipe_fd);
 
         /* If we reload/reexecute things we keep the mount point around */
-        if (!IN_SET(UNIT(a)->manager->exit_code, MANAGER_RELOAD, MANAGER_REEXECUTE)) {
+        if (!IN_SET(UNIT(a)->manager->objective, MANAGER_RELOAD, MANAGER_REEXECUTE)) {
 
                 automount_send_ready(a, a->tokens, -EHOSTDOWN);
                 automount_send_ready(a, a->expire_tokens, -EHOSTDOWN);
@@ -149,7 +152,7 @@ static int automount_add_default_dependencies(Automount *a) {
         if (!MANAGER_IS_SYSTEM(UNIT(a)->manager))
                 return 0;
 
-        r = unit_add_two_dependencies_by_name(UNIT(a), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_two_dependencies_by_name(UNIT(a), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_UMOUNT_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 
@@ -235,6 +238,9 @@ static void automount_set_state(Automount *a, AutomountState state) {
         AutomountState old_state;
         assert(a);
 
+        if (a->state != state)
+                bus_unit_send_pending_change_signal(UNIT(a), false);
+
         old_state = a->state;
         a->state = state;
 
@@ -314,9 +320,7 @@ static void automount_enter_dead(Automount *a, AutomountResult f) {
         if (a->result == AUTOMOUNT_SUCCESS)
                 a->result = f;
 
-        if (a->result != AUTOMOUNT_SUCCESS)
-                log_unit_warning(UNIT(a), "Failed with result '%s'.", automount_result_to_string(a->result));
-
+        unit_log_result(UNIT(a), a->result == AUTOMOUNT_SUCCESS, automount_result_to_string(a->result));
         automount_set_state(a, a->result != AUTOMOUNT_SUCCESS ? AUTOMOUNT_FAILED : AUTOMOUNT_DEAD);
 }
 
@@ -841,16 +845,16 @@ static int automount_serialize(Unit *u, FILE *f, FDSet *fds) {
         assert(f);
         assert(fds);
 
-        unit_serialize_item(u, f, "state", automount_state_to_string(a->state));
-        unit_serialize_item(u, f, "result", automount_result_to_string(a->result));
-        unit_serialize_item_format(u, f, "dev-id", "%u", (unsigned) a->dev_id);
+        (void) serialize_item(f, "state", automount_state_to_string(a->state));
+        (void) serialize_item(f, "result", automount_result_to_string(a->result));
+        (void) serialize_item_format(f, "dev-id", "%lu", (unsigned long) a->dev_id);
 
         SET_FOREACH(p, a->tokens, i)
-                unit_serialize_item_format(u, f, "token", "%u", PTR_TO_UINT(p));
+                (void) serialize_item_format(f, "token", "%u", PTR_TO_UINT(p));
         SET_FOREACH(p, a->expire_tokens, i)
-                unit_serialize_item_format(u, f, "expire-token", "%u", PTR_TO_UINT(p));
+                (void) serialize_item_format(f, "expire-token", "%u", PTR_TO_UINT(p));
 
-        r = unit_serialize_item_fd(u, f, fds, "pipe-fd", a->pipe_fd);
+        r = serialize_fd(f, fds, "pipe-fd", a->pipe_fd);
         if (r < 0)
                 return r;
 
@@ -882,12 +886,13 @@ static int automount_deserialize_item(Unit *u, const char *key, const char *valu
                         a->result = f;
 
         } else if (streq(key, "dev-id")) {
-                unsigned d;
+                unsigned long d;
 
-                if (safe_atou(value, &d) < 0)
+                if (safe_atolu(value, &d) < 0)
                         log_unit_debug(u, "Failed to parse dev-id value: %s", value);
                 else
-                        a->dev_id = (unsigned) d;
+                        a->dev_id = (dev_t) d;
+
         } else if (streq(key, "token")) {
                 unsigned token;
 

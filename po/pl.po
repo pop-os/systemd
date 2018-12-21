@@ -1,16 +1,13 @@
 # SPDX-License-Identifier: LGPL-2.1+
 #
 # Polish translation for systemd.
-# This file is distributed under the same license as the systemd package.
-# Piotr Drąg <piotrdrag@gmail.com>, 2011, 2013-2018.
-# Zbigniew Jędrzejewski-Szmek <zbyszek@in.waw.pl>, 2011.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: systemd\n"
 "Report-Msgid-Bugs-To: https://github.com/systemd/systemd/issues\n"
-"POT-Creation-Date: 2018-06-19 15:00+0000\n"
-"PO-Revision-Date: 2018-06-19 17:05+0200\n"
+"POT-Creation-Date: 2018-10-26 19:14+0000\n"
+"PO-Revision-Date: 2018-10-26 21:15+0200\n"
 "Last-Translator: Piotr Drąg <piotrdrag@gmail.com>\n"
 "Language-Team: Polish <trans-pl@lists.fedoraproject.org>\n"
 "Language: pl\n"
@@ -100,6 +97,14 @@ msgstr "Ustawienie informacji o komputerze"
 msgid "Authentication is required to set local machine information."
 msgstr ""
 "Wymagane jest uwierzytelnienie, aby ustawić informacje o lokalnym komputerze."
+
+#: src/hostname/org.freedesktop.hostname1.policy:51
+msgid "Get product UUID"
+msgstr "Uzyskanie UUID produktu"
+
+#: src/hostname/org.freedesktop.hostname1.policy:52
+msgid "Authentication is required to get product UUID."
+msgstr "Wymagane jest uwierzytelnienie, aby uzyskać UUID produktu."
 
 #: src/import/org.freedesktop.import1.policy:22
 msgid "Import a VM or container image"
@@ -667,9 +672,12 @@ msgstr ""
 "Wymagane jest uwierzytelnienie, aby ponownie uruchomić jednostkę „$(unit)”."
 
 #: src/core/dbus-unit.c:437
-msgid "Authentication is required to kill '$(unit)'."
+msgid ""
+"Authentication is required to send a UNIX signal to the processes of "
+"'$(unit)'."
 msgstr ""
-"Wymagane jest uwierzytelnienie, aby wymusić wyłączenie jednostki „$(unit)”."
+"Wymagane jest uwierzytelnienie, aby wysłać sygnał uniksowy do procesów "
+"jednostki „$(unit)”."
 
 #: src/core/dbus-unit.c:468
 msgid "Authentication is required to reset the \"failed\" state of '$(unit)'."

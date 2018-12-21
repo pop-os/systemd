@@ -9,6 +9,7 @@
 #include "alloc-util.h"
 #include "extract-word.h"
 #include "macro.h"
+#include "string-util.h"
 #include "util.h"
 
 char *strv_find(char **l, const char *name) _pure_;
@@ -53,8 +54,9 @@ bool strv_equal(char **a, char **b);
 
 #define strv_contains(l, s) (!!strv_find((l), (s)))
 
-char **strv_new(const char *x, ...) _sentinel_;
+char **strv_new_internal(const char *x, ...) _sentinel_;
 char **strv_new_ap(const char *x, va_list ap);
+#define strv_new(...) strv_new_internal(__VA_ARGS__, NULL)
 
 #define STRV_IGNORE ((const char *) -1)
 
@@ -66,12 +68,18 @@ static inline bool strv_isempty(char * const *l) {
         return !l || !*l;
 }
 
-char **strv_split(const char *s, const char *separator);
+char **strv_split_full(const char *s, const char *separator, SplitFlags flags);
+static inline char **strv_split(const char *s, const char *separator) {
+        return strv_split_full(s, separator, 0);
+}
 char **strv_split_newlines(const char *s);
 
 int strv_split_extract(char ***t, const char *s, const char *separators, ExtractFlags flags);
 
-char *strv_join(char **l, const char *separator);
+char *strv_join_prefix(char **l, const char *separator, const char *prefix);
+static inline char *strv_join(char **l, const char *separator) {
+        return strv_join_prefix(l, separator, NULL);
+}
 
 char **strv_parse_nulstr(const char *s, size_t l);
 char **strv_split_nulstr(const char *s);
@@ -134,6 +142,18 @@ void strv_print(char **l);
         ({                                                       \
                 const char* _x = (x);                            \
                 _x && strv_contains(STRV_MAKE(__VA_ARGS__), _x); \
+        })
+
+#define STARTSWITH_SET(p, ...)                                  \
+        ({                                                      \
+                const char *_p = (p);                           \
+                char  *_found = NULL, **_i;                     \
+                STRV_FOREACH(_i, STRV_MAKE(__VA_ARGS__)) {      \
+                        _found = startswith(_p, *_i);           \
+                        if (_found)                             \
+                                break;                          \
+                }                                               \
+                _found;                                         \
         })
 
 #define FOREACH_STRING(x, ...)                               \

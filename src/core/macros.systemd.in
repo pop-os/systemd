@@ -2,8 +2,6 @@
 #  SPDX-License-Identifier: LGPL-2.1+
 #
 #  This file is part of systemd.
-#
-#  Copyright 2012 Lennart Poettering
 
 # RPM macros for packages installing systemd unit files
 
@@ -18,13 +16,17 @@
 %_sysctldir @sysctldir@
 %_sysusersdir @sysusersdir@
 %_tmpfilesdir @tmpfilesdir@
-%_environmnentdir @environmentdir@
+%_environmentdir @environmentdir@
 %_modulesloaddir @modulesloaddir@
 %_modprobedir @modprobedir@
 %_systemdgeneratordir @systemgeneratordir@
 %_systemdusergeneratordir @usergeneratordir@
 %_systemd_system_env_generator_dir @systemenvgeneratordir@
 %_systemd_user_env_generator_dir @userenvgeneratordir@
+
+# Because we had one release with a typo...
+# This is temporary (Remove after systemd 240 is released)
+%_environmnentdir %{warn:Use %%_environmentdir instead}%_environmentdir
 
 %systemd_requires \
 Requires(post): systemd \

@@ -21,8 +21,10 @@ typedef enum KillMode {
 struct KillContext {
         KillMode kill_mode;
         int kill_signal;
+        int final_kill_signal;
         bool send_sigkill;
         bool send_sighup;
+        int watchdog_signal;
 };
 
 typedef enum KillWho {

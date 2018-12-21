@@ -36,6 +36,7 @@
 #include "mkdir.h"
 #include "process-util.h"
 #include "selinux-access.h"
+#include "serialize.h"
 #include "service.h"
 #include "special.h"
 #include "string-util.h"
@@ -47,23 +48,22 @@
 
 static void destroy_bus(Manager *m, sd_bus **bus);
 
-int bus_send_queued_message(Manager *m) {
+int bus_send_pending_reload_message(Manager *m) {
         int r;
 
         assert(m);
 
-        if (!m->queued_message)
+        if (!m->pending_reload_message)
                 return 0;
 
-        /* If we cannot get rid of this message we won't dispatch any
-         * D-Bus messages, so that we won't end up wanting to queue
-         * another message. */
+        /* If we cannot get rid of this message we won't dispatch any D-Bus messages, so that we won't end up wanting
+         * to queue another message. */
 
-        r = sd_bus_send(NULL, m->queued_message, NULL);
+        r = sd_bus_send(NULL, m->pending_reload_message, NULL);
         if (r < 0)
-                log_warning_errno(r, "Failed to send queued message: %m");
+                log_warning_errno(r, "Failed to send queued message, ignoring: %m");
 
-        m->queued_message = sd_bus_message_unref(m->queued_message);
+        m->pending_reload_message = sd_bus_message_unref(m->pending_reload_message);
 
         return 0;
 }
@@ -974,12 +974,9 @@ int bus_init_system(Manager *m) {
 
 int bus_init_private(Manager *m) {
         _cleanup_close_ int fd = -1;
-        union sockaddr_union sa = {
-                .un.sun_family = AF_UNIX
-        };
+        union sockaddr_union sa = {};
         sd_event_source *s;
-        socklen_t salen;
-        int r;
+        int r, salen;
 
         assert(m);
 
@@ -992,27 +989,23 @@ int bus_init_private(Manager *m) {
                 if (getpid_cached() != 1)
                         return 0;
 
-                strcpy(sa.un.sun_path, "/run/systemd/private");
-                salen = SOCKADDR_UN_LEN(sa.un);
+                salen = sockaddr_un_set_path(&sa.un, "/run/systemd/private");
         } else {
-                size_t left = sizeof(sa.un.sun_path);
-                char *p = sa.un.sun_path;
-                const char *e;
+                const char *e, *joined;
 
                 e = secure_getenv("XDG_RUNTIME_DIR");
-                if (!e) {
-                        log_error("Failed to determine XDG_RUNTIME_DIR");
-                        return -EHOSTDOWN;
-                }
+                if (!e)
+                        return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
+                                               "XDG_RUNTIME_DIR is not set, refusing.");
 
-                left = strpcpy(&p, left, e);
-                left = strpcpy(&p, left, "/systemd/private");
-
-                salen = sizeof(sa.un) - left;
+                joined = strjoina(e, "/systemd/private");
+                salen = sockaddr_un_set_path(&sa.un, joined);
         }
+        if (salen < 0)
+                return log_error_errno(salen, "Can't set path for AF_UNIX socket to bind to: %m");
 
         (void) mkdir_parents_label(sa.un.sun_path, 0755);
-        (void) unlink(sa.un.sun_path);
+        (void) sockaddr_un_unlink(&sa.un);
 
         fd = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
         if (fd < 0)
@@ -1035,9 +1028,8 @@ int bus_init_private(Manager *m) {
 
         (void) sd_event_source_set_description(s, "bus-connection");
 
-        m->private_listen_fd = fd;
+        m->private_listen_fd = TAKE_FD(fd);
         m->private_listen_event_source = s;
-        fd = -1;
 
         log_debug("Successfully created private D-Bus server.");
 
@@ -1079,8 +1071,8 @@ static void destroy_bus(Manager *m, sd_bus **bus) {
                         u->bus_track = sd_bus_track_unref(u->bus_track);
 
         /* Get rid of queued message on this bus */
-        if (m->queued_message && sd_bus_message_get_bus(m->queued_message) == *bus)
-                m->queued_message = sd_bus_message_unref(m->queued_message);
+        if (m->pending_reload_message && sd_bus_message_get_bus(m->pending_reload_message) == *bus)
+                m->pending_reload_message = sd_bus_message_unref(m->pending_reload_message);
 
         /* Possibly flush unwritten data, but only if we are
          * unprivileged, since we don't want to sync here */
@@ -1211,13 +1203,8 @@ void bus_track_serialize(sd_bus_track *t, FILE *f, const char *prefix) {
                 int c, j;
 
                 c = sd_bus_track_count_name(t, n);
-
-                for (j = 0; j < c; j++) {
-                        fputs(prefix, f);
-                        fputc('=', f);
-                        fputs(n, f);
-                        fputc('\n', f);
-                }
+                for (j = 0; j < c; j++)
+                        (void) serialize_item(f, prefix, n);
         }
 }
 
