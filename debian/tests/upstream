@@ -11,6 +11,7 @@ BLACKLIST="TEST-06-SELINUX"
 BLACKLIST="$BLACKLIST
 TEST-02-CRYPTSETUP
 TEST-16-EXTEND-TIMEOUT
+TEST-17-UDEV-WANTS
 "
 
 # quiesce Makefile.guess; not really relevant as systemd/nspawn run from
