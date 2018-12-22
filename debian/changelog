@@ -1,4 +1,4 @@
-systemd (240-1) UNRELEASED; urgency=medium
+systemd (240-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 240
@@ -10,6 +10,10 @@ systemd (240-1) UNRELEASED; urgency=medium
       (Closes: #916516)
     - core: Don't track jobs-finishing-during-reload explicitly
       (Closes: #916678)
+  * Rebase patches
+  * Install new systemd-id128 binary
+  * Update symbols file for libsystemd0
+  * Update nss build options
 
   [ Martin Pitt ]
   * tests: Disable some flaky upstream tests.
@@ -17,7 +21,7 @@ systemd (240-1) UNRELEASED; urgency=medium
   * tests: Disable flaky TEST-17-UDEV-WANTS upstream test.
     See https://github.com/systemd/systemd/issues/11195
 
- -- Michael Biebl <biebl@debian.org>  Fri, 21 Dec 2018 22:06:31 +0100
+ -- Michael Biebl <biebl@debian.org>  Sat, 22 Dec 2018 16:01:43 +0100
 
 systemd (239-15) unstable; urgency=medium
 
