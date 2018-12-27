@@ -1,6 +1,6 @@
 systemd (240-2) unstable; urgency=medium
 
-  * Pass seperate dev_t var to device_path_parse_major_minor.
+  * Pass separate dev_t var to device_path_parse_major_minor.
     Fixes FTBFS on mips/mipsel (MIPS/O32). (Closes: #917195)
   * test-json: Check absolute and relative difference in floating point test.
     Fixes FTBFS due to test-suite failures on armel, armhf and hppa.
