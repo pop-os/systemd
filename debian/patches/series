@@ -15,3 +15,4 @@ debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
 debian/Drop-seccomp-system-call-filter-for-udev.patch
+debian/Pass-seperate-dev_t-var-to-device_path_parse_major_minor.patch
