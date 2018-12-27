@@ -1,3 +1,30 @@
+systemd (240-2) unstable; urgency=medium
+
+  * Pass seperate dev_t var to device_path_parse_major_minor.
+    Fixes FTBFS on mips/mipsel (MIPS/O32). (Closes: #917195)
+  * test-json: Check absolute and relative difference in floating point test.
+    Fixes FTBFS due to test-suite failures on armel, armhf and hppa.
+    (Closes: #917215)
+  * sd-device: Fix segfault when error occurs in device_new_from_{nulstr,strv}()
+    Fixes a segfault in systemd-udevd when debug logging is enabled.
+  * udev-event: Do not read stdout or stderr if the pipefd is not created.
+    This fixes problems with device-mapper symlinks no longer being created
+    or certain devices not being marked as ready. (Closes: #917124)
+  * Don't bump fs.nr_open in PID 1.
+    In v240, systemd bumped fs.nr_open in PID 1 to the highest possible
+    value. Processes that are spawned directly by systemd, will have
+    RLIMIT_NOFILE be set to 512K (hard).
+    pam_limits in Debian defaults to "set_all", i.e. for limits which are
+    not explicitly configured in /etc/security/limits.conf, the value from
+    PID 1 is taken, which means for login sessions, RLIMIT_NOFILE is set to
+    the highest possible value instead of 512K. Not every software is able
+    to deal with such an RLIMIT_NOFILE properly.
+    While this is arguably a questionable default in Debian's pam_limit,
+    work around this problem by not bumping fs.nr_open in PID 1.
+    (Closes: #917167)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 27 Dec 2018 14:03:57 +0100
+
 systemd (240-1) unstable; urgency=medium
 
   [ Michael Biebl ]
