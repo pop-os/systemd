@@ -13,10 +13,10 @@ hack to make the renaming less likely to fail.
  1 file changed, 46 insertions(+), 5 deletions(-)
 
 diff --git a/src/udev/udev-event.c b/src/udev/udev-event.c
-index e28d6a5..f601a0b 100644
+index 3e91697..ebeae32 100644
 --- a/src/udev/udev-event.c
 +++ b/src/udev/udev-event.c
-@@ -688,6 +688,7 @@ static int rename_netif(UdevEvent *event) {
+@@ -692,6 +692,7 @@ static int rename_netif(UdevEvent *event) {
          const char *action, *oldname;
          char name[IFNAMSIZ];
          int ifindex, r;
@@ -24,7 +24,7 @@ index e28d6a5..f601a0b 100644
  
          if (!event->name)
                  return 0; /* No new name is requested. */
-@@ -713,17 +714,57 @@ static int rename_netif(UdevEvent *event) {
+@@ -717,17 +718,57 @@ static int rename_netif(UdevEvent *event) {
                  return log_device_error_errno(dev, r, "Failed to get ifindex: %m");
  
          strscpy(name, IFNAMSIZ, event->name);
