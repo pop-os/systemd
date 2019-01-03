@@ -177,8 +177,14 @@ case "$1" in
         sleep 15
     fi
 
-    log_action_begin_msg "Synthesizing the initial hotplug events"
-    if udevadm trigger --action=add; then
+    log_action_begin_msg "Synthesizing the initial hotplug events (subsystems)"
+    if udevadm trigger --type=subsystems --action=add; then
+        log_action_end_msg $?
+    else
+        log_action_end_msg $?
+    fi
+    log_action_begin_msg "Synthesizing the initial hotplug events (devices)"
+    if udevadm trigger --type=devices --action=add; then
         log_action_end_msg $?
     else
         log_action_end_msg $?
