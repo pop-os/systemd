@@ -1,4 +1,7 @@
 udev-event-do-not-read-stdout-or-stderr-if-the-pipefd-is-.patch
+Pass-separate-dev_t-var-to-device_path_parse_major_minor.patch
+test-json-check-absolute-and-relative-difference-in-float.patch
+sd-device-fix-segfault-when-error-occurs-in-device_new_fr.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -16,6 +19,3 @@ debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Revert-udev-rules-Permission-changes-for-dev-dri-renderD.patch
 debian/Drop-seccomp-system-call-filter-for-udev.patch
-debian/Pass-seperate-dev_t-var-to-device_path_parse_major_minor.patch
-debian/test-json-check-absolute-and-relative-difference-in-float.patch
-debian/sd-device-fix-segfault-when-error-occurs-in-device_new_fr.patch

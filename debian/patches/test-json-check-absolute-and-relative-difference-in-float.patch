@@ -11,6 +11,8 @@ fail.
 
 It also seems that even without valgrind, this fails on some arm32 CPUs.
 Let's do the usual-style test for absolute and relative differences.
+
+(cherry picked from commit aa70783f55b369521b94e0985e84bbdaae16b174)
 ---
  src/test/test-json.c | 16 +++++++---------
  1 file changed, 7 insertions(+), 9 deletions(-)
