@@ -1,0 +1,45 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 30 Dec 2018 22:07:23 +0900
+Subject: network: do not ignore errors on link_request_set_neighbors() and
+ link_set_routing_policy()
+
+(cherry picked from commit f3ef324dfa72ee1d0e113dbb234c643d8f0286f0)
+---
+ src/network/networkd-link.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index cadf7f8..589a016 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -866,7 +866,9 @@ static int link_request_set_routes(Link *link) {
+ 
+         link_set_state(link, LINK_STATE_CONFIGURING);
+ 
+-        (void) link_set_routing_policy_rule(link);
++        r = link_set_routing_policy_rule(link);
++        if (r < 0)
++                return r;
+ 
+         /* First add the routes that enable us to talk to gateways, then add in the others that need a gateway. */
+         for (phase = 0; phase < _PHASE_MAX; phase++)
+@@ -1079,7 +1081,9 @@ static int link_request_set_addresses(Link *link) {
+ 
+         link_set_state(link, LINK_STATE_CONFIGURING);
+ 
+-        link_request_set_neighbors(link);
++        r = link_request_set_neighbors(link);
++        if (r < 0)
++                return r;
+ 
+         LIST_FOREACH(addresses, ad, link->network->static_addresses) {
+                 r = address_configure(ad, link, address_handler, false);
+@@ -1216,7 +1220,7 @@ static int link_request_set_addresses(Link *link) {
+ 
+                                 return 0;
+                         }
+-                }    
++                }
+ 
+                 log_link_debug(link, "Offering DHCPv4 leases");
+         }

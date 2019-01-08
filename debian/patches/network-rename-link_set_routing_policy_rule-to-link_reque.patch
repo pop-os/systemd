@@ -1,0 +1,34 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 30 Dec 2018 22:10:32 +0900
+Subject: network: rename link_set_routing_policy_rule() to
+ link_request_set_routing_policy_rule()
+
+For consistency to other functions.
+
+(cherry picked from commit 47079967e64727dd9271d2b033b5aa485209a7f7)
+---
+ src/network/networkd-link.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 589a016..e529111 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -787,7 +787,7 @@ void link_check_ready(Link *link) {
+         return;
+ }
+ 
+-static int link_set_routing_policy_rule(Link *link) {
++static int link_request_set_routing_policy_rule(Link *link) {
+         RoutingPolicyRule *rule, *rrule = NULL;
+         int r;
+ 
+@@ -866,7 +866,7 @@ static int link_request_set_routes(Link *link) {
+ 
+         link_set_state(link, LINK_STATE_CONFIGURING);
+ 
+-        r = link_set_routing_policy_rule(link);
++        r = link_request_set_routing_policy_rule(link);
+         if (r < 0)
+                 return r;
+ 
