@@ -2,6 +2,7 @@ udev-event-do-not-read-stdout-or-stderr-if-the-pipefd-is-.patch
 Pass-separate-dev_t-var-to-device_path_parse_major_minor.patch
 test-json-check-absolute-and-relative-difference-in-float.patch
 sd-device-fix-segfault-when-error-occurs-in-device_new_fr.patch
+udevadm-refuse-to-run-trigger-control-settle-and-monitor-.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
