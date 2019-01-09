@@ -7,6 +7,7 @@ Do-not-start-server-if-it-is-already-runnning-11245.patch
 network-do-not-ignore-errors-on-link_request_set_neighbor.patch
 network-rename-link_set_routing_policy_rule-to-link_reque.patch
 network-set-_configured-flags-to-false-before-requesting-.patch
+libudev-util-make-util_replace_whitespace-read-only-len-c.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
