@@ -1,3 +1,26 @@
+systemd (240-3) unstable; urgency=medium
+
+  * udev.init: Trigger add events for subsystems.
+    Update the SysV init script and mimic the behaviour of the initramfs and
+    systemd-udev-trigger.service which first trigger subsystems and then
+    devices during the coldplug stage.
+  * udevadm: Refuse to run trigger, control, settle and monitor commands in
+    chroot (Closes: #917633)
+  * network: Set link state configuring before setting addresses.
+    Fixes a crash in systemd-networkd caused by an assertion failure.
+    (Closes: #918658)
+  * libudev-util: Make util_replace_whitespace() read only len characters.
+    Fixes a regression where /dev/disk/by-id/ names had additional
+    underscores.
+  * man: Update color of journal logs in DEBUG level (Closes: #917948)
+  * Remove old state directory of systemd-timesyncd on upgrades.
+    Otherwise timesyncd will fail to update the clock file if it was created
+    as /var/lib/private/systemd/timesync/clock.
+    This was the case when the service was using DynamicUser=yes which it no
+    longer does in v240. (Closes: #918190)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 09 Jan 2019 18:40:57 +0100
+
 systemd (240-2) unstable; urgency=medium
 
   * Pass separate dev_t var to device_path_parse_major_minor.
