@@ -38,6 +38,7 @@ network-rename-link_set_routing_policy_rule-to-link_reque.patch
 network-set-_configured-flags-to-false-before-requesting-.patch
 man-update-color-of-journal-logs-in-DEBUG-level.patch
 sd-device-monitor-fix-ordering-of-setting-buffer-size.patch
+meson-stop-setting-fPIE-globally.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
