@@ -1,3 +1,26 @@
+systemd (240-4) unstable; urgency=medium
+
+  [ Benjamin Drung ]
+  * Fix shellcheck issues in initramfs-tools scripts
+
+  [ Michael Biebl ]
+  * Import patches from v240-stable branch (up to f02b5472c6)
+    - Fixes a problem in logind closing the controlling terminal when using
+      startx. (Closes: #918927)
+    - Fixes various journald vulnerabilities via attacker controlled alloca.
+      (CVE-2018-16864, CVE-2018-16865, Closes: #918841, Closes: #918848)
+  * sd-device-monitor: Fix ordering of setting buffer size.
+    Fixes an issue with uevents not being processed properly during coldplug
+    stage and some kernel modules not being loaded via "udevadm trigger".
+    (Closes: #917607)
+  * meson: Stop setting -fPIE globally.
+    Setting -fPIE globally can lead to miscompilations on certain
+    architectures. Instead use the b_pie=true build option, which was
+    introduced in meson 0.49. Bump the Build-Depends accordingly.
+    (Closes: #909396)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 12 Jan 2019 21:49:44 +0100
+
 systemd (240-3) unstable; urgency=medium
 
   * udev.init: Trigger add events for subsystems.
