@@ -13,10 +13,10 @@ hack to make the renaming less likely to fail.
  1 file changed, 46 insertions(+), 5 deletions(-)
 
 diff --git a/src/udev/udev-event.c b/src/udev/udev-event.c
-index 3e91697..ebeae32 100644
+index 07b7365..f67b295 100644
 --- a/src/udev/udev-event.c
 +++ b/src/udev/udev-event.c
-@@ -692,6 +692,7 @@ static int rename_netif(UdevEvent *event) {
+@@ -680,6 +680,7 @@ static int rename_netif(UdevEvent *event) {
          const char *action, *oldname;
          char name[IFNAMSIZ];
          int ifindex, r;
@@ -24,7 +24,7 @@ index 3e91697..ebeae32 100644
  
          if (!event->name)
                  return 0; /* No new name is requested. */
-@@ -717,17 +718,57 @@ static int rename_netif(UdevEvent *event) {
+@@ -705,17 +706,57 @@ static int rename_netif(UdevEvent *event) {
                  return log_device_error_errno(dev, r, "Failed to get ifindex: %m");
  
          strscpy(name, IFNAMSIZ, event->name);
@@ -41,12 +41,12 @@ index 3e91697..ebeae32 100644
 +
 +                return 1;
 +        }
- 
--        r = device_rename(dev, event->name);
++
 +        /* keep trying if the destination interface name already exists */
 +        if (r != -EEXIST)
 +                goto out;
-+
+ 
+-        r = device_rename(dev, event->name);
 +        /* free our own name, another process may wait for us */
 +        snprintf(name, IFNAMSIZ, "rename%u", ifindex);
 +        r = rtnl_set_link_name(&event->rtnl, ifindex, name);

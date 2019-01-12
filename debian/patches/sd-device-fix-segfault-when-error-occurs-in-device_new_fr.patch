@@ -12,6 +12,7 @@ set.
 Fixes #11258.
 
 (cherry picked from commit 18fee12a2d489378a2a9b647db0d0eb8c43f5362)
+(cherry picked from commit 9ae73a6273461361eef7e83d48aadee111d6616e)
 ---
  src/libsystemd/sd-device/sd-device.c | 3 +++
  1 file changed, 3 insertions(+)

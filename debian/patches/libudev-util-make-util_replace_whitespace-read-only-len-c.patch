@@ -8,6 +8,7 @@ This effectively reverts df8ba4fa0e8be1ff7899d08a4b6be0196c8405a0.
 Fixes #11264.
 
 (cherry picked from commit 577ab71c58d36bc8577d15f172a306c9c05cd2f4)
+(cherry picked from commit c3712308fc090116e388f395e4a8bb0bd8446ea6)
 ---
  src/libudev/libudev-util.c | 13 +++++++------
  src/test/test-libudev.c    | 27 +++++++++++++++++----------

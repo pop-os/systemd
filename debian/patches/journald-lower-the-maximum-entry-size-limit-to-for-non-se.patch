@@ -1,0 +1,32 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 5 Dec 2018 22:52:53 +0100
+Subject: =?utf-8?q?journald=3A_lower_the_maximum_entry_size_limit_to_=C2=BD?=
+ =?utf-8?q?_for_non-sealed_fds?=
+
+We immediately read the whole contents into memory, making thigs much more
+expensive. Sealed fds should be used instead since they are more efficient
+on our side.
+
+(cherry picked from commit 6670c9de196c8e2d5e84a8890cbb68f70c4db6e3)
+(cherry picked from commit f0ad5fe17fc6cee1f04f8f93899538ea2e96256c)
+---
+ src/journal/journald-native.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/journal/journald-native.c b/src/journal/journald-native.c
+index 50aad6d..221188d 100644
+--- a/src/journal/journald-native.c
++++ b/src/journal/journald-native.c
+@@ -376,8 +376,10 @@ void server_process_native_file(
+         if (st.st_size <= 0)
+                 return;
+ 
+-        if (st.st_size > ENTRY_SIZE_MAX) {
+-                log_error("File passed too large. Ignoring.");
++        /* When !sealed, set a lower memory limit. We have to read the file,
++         * effectively doubling memory use. */
++        if (st.st_size > ENTRY_SIZE_MAX / (sealed ? 1 : 2)) {
++                log_error("File passed too large (%"PRIu64" bytes). Ignoring.", (uint64_t) st.st_size);
+                 return;
+         }
+ 

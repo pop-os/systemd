@@ -6,6 +6,7 @@ Subject: udev-event: do not read stdout or stderr if the pipefd is not
 Fixes #11255.
 
 (cherry picked from commit adeb26c1affd09138bb96a9e25b795d146e64c97)
+(cherry picked from commit 32a11a27b69031240beea38260d93e034ea33036)
 ---
  src/udev/udev-event.c | 16 ++++++++++------
  1 file changed, 10 insertions(+), 6 deletions(-)

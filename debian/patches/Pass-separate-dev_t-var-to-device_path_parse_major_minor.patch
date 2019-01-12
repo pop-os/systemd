@@ -11,6 +11,7 @@ while pass 2 seperate variables. The result of stat is alos copied
 out into these 2 variables. Fixes: #11247
 
 (cherry picked from commit f5855697aa19fb92637e72ab02e4623abe77f288)
+(cherry picked from commit a0d4edf0e7fe6674c44258a73e0722494d659976)
 ---
  src/core/cgroup.c | 35 ++++++++++++++++++++++-------------
  1 file changed, 22 insertions(+), 13 deletions(-)
