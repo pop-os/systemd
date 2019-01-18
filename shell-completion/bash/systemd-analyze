@@ -4,7 +4,6 @@
 # This file is part of systemd.
 #
 # Copyright © 2010 Ran Benita
-# Copyright © 2013 Harald Hoyer
 #
 # systemd is free software; you can redistribute it and/or modify it
 # under the terms of the GNU Lesser General Public License as published by
@@ -31,8 +30,22 @@ __get_machines() {
         machinectl list --no-legend --no-pager | { while read a b; do echo " $a"; done; };
 }
 
+__get_services() {
+        systemctl list-units --no-legend --no-pager -t service --all $1 | \
+                { while read -r a b c; do [[ $b == "loaded" ]]; echo " $a"; done }
+}
+
+__get_syscall_sets() {
+        local line
+        systemd-analyze syscall-filter --no-pager | while IFS= read -r line; do
+                if [[ $line == @* ]]; then
+                        printf '%s\n' "$line"
+                fi
+        done
+}
+
 _systemd_analyze() {
-        local i verb comps
+        local i verb comps mode
         local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
 
         local -A OPTS=(
@@ -42,7 +55,7 @@ _systemd_analyze() {
         )
 
         local -A VERBS=(
-                [STANDALONE]='time blame plot dump unit-paths calendar'
+                [STANDALONE]='time blame plot dump unit-paths calendar timespan'
                 [CRITICAL_CHAIN]='critical-chain'
                 [DOT]='dot'
                 [LOG_LEVEL]='log-level'
@@ -51,6 +64,7 @@ _systemd_analyze() {
                 [SECCOMP_FILTER]='syscall-filter'
                 [SERVICE_WATCHDOGS]='service-watchdogs'
                 [CAT_CONFIG]='cat-config'
+                [SECURITY]='security'
         )
 
         local CONFIGS='systemd/bootchart.conf systemd/coredump.conf systemd/journald.conf
@@ -122,6 +136,8 @@ _systemd_analyze() {
         elif __contains_word "$verb" ${VERBS[SECCOMP_FILTER]}; then
                 if [[ $cur = -* ]]; then
                         comps='--help --version --no-pager'
+                else
+                        comps=$( __get_syscall_sets )
                 fi
 
         elif __contains_word "$verb" ${VERBS[VERIFY]}; then
@@ -148,6 +164,18 @@ _systemd_analyze() {
                 else
                         comps="$CONFIGS $( compgen -A file -- "$cur" )"
                         compopt -o filenames
+                fi
+
+        elif __contains_word "$verb" ${VERBS[SECURITY]}; then
+                if [[ $cur = -* ]]; then
+                        comps='--help --version --no-pager --system --user -H --host -M --machine'
+                else
+                        if __contains_word "--user" ${COMP_WORDS[*]}; then
+                                mode=--user
+                        else
+                                mode=--system
+                        fi
+                        comps=$( __get_services $mode )
                 fi
         fi
 

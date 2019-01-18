@@ -554,17 +554,13 @@ static int dns_query_add_candidate(DnsQuery *q, DnsScope *s) {
                 return r;
 
         /* If this a single-label domain on DNS, we might append a suitable search domain first. */
-        if ((q->flags & SD_RESOLVED_NO_SEARCH) == 0)  {
-                r = dns_scope_name_needs_search_domain(s, dns_question_first_name(q->question_idna));
-                if (r < 0)
-                        goto fail;
-                if (r > 0) {
-                        /* OK, we need a search domain now. Let's find one for this scope */
+        if ((q->flags & SD_RESOLVED_NO_SEARCH) == 0 &&
+            dns_scope_name_needs_search_domain(s, dns_question_first_name(q->question_idna))) {
+                /* OK, we need a search domain now. Let's find one for this scope */
 
-                        r = dns_query_candidate_next_search_domain(c);
-                        if (r <= 0) /* if there's no search domain, then we won't add any transaction. */
-                                goto fail;
-                }
+                r = dns_query_candidate_next_search_domain(c);
+                if (r <= 0) /* if there's no search domain, then we won't add any transaction. */
+                        goto fail;
         }
 
         r = dns_query_candidate_setup_transactions(c);
@@ -686,22 +682,15 @@ int dns_query_go(DnsQuery *q) {
                         continue;
 
                 match = dns_scope_good_domain(s, q->ifindex, q->flags, name);
-                if (match < 0)
-                        return match;
-
-                if (match == DNS_SCOPE_NO)
+                if (match < 0) {
+                        log_debug("Couldn't check if '%s' matches against scope, ignoring.", name);
                         continue;
+                }
 
-                found = match;
-
-                if (match == DNS_SCOPE_YES) {
+                if (match > found) { /* Does this match better? If so, remember how well it matched, and the first one
+                                      * that matches this well */
+                        found = match;
                         first = s;
-                        break;
-                } else {
-                        assert(match == DNS_SCOPE_MAYBE);
-
-                        if (!first)
-                                first = s;
                 }
         }
 
@@ -729,10 +718,12 @@ int dns_query_go(DnsQuery *q) {
                         continue;
 
                 match = dns_scope_good_domain(s, q->ifindex, q->flags, name);
-                if (match < 0)
-                        goto fail;
+                if (match < 0) {
+                        log_debug("Couldn't check if '%s' matches agains scope, ignoring.", name);
+                        continue;
+                }
 
-                if (match != found)
+                if (match < found)
                         continue;
 
                 r = dns_query_add_candidate(q, s);

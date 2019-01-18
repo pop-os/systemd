@@ -4,8 +4,8 @@
 #include <string.h>
 
 #include "macro.h"
+#include "missing_network.h"
 #include "string-util.h"
-#include "util.h"
 
 _unused_ \
 static const struct arphrd_name* lookup_arphrd(register const char *str, register GPERF_LEN_TYPE len);
@@ -16,7 +16,7 @@ static const struct arphrd_name* lookup_arphrd(register const char *str, registe
 
 int main(int argc, const char *argv[]) {
 
-        unsigned int i;
+        unsigned i;
 
         for (i = 1; i < ELEMENTSOF(arphrd_names); i++) {
                 if (arphrd_names[i]) {
@@ -27,8 +27,8 @@ int main(int argc, const char *argv[]) {
 
         assert_se(arphrd_to_name(arphrd_max()) == NULL);
         assert_se(arphrd_to_name(0) == NULL);
-        assert_se(arphrd_from_name("huddlduddl") == 0);
-        assert_se(arphrd_from_name("") == 0);
+        assert_se(arphrd_from_name("huddlduddl") == -EINVAL);
+        assert_se(arphrd_from_name("") == -EINVAL);
 
         return 0;
 }

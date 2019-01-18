@@ -34,7 +34,8 @@ static ssize_t write_entry(char *buf, size_t size, Uploader *u) {
 
                         r = snprintf(buf + pos, size - pos,
                                      "__CURSOR=%s\n", u->current_cursor);
-                        if (pos + r > size)
+                        assert(r >= 0);
+                        if ((size_t) r > size - pos)
                                 /* not enough space */
                                 return pos;
 
@@ -58,7 +59,8 @@ static ssize_t write_entry(char *buf, size_t size, Uploader *u) {
 
                         r = snprintf(buf + pos, size - pos,
                                      "__REALTIME_TIMESTAMP="USEC_FMT"\n", realtime);
-                        if (r + pos > size)
+                        assert(r >= 0);
+                        if ((size_t) r > size - pos)
                                 /* not enough space */
                                 return pos;
 
@@ -83,7 +85,8 @@ static ssize_t write_entry(char *buf, size_t size, Uploader *u) {
 
                         r = snprintf(buf + pos, size - pos,
                                      "__MONOTONIC_TIMESTAMP="USEC_FMT"\n", monotonic);
-                        if (r + pos > size)
+                        assert(r >= 0);
+                        if ((size_t) r > size - pos)
                                 /* not enough space */
                                 return pos;
 
@@ -108,7 +111,8 @@ static ssize_t write_entry(char *buf, size_t size, Uploader *u) {
 
                         r = snprintf(buf + pos, size - pos,
                                      "_BOOT_ID=%s\n", sd_id128_to_string(boot_id, sid));
-                        if (r + pos > size)
+                        assert(r >= 0);
+                        if ((size_t) r > size - pos)
                                 /* not enough space */
                                 return pos;
 
@@ -180,10 +184,9 @@ static ssize_t write_entry(char *buf, size_t size, Uploader *u) {
                         size_t len;
 
                         c = memchr(u->field_data, '=', u->field_length);
-                        if (!c || c == u->field_data) {
-                                log_error("Invalid field.");
-                                return -EINVAL;
-                        }
+                        if (!c || c == u->field_data)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Invalid field.");
 
                         len = c - (const char*)u->field_data;
 

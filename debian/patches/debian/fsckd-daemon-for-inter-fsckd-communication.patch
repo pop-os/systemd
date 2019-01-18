@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index 9458a40..cbd947b 100644
+index 0c990a0..dff5d2f 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -566,6 +566,7 @@ manpages = [
+@@ -657,6 +657,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index e1dc2ca..654bc3f 100644
+index e6b28e1..a87bb57 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2202,6 +2202,14 @@ executable('systemd-makefs',
+@@ -2372,6 +2372,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  
@@ -963,18 +963,18 @@ index 0000000..d48e53a
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index e4ac6ce..5c13ec6 100644
+index d695084..ab489b3 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -85,6 +85,7 @@ units = [
-          'multi-user.target.wants/'],
+@@ -87,6 +87,7 @@ units = [
          ['systemd-coredump.socket',             'ENABLE_COREDUMP',
           'sockets.target.wants/'],
+         ['systemd-exit.service',                 ''],
 +        ['systemd-fsckd.socket',                ''],
          ['systemd-initctl.socket',              '',
           'sockets.target.wants/'],
          ['systemd-journal-gatewayd.socket',     'ENABLE_REMOTE HAVE_MICROHTTPD'],
-@@ -138,6 +139,7 @@ in_units = [
+@@ -143,6 +144,7 @@ in_units = [
           'sysinit.target.wants/'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],
@@ -983,27 +983,26 @@ index e4ac6ce..5c13ec6 100644
          ['systemd-hibernate-resume@.service',    'ENABLE_HIBERNATE'],
          ['systemd-hibernate.service',            'ENABLE_HIBERNATE'],
 diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
-index 25aca19..3cc60e5 100644
+index 042081c..bea6c16 100644
 --- a/units/systemd-fsck-root.service.in
 +++ b/units/systemd-fsck-root.service.in
-@@ -11,7 +11,9 @@
- Description=File System Check on Root Device
- Documentation=man:systemd-fsck-root.service(8)
+@@ -13,6 +13,8 @@ Documentation=man:systemd-fsck-root.service(8)
  DefaultDependencies=no
-+Wants=systemd-fsckd.socket
+ Conflicts=shutdown.target
  Before=local-fs.target shutdown.target
++Wants=systemd-fsckd.socket
 +After=systemd-fsckd.socket
  ConditionPathIsReadWrite=!/
  
  [Service]
 diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 078edcc..b254476 100644
+index 3322083..bfa565b 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
-@@ -12,7 +12,8 @@ Description=File System Check on %f
- Documentation=man:systemd-fsck@.service(8)
+@@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)
  DefaultDependencies=no
  BindsTo=%i.device
+ Conflicts=shutdown.target
 -After=%i.device systemd-fsck-root.service local-fs-pre.target
 +Wants=systemd-fsckd.socket
 +After=%i.device systemd-fsck-root.service local-fs-pre.target systemd-fsckd.socket

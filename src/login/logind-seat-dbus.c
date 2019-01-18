@@ -9,6 +9,7 @@
 #include "bus-util.h"
 #include "logind-seat.h"
 #include "logind.h"
+#include "missing_capability.h"
 #include "strv.h"
 #include "user-util.h"
 #include "util.h"
@@ -183,7 +184,7 @@ static int method_activate_session(sd_bus_message *message, void *userdata, sd_b
 
 static int method_switch_to(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Seat *s = userdata;
-        unsigned int to;
+        unsigned to;
         int r;
 
         assert(message);

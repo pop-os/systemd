@@ -8,6 +8,7 @@
 #include "format-util.h"
 #include "logind-user.h"
 #include "logind.h"
+#include "missing_capability.h"
 #include "signal-util.h"
 #include "strv.h"
 #include "user-util.h"
@@ -109,7 +110,7 @@ static int property_get_idle_since_hint(
         assert(reply);
         assert(u);
 
-        user_get_idle_hint(u, &t);
+        (void) user_get_idle_hint(u, &t);
         k = streq(property, "IdleSinceHint") ? t.realtime : t.monotonic;
 
         return sd_bus_message_append(reply, "t", k);

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <linux/fs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 #include "sd-id128.h"
 
 #include "alloc-util.h"
+#include "chattr-util.h"
 #include "dirent-util.h"
 #include "efivars.h"
 #include "fd-util.h"
@@ -20,6 +22,7 @@
 #include "macro.h"
 #include "parse-util.h"
 #include "stdio-util.h"
+#include "strv.h"
 #include "time-util.h"
 #include "utf8.h"
 #include "util.h"
@@ -63,7 +66,10 @@ struct device_path {
 } _packed_;
 
 bool is_efi_boot(void) {
-        return access("/sys/firmware/efi", F_OK) >= 0;
+        if (detect_container() > 0)
+                return false;
+
+        return access("/sys/firmware/efi/", F_OK) >= 0;
 }
 
 static int read_flag(const char *varname) {
@@ -71,6 +77,9 @@ static int read_flag(const char *varname) {
         uint8_t b;
         size_t s;
         int r;
+
+        if (!is_efi_boot()) /* If this is not an EFI boot, assume the queried flags are zero */
+                return 0;
 
         r = efi_get_variable(EFI_VENDOR_GLOBAL, varname, NULL, &v, &s);
         if (r < 0)
@@ -80,7 +89,7 @@ static int read_flag(const char *varname) {
                 return -EINVAL;
 
         b = *(uint8_t *)v;
-        return b > 0;
+        return !!b;
 }
 
 bool is_efi_secure_boot(void) {
@@ -97,7 +106,7 @@ int efi_reboot_to_firmware_supported(void) {
         size_t s;
         int r;
 
-        if (!is_efi_boot() || detect_container() > 0)
+        if (!is_efi_boot())
                 return -EOPNOTSUPP;
 
         r = efi_get_variable(EFI_VENDOR_GLOBAL, "OsIndicationsSupported", NULL, &v, &s);
@@ -120,21 +129,18 @@ static int get_os_indications(uint64_t *os_indication) {
         size_t s;
         int r;
 
+        /* Let's verify general support first */
         r = efi_reboot_to_firmware_supported();
         if (r < 0)
                 return r;
 
         r = efi_get_variable(EFI_VENDOR_GLOBAL, "OsIndications", NULL, &v, &s);
         if (r == -ENOENT) {
-                /* Some firmware implementations that do support
-                 * OsIndications and report that with
-                 * OsIndicationsSupported will remove the
-                 * OsIndications variable when it is unset. Let's
-                 * pretend it's 0 then, to hide this implementation
-                 * detail. Note that this call will return -ENOENT
-                 * then only if the support for OsIndications is
-                 * missing entirely, as determined by
-                 * efi_reboot_to_firmware_supported() above. */
+                /* Some firmware implementations that do support OsIndications and report that with
+                 * OsIndicationsSupported will remove the OsIndications variable when it is unset. Let's pretend it's 0
+                 * then, to hide this implementation detail. Note that this call will return -ENOENT then only if the
+                 * support for OsIndications is missing entirely, as determined by efi_reboot_to_firmware_supported()
+                 * above. */
                 *os_indication = 0;
                 return 0;
         } else if (r < 0)
@@ -240,47 +246,6 @@ int efi_get_variable(
         return 0;
 }
 
-int efi_set_variable(
-                sd_id128_t vendor,
-                const char *name,
-                const void *value,
-                size_t size) {
-
-        struct var {
-                uint32_t attr;
-                char buf[];
-        } _packed_ * _cleanup_free_ buf = NULL;
-        _cleanup_free_ char *p = NULL;
-        _cleanup_close_ int fd = -1;
-
-        assert(name);
-        assert(value || size == 0);
-
-        if (asprintf(&p,
-                     "/sys/firmware/efi/efivars/%s-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-                     name, SD_ID128_FORMAT_VAL(vendor)) < 0)
-                return -ENOMEM;
-
-        if (size == 0) {
-                if (unlink(p) < 0)
-                        return -errno;
-                return 0;
-        }
-
-        fd = open(p, O_WRONLY|O_CREAT|O_NOCTTY|O_CLOEXEC, 0644);
-        if (fd < 0)
-                return -errno;
-
-        buf = malloc(sizeof(uint32_t) + size);
-        if (!buf)
-                return -ENOMEM;
-
-        buf->attr = EFI_VARIABLE_NON_VOLATILE|EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS;
-        memcpy(buf->buf, value, size);
-
-        return loop_write(fd, buf, sizeof(uint32_t) + size, false);
-}
-
 int efi_get_variable_string(sd_id128_t vendor, const char *name, char **p) {
         _cleanup_free_ void *s = NULL;
         size_t ss = 0;
@@ -297,6 +262,96 @@ int efi_get_variable_string(sd_id128_t vendor, const char *name, char **p) {
 
         *p = x;
         return 0;
+}
+
+int efi_set_variable(
+                sd_id128_t vendor,
+                const char *name,
+                const void *value,
+                size_t size) {
+
+        struct var {
+                uint32_t attr;
+                char buf[];
+        } _packed_ * _cleanup_free_ buf = NULL;
+        _cleanup_free_ char *p = NULL;
+        _cleanup_close_ int fd = -1;
+        bool saved_flags_valid = false;
+        unsigned saved_flags;
+        int r;
+
+        assert(name);
+        assert(value || size == 0);
+
+        if (asprintf(&p,
+                     "/sys/firmware/efi/efivars/%s-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+                     name, SD_ID128_FORMAT_VAL(vendor)) < 0)
+                return -ENOMEM;
+
+        /* Newer efivarfs protects variables that are not in a whitelist with FS_IMMUTABLE_FL by default, to protect
+         * them for accidental removal and modification. We are not changing these variables accidentally however,
+         * hence let's unset the bit first. */
+
+        r = chattr_path(p, 0, FS_IMMUTABLE_FL, &saved_flags);
+        if (r < 0 && r != -ENOENT)
+                log_debug_errno(r, "Failed to drop FS_IMMUTABLE_FL flag from '%s', ignoring: %m", p);
+
+        saved_flags_valid = r >= 0;
+
+        if (size == 0) {
+                if (unlink(p) < 0) {
+                        r = -errno;
+                        goto finish;
+                }
+
+                return 0;
+        }
+
+        fd = open(p, O_WRONLY|O_CREAT|O_NOCTTY|O_CLOEXEC, 0644);
+        if (fd < 0) {
+                r = -errno;
+                goto finish;
+        }
+
+        buf = malloc(sizeof(uint32_t) + size);
+        if (!buf) {
+                r = -ENOMEM;
+                goto finish;
+        }
+
+        buf->attr = EFI_VARIABLE_NON_VOLATILE|EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS;
+        memcpy(buf->buf, value, size);
+
+        r = loop_write(fd, buf, sizeof(uint32_t) + size, false);
+        if (r < 0)
+                goto finish;
+
+        r = 0;
+
+finish:
+        if (saved_flags_valid) {
+                int q;
+
+                /* Restore the original flags field, just in case */
+                if (fd < 0)
+                        q = chattr_path(p, saved_flags, FS_IMMUTABLE_FL, NULL);
+                else
+                        q = chattr_fd(fd, saved_flags, FS_IMMUTABLE_FL, NULL);
+                if (q < 0)
+                        log_debug_errno(q, "Failed to restore FS_IMMUTABLE_FL on '%s', ignoring: %m", p);
+        }
+
+        return r;
+}
+
+int efi_set_variable_string(sd_id128_t vendor, const char *name, const char *v) {
+        _cleanup_free_ char16_t *u16 = NULL;
+
+        u16 = utf8_to_utf16(v, strlen(v));
+        if (!u16)
+                return -ENOMEM;
+
+        return efi_set_variable(vendor, name, u16, (char16_strlen(u16) + 1) * sizeof(char16_t));
 }
 
 static size_t utf16_size(const uint16_t *s) {
@@ -344,6 +399,9 @@ int efi_get_boot_option(
         sd_id128_t p_uuid = SD_ID128_NULL;
         int r;
 
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
+
         xsprintf(boot_id, "Boot%04X", id);
         r = efi_get_variable(EFI_VENDOR_GLOBAL, boot_id, NULL, (void **)&buf, &l);
         if (r < 0)
@@ -364,9 +422,13 @@ int efi_get_boot_option(
 
         if (header->path_len > 0) {
                 uint8_t *dbuf;
-                size_t dnext;
+                size_t dnext, doff;
 
-                dbuf = buf + offsetof(struct boot_option, title) + title_size;
+                doff = offsetof(struct boot_option, title) + title_size;
+                dbuf = buf + doff;
+                if (header->path_len > l - doff)
+                        return -EINVAL;
+
                 dnext = 0;
                 while (dnext < header->path_len) {
                         struct device_path *dpath;
@@ -403,6 +465,9 @@ int efi_get_boot_option(
                         /* Sub-Type 4 – File Path */
                         if (dpath->sub_type == MEDIA_FILEPATH_DP && !p && path) {
                                 p = utf16_to_utf8(dpath->path, dpath->length-4);
+                                if (!p)
+                                        return  -ENOMEM;
+
                                 efi_tilt_backslashes(p);
                                 continue;
                         }
@@ -455,23 +520,30 @@ static uint16_t *tilt_slashes(uint16_t *s) {
         return s;
 }
 
-int efi_add_boot_option(uint16_t id, const char *title,
-                        uint32_t part, uint64_t pstart, uint64_t psize,
-                        sd_id128_t part_uuid, const char *path) {
-        char boot_id[9];
-        size_t size;
-        size_t title_len;
-        size_t path_len;
+int efi_add_boot_option(
+                uint16_t id,
+                const char *title,
+                uint32_t part,
+                uint64_t pstart,
+                uint64_t psize,
+                sd_id128_t part_uuid,
+                const char *path) {
+
+        size_t size, title_len, path_len;
+        _cleanup_free_ char *buf = NULL;
         struct boot_option *option;
         struct device_path *devicep;
-        _cleanup_free_ char *buf = NULL;
+        char boot_id[9];
+
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
 
         title_len = (strlen(title)+1) * 2;
         path_len = (strlen(path)+1) * 2;
 
-        buf = calloc(sizeof(struct boot_option) + title_len +
-                     sizeof(struct drive_path) +
-                     sizeof(struct device_path) + path_len, 1);
+        buf = malloc0(sizeof(struct boot_option) + title_len +
+                      sizeof(struct drive_path) +
+                      sizeof(struct device_path) + path_len);
         if (!buf)
                 return -ENOMEM;
 
@@ -520,6 +592,9 @@ int efi_add_boot_option(uint16_t id, const char *title,
 int efi_remove_boot_option(uint16_t id) {
         char boot_id[9];
 
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
+
         xsprintf(boot_id, "Boot%04X", id);
         return efi_set_variable(EFI_VENDOR_GLOBAL, boot_id, NULL, 0);
 }
@@ -528,6 +603,9 @@ int efi_get_boot_order(uint16_t **order) {
         _cleanup_free_ void *buf = NULL;
         size_t l;
         int r;
+
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
 
         r = efi_get_variable(EFI_VENDOR_GLOBAL, "BootOrder", NULL, &buf, &l);
         if (r < 0)
@@ -545,12 +623,15 @@ int efi_get_boot_order(uint16_t **order) {
 }
 
 int efi_set_boot_order(uint16_t *order, size_t n) {
+
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
+
         return efi_set_variable(EFI_VENDOR_GLOBAL, "BootOrder", order, n * sizeof(uint16_t));
 }
 
 static int boot_id_hex(const char s[4]) {
-        int i;
-        int id = 0;
+        int id = 0, i;
 
         for (i = 0; i < 4; i++)
                 if (s[i] >= '0' && s[i] <= '9')
@@ -563,20 +644,21 @@ static int boot_id_hex(const char s[4]) {
         return id;
 }
 
-static int cmp_uint16(const void *_a, const void *_b) {
-        const uint16_t *a = _a, *b = _b;
-
-        return (int)*a - (int)*b;
+static int cmp_uint16(const uint16_t *a, const uint16_t *b) {
+        return CMP(*a, *b);
 }
 
 int efi_get_boot_options(uint16_t **options) {
         _cleanup_closedir_ DIR *dir = NULL;
-        struct dirent *de;
         _cleanup_free_ uint16_t *list = NULL;
+        struct dirent *de;
         size_t alloc = 0;
         int count = 0;
 
         assert(options);
+
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
 
         dir = opendir("/sys/firmware/efi/efivars/");
         if (!dir)
@@ -604,7 +686,7 @@ int efi_get_boot_options(uint16_t **options) {
                 list[count++] = id;
         }
 
-        qsort_safe(list, count, sizeof(uint16_t), cmp_uint16);
+        typesafe_qsort(list, count, cmp_uint16);
 
         *options = TAKE_PTR(list);
 
@@ -638,6 +720,9 @@ int efi_loader_get_boot_usec(usec_t *firmware, usec_t *loader) {
         assert(firmware);
         assert(loader);
 
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
+
         r = read_usec(EFI_VENDOR_LOADER, "LoaderTimeInitUSec", &x);
         if (r < 0)
                 return r;
@@ -662,6 +747,9 @@ int efi_loader_get_device_part_uuid(sd_id128_t *u) {
         _cleanup_free_ char *p = NULL;
         int r, parsed[16];
 
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
+
         r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderDevicePartUUID", &p);
         if (r < 0)
                 return r;
@@ -680,6 +768,118 @@ int efi_loader_get_device_part_uuid(sd_id128_t *u) {
                         u->bytes[i] = parsed[i];
         }
 
+        return 0;
+}
+
+bool efi_loader_entry_name_valid(const char *s) {
+        if (isempty(s))
+                return false;
+
+        if (strlen(s) > FILENAME_MAX) /* Make sure entry names fit in filenames */
+                return false;
+
+        return in_charset(s, ALPHANUMERICAL "-");
+}
+
+int efi_loader_get_entries(char ***ret) {
+        _cleanup_free_ char16_t *entries = NULL;
+        _cleanup_strv_free_ char **l = NULL;
+        size_t size, i, start;
+        int r;
+
+        assert(ret);
+
+        if (!is_efi_boot())
+                return -EOPNOTSUPP;
+
+        r = efi_get_variable(EFI_VENDOR_LOADER, "LoaderEntries", NULL, (void**) &entries, &size);
+        if (r < 0)
+                return r;
+
+        /* The variable contains a series of individually NUL terminated UTF-16 strings. */
+
+        for (i = 0, start = 0;; i++) {
+                _cleanup_free_ char *decoded = NULL;
+                bool end;
+
+                /* Is this the end of the variable's data? */
+                end = i * sizeof(char16_t) >= size;
+
+                /* Are we in the middle of a string? (i.e. not at the end of the variable, nor at a NUL terminator?) If
+                 * so, let's go to the next entry. */
+                if (!end && entries[i] != 0)
+                        continue;
+
+                /* We reached the end of a string, let's decode it into UTF-8 */
+                decoded = utf16_to_utf8(entries + start, (i - start) * sizeof(char16_t));
+                if (!decoded)
+                        return -ENOMEM;
+
+                if (efi_loader_entry_name_valid(decoded)) {
+                        r = strv_consume(&l, TAKE_PTR(decoded));
+                        if (r < 0)
+                                return r;
+                } else
+                        log_debug("Ignoring invalid loader entry '%s'.", decoded);
+
+                /* We reached the end of the variable */
+                if (end)
+                        break;
+
+                /* Continue after the NUL byte */
+                start = i + 1;
+        }
+
+        *ret = TAKE_PTR(l);
+        return 0;
+}
+
+int efi_loader_get_features(uint64_t *ret) {
+        _cleanup_free_ void *v = NULL;
+        size_t s;
+        int r;
+
+        if (!is_efi_boot()) {
+                *ret = 0;
+                return 0;
+        }
+
+        r = efi_get_variable(EFI_VENDOR_LOADER, "LoaderFeatures", NULL, &v, &s);
+        if (r == -ENOENT) {
+                _cleanup_free_ char *info = NULL;
+
+                /* The new (v240+) LoaderFeatures variable is not supported, let's see if it's systemd-boot at all */
+                r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderInfo", &info);
+                if (r < 0) {
+                        if (r != -ENOENT)
+                                return r;
+
+                        /* Variable not set, definitely means not systemd-boot */
+
+                } else if (first_word(info, "systemd-boot")) {
+
+                        /* An older systemd-boot version. Let's hardcode the feature set, since it was pretty
+                         * static in all its versions. */
+
+                        *ret = EFI_LOADER_FEATURE_CONFIG_TIMEOUT |
+                                EFI_LOADER_FEATURE_ENTRY_DEFAULT |
+                                EFI_LOADER_FEATURE_ENTRY_ONESHOT;
+
+                        return 0;
+                }
+
+                /* No features supported */
+                *ret = 0;
+                return 0;
+        }
+        if (r < 0)
+                return r;
+
+        if (s != sizeof(uint64_t))
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "LoaderFeatures EFI variable doesn't have the right size.");
+
+        memcpy(ret, v, sizeof(uint64_t));
         return 0;
 }
 

@@ -149,6 +149,14 @@ adduser --quiet --system --group --no-create-home --home /run/systemd \
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Resolver" systemd-resolve
 
+# Remove old state directory of systemd-timesyncd
+if dpkg --compare-versions "$2" lt-nl "240-3~"; then
+    if [ -L /var/lib/systemd/timesync ] ; then
+        rm /var/lib/systemd/timesync
+        rm -rf /var/lib/private/systemd/timesync
+    fi
+fi
+
 # Initial update of the Message Catalogs database
 _update_catalog
 
@@ -196,6 +204,13 @@ if dpkg --compare-versions "$2" lt-nl "236-1~"; then
     # The clock file used by systemd-timesyncd is now stored in
     # StateDirectory=systemd/timesync.
     rm -f /var/lib/systemd/clock
+fi
+
+if dpkg --compare-versions "$2" lt-nl "239-12~"; then
+    # clean up bogus "nobody" group from #912525; ensure that it's a system group
+    if getent group nobody >/dev/null; then
+        delgroup --system nobody || true
+    fi
 fi
 
 # Process all tmpfiles that we ship, including any overrides in

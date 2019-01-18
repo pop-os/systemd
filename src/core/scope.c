@@ -5,9 +5,11 @@
 
 #include "alloc-util.h"
 #include "dbus-scope.h"
+#include "dbus-unit.h"
 #include "load-dropin.h"
 #include "log.h"
 #include "scope.h"
+#include "serialize.h"
 #include "special.h"
 #include "string-table.h"
 #include "string-util.h"
@@ -81,6 +83,9 @@ static void scope_set_state(Scope *s, ScopeState state) {
         ScopeState old_state;
         assert(s);
 
+        if (s->state != state)
+                bus_unit_send_pending_change_signal(UNIT(s), false);
+
         old_state = s->state;
         s->state = state;
 
@@ -110,7 +115,7 @@ static int scope_add_default_dependencies(Scope *s) {
         r = unit_add_two_dependencies_by_name(
                         UNIT(s),
                         UNIT_BEFORE, UNIT_CONFLICTS,
-                        SPECIAL_SHUTDOWN_TARGET, NULL, true,
+                        SPECIAL_SHUTDOWN_TARGET, true,
                         UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
@@ -239,9 +244,7 @@ static void scope_enter_dead(Scope *s, ScopeResult f) {
         if (s->result == SCOPE_SUCCESS)
                 s->result = f;
 
-        if (s->result != SCOPE_SUCCESS)
-                log_unit_warning(UNIT(s), "Failed with result '%s'.", scope_result_to_string(s->result));
-
+        unit_log_result(UNIT(s), s->result == SCOPE_SUCCESS, scope_result_to_string(s->result));
         scope_set_state(s, s->result != SCOPE_SUCCESS ? SCOPE_FAILED : SCOPE_DEAD);
 }
 
@@ -402,11 +405,11 @@ static int scope_serialize(Unit *u, FILE *f, FDSet *fds) {
         assert(f);
         assert(fds);
 
-        unit_serialize_item(u, f, "state", scope_state_to_string(s->state));
-        unit_serialize_item(u, f, "was-abandoned", yes_no(s->was_abandoned));
+        (void) serialize_item(f, "state", scope_state_to_string(s->state));
+        (void) serialize_bool(f, "was-abandoned", s->was_abandoned);
 
         if (s->controller)
-                unit_serialize_item(u, f, "controller", s->controller);
+                (void) serialize_item(f, "controller", s->controller);
 
         return 0;
 }
@@ -441,7 +444,7 @@ static int scope_deserialize_item(Unit *u, const char *key, const char *value, F
 
                 r = free_and_strdup(&s->controller, value);
                 if (r < 0)
-                        log_oom();
+                        return log_oom();
 
         } else
                 log_unit_debug(u, "Unknown serialization key: %s", key);

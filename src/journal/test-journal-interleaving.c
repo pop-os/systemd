@@ -1,7 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  Copyright © 2013 Marius Vollmer
-***/
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -9,15 +6,16 @@
 #include "sd-journal.h"
 
 #include "alloc-util.h"
+#include "io-util.h"
 #include "journal-file.h"
 #include "journal-vacuum.h"
 #include "log.h"
 #include "parse-util.h"
 #include "rm-rf.h"
+#include "tests.h"
 #include "util.h"
 
-/* This program tests skipping around in a multi-file journal.
- */
+/* This program tests skipping around in a multi-file journal. */
 
 static bool arg_keep = false;
 
@@ -61,8 +59,7 @@ static void append_number(JournalFile *f, int n, uint64_t *seqnum) {
         previous_ts = ts;
 
         assert_se(asprintf(&p, "NUMBER=%d", n) >= 0);
-        iovec[0].iov_base = p;
-        iovec[0].iov_len = strlen(p);
+        iovec[0] = IOVEC_MAKE_STRING(p);
         assert_ret(journal_file_append_entry(f, &ts, NULL, iovec, 1, seqnum, NULL, NULL));
         free(p);
 }
@@ -274,11 +271,11 @@ static void test_sequence_numbers(void) {
 }
 
 int main(int argc, char *argv[]) {
-        log_set_max_level(LOG_DEBUG);
+        test_setup_logging(LOG_DEBUG);
 
         /* journal_file_open requires a valid machine id */
         if (access("/etc/machine-id", F_OK) != 0)
-                return EXIT_TEST_SKIP;
+                return log_tests_skipped("/etc/machine-id not found");
 
         arg_keep = argc > 1;
 

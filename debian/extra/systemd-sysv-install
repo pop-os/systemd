@@ -29,9 +29,9 @@ NAME="${2:-}"
 
 run() {
     if [ -n "$ROOT" ] && [ "$ROOT" != "/" ]; then
-        chroot "$ROOT" /usr/sbin/update-rc.d "$@"
+        _SKIP_SYSTEMD_NATIVE=1 chroot "$ROOT" /usr/sbin/update-rc.d "$@"
     else
-        /usr/sbin/update-rc.d "$@"
+        _SKIP_SYSTEMD_NATIVE=1 /usr/sbin/update-rc.d "$@"
     fi
 }
 

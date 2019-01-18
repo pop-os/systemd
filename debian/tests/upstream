@@ -7,6 +7,13 @@ set -e
 # "Failed to install /usr/libexec/selinux/hll/pp"
 BLACKLIST="TEST-06-SELINUX TEST-16-EXTEND-TIMEOUT"
 
+# some tests are flaky
+BLACKLIST="$BLACKLIST
+TEST-02-CRYPTSETUP
+TEST-16-EXTEND-TIMEOUT
+TEST-17-UDEV-WANTS
+"
+
 # quiesce Makefile.guess; not really relevant as systemd/nspawn run from
 # installed packages
 export BUILD_DIR=.
@@ -25,7 +32,7 @@ for t in test/TEST*; do
     echo "$BLACKLIST" | grep -q "$(basename $t)" && continue
     echo "========== `basename $t` =========="
     rm -rf /var/tmp/systemd-test.*
-    if ! make -C $t clean setup run; then
+    if ! make -C $t setup run clean; then
         for j in /var/tmp/systemd-test.*/journal/*; do
             [ -e "$j" ] || continue
             # keep the entire journal in artifacts, in case one needs the debug messages

@@ -4,8 +4,6 @@
      "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 <!--
   SPDX-License-Identifier: LGPL-2.1+
-
-  Copyright © 2013 David Strauss
 -->
 <refentry id="systemd-socket-proxyd"
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -54,7 +52,7 @@
     <citerefentry project='die-net'><refentrytitle>socat</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
     The main differences for <command>systemd-socket-proxyd</command>
     are support for socket activation with
-    <literal>Accept=false</literal> and an event-driven
+    <literal>Accept=no</literal> and an event-driven
     design that scales better with the number of
     connections.</para>
   </refsect1>

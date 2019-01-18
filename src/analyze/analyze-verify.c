@@ -43,10 +43,7 @@ static int prepare_filename(const char *filename, char **ret) {
         if (!dir)
                 return -ENOMEM;
 
-        if (with_instance)
-                c = path_join(NULL, dir, with_instance);
-        else
-                c = path_join(NULL, dir, name);
+        c = path_join(dir, with_instance ?: name);
         if (!c)
                 return -ENOMEM;
 
@@ -179,9 +176,9 @@ static int verify_documentation(Unit *u, bool check_man) {
                         k = show_man_page(*p + 4, true);
                         if (k != 0) {
                                 if (k < 0)
-                                        log_unit_error_errno(u, r, "Can't show %s: %m", *p);
+                                        log_unit_error_errno(u, k, "Can't show %s: %m", *p + 4);
                                 else {
-                                        log_unit_error_errno(u, r, "man %s command failed with code %d", *p + 4, k);
+                                        log_unit_error(u, "Command 'man %s' failed with code %d", *p + 4, k);
                                         k = -ENOEXEC;
                                 }
                                 if (r == 0)
@@ -225,9 +222,10 @@ static int verify_unit(Unit *u, bool check_man) {
 }
 
 int verify_units(char **filenames, UnitFileScope scope, bool check_man, bool run_generators) {
-        const uint8_t flags = MANAGER_TEST_RUN_BASIC |
-                              MANAGER_TEST_RUN_ENV_GENERATORS |
-                              run_generators * MANAGER_TEST_RUN_GENERATORS;
+        const ManagerTestRunFlags flags =
+                MANAGER_TEST_RUN_BASIC |
+                MANAGER_TEST_RUN_ENV_GENERATORS |
+                run_generators * MANAGER_TEST_RUN_GENERATORS;
 
         _cleanup_(manager_freep) Manager *m = NULL;
         Unit *units[strv_length(filenames)];
@@ -253,7 +251,7 @@ int verify_units(char **filenames, UnitFileScope scope, bool check_man, bool run
 
         r = manager_startup(m, NULL, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to start manager: %m");
+                return r;
 
         manager_clear_jobs(m);
 

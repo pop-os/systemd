@@ -25,6 +25,7 @@
 #include "selinux-util.h"
 #include "socket-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "unaligned.h"
 
 static bool allow_object_pid(const struct ucred *ucred) {
@@ -205,8 +206,7 @@ static int server_process_entry(
                         memcpy(k + (e - p) + 1, e + 1 + sizeof(uint64_t), l);
 
                         if (journal_field_valid(p, e - p, false)) {
-                                iovec[n].iov_base = k;
-                                iovec[n].iov_len = (e - p) + 1 + l;
+                                iovec[n] = IOVEC_MAKE(k, (e - p) + 1 + l);
                                 entry_size += iovec[n].iov_len;
                                 n++;
 
@@ -277,7 +277,7 @@ finish:
 
 void server_process_native_message(
                 Server *s,
-                const void *buffer, size_t buffer_size,
+                const char *buffer, size_t buffer_size,
                 const struct ucred *ucred,
                 const struct timeval *tv,
                 const char *label, size_t label_len) {
@@ -337,11 +337,7 @@ void server_process_native_file(
                         return;
                 }
 
-                e = path_startswith(k, "/dev/shm/");
-                if (!e)
-                        e = path_startswith(k, "/tmp/");
-                if (!e)
-                        e = path_startswith(k, "/var/tmp/");
+                e = PATH_STARTSWITH_SET(k, "/dev/shm/", "/tmp/", "/var/tmp/");
                 if (!e) {
                         log_error("Received file outside of allowed directories. Refusing.");
                         return;
@@ -437,13 +433,12 @@ void server_process_native_file(
         }
 }
 
-int server_open_native_socket(Server*s) {
+int server_open_native_socket(Server *s) {
 
         static const union sockaddr_union sa = {
                 .un.sun_family = AF_UNIX,
                 .un.sun_path = "/run/systemd/journal/socket",
         };
-        static const int one = 1;
         int r;
 
         assert(s);
@@ -453,7 +448,7 @@ int server_open_native_socket(Server*s) {
                 if (s->native_fd < 0)
                         return log_error_errno(errno, "socket() failed: %m");
 
-                (void) unlink(sa.un.sun_path);
+                (void) sockaddr_un_unlink(&sa.un);
 
                 r = bind(s->native_fd, &sa.sa, SOCKADDR_UN_LEN(sa.un));
                 if (r < 0)
@@ -461,23 +456,23 @@ int server_open_native_socket(Server*s) {
 
                 (void) chmod(sa.un.sun_path, 0666);
         } else
-                fd_nonblock(s->native_fd, 1);
+                (void) fd_nonblock(s->native_fd, true);
 
-        r = setsockopt(s->native_fd, SOL_SOCKET, SO_PASSCRED, &one, sizeof(one));
+        r = setsockopt_int(s->native_fd, SOL_SOCKET, SO_PASSCRED, true);
         if (r < 0)
-                return log_error_errno(errno, "SO_PASSCRED failed: %m");
+                return log_error_errno(r, "SO_PASSCRED failed: %m");
 
 #if HAVE_SELINUX
         if (mac_selinux_use()) {
-                r = setsockopt(s->native_fd, SOL_SOCKET, SO_PASSSEC, &one, sizeof(one));
+                r = setsockopt_int(s->native_fd, SOL_SOCKET, SO_PASSSEC, true);
                 if (r < 0)
-                        log_warning_errno(errno, "SO_PASSSEC failed: %m");
+                        log_warning_errno(r, "SO_PASSSEC failed: %m");
         }
 #endif
 
-        r = setsockopt(s->native_fd, SOL_SOCKET, SO_TIMESTAMP, &one, sizeof(one));
+        r = setsockopt_int(s->native_fd, SOL_SOCKET, SO_TIMESTAMP, true);
         if (r < 0)
-                return log_error_errno(errno, "SO_TIMESTAMP failed: %m");
+                return log_error_errno(r, "SO_TIMESTAMP failed: %m");
 
         r = sd_event_add_io(s->event, &s->native_event_source, s->native_fd, EPOLLIN, server_process_datagram, s);
         if (r < 0)

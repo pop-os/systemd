@@ -17,6 +17,10 @@ else
     CONFFLAGS_DISTRO =
 endif
 
+ifneq (, $(filter $(DEB_BUILD_ARCH), riscv64))
+    TEST_TIMEOUT_MULTIPLIER = "-t 10"
+endif
+
 # fail on missing files and symbols changes on distro builds, but not if we
 # build/test upstream master
 ifeq ($(TEST_UPSTREAM),)
@@ -33,6 +37,7 @@ endif
 
 CONFFLAGS = \
 	-Db_lto=true \
+	-Db_pie=true \
 	-Drootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
 	-Dsplit-usr=true \
 	-Dquotaon-path=/sbin/quotaon \
@@ -66,6 +71,7 @@ CONFFLAGS = \
 	-Dsystem-gid-max=999 \
 	-Dnobody-user=nobody \
 	-Dnobody-group=nogroup \
+	-Dbump-proc-sys-fs-nr-open=false \
 	-Ddev-kvm-mode=0660
 
 # resolved's DNSSEC support is still not mature enough, don't enable it by
@@ -78,8 +84,12 @@ CONFFLAGS_deb = \
 	-Dsysusers=true \
 	-Dinstall-tests=true \
 	-Defi=true \
+	-Dnss-myhostname=true \
+	-Dnss-mymachines=true \
+	-Dnss-resolve=true \
 	-Dnss-systemd=true \
-	-Dresolve=true
+	-Dresolve=true \
+	-Dlink-systemctl-shared=false
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
 CONFFLAGS_deb += \
@@ -137,7 +147,9 @@ CONFFLAGS_udeb = \
 	-Dnetworkd=false \
 	-Dtimesyncd=false \
 	-Dlocaled=false \
-	-Dmyhostname=false \
+	-Dnss-myhostname=false \
+	-Dnss-mymachines=false \
+	-Dnss-resolve=false \
 	-Dnss-systemd=false \
 	-Dresolve=false \
 	-Dpolkit=false \
@@ -147,7 +159,6 @@ CONFFLAGS_udeb = \
 	-Dhwdb=false \
 	-Dman=false \
 	-Defi=false \
-	-Dgnuefi=false \
 	-Dseccomp=false \
 	-Dsysusers=false
 
@@ -262,7 +273,7 @@ override_dh_installinit:
 	dh_installinit --no-scripts -psystemd
 	dh_installinit --no-start -Nsystemd
 
-PROJECT_VERSION ?= $(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.h | tr -d \")
+PROJECT_VERSION ?= $(shell awk '/(PROJECT|PACKAGE)_VERSION/ {print $$3}' build-deb/config.h | tr -d \")
 
 # The SysV compat tools (which are symlinks to systemctl) are
 # quasi-essential, so add their dependencies to Pre-Depends
@@ -270,7 +281,6 @@ PROJECT_VERSION ?= $(shell awk '/PACKAGE_VERSION/ {print $$3}' build-deb/config.
 override_dh_shlibdeps:
 	dh_shlibdeps -psystemd -- -dPre-Depends \
 		-edebian/systemd/bin/systemctl \
-		-edebian/systemd/lib/systemd/libsystemd-shared-$(PROJECT_VERSION).so \
 		-dDepends
 	dh_shlibdeps --remaining-packages -Lsystemd
 
@@ -284,7 +294,7 @@ override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	echo "01234567890123456789012345678901" > build-deb/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id ninja -C build-deb test || ( \
+	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id meson test -C build-deb $(TEST_TIMEOUT_MULTIPLIER) || ( \
 		cat build-deb/meson-logs/testlog.txt; \
 		exit 1)
 endif

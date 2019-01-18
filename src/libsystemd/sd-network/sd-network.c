@@ -8,8 +8,8 @@
 #include "sd-network.h"
 
 #include "alloc-util.h"
+#include "env-file.h"
 #include "fd-util.h"
-#include "fileio.h"
 #include "fs-util.h"
 #include "macro.h"
 #include "parse-util.h"
@@ -24,7 +24,7 @@ _public_ int sd_network_get_operational_state(char **state) {
 
         assert_return(state, -EINVAL);
 
-        r = parse_env_file(NULL, "/run/systemd/netif/state", NEWLINE, "OPER_STATE", &s, NULL);
+        r = parse_env_file(NULL, "/run/systemd/netif/state", "OPER_STATE", &s);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)
@@ -44,7 +44,7 @@ static int network_get_strv(const char *key, char ***ret) {
 
         assert_return(ret, -EINVAL);
 
-        r = parse_env_file(NULL, "/run/systemd/netif/state", NEWLINE, key, &s, NULL);
+        r = parse_env_file(NULL, "/run/systemd/netif/state", key, &s);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)
@@ -92,7 +92,7 @@ static int network_link_get_string(int ifindex, const char *field, char **ret) {
 
         xsprintf(path, "/run/systemd/netif/links/%i", ifindex);
 
-        r = parse_env_file(NULL, path, NEWLINE, field, &s, NULL);
+        r = parse_env_file(NULL, path, field, &s);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)
@@ -115,7 +115,7 @@ static int network_link_get_strv(int ifindex, const char *key, char ***ret) {
         assert_return(ret, -EINVAL);
 
         xsprintf(path, "/run/systemd/netif/links/%i", ifindex);
-        r = parse_env_file(NULL, path, NEWLINE, key, &s, NULL);
+        r = parse_env_file(NULL, path, key, &s);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)
@@ -204,6 +204,25 @@ _public_ int sd_network_link_get_route_domains(int ifindex, char ***ret) {
         return network_link_get_strv(ifindex, "ROUTE_DOMAINS", ret);
 }
 
+_public_ int sd_network_link_get_dns_default_route(int ifindex) {
+        char path[STRLEN("/run/systemd/netif/links/") + DECIMAL_STR_MAX(ifindex) + 1];
+        _cleanup_free_ char *s = NULL;
+        int r;
+
+        assert_return(ifindex > 0, -EINVAL);
+
+        xsprintf(path, "/run/systemd/netif/links/%i", ifindex);
+
+        r = parse_env_file(NULL, path, "DNS_DEFAULT_ROUTE", &s);
+        if (r == -ENOENT)
+                return -ENODATA;
+        if (r < 0)
+                return r;
+        if (isempty(s))
+                return -ENODATA;
+        return parse_boolean(s);
+}
+
 static int network_link_get_ifindexes(int ifindex, const char *key, int **ret) {
         char path[STRLEN("/run/systemd/netif/links/") + DECIMAL_STR_MAX(ifindex) + 1];
         _cleanup_free_ int *ifis = NULL;
@@ -216,7 +235,7 @@ static int network_link_get_ifindexes(int ifindex, const char *key, int **ret) {
         assert_return(ret, -EINVAL);
 
         xsprintf(path, "/run/systemd/netif/links/%i", ifindex);
-        r = parse_env_file(NULL, path, NEWLINE, key, &s, NULL);
+        r = parse_env_file(NULL, path, key, &s);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)

@@ -6,8 +6,9 @@ XSBC-Original-Maintainer: Debian systemd Maintainers <pkg-systemd-maintainers@li
 Uploaders: Michael Biebl <biebl@debian.org>,
            Marco d'Itri <md@linux.it>,
            Sjoerd Simons <sjoerd@debian.org>,
-           Martin Pitt <mpitt@debian.org>
-Standards-Version: 4.1.3
+           Martin Pitt <mpitt@debian.org>,
+           Felipe Sateler <fsateler@debian.org>
+Standards-Version: 4.2.1
 Rules-Requires-Root: no
 Vcs-Git: https://salsa.debian.org/systemd-team/systemd.git
 Vcs-Browser: https://salsa.debian.org/systemd-team/systemd
@@ -18,7 +19,7 @@ Build-Depends: debhelper (>= 10.4~),
                docbook-xsl,
                docbook-xml,
                m4,
-               meson (>= 0.44),
+               meson (>= 0.49),
                gettext,
                gperf,
                gnu-efi [amd64 i386 arm64 armhf],
@@ -75,8 +76,9 @@ Depends: ${shlibs:Depends},
          util-linux (>= 2.27.1),
          mount (>= 2.26),
          adduser,
-         procps,
-Conflicts: systemd-shim, upstart
+Conflicts: consolekit,
+           systemd-shim, upstart,
+           libpam-ck-connector,
 Breaks: apparmor (<< 2.9.2-1),
         ifupdown (<< 0.8.5~),
         udev (<< 228-5),
@@ -108,8 +110,7 @@ Conflicts: sysvinit-core,
            openrc (<< 0.20.4-2.1),
            file-rc,
            systemd-shim,
-Replaces: sysvinit (<< 2.88dsf-44~),
-          sysvinit-core,
+Replaces: sysvinit-core,
           upstart (<< 1.13.2-0ubuntu10~),
           upstart-sysv,
 Pre-Depends: systemd
@@ -335,7 +336,6 @@ Depends: ${shlibs:Depends},
          lsb-base (>= 3.0-6),
          util-linux (>= 2.27.1),
          s390-tools (>> 1.6.2) [s390],
-         procps
 Conflicts: hal
 Breaks: systemd (<< 233-4),
         ifupdown (<< 0.8.5~),

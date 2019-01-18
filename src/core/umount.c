@@ -13,22 +13,24 @@
 /* This needs to be after sys/mount.h :( */
 #include <libmount.h>
 
-#include "libudev.h"
+#include "sd-device.h"
 
 #include "alloc-util.h"
 #include "blockdev-util.h"
 #include "def.h"
+#include "device-util.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "fstab-util.h"
 #include "linux-3.13/dm-ioctl.h"
 #include "mount-setup.h"
 #include "mount-util.h"
+#include "mountpoint-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "signal-util.h"
 #include "string-util.h"
-#include "udev-util.h"
+#include "strv.h"
 #include "umount.h"
 #include "util.h"
 #include "virt.h"
@@ -72,7 +74,8 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
 
         for (;;) {
                 struct libmnt_fs *fs;
-                const char *path, *options, *fstype;
+                const char *path, *fstype;
+                _cleanup_free_ char *options = NULL;
                 _cleanup_free_ char *p = NULL;
                 unsigned long remount_flags = 0u;
                 _cleanup_free_ char *remount_options = NULL;
@@ -92,8 +95,24 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
                 if (cunescape(path, UNESCAPE_RELAX, &p) < 0)
                         return log_oom();
 
-                options = mnt_fs_get_options(fs);
                 fstype = mnt_fs_get_fstype(fs);
+
+                /* Combine the generic VFS options with the FS-specific
+                 * options. Duplicates are not a problem here, because the only
+                 * options that should come up twice are typically ro/rw, which
+                 * are turned into MS_RDONLY or the invertion of it.
+                 *
+                 * Even if there are duplicates later in mount_option_mangle()
+                 * it shouldn't hurt anyways as they override each other.
+                 */
+                if (!strextend_with_separator(&options, ",",
+                                              mnt_fs_get_vfs_options(fs),
+                                              NULL))
+                        return log_oom();
+                if (!strextend_with_separator(&options, ",",
+                                              mnt_fs_get_fs_options(fs),
+                                              NULL))
+                        return log_oom();
 
                 /* Ignore mount points we can't unmount because they
                  * are API or because we are keeping them open (like
@@ -104,9 +123,7 @@ int mount_points_list_get(const char *mountinfo, MountPoint **head) {
                  * unmount these things, hence don't bother. */
                 if (mount_point_is_api(p) ||
                     mount_point_ignore(p) ||
-                    path_startswith(p, "/dev") ||
-                    path_startswith(p, "/sys") ||
-                    path_startswith(p, "/proc"))
+                    PATH_STARTSWITH_SET(p, "/dev", "/sys", "/proc"))
                         continue;
 
                 /* If we are in a container, don't attempt to
@@ -212,121 +229,105 @@ int swap_list_get(const char *swaps, MountPoint **head) {
 }
 
 static int loopback_list_get(MountPoint **head) {
-        _cleanup_(udev_enumerate_unrefp) struct udev_enumerate *e = NULL;
-        struct udev_list_entry *item = NULL, *first = NULL;
-        _cleanup_(udev_unrefp) struct udev *udev = NULL;
+        _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
+        sd_device *d;
         int r;
 
         assert(head);
 
-        udev = udev_new();
-        if (!udev)
-                return -ENOMEM;
-
-        e = udev_enumerate_new(udev);
-        if (!e)
-                return -ENOMEM;
-
-        r = udev_enumerate_add_match_subsystem(e, "block");
+        r = sd_device_enumerator_new(&e);
         if (r < 0)
                 return r;
 
-        r = udev_enumerate_add_match_sysname(e, "loop*");
+        r = sd_device_enumerator_allow_uninitialized(e);
         if (r < 0)
                 return r;
 
-        r = udev_enumerate_add_match_sysattr(e, "loop/backing_file", NULL);
+        r = sd_device_enumerator_add_match_subsystem(e, "block", true);
         if (r < 0)
                 return r;
 
-        r = udev_enumerate_scan_devices(e);
+        r = sd_device_enumerator_add_match_sysname(e, "loop*");
         if (r < 0)
                 return r;
 
-        first = udev_enumerate_get_list_entry(e);
-        udev_list_entry_foreach(item, first) {
-                _cleanup_(udev_device_unrefp) struct udev_device *d;
+        r = sd_device_enumerator_add_match_sysattr(e, "loop/backing_file", NULL, true);
+        if (r < 0)
+                return r;
+
+        FOREACH_DEVICE(e, d) {
+                _cleanup_free_ char *p = NULL;
                 const char *dn;
-                _cleanup_free_ MountPoint *lb = NULL;
+                MountPoint *lb;
 
-                d = udev_device_new_from_syspath(udev, udev_list_entry_get_name(item));
-                if (!d)
-                        return -ENOMEM;
-
-                dn = udev_device_get_devnode(d);
-                if (!dn)
+                if (sd_device_get_devname(d, &dn) < 0)
                         continue;
 
-                lb = new0(MountPoint, 1);
+                p = strdup(dn);
+                if (!p)
+                        return -ENOMEM;
+
+                lb = new(MountPoint, 1);
                 if (!lb)
                         return -ENOMEM;
 
-                r = free_and_strdup(&lb->path, dn);
-                if (r < 0)
-                        return r;
+                *lb = (MountPoint) {
+                        .path = TAKE_PTR(p),
+                };
 
                 LIST_PREPEND(mount_point, *head, lb);
-                lb = NULL;
         }
 
         return 0;
 }
 
 static int dm_list_get(MountPoint **head) {
-        _cleanup_(udev_enumerate_unrefp) struct udev_enumerate *e = NULL;
-        struct udev_list_entry *item = NULL, *first = NULL;
-        _cleanup_(udev_unrefp) struct udev *udev = NULL;
+        _cleanup_(sd_device_enumerator_unrefp) sd_device_enumerator *e = NULL;
+        sd_device *d;
         int r;
 
         assert(head);
 
-        udev = udev_new();
-        if (!udev)
-                return -ENOMEM;
-
-        e = udev_enumerate_new(udev);
-        if (!e)
-                return -ENOMEM;
-
-        r = udev_enumerate_add_match_subsystem(e, "block");
+        r = sd_device_enumerator_new(&e);
         if (r < 0)
                 return r;
 
-        r = udev_enumerate_add_match_sysname(e, "dm-*");
+        r = sd_device_enumerator_allow_uninitialized(e);
         if (r < 0)
                 return r;
 
-        r = udev_enumerate_scan_devices(e);
+        r = sd_device_enumerator_add_match_subsystem(e, "block", true);
         if (r < 0)
                 return r;
 
-        first = udev_enumerate_get_list_entry(e);
-        udev_list_entry_foreach(item, first) {
-                _cleanup_(udev_device_unrefp) struct udev_device *d;
-                dev_t devnum;
+        r = sd_device_enumerator_add_match_sysname(e, "dm-*");
+        if (r < 0)
+                return r;
+
+        FOREACH_DEVICE(e, d) {
+                _cleanup_free_ char *p = NULL;
                 const char *dn;
-                _cleanup_free_ MountPoint *m = NULL;
+                MountPoint *m;
+                dev_t devnum;
 
-                d = udev_device_new_from_syspath(udev, udev_list_entry_get_name(item));
-                if (!d)
-                        return -ENOMEM;
-
-                devnum = udev_device_get_devnum(d);
-                dn = udev_device_get_devnode(d);
-                if (major(devnum) == 0 || !dn)
+                if (sd_device_get_devnum(d, &devnum) < 0 ||
+                    sd_device_get_devname(d, &dn) < 0)
                         continue;
 
-                m = new0(MountPoint, 1);
+                p = strdup(dn);
+                if (!p)
+                        return -ENOMEM;
+
+                m = new(MountPoint, 1);
                 if (!m)
                         return -ENOMEM;
 
-                m->devnum = devnum;
-                r = free_and_strdup(&m->path, dn);
-                if (r < 0)
-                        return r;
+                *m = (MountPoint) {
+                        .path = TAKE_PTR(p),
+                        .devnum = devnum,
+                };
 
                 LIST_PREPEND(mount_point, *head, m);
-                m = NULL;
         }
 
         return 0;

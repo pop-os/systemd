@@ -9,6 +9,7 @@
 #include "manager.h"
 #include "netlink-util.h"
 #include "network-internal.h"
+#include "strv.h"
 #include "time-util.h"
 #include "util.h"
 
@@ -168,11 +169,11 @@ static int manager_rtnl_listen(Manager *m) {
         if (r < 0)
                 return r;
 
-        r = sd_netlink_add_match(m->rtnl, RTM_NEWLINK, on_rtnl_event, m);
+        r = sd_netlink_add_match(m->rtnl, NULL, RTM_NEWLINK, on_rtnl_event, NULL, m, "wait-online-on-NEWLINK");
         if (r < 0)
                 return r;
 
-        r = sd_netlink_add_match(m->rtnl, RTM_DELLINK, on_rtnl_event, m);
+        r = sd_netlink_add_match(m->rtnl, NULL, RTM_DELLINK, on_rtnl_event, NULL, m, "wait-online-on-DELLINK");
         if (r < 0)
                 return r;
 
@@ -262,8 +263,8 @@ int manager_new(Manager **ret, char **interfaces, char **ignore, usec_t timeout)
         if (r < 0)
                 return r;
 
-        sd_event_add_signal(m->event, NULL, SIGTERM, NULL,  NULL);
-        sd_event_add_signal(m->event, NULL, SIGINT, NULL, NULL);
+        (void) sd_event_add_signal(m->event, NULL, SIGTERM, NULL,  NULL);
+        (void) sd_event_add_signal(m->event, NULL, SIGINT, NULL, NULL);
 
         if (timeout > 0) {
                 usec_t usec;
@@ -291,14 +292,10 @@ int manager_new(Manager **ret, char **interfaces, char **ignore, usec_t timeout)
 }
 
 void manager_free(Manager *m) {
-        Link *l;
-
         if (!m)
                 return;
 
-        while ((l = hashmap_first(m->links)))
-               link_free(l);
-        hashmap_free(m->links);
+        hashmap_free_with_destructor(m->links, link_free);
         hashmap_free(m->links_by_name);
 
         sd_event_source_unref(m->network_monitor_event_source);

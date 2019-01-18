@@ -16,8 +16,8 @@ typedef struct LinkAddress LinkAddress;
 #include "resolved-dns-server.h"
 #include "resolved-manager.h"
 
-#define LINK_SEARCH_DOMAINS_MAX 32
-#define LINK_DNS_SERVERS_MAX 32
+#define LINK_SEARCH_DOMAINS_MAX 256
+#define LINK_DNS_SERVERS_MAX 256
 
 struct LinkAddress {
         Link *link;
@@ -50,6 +50,8 @@ struct Link {
 
         LIST_HEAD(DnsSearchDomain, search_domains);
         unsigned n_search_domains;
+
+        int default_route;
 
         ResolveSupport llmnr_support;
         ResolveSupport mdns_support;

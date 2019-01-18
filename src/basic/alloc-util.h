@@ -8,9 +8,11 @@
 
 #include "macro.h"
 
+typedef void (*free_func_t)(void *p);
+
 #define new(t, n) ((t*) malloc_multiply(sizeof(t), (n)))
 
-#define new0(t, n) ((t*) calloc((n), sizeof(t)))
+#define new0(t, n) ((t*) calloc((n) ?: 1, sizeof(t)))
 
 #define newa(t, n)                                              \
         ({                                                      \
@@ -46,6 +48,21 @@ static inline void *mfree(void *memory) {
 void* memdup(const void *p, size_t l) _alloc_(2);
 void* memdup_suffix0(const void *p, size_t l) _alloc_(2);
 
+#define memdupa(p, l)                           \
+        ({                                      \
+                void *_q_;                      \
+                _q_ = alloca(l);                \
+                memcpy(_q_, p, l);              \
+        })
+
+#define memdupa_suffix0(p, l)                   \
+        ({                                      \
+                void *_q_;                      \
+                _q_ = alloca(l + 1);            \
+                ((uint8_t*) _q_)[l] = 0;        \
+                memcpy(_q_, p, l);              \
+        })
+
 static inline void freep(void *p) {
         free(*(void**) p);
 }
@@ -60,7 +77,7 @@ _malloc_  _alloc_(1, 2) static inline void *malloc_multiply(size_t size, size_t 
         if (size_multiply_overflow(size, need))
                 return NULL;
 
-        return malloc(size * need);
+        return malloc(size * need ?: 1);
 }
 
 #if !HAVE_REALLOCARRAY
@@ -68,7 +85,7 @@ _alloc_(2, 3) static inline void *reallocarray(void *p, size_t need, size_t size
         if (size_multiply_overflow(size, need))
                 return NULL;
 
-        return realloc(p, size * need);
+        return realloc(p, size * need ?: 1);
 }
 #endif
 

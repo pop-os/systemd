@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-
 #include <getopt.h>
 
 #include "sd-daemon.h"
 
+#include "daemon-util.h"
+#include "main-func.h"
 #include "manager.h"
+#include "pretty-print.h"
 #include "signal-util.h"
 #include "strv.h"
 
@@ -14,7 +16,17 @@ static usec_t arg_timeout = 120 * USEC_PER_SEC;
 static char **arg_interfaces = NULL;
 static char **arg_ignore = NULL;
 
-static void help(void) {
+STATIC_DESTRUCTOR_REGISTER(arg_interfaces, strv_freep);
+STATIC_DESTRUCTOR_REGISTER(arg_ignore, strv_freep);
+
+static int help(void) {
+        _cleanup_free_ char *link = NULL;
+        int r;
+
+        r = terminal_urlify_man("systemd-networkd-wait-online.service", "8", &link);
+        if (r < 0)
+                return log_oom();
+
         printf("%s [OPTIONS...]\n\n"
                "Block until network is configured.\n\n"
                "  -h --help                 Show this help\n"
@@ -23,7 +35,12 @@ static void help(void) {
                "  -i --interface=INTERFACE  Block until at least these interfaces have appeared\n"
                "     --ignore=INTERFACE     Don't take these interfaces into account\n"
                "     --timeout=SECS         Maximum time to wait for network connectivity\n"
-               , program_invocation_short_name);
+               "\nSee the %s for details.\n"
+               , program_invocation_short_name
+               , link
+        );
+
+        return 0;
 }
 
 static int parse_argv(int argc, char *argv[]) {
@@ -93,13 +110,12 @@ static int parse_argv(int argc, char *argv[]) {
         return 1;
 }
 
-int main(int argc, char *argv[]) {
+static int run(int argc, char *argv[]) {
+        _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         _cleanup_(manager_freep) Manager *m = NULL;
         int r;
 
-        log_set_target(LOG_TARGET_AUTO);
-        log_parse_environment();
-        log_open();
+        log_setup_service();
 
         umask(0022);
 
@@ -113,37 +129,24 @@ int main(int argc, char *argv[]) {
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, -1) >= 0);
 
         r = manager_new(&m, arg_interfaces, arg_ignore, arg_timeout);
-        if (r < 0) {
-                log_error_errno(r, "Could not create manager: %m");
-                goto finish;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Could not create manager: %m");
 
-        if (manager_all_configured(m)) {
-                r = 0;
-                goto finish;
-        }
+        if (manager_all_configured(m))
+                goto success;
 
-        sd_notify(false,
-                  "READY=1\n"
-                  "STATUS=Waiting for network connections...");
+        notify_message = notify_start("READY=1\n"
+                                      "STATUS=Waiting for network connections...",
+                                      "STATUS=Failed to wait for network connectivity...");
 
         r = sd_event_loop(m->event);
-        if (r < 0) {
-                log_error_errno(r, "Event loop failed: %m");
-                goto finish;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Event loop failed: %m");
 
-finish:
-        strv_free(arg_interfaces);
-        strv_free(arg_ignore);
+success:
+        notify_message = "STATUS=All interfaces configured...";
 
-        if (r >= 0) {
-                sd_notify(false, "STATUS=All interfaces configured...");
-
-                return EXIT_SUCCESS;
-        } else {
-                sd_notify(false, "STATUS=Failed waiting for network connectivity...");
-
-                return EXIT_FAILURE;
-        }
+        return 0;
 }
+
+DEFINE_MAIN_FUNCTION(run);

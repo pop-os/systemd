@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "env-file.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -15,6 +16,7 @@
 #include "parse-util.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "tmpfile-util.h"
 #include "user-util.h"
 #include "util.h"
 
@@ -193,15 +195,14 @@ int inhibitor_load(Inhibitor *i) {
         char *cc;
         int r;
 
-        r = parse_env_file(NULL, i->state_file, NEWLINE,
+        r = parse_env_file(NULL, i->state_file,
                            "WHAT", &what,
                            "UID", &uid,
                            "PID", &pid,
                            "WHO", &who,
                            "WHY", &why,
                            "MODE", &mode,
-                           "FIFO", &i->fifo_path,
-                           NULL);
+                           "FIFO", &i->fifo_path);
         if (r < 0)
                 return r;
 

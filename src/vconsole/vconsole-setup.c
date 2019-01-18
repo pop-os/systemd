@@ -18,11 +18,13 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "io-util.h"
 #include "locale-util.h"
 #include "log.h"
+#include "proc-cmdline.h"
 #include "process-util.h"
 #include "signal-util.h"
 #include "stdio-util.h"
@@ -112,7 +114,7 @@ static int toggle_utf8(const char *name, int fd, bool utf8) {
 static int toggle_utf8_sysfs(bool utf8) {
         int r;
 
-        r = write_string_file("/sys/module/vt/parameters/default_utf8", one_zero(utf8), 0);
+        r = write_string_file("/sys/module/vt/parameters/default_utf8", one_zero(utf8), WRITE_STRING_FILE_DISABLE_BUFFER);
         if (r < 0)
                 return log_warning_errno(r, "Failed to %s sysfs UTF-8 flag: %m", enable_disable(utf8));
 
@@ -148,7 +150,7 @@ static int keyboard_load_and_wait(const char *vc, const char *map, const char *m
                 log_debug("Executing \"%s\"...", strnull(cmd));
         }
 
-        r = safe_fork("(loadkeys)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG, &pid);
+        r = safe_fork("(loadkeys)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -191,7 +193,7 @@ static int font_load_and_wait(const char *vc, const char *font, const char *map,
                 log_debug("Executing \"%s\"...", strnull(cmd));
         }
 
-        r = safe_fork("(setfont)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_LOG, &pid);
+        r = safe_fork("(setfont)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_LOG, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -296,14 +298,28 @@ static void setup_remaining_vcs(int src_fd, unsigned src_idx, bool utf8) {
 
                 r = ioctl(fd_d, KDFONTOP, &cfo);
                 if (r < 0) {
-                        log_warning_errno(errno, "KD_FONT_OP_SET failed, fonts will not be copied to tty%u: %m", i);
+                        int last_errno, mode;
+
+                        /* The fonts couldn't have been copied. It might be due to the
+                         * terminal being in graphical mode. In this case the kernel
+                         * returns -EINVAL which is too generic for distinguishing this
+                         * specific case. So we need to retrieve the terminal mode and if
+                         * the graphical mode is in used, let's assume that something else
+                         * is using the terminal and the failure was expected as we
+                         * shouldn't have tried to copy the fonts. */
+
+                        last_errno = errno;
+                        if (ioctl(fd_d, KDGETMODE, &mode) >= 0 && mode != KD_TEXT)
+                                log_debug("KD_FONT_OP_SET skipped: tty%u is not in text mode", i);
+                        else
+                                log_warning_errno(last_errno, "KD_FONT_OP_SET failed, fonts will not be copied to tty%u: %m", i);
+
                         continue;
                 }
 
                 /*
-                 * copy unicode translation table
-                 * unimapd is a ushort count and a pointer to an
-                 * array of struct unipair { ushort, ushort }
+                 * copy unicode translation table unimapd is a ushort count and a pointer
+                 * to an array of struct unipair { ushort, ushort }
                  */
                 r = ioctl(fd_d, PIO_UNIMAPCLR, &adv);
                 if (r < 0) {
@@ -402,9 +418,7 @@ int main(int argc, char **argv) {
         unsigned idx = 0;
         int r;
 
-        log_set_target(LOG_TARGET_AUTO);
-        log_parse_environment();
-        log_open();
+        log_setup_service();
 
         umask(0022);
 
@@ -417,32 +431,29 @@ int main(int argc, char **argv) {
 
         utf8 = is_locale_utf8();
 
-        r = parse_env_file(NULL, "/etc/vconsole.conf", NEWLINE,
+        r = parse_env_file(NULL, "/etc/vconsole.conf",
                            "KEYMAP", &vc_keymap,
                            "KEYMAP_TOGGLE", &vc_keymap_toggle,
                            "FONT", &vc_font,
                            "FONT_MAP", &vc_font_map,
-                           "FONT_UNIMAP", &vc_font_unimap,
-                           NULL);
+                           "FONT_UNIMAP", &vc_font_unimap);
         if (r < 0 && r != -ENOENT)
                 log_warning_errno(r, "Failed to read /etc/vconsole.conf: %m");
 
         /* Let the kernel command line override /etc/vconsole.conf */
-        if (detect_container() <= 0) {
-                r = parse_env_file(NULL, "/proc/cmdline", WHITESPACE,
-                                   "vconsole.keymap", &vc_keymap,
-                                   "vconsole.keymap_toggle", &vc_keymap_toggle,
-                                   "vconsole.font", &vc_font,
-                                   "vconsole.font_map", &vc_font_map,
-                                   "vconsole.font_unimap", &vc_font_unimap,
-                                   /* compatibility with obsolete multiple-dot scheme */
-                                   "vconsole.keymap.toggle", &vc_keymap_toggle,
-                                   "vconsole.font.map", &vc_font_map,
-                                   "vconsole.font.unimap", &vc_font_unimap,
-                                   NULL);
-                if (r < 0 && r != -ENOENT)
-                        log_warning_errno(r, "Failed to read /proc/cmdline: %m");
-        }
+        r = proc_cmdline_get_key_many(
+                        PROC_CMDLINE_STRIP_RD_PREFIX,
+                        "vconsole.keymap", &vc_keymap,
+                        "vconsole.keymap_toggle", &vc_keymap_toggle,
+                        "vconsole.font", &vc_font,
+                        "vconsole.font_map", &vc_font_map,
+                        "vconsole.font_unimap", &vc_font_unimap,
+                        /* compatibility with obsolete multiple-dot scheme */
+                        "vconsole.keymap.toggle", &vc_keymap_toggle,
+                        "vconsole.font.map", &vc_font_map,
+                        "vconsole.font.unimap", &vc_font_unimap);
+        if (r < 0 && r != -ENOENT)
+                log_warning_errno(r, "Failed to read /proc/cmdline: %m");
 
         (void) toggle_utf8_sysfs(utf8);
         (void) toggle_utf8(vc, fd, utf8);

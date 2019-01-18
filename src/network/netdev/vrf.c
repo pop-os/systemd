@@ -1,7 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-  Copyright © 2016 Andreas Rammhold <andreas@rammhold.de>
-***/
 
 #include <net/if.h>
 
@@ -30,7 +27,7 @@ static int netdev_vrf_fill_message_create(NetDev *netdev, Link *link, sd_netlink
 
 const NetDevVTable vrf_vtable = {
         .object_size = sizeof(Vrf),
-        .sections = "NetDev\0VRF\0",
+        .sections = "Match\0NetDev\0VRF\0",
         .fill_message_create = netdev_vrf_fill_message_create,
         .create_type = NETDEV_CREATE_MASTER,
 };

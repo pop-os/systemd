@@ -1,4 +1,4 @@
-<?xml version='1.0'?> <!--*- Mode: nxml; nxml-child-indent: 2; indent-tabs-mode: nil -*-->
+<?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
@@ -364,14 +364,13 @@
       <varlistentry>
         <term><varname>AutoNegotiation=</varname></term>
         <listitem>
-          <para>Enables or disables automatic negotiation of transmission parameters.
+          <para>Takes a boolean. If set to yes, automatic negotiation of transmission parameters is enabled.
           Autonegotiation is a procedure by which two connected ethernet devices choose
           common transmission parameters, such as speed, duplex mode, and flow control.
-          Takes a boolean value. Unset by default, which means that the kernel default
-          will be used.</para>
+          When unset, the kernel's default will be used.</para>
 
-          <para>Note that if autonegotiation is enabled, speed and duplex settings are
-          read-only. If autonegotation is disabled, speed and duplex settings are writable
+          <para>Note that if autonegotiation is enabled, speed, duplex and advertise settings are
+          read-only. If autonegotation is disabled, speed, duplex and advertise settings are writable
           if the driver supports multiple link modes.</para>
         </listitem>
       </varlistentry>
@@ -479,43 +478,109 @@
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term><varname>Advertise=</varname></term>
+        <listitem>
+          <para>This sets what speeds and duplex modes of operation are advertised for auto-negotiation.
+          The supported values are:
+
+          <table>
+            <title>Supported advertise values</title>
+            <tgroup cols='3'>
+              <colspec colname='Advertise' />
+              <colspec colname='Speed' />
+              <colspec colname='Duplex Mode' />
+
+              <thead><row>
+                <entry>Advertise</entry>
+                <entry>Speed (Mbps)</entry>
+                <entry>Duplex Mode</entry>
+              </row></thead>
+              <tbody>
+
+                <row><entry><literal>10baset-half</literal></entry>
+                <entry>10</entry><entry>half</entry></row>
+
+                <row><entry><literal>10baset-full</literal></entry>
+                <entry>10</entry><entry>full</entry></row>
+
+                <row><entry><literal>100baset-half</literal></entry>
+                <entry>100</entry><entry>half</entry></row>
+
+                <row><entry><literal>100baset-full</literal></entry>
+                <entry>100</entry><entry>full</entry></row>
+
+                <row><entry><literal>1000baset-half</literal></entry>
+                <entry>1000</entry><entry>half</entry></row>
+
+                <row><entry><literal>1000baset-full</literal></entry>
+                <entry>1000</entry><entry>full</entry></row>
+
+                <row><entry><literal>10000baset-full</literal></entry>
+                <entry>10000</entry><entry>full</entry></row>
+
+                <row><entry><literal>2500basex-full</literal></entry>
+                <entry>2500</entry><entry>full</entry></row>
+
+                <row><entry><literal>1000basekx-full</literal></entry>
+                <entry>1000</entry><entry>full</entry></row>
+
+                <row><entry><literal>10000basekx4-full</literal></entry>
+                <entry>10000</entry><entry>full</entry></row>
+
+                <row><entry><literal>10000basekr-full</literal></entry>
+                <entry>10000</entry><entry>full</entry></row>
+
+                <row><entry><literal>10000baser-fec</literal></entry>
+                <entry>10000</entry><entry>full</entry></row>
+
+                <row><entry><literal>20000basemld2-full</literal></entry>
+                <entry>20000</entry><entry>full</entry></row>
+
+                <row><entry><literal>20000basekr2-full</literal></entry>
+                <entry>20000</entry><entry>full</entry></row>
+              </tbody>
+            </tgroup>
+          </table>
+
+          By default this is unset, i.e. all possible modes will be advertised.
+          This option may be specified more than once, in which case all specified speeds and modes are advertised.
+          If the empty string is assigned to this option, the list is reset, and all prior assignments have no effect.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term><varname>TCPSegmentationOffload=</varname></term>
         <listitem>
-          <para>The TCP Segmentation Offload (TSO) when true enables
-          TCP segmentation offload. Takes a boolean value.
-          Defaults to "unset".</para>
+          <para>Takes a boolean. If set to true, the TCP Segmentation Offload (TSO) is enabled.
+          When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
        <varlistentry>
       <term><varname>TCP6SegmentationOffload=</varname></term>
         <listitem>
-          <para>The TCP6 Segmentation Offload (tx-tcp6-segmentation) when true enables
-          TCP6 segmentation offload. Takes a boolean value.
-          Defaults to "unset".</para>
+          <para>Takes a boolean. If set to true, the TCP6 Segmentation Offload (tx-tcp6-segmentation) is enabled.
+          When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>GenericSegmentationOffload=</varname></term>
         <listitem>
-          <para>The Generic Segmentation Offload (GSO) when true enables
-          generic segmentation offload. Takes a boolean value.
-          Defaults to "unset".</para>
+          <para>Takes a boolean. If set to true, the Generic Segmentation Offload (GSO) is enabled.
+          When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
     <varlistentry>
         <term><varname>GenericReceiveOffload=</varname></term>
         <listitem>
-          <para>The Generic Receive Offload (GRO) when true enables
-          generic receive offload. Takes a boolean value.
-          Defaults to "unset".</para>
+          <para>Takes a boolean. If set to true, the Generic Receive Offload (GRO) is enabled.
+          When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>LargeReceiveOffload=</varname></term>
         <listitem>
-          <para>The Large Receive Offload (LRO) when true enables
-          large receive offload. Takes a boolean value.
-          Defaults to "unset".</para>
+          <para>Takes a boolean. If set to true, the Large Receive Offload (LRO) is enabled.
+          When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
       <varlistentry>

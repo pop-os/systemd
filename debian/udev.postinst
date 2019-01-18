@@ -20,7 +20,7 @@ in_debootstrap() {
     return 0
   fi
   return 1
-} 
+}
 
 can_start_udevd() {
   if [ ! -d /sys/class/ ]; then
@@ -84,6 +84,11 @@ Driver=virtio_net
 [Link]
 NamePolicy=onboard kernel
 EOF
+  fi
+
+  # new Default-Stop (see #791944)
+  if dpkg --compare-versions "$2" lt-nl "239-8"; then
+    update-rc.d -f udev remove
   fi
 }
 

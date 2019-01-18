@@ -8,6 +8,7 @@
 #include "fileio.h"
 #include "io-util.h"
 #include "machine-image.h"
+#include "missing_capability.h"
 #include "portable.h"
 #include "portabled-bus.h"
 #include "portabled-image-bus.h"
@@ -72,7 +73,7 @@ static int append_fd(sd_bus_message *m, PortableMetadata *d) {
         assert(d);
         assert(d->fd >= 0);
 
-        f = fdopen(d->fd, "re");
+        f = fdopen(d->fd, "r");
         if (!f)
                 return -errno;
 
@@ -93,7 +94,7 @@ int bus_image_common_get_metadata(
                 sd_bus_error *error) {
 
         _cleanup_(portable_metadata_unrefp) PortableMetadata *os_release = NULL;
-        _cleanup_(portable_metadata_hashmap_unrefp) Hashmap *unit_files = NULL;
+        _cleanup_hashmap_free_ Hashmap *unit_files = NULL;
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ PortableMetadata **sorted = NULL;
         _cleanup_strv_free_ char **matches = NULL;
@@ -636,6 +637,10 @@ int bus_image_acquire(
 
                 r = image_from_path(name_or_path, &loaded);
         }
+        if (r == -EMEDIUMTYPE) {
+                sd_bus_error_setf(error, BUS_ERROR_BAD_PORTABLE_IMAGE_TYPE, "Typ of image '%s' not recognized; supported image types are directories/btrfs subvolumes, block devices, and raw disk image files with suffix '.raw'.", name_or_path);
+                return r;
+        }
         if (r < 0)
                 return r;
 
@@ -689,7 +694,7 @@ not_found:
 }
 
 int bus_image_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error) {
-        _cleanup_(image_hashmap_freep) Hashmap *images = NULL;
+        _cleanup_hashmap_free_ Hashmap *images = NULL;
         _cleanup_strv_free_ char **l = NULL;
         size_t n_allocated = 0, n = 0;
         Manager *m = userdata;
@@ -701,7 +706,7 @@ int bus_image_node_enumerator(sd_bus *bus, const char *path, void *userdata, cha
         assert(path);
         assert(nodes);
 
-        images = hashmap_new(&string_hash_ops);
+        images = hashmap_new(&image_hash_ops);
         if (!images)
                 return -ENOMEM;
 

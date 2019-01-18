@@ -2,14 +2,15 @@
 
 udevadm_sources = files('''
         udevadm.c
-        udevadm-info.c
+        udevadm.h
         udevadm-control.c
-        udevadm-monitor.c
         udevadm-hwdb.c
+        udevadm-info.c
+        udevadm-monitor.c
         udevadm-settle.c
-        udevadm-trigger.c
         udevadm-test.c
         udevadm-test-builtin.c
+        udevadm-trigger.c
         udevadm-util.c
         udevadm-util.h
 '''.split())
@@ -18,12 +19,16 @@ systemd_udevd_sources = files('udevd.c')
 
 libudev_core_sources = '''
         udev.h
-        udev-event.c
-        udev-watch.c
-        udev-node.c
-        udev-rules.c
         udev-ctrl.c
+        udev-ctrl.h
+        udev-event.c
+        udev-node.c
+        udev-node.h
+        udev-rules.c
+        udev-watch.c
+        udev-watch.h
         udev-builtin.c
+        udev-builtin.h
         udev-builtin-btrfs.c
         udev-builtin-hwdb.c
         udev-builtin-input_id.c
@@ -49,7 +54,7 @@ endif
 if conf.get('HAVE_ACL') == 1
         libudev_core_sources += ['udev-builtin-uaccess.c',
                                  logind_acl_c,
-                                 sd_login_c]
+                                 sd_login_sources]
 endif
 
 ############################################################
@@ -123,6 +128,7 @@ install_libudev_static = static_library(
         shared_sources,
         libsystemd_sources,
         libudev_sources,
+        disable_mempool_c,
         include_directories : includes,
         build_by_default : static_libudev != 'false',
         install : static_libudev != 'false',
@@ -134,7 +140,7 @@ install_libudev_static = static_library(
 
 libudev = shared_library(
         'udev',
-        'udev.h', # pick a header file at random to work around old meson bug
+        disable_mempool_c,
         version : libudev_version,
         include_directories : includes,
         link_args : ['-shared',
@@ -159,7 +165,6 @@ libudev_core = static_library(
 
 foreach prog : [['ata_id/ata_id.c'],
                 ['cdrom_id/cdrom_id.c'],
-                ['collect/collect.c'],
                 ['scsi_id/scsi_id.c',
                  'scsi_id/scsi_id.h',
                  'scsi_id/scsi_serial.c',

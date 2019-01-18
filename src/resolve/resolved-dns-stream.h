@@ -8,10 +8,11 @@ typedef struct DnsStream DnsStream;
 #include "resolved-dns-packet.h"
 #include "resolved-dns-transaction.h"
 #include "resolved-manager.h"
-
 #if ENABLE_DNS_OVER_TLS
-#include <gnutls/gnutls.h>
+#include "resolved-dnstls.h"
 #endif
+
+#define DNS_STREAM_WRITE_TLS_DATA 1
 
 /* Streams are used by three subsystems:
  *
@@ -22,7 +23,7 @@ typedef struct DnsStream DnsStream;
 
 struct DnsStream {
         Manager *manager;
-        int n_ref;
+        unsigned n_ref;
 
         DnsProtocol protocol;
 
@@ -40,9 +41,8 @@ struct DnsStream {
         socklen_t tfo_salen;
 
 #if ENABLE_DNS_OVER_TLS
-        gnutls_session_t tls_session;
-        int tls_handshake;
-        bool tls_bye;
+        DnsTlsStreamData dnstls_data;
+        int dnstls_events;
 #endif
 
         sd_event_source *io_event_source;
@@ -53,13 +53,12 @@ struct DnsStream {
         size_t n_written, n_read;
         OrderedSet *write_queue;
 
-        int (*on_connection)(DnsStream *s);
         int (*on_packet)(DnsStream *s);
         int (*complete)(DnsStream *s, int error);
 
         LIST_HEAD(DnsTransaction, transactions); /* when used by the transaction logic */
         DnsServer *server;                       /* when used by the transaction logic */
-        DnsQuery *query;             /* when used by the DNS stub logic */
+        DnsQuery *query;                         /* when used by the DNS stub logic */
 
         /* used when DNS-over-TLS is enabled */
         bool encrypted:1;
@@ -69,7 +68,7 @@ struct DnsStream {
 
 int dns_stream_new(Manager *m, DnsStream **s, DnsProtocol protocol, int fd, const union sockaddr_union *tfo_address);
 #if ENABLE_DNS_OVER_TLS
-int dns_stream_connect_tls(DnsStream *s, gnutls_session_t tls_session);
+int dns_stream_connect_tls(DnsStream *s, void *tls_session);
 #endif
 DnsStream *dns_stream_unref(DnsStream *s);
 DnsStream *dns_stream_ref(DnsStream *s);
@@ -77,6 +76,7 @@ DnsStream *dns_stream_ref(DnsStream *s);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsStream*, dns_stream_unref);
 
 int dns_stream_write_packet(DnsStream *s, DnsPacket *p);
+ssize_t dns_stream_writev(DnsStream *s, const struct iovec *iov, size_t iovcnt, int flags);
 
 static inline bool DNS_STREAM_QUEUED(DnsStream *s) {
         assert(s);
@@ -86,3 +86,7 @@ static inline bool DNS_STREAM_QUEUED(DnsStream *s) {
 
         return !!s->write_packet;
 }
+
+DnsPacket *dns_stream_take_read_packet(DnsStream *s);
+
+void dns_stream_detach(DnsStream *s);

@@ -30,6 +30,7 @@ typedef enum ServiceType {
         SERVICE_DBUS,     /* we fork and wait until a specific D-Bus name appears on the bus */
         SERVICE_NOTIFY,   /* we fork and wait until a daemon sends us a ready message with sd_notify() */
         SERVICE_IDLE,     /* much like simple, but delay exec() until all jobs are dispatched. */
+        SERVICE_EXEC,     /* we fork and wait until we execute exec() (this means our own setup is waited for) */
         _SERVICE_TYPE_MAX,
         _SERVICE_TYPE_INVALID = -1
 } ServiceType;
@@ -98,8 +99,9 @@ struct Service {
         usec_t runtime_max_usec;
 
         dual_timestamp watchdog_timestamp;
-        usec_t watchdog_usec;
-        usec_t watchdog_override_usec;
+        usec_t watchdog_usec;            /* the requested watchdog timeout in the unit file */
+        usec_t watchdog_original_usec;   /* the watchdog timeout that was in effect when the unit was started, i.e. the timeout the forked off processes currently see */
+        usec_t watchdog_override_usec;   /* the watchdog timeout requested by the service itself through sd_notify() */
         bool watchdog_override_enable;
         sd_event_source *watchdog_event_source;
 
@@ -165,6 +167,8 @@ struct Service {
         NotifyAccess notify_access;
         NotifyState notify_state;
 
+        sd_event_source *exec_fd_event_source;
+
         ServiceFDStore *fd_store;
         size_t n_fd_store;
         unsigned n_fd_store_max;
@@ -179,6 +183,7 @@ struct Service {
 
         unsigned n_restarts;
         bool flush_n_restarts;
+        bool exec_fd_hot;
 };
 
 extern const UnitVTable service_vtable;
@@ -202,3 +207,5 @@ const char* service_result_to_string(ServiceResult i) _const_;
 ServiceResult service_result_from_string(const char *s) _pure_;
 
 DEFINE_CAST(SERVICE, Service);
+
+#define STATUS_TEXT_MAX (16U*1024U)

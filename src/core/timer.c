@@ -6,9 +6,11 @@
 #include "bus-error.h"
 #include "bus-util.h"
 #include "dbus-timer.h"
+#include "dbus-unit.h"
 #include "fs-util.h"
 #include "parse-util.h"
 #include "random-util.h"
+#include "serialize.h"
 #include "special.h"
 #include "string-table.h"
 #include "string-util.h"
@@ -88,18 +90,18 @@ static int timer_add_default_dependencies(Timer *t) {
         if (!UNIT(t)->default_dependencies)
                 return 0;
 
-        r = unit_add_dependency_by_name(UNIT(t), UNIT_BEFORE, SPECIAL_TIMERS_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+        r = unit_add_dependency_by_name(UNIT(t), UNIT_BEFORE, SPECIAL_TIMERS_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
         if (r < 0)
                 return r;
 
         if (MANAGER_IS_SYSTEM(UNIT(t)->manager)) {
-                r = unit_add_two_dependencies_by_name(UNIT(t), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+                r = unit_add_two_dependencies_by_name(UNIT(t), UNIT_AFTER, UNIT_REQUIRES, SPECIAL_SYSINIT_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
                 if (r < 0)
                         return r;
 
                 LIST_FOREACH(value, v, t->values) {
                         if (v->base == TIMER_CALENDAR) {
-                                r = unit_add_dependency_by_name(UNIT(t), UNIT_AFTER, SPECIAL_TIME_SYNC_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+                                r = unit_add_dependency_by_name(UNIT(t), UNIT_AFTER, SPECIAL_TIME_SYNC_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
                                 if (r < 0)
                                         return r;
                                 break;
@@ -107,7 +109,7 @@ static int timer_add_default_dependencies(Timer *t) {
                 }
         }
 
-        return unit_add_two_dependencies_by_name(UNIT(t), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, NULL, true, UNIT_DEPENDENCY_DEFAULT);
+        return unit_add_two_dependencies_by_name(UNIT(t), UNIT_BEFORE, UNIT_CONFLICTS, SPECIAL_SHUTDOWN_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
 }
 
 static int timer_add_trigger_dependencies(Timer *t) {
@@ -246,6 +248,9 @@ static void timer_set_state(Timer *t, TimerState state) {
         TimerState old_state;
         assert(t);
 
+        if (t->state != state)
+                bus_unit_send_pending_change_signal(UNIT(t), false);
+
         old_state = t->state;
         t->state = state;
 
@@ -262,7 +267,7 @@ static void timer_set_state(Timer *t, TimerState state) {
         unit_notify(UNIT(t), state_translation_table[old_state], state_translation_table[state], 0);
 }
 
-static void timer_enter_waiting(Timer *t, bool initial);
+static void timer_enter_waiting(Timer *t, bool time_change);
 
 static int timer_coldplug(Unit *u) {
         Timer *t = TIMER(u);
@@ -287,9 +292,7 @@ static void timer_enter_dead(Timer *t, TimerResult f) {
         if (t->result == TIMER_SUCCESS)
                 t->result = f;
 
-        if (t->result != TIMER_SUCCESS)
-                log_unit_warning(UNIT(t), "Failed with result '%s'.", timer_result_to_string(t->result));
-
+        unit_log_result(UNIT(t), t->result == TIMER_SUCCESS, timer_result_to_string(t->result));
         timer_set_state(t, t->result != TIMER_SUCCESS ? TIMER_FAILED : TIMER_DEAD);
 }
 
@@ -332,7 +335,7 @@ static void add_random(Timer *t, usec_t *v) {
         log_unit_debug(UNIT(t), "Adding %s random time.", format_timespan(s, sizeof(s), add, 0));
 }
 
-static void timer_enter_waiting(Timer *t, bool initial) {
+static void timer_enter_waiting(Timer *t, bool time_change) {
         bool found_monotonic = false, found_realtime = false;
         bool leave_around = false;
         triple_timestamp ts;
@@ -442,7 +445,8 @@ static void timer_enter_waiting(Timer *t, bool initial) {
 
                         v->next_elapse = usec_add(usec_shift_clock(base, CLOCK_MONOTONIC, TIMER_MONOTONIC_CLOCK(t)), v->value);
 
-                        if (!initial &&
+                        if (dual_timestamp_is_set(&t->last_trigger) &&
+                            !time_change &&
                             v->next_elapse < triple_timestamp_by_clock(&ts, TIMER_MONOTONIC_CLOCK(t)) &&
                             IN_SET(v->base, TIMER_ACTIVE, TIMER_BOOT, TIMER_STARTUP)) {
                                 /* This is a one time trigger, disable it now */
@@ -640,7 +644,7 @@ static int timer_start(Unit *u) {
         }
 
         t->result = TIMER_SUCCESS;
-        timer_enter_waiting(t, true);
+        timer_enter_waiting(t, false);
         return 1;
 }
 
@@ -661,21 +665,20 @@ static int timer_serialize(Unit *u, FILE *f, FDSet *fds) {
         assert(f);
         assert(fds);
 
-        unit_serialize_item(u, f, "state", timer_state_to_string(t->state));
-        unit_serialize_item(u, f, "result", timer_result_to_string(t->result));
+        (void) serialize_item(f, "state", timer_state_to_string(t->state));
+        (void) serialize_item(f, "result", timer_result_to_string(t->result));
 
         if (t->last_trigger.realtime > 0)
-                unit_serialize_item_format(u, f, "last-trigger-realtime", "%" PRIu64, t->last_trigger.realtime);
+                (void) serialize_usec(f, "last-trigger-realtime", t->last_trigger.realtime);
 
         if (t->last_trigger.monotonic > 0)
-                unit_serialize_item_format(u, f, "last-trigger-monotonic", "%" PRIu64, t->last_trigger.monotonic);
+                (void) serialize_usec(f, "last-trigger-monotonic", t->last_trigger.monotonic);
 
         return 0;
 }
 
 static int timer_deserialize_item(Unit *u, const char *key, const char *value, FDSet *fds) {
         Timer *t = TIMER(u);
-        int r;
 
         assert(u);
         assert(key);
@@ -690,6 +693,7 @@ static int timer_deserialize_item(Unit *u, const char *key, const char *value, F
                         log_unit_debug(u, "Failed to parse state value: %s", value);
                 else
                         t->deserialized_state = state;
+
         } else if (streq(key, "result")) {
                 TimerResult f;
 
@@ -698,19 +702,12 @@ static int timer_deserialize_item(Unit *u, const char *key, const char *value, F
                         log_unit_debug(u, "Failed to parse result value: %s", value);
                 else if (f != TIMER_SUCCESS)
                         t->result = f;
-        } else if (streq(key, "last-trigger-realtime")) {
 
-                r = safe_atou64(value, &t->last_trigger.realtime);
-                if (r < 0)
-                        log_unit_debug(u, "Failed to parse last-trigger-realtime value: %s", value);
-
-        } else if (streq(key, "last-trigger-monotonic")) {
-
-                r = safe_atou64(value, &t->last_trigger.monotonic);
-                if (r < 0)
-                        log_unit_debug(u, "Failed to parse last-trigger-monotonic value: %s", value);
-
-        } else
+        } else if (streq(key, "last-trigger-realtime"))
+                (void) deserialize_usec(value, &t->last_trigger.realtime);
+        else if (streq(key, "last-trigger-monotonic"))
+                (void) deserialize_usec(value, &t->last_trigger.monotonic);
+        else
                 log_unit_debug(u, "Unknown serialization key: %s", key);
 
         return 0;
@@ -811,7 +808,7 @@ static void timer_time_change(Unit *u) {
                 t->last_trigger.realtime = ts;
 
         log_unit_debug(u, "Time change, recalculating next elapse.");
-        timer_enter_waiting(t, false);
+        timer_enter_waiting(t, true);
 }
 
 static void timer_timezone_change(Unit *u) {

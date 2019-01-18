@@ -1,6 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
-/***
-***/
 
 #include <stdio_ext.h>
 
@@ -63,7 +61,7 @@ int introspect_write_child_nodes(struct introspect *i, Set *s, const char *prefi
         return 0;
 }
 
-static void introspect_write_flags(struct introspect *i, int type, int flags) {
+static void introspect_write_flags(struct introspect *i, int type, uint64_t flags) {
         if (flags & SD_BUS_VTABLE_DEPRECATED)
                 fputs("   <annotation name=\"org.freedesktop.DBus.Deprecated\" value=\"true\"/>\n", i->f);
 

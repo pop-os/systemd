@@ -61,13 +61,9 @@ class ServicesTest(unittest.TestCase):
                 subprocess.call(['journalctl', '-b', '-u', f])
             self.assertEqual(failed, [])
 
-    @unittest.skipUnless(subprocess.call(['which', 'gdm3'], stdout=subprocess.DEVNULL) == 0, 'gdm3 not found')
-    @unittest.skipUnless(subprocess.call(['ps', 'u', '-C', 'gdm-x-session'], stdout=subprocess.DEVNULL) == 0, 'gdm-x-session failed to start')
+    @unittest.skipUnless(shutil.which('gdm3') is not None, 'gdm3 not found')
     def test_gdm3(self):
-        out = subprocess.check_output(['ps', 'u', '-C', 'gdm-x-session'])
-        self.assertIn(b'gdm-x-session gnome-session', out)
-        out = subprocess.check_output(['ps', 'u', '-C', 'Xorg'])
-        self.assertIn(b'Xorg vt1', out)
+        subprocess.check_call(['pgrep', '-af', 'gdm-.*-session'])
         self.active_unit('gdm')
 
     def test_dbus(self):
@@ -386,34 +382,6 @@ ExecStart=/bin/sleep 500
         self.assertController('cpu,cpuacct')
         subprocess.check_call(['systemctl', 'stop', self.service])
         self.assertNoControllers()
-
-    @unittest.skipIf('TEST_UPSTREAM' in os.environ,
-                     'fix not applied upstream')
-    def test_custom_cgroup_cleanup(self):
-        '''cgroup cleanup does not touch manually created cgroups'''
-
-        # reproduces https://bugs.debian.org/777601
-        self.create_service()
-        os.mkdir('/sys/fs/cgroup/blkio/aux')
-        os.mkdir('/sys/fs/cgroup/perf_event/aux')
-        self.addCleanup(os.rmdir, '/sys/fs/cgroup/blkio/aux')
-        self.addCleanup(os.rmdir, '/sys/fs/cgroup/perf_event/aux')
-        subprocess.check_call(['systemctl', 'start', self.service])
-        self.assertController('systemd')
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/blkio/aux'))
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
-
-        subprocess.check_call(['systemctl', 'daemon-reload'])
-        time.sleep(1)
-        subprocess.check_call(['systemctl', 'restart', self.service])
-        time.sleep(1)
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/blkio/aux'))
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
-
-        subprocess.check_call(['systemctl', 'stop', self.service])
-        self.assertNoControllers()
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/blkio/aux'))
-        self.assertTrue(os.path.exists('/sys/fs/cgroup/perf_event/aux'))
 
 
 class SeccompTest(unittest.TestCase):

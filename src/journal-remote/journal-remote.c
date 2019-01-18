@@ -346,7 +346,7 @@ static void MHDDaemonWrapper_free(MHDDaemonWrapper *d) {
 }
 #endif
 
-RemoteServer* journal_remote_server_destroy(RemoteServer *s) {
+void journal_remote_server_destroy(RemoteServer *s) {
         size_t i;
 
 #if HAVE_MICROHTTPD
@@ -370,7 +370,6 @@ RemoteServer* journal_remote_server_destroy(RemoteServer *s) {
                 journal_remote_server_global = NULL;
 
         /* fds that we're listening on remain open... */
-        return NULL;
 }
 
 /**********************************************************************
@@ -408,7 +407,7 @@ int journal_remote_handle_raw_source(
                 log_debug("%zu active sources remaining", s->active);
                 return 0;
         } else if (r == -E2BIG) {
-                log_notice_errno(E2BIG, "Entry too big, skipped");
+                log_notice("Entry too big, skipped");
                 return 1;
         } else if (r == -EAGAIN) {
                 return 0;

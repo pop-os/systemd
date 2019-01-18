@@ -16,7 +16,7 @@ static const struct af_name* lookup_af(register const char *str, register GPERF_
 
 int main(int argc, const char *argv[]) {
 
-        unsigned int i;
+        unsigned i;
 
         for (i = 0; i < ELEMENTSOF(af_names); i++) {
                 if (af_names[i]) {
@@ -27,8 +27,8 @@ int main(int argc, const char *argv[]) {
 
         assert_se(af_to_name(af_max()) == NULL);
         assert_se(af_to_name(-1) == NULL);
-        assert_se(af_from_name("huddlduddl") == AF_UNSPEC);
-        assert_se(af_from_name("") == AF_UNSPEC);
+        assert_se(af_from_name("huddlduddl") == -EINVAL);
+        assert_se(af_from_name("") == -EINVAL);
 
         return 0;
 }

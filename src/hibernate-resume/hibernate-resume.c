@@ -20,9 +20,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
 
-        log_set_target(LOG_TARGET_AUTO);
-        log_parse_environment();
-        log_open();
+        log_setup_service();
 
         umask(0022);
 
@@ -47,7 +45,7 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
         }
 
-        r = write_string_file("/sys/power/resume", major_minor, WRITE_STRING_FILE_CREATE);
+        r = write_string_file("/sys/power/resume", major_minor, WRITE_STRING_FILE_DISABLE_BUFFER);
         if (r < 0) {
                 log_error_errno(r, "Failed to write '%s' to /sys/power/resume: %m", major_minor);
                 return EXIT_FAILURE;

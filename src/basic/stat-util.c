@@ -10,11 +10,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "alloc-util.h"
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
 #include "macro.h"
 #include "missing.h"
+#include "parse-util.h"
 #include "stat-util.h"
 #include "string-util.h"
 
@@ -40,6 +42,15 @@ int is_dir(const char* path, bool follow) {
         else
                 r = lstat(path, &st);
         if (r < 0)
+                return -errno;
+
+        return !!S_ISDIR(st.st_mode);
+}
+
+int is_dir_fd(int fd) {
+        struct stat st;
+
+        if (fstat(fd, &st) < 0)
                 return -errno;
 
         return !!S_ISDIR(st.st_mode);
@@ -204,15 +215,47 @@ int fd_is_network_fs(int fd) {
 }
 
 int fd_is_network_ns(int fd) {
+        struct statfs s;
         int r;
 
-        r = fd_is_fs_type(fd, NSFS_MAGIC);
-        if (r <= 0)
-                return r;
+        /* Checks whether the specified file descriptor refers to a network namespace. On old kernels there's no nice
+         * way to detect that, hence on those we'll return a recognizable error (EUCLEAN), so that callers can handle
+         * this somewhat nicely.
+         *
+         * This function returns > 0 if the fd definitely refers to a network namespace, 0 if it definitely does not
+         * refer to a network namespace, -EUCLEAN if we can't determine, and other negative error codes on error. */
+
+        if (fstatfs(fd, &s) < 0)
+                return -errno;
+
+        if (!is_fs_type(&s, NSFS_MAGIC)) {
+                /* On really old kernels, there was no "nsfs", and network namespace sockets belonged to procfs
+                 * instead. Handle that in a somewhat smart way. */
+
+                if (is_fs_type(&s, PROC_SUPER_MAGIC)) {
+                        struct statfs t;
+
+                        /* OK, so it is procfs. Let's see if our own network namespace is procfs, too. If so, then the
+                         * passed fd might refer to a network namespace, but we can't know for sure. In that case,
+                         * return a recognizable error. */
+
+                        if (statfs("/proc/self/ns/net", &t) < 0)
+                                return -errno;
+
+                        if (s.f_type == t.f_type)
+                                return -EUCLEAN; /* It's possible, we simply don't know */
+                }
+
+                return 0; /* No! */
+        }
 
         r = ioctl(fd, NS_GET_NSTYPE);
-        if (r < 0)
+        if (r < 0) {
+                if (errno == ENOTTY) /* Old kernels didn't know this ioctl, let's also return a recognizable error in that case */
+                        return -EUCLEAN;
+
                 return -errno;
+        }
 
         return r == CLONE_NEWNET;
 }
@@ -254,4 +297,123 @@ int fd_verify_regular(int fd) {
                 return -errno;
 
         return stat_verify_regular(&st);
+}
+
+int stat_verify_directory(const struct stat *st) {
+        assert(st);
+
+        if (S_ISLNK(st->st_mode))
+                return -ELOOP;
+
+        if (!S_ISDIR(st->st_mode))
+                return -ENOTDIR;
+
+        return 0;
+}
+
+int fd_verify_directory(int fd) {
+        struct stat st;
+
+        assert(fd >= 0);
+
+        if (fstat(fd, &st) < 0)
+                return -errno;
+
+        return stat_verify_directory(&st);
+}
+
+int device_path_make_major_minor(mode_t mode, dev_t devno, char **ret) {
+        const char *t;
+
+        /* Generates the /dev/{char|block}/MAJOR:MINOR path for a dev_t */
+
+        if (S_ISCHR(mode))
+                t = "char";
+        else if (S_ISBLK(mode))
+                t = "block";
+        else
+                return -ENODEV;
+
+        if (asprintf(ret, "/dev/%s/%u:%u", t, major(devno), minor(devno)) < 0)
+                return -ENOMEM;
+
+        return 0;
+
+}
+
+int device_path_make_canonical(mode_t mode, dev_t devno, char **ret) {
+        _cleanup_free_ char *p = NULL;
+        int r;
+
+        /* Finds the canonical path for a device, i.e. resolves the /dev/{char|block}/MAJOR:MINOR path to the end. */
+
+        assert(ret);
+
+        if (major(devno) == 0 && minor(devno) == 0) {
+                char *s;
+
+                /* A special hack to make sure our 'inaccessible' device nodes work. They won't have symlinks in
+                 * /dev/block/ and /dev/char/, hence we handle them specially here. */
+
+                if (S_ISCHR(mode))
+                        s = strdup("/run/systemd/inaccessible/chr");
+                else if (S_ISBLK(mode))
+                        s = strdup("/run/systemd/inaccessible/blk");
+                else
+                        return -ENODEV;
+
+                if (!s)
+                        return -ENOMEM;
+
+                *ret = s;
+                return 0;
+        }
+
+        r = device_path_make_major_minor(mode, devno, &p);
+        if (r < 0)
+                return r;
+
+        return chase_symlinks(p, NULL, 0, ret);
+}
+
+int device_path_parse_major_minor(const char *path, mode_t *ret_mode, dev_t *ret_devno) {
+        mode_t mode;
+        dev_t devno;
+        int r;
+
+        /* Tries to extract the major/minor directly from the device path if we can. Handles /dev/block/ and /dev/char/
+         * paths, as well out synthetic inaccessible device nodes. Never goes to disk. Returns -ENODEV if the device
+         * path cannot be parsed like this.  */
+
+        if (path_equal(path, "/run/systemd/inaccessible/chr")) {
+                mode = S_IFCHR;
+                devno = makedev(0, 0);
+        } else if (path_equal(path, "/run/systemd/inaccessible/blk")) {
+                mode = S_IFBLK;
+                devno = makedev(0, 0);
+        } else {
+                const char *w;
+
+                w = path_startswith(path, "/dev/block/");
+                if (w)
+                        mode = S_IFBLK;
+                else {
+                        w = path_startswith(path, "/dev/char/");
+                        if (!w)
+                                return -ENODEV;
+
+                        mode = S_IFCHR;
+                }
+
+                r = parse_dev(w, &devno);
+                if (r < 0)
+                        return r;
+        }
+
+        if (ret_mode)
+                *ret_mode = mode;
+        if (ret_devno)
+                *ret_devno = devno;
+
+        return 0;
 }

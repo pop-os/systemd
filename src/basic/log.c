@@ -401,7 +401,7 @@ static int write_to_syslog(
                 .msg_iovlen = ELEMENTSOF(iovec),
         };
         time_t t;
-        struct tm *tm;
+        struct tm tm;
 
         if (syslog_fd < 0)
                 return 0;
@@ -409,11 +409,10 @@ static int write_to_syslog(
         xsprintf(header_priority, "<%i>", level);
 
         t = (time_t) (now(CLOCK_REALTIME) / USEC_PER_SEC);
-        tm = localtime(&t);
-        if (!tm)
+        if (!localtime_r(&t, &tm))
                 return -EINVAL;
 
-        if (strftime(header_time, sizeof(header_time), "%h %e %T ", tm) <= 0)
+        if (strftime(header_time, sizeof(header_time), "%h %e %T ", &tm) <= 0)
                 return -EINVAL;
 
         xsprintf(header_pid, "["PID_FMT"]: ", getpid_cached());
@@ -484,6 +483,8 @@ static int log_do_header(
                 const char *object_field, const char *object,
                 const char *extra_field, const char *extra) {
         int r;
+
+        error = IS_SYNTHETIC_ERRNO(error) ? 0 : ERRNO_VALUE(error);
 
         r = snprintf(header, size,
                      "PRIORITY=%i\n"
@@ -570,15 +571,12 @@ int log_dispatch_internal(
 
         assert_raw(buffer);
 
-        if (error < 0)
-                error = -error;
-
         if (log_target == LOG_TARGET_NULL)
-                return -error;
+                return -ERRNO_VALUE(error);
 
         /* Patch in LOG_DAEMON facility if necessary */
         if ((level & LOG_FACMASK) == 0)
-                level = log_facility | LOG_PRI(level);
+                level |= log_facility;
 
         if (open_when_needed)
                 log_open();
@@ -637,7 +635,7 @@ int log_dispatch_internal(
         if (open_when_needed)
                 log_close();
 
-        return -error;
+        return -ERRNO_VALUE(error);
 }
 
 int log_dump_internal(
@@ -653,11 +651,8 @@ int log_dump_internal(
 
         /* This modifies the buffer... */
 
-        if (error < 0)
-                error = -error;
-
         if (_likely_(LOG_PRI(level) > log_max_level[realm]))
-                return -error;
+                return -ERRNO_VALUE(error);
 
         return log_dispatch_internal(level, error, file, line, func, NULL, NULL, NULL, NULL, buffer);
 }
@@ -675,14 +670,11 @@ int log_internalv_realm(
         char buffer[LINE_MAX];
         PROTECT_ERRNO;
 
-        if (error < 0)
-                error = -error;
-
         if (_likely_(LOG_PRI(level) > log_max_level[realm]))
-                return -error;
+                return -ERRNO_VALUE(error);
 
         /* Make sure that %m maps to the specified error (or "Success"). */
-        errno = error;
+        errno = ERRNO_VALUE(error);
 
         (void) vsnprintf(buffer, sizeof buffer, format, ap);
 
@@ -724,14 +716,11 @@ static int log_object_internalv(
         PROTECT_ERRNO;
         char *buffer, *b;
 
-        if (error < 0)
-                error = -error;
-
         if (_likely_(LOG_PRI(level) > log_max_level[LOG_REALM_SYSTEMD]))
-                return -error;
+                return -ERRNO_VALUE(error);
 
         /* Make sure that %m maps to the specified error (or "Success"). */
-        errno = error;
+        errno = ERRNO_VALUE(error);
 
         /* Prepend the object name before the message */
         if (object) {
@@ -854,7 +843,7 @@ int log_format_iovec(
                  * since vasprintf() leaves it afterwards at
                  * an undefined location */
 
-                errno = error;
+                errno = ERRNO_VALUE(error);
 
                 va_copy(aq, ap);
                 r = vasprintf(&m, format, aq);
@@ -869,8 +858,7 @@ int log_format_iovec(
                 iovec[(*n)++] = IOVEC_MAKE_STRING(m);
 
                 if (newline_separator) {
-                        iovec[*n].iov_base = (char*) &nl;
-                        iovec[*n].iov_len = 1;
+                        iovec[*n] = IOVEC_MAKE((char *)&nl, 1);
                         (*n)++;
                 }
 
@@ -893,17 +881,12 @@ int log_struct_internal(
         PROTECT_ERRNO;
         va_list ap;
 
-        if (error < 0)
-                error = -error;
-
-        if (_likely_(LOG_PRI(level) > log_max_level[realm]))
-                return -error;
-
-        if (log_target == LOG_TARGET_NULL)
-                return -error;
+        if (_likely_(LOG_PRI(level) > log_max_level[realm]) ||
+            log_target == LOG_TARGET_NULL)
+                return -ERRNO_VALUE(error);
 
         if ((level & LOG_FACMASK) == 0)
-                level = log_facility | LOG_PRI(level);
+                level |= log_facility;
 
         if (IN_SET(log_target,
                    LOG_TARGET_AUTO,
@@ -923,7 +906,8 @@ int log_struct_internal(
                         };
                         bool fallback = false;
 
-                        /* If the journal is available do structured logging */
+                        /* If the journal is available do structured logging.
+                         * Do not report the errno if it is synthetic. */
                         log_do_header(header, sizeof(header), level, error, file, line, func, NULL, NULL, NULL, NULL);
                         iovec[n++] = IOVEC_MAKE_STRING(header);
 
@@ -944,7 +928,7 @@ int log_struct_internal(
                                 if (open_when_needed)
                                         log_close();
 
-                                return -error;
+                                return -ERRNO_VALUE(error);
                         }
                 }
         }
@@ -955,7 +939,7 @@ int log_struct_internal(
         while (format) {
                 va_list aq;
 
-                errno = error;
+                errno = ERRNO_VALUE(error);
 
                 va_copy(aq, ap);
                 (void) vsnprintf(buf, sizeof buf, format, aq);
@@ -976,7 +960,7 @@ int log_struct_internal(
                 if (open_when_needed)
                         log_close();
 
-                return -error;
+                return -ERRNO_VALUE(error);
         }
 
         return log_dispatch_internal(level, error, file, line, func, NULL, NULL, NULL, NULL, buf + 8);
@@ -996,17 +980,12 @@ int log_struct_iovec_internal(
         size_t i;
         char *m;
 
-        if (error < 0)
-                error = -error;
-
-        if (_likely_(LOG_PRI(level) > log_max_level[realm]))
-                return -error;
-
-        if (log_target == LOG_TARGET_NULL)
-                return -error;
+        if (_likely_(LOG_PRI(level) > log_max_level[realm]) ||
+            log_target == LOG_TARGET_NULL)
+                return -ERRNO_VALUE(error);
 
         if ((level & LOG_FACMASK) == 0)
-                level = log_facility | LOG_PRI(level);
+                level |= log_facility;
 
         if (IN_SET(log_target, LOG_TARGET_AUTO,
                                LOG_TARGET_JOURNAL_OR_KMSG,
@@ -1029,7 +1008,7 @@ int log_struct_iovec_internal(
                 }
 
                 if (sendmsg(journal_fd, &mh, MSG_NOSIGNAL) >= 0)
-                        return -error;
+                        return -ERRNO_VALUE(error);
         }
 
         for (i = 0; i < n_input_iovec; i++)
@@ -1037,7 +1016,7 @@ int log_struct_iovec_internal(
                         break;
 
         if (_unlikely_(i >= n_input_iovec)) /* Couldn't find MESSAGE=? */
-                return -error;
+                return -ERRNO_VALUE(error);
 
         m = strndupa(input_iovec[i].iov_base + STRLEN("MESSAGE="),
                      input_iovec[i].iov_len - STRLEN("MESSAGE="));
@@ -1240,14 +1219,9 @@ int log_syntax_internal(
         va_list ap;
         const char *unit_fmt = NULL;
 
-        if (error < 0)
-                error = -error;
-
-        if (_likely_(LOG_PRI(level) > log_max_level[LOG_REALM_SYSTEMD]))
-                return -error;
-
-        if (log_target == LOG_TARGET_NULL)
-                return -error;
+        if (_likely_(LOG_PRI(level) > log_max_level[LOG_REALM_SYSTEMD]) ||
+            log_target == LOG_TARGET_NULL)
+                return -ERRNO_VALUE(error);
 
         errno = error;
 
@@ -1337,4 +1311,14 @@ int log_dup_console(void) {
 
         console_fd = copy;
         return 0;
+}
+
+void log_setup_service(void) {
+        /* Sets up logging the way it is most appropriate for running a program as a service. Note that using this
+         * doesn't make the binary unsuitable for invocation on the command line, as log output will still go to the
+         * terminal if invoked interactively. */
+
+        log_set_target(LOG_TARGET_AUTO);
+        log_parse_environment();
+        log_open();
 }
