@@ -22,10 +22,10 @@ Users may override this setting in the .network files by specifying
  src/network/networkd-network.c | 2 ++
  2 files changed, 5 insertions(+), 3 deletions(-)
 
-diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index f0076cd..5f3eba3 100644
---- a/man/systemd.network.xml
-+++ b/man/systemd.network.xml
+Index: systemd/man/systemd.network.xml
+===================================================================
+--- systemd.orig/man/systemd.network.xml
++++ systemd/man/systemd.network.xml
 @@ -301,7 +301,7 @@
              <literal>IPv6AcceptRA=</literal>.</para>
  
@@ -35,7 +35,7 @@ index f0076cd..5f3eba3 100644
              See option <option>UseDomains=</option> below.</para>
  
              <para>See the <literal>[DHCP]</literal> section below for further configuration options for the DHCP client
-@@ -1214,7 +1214,7 @@
+@@ -1291,7 +1291,7 @@
              the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name received from
              the DHCP server will be used for routing DNS queries only, but not for searching, similar to the effect of
              the <option>Domains=</option> setting when the argument is prefixed with <literal>~</literal>. Defaults to
@@ -44,7 +44,7 @@ index f0076cd..5f3eba3 100644
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-@@ -1390,7 +1390,7 @@
+@@ -1483,7 +1483,7 @@
              the effect of the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name
              received via IPv6 RA will be used for routing DNS queries only, but not for searching, similar to the
              effect of the <option>Domains=</option> setting when the argument is prefixed with
@@ -53,23 +53,23 @@ index f0076cd..5f3eba3 100644
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 6bfd017..fa18617 100644
---- a/src/network/networkd-network.c
-+++ b/src/network/networkd-network.c
-@@ -194,6 +194,7 @@ static int network_load_one(Manager *manager, const char *filename) {
-         network->dhcp_use_routes = true;
-         /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
-         network->dhcp_send_hostname = true;
-+        network->dhcp_use_domains = DHCP_USE_DOMAINS_YES;
-         /* To enable/disable RFC7844 Anonymity Profiles */
-         network->dhcp_anonymize = false;
-         network->dhcp_route_metric = DHCP_ROUTE_METRIC;
-@@ -246,6 +247,7 @@ static int network_load_one(Manager *manager, const char *filename) {
-         network->multicast = -1;
-         network->allmulticast = -1;
-         network->ipv6_accept_ra_use_dns = true;
-+        network->ipv6_accept_ra_use_domains = DHCP_USE_DOMAINS_YES;
-         network->ipv6_accept_ra_route_table = RT_TABLE_MAIN;
-         network->ipv6_mtu = 0;
+Index: systemd/src/network/networkd-network.c
+===================================================================
+--- systemd.orig/src/network/networkd-network.c
++++ systemd/src/network/networkd-network.c
+@@ -137,6 +137,7 @@ int network_load_one(Manager *manager, c
+                 .dhcp_use_routes = true,
+                 /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
+                 .dhcp_send_hostname = true,
++                .dhcp_use_domains = DHCP_USE_DOMAINS_YES,
+                 /* To enable/disable RFC7844 Anonymity Profiles */
+                 .dhcp_anonymize = false,
+                 .dhcp_route_metric = DHCP_ROUTE_METRIC,
+@@ -187,6 +188,7 @@ int network_load_one(Manager *manager, c
+                 .multicast = -1,
+                 .allmulticast = -1,
+                 .ipv6_accept_ra_use_dns = true,
++                .ipv6_accept_ra_use_domains = DHCP_USE_DOMAINS_YES,
+                 .ipv6_accept_ra_route_table = RT_TABLE_MAIN,
+         };
  

@@ -7,19 +7,19 @@ In LXD container, test_rearrange_stdio fails / aborts.
  src/test/test-fd-util.c | 4 ++++
  1 file changed, 4 insertions(+)
 
-diff --git a/src/test/test-fd-util.c b/src/test/test-fd-util.c
-index a04403d..a567ee0 100644
---- a/src/test/test-fd-util.c
-+++ b/src/test/test-fd-util.c
-@@ -12,6 +12,7 @@
- #include "random-util.h"
- #include "string-util.h"
+Index: systemd/src/test/test-fd-util.c
+===================================================================
+--- systemd.orig/src/test/test-fd-util.c
++++ systemd/src/test/test-fd-util.c
+@@ -15,6 +15,7 @@
+ #include "tests.h"
+ #include "tmpfile-util.h"
  #include "util.h"
 +#include "virt.h"
  
  static void test_close_many(void) {
          int fds[3];
-@@ -161,6 +162,9 @@ static void test_rearrange_stdio(void) {
+@@ -164,6 +165,9 @@ static void test_rearrange_stdio(void) {
          pid_t pid;
          int r;
  
