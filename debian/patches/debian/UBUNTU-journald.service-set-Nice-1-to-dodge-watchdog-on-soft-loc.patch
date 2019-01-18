@@ -8,10 +8,10 @@ LP: #1696970
  units/systemd-journald.service.in | 1 +
  1 file changed, 1 insertion(+)
 
-Index: systemd/units/systemd-journald.service.in
-===================================================================
---- systemd.orig/units/systemd-journald.service.in
-+++ systemd/units/systemd-journald.service.in
+diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
+index 4684f09..059689d 100644
+--- a/units/systemd-journald.service.in
++++ b/units/systemd-journald.service.in
 @@ -25,6 +25,7 @@ MemoryDenyWriteExecute=yes
  NoNewPrivileges=yes
  Restart=always

@@ -7,10 +7,10 @@ In LXD container, test_rearrange_stdio fails / aborts.
  src/test/test-fd-util.c | 4 ++++
  1 file changed, 4 insertions(+)
 
-Index: systemd/src/test/test-fd-util.c
-===================================================================
---- systemd.orig/src/test/test-fd-util.c
-+++ systemd/src/test/test-fd-util.c
+diff --git a/src/test/test-fd-util.c b/src/test/test-fd-util.c
+index 7a0a2ad..b8a29f7 100644
+--- a/src/test/test-fd-util.c
++++ b/src/test/test-fd-util.c
 @@ -15,6 +15,7 @@
  #include "tests.h"
  #include "tmpfile-util.h"

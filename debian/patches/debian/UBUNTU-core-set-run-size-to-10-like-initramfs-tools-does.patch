@@ -12,10 +12,10 @@ LP: #1799251
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/mount-setup.c b/src/core/mount-setup.c
-index 908a83f..7de24b5 100644
+index 3aae4c8..f098b0b 100644
 --- a/src/core/mount-setup.c
 +++ b/src/core/mount-setup.c
-@@ -76,10 +76,10 @@ static const MountPoint mount_table[] = {
+@@ -78,10 +78,10 @@ static const MountPoint mount_table[] = {
          { "devpts",      "/dev/pts",                  "devpts",     "mode=620,gid=" STRINGIFY(TTY_GID), MS_NOSUID|MS_NOEXEC,
            NULL,          MNT_IN_CONTAINER           },
  #if ENABLE_SMACK

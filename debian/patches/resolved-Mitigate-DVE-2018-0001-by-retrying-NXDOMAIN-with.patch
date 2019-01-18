@@ -16,10 +16,10 @@ Bug-DNS: https://github.com/dns-violations/dns-violations/blob/master/2018/DVE-2
  1 file changed, 33 insertions(+), 5 deletions(-)
 
 diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
-index c60b821..905cad6 100644
+index 4a2d2cc..d252347 100644
 --- a/src/resolve/resolved-dns-transaction.c
 +++ b/src/resolve/resolved-dns-transaction.c
-@@ -378,12 +378,12 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
+@@ -377,12 +377,12 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
          if (!server)
                  return -ESRCH;
  
@@ -37,7 +37,7 @@ index c60b821..905cad6 100644
  
          /* Clamp the feature level if that is requested. */
          if (t->clamp_feature_level != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
-@@ -1062,6 +1062,34 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
+@@ -1024,6 +1024,34 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
                          return;
                  }
  

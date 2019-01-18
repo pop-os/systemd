@@ -7,10 +7,10 @@ Subject: UBUNTU: drop unrelated settings from sysctl defaults shipped by
  sysctl.d/50-default.conf | 20 --------------------
  1 file changed, 20 deletions(-)
 
-Index: systemd/sysctl.d/50-default.conf
-===================================================================
---- systemd.orig/sysctl.d/50-default.conf
-+++ systemd/sysctl.d/50-default.conf
+diff --git a/sysctl.d/50-default.conf b/sysctl.d/50-default.conf
+index b0645f3..36ae524 100644
+--- a/sysctl.d/50-default.conf
++++ b/sysctl.d/50-default.conf
 @@ -11,28 +11,8 @@
  # (e.g. /etc/sysctl.d/90-override.conf), and put any assignments
  # there.

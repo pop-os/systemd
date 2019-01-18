@@ -22,10 +22,10 @@ Users may override this setting in the .network files by specifying
  src/network/networkd-network.c | 2 ++
  2 files changed, 5 insertions(+), 3 deletions(-)
 
-Index: systemd/man/systemd.network.xml
-===================================================================
---- systemd.orig/man/systemd.network.xml
-+++ systemd/man/systemd.network.xml
+diff --git a/man/systemd.network.xml b/man/systemd.network.xml
+index ee464ff..b44eebd 100644
+--- a/man/systemd.network.xml
++++ b/man/systemd.network.xml
 @@ -301,7 +301,7 @@
              <literal>IPv6AcceptRA=</literal>.</para>
  
@@ -53,11 +53,11 @@ Index: systemd/man/systemd.network.xml
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-Index: systemd/src/network/networkd-network.c
-===================================================================
---- systemd.orig/src/network/networkd-network.c
-+++ systemd/src/network/networkd-network.c
-@@ -137,6 +137,7 @@ int network_load_one(Manager *manager, c
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index ccc1c3c..e05f385 100644
+--- a/src/network/networkd-network.c
++++ b/src/network/networkd-network.c
+@@ -137,6 +137,7 @@ int network_load_one(Manager *manager, const char *filename) {
                  .dhcp_use_routes = true,
                  /* NOTE: this var might be overwriten by network_apply_anonymize_if_set */
                  .dhcp_send_hostname = true,
@@ -65,7 +65,7 @@ Index: systemd/src/network/networkd-network.c
                  /* To enable/disable RFC7844 Anonymity Profiles */
                  .dhcp_anonymize = false,
                  .dhcp_route_metric = DHCP_ROUTE_METRIC,
-@@ -187,6 +188,7 @@ int network_load_one(Manager *manager, c
+@@ -187,6 +188,7 @@ int network_load_one(Manager *manager, const char *filename) {
                  .multicast = -1,
                  .allmulticast = -1,
                  .ipv6_accept_ra_use_dns = true,

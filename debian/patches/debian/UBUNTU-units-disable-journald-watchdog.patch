@@ -8,10 +8,10 @@ LP: #1773148
  units/systemd-journald.service.in | 1 -
  1 file changed, 1 deletion(-)
 
-Index: systemd/units/systemd-journald.service.in
-===================================================================
---- systemd.orig/units/systemd-journald.service.in
-+++ systemd/units/systemd-journald.service.in
+diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
+index 059689d..0d65bd7 100644
+--- a/units/systemd-journald.service.in
++++ b/units/systemd-journald.service.in
 @@ -35,7 +35,6 @@ SystemCallArchitectures=native
  SystemCallErrorNumber=EPERM
  SystemCallFilter=@system-service

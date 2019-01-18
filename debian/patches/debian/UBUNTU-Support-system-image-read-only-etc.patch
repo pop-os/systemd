@@ -13,10 +13,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  src/hostname/hostnamed.c | 28 ++++++++++++++++++++++++----
  1 file changed, 24 insertions(+), 4 deletions(-)
 
-Index: systemd/src/hostname/hostnamed.c
-===================================================================
---- systemd.orig/src/hostname/hostnamed.c
-+++ systemd/src/hostname/hostnamed.c
+diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
+index 7777450..36f4780 100644
+--- a/src/hostname/hostnamed.c
++++ b/src/hostname/hostnamed.c
 @@ -22,6 +22,7 @@
  #include "os-util.h"
  #include "parse-util.h"
@@ -51,7 +51,7 @@ Index: systemd/src/hostname/hostnamed.c
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -302,12 +322,12 @@ static int context_write_data_static_hos
+@@ -302,12 +322,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -66,7 +66,7 @@ Index: systemd/src/hostname/hostnamed.c
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -352,13 +372,13 @@ static int context_write_data_machine_in
+@@ -352,13 +372,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
