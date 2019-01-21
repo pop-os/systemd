@@ -14,7 +14,7 @@ LP: #1765173
  1 file changed, 13 insertions(+), 4 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 5353b9d..21a8441 100644
+index 5cd59c6..6fb3239 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -217,7 +217,7 @@ static bool link_proxy_arp_enabled(Link *link) {
@@ -51,7 +51,7 @@ index 5353b9d..21a8441 100644
  static IPv6PrivacyExtensions link_ipv6_privacy_extensions(Link *link) {
          assert(link);
  
-@@ -773,8 +780,10 @@ void link_check_ready(Link *link) {
+@@ -796,8 +803,10 @@ void link_check_ready(Link *link) {
                       !link->dhcp4_configured && !link->dhcp6_configured))
                          return;
  
