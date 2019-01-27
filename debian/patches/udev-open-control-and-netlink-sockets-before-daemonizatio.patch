@@ -5,6 +5,10 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
 c4b69e990f962128cc6975e36e91e9ad838fa2c4 effectively moved the initalization of socket.
 Before that commit:
 run → listen_fds → udev_ctrl_new → udev_ctrl_new_from_fd → socket()

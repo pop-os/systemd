@@ -5,6 +5,10 @@ MIME-Version: 1.0
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
 Calling mhd_respond(), which ulimately calls MHD_queue_response() is
 ineffective at point, becuase MHD_queue_response() immediately returns
 MHD_NO signifying an error, because the connection is in state
