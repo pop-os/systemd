@@ -1,3 +1,13 @@
+systemd (240-5) unstable; urgency=medium
+
+  [ Felipe Sateler ]
+  * Revert interface renaming changes. (Closes: #919390)
+
+  [ Martin Pitt ]
+  * process-util: Fix memory leak (Closes: #920018)
+
+ -- Martin Pitt <mpitt@debian.org>  Sun, 27 Jan 2019 21:33:07 +0000
+
 systemd (240-4) unstable; urgency=medium
 
   [ Benjamin Drung ]
