@@ -1,0 +1,61 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 16 Jan 2019 13:28:41 +0100
+Subject: Revert "Always rename an interface to its name specified in config
+ if no NamePolicy= is specified"
+
+This reverts commit 55b6530baacf4658a183b15b010a8cf3483fde08.
+
+This commit description says "Always rename an interface to its name specified
+in config if no NamePolicy= is specified", but it does much more:
+1. It completely changes the meaning of NamePolicy=kernel. Before, it meant that an interface
+   with type==NAMEPOLICY_KERNEL would not be renamed. After, the kernel name only works as
+   a fallback, if no policy matches.
+2. The "if no NamePolicy= is specified" part is not true at all, the interface will be renamed
+   according to the specified NamePolicy=.
+
+After 55b6530baacf, the should_rename() function is named very misleadingly: it is only used
+to mean "respect kernel predictable name if no naming policy matches".
+
+Let's revert, and start with a clean slate. This fixes #11436.
+
+(cherry picked from commit ed30802324365dde6c05d0b7c3ce1a0eff3bf571)
+---
+ src/udev/net/link-config.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/src/udev/net/link-config.c b/src/udev/net/link-config.c
+index ac66ffd..07d8b92 100644
+--- a/src/udev/net/link-config.c
++++ b/src/udev/net/link-config.c
+@@ -312,11 +312,16 @@ static bool should_rename(sd_device *device, bool respect_predictable) {
+                 return true;
+ 
+         switch (type) {
++        case NET_NAME_USER:
++        case NET_NAME_RENAMED:
++                /* these were already named by userspace, do not touch again */
++                return false;
+         case NET_NAME_PREDICTABLE:
+                 /* the kernel claims to have given a predictable name */
+                 if (respect_predictable)
+                         return false;
+                 _fallthrough_;
++        case NET_NAME_ENUM:
+         default:
+                 /* the name is known to be bad, or of an unknown type */
+                 return true;
+@@ -437,8 +442,12 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
+                 }
+         }
+ 
+-        if (!new_name && should_rename(device, respect_predictable))
+-                new_name = config->name;
++        if (should_rename(device, respect_predictable)) {
++                /* if not set by policy, fall back manually set name */
++                if (!new_name)
++                        new_name = config->name;
++        } else
++                new_name = NULL;
+ 
+         switch (config->mac_policy) {
+                 case MACPOLICY_PERSISTENT:

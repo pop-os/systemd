@@ -39,6 +39,8 @@ network-set-_configured-flags-to-false-before-requesting-.patch
 man-update-color-of-journal-logs-in-DEBUG-level.patch
 sd-device-monitor-fix-ordering-of-setting-buffer-size.patch
 meson-stop-setting-fPIE-globally.patch
+Revert-Always-rename-an-interface-to-its-name-specified-i.patch
+process-util-don-t-use-overly-large-buffer-to-store-proce.patch
 networkd-honour-LinkLocalAddressing.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
