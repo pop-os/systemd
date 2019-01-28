@@ -1,3 +1,35 @@
+systemd (240-5ubuntu1) disco; urgency=medium
+
+  * Reenable pristine-tar in gbp.conf.
+    The pristine-tar bug has been fixed, so we can use it again.
+    This reverts commit 9fcfbbf6fea15eacfa3fad74240431c5f2c3300e.
+    Author: Felipe Sateler
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=045998b2a974f9322535fef6018b3c5fff6da342
+
+  * debian/tests/storage: improve cleanups.
+    On fast ppc64el machines, cryptsetup start job may not complete by the time
+    tearDown is executed. In that case stop, causes to simply cancel the start job
+    without actually cleaning up the dmsetup node. This leads to failing subsequent
+    test as it no longer starts with a clean device. Thus ensure the
+    systemd-cryptsetup unit is started, before stopping it.
+    Also rmmod scsi_debug module at the end, to allow re-running the test in a
+    loop.
+    File: debian/tests/storage
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bfafb0924a59f2a93bcde00fc9eeea5c4d058977
+
+  * d/watch: add version mangle to transform -rc to ~rc.
+    Upstream has started releasing rcs, so let's account for that
+    Author: Felipe Sateler
+    File: debian/watch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=db2dbed693ac75c88ea6ed923537d18d30fc1cdf
+
+  * debian/tests/upstream: Mark TEST-13-NSPAWN-SMOKE as flakey.
+    File: debian/tests/upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a106d9c60b7b9fc3e16e423ca6a4d376560927cc
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Mon, 28 Jan 2019 13:52:58 +0000
+
 systemd (240-5) unstable; urgency=medium
 
   [ Felipe Sateler ]
