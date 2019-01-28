@@ -29,6 +29,11 @@ class FakeDriveTestBase(unittest.TestCase):
         assert len(devs) == 1
         klass.device = '/dev/' + devs[0]
 
+    @classmethod
+    def tearDownClass(klass):
+        # create a fake SCSI hard drive
+        subprocess.check_call(['rmmod', 'scsi_debug'])
+
     def tearDown(self):
         # clear drive
         with open(self.device, 'wb') as f:
@@ -62,12 +67,17 @@ class CryptsetupTest(FakeDriveTestBase):
             os.waitpid(self.password_agent, 0)
             self.password_agent = None
         subprocess.call(['umount', self.plaintext_dev], stderr=subprocess.DEVNULL)
+        subprocess.call(['systemctl', 'start', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
+                        stderr=subprocess.STDOUT)
         subprocess.call(['systemctl', 'stop', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
                         stderr=subprocess.STDOUT)
         if os.path.exists('/etc/crypttab'):
             os.unlink('/etc/crypttab')
         if os.path.exists('/etc/crypttab.systemdtest'):
             os.rename('/etc/crypttab.systemdtest', '/etc/crypttab')
+        if os.path.exists(self.plaintext_dev):
+            subprocess.call(['dmsetup', 'remove', self.plaintext_dev],
+                            stderr=subprocess.STDOUT)
 
         super().tearDown()
 
