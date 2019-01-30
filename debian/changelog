@@ -1,3 +1,33 @@
+systemd (240-5ubuntu2) disco; urgency=medium
+
+  * core: Revert strict mount namespacing/sandboxing, until LXD allows the needed mounts.
+    (LP: #1813622)
+    File: debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=030919ba5e4931d6ee576d0259fae67fe4ed9770
+
+  * resolved: add support for pipelined requests. (LP: #1811471)
+    Files:
+    - debian/patches/llmnr-add-comment-why-we-install-no-complete-handler-on-s.patch
+    - debian/patches/resolved-add-comment-to-dns_stream_complete-about-its-err.patch
+    - debian/patches/resolved-keep-stub-stream-connections-up-for-as-long-as-c.patch
+    - debian/patches/resolved-only-call-complete-with-zero-argument-in-LLMNR-c.patch
+    - debian/patches/resolved-restart-stream-timeout-whenever-we-managed-to-re.patch
+    - debian/patches/stream-follow-coding-style-don-t-use-degrade-to-bool-for-.patch
+    - debian/patches/stream-track-type-of-DnsStream-object.patch
+    - debian/patches/transaction-simplify-handling-if-we-get-an-unexpected-DNS.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8ad1db08c2135af098a33957ce7cffbe21fb683f
+
+  * networkd: [Route] PreferredSource not working in *.network files.
+    (LP: #1812760)
+    Files:
+    - debian/patches/Install-routes-after-addresses-are-ready.patch
+    - debian/patches/Move-link_check_ready-to-later-in-the-file.patch
+    - debian/patches/tests-Add-test-for-IPv6-source-routing.patch
+    - debian/patches/debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4e2ee0b2ac1be2ae78952890a56a2d5398df518
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 30 Jan 2019 11:46:53 +0000
+
 systemd (240-5ubuntu1) disco; urgency=medium
 
   * Reenable pristine-tar in gbp.conf.
