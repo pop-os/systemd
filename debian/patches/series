@@ -80,3 +80,11 @@ resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
 test-test-functions-on-PP64-use-vmlinux.patch
 test-test-functions-on-PPC64-use-hvc0-console.patch
 Revert-namespace-be-more-careful-when-handling-namespacin.patch
+stream-follow-coding-style-don-t-use-degrade-to-bool-for-.patch
+stream-track-type-of-DnsStream-object.patch
+transaction-simplify-handling-if-we-get-an-unexpected-DNS.patch
+llmnr-add-comment-why-we-install-no-complete-handler-on-s.patch
+resolved-restart-stream-timeout-whenever-we-managed-to-re.patch
+resolved-only-call-complete-with-zero-argument-in-LLMNR-c.patch
+resolved-add-comment-to-dns_stream_complete-about-its-err.patch
+resolved-keep-stub-stream-connections-up-for-as-long-as-c.patch

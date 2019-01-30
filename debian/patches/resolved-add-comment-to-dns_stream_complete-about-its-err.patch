@@ -1,0 +1,24 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 21 Jan 2019 19:44:01 +0100
+Subject: resolved: add comment to dns_stream_complete() about its 'error'
+ argument
+
+---
+ src/resolve/resolved-dns-stream.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/resolve/resolved-dns-stream.c b/src/resolve/resolved-dns-stream.c
+index 45b06eb..3fd056b 100644
+--- a/src/resolve/resolved-dns-stream.c
++++ b/src/resolve/resolved-dns-stream.c
+@@ -52,6 +52,10 @@ static int dns_stream_complete(DnsStream *s, int error) {
+         _cleanup_(dns_stream_unrefp) _unused_ DnsStream *ref = dns_stream_ref(s); /* Protect stream while we process it */
+ 
+         assert(s);
++        assert(error >= 0);
++
++        /* Error is > 0 when the connection failed for some reason in the network stack. It's == 0 if we sent
++         * and receieved exactly one packet each (in the LLMNR client case). */
+ 
+ #if ENABLE_DNS_OVER_TLS
+         if (s->encrypted) {
