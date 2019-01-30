@@ -1,0 +1,73 @@
+From: Daniel Axtens <dja@axtens.net>
+Date: Tue, 15 Jan 2019 01:15:15 +1100
+Subject: tests: Add test for IPv6 source routing
+
+The test is a bit messy because it must be done on a device that
+enforces a tentative state for IPv6 addresses, and it appears
+that the dummy device does not. So we use a bond instead.
+
+Signed-off-by: Daniel Axtens <dja@axtens.net>
+(cherry picked from commit 20ca06a6692089c94d25f7a2eea0a65ce71970a8)
+---
+ test/test-network/conf/25-route-ipv6-src.network | 16 ++++++++++++++++
+ test/test-network/systemd-networkd-tests.py      | 17 +++++++++++++++++
+ 2 files changed, 33 insertions(+)
+ create mode 100644 test/test-network/conf/25-route-ipv6-src.network
+
+diff --git a/test/test-network/conf/25-route-ipv6-src.network b/test/test-network/conf/25-route-ipv6-src.network
+new file mode 100644
+index 0000000..4e551c0
+--- /dev/null
++++ b/test/test-network/conf/25-route-ipv6-src.network
+@@ -0,0 +1,16 @@
++# This test cannot use a dummy interface: IPv6 addresses
++# are added without having to go through tentative state
++
++[Match]
++Name=bond199
++
++[Network]
++LinkLocalAddressing=ipv6
++Address=2001:1234:56:8f63::1/64
++Address=2001:1234:56:8f63::2/64
++IPv6AcceptRA=no
++
++[Route]
++Destination=abcd::/16
++Gateway=2001:1234:56:8f63::1:1
++PreferredSource=2001:1234:56:8f63::2
+diff --git a/test/test-network/systemd-networkd-tests.py b/test/test-network/systemd-networkd-tests.py
+index 19572be..49592b8 100755
+--- a/test/test-network/systemd-networkd-tests.py
++++ b/test/test-network/systemd-networkd-tests.py
+@@ -539,6 +539,7 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
+         '25-link-section-unmanaged.network',
+         '25-route-gateway.network',
+         '25-route-gateway-on-link.network',
++        '25-route-ipv6-src.network',
+         '25-route-reverse-order.network',
+         '25-route-section.network',
+         '25-route-tcp-window-settings.network',
+@@ -756,6 +757,22 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
+         self.assertRegex(output, 'scope')
+         self.assertRegex(output, 'link')
+ 
++    def test_ip_route_ipv6_src_route(self):
++        # a dummy device does not make the addresses go through tentative state, so we
++        # reuse a bond from an earlier test, which does make the addresses go through
++        # tentative state, and do our test on that
++        self.copy_unit_to_networkd_unit_path('23-active-slave.network', '25-route-ipv6-src.network', '25-bond-active-backup-slave.netdev', '12-dummy.netdev')
++        self.start_networkd()
++
++        self.assertTrue(self.link_exits('dummy98'))
++        self.assertTrue(self.link_exits('bond199'))
++
++        output = subprocess.check_output(['ip', '-6', 'route', 'list', 'dev', 'bond199']).rstrip().decode('utf-8')
++        print(output)
++        self.assertRegex(output, 'abcd::/16')
++        self.assertRegex(output, 'src')
++        self.assertRegex(output, '2001:1234:56:8f63::2')
++
+     def test_ip_link_mac_address(self):
+         self.copy_unit_to_networkd_unit_path('25-address-link-section.network', '12-dummy.netdev')
+         self.start_networkd()

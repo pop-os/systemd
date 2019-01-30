@@ -1,0 +1,93 @@
+From: Daniel Axtens <dja@axtens.net>
+Date: Wed, 5 Dec 2018 21:49:35 +1100
+Subject: Install routes after addresses are ready
+
+If an IPv6 route is added with a source address that is still
+tentative, the kernel will refuse to install it.
+
+Previously, once we sent the messages to the kernel to add the
+addresses, we would immediately proceed to add the routes. The
+addresses would usually still be tentative at this point, so
+adding static IPv6 routes was broken - see issue #5882.
+
+Now, only begin to configure routes once the addresses are ready,
+by restructuring the state machine, and tracking when addresses are
+ready, not just added.
+
+Fixes: #5882
+Signed-off-by: Daniel Axtens <dja@axtens.net>
+(cherry picked from commit 6aa5773bfff0a92d64da70426cae833df6f84daf)
+---
+ src/network/networkd-link.c | 18 ++++++++++++------
+ src/network/networkd-link.h |  1 +
+ 2 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index d778899..a9a1f89 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -884,6 +884,15 @@ void link_check_ready(Link *link) {
+         if (!link->neighbors_configured)
+                 return;
+ 
++        SET_FOREACH(a, link->addresses, i)
++                if (!address_is_ready(a))
++                        return;
++
++        if (!link->addresses_ready) {
++                link->addresses_ready = true;
++                link_request_set_routes(link);
++        }
++
+         if (!link->static_routes_configured)
+                 return;
+ 
+@@ -913,10 +922,6 @@ void link_check_ready(Link *link) {
+                         return;
+         }
+ 
+-        SET_FOREACH(a, link->addresses, i)
+-                if (!address_is_ready(a))
+-                        return;
+-
+         if (link->state != LINK_STATE_CONFIGURED)
+                 link_enter_configured(link);
+ 
+@@ -977,7 +982,7 @@ static int address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
+         if (link->address_messages == 0) {
+                 log_link_debug(link, "Addresses set");
+                 link->addresses_configured = true;
+-                link_request_set_routes(link);
++                link_check_ready(link);
+         }
+ 
+         return 1;
+@@ -1107,6 +1112,7 @@ static int link_request_set_addresses(Link *link) {
+ 
+         /* Reset all *_configured flags we are configuring. */
+         link->addresses_configured = false;
++        link->addresses_ready = false;
+         link->neighbors_configured = false;
+         link->static_routes_configured = false;
+         link->routing_policy_rules_configured = false;
+@@ -1261,7 +1267,7 @@ static int link_request_set_addresses(Link *link) {
+ 
+         if (link->address_messages == 0) {
+                 link->addresses_configured = true;
+-                link_request_set_routes(link);
++                link_check_ready(link);
+         } else
+                 log_link_debug(link, "Setting addresses");
+ 
+diff --git a/src/network/networkd-link.h b/src/network/networkd-link.h
+index 00e68fd..e417ea2 100644
+--- a/src/network/networkd-link.h
++++ b/src/network/networkd-link.h
+@@ -82,6 +82,7 @@ typedef struct Link {
+         Set *routes_foreign;
+ 
+         bool addresses_configured;
++        bool addresses_ready;
+ 
+         sd_dhcp_client *dhcp_client;
+         sd_dhcp_lease *dhcp_lease;
