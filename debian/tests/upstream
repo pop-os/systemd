@@ -15,6 +15,14 @@ TEST-16-EXTEND-TIMEOUT
 TEST-17-UDEV-WANTS
 "
 
+# passes on baremetal, fails in nested qemu
+# https://github.com/systemd/systemd/issues/11612
+if [ $(dpkg --print-architecture) = "ppc64el" ]; then
+BLACKLIST="$BLACKLIST
+TEST-24-UNIT-TESTS
+"
+fi
+
 # quiesce Makefile.guess; not really relevant as systemd/nspawn run from
 # installed packages
 export BUILD_DIR=.
