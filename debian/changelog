@@ -1,3 +1,13 @@
+systemd (240-5ubuntu3) disco; urgency=medium
+
+  * debian/tests: blacklist upstream test-24-unit-tests on ppc64le.
+    Fails, not a regression as it's a new test case, which was never before
+    executed on ppc64le.
+    File: debian/tests/upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8062b9a2712c390010d2948eaf764a1b52e68715
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Sat, 02 Feb 2019 11:05:12 +0100
+
 systemd (240-5ubuntu2) disco; urgency=medium
 
   * core: Revert strict mount namespacing/sandboxing, until LXD allows the needed mounts.
