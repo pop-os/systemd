@@ -1,0 +1,29 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 14 Jan 2019 06:34:15 +0900
+Subject: udevadm: fix segfault
+
+Fixes #11416.
+
+(cherry picked from commit 0eba88dc9f66aca023a89e2bf25f6bff49787145)
+---
+ src/udev/udevadm-monitor.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/udev/udevadm-monitor.c b/src/udev/udevadm-monitor.c
+index f1b3e25..3dde3f3 100644
+--- a/src/udev/udevadm-monitor.c
++++ b/src/udev/udevadm-monitor.c
+@@ -144,11 +144,11 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+                         slash = strchr(optarg, '/');
+                         if (slash) {
+-                                devtype = strdup(devtype + 1);
++                                devtype = strdup(slash + 1);
+                                 if (!devtype)
+                                         return -ENOMEM;
+ 
+-                                subsystem = strndup(optarg, devtype - optarg);
++                                subsystem = strndup(optarg, slash - optarg);
+                         } else
+                                 subsystem = strdup(optarg);
+ 
