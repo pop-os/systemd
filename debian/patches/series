@@ -42,6 +42,7 @@ meson-stop-setting-fPIE-globally.patch
 Revert-Always-rename-an-interface-to-its-name-specified-i.patch
 process-util-don-t-use-overly-large-buffer-to-store-proce.patch
 udevadm-fix-segfault.patch
+udev-check-whether-systemd-is-running-and-do-not-use-cg_k.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
