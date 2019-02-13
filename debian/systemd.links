@@ -26,8 +26,9 @@
 /dev/null /lib/systemd/system/stop-bootlogd-single.service
 /dev/null /lib/systemd/system/stop-bootlogd.service
 
-# systemd sets the hwclock internally
-# http://cgit.freedesktop.org/systemd/systemd/commit/?id=7948c4dfbea73ac21250b588089039aa17a90386
+# Don't set the hwclock, as the kernel does that on its own when using NTP
+# Without NTP, we shouldn't store the time either
+# https://github.com/systemd/systemd/commit/da2617378523e007ec0c6efe99d0cebb2be994e1
 /dev/null /lib/systemd/system/hwclock.service
 
 # We use native mount support so mask those services
