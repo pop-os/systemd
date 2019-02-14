@@ -1,3 +1,38 @@
+systemd (240-5ubuntu4) disco; urgency=medium
+
+  * debian/tests/control: add socat to upstream tests for pull #11591
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7dff5196e23f50d15c0e0c4cb6742a1cc1cc704a
+
+  * udevadm: Fix segfault with subsystem-match containing '/' (Closes: #919206)
+    Author: Martin Pitt
+    File: debian/patches/udevadm-fix-segfault.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=736973d38676301f276716f22a746aed2489baac
+
+  * Blacklist TEST-10-ISSUE-2467 #11706
+    File: debian/tests/upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f93b9e46b54388370da7b0cd7f858031be3a2578
+
+  * Fix comment about why we disable hwclock.service.
+    Systemd nowadays doesn't do it itself because the kernel does it on its own when necessary,
+    and when not, it is not safe to save the hwclock (eg, there is no certainty the system clock
+    is correct)
+    Author: Felipe Sateler
+    File: debian/systemd.links
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8473f88fffdb9db1f5ba547bb692a911997f2569
+
+  * udev: Backport upstream preventing mass killings when not running under systemd
+    (Closes: #918764)
+    Author: Felipe Sateler
+    File: debian/patches/udev-check-whether-systemd-is-running-and-do-not-use-cg_k.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=617ee70c31c45ea5d5c6c7b30766d47f0b89446c
+
+  * debian/tests/storage: fix for LUKS2 and avoid interactive password prompts.
+    File: debian/tests/storage
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5594ebf325816e76a8c58043c56fc94f2d52b2a6
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 14 Feb 2019 14:51:37 +0000
+
 systemd (240-5ubuntu3) disco; urgency=medium
 
   * debian/tests: blacklist upstream test-24-unit-tests on ppc64le.
