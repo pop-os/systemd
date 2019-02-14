@@ -18,7 +18,7 @@ class FakeDriveTestBase(unittest.TestCase):
     @classmethod
     def setUpClass(klass):
         # create a fake SCSI hard drive
-        subprocess.check_call(['modprobe', 'scsi_debug'])
+        subprocess.check_call(['modprobe', 'scsi_debug', 'dev_size_mb=32'])
         # wait until drive got created
         sys_dirs = []
         while not sys_dirs:
@@ -67,7 +67,7 @@ class CryptsetupTest(FakeDriveTestBase):
             os.waitpid(self.password_agent, 0)
             self.password_agent = None
         subprocess.call(['umount', self.plaintext_dev], stderr=subprocess.DEVNULL)
-        subprocess.call(['systemctl', 'start', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
+        subprocess.call(['systemctl', 'start', '--no-ask-password', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
                         stderr=subprocess.STDOUT)
         subprocess.call(['systemctl', 'stop', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
                         stderr=subprocess.STDOUT)
@@ -131,7 +131,7 @@ class CryptsetupTest(FakeDriveTestBase):
         subprocess.check_call(['systemctl', 'daemon-reload'])
 
         self.start_password_agent()
-        subprocess.check_call(['systemctl', 'restart', target])
+        subprocess.check_call(['systemctl', '--no-ask-password', 'restart', target])
         for timeout in range(50):
             if os.path.exists(self.plaintext_dev):
                 break
