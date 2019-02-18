@@ -1,3 +1,50 @@
+systemd (240-6) unstable; urgency=high
+
+  * High urgency as this fixes a vulnerability.
+
+  [ Felipe Sateler ]
+  * Reenable pristine-tar in gbp.conf.
+    The pristine-tar bug has been fixed, so we can use it again.
+    This reverts commit 9fcfbbf6fea15eacfa3fad74240431c5f2c3300e.
+  * d/watch: add version mangle to transform -rc to ~rc.
+    Upstream has started releasing rcs, so let's account for that
+  * Fix comment about why we disable hwclock.service.
+    Systemd nowadays doesn't do it itself because the kernel does it on its
+    own when necessary, and when not, it is not safe to save the hwclock (eg,
+    there is no certainty the system clock
+    is correct)
+  * udev: Backport upstream preventing mass killings when not running under
+    systemd (Closes: #918764)
+
+  [ Dimitri John Ledkov ]
+  * debian/tests/storage: improve cleanups.
+    On fast ppc64el machines, cryptsetup start job may not complete by the
+    time tearDown is executed. In that case stop, causes to simply cancel the
+    start job without actually cleaning up the dmsetup node. This leads to
+    failing subsequent test as it no longer starts with a clean device. Thus
+    ensure the systemd-cryptsetup unit is started, before stopping it.
+    Also rmmod scsi_debug module at the end, to allow re-running the test in a
+    loop.
+  * debian/tests/upstream: Mark TEST-13-NSPAWN-SMOKE as flakey.
+  * debian/tests/control: add socat to upstream tests for pull #11591
+  * Blacklist TEST-10-ISSUE-2467 #11706
+  * debian/tests/storage: fix for LUKS2 and avoid interactive password
+    prompts.
+
+  [ Martin Pitt ]
+  * udevadm: Fix segfault with subsystem-match containing '/'
+    (Closes: #919206)
+  * sd-bus: if we receive an invalid dbus message, ignore and proceed
+  * sd-bus: enforce a size limit on D-Bus object paths.
+    This avoids accessing/modifying memory outside of the allocated stack
+    region by sending specially crafted D-Bus messages with very large object
+    paths.
+    Vulnerability discovered by Chris Coulson <chris.coulson@canonical.com>,
+    patch provided by Riccardo Schirone <rschiron@redhat.com>.
+    (CVE-2019-6454)
+
+ -- Martin Pitt <mpitt@debian.org>  Mon, 18 Feb 2019 13:54:04 +0000
+
 systemd (240-5) unstable; urgency=medium
 
   [ Felipe Sateler ]
