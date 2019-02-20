@@ -23,6 +23,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_238@LIBSYSTEMD_238 238
  LIBSYSTEMD_239@LIBSYSTEMD_239 239
  LIBSYSTEMD_240@LIBSYSTEMD_240 240
+ LIBSYSTEMD_241@LIBSYSTEMD_241 241
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -40,6 +41,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_call_method_async@LIBSYSTEMD_221 221
  sd_bus_can_send@LIBSYSTEMD_221 221
  sd_bus_close@LIBSYSTEMD_221 221
+ sd_bus_close_unref@LIBSYSTEMD_241 241
  sd_bus_creds_get_audit_login_uid@LIBSYSTEMD_221 221
  sd_bus_creds_get_audit_session_id@LIBSYSTEMD_221 221
  sd_bus_creds_get_augmented_mask@LIBSYSTEMD_221 221
