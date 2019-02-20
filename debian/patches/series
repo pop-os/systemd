@@ -43,6 +43,8 @@ Revert-Always-rename-an-interface-to-its-name-specified-i.patch
 process-util-don-t-use-overly-large-buffer-to-store-proce.patch
 udevadm-fix-segfault.patch
 udev-check-whether-systemd-is-running-and-do-not-use-cg_k.patch
+sd-bus-if-we-receive-an-invalid-dbus-message-ignore-and-p.patch
+sd-bus-enforce-a-size-limit-on-D-Bus-object-paths.patch
 networkd-honour-LinkLocalAddressing.patch
 Move-link_check_ready-to-later-in-the-file.patch
 Install-routes-after-addresses-are-ready.patch
