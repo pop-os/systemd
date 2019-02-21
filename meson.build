@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1+
 
 project('systemd', 'c',
-        version : '240',
+        version : '241',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu99',
@@ -12,20 +12,19 @@ project('systemd', 'c',
         meson_version : '>= 0.46',
        )
 
-libsystemd_version = '0.24.0'
-libudev_version = '1.6.12'
+libsystemd_version = '0.25.0'
+libudev_version = '1.6.13'
 
 # We need the same data in two different formats, ugh!
 # Also, for hysterical reasons, we use different variable
 # names, sometimes. Not all variables are included in every
 # set. Ugh, ugh, ugh!
 conf = configuration_data()
-conf.set_quoted('PACKAGE_STRING',  meson.project_name() + ' ' + meson.project_version())
-conf.set_quoted('PACKAGE_VERSION', meson.project_version())
+conf.set('PROJECT_VERSION',        meson.project_version())
 
 substs = configuration_data()
-substs.set('PACKAGE_URL',          'https://www.freedesktop.org/wiki/Software/systemd')
-substs.set('PACKAGE_VERSION',      meson.project_version())
+substs.set('PROJECT_URL',          'https://www.freedesktop.org/wiki/Software/systemd')
+substs.set('PROJECT_VERSION',      meson.project_version())
 
 want_ossfuzz = get_option('oss-fuzz')
 want_libfuzzer = get_option('llvm-fuzz')
@@ -287,10 +286,8 @@ want_tests = get_option('tests')
 slow_tests = want_tests != 'false' and get_option('slow-tests')
 install_tests = get_option('install-tests')
 
-cxx = find_program('c++', required : fuzzer_build)
-if cxx.found()
+if add_languages('cpp', required : fuzzer_build)
         #  Used only for tests
-        add_languages('cpp')
         cxx_cmd = ' '.join(meson.get_compiler('cpp').cmd_array())
 else
         cxx_cmd = ''
@@ -361,13 +358,6 @@ possible_link_flags = [
         '-Wl,-z,relro',
         '-Wl,-z,now',
 ]
-
-# the oss-fuzz fuzzers are not built with -fPIE, so don't
-# enable it when we are linking against them
-if not fuzzer_build
-        possible_cc_flags += '-fPIE'
-        possible_link_flags += '-pie'
-endif
 
 if cc.get_id() == 'clang'
         possible_cc_flags += [
@@ -486,6 +476,7 @@ foreach decl : [['ETHTOOL_LINK_MODE_10baseT_Half_BIT',      'linux/ethtool.h'],
                 ['IFLA_TARGET_NETNSID',                     'linux/if_link.h'],
                 ['IFLA_NEW_IFINDEX',                        'linux/if_link.h'],
                 ['IFLA_MAX_MTU',                            'linux/if_link.h'],
+                ['IFLA_BOND_MODE',                          'linux/if_link.h'],
                 ['IFLA_BOND_ACTIVE_SLAVE',                  'linux/if_link.h'],
                 ['IFLA_BOND_AD_INFO',                       'linux/if_link.h'],
                 ['IFLA_BOND_AD_ACTOR_SYSTEM',               'linux/if_link.h'],
@@ -583,6 +574,18 @@ else
 endif
 
 #####################################################################
+
+vcs_tagger = [meson.source_root() + '/tools/meson-vcs-tag.sh',
+              meson.source_root(),
+              get_option('version-tag'),
+              meson.project_version()]
+
+version_h = vcs_tag(
+        input : 'src/version/version.h.in',
+        output : 'version.h',
+        command: vcs_tagger)
+
+versiondep = declare_dependency(sources: version_h)
 
 sed = find_program('sed')
 awk = find_program('awk')
@@ -829,6 +832,17 @@ substs.set('DNS_SERVERS', dns_servers)
 ntp_servers = get_option('ntp-servers')
 conf.set_quoted('NTP_SERVERS', ntp_servers)
 substs.set('NTP_SERVERS', ntp_servers)
+
+default_locale = get_option('default-locale')
+if default_locale == ''
+        if not meson.is_cross_build()
+                choose_default_locale_sh = find_program('tools/choose-default-locale.sh')
+                default_locale = run_command(choose_default_locale_sh).stdout().strip()
+        else
+                default_locale = 'C.UTF-8'
+        endif
+endif
+conf.set_quoted('SYSTEMD_DEFAULT_LOCALE', default_locale)
 
 conf.set_quoted('GETTEXT_PACKAGE', meson.project_name())
 
@@ -2387,6 +2401,9 @@ executable('systemd-sleep',
            install : true,
            install_dir : rootlibexecdir)
 
+install_data('src/sleep/sleep.conf',
+             install_dir : pkgsysconfdir)
+
 exe = executable('systemd-sysctl',
                  'src/sysctl/sysctl.c',
                  include_directories : includes,
@@ -3045,10 +3062,6 @@ run_target(
         depends : [man, libsystemd, libudev],
         command : [meson_check_api_docs_sh, libsystemd.full_path(), libudev.full_path()])
 
-run_target(
-        'make-index-md',
-        command : ['sh', '@0@/tools/make-index-md.sh'.format(meson.source_root()), meson.source_root()])
-
 ############################################################
 
 status = [
@@ -3098,7 +3111,8 @@ status = [
         'default DNS-over-TLS mode:         @0@'.format(default_dns_over_tls),
         'default cgroup hierarchy:          @0@'.format(default_hierarchy),
         'default net.naming-scheme setting: @0@'.format(default_net_naming_scheme),
-        'default KillUserProcesses setting: @0@'.format(kill_user_processes)]
+        'default KillUserProcesses setting: @0@'.format(kill_user_processes),
+        'default locale:                    @0@'.format(default_locale)]
 
 alt_dns_servers = '\n                                            '.join(dns_servers.split(' '))
 alt_ntp_servers = '\n                                            '.join(ntp_servers.split(' '))

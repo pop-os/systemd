@@ -11,6 +11,7 @@
 
 #include "hashmap.h"
 #include "hostname-util.h"
+#include "missing_network.h"
 #include "network-internal.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -253,7 +254,6 @@ static int dhcp6_route_handler(sd_netlink *nl, sd_netlink_message *m, Link *link
 
         return 1;
 }
-
 
 static int dhcp6_lease_pd_prefix_acquired(sd_dhcp6_client *client, Link *link) {
         int r;

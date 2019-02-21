@@ -396,26 +396,31 @@ static void cgroup_xattr_apply(Unit *u) {
 }
 
 static int lookup_block_device(const char *p, dev_t *ret) {
-        struct stat st = {};
+        dev_t rdev, dev = 0;
+        mode_t mode;
         int r;
 
         assert(p);
         assert(ret);
 
-        r = device_path_parse_major_minor(p, &st.st_mode, &st.st_rdev);
+        r = device_path_parse_major_minor(p, &mode, &rdev);
         if (r == -ENODEV) { /* not a parsable device node, need to go to disk */
+                struct stat st;
                 if (stat(p, &st) < 0)
                         return log_warning_errno(errno, "Couldn't stat device '%s': %m", p);
+                rdev = (dev_t)st.st_rdev;
+                dev = (dev_t)st.st_dev;
+                mode = st.st_mode;
         } else if (r < 0)
                 return log_warning_errno(r, "Failed to parse major/minor from path '%s': %m", p);
 
-        if (S_ISCHR(st.st_mode)) {
+        if (S_ISCHR(mode)) {
                 log_warning("Device node '%s' is a character device, but block device needed.", p);
                 return -ENOTBLK;
-        } else if (S_ISBLK(st.st_mode))
-                *ret = st.st_rdev;
-        else if (major(st.st_dev) != 0)
-                *ret = st.st_dev; /* If this is not a device node then use the block device this file is stored on */
+        } else if (S_ISBLK(mode))
+                *ret = rdev;
+        else if (major(dev) != 0)
+                *ret = dev; /* If this is not a device node then use the block device this file is stored on */
         else {
                 /* If this is btrfs, getting the backing block device is a bit harder */
                 r = btrfs_get_block_device(p, ret);
@@ -436,7 +441,8 @@ static int lookup_block_device(const char *p, dev_t *ret) {
 }
 
 static int whitelist_device(BPFProgram *prog, const char *path, const char *node, const char *acc) {
-        struct stat st = {};
+        dev_t rdev;
+        mode_t mode;
         int r;
 
         assert(path);
@@ -445,11 +451,12 @@ static int whitelist_device(BPFProgram *prog, const char *path, const char *node
         /* Some special handling for /dev/block/%u:%u, /dev/char/%u:%u, /run/systemd/inaccessible/chr and
          * /run/systemd/inaccessible/blk paths. Instead of stat()ing these we parse out the major/minor directly. This
          * means clients can use these path without the device node actually around */
-        r = device_path_parse_major_minor(node, &st.st_mode, &st.st_rdev);
+        r = device_path_parse_major_minor(node, &mode, &rdev);
         if (r < 0) {
                 if (r != -ENODEV)
                         return log_warning_errno(r, "Couldn't parse major/minor from device path '%s': %m", node);
 
+                struct stat st;
                 if (stat(node, &st) < 0)
                         return log_warning_errno(errno, "Couldn't stat device %s: %m", node);
 
@@ -457,22 +464,24 @@ static int whitelist_device(BPFProgram *prog, const char *path, const char *node
                         log_warning("%s is not a device.", node);
                         return -ENODEV;
                 }
+                rdev = (dev_t) st.st_rdev;
+                mode = st.st_mode;
         }
 
         if (cg_all_unified() > 0) {
                 if (!prog)
                         return 0;
 
-                return cgroup_bpf_whitelist_device(prog, S_ISCHR(st.st_mode) ? BPF_DEVCG_DEV_CHAR : BPF_DEVCG_DEV_BLOCK,
-                                                   major(st.st_rdev), minor(st.st_rdev), acc);
+                return cgroup_bpf_whitelist_device(prog, S_ISCHR(mode) ? BPF_DEVCG_DEV_CHAR : BPF_DEVCG_DEV_BLOCK,
+                                                   major(rdev), minor(rdev), acc);
 
         } else {
                 char buf[2+DECIMAL_STR_MAX(dev_t)*2+2+4];
 
                 sprintf(buf,
                         "%c %u:%u %s",
-                        S_ISCHR(st.st_mode) ? 'c' : 'b',
-                        major(st.st_rdev), minor(st.st_rdev),
+                        S_ISCHR(mode) ? 'c' : 'b',
+                        major(rdev), minor(rdev),
                         acc);
 
                 /* Changing the devices list of a populated cgroup might result in EINVAL, hence ignore EINVAL here. */
@@ -881,7 +890,7 @@ static void cgroup_context_apply(
         /* In fully unified mode these attributes don't exist on the host cgroup root. On legacy the weights exist, but
          * setting the weight makes very little sense on the host root cgroup, as there are no other cgroups at this
          * level. The quota exists there too, but any attempt to write to it is refused with EINVAL. Inside of
-         * containers we want to leave control of these to the container manager (and if cgroupsv2 delegation is used
+         * containers we want to leave control of these to the container manager (and if cgroup v2 delegation is used
          * we couldn't even write to them if we wanted to). */
         if ((apply_mask & CGROUP_MASK_CPU) && !is_local_root) {
 
@@ -925,7 +934,7 @@ static void cgroup_context_apply(
                 }
         }
 
-        /* The 'io' controller attributes are not exported on the host's root cgroup (being a pure cgroupsv2
+        /* The 'io' controller attributes are not exported on the host's root cgroup (being a pure cgroup v2
          * controller), and in case of containers we want to leave control of these attributes to the container manager
          * (and we couldn't access that stuff anyway, even if we tried if proper delegation is used). */
         if ((apply_mask & CGROUP_MASK_IO) && !is_local_root) {
@@ -1067,7 +1076,7 @@ static void cgroup_context_apply(
 
         /* In unified mode 'memory' attributes do not exist on the root cgroup. In legacy mode 'memory.limit_in_bytes'
          * exists on the root cgroup, but any writes to it are refused with EINVAL. And if we run in a container we
-         * want to leave control to the container manager (and if proper cgroupsv2 delegation is used we couldn't even
+         * want to leave control to the container manager (and if proper cgroup v2 delegation is used we couldn't even
          * write to this if we wanted to.) */
         if ((apply_mask & CGROUP_MASK_MEMORY) && !is_local_root) {
 
@@ -1109,7 +1118,7 @@ static void cgroup_context_apply(
                 }
         }
 
-        /* On cgroupsv2 we can apply BPF everywhere. On cgroupsv1 we apply it everywhere except for the root of
+        /* On cgroup v2 we can apply BPF everywhere. On cgroup v1 we apply it everywhere except for the root of
          * containers, where we leave this to the manager */
         if ((apply_mask & (CGROUP_MASK_DEVICES | CGROUP_MASK_BPF_DEVICES)) &&
             (is_host_root || cg_all_unified() > 0 || !is_local_root)) {
@@ -1841,14 +1850,14 @@ static bool unit_has_mask_realized(
         /* Returns true if this unit is fully realized. We check four things:
          *
          * 1. Whether the cgroup was created at all
-         * 2. Whether the cgroup was created in all the hierarchies we need it to be created in (in case of cgroupsv1)
-         * 3. Whether the cgroup has all the right controllers enabled (in case of cgroupsv2)
+         * 2. Whether the cgroup was created in all the hierarchies we need it to be created in (in case of cgroup v1)
+         * 3. Whether the cgroup has all the right controllers enabled (in case of cgroup v2)
          * 4. Whether the invalidation mask is currently zero
          *
          * If you wonder why we mask the target realization and enable mask with CGROUP_MASK_V1/CGROUP_MASK_V2: note
-         * that there are three sets of bitmasks: CGROUP_MASK_V1 (for real cgroupv1 controllers), CGROUP_MASK_V2 (for
-         * real cgroupv2 controllers) and CGROUP_MASK_BPF (for BPF-based pseudo-controllers). Now, cgroup_realized_mask
-         * is only matters for cgroupsv1 controllers, and cgroup_enabled_mask only used for cgroupsv2, and if they
+         * that there are three sets of bitmasks: CGROUP_MASK_V1 (for real cgroup v1 controllers), CGROUP_MASK_V2 (for
+         * real cgroup v2 controllers) and CGROUP_MASK_BPF (for BPF-based pseudo-controllers). Now, cgroup_realized_mask
+         * is only matters for cgroup v1 controllers, and cgroup_enabled_mask only used for cgroup v2, and if they
          * differ in the others, we don't really care. (After all, the cgroup_enabled_mask tracks with controllers are
          * enabled through cgroup.subtree_control, and since the BPF pseudo-controllers don't show up there, they
          * simply don't matter. */
@@ -2771,7 +2780,7 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
 
         /* The root cgroup doesn't expose this information, let's get it from /proc instead */
         if (unit_has_host_root_cgroup(u))
-                return procfs_memory_get_current(ret);
+                return procfs_memory_get_used(ret);
 
         if ((u->cgroup_realized_mask & CGROUP_MASK_MEMORY) == 0)
                 return -ENODATA;

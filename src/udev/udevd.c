@@ -31,6 +31,7 @@
 #include "sd-event.h"
 
 #include "alloc-util.h"
+#include "build.h"
 #include "cgroup-util.h"
 #include "cpu-set-util.h"
 #include "dev-setup.h"
@@ -185,20 +186,11 @@ static void worker_free(struct worker *worker) {
         free(worker);
 }
 
-static void manager_workers_free(Manager *manager) {
-        struct worker *worker;
-        Iterator i;
-
-        assert(manager);
-
-        HASHMAP_FOREACH(worker, manager->workers, i)
-                worker_free(worker);
-
-        manager->workers = hashmap_free(manager->workers);
-}
+DEFINE_TRIVIAL_CLEANUP_FUNC(struct worker *, worker_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(worker_hash_op, void, trivial_hash_func, trivial_compare_func, struct worker, worker_free);
 
 static int worker_new(struct worker **ret, Manager *manager, sd_device_monitor *worker_monitor, pid_t pid) {
-        _cleanup_free_ struct worker *worker = NULL;
+        _cleanup_(worker_freep) struct worker *worker = NULL;
         int r;
 
         assert(ret);
@@ -206,17 +198,20 @@ static int worker_new(struct worker **ret, Manager *manager, sd_device_monitor *
         assert(worker_monitor);
         assert(pid > 1);
 
-        worker = new0(struct worker, 1);
+        /* close monitor, but keep address around */
+        device_monitor_disconnect(worker_monitor);
+
+        worker = new(struct worker, 1);
         if (!worker)
                 return -ENOMEM;
 
-        worker->manager = manager;
-        /* close monitor, but keep address around */
-        device_monitor_disconnect(worker_monitor);
-        worker->monitor = sd_device_monitor_ref(worker_monitor);
-        worker->pid = pid;
+        *worker = (struct worker) {
+                .manager = manager,
+                .monitor = sd_device_monitor_ref(worker_monitor),
+                .pid = pid,
+        };
 
-        r = hashmap_ensure_allocated(&manager->workers, NULL);
+        r = hashmap_ensure_allocated(&manager->workers, &worker_hash_op);
         if (r < 0)
                 return r;
 
@@ -290,7 +285,7 @@ static void manager_clear_for_worker(Manager *manager) {
 
         manager->event = sd_event_unref(manager->event);
 
-        manager_workers_free(manager);
+        manager->workers = hashmap_free(manager->workers);
         event_queue_cleanup(manager, EVENT_UNDEF);
 
         manager->monitor = sd_device_monitor_unref(manager->monitor);
@@ -396,7 +391,7 @@ static int worker_lock_block_device(sd_device *dev, int *ret_fd) {
 static int worker_process_device(Manager *manager, sd_device *dev) {
         _cleanup_(udev_event_freep) UdevEvent *udev_event = NULL;
         _cleanup_close_ int fd_lock = -1;
-        const char *seqnum;
+        const char *seqnum, *action;
         int r;
 
         assert(manager);
@@ -404,9 +399,13 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
 
         r = sd_device_get_property_value(dev, "SEQNUM", &seqnum);
         if (r < 0)
-                log_device_debug_errno(dev, r, "Failed to get SEQNUM: %m");
+                return log_device_debug_errno(dev, r, "Failed to get SEQNUM: %m");
 
-        log_device_debug(dev, "Processing device (SEQNUM=%s)", seqnum);
+        r = sd_device_get_property_value(dev, "ACTION", &action);
+        if (r < 0)
+                return log_device_debug_errno(dev, r, "Failed to get ACTION: %m");
+
+        log_device_debug(dev, "Processing device (SEQNUM=%s, ACTION=%s)", seqnum, action);
 
         udev_event = udev_event_new(dev, arg_exec_delay_usec, manager->rtnl);
         if (!udev_event)
@@ -432,7 +431,7 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
                         return log_device_debug_errno(dev, r, "Failed to update database under /run/udev/data/: %m");
         }
 
-        log_device_debug(dev, "Device (SEQNUM=%s) processed", seqnum);
+        log_device_debug(dev, "Device (SEQNUM=%s, ACTION=%s) processed", seqnum, action);
 
         return 0;
 }
@@ -464,7 +463,7 @@ static int worker_device_monitor_handler(sd_device_monitor *monitor, sd_device *
 static int worker_main(Manager *_manager, sd_device_monitor *monitor, sd_device *first_device) {
         _cleanup_(sd_device_unrefp) sd_device *dev = first_device;
         _cleanup_(manager_freep) Manager *manager = _manager;
-        int r, ret;
+        int r;
 
         assert(manager);
         assert(monitor);
@@ -507,11 +506,7 @@ static int worker_main(Manager *_manager, sd_device_monitor *monitor, sd_device 
         if (r < 0)
                 return log_error_errno(r, "Event loop failed: %m");
 
-        r = sd_event_get_exit_code(manager->event, &ret);
-        if (r < 0)
-                return log_error_errno(r, "Failed to get exit code: %m");
-
-        return ret;
+        return 0;
 }
 
 static int worker_spawn(Manager *manager, struct event *event) {
@@ -534,7 +529,7 @@ static int worker_spawn(Manager *manager, struct event *event) {
         if (r < 0)
                 return log_error_errno(r, "Worker: Failed to enable receiving of device: %m");
 
-        r = safe_fork("(worker)", FORK_DEATHSIG, &pid);
+        r = safe_fork(NULL, FORK_DEATHSIG, &pid);
         if (r < 0) {
                 event->state = EVENT_QUEUED;
                 return log_error_errno(r, "Failed to fork() worker: %m");
@@ -592,8 +587,8 @@ static void event_run(Manager *manager, struct event *event) {
 
 static int event_queue_insert(Manager *manager, sd_device *dev) {
         _cleanup_(sd_device_unrefp) sd_device *clone = NULL;
+        const char *val, *action;
         struct event *event;
-        const char *val;
         uint64_t seqnum;
         int r;
 
@@ -617,6 +612,11 @@ static int event_queue_insert(Manager *manager, sd_device *dev) {
 
         if (seqnum == 0)
                 return -EINVAL;
+
+        /* Refuse devices do not have ACTION property. */
+        r = sd_device_get_property_value(dev, "ACTION", &action);
+        if (r < 0)
+                return r;
 
         /* Save original device to restore the state on failures. */
         r = device_shallow_clone(dev, &clone);
@@ -647,12 +647,7 @@ static int event_queue_insert(Manager *manager, sd_device *dev) {
 
         LIST_APPEND(event, manager->events, event);
 
-        if (DEBUG_LOGGING) {
-                if (sd_device_get_property_value(dev, "ACTION", &val) < 0)
-                        val = NULL;
-
-                log_device_debug(dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) is queued", seqnum, strnull(val));
-        }
+        log_device_debug(dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) is queued", seqnum, action);
 
         return 0;
 }
@@ -875,7 +870,7 @@ static void event_queue_start(Manager *manager) {
         assert_se(sd_event_now(manager->event, CLOCK_MONOTONIC, &usec) >= 0);
         /* check for changed config, every 3 seconds at most */
         if (manager->last_usec == 0 ||
-            (usec - manager->last_usec) > 3 * USEC_PER_SEC) {
+            usec - manager->last_usec > 3 * USEC_PER_SEC) {
                 if (udev_rules_check_timestamp(manager->rules) ||
                     udev_builtin_validate())
                         manager_reload(manager);
@@ -960,12 +955,11 @@ static int on_worker(sd_event_source *s, int fd, uint32_t revents, void *userdat
                         continue;
                 }
 
-                CMSG_FOREACH(cmsg, &msghdr) {
+                CMSG_FOREACH(cmsg, &msghdr)
                         if (cmsg->cmsg_level == SOL_SOCKET &&
                             cmsg->cmsg_type == SCM_CREDENTIALS &&
                             cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred)))
                                 ucred = (struct ucred*) CMSG_DATA(cmsg);
-                }
 
                 if (!ucred || ucred->pid <= 0) {
                         log_warning("Ignoring worker message without valid PID");
@@ -1033,7 +1027,8 @@ static int on_ctrl_msg(sd_event_source *s, int fd, uint32_t revents, void *userd
         i = udev_ctrl_get_set_log_level(ctrl_msg);
         if (i >= 0) {
                 log_debug("Received udev control message (SET_LOG_LEVEL), setting log_priority=%i", i);
-                log_set_max_level(i);
+                log_set_max_level_realm(LOG_REALM_UDEV, i);
+                log_set_max_level_realm(LOG_REALM_SYSTEMD, i);
                 manager_kill_workers(manager);
         }
 
@@ -1118,7 +1113,7 @@ static int on_ctrl_msg(sd_event_source *s, int fd, uint32_t revents, void *userd
         }
 
         if (udev_ctrl_get_ping(ctrl_msg) > 0)
-                log_debug("Received udev control message (SYNC)");
+                log_debug("Received udev control message (PING)");
 
         if (udev_ctrl_get_exit(ctrl_msg) > 0) {
                 log_debug("Received udev control message (EXIT)");
@@ -1338,9 +1333,9 @@ static int on_sigchld(sd_event_source *s, const struct signalfd_siginfo *si, voi
                                 log_debug("Worker ["PID_FMT"] exited", pid);
                         else
                                 log_warning("Worker ["PID_FMT"] exited with return code %i", pid, WEXITSTATUS(status));
-                } else if (WIFSIGNALED(status)) {
+                } else if (WIFSIGNALED(status))
                         log_warning("Worker ["PID_FMT"] terminated by signal %i (%s)", pid, WTERMSIG(status), signal_to_string(WTERMSIG(status)));
-                } else if (WIFSTOPPED(status)) {
+                else if (WIFSTOPPED(status)) {
                         log_info("Worker ["PID_FMT"] stopped", pid);
                         continue;
                 } else if (WIFCONTINUED(status)) {
@@ -1579,7 +1574,7 @@ static int parse_argv(int argc, char *argv[]) {
                 case 'h':
                         return help();
                 case 'V':
-                        printf("%s\n", PACKAGE_VERSION);
+                        printf("%s\n", GIT_VERSION);
                         return 0;
                 case '?':
                         return -EINVAL;
@@ -1594,7 +1589,7 @@ static int parse_argv(int argc, char *argv[]) {
 
 static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent, const char *cgroup) {
         _cleanup_(manager_freep) Manager *manager = NULL;
-        int r, fd_worker;
+        int r;
 
         assert(ret);
 
@@ -1608,31 +1603,31 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent, const char *cg
                 .cgroup = cgroup,
         };
 
-        udev_builtin_init();
-
-        r = udev_rules_new(&manager->rules, arg_resolve_name_timing);
-        if (!manager->rules)
-                return log_error_errno(r, "Failed to read udev rules: %m");
-
         manager->ctrl = udev_ctrl_new_from_fd(fd_ctrl);
         if (!manager->ctrl)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize udev control socket");
 
-        if (fd_ctrl < 0) {
-                r = udev_ctrl_enable_receiving(manager->ctrl);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to bind udev control socket: %m");
-        }
-
-        fd_ctrl = udev_ctrl_get_fd(manager->ctrl);
-        if (fd_ctrl < 0)
-                return log_error_errno(fd_ctrl, "Failed to get udev control socket fd: %m");
+        r = udev_ctrl_enable_receiving(manager->ctrl);
+        if (r < 0)
+                return log_error_errno(r, "Failed to bind udev control socket: %m");
 
         r = device_monitor_new_full(&manager->monitor, MONITOR_GROUP_KERNEL, fd_uevent);
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize device monitor: %m");
 
         (void) sd_device_monitor_set_receive_buffer_size(manager->monitor, 128 * 1024 * 1024);
+
+        r = device_monitor_enable_receiving(manager->monitor);
+        if (r < 0)
+                return log_error_errno(r, "Failed to bind netlink socket: %m");
+
+        *ret = TAKE_PTR(manager);
+
+        return 0;
+}
+
+static int main_loop(Manager *manager) {
+        int fd_worker, fd_ctrl, r;
 
         /* unnamed socket from workers to the main daemon */
         r = socketpair(AF_LOCAL, SOCK_DGRAM|SOCK_CLOEXEC, 0, manager->worker_watch);
@@ -1679,6 +1674,10 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent, const char *cg
         if (r < 0)
                 return log_error_errno(r, "Failed to create watchdog event source: %m");
 
+        fd_ctrl = udev_ctrl_get_fd(manager->ctrl);
+        if (fd_ctrl < 0)
+                return log_error_errno(fd_ctrl, "Failed to get udev control socket fd: %m");
+
         r = sd_event_add_io(manager->event, &manager->ctrl_event, fd_ctrl, EPOLLIN, on_ctrl_msg, manager);
         if (r < 0)
                 return log_error_errno(r, "Failed to create udev control event source: %m");
@@ -1713,20 +1712,11 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent, const char *cg
         if (r < 0)
                 return log_error_errno(r, "Failed to create post event source: %m");
 
-        *ret = TAKE_PTR(manager);
+        udev_builtin_init();
 
-        return 0;
-}
-
-static int main_loop(int fd_ctrl, int fd_uevent, const char *cgroup) {
-        _cleanup_(manager_freep) Manager *manager = NULL;
-        int r;
-
-        r = manager_new(&manager, fd_ctrl, fd_uevent, cgroup);
-        if (r < 0) {
-                r = log_error_errno(r, "Failed to allocate manager object: %m");
-                goto exit;
-        }
+        r = udev_rules_new(&manager->rules, arg_resolve_name_timing);
+        if (!manager->rules)
+                return log_error_errno(r, "Failed to read udev rules: %m");
 
         r = udev_rules_apply_static_dev_perms(manager->rules);
         if (r < 0)
@@ -1737,24 +1727,18 @@ static int main_loop(int fd_ctrl, int fd_uevent, const char *cgroup) {
                           "STATUS=Processing with %u children at max", arg_children_max);
 
         r = sd_event_loop(manager->event);
-        if (r < 0) {
+        if (r < 0)
                 log_error_errno(r, "Event loop failed: %m");
-                goto exit;
-        }
 
-        sd_event_get_exit_code(manager->event, &r);
-
-exit:
         sd_notify(false,
                   "STOPPING=1\n"
                   "STATUS=Shutting down...");
-        if (manager)
-                udev_ctrl_cleanup(manager->ctrl);
         return r;
 }
 
 static int run(int argc, char *argv[]) {
         _cleanup_free_ char *cgroup = NULL;
+        _cleanup_(manager_freep) Manager *manager = NULL;
         int fd_ctrl = -1, fd_uevent = -1;
         int r;
 
@@ -1814,10 +1798,10 @@ static int run(int argc, char *argv[]) {
 
         dev_setup(NULL, UID_INVALID, GID_INVALID);
 
-        if (getppid() == 1) {
-                /* get our own cgroup, we regularly kill everything udev has left behind
-                   we only do this on systemd systems, and only if we are directly spawned
-                   by PID1. otherwise we are not guaranteed to have a dedicated cgroup */
+        if (getppid() == 1 && sd_booted() > 0) {
+                /* Get our own cgroup, we regularly kill everything udev has left behind.
+                 * We only do this on systemd systems, and only if we are directly spawned
+                 * by PID1. Otherwise we are not guaranteed to have a dedicated cgroup. */
                 r = cg_pid_get_path(SYSTEMD_CGROUP_CONTROLLER, 0, &cgroup);
                 if (r < 0) {
                         if (IN_SET(r, -ENOENT, -ENOMEDIUM))
@@ -1831,10 +1815,14 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to listen on fds: %m");
 
+        r = manager_new(&manager, fd_ctrl, fd_uevent, cgroup);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create manager: %m");
+
         if (arg_daemonize) {
                 pid_t pid;
 
-                log_info("starting version " PACKAGE_VERSION);
+                log_info("Starting version " GIT_VERSION);
 
                 /* connect /dev/null to stdin, stdout, stderr */
                 if (log_get_max_level() < LOG_DEBUG) {
@@ -1858,7 +1846,10 @@ static int run(int argc, char *argv[]) {
                         log_debug_errno(r, "Failed to adjust OOM score, ignoring: %m");
         }
 
-        return main_loop(fd_ctrl, fd_uevent, cgroup);
+        r = main_loop(manager);
+        /* FIXME: move this into manager_free() */
+        udev_ctrl_cleanup(manager->ctrl);
+        return r;
 }
 
 DEFINE_MAIN_FUNCTION(run);

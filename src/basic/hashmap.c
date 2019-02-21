@@ -345,7 +345,7 @@ static unsigned base_bucket_hash(HashmapBase *h, const void *p) {
 }
 #define bucket_hash(h, p) base_bucket_hash(HASHMAP_BASE(h), p)
 
-static inline void base_set_dirty(HashmapBase *h) {
+static void base_set_dirty(HashmapBase *h) {
         h->dirty = true;
 }
 #define hashmap_set_dirty(h) base_set_dirty(HASHMAP_BASE(h))
@@ -888,7 +888,8 @@ void internal_hashmap_clear(HashmapBase *h, free_func_t default_free_key, free_f
                  * themselves from our hash table a second time, the entry is already gone. */
 
                 while (internal_hashmap_size(h) > 0) {
-                        void *v, *k;
+                        void *k = NULL;
+                        void *v;
 
                         v = internal_hashmap_first_key_and_value(h, true, &k);
 
@@ -1515,8 +1516,11 @@ void *internal_hashmap_first_key_and_value(HashmapBase *h, bool remove, void **r
         unsigned idx;
 
         idx = find_first_entry(h);
-        if (idx == IDX_NIL)
+        if (idx == IDX_NIL) {
+                if (ret_key)
+                        *ret_key = NULL;
                 return NULL;
+        }
 
         e = bucket_at(h, idx);
         key = (void*) e->key;

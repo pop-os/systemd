@@ -3749,7 +3749,7 @@ int config_parse_exec_directories(
 
                 if (path_startswith(k, "private")) {
                         log_syntax(unit, LOG_ERR, filename, line, 0,
-                                   "%s= path can't be 'private', ingoring assignment: %s", lvalue, word);
+                                   "%s= path can't be 'private', ignoring assignment: %s", lvalue, word);
                         continue;
                 }
 
@@ -4253,6 +4253,12 @@ int config_parse_pid_file(
         assert(lvalue);
         assert(rvalue);
         assert(u);
+
+        if (isempty(rvalue)) {
+                /* An empty assignment removes already set value. */
+                *s = mfree(*s);
+                return 0;
+        }
 
         r = unit_full_printf(u, rvalue, &k);
         if (r < 0) {

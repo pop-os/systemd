@@ -41,6 +41,8 @@ libudev_core_sources = '''
         net/link-config.h
         net/ethtool-util.c
         net/ethtool-util.h
+        net/naming-scheme.c
+        net/naming-scheme.h
 '''.split()
 
 if conf.get('HAVE_KMOD') == 1
@@ -187,12 +189,11 @@ endforeach
 install_data('udev.conf',
              install_dir : join_paths(sysconfdir, 'udev'))
 
-udev_pc = configure_file(
+configure_file(
         input : 'udev.pc.in',
         output : 'udev.pc',
-        configuration : substs)
-install_data(udev_pc,
-             install_dir : pkgconfigdatadir)
+        configuration : substs,
+        install_dir : pkgconfigdatadir == 'no' ? '' : pkgconfigdatadir)
 
 meson.add_install_script('sh', '-c',
                          mkdir_p.format(join_paths(sysconfdir, 'udev/rules.d')))

@@ -5,6 +5,7 @@
 #include "alloc-util.h"
 #include "conf-parser.h"
 #include "firewall-util.h"
+#include "missing_network.h"
 #include "netlink-util.h"
 #include "networkd-address.h"
 #include "networkd-manager.h"
@@ -351,18 +352,17 @@ int address_update(
         address->cinfo = *cinfo;
 
         link_update_operstate(address->link);
+        link_check_ready(address->link);
 
-        if (!ready && address_is_ready(address)) {
-                link_check_ready(address->link);
+        if (!ready &&
+            address_is_ready(address) &&
+            address->family == AF_INET6 &&
+            in_addr_is_link_local(AF_INET6, &address->in_addr) > 0 &&
+            in_addr_is_null(AF_INET6, (const union in_addr_union*) &address->link->ipv6ll_address) > 0) {
 
-                if (address->family == AF_INET6 &&
-                    in_addr_is_link_local(AF_INET6, &address->in_addr) > 0 &&
-                    in_addr_is_null(AF_INET6, (const union in_addr_union*) &address->link->ipv6ll_address) > 0) {
-
-                        r = link_ipv6ll_gained(address->link, &address->in_addr.in6);
-                        if (r < 0)
-                                return r;
-                }
+                r = link_ipv6ll_gained(address->link, &address->in_addr.in6);
+                if (r < 0)
+                        return r;
         }
 
         return 0;
@@ -632,14 +632,10 @@ int address_configure(
                         r = sd_netlink_message_append_in6_addr(req, IFA_ADDRESS, &address->in_addr_peer.in6);
                 if (r < 0)
                         return log_error_errno(r, "Could not append IFA_ADDRESS attribute: %m");
-        } else {
-                if (address->family == AF_INET) {
-                        if (address->prefixlen <= 30) {
-                                r = sd_netlink_message_append_in_addr(req, IFA_BROADCAST, &address->broadcast);
-                                if (r < 0)
-                                        return log_error_errno(r, "Could not append IFA_BROADCAST attribute: %m");
-                        }
-                }
+        } else if (address->family == AF_INET && address->prefixlen <= 30) {
+                r = sd_netlink_message_append_in_addr(req, IFA_BROADCAST, &address->broadcast);
+                if (r < 0)
+                        return log_error_errno(r, "Could not append IFA_BROADCAST attribute: %m");
         }
 
         if (address->label) {
@@ -648,8 +644,7 @@ int address_configure(
                         return log_error_errno(r, "Could not append IFA_LABEL attribute: %m");
         }
 
-        r = sd_netlink_message_append_cache_info(req, IFA_CACHEINFO,
-                                              &address->cinfo);
+        r = sd_netlink_message_append_cache_info(req, IFA_CACHEINFO, &address->cinfo);
         if (r < 0)
                 return log_error_errno(r, "Could not append IFA_CACHEINFO attribute: %m");
 
@@ -657,8 +652,7 @@ int address_configure(
         if (r < 0)
                 return r;
 
-        r = netlink_call_async(link->manager->rtnl, NULL, req, callback,
-                               link_netlink_destroy_callback, link);
+        r = netlink_call_async(link->manager->rtnl, NULL, req, callback, link_netlink_destroy_callback, link);
         if (r < 0) {
                 address_release(address);
                 return log_error_errno(r, "Could not send rtnetlink message: %m");
@@ -666,7 +660,10 @@ int address_configure(
 
         link_ref(link);
 
-        r = address_add(link, address->family, &address->in_addr, address->prefixlen, NULL);
+        if (address->family == AF_INET6 && !in_addr_is_null(address->family, &address->in_addr_peer))
+                r = address_add(link, address->family, &address->in_addr_peer, address->prefixlen, NULL);
+        else
+                r = address_add(link, address->family, &address->in_addr, address->prefixlen, NULL);
         if (r < 0) {
                 address_release(address);
                 return log_error_errno(r, "Could not add address: %m");
@@ -752,7 +749,15 @@ int config_parse_address(const char *unit,
                 return r;
 
         /* Address=address/prefixlen */
-        r = in_addr_default_prefix_from_string_auto(rvalue, &f, &buffer, &prefixlen);
+        r = in_addr_prefix_from_string_auto_internal(rvalue, PREFIXLEN_REFUSE, &f, &buffer, &prefixlen);
+        if (r == -ENOANO) {
+                log_syntax(unit, LOG_ERR, filename, line, r,
+                           "An address '%s' is specified without prefix length. "
+                           "The behavior of parsing addresses without prefix length will be changed in the future release. "
+                           "Please specify prefix length explicitly.", rvalue);
+
+                r = in_addr_prefix_from_string_auto_internal(rvalue, PREFIXLEN_LEGACY, &f, &buffer, &prefixlen);
+        }
         if (r < 0) {
                 log_syntax(unit, LOG_ERR, filename, line, r, "Invalid address '%s', ignoring assignment: %m", rvalue);
                 return 0;

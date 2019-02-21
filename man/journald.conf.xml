@@ -50,7 +50,7 @@
     <para>All options are configured in the
     <literal>[Journal]</literal> section:</para>
 
-    <variablelist>
+    <variablelist class='config-directives'>
 
       <varlistentry>
         <term><varname>Storage=</varname></term>
@@ -258,7 +258,7 @@
 
         <listitem><para>The maximum time to store journal entries.
         This controls whether journal files containing entries older
-        then the specified time span are deleted. Normally, time-based
+        than the specified time span are deleted. Normally, time-based
         deletion of old journal files should not be required as
         size-based deletion with options such as
         <varname>SystemMaxUse=</varname> should be sufficient to
