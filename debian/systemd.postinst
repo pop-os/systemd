@@ -107,8 +107,9 @@ if dpkg --compare-versions "$2" lt-nl "239-6"; then
     done
 fi
 
+# don't fail with DynamicUser= while timesyncd is running
 adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Time Synchronization" systemd-timesync
+    --gecos "systemd Time Synchronization" systemd-timesync || true
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Network Management" systemd-network
 adduser --quiet --system --group --no-create-home --home /run/systemd \
