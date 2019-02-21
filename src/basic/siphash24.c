@@ -23,13 +23,13 @@
 #include "siphash24.h"
 #include "unaligned.h"
 
-static inline uint64_t rotate_left(uint64_t x, uint8_t b) {
+static uint64_t rotate_left(uint64_t x, uint8_t b) {
         assert(b < 64);
 
         return (x << b) | (x >> (64 - b));
 }
 
-static inline void sipround(struct siphash *state) {
+static void sipround(struct siphash *state) {
         assert(state);
 
         state->v0 += state->v1;
@@ -48,7 +48,7 @@ static inline void sipround(struct siphash *state) {
         state->v2 = rotate_left(state->v2, 32);
 }
 
-void siphash24_init(struct siphash *state, const uint8_t k[16]) {
+void siphash24_init(struct siphash *state, const uint8_t k[static 16]) {
         uint64_t k0, k1;
 
         assert(state);
@@ -187,7 +187,7 @@ uint64_t siphash24_finalize(struct siphash *state) {
         return state->v0 ^ state->v1 ^ state->v2  ^ state->v3;
 }
 
-uint64_t siphash24(const void *in, size_t inlen, const uint8_t k[16]) {
+uint64_t siphash24(const void *in, size_t inlen, const uint8_t k[static 16]) {
         struct siphash state;
 
         assert(in);

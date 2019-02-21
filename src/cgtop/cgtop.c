@@ -104,7 +104,7 @@ static const char *maybe_format_bytes(char *buf, size_t l, bool is_valid, uint64
 
 static bool is_root_cgroup(const char *path) {
 
-        /* Returns true if the specified path belongs to the root cgroup. The root cgroup is special on cgroupsv2 as it
+        /* Returns true if the specified path belongs to the root cgroup. The root cgroup is special on cgroup v2 as it
          * carries only very few attributes in order not to export multiple truth about system state as most
          * information is available elsewhere in /proc anyway. We need to be able to deal with that, and need to get
          * our data from different sources in that case.
@@ -291,7 +291,7 @@ static int process(
         } else if (streq(controller, "memory")) {
 
                 if (is_root_cgroup(path)) {
-                        r = procfs_memory_get_current(&g->memory);
+                        r = procfs_memory_get_used(&g->memory);
                         if (r < 0)
                                 return r;
                 } else {

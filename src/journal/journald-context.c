@@ -16,6 +16,7 @@
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "procfs-util.h"
 #include "string-util.h"
 #include "syslog-util.h"
 #include "unaligned.h"
@@ -60,7 +61,37 @@
 /* Keep at most 16K entries in the cache. (Note though that this limit may be violated if enough streams pin entries in
  * the cache, in which case we *do* permit this limit to be breached. That's safe however, as the number of stream
  * clients itself is limited.) */
-#define CACHE_MAX (16*1024)
+#define CACHE_MAX_FALLBACK 128U
+#define CACHE_MAX_MAX (16*1024U)
+#define CACHE_MAX_MIN 64U
+
+static size_t cache_max(void) {
+        static size_t cached = -1;
+
+        if (cached == (size_t) -1) {
+                uint64_t mem_total;
+                int r;
+
+                r = procfs_memory_get(&mem_total, NULL);
+                if (r < 0) {
+                        log_warning_errno(r, "Cannot query /proc/meminfo for MemTotal: %m");
+                        cached = CACHE_MAX_FALLBACK;
+                } else {
+                        /* Cache entries are usually a few kB, but the process cmdline is controlled by the
+                         * user and can be up to _SC_ARG_MAX, usually 2MB. Let's say that approximately up to
+                         * 1/8th of memory may be used by the cache.
+                         *
+                         * In the common case, this formula gives 64 cache entries for each GB of RAM.
+                         */
+                        long l = sysconf(_SC_ARG_MAX);
+                        assert(l > 0);
+
+                        cached = CLAMP(mem_total / 8 / (uint64_t) l, CACHE_MAX_MIN, CACHE_MAX_MAX);
+                }
+        }
+
+        return cached;
+}
 
 static int client_context_compare(const void *a, const void *b) {
         const ClientContext *x = a, *y = b;
@@ -246,7 +277,7 @@ static int client_context_read_label(
 }
 
 static int client_context_read_cgroup(Server *s, ClientContext *c, const char *unit_id) {
-        char *t = NULL;
+        _cleanup_free_ char *t = NULL;
         int r;
 
         assert(c);
@@ -254,10 +285,9 @@ static int client_context_read_cgroup(Server *s, ClientContext *c, const char *u
         /* Try to acquire the current cgroup path */
         r = cg_pid_get_path_shifted(c->pid, s->cgroup_root, &t);
         if (r < 0 || empty_or_root(t)) {
-
                 /* We use the unit ID passed in as fallback if we have nothing cached yet and cg_pid_get_path_shifted()
                  * failed or process is running in a root cgroup. Zombie processes are automatically migrated to root cgroup
-                 * on cgroupsv1 and we want to be able to map log messages from them too. */
+                 * on cgroup v1 and we want to be able to map log messages from them too. */
                 if (unit_id && !c->unit) {
                         c->unit = strdup(unit_id);
                         if (c->unit)
@@ -268,10 +298,8 @@ static int client_context_read_cgroup(Server *s, ClientContext *c, const char *u
         }
 
         /* Let's shortcut this if the cgroup path didn't change */
-        if (streq_ptr(c->cgroup, t)) {
-                free(t);
+        if (streq_ptr(c->cgroup, t))
                 return 0;
-        }
 
         free_and_replace(c->cgroup, t);
 
@@ -553,15 +581,39 @@ refresh:
 }
 
 static void client_context_try_shrink_to(Server *s, size_t limit) {
+        ClientContext *c;
+        usec_t t;
+
         assert(s);
+
+        /* Flush any cache entries for PIDs that have already moved on. Don't do this
+         * too often, since it's a slow process. */
+        t = now(CLOCK_MONOTONIC);
+        if (s->last_cache_pid_flush + MAX_USEC < t) {
+                unsigned n = prioq_size(s->client_contexts_lru), idx = 0;
+
+                /* We do a number of iterations based on the initial size of the prioq.  When we remove an
+                 * item, a new item is moved into its places, and items to the right might be reshuffled.
+                 */
+                for (unsigned i = 0; i < n; i++) {
+                        c = prioq_peek_by_index(s->client_contexts_lru, idx);
+
+                        assert(c->n_ref == 0);
+
+                        if (!pid_is_unwaited(c->pid))
+                                client_context_free(s, c);
+                        else
+                                idx ++;
+                }
+
+                s->last_cache_pid_flush = t;
+        }
 
         /* Bring the number of cache entries below the indicated limit, so that we can create a new entry without
          * breaching the limit. Note that we only flush out entries that aren't pinned here. This means the number of
          * cache entries may very well grow beyond the limit, if all entries stored remain pinned. */
 
         while (hashmap_size(s->client_contexts) > limit) {
-                ClientContext *c;
-
                 c = prioq_pop(s->client_contexts_lru);
                 if (!c)
                         break; /* All remaining entries are pinned, give up */
@@ -630,7 +682,7 @@ static int client_context_get_internal(
                 return 0;
         }
 
-        client_context_try_shrink_to(s, CACHE_MAX-1);
+        client_context_try_shrink_to(s, cache_max()-1);
 
         r = client_context_new(s, pid, &c);
         if (r < 0)

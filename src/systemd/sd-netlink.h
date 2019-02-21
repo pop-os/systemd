@@ -78,6 +78,8 @@ int sd_netlink_message_append_u32(sd_netlink_message *m, unsigned short type, ui
 int sd_netlink_message_append_data(sd_netlink_message *m, unsigned short type, const void *data, size_t len);
 int sd_netlink_message_append_in_addr(sd_netlink_message *m, unsigned short type, const struct in_addr *data);
 int sd_netlink_message_append_in6_addr(sd_netlink_message *m, unsigned short type, const struct in6_addr *data);
+int sd_netlink_message_append_sockaddr_in(sd_netlink_message *m, unsigned short type, const struct sockaddr_in *data);
+int sd_netlink_message_append_sockaddr_in6(sd_netlink_message *m, unsigned short type, const struct sockaddr_in6 *data);
 int sd_netlink_message_append_ether_addr(sd_netlink_message *m, unsigned short type, const struct ether_addr *data);
 int sd_netlink_message_append_cache_info(sd_netlink_message *m, unsigned short type, const struct ifa_cacheinfo *info);
 
@@ -199,7 +201,6 @@ int sd_netlink_slot_get_floating(sd_netlink_slot *slot);
 int sd_netlink_slot_set_floating(sd_netlink_slot *slot, int b);
 int sd_netlink_slot_get_description(sd_netlink_slot *slot, const char **description);
 int sd_netlink_slot_set_description(sd_netlink_slot *slot, const char *description);
-
 
 _SD_DEFINE_POINTER_CLEANUP_FUNC(sd_netlink, sd_netlink_unref);
 _SD_DEFINE_POINTER_CLEANUP_FUNC(sd_netlink_message, sd_netlink_message_unref);

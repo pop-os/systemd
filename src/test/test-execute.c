@@ -13,6 +13,7 @@
 #include "fs-util.h"
 #include "macro.h"
 #include "manager.h"
+#include "missing_prctl.h"
 #include "mkdir.h"
 #include "path-util.h"
 #include "rm-rf.h"
@@ -130,7 +131,7 @@ static bool check_user_has_group_with_same_name(const char *name) {
 }
 
 static bool is_inaccessible_available(void) {
-        char *p;
+        const char *p;
 
         FOREACH_STRING(p,
                 "/run/systemd/inaccessible/reg",
@@ -769,6 +770,7 @@ int main(int argc, char *argv[]) {
         (void) unsetenv("USER");
         (void) unsetenv("LOGNAME");
         (void) unsetenv("SHELL");
+        (void) unsetenv("HOME");
 
         can_unshare = have_namespaces();
 

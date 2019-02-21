@@ -61,10 +61,13 @@ static bool skip_attribute(const char *name) {
 static void print_all_attributes(sd_device *device, const char *key) {
         const char *name, *value;
 
-        FOREACH_DEVICE_PROPERTY(device, name, value) {
+        FOREACH_DEVICE_SYSATTR(device, name) {
                 size_t len;
 
                 if (skip_attribute(name))
+                        continue;
+
+                if (sd_device_get_sysattr_value(device, name, &value) < 0)
                         continue;
 
                 /* skip any values that look like a path */
@@ -387,10 +390,8 @@ int info_main(int argc, char *argv[], void *userdata) {
                                 query = QUERY_PATH;
                         else if (streq(optarg, "all"))
                                 query = QUERY_ALL;
-                        else {
-                                log_error("unknown query type");
-                                return -EINVAL;
-                        }
+                        else
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "unknown query type");
                         break;
                 case 'r':
                         arg_root = true;
@@ -413,6 +414,7 @@ int info_main(int argc, char *argv[], void *userdata) {
                         arg_export = true;
                         break;
                 case 'P':
+                        arg_export = true;
                         arg_export_prefix = optarg;
                         break;
                 case 'V':
@@ -424,7 +426,6 @@ int info_main(int argc, char *argv[], void *userdata) {
                 default:
                         assert_not_reached("Unknown option");
                 }
-
 
         if (action == ACTION_DEVICE_ID_FILE) {
                 if (argv[optind])

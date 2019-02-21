@@ -326,15 +326,6 @@ static int device_append(sd_device *device, char *key, const char **_major, cons
                         action = device_action_from_string(value);
                         if (action == _DEVICE_ACTION_INVALID)
                                 return -EINVAL;
-                        /* FIXME: remove once we no longer flush previuos state for each action */
-                        if (action == DEVICE_ACTION_BIND || action == DEVICE_ACTION_UNBIND) {
-                                static bool warned;
-                                if (!warned) {
-                                        log_device_debug(device, "sd-device: ignoring actions 'bind' and 'unbind'");
-                                        warned = true;
-                                }
-                                return -EINVAL;
-                        }
                 } else if (streq(key, "SEQNUM")) {
                         r = safe_atou64(value, &seqnum);
                         if (r < 0)
@@ -711,13 +702,24 @@ int device_new_from_stat_rdev(sd_device **ret, const struct stat *st) {
 
 int device_copy_properties(sd_device *device_dst, sd_device *device_src) {
         const char *property, *value;
+        Iterator i;
         int r;
 
         assert(device_dst);
         assert(device_src);
 
-        FOREACH_DEVICE_PROPERTY(device_src, property, value) {
-                r = device_add_property(device_dst, property, value);
+        r = device_properties_prepare(device_src);
+        if (r < 0)
+                return r;
+
+        ORDERED_HASHMAP_FOREACH_KEY(value, property, device_src->properties_db, i) {
+                r = device_add_property_aux(device_dst, property, value, true);
+                if (r < 0)
+                        return r;
+        }
+
+        ORDERED_HASHMAP_FOREACH_KEY(value, property, device_src->properties, i) {
+                r = device_add_property_aux(device_dst, property, value, false);
                 if (r < 0)
                         return r;
         }

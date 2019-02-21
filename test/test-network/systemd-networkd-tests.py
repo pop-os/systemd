@@ -9,7 +9,6 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 import unittest
 from shutil import copytree
@@ -20,7 +19,6 @@ networkd_ci_path='/run/networkd-ci'
 network_sysctl_ipv6_path='/proc/sys/net/ipv6/conf'
 network_sysctl_ipv4_path='/proc/sys/net/ipv4/conf'
 
-dnsmasq_config_file='/run/networkd-ci/test-dnsmasq.conf'
 dnsmasq_pid_file='/run/networkd-ci/test-test-dnsmasq.pid'
 dnsmasq_log_file='/run/networkd-ci/test-dnsmasq-log-file'
 
@@ -34,6 +32,39 @@ def expectedFailureIfModuleIsNotAvailable(module_name):
         if not is_module_available(module_name):
             return unittest.expectedFailure(func)
         return func
+
+    return f
+
+def expectedFailureIfERSPANModuleIsNotAvailable():
+    def f(func):
+        rc = subprocess.call(['ip', 'link', 'add', 'dev', 'erspan99', 'type', 'erspan', 'seq', 'key', '30', 'local', '192.168.1.4', 'remote', '192.168.1.1', 'erspan_ver', '1', 'erspan', '123'])
+        if rc == 0:
+            subprocess.call(['ip', 'link', 'del', 'erspan99'])
+            return func
+        else:
+            return unittest.expectedFailure(func)
+
+    return f
+
+def expectedFailureIfRoutingPolicyPortRangeIsNotAvailable():
+    def f(func):
+        rc = subprocess.call(['ip', 'rule', 'add', 'from', '192.168.100.19', 'sport', '1123-1150', 'dport', '3224-3290', 'table', '7'])
+        if rc == 0:
+            subprocess.call(['ip', 'rule', 'del', 'from', '192.168.100.19', 'sport', '1123-1150', 'dport', '3224-3290', 'table', '7'])
+            return func
+        else:
+            return unittest.expectedFailure(func)
+
+    return f
+
+def expectedFailureIfRoutingPolicyIPProtoIsNotAvailable():
+    def f(func):
+        rc = subprocess.call(['ip', 'rule', 'add', 'not', 'from', '192.168.100.19', 'ipproto', 'tcp', 'table', '7'])
+        if rc == 0:
+            subprocess.call(['ip', 'rule', 'del', 'not', 'from', '192.168.100.19', 'ipproto', 'tcp', 'table', '7'])
+            return func
+        else:
+            return unittest.expectedFailure(func)
 
     return f
 
@@ -100,8 +131,9 @@ class Utilities():
                 if (os.path.exists(os.path.join(network_unit_file_path, unit + '.d'))):
                     shutil.rmtree(os.path.join(network_unit_file_path, unit + '.d'))
 
-    def start_dnsmasq(self):
-        subprocess.check_call('dnsmasq -8 /var/run/networkd-ci/test-dnsmasq-log-file --log-queries=extra --log-dhcp --pid-file=/var/run/networkd-ci/test-test-dnsmasq.pid --conf-file=/dev/null --interface=veth-peer --enable-ra --dhcp-range=2600::10,2600::20 --dhcp-range=192.168.5.10,192.168.5.200 -R --dhcp-leasefile=/var/run/networkd-ci/lease --dhcp-option=26,1492 --dhcp-option=option:router,192.168.5.1 --dhcp-option=33,192.168.5.4,192.168.5.5', shell=True)
+    def start_dnsmasq(self, additional_options=''):
+        dnsmasq_command = 'dnsmasq -8 /var/run/networkd-ci/test-dnsmasq-log-file --log-queries=extra --log-dhcp --pid-file=/var/run/networkd-ci/test-test-dnsmasq.pid --conf-file=/dev/null --interface=veth-peer --enable-ra --dhcp-range=2600::10,2600::20 --dhcp-range=192.168.5.10,192.168.5.200 -R --dhcp-leasefile=/var/run/networkd-ci/lease --dhcp-option=26,1492 --dhcp-option=option:router,192.168.5.1 --dhcp-option=33,192.168.5.4,192.168.5.5 --port=0 ' + additional_options
+        subprocess.check_call(dnsmasq_command, shell=True)
 
         time.sleep(10)
 
@@ -144,33 +176,6 @@ class Utilities():
         time.sleep(5)
         print()
 
-global ip
-global port
-
-class DHCPServer(threading.Thread):
-    def __init__(self, name):
-        threading.Thread.__init__(self)
-        self.name = name
-
-    def run(self):
-        self.start_dhcp_server()
-
-    def start_dhcp_server(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        server_address = ('0.0.0.0', 67)
-        sock.bind(server_address)
-
-        print('Starting DHCP Server ...\n')
-        data, addr = sock.recvfrom(1024) # buffer size is 1024 bytes
-
-        global ip
-        ip = addr[0]
-
-        global port
-        port = addr[1]
-        sock.close()
-
 class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
     links =[
@@ -201,6 +206,7 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
         'vti6tun99',
         'vtitun99',
         'vxlan99',
+        'wg98',
         'wg99']
 
     units = [
@@ -234,6 +240,8 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
         '25-vti6-tunnel.netdev',
         '25-vti-tunnel.netdev',
         '25-vxlan.netdev',
+        '25-wireguard-23-peers.netdev',
+        '25-wireguard-23-peers.network',
         '25-wireguard.netdev',
         '6rd.network',
         'gre.network',
@@ -388,8 +396,28 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
 
         if shutil.which('wg'):
             subprocess.call('wg')
+            output = subprocess.check_output(['wg', 'show', 'wg99', 'listen-port']).rstrip().decode('utf-8')
+            self.assertTrue(output, '51820')
+            output = subprocess.check_output(['wg', 'show', 'wg99', 'fwmark']).rstrip().decode('utf-8')
+            self.assertTrue(output, '0x4d2')
+            output = subprocess.check_output(['wg', 'show', 'wg99', 'allowed-ips']).rstrip().decode('utf-8')
+            self.assertTrue(output, 'RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=\t192.168.26.0/24 fd31:bf08:57cb::/48')
+            output = subprocess.check_output(['wg', 'show', 'wg99', 'persistent-keepalive']).rstrip().decode('utf-8')
+            self.assertTrue(output, 'RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=\t20')
+            output = subprocess.check_output(['wg', 'show', 'wg99', 'endpoints']).rstrip().decode('utf-8')
+            self.assertTrue(output, 'RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=\t192.168.27.3:51820')
 
         self.assertTrue(self.link_exits('wg99'))
+
+    @expectedFailureIfModuleIsNotAvailable('wireguard')
+    def test_wireguard_23_peers(self):
+        self.copy_unit_to_networkd_unit_path('25-wireguard-23-peers.netdev', '25-wireguard-23-peers.network')
+        self.start_networkd()
+
+        if shutil.which('wg'):
+            subprocess.call('wg')
+
+        self.assertTrue(self.link_exits('wg98'))
 
     def test_geneve(self):
         self.copy_unit_to_networkd_unit_path('25-geneve.netdev')
@@ -478,6 +506,7 @@ class NetworkdNetDevTests(unittest.TestCase, Utilities):
         self.assertTrue(self.link_exits('dummy98'))
         self.assertTrue(self.link_exits('sittun99'))
 
+    @expectedFailureIfERSPANModuleIsNotAvailable()
     def test_erspan_tunnel(self):
         self.copy_unit_to_networkd_unit_path('25-erspan-tunnel.netdev')
         self.start_networkd()
@@ -536,9 +565,12 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
         '25-fibrule-port-range.network',
         '25-ipv6-address-label-section.network',
         '25-neighbor-section.network',
+        '25-link-local-addressing-no.network',
+        '25-link-local-addressing-yes.network',
         '25-link-section-unmanaged.network',
         '25-route-gateway.network',
         '25-route-gateway-on-link.network',
+        '25-route-ipv6-src.network',
         '25-route-reverse-order.network',
         '25-route-section.network',
         '25-route-tcp-window-settings.network',
@@ -618,6 +650,7 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
 
         subprocess.call(['ip', 'rule', 'del', 'table', '7'])
 
+    @expectedFailureIfRoutingPolicyPortRangeIsNotAvailable()
     def test_routing_policy_rule_port_range(self):
         self.copy_unit_to_networkd_unit_path('25-fibrule-port-range.network', '11-dummy.netdev')
         self.start_networkd()
@@ -635,6 +668,7 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
 
         subprocess.call(['ip', 'rule', 'del', 'table', '7'])
 
+    @expectedFailureIfRoutingPolicyIPProtoIsNotAvailable()
     def test_routing_policy_rule_invert(self):
         self.copy_unit_to_networkd_unit_path('25-fibrule-invert.network', '11-dummy.netdev')
         self.start_networkd()
@@ -649,6 +683,22 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
         self.assertRegex(output, 'lookup 7')
 
         subprocess.call(['ip', 'rule', 'del', 'table', '7'])
+
+    def test_address_peer(self):
+        self.copy_unit_to_networkd_unit_path('25-address-section.network', '12-dummy.netdev')
+        self.start_networkd()
+
+        self.assertTrue(self.link_exits('dummy98'))
+
+        output = subprocess.check_output(['ip', 'address', 'show', 'dummy98']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, 'inet 10.2.3.4 peer 10.2.3.5/16 scope global 32')
+        self.assertRegex(output, 'inet 10.6.7.8/16 brd 10.6.255.255 scope global 33')
+        self.assertRegex(output, 'inet6 2001:db8::20 peer 2001:db8::10/128 scope global')
+
+        output = subprocess.check_output(['networkctl', 'status', 'dummy98']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, 'State: routable \(configured\)')
 
     def test_address_preferred_lifetime_zero_ipv6(self):
         self.copy_unit_to_networkd_unit_path('25-address-section-miscellaneous.network', '12-dummy.netdev')
@@ -756,6 +806,22 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
         self.assertRegex(output, 'scope')
         self.assertRegex(output, 'link')
 
+    def test_ip_route_ipv6_src_route(self):
+        # a dummy device does not make the addresses go through tentative state, so we
+        # reuse a bond from an earlier test, which does make the addresses go through
+        # tentative state, and do our test on that
+        self.copy_unit_to_networkd_unit_path('23-active-slave.network', '25-route-ipv6-src.network', '25-bond-active-backup-slave.netdev', '12-dummy.netdev')
+        self.start_networkd()
+
+        self.assertTrue(self.link_exits('dummy98'))
+        self.assertTrue(self.link_exits('bond199'))
+
+        output = subprocess.check_output(['ip', '-6', 'route', 'list', 'dev', 'bond199']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, 'abcd::/16')
+        self.assertRegex(output, 'src')
+        self.assertRegex(output, '2001:1234:56:8f63::2')
+
     def test_ip_link_mac_address(self):
         self.copy_unit_to_networkd_unit_path('25-address-link-section.network', '12-dummy.netdev')
         self.start_networkd()
@@ -795,7 +861,67 @@ class NetworkdNetWorkTests(unittest.TestCase, Utilities):
         output = subprocess.check_output(['ip', 'neigh', 'list']).rstrip().decode('utf-8')
         print(output)
         self.assertRegex(output, '192.168.10.1.*00:00:5e:00:02:65.*PERMANENT')
-        self.assertRegex(output, '2004:da8:1:0::1.*00:00:5e:00:02:66.*PERMANENT')
+        self.assertRegex(output, '2004:da8:1::1.*00:00:5e:00:02:66.*PERMANENT')
+
+    def test_link_local_addressing(self):
+        self.copy_unit_to_networkd_unit_path('25-link-local-addressing-yes.network', '11-dummy.netdev',
+                                             '25-link-local-addressing-no.network', '12-dummy.netdev')
+        self.start_networkd()
+
+        self.assertTrue(self.link_exits('test1'))
+        self.assertTrue(self.link_exits('dummy98'))
+
+        time.sleep(10)
+
+        output = subprocess.check_output(['ip', 'address', 'show', 'dev', 'test1']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, 'inet .* scope link')
+        self.assertRegex(output, 'inet6 .* scope link')
+
+        output = subprocess.check_output(['ip', 'address', 'show', 'dev', 'dummy98']).rstrip().decode('utf-8')
+        print(output)
+        self.assertNotRegex(output, 'inet6* .* scope link')
+
+        output = subprocess.check_output(['networkctl', 'status', 'test1']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, 'State: degraded \(configured\)')
+
+        output = subprocess.check_output(['networkctl', 'status', 'dummy98']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, 'State: carrier \(configured\)')
+
+        '''
+        Documentation/networking/ip-sysctl.txt
+
+        addr_gen_mode - INTEGER
+        Defines how link-local and autoconf addresses are generated.
+
+        0: generate address based on EUI64 (default)
+        1: do no generate a link-local address, use EUI64 for addresses generated
+           from autoconf
+        2: generate stable privacy addresses, using the secret from
+           stable_secret (RFC7217)
+        3: generate stable privacy addresses, using a random secret if unset
+        '''
+
+        test1_addr_gen_mode = ''
+        if os.path.exists(os.path.join(os.path.join(network_sysctl_ipv6_path, 'test1'), 'stable_secret')):
+            with open(os.path.join(os.path.join(network_sysctl_ipv6_path, 'test1'), 'stable_secret')) as f:
+                try:
+                    f.readline()
+                except IOError:
+                    # if stable_secret is unset, then EIO is returned
+                    test1_addr_gen_mode = '0'
+                else:
+                    test1_addr_gen_mode = '2'
+        else:
+            test1_addr_gen_mode = '0'
+
+        if os.path.exists(os.path.join(os.path.join(network_sysctl_ipv6_path, 'test1'), 'addr_gen_mode')):
+            self.assertEqual(self.read_ipv6_sysctl_attr('test1', 'addr_gen_mode'), '0')
+
+        if os.path.exists(os.path.join(os.path.join(network_sysctl_ipv6_path, 'dummy98'), 'addr_gen_mode')):
+            self.assertEqual(self.read_ipv6_sysctl_attr('dummy98', 'addr_gen_mode'), '1')
 
     def test_sysctl(self):
         self.copy_unit_to_networkd_unit_path('25-sysctl.network', '12-dummy.netdev')
@@ -954,7 +1080,7 @@ class NetworkdNetworkDHCPServerTests(unittest.TestCase, Utilities):
         self.assertRegex(output, 'NTP: 192.168.5.1')
 
     def test_domain(self):
-        self.copy_unit_to_networkd_unit_path( '12-dummy.netdev', '24-search-domain.network')
+        self.copy_unit_to_networkd_unit_path('12-dummy.netdev', '24-search-domain.network')
         self.start_networkd()
 
         self.assertTrue(self.link_exits('dummy98'))
@@ -994,8 +1120,10 @@ class NetworkdNetworkDHCPClientTests(unittest.TestCase, Utilities):
         'dhcp-client-listen-port.network',
         'dhcp-client-route-metric.network',
         'dhcp-client-route-table.network',
+        'dhcp-client.network',
         'dhcp-server-veth-peer.network',
-        'dhcp-v4-server-veth-peer.network']
+        'dhcp-v4-server-veth-peer.network',
+        'static.network']
 
     def setUp(self):
         self.link_remove(self.links)
@@ -1009,7 +1137,7 @@ class NetworkdNetworkDHCPClientTests(unittest.TestCase, Utilities):
         self.remove_log_file()
 
     def test_dhcp_client_ipv6_only(self):
-        self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network','dhcp-client-ipv6-only.network')
+        self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network', 'dhcp-client-ipv6-only.network')
         self.start_networkd()
 
         self.assertTrue(self.link_exits('veth99'))
@@ -1022,7 +1150,7 @@ class NetworkdNetworkDHCPClientTests(unittest.TestCase, Utilities):
         self.assertNotRegex(output, '192.168.5')
 
     def test_dhcp_client_ipv4_only(self):
-        self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network','dhcp-client-ipv4-only-ipv6-disabled.network')
+        self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network', 'dhcp-client-ipv4-only-ipv6-disabled.network')
         self.start_networkd()
 
         self.assertTrue(self.link_exits('veth99'))
@@ -1111,21 +1239,15 @@ class NetworkdNetworkDHCPClientTests(unittest.TestCase, Utilities):
 
     def test_dhcp_client_listen_port(self):
         self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network', 'dhcp-client-listen-port.network')
-
-        dh_server = DHCPServer("dhcp_server")
-        dh_server.start()
-
         self.start_networkd()
 
         self.assertTrue(self.link_exits('veth99'))
 
-        global port
-        global ip
+        self.start_dnsmasq('--dhcp-alternate-port=67,5555')
 
-        self.assertRegex(str(port), '5555')
-        self.assertRegex(str(ip), '0.0.0.0')
-
-        dh_server.join()
+        output = subprocess.check_output(['ip', '-4', 'address', 'show', 'dev', 'veth99']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, '192.168.5.* dynamic')
 
     def test_dhcp_route_table_id(self):
         self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-v4-server-veth-peer.network', 'dhcp-client-route-table.network')
@@ -1173,6 +1295,43 @@ class NetworkdNetworkDHCPClientTests(unittest.TestCase, Utilities):
         output = subprocess.check_output(['networkctl', 'status', 'veth99']).rstrip().decode('utf-8')
         print(output)
         self.assertRegex(output, '192.168.5.*')
+
+    def test_dhcp_client_reuse_address_as_static(self):
+        self.copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network', 'dhcp-client.network')
+        self.start_networkd()
+
+        self.assertTrue(self.link_exits('veth99'))
+
+        self.start_dnsmasq()
+
+        output = subprocess.check_output(['ip', 'address', 'show', 'dev', 'veth99', 'scope', 'global']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, '192.168.5')
+        self.assertRegex(output, '2600::')
+
+        ipv4_address = re.search('192\.168\.5\.[0-9]*/24', output)
+        ipv6_address = re.search('2600::[0-9a-f:]*/128', output)
+        static_network = '\n'.join(['[Match]', 'Name=veth99', '[Network]', 'IPv6AcceptRA=no', 'Address=' + ipv4_address.group(), 'Address=' + ipv6_address.group()])
+        print(static_network)
+
+        self.remove_unit_from_networkd_path(['dhcp-client.network'])
+
+        with open(os.path.join(network_unit_file_path, 'static.network'), mode='w') as f:
+            f.write(static_network)
+
+        self.start_networkd()
+
+        self.assertTrue(self.link_exits('veth99'))
+
+        output = subprocess.check_output(['ip', '-4', 'address', 'show', 'dev', 'veth99', 'scope', 'global']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, '192.168.5')
+        self.assertRegex(output, 'valid_lft forever preferred_lft forever')
+
+        output = subprocess.check_output(['ip', '-6', 'address', 'show', 'dev', 'veth99', 'scope', 'global']).rstrip().decode('utf-8')
+        print(output)
+        self.assertRegex(output, '2600::')
+        self.assertRegex(output, 'valid_lft forever preferred_lft forever')
 
 if __name__ == '__main__':
     unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout,

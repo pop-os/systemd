@@ -393,7 +393,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
 
   <refsect1>
     <title>Mandatory Access Control</title>
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>SELinuxContext=</varname></term>
@@ -436,7 +436,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
   <refsect1>
     <title>Process Properties</title>
 
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>LimitCPU=</varname></term>
@@ -671,7 +671,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
   <refsect1>
     <title>Scheduling</title>
 
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>Nice=</varname></term>
@@ -764,7 +764,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
     (such as <varname>ProtectSystem=</varname>) are not available, as the underlying kernel functionality is only
     accessible to privileged processes.</para>
 
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>ProtectSystem=</varname></term>
@@ -820,7 +820,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         names must be relative, and may not include <literal>..</literal>. If set, one or more
         directories by the specified names will be created (including their parents) below the locations
         defined in the following table, when the unit is started. Also, the corresponding environment variable
-        is defined with the full path of directories. If multiple directories are set, then int the environment variable
+        is defined with the full path of directories. If multiple directories are set, then in the environment variable
         the paths are concatenated with colon (<literal>:</literal>).</para>
         <table>
           <title>Automatic directory creation and environment variables</title>
@@ -1279,13 +1279,19 @@ RestrictNamespaces=~cgroup net</programlisting>
         <constant>SHM_EXEC</constant> set. Note that this option is incompatible with programs and libraries that
         generate program code dynamically at runtime, including JIT execution engines, executable stacks, and code
         "trampoline" feature of various C compilers. This option improves service security, as it makes harder for
-        software exploits to change running code dynamically. Note that this feature is fully available on x86-64, and
-        partially on x86. Specifically, the <function>shmat()</function> protection is not available on x86. Note that
-        on systems supporting multiple ABIs (such as x86/x86-64) it is recommended to turn off alternative ABIs for
-        services, so that they cannot be used to circumvent the restrictions of this option. Specifically, it is
-        recommended to combine this option with <varname>SystemCallArchitectures=native</varname> or similar. If
-        running in user mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant> capability
-        (e.g. setting <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname> is implied.</para></listitem>
+        software exploits to change running code dynamically. However, the protection can be circumvented, if
+        the service can write to a filesystem, which is not mounted with <constant>noexec</constant> (such as
+        <filename>/dev/shm</filename>), or it can use <function>memfd_create()</function>.  This can be
+        prevented by making such file systems inaccessible to the service
+        (e.g. <varname>InaccessiblePaths=/dev/shm</varname>) and installing further system call filters
+        (<varname>SystemCallFilter=~memfd_create</varname>). Note that this feature is fully available on
+        x86-64, and partially on x86. Specifically, the <function>shmat()</function> protection is not
+        available on x86. Note that on systems supporting multiple ABIs (such as x86/x86-64) it is
+        recommended to turn off alternative ABIs for services, so that they cannot be used to circumvent the
+        restrictions of this option. Specifically, it is recommended to combine this option with
+        <varname>SystemCallArchitectures=native</varname> or similar. If running in user mode, or in system
+        mode, but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
+        <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname> is implied.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1382,7 +1388,7 @@ RestrictNamespaces=~cgroup net</programlisting>
 
   <refsect1>
     <title>System Call Filtering</title>
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>SystemCallFilter=</varname></term>
@@ -1621,7 +1627,7 @@ SystemCallErrorNumber=EPERM</programlisting>
   <refsect1>
     <title>Environment</title>
 
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>Environment=</varname></term>
@@ -1736,7 +1742,7 @@ SystemCallErrorNumber=EPERM</programlisting>
   <refsect1>
     <title>Logging and Standard Input/Output</title>
 
-    <variablelist>
+    <variablelist class='unit-directives'>
       <varlistentry>
 
         <term><varname>StandardInput=</varname></term>
@@ -1810,7 +1816,7 @@ SystemCallErrorNumber=EPERM</programlisting>
         <option>syslog</option>, <option>kmsg</option>, <option>journal+console</option>,
         <option>syslog+console</option>, <option>kmsg+console</option>,
         <option>file:<replaceable>path</replaceable></option>, <option>append:<replaceable>path</replaceable></option>,
-        <option>socket</option> or<option>fd:<replaceable>name</replaceable></option>.</para>
+        <option>socket</option> or <option>fd:<replaceable>name</replaceable></option>.</para>
 
         <para><option>inherit</option> duplicates the file descriptor of standard input for standard output.</para>
 
@@ -2078,7 +2084,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
 
   <refsect1>
     <title>System V Compatibility</title>
-    <variablelist>
+    <variablelist class='unit-directives'>
 
       <varlistentry>
         <term><varname>UtmpIdentifier=</varname></term>
@@ -2878,7 +2884,8 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+        <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,

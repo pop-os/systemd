@@ -82,6 +82,7 @@ typedef struct Link {
         Set *routes_foreign;
 
         bool addresses_configured;
+        bool addresses_ready;
 
         sd_dhcp_client *dhcp_client;
         sd_dhcp_lease *dhcp_lease;
@@ -142,7 +143,6 @@ int link_get(Manager *m, int ifindex, Link **ret);
 int link_add(Manager *manager, sd_netlink_message *message, Link **ret);
 void link_drop(Link *link);
 
-int link_up(Link *link);
 int link_down(Link *link);
 
 void link_enter_failed(Link *link);

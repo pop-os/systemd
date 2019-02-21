@@ -15,6 +15,7 @@ TIMED_OUT=  # will be 1 after run_* if *_TIMEOUT is set and test timed out
 [[ "$LOOKS_LIKE_SUSE" ]] && FSTYPE="${FSTYPE:-btrfs}" || FSTYPE="${FSTYPE:-ext4}"
 UNIFIED_CGROUP_HIERARCHY="${UNIFIED_CGROUP_HIERARCHY:-default}"
 EFI_MOUNT="$(bootctl -p 2>/dev/null || echo /boot)"
+QEMU_MEM="${QEMU_MEM:-512M}"
 
 if ! ROOTLIBDIR=$(pkg-config --variable=systemdutildir systemd); then
     echo "WARNING! Cannot determine rootlibdir from pkg-config, assuming /usr/lib/systemd" >&2
@@ -37,7 +38,7 @@ is_built_with_asan() {
     fi
 
     # Borrowed from https://github.com/google/oss-fuzz/blob/cd9acd02f9d3f6e80011cc1e9549be526ce5f270/infra/base-images/base-runner/bad_build_check#L182
-    local _asan_calls=$(objdump -dC $BUILD_DIR/systemd | egrep "callq\s+[0-9a-f]+\s+<__asan" -c)
+    local _asan_calls=$(objdump -dC $BUILD_DIR/systemd-journald | egrep "callq\s+[0-9a-f]+\s+<__asan" -c)
     if (( $_asan_calls < 1000 )); then
         return 1
     else
@@ -51,6 +52,8 @@ if [[ "$IS_BUILT_WITH_ASAN" = "yes" ]]; then
     STRIP_BINARIES=no
     SKIP_INITRD=yes
     PATH_TO_INIT=$ROOTLIBDIR/systemd-under-asan
+    QEMU_MEM="1536M"
+    QEMU_SMP=4
 fi
 
 function find_qemu_bin() {
@@ -96,17 +99,28 @@ run_qemu() {
             && KERNEL_BIN="$EFI_MOUNT/$MACHINE_ID/$KERNEL_VER/linux"
     fi
 
+    CONSOLE=ttyS0
+
     if [[ ! "$KERNEL_BIN" ]]; then
         if [[ "$LOOKS_LIKE_ARCH" ]]; then
             KERNEL_BIN=/boot/vmlinuz-linux
         else
-            KERNEL_BIN=/boot/vmlinuz-$KERNEL_VER
+            [ "$ARCH" ] || ARCH=$(uname -m)
+            case $ARCH in
+                ppc64*)
+                KERNEL_BIN=/boot/vmlinux-$KERNEL_VER
+                CONSOLE=hvc0
+                ;;
+                *)
+                KERNEL_BIN=/boot/vmlinuz-$KERNEL_VER
+                ;;
+            esac
         fi
     fi
 
     default_fedora_initrd=/boot/initramfs-${KERNEL_VER}.img
     default_debian_initrd=/boot/initrd.img-${KERNEL_VER}
-    default_arch_initrd=/boot/initramfs-linux.img
+    default_arch_initrd=/boot/initramfs-linux-fallback.img
     default_suse_initrd=/boot/initrd-${KERNEL_VER}
     if [[ ! "$INITRD" ]]; then
         if [[ -e "$default_fedora_initrd" ]]; then
@@ -147,7 +161,7 @@ root=/dev/sda1 \
 raid=noautodetect \
 loglevel=2 \
 init=$PATH_TO_INIT \
-console=ttyS0 \
+console=$CONSOLE \
 selinux=0 \
 printk.devkmsg=on \
 $_cgroup_args \
@@ -156,7 +170,7 @@ $KERNEL_APPEND \
 
     QEMU_OPTIONS="-smp $QEMU_SMP \
 -net none \
--m 512M \
+-m $QEMU_MEM \
 -nographic \
 -kernel $KERNEL_BIN \
 -drive format=raw,cache=unsafe,file=${TESTDIR}/rootdisk.img \
@@ -330,8 +344,8 @@ create_asan_wrapper() {
 set -x
 
 DEFAULT_ASAN_OPTIONS=strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
-DEFAULT_UBSAN_OPTIONS=print_stacktrace=1:print_summary=1
-DEFAULT_ENVIRONMENT="ASAN_OPTIONS=\$DEFAULT_ASAN_OPTIONS UBSAN_OPTIONS=\$DEFAULT_UBSAN_OPTIONS:halt_on_error=1"
+DEFAULT_UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1
+DEFAULT_ENVIRONMENT="ASAN_OPTIONS=\$DEFAULT_ASAN_OPTIONS UBSAN_OPTIONS=\$DEFAULT_UBSAN_OPTIONS"
 
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
@@ -344,6 +358,7 @@ if [[ "\$PATH_TO_ASAN" ]]; then
   DEFAULT_ENVIRONMENT="\$DEFAULT_ENVIRONMENT LD_PRELOAD=\$PATH_TO_ASAN"
 fi
 echo DefaultEnvironment=\$DEFAULT_ENVIRONMENT >>/etc/systemd/system.conf
+echo DefaultTimeoutStartSec=180s >>/etc/systemd/system.conf
 
 # ASAN and syscall filters aren't compatible with each other.
 find / -name '*.service' -type f | xargs sed -i 's/^\\(MemoryDeny\\|SystemCall\\)/#\\1/'
@@ -353,6 +368,12 @@ find / -name '*.service' -type f | xargs sed -i 's/^\\(MemoryDeny\\|SystemCall\\
 JOURNALD_CONF_DIR=/etc/systemd/system/systemd-journald.service.d
 mkdir -p "\$JOURNALD_CONF_DIR"
 printf "[Service]\nEnvironment=ASAN_OPTIONS=\$DEFAULT_ASAN_OPTIONS:log_path=/systemd-journald.asan.log\n" >"\$JOURNALD_CONF_DIR/env.conf"
+
+# 90s isn't enough for some services to finish when literally everything is run
+# under ASan+UBSan in containers, which, in turn, are run in VMs.
+# Let's limit which environments such services should be executed in.
+mkdir -p /etc/systemd/system/systemd-hwdb-update.service.d
+printf "[Unit]\nConditionVirtualization=container\n\n[Service]\nTimeoutSec=180s\n" >/etc/systemd/system/systemd-hwdb-update.service.d/env-override.conf
 
 export ASAN_OPTIONS=\$DEFAULT_ASAN_OPTIONS:log_path=/systemd.asan.log UBSAN_OPTIONS=\$DEFAULT_UBSAN_OPTIONS
 exec  $ROOTLIBDIR/systemd "\$@"
@@ -453,8 +474,47 @@ EOF
     fi
 }
 
+check_asan_reports() {
+    local ret=0
+    local root="$1"
+
+    if [[ "$IS_BUILT_WITH_ASAN" = "yes" ]]; then
+        ls -l "$root"
+        if [[ -e "$root/systemd.asan.log.1" ]]; then
+            cat "$root/systemd.asan.log.1"
+            ret=$(($ret+1))
+        fi
+
+        journald_report=$(find "$root" -name "systemd-journald.asan.log*" -exec cat {} \;)
+        if [[ ! -z "$journald_report" ]]; then
+            printf "%s" "$journald_report"
+            ret=$(($ret+1))
+        fi
+
+        pids=$(
+            "$BUILD_DIR/journalctl" -D "$root/var/log/journal" | perl -alne '
+                 BEGIN {
+                     %services_to_ignore = (
+                         "dbus-daemon" => undef,
+                     );
+                 }
+	         print $2 if /\s(\S*)\[(\d+)\]:\s*SUMMARY:\s+\w+Sanitizer/ && !exists $services_to_ignore{$1}'
+        )
+        if [[ ! -z "$pids" ]]; then
+            ret=$(($ret+1))
+            for pid in $pids; do
+                "$BUILD_DIR/journalctl" -D "$root/var/log/journal" _PID=$pid --no-pager
+            done
+        fi
+    fi
+
+    return $ret
+}
+
 check_result_nspawn() {
     local ret=1
+    local journald_report=""
+    local pids=""
     [[ -e $TESTDIR/$1/testok ]] && ret=0
     [[ -f $TESTDIR/$1/failed ]] && cp -a $TESTDIR/$1/failed $TESTDIR
     cp -a $TESTDIR/$1/var/log/journal $TESTDIR
@@ -462,6 +522,7 @@ check_result_nspawn() {
     ls -l $TESTDIR/journal/*/*.journal
     test -s $TESTDIR/failed && ret=$(($ret+1))
     [ -n "$TIMED_OUT" ] && ret=$(($ret+1))
+    check_asan_reports "$TESTDIR/$1" || ret=$(($ret+1))
     return $ret
 }
 
@@ -473,6 +534,7 @@ check_result_qemu() {
     [[ -e $TESTDIR/root/testok ]] && ret=0
     [[ -f $TESTDIR/root/failed ]] && cp -a $TESTDIR/root/failed $TESTDIR
     cp -a $TESTDIR/root/var/log/journal $TESTDIR
+    check_asan_reports "$TESTDIR/root" || ret=$(($ret+1))
     umount $TESTDIR/root
     [[ -f $TESTDIR/failed ]] && cat $TESTDIR/failed
     ls -l $TESTDIR/journal/*/*.journal
@@ -508,7 +570,9 @@ install_execs() {
     sed -r -n 's|^Exec[a-zA-Z]*=[@+!-]*([^ ]+).*|\1|gp' $initdir/{$systemdsystemunitdir,$systemduserunitdir}/*.service \
          | sort -u | while read i; do
          # some {rc,halt}.local scripts and programs are okay to not exist, the rest should
-         inst $i || [ "${i%.local}" != "$i" ] || [ "${i%systemd-update-done}" != "$i" ]
+         # also, plymouth is pulled in by rescue.service, but even there the exit code
+         # is ignored; as it's not present on some distros, don't fail if it doesn't exist
+         inst $i || [ "${i%.local}" != "$i" ] || [ "${i%systemd-update-done}" != "$i" ] || [ "/bin/plymouth" == "$i" ]
      done
     )
 }
@@ -1526,7 +1590,7 @@ test_run() {
             else
                 dwarn "can't run systemd-nspawn, skipping"
             fi
-	fi
+        fi
     fi
     return 0
 }
