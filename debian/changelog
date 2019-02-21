@@ -1,3 +1,25 @@
+systemd (241-1) unstable; urgency=medium
+
+  [ Adam Borowski ]
+  * Make libpam-systemd Provide: logind, default-logind.
+    This allows alternate logind implementations such as elogind, without
+    having to recompile every dependant package -- as long as the client API
+    remains compatible.
+    These new virtual packages got policy-approved in #917431. (Closes: #915407)
+
+  [ Felipe Sateler ]
+  * New upstream version 241
+    - Refresh patches
+    - Backport upstream fix for Driver= matches in .network files
+
+  [ Martin Pitt ]
+  * debian/libsystemd0.symbols: Add new symbol from release 241
+  * Fix various bugs and races in networkd tests.
+    This should get the autopkgtest back to green, which regressed with
+    dnsmasq 2.80.
+
+ -- Felipe Sateler <fsateler@debian.org>  Thu, 21 Feb 2019 20:10:15 -0300
+
 systemd (240-6) unstable; urgency=high
 
   * High urgency as this fixes a vulnerability.
