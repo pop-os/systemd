@@ -10,9 +10,9 @@ import sys
 import tempfile
 from glob import glob
 
-system_unit_dir = subprocess.check_output(
+system_unit_dir = os.path.realpath(subprocess.check_output(
     ['pkg-config', '--variable=systemdsystemunitdir', 'systemd'],
-    universal_newlines=True).strip()
+    universal_newlines=True).strip())
 systemd_sysv_install = os.path.join(os.path.dirname(system_unit_dir),
                                     'systemd-sysv-install')
 
