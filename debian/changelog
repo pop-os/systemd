@@ -3,7 +3,7 @@ systemd (241-1) unstable; urgency=medium
   [ Adam Borowski ]
   * Make libpam-systemd Provide: logind, default-logind.
     This allows alternate logind implementations such as elogind, without
-    having to recompile every dependant package -- as long as the client API
+    having to recompile every dependent package -- as long as the client API
     remains compatible.
     These new virtual packages got policy-approved in #917431. (Closes: #915407)
 
