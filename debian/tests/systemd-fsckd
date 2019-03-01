@@ -250,17 +250,17 @@ def getAllTests(unitTestClass):
                   if test[0].startswith('test_')])
 
 
-# ADT_REBOOT_MARK contains the test name to pursue after reboot
+# AUTOPKGTEST_REBOOT_MARK contains the test name to pursue after reboot
 # (to check results and states after reboot, mostly).
 # we append the previous global return code (0 or 1) to it.
-# Example: ADT_REBOOT_MARK=test_foo:0
+# Example: AUTOPKGTEST_REBOOT_MARK=test_foo:0
 if __name__ == '__main__':
     if os.path.exists('/run/initramfs/fsck-root'):
         print('SKIP: root file system is being checked by initramfs already')
         sys.exit(0)
 
     all_tests = getAllTests(FsckdTest)
-    reboot_marker = os.getenv('ADT_REBOOT_MARK')
+    reboot_marker = os.getenv('AUTOPKGTEST_REBOOT_MARK')
 
     current_test_after_reboot = ""
     if not reboot_marker:
@@ -279,7 +279,7 @@ if __name__ == '__main__':
     try:
         remaining_tests = all_tests[all_tests.index(current_test):]
     except ValueError:
-        print("Invalid value for ADT_REBOOT_MARK, {} is not a valid test name".format(reboot_marker))
+        print("Invalid value for AUTOPKGTEST_REBOOT_MARK, {} is not a valid test name".format(reboot_marker))
         sys.exit(2)
 
     # run all remaining tests

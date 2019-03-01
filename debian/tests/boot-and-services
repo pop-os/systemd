@@ -530,7 +530,7 @@ EndSection''')
 
 
 if __name__ == '__main__':
-    if not os.getenv('ADT_REBOOT_MARK'):
+    if not os.getenv('AUTOPKGTEST_REBOOT_MARK'):
         pre_boot_setup()
         print('Rebooting...')
         subprocess.check_call(['/tmp/autopkgtest-reboot', 'boot1'])
