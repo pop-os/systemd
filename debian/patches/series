@@ -4,6 +4,7 @@ sd-device-also-store-properties-read-from-udev-database-t.patch
 networkd-test-disable-DNSSEC-in-domain-restricted-DNS-tes.patch
 networkd-test-use-a-complete-domain-name-in-test_route_on.patch
 networkd-test-fix-test_dropin.patch
+networkd-test-ignore-failures-of-test_route_only_dns-in-c.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
