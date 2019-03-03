@@ -9,7 +9,7 @@ set -e
 
 fail() {
     journalctl --sync
-    journalctl -ab > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-journal.txt"
+    journalctl -a > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-journal.txt"
     udevadm info --export-db > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-udevdb.txt"
     exit 1
 }
