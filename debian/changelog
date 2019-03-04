@@ -1,3 +1,11 @@
+systemd (240-6ubuntu2) disco; urgency=medium
+
+  * d/p/network-remove-routing-policy-rule-from-foreign-rule.patch
+  * d/p/network-do-not-remove-rule-when-it-is-requested-by-e.patch
+    - Fix RoutingPolicyRule does not apply correctly (LP: #1818282)
+
+ -- Ioanna Alifieraki <ioanna-marial.alifieraki@canonical.com>  Mon, 04 Mar 2019 10:32:19 +0000
+
 systemd (240-6ubuntu1) disco; urgency=medium
 
   * Release to ubuntu.

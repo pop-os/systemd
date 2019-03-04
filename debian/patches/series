@@ -95,3 +95,5 @@ resolved-restart-stream-timeout-whenever-we-managed-to-re.patch
 resolved-only-call-complete-with-zero-argument-in-LLMNR-c.patch
 resolved-add-comment-to-dns_stream_complete-about-its-err.patch
 resolved-keep-stub-stream-connections-up-for-as-long-as-c.patch
+network-remove-routing-policy-rule-from-foreign-rule.patch
+network-do-not-remove-rule-when-it-is-requested-by-e.patch
