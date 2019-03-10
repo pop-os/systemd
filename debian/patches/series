@@ -6,6 +6,7 @@ networkd-test-use-a-complete-domain-name-in-test_route_on.patch
 networkd-test-fix-test_dropin.patch
 networkd-test-ignore-failures-of-test_route_only_dns-in-c.patch
 timedate-fix-emitted-value-when-ntp-client-is-enabled-dis.patch
+cgtop-Fix-processing-of-controllers-other-than-CPU.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
