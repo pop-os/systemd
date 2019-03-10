@@ -134,3 +134,54 @@ timedatectl set-local-rtc 1
 assert_eq "`cat /etc/adjtime`" "0.0 0 0
 0
 LOCAL"
+
+# timesyncd has ConditionVirtualization=!container by default; drop/mock that for testing
+if systemd-detect-virt --container --quiet; then
+    systemctl disable --quiet --now systemd-timesyncd
+    mkdir -p /run/systemd/system/systemd-timesyncd.service.d
+    printf '[Unit]\nConditionVirtualization=\n[Service]\nType=simple\nAmbientCapabilities=\nExecStart=\nExecStart=/bin/sleep infinity' > /run/systemd/system/systemd-timesyncd.service.d/container.conf
+    systemctl daemon-reload
+fi
+
+mon=$(mktemp -t dbusmon.XXXXXX)
+trap "rm -f $mon" EXIT INT QUIT PIPE
+
+assert_ntp() {
+    V=$(busctl get-property org.freedesktop.timedate1 /org/freedesktop/timedate1 org.freedesktop.timedate1 NTP)
+    assert_eq "$V" "b $1"
+}
+
+start_mon() {
+    dbus-monitor --system "type='signal', member='PropertiesChanged', path='/org/freedesktop/timedate1'" > $mon &
+    MONPID=$!
+}
+
+wait_mon() {
+    for retry in $(seq 10); do
+        grep -q "$1" $mon && break
+        sleep 1
+    done
+    assert_in "$2" "$(cat $mon)"
+    kill $MONPID
+    wait
+}
+
+echo 'disable NTP'
+timedatectl set-ntp false
+assert_ntp false
+assert_rc 3 systemctl is-active --quiet systemd-timesyncd
+
+echo 'enable NTP'
+start_mon
+timedatectl set-ntp true
+wait_mon "NTP" "boolean true"
+assert_ntp true
+while [ "$(systemctl is-active systemd-timesyncd)" = "activating" ]; do sleep 1; done
+assert_rc 0 systemctl is-active --quiet systemd-timesyncd
+
+echo 're-disable NTP'
+start_mon
+timedatectl set-ntp false
+wait_mon "NTP" "boolean false"
+assert_ntp false
+assert_rc 3 systemctl is-active --quiet systemd-timesyncd
