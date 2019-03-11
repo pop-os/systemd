@@ -330,6 +330,7 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
+         dpkg (>= 1.19.3),
          libudev1 (= ${binary:Version}),
          lsb-base (>= 3.0-6),
          util-linux (>= 2.27.1),
