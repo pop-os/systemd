@@ -168,6 +168,7 @@ wait_mon() {
 
 echo 'disable NTP'
 timedatectl set-ntp false
+while systemctl is-active --quiet systemd-timesyncd; do sleep 1; done
 assert_ntp false
 assert_rc 3 systemctl is-active --quiet systemd-timesyncd
 
