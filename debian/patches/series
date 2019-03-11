@@ -8,6 +8,7 @@ networkd-test-ignore-failures-of-test_route_only_dns-in-c.patch
 timedate-fix-emitted-value-when-ntp-client-is-enabled-dis.patch
 cgtop-Fix-processing-of-controllers-other-than-CPU.patch
 udev-restore-debug-level-when-logging-a-failure-in-the-ex.patch
+remove-.-path-components-from-required-mount-paths.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
