@@ -25,9 +25,6 @@ Section "Device"
     Driver "dummy"
 EndSection
 EOF
-    # avoid error messages about "render" group, which does not exist (that
-    # patch is reverted in Debian)
-    addgroup --quiet --system render
 
 
     AUTOPKGTEST_REBOOT_MARK=0
