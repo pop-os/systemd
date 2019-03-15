@@ -1,3 +1,50 @@
+systemd (241-2) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/boot-smoke: Create journal and udevdb artifacts on all
+    failures
+  * autopkgtests: Replace obsolete $ADT_* variables
+  * networkd-test: Ignore failures of test_route_only_dns* in containers.
+    This test exposes a race condition when running in LXC, see issue #11848
+    for details. Until that is understood and fixed, skip the test as it's
+    not a recent regression. (Closes: #924539)
+  * Bump Standards-Version to 4.3.0.
+    No changes necessary.
+  * debian/tests/boot-smoke: Only check current boot for connection timeouts.
+    Otherwise we'll catch some
+        Failed to resolve group 'render': Connection timed out
+    messages that happen in earlier boots during VM setup, before the
+    "render" group is created.
+    Fixes https://github.com/systemd/systemd/issues/11875
+  * timedated: Fix emitted value when ntp client is enabled/disabled.
+    Fixes a regression introduced in 241.
+  * debian/tests/timedated: Check enabling/disabling NTP.
+    Assert that `timedatectl set-ntp` correctly controls the service, sets
+    the `org.freedesktop.timedate1 NTP` property, and sends the right
+    `PropertiesChanged` signal.
+    This reproduces <https://github.com/systemd/systemd/issues/11944> and
+    also the earlier <https://github.com/systemd/systemd/issues/9672>.
+
+  [ Michael Biebl ]
+  * Disable fallback DNS servers in resolved (Closes: #923081)
+  * cgtop: Fix processing of controllers other than CPU (Closes: #921280)
+  * udev: Restore debug level when logging a failure in the external prog
+    called by IMPORT{program} (Closes: #924199)
+  * core: Remove "." path components from required mount paths.
+    Fixes mount related failures when a user's home directory contains "/./"
+    (Closes: #923881)
+  * udev.init: Use new s-s-d --notify-await to start udev daemon.
+    Fixes a race condition during startup under SysV init.
+    Add versioned dependency on dpkg (>= 1.19.3) to ensure that a version
+    of start-stop-daemon which supports --notify-await is installed.
+    (Closes: #908796)
+  * Make /dev/dri/renderD* accessible to group "render"
+    Follow upstream and make render nodes available to a dedicated system
+    group "render" instead of "video". Keep the uaccess tag for local,
+    active users.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 15 Mar 2019 18:33:54 +0100
+
 systemd (241-1) unstable; urgency=medium
 
   [ Adam Borowski ]
