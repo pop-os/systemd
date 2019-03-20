@@ -256,7 +256,7 @@ endif
 	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd); do \
 		echo "... from $$pkg..."; \
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
-		(cd debian/$$pkg; find -mindepth 1 -type d) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
+		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
 
 	# Ubuntu specific files
