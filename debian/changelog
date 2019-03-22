@@ -1,3 +1,11 @@
+systemd (240-6ubuntu3) disco; urgency=medium
+
+  * virt: detect WSL environment as a container (LP: #1816753)
+  * debian/control: Update Vcs-{Browser|Git} to Ubuntu's packaging repository
+  * debian/gbp.conf: Set tag format to ubuntu/*
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 22 Mar 2019 18:39:48 +0100
+
 systemd (240-6ubuntu2) disco; urgency=medium
 
   * d/p/network-remove-routing-policy-rule-from-foreign-rule.patch
