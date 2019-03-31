@@ -82,10 +82,11 @@ Depends: systemd-sysv,
   cron,
   network-manager,
   busybox-static,
+  rsyslog,
   apparmor,
   pkg-config,
   python3
-Restrictions: needs-root, isolation-machine, breaks-testbed
+Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: udev
 Depends: systemd-tests,
