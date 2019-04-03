@@ -13,6 +13,8 @@ Re-add-uaccess-tag-for-dev-dri-renderD.patch
 udev-run-programs-in-the-specified-order.patch
 bash-completion-use-default-completion-for-redirect-opera.patch
 networkd-clarify-that-IPv6-RA-uses-our-own-stack-no-the-k.patch
+network-remove-routing-policy-rule-from-foreign-rule-data.patch
+network-do-not-remove-rule-when-it-is-requested-by-existi.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
