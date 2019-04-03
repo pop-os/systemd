@@ -516,6 +516,9 @@ class CLITest(unittest.TestCase):
 def pre_boot_setup():
     '''Test setup before rebooting testbed'''
 
+    subprocess.check_call(['systemctl', 'set-default', 'graphical.target'],
+                          stderr=subprocess.STDOUT)
+
     # create a few temporary files to ensure that they get cleaned up on boot
     os.close(os.open('/tmp/newfile.test',
                      os.O_CREAT | os.O_EXCL | os.O_WRONLY))
