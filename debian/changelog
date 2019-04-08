@@ -1,3 +1,45 @@
+systemd (241-3) unstable; urgency=high
+
+  [ Michael Biebl ]
+  * Drop systemd-shim alternative from libpam-systemd.
+    A fixed systemd-shim package which works with newer versions of systemd
+    is unlikely to happen given that the systemd-shim package has been
+    removed from the archive. Drop the alternative dependency from
+    libpam-systemd accordingly.
+  * Properly remove duplicate directories from systemd package.
+    When removing duplicate directories from the systemd package, sort the
+    list of directories in reverse order so we properly delete nested
+    directories.
+  * udev: Run programs in the specified order (Closes: #925190)
+  * bash-completion: Use default completion for redirect operators
+    (Closes: #924541)
+  * networkd: Clarify that IPv6 RA uses our own stack, no the kernel's
+    (Closes: #815582)
+  * Revert "Drop systemd-timesyncd.service.d/disable-with-time-daemon.conf"
+    Apparently Conflicts= are not a reliable mechanism to ensure alternative
+    NTP implementations take precedence over systemd-timesyncd.
+    (Closes: #902026)
+  * network: Fix routing policy rule issue.
+    When multiple links request a routing policy, make sure they are all
+    applied correctly. (Closes: #924406)
+  * pam-systemd: Use secure_getenv() rather than getenv()
+    Fixes a vulnerability in the systemd PAM module which insecurely uses
+    the environment and lacks seat verification permitting spoofing an
+    active session to PolicyKit. (CVE-2019-3842)
+
+  [ Martin Pitt ]
+  * Enable udev autopkgtest in containers.
+    This test doesn't actually need udev.service (which is disabled in
+    containers) and works fine in LXC.
+  * Enable boot-and-service autopkgtest in containers
+    - Skip tests which can't work in containers.
+    - Add missing rsyslog test dependency.
+    - e2scrub_reap.service fails in containers, ignore (filed as #926138)
+    - Relax pgrep pattern for gdm, as there's no wayland session in
+      containers.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 08 Apr 2019 12:59:32 +0200
+
 systemd (241-2) unstable; urgency=medium
 
   [ Martin Pitt ]
