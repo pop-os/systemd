@@ -50,6 +50,7 @@ Move-link_check_ready-to-later-in-the-file.patch
 Install-routes-after-addresses-are-ready.patch
 tests-Add-test-for-IPv6-source-routing.patch
 pam-systemd-use-secure_getenv-rather-than-getenv.patch
+core-when-we-uninstall-a-job-add-unit-to-dbus-queue.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
