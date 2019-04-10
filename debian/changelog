@@ -1,3 +1,17 @@
+systemd (240-6ubuntu4) disco; urgency=medium
+
+  * pam-systemd: use secure_getenv() rather than getenv()
+    CVE-2019-3842
+    File: debian/patches/pam-systemd-use-secure_getenv-rather-than-getenv.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f3291e9e8c3eafd0c8921cb26a0d5ee0fd563b3c
+
+  * core: queue jobs on uninstall to generate PropertiesChanged signal.
+    (LP: #1816812)
+    File: debian/patches/core-when-we-uninstall-a-job-add-unit-to-dbus-queue.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=241deca98fb9a0f1ba9a6ba781f738fb31a3bd80
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 10 Apr 2019 01:06:03 +0100
+
 systemd (240-6ubuntu3) disco; urgency=medium
 
   * virt: detect WSL environment as a container (LP: #1816753)
