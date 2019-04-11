@@ -316,7 +316,6 @@ Depends: ${shlibs:Depends},
          adduser,
          dpkg (>= 1.19.3) | systemd-sysv,
          libudev1 (= ${binary:Version}),
-         lsb-base (>= 3.0-6),
          util-linux (>= 2.27.1),
          s390-tools (>> 1.6.2) [s390],
 Conflicts: hal
