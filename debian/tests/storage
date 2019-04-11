@@ -14,6 +14,8 @@ from glob import glob
 
 @unittest.skipIf(os.path.isdir('/sys/module/scsi_debug'),
                  'The scsi_debug module is already loaded')
+@unittest.skipIf(subprocess.call(['modinfo', 'scsi_debug'], stdout=subprocess.DEVNULL) != 0,
+                 'The scsi_debug module is not available')
 class FakeDriveTestBase(unittest.TestCase):
     @classmethod
     def setUpClass(klass):
@@ -32,7 +34,9 @@ class FakeDriveTestBase(unittest.TestCase):
     @classmethod
     def tearDownClass(klass):
         # create a fake SCSI hard drive
-        subprocess.check_call(['rmmod', 'scsi_debug'])
+        # if this fails to remove the module, will not be able to rerun this test again
+        # but this is not critical to cleanup everything, if the tests passed otherwise
+        subprocess.call(['rmmod', 'scsi_debug'])
 
     def tearDown(self):
         # clear drive
