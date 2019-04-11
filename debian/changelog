@@ -1,3 +1,67 @@
+systemd (240-6ubuntu5) disco; urgency=medium
+
+  * systemd-stable: cherrypick many bugfixes from the v240-stable branch.
+    Includes many documentation fixes, memory safety (use after free, read
+    overruns, etc), networkd wireguard fixes, POSIX ACL fix which is preventing adm
+    group from reading journals (LP: #1824342), journal dropping caches
+    improvement, fixes regressions in udevadm / machinectl command line parsing.
+    Files:
+    - debian/patches/Add-missing-dash-to-all-option-in-the-timedatectl-man-pag.patch
+    - debian/patches/Add-note-about-transactions-being-genereated-independentl.patch
+    - debian/patches/Change-job-mode-of-manager-triggered-restarts-to-JOB_REPL.patch
+    - debian/patches/Fix-omission-in-docs.patch
+    - debian/patches/Log-the-job-being-merged.patch
+    - debian/patches/NEWS-document-deprecation-of-PermissionsStartOnly-in-v240.patch
+    - debian/patches/NEWS-retroactively-describe-.include-deprecation.patch
+    - debian/patches/Update-systemd-system.conf.xml.patch
+    - debian/patches/basic-prioq-add-prioq_peek_item.patch
+    - debian/patches/core-Fix-EOPNOTSUPP-emergency-action-error-string.patch
+    - debian/patches/core-Fix-return-argument-check-for-parse_emergency_action.patch
+    - debian/patches/core-mount-do-not-add-Before-local-fs.target-or-remote-fs.patch
+    - debian/patches/core-mount-move-static-function-earlier-in-file.patch
+    - debian/patches/curl-util-fix-use-after-free.patch
+    - debian/patches/ethtool-Make-sure-advertise-is-actually-set-when-autonego.patch
+    - debian/patches/journal-avoid-buffer-overread-when-locale-name-is-too-lon.patch
+    - debian/patches/journal-limit-the-number-of-entries-in-the-cache-based-on.patch
+    - debian/patches/journald-periodically-drop-cache-for-all-dead-PIDs.patch
+    - debian/patches/machinectl-fix-argument-index-in-error-log.patch
+    - debian/patches/man-Fix-a-typo-in-systemd.exec.xml.patch
+    - debian/patches/man-fix-reference.patch
+    - debian/patches/man-fix-volume-num-of-journalctl.patch
+    - debian/patches/man-update-DefaultDependency-in-systemd.mount-5.patch
+    - debian/patches/netlink-set-maximum-size-of-WGDEVICE_A_IFNAME.patch
+    - debian/patches/network-make-Link-and-NetDev-always-have-the-valid-poiter.patch
+    - debian/patches/network-unset-Network-manager-when-loading-.network-file-.patch
+    - debian/patches/network-wireguard-rename-and-split-set_wireguard_interfac.patch
+    - debian/patches/networkd-wait-for-kernel-to-reply-ipv6-peer-address.patch
+    - debian/patches/nspawn-ignore-SIGPIPE-for-nspawn-itself.patch
+    - debian/patches/pager-improve-english-a-bit.patch
+    - debian/patches/pid1-fix-cleanup-of-stale-implicit-deps-based-on-proc-sel.patch
+    - debian/patches/procfs-util-expose-functionality-to-query-total-memory.patch
+    - debian/patches/pull-fix-invalid-error-check.patch
+    - debian/patches/shared-Revert-commit-49fe5c099-in-parts-for-function-pars.patch
+    - debian/patches/shared-dissect-image-make-sure-that-we-don-t-truncate-dev.patch
+    - debian/patches/test-execute-unset-HOME-before-testing.patch
+    - debian/patches/udev-do-logging-before-setting-variables-to-NULL.patch
+    - debian/patches/udev-val-may-be-NULL-use-strempty.patch
+    - debian/patches/udevadm-info-a-should-enumerate-sysfs-attributes-not-envs.patch
+    - debian/patches/udevd-use-worker_free-on-failure-in-worker_new.patch
+    - debian/patches/units-make-sure-initrd-cleanup.service-terminates-before-.patch
+    - debian/patches/wait-online-do-not-fail-if-we-receive-invalid-messages.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2b3db732ba7e5418d45ca42884e8d075189f2724
+
+  * Only test that gdm3 comes up on amd64. Stalls on other arches.
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=97cb13685dfb353045c449ec5d6d1df60f661079
+
+  * tests/storage: make the test more resilient.
+    Skip if the scsi_debug module is not available (like on custom kernels). Do not
+    fail the tests if removing the module fail, at the end of the test run.
+    File: debian/tests/storage
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c08dcb1ffe372acd3a21496758a1984ff78dcdd4
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 11 Apr 2019 14:44:08 +0100
+
 systemd (240-6ubuntu4) disco; urgency=medium
 
   * pam-systemd: use secure_getenv() rather than getenv()
