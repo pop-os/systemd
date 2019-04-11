@@ -1,0 +1,26 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 1 Feb 2019 12:49:26 +0100
+Subject: test-execute: unset $HOME before testing
+
+Otherwise, test for %h specifier may fail.
+
+Fixes #11609.
+
+(cherry picked from commit 3285320786c53eba186cafdc39ac93aafe09d089)
+(cherry picked from commit 04f173da3824b0f74ad5917158899dbe2174791b)
+---
+ src/test/test-execute.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 2115061..e8ede3e 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -769,6 +769,7 @@ int main(int argc, char *argv[]) {
+         (void) unsetenv("USER");
+         (void) unsetenv("LOGNAME");
+         (void) unsetenv("SHELL");
++        (void) unsetenv("HOME");
+ 
+         can_unshare = have_namespaces();
+ 

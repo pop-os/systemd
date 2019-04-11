@@ -1,0 +1,82 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 17 Jan 2019 21:17:51 +0100
+Subject: core/mount: move static function earlier in file
+
+No functional change.
+
+(cherry picked from commit b7bbf89025d40cd73beccbb68fa1719d53aa8ab5)
+(cherry picked from commit a24ec0355cc76c23db5b4fbcdafbf29cfe847a78)
+---
+ src/core/mount.c | 52 ++++++++++++++++++++++++++--------------------------
+ 1 file changed, 26 insertions(+), 26 deletions(-)
+
+diff --git a/src/core/mount.c b/src/core/mount.c
+index 4c5a029..d7ecfd0 100644
+--- a/src/core/mount.c
++++ b/src/core/mount.c
+@@ -251,6 +251,32 @@ _pure_ static MountParameters* get_mount_parameters(Mount *m) {
+         return get_mount_parameters_fragment(m);
+ }
+ 
++static int update_parameters_proc_self_mount_info(
++                Mount *m,
++                const char *what,
++                const char *options,
++                const char *fstype) {
++
++        MountParameters *p;
++        int r, q, w;
++
++        p = &m->parameters_proc_self_mountinfo;
++
++        r = free_and_strdup(&p->what, what);
++        if (r < 0)
++                return r;
++
++        q = free_and_strdup(&p->options, options);
++        if (q < 0)
++                return q;
++
++        w = free_and_strdup(&p->fstype, fstype);
++        if (w < 0)
++                return w;
++
++        return r > 0 || q > 0 || w > 0;
++}
++
+ static int mount_add_mount_dependencies(Mount *m) {
+         MountParameters *pm;
+         Unit *other;
+@@ -1428,32 +1454,6 @@ static int mount_dispatch_timer(sd_event_source *source, usec_t usec, void *user
+         return 0;
+ }
+ 
+-static int update_parameters_proc_self_mount_info(
+-                Mount *m,
+-                const char *what,
+-                const char *options,
+-                const char *fstype) {
+-
+-        MountParameters *p;
+-        int r, q, w;
+-
+-        p = &m->parameters_proc_self_mountinfo;
+-
+-        r = free_and_strdup(&p->what, what);
+-        if (r < 0)
+-                return r;
+-
+-        q = free_and_strdup(&p->options, options);
+-        if (q < 0)
+-                return q;
+-
+-        w = free_and_strdup(&p->fstype, fstype);
+-        if (w < 0)
+-                return w;
+-
+-        return r > 0 || q > 0 || w > 0;
+-}
+-
+ static int mount_setup_new_unit(
+                 Manager *m,
+                 const char *name,

@@ -1,0 +1,75 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 22 Jan 2019 17:30:48 +0100
+Subject: journald: periodically drop cache for all dead PIDs
+
+In normal use, this allow us to drop dead entries from the cache and reduces
+the cache size so that we don't evict entries unnecessarily. The time limit is
+there mostly to serve as a guard against malicious logging from many different
+PIDs.
+
+(cherry picked from commit 91714a7f427a6c9c5c3be8b3819fee45050028f3)
+(cherry picked from commit 034c58e6de60ba27a8715c350de881a2f9a4e030)
+---
+ src/journal/journald-context.c | 28 ++++++++++++++++++++++++++--
+ src/journal/journald-server.h  |  2 ++
+ 2 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/src/journal/journald-context.c b/src/journal/journald-context.c
+index 09fc12f..54568ae 100644
+--- a/src/journal/journald-context.c
++++ b/src/journal/journald-context.c
+@@ -581,15 +581,39 @@ refresh:
+ }
+ 
+ static void client_context_try_shrink_to(Server *s, size_t limit) {
++        ClientContext *c;
++        usec_t t;
++
+         assert(s);
+ 
++        /* Flush any cache entries for PIDs that have already moved on. Don't do this
++         * too often, since it's a slow process. */
++        t = now(CLOCK_MONOTONIC);
++        if (s->last_cache_pid_flush + MAX_USEC < t) {
++                unsigned n = prioq_size(s->client_contexts_lru), idx = 0;
++
++                /* We do a number of iterations based on the initial size of the prioq.  When we remove an
++                 * item, a new item is moved into its places, and items to the right might be reshuffled.
++                 */
++                for (unsigned i = 0; i < n; i++) {
++                        c = prioq_peek_by_index(s->client_contexts_lru, idx);
++
++                        assert(c->n_ref == 0);
++
++                        if (!pid_is_unwaited(c->pid))
++                                client_context_free(s, c);
++                        else
++                                idx ++;
++                }
++
++                s->last_cache_pid_flush = t;
++        }
++
+         /* Bring the number of cache entries below the indicated limit, so that we can create a new entry without
+          * breaching the limit. Note that we only flush out entries that aren't pinned here. This means the number of
+          * cache entries may very well grow beyond the limit, if all entries stored remain pinned. */
+ 
+         while (hashmap_size(s->client_contexts) > limit) {
+-                ClientContext *c;
+-
+                 c = prioq_pop(s->client_contexts_lru);
+                 if (!c)
+                         break; /* All remaining entries are pinned, give up */
+diff --git a/src/journal/journald-server.h b/src/journal/journald-server.h
+index 6d4847b..3f6b42d 100644
+--- a/src/journal/journald-server.h
++++ b/src/journal/journald-server.h
+@@ -161,6 +161,8 @@ struct Server {
+         Hashmap *client_contexts;
+         Prioq *client_contexts_lru;
+ 
++        usec_t last_cache_pid_flush;
++
+         ClientContext *my_context; /* the context of journald itself */
+         ClientContext *pid1_context; /* the context of PID 1 */
+ };

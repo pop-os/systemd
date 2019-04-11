@@ -1,0 +1,23 @@
+From: Jonathan Roemer <jon.roemera@gmail.com>
+Date: Fri, 25 Jan 2019 18:46:15 -0600
+Subject: Add missing dash to --all option in the timedatectl man page
+
+(cherry picked from commit ab14760ed778b3bd9206550dc5d794c4c4249ea4)
+(cherry picked from commit 05377cafd8a0c8d31e1f7003f6e62d35c32bf1e8)
+---
+ man/timedatectl.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/man/timedatectl.xml b/man/timedatectl.xml
+index a629024..b75b4cc 100644
+--- a/man/timedatectl.xml
++++ b/man/timedatectl.xml
+@@ -82,7 +82,7 @@
+ 
+       <varlistentry>
+         <term><option>-a</option></term>
+-        <term><option>-all</option></term>
++        <term><option>--all</option></term>
+ 
+         <listitem><para>When showing properties of
+         <citerefentry><refentrytitle>systemd-timesyncd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,

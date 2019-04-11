@@ -1,0 +1,41 @@
+From: Susant Sahani <ssahani@gmail.com>
+Date: Mon, 10 Dec 2018 22:35:40 +0530
+Subject: networkd: wait for kernel to reply ipv6 peer address
+
+When we configure address with peer, peer address is repliedby kernel.
+Hence add the peer when it is available.
+
+Closes #9130.
+
+(cherry picked from commit dfef713f3e390ced671ce0ee87782cc373c937d0)
+(cherry picked from commit 32e741bc156ef3141fb6a16874a58c78bb132a0c)
+---
+ src/network/networkd-address.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/network/networkd-address.c b/src/network/networkd-address.c
+index 9f0a22b..af11c6f 100644
+--- a/src/network/networkd-address.c
++++ b/src/network/networkd-address.c
+@@ -657,8 +657,7 @@ int address_configure(
+         if (r < 0)
+                 return r;
+ 
+-        r = netlink_call_async(link->manager->rtnl, NULL, req, callback,
+-                               link_netlink_destroy_callback, link);
++        r = netlink_call_async(link->manager->rtnl, NULL, req, callback, link_netlink_destroy_callback, link);
+         if (r < 0) {
+                 address_release(address);
+                 return log_error_errno(r, "Could not send rtnetlink message: %m");
+@@ -666,7 +665,10 @@ int address_configure(
+ 
+         link_ref(link);
+ 
+-        r = address_add(link, address->family, &address->in_addr, address->prefixlen, NULL);
++        if (address->family == AF_INET6 && !in_addr_is_null(address->family, &address->in_addr_peer))
++                r = address_add(link, address->family, &address->in_addr_peer, address->prefixlen, NULL);
++        else
++                r = address_add(link, address->family, &address->in_addr, address->prefixlen, NULL);
+         if (r < 0) {
+                 address_release(address);
+                 return log_error_errno(r, "Could not add address: %m");

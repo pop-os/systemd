@@ -1,0 +1,23 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 14 Jan 2019 04:43:33 +0900
+Subject: netlink: set maximum size of WGDEVICE_A_IFNAME
+
+(cherry picked from commit 33c2ea801958f03679e2dcfb15d88719b8ae7b85)
+(cherry picked from commit 5a9e52c97672405872a26b00192712e927eacffa)
+---
+ src/libsystemd/sd-netlink/netlink-types.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/libsystemd/sd-netlink/netlink-types.c b/src/libsystemd/sd-netlink/netlink-types.c
+index cd5cdcc..bb7e8c3 100644
+--- a/src/libsystemd/sd-netlink/netlink-types.c
++++ b/src/libsystemd/sd-netlink/netlink-types.c
+@@ -732,7 +732,7 @@ static const NLTypeSystem genl_wireguard_peer_type_system = {
+ 
+ static const NLType genl_wireguard_set_device_types[] = {
+         [WGDEVICE_A_IFINDEX] = { .type = NETLINK_TYPE_U32 },
+-        [WGDEVICE_A_IFNAME] = { .type = NETLINK_TYPE_STRING },
++        [WGDEVICE_A_IFNAME] = { .type = NETLINK_TYPE_STRING, .size = IFNAMSIZ-1 },
+         [WGDEVICE_A_FLAGS] = { .type = NETLINK_TYPE_U32 },
+         [WGDEVICE_A_PRIVATE_KEY] = { .size = WG_KEY_LEN },
+         [WGDEVICE_A_LISTEN_PORT] = { .type = NETLINK_TYPE_U16 },

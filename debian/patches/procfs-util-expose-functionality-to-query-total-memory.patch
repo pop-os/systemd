@@ -1,0 +1,102 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 22 Jan 2019 15:43:07 +0100
+Subject: procfs-util: expose functionality to query total memory
+
+procfs_memory_get_current is renamed to procfs_memory_get_used, because
+"current" can mean anything, including total memory, used memory, and free
+memory, as long as the value is up to date.
+
+No functional change.
+
+(cherry picked from commit c482724aa5c5d0b1391fcf958a9a3ea6ce73a085)
+(cherry picked from commit 3cb04d8af1c61888e1a5b405c1435f330726c882)
+---
+ src/basic/procfs-util.c     | 9 +++++----
+ src/basic/procfs-util.h     | 5 ++++-
+ src/cgtop/cgtop.c           | 2 +-
+ src/core/cgroup.c           | 2 +-
+ src/test/test-procfs-util.c | 2 +-
+ 5 files changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/src/basic/procfs-util.c b/src/basic/procfs-util.c
+index a159e34..7aaf95b 100644
+--- a/src/basic/procfs-util.c
++++ b/src/basic/procfs-util.c
+@@ -201,13 +201,11 @@ int procfs_cpu_get_usage(nsec_t *ret) {
+         return 0;
+ }
+ 
+-int procfs_memory_get_current(uint64_t *ret) {
++int procfs_memory_get(uint64_t *ret_total, uint64_t *ret_used) {
+         uint64_t mem_total = UINT64_MAX, mem_free = UINT64_MAX;
+         _cleanup_fclose_ FILE *f = NULL;
+         int r;
+ 
+-        assert(ret);
+-
+         f = fopen("/proc/meminfo", "re");
+         if (!f)
+                 return -errno;
+@@ -262,6 +260,9 @@ int procfs_memory_get_current(uint64_t *ret) {
+         if (mem_free > mem_total)
+                 return -EINVAL;
+ 
+-        *ret = (mem_total - mem_free) * 1024U;
++        if (ret_total)
++                *ret_total = mem_total * 1024U;
++        if (ret_used)
++                *ret_used = (mem_total - mem_free) * 1024U;
+         return 0;
+ }
+diff --git a/src/basic/procfs-util.h b/src/basic/procfs-util.h
+index f697ed9..5a44e9e 100644
+--- a/src/basic/procfs-util.h
++++ b/src/basic/procfs-util.h
+@@ -11,4 +11,7 @@ int procfs_tasks_get_current(uint64_t *ret);
+ 
+ int procfs_cpu_get_usage(nsec_t *ret);
+ 
+-int procfs_memory_get_current(uint64_t *ret);
++int procfs_memory_get(uint64_t *ret_total, uint64_t *ret_used);
++static inline int procfs_memory_get_used(uint64_t *ret) {
++        return procfs_memory_get(NULL, ret);
++}
+diff --git a/src/cgtop/cgtop.c b/src/cgtop/cgtop.c
+index 5abfab0..224be84 100644
+--- a/src/cgtop/cgtop.c
++++ b/src/cgtop/cgtop.c
+@@ -291,7 +291,7 @@ static int process(
+         } else if (streq(controller, "memory")) {
+ 
+                 if (is_root_cgroup(path)) {
+-                        r = procfs_memory_get_current(&g->memory);
++                        r = procfs_memory_get_used(&g->memory);
+                         if (r < 0)
+                                 return r;
+                 } else {
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index 52324f8..3742c52 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -2780,7 +2780,7 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
+ 
+         /* The root cgroup doesn't expose this information, let's get it from /proc instead */
+         if (unit_has_host_root_cgroup(u))
+-                return procfs_memory_get_current(ret);
++                return procfs_memory_get_used(ret);
+ 
+         if ((u->cgroup_realized_mask & CGROUP_MASK_MEMORY) == 0)
+                 return -ENODATA;
+diff --git a/src/test/test-procfs-util.c b/src/test/test-procfs-util.c
+index 08af380..1d06129 100644
+--- a/src/test/test-procfs-util.c
++++ b/src/test/test-procfs-util.c
+@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
+         assert_se(procfs_cpu_get_usage(&nsec) >= 0);
+         log_info("Current system CPU time: %s", format_timespan(buf, sizeof(buf), nsec/NSEC_PER_USEC, 1));
+ 
+-        assert_se(procfs_memory_get_current(&v) >= 0);
++        assert_se(procfs_memory_get_used(&v) >= 0);
+         log_info("Current memory usage: %s", format_bytes(buf, sizeof(buf), v));
+ 
+         assert_se(procfs_tasks_get_current(&v) >= 0);

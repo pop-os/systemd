@@ -1,0 +1,37 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sun, 27 Jan 2019 09:35:36 +0100
+Subject: shared/dissect-image: make sure that we don't truncate device name
+
+gcc-9 complains that the string may be truncated when written into the output
+structure. This shouldn't happen, but if it did, in principle we could remove a
+different structure (with a matching name prefix). Let's just refuse the
+operation if the name doesn't fit.
+
+(cherry picked from commit cd8c98d7a75435e5b3eebc927560788acef27f60)
+(cherry picked from commit bd45a676186709c8415849ca6a4bbc25aee28a1f)
+---
+ src/shared/dissect-image.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index 3a46faf..d340487 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -1178,7 +1178,6 @@ int dissected_image_decrypt_interactively(
+ 
+ #if HAVE_LIBCRYPTSETUP
+ static int deferred_remove(DecryptedPartition *p) {
+-
+         struct dm_ioctl dm = {
+                 .version = {
+                         DM_VERSION_MAJOR,
+@@ -1199,6 +1198,9 @@ static int deferred_remove(DecryptedPartition *p) {
+         if (fd < 0)
+                 return -errno;
+ 
++        if (strlen(p->name) > sizeof(dm.name))
++                return -ENAMETOOLONG;
++
+         strncpy(dm.name, p->name, sizeof(dm.name));
+ 
+         if (ioctl(fd, DM_DEV_REMOVE, &dm))

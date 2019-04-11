@@ -1,0 +1,35 @@
+From: Franck Bui <fbui@suse.com>
+Date: Mon, 28 Jan 2019 12:07:37 +0100
+Subject: units: make sure initrd-cleanup.service terminates before switching
+ to rootfs
+
+A follow-up for commit a8cb1dc3e0fa81aff.
+
+Commit a8cb1dc3e0fa81aff made sure that initrd-cleanup.service won't be stopped
+when initrd-switch-root.target is isolated.
+
+However even with this change, it might happen that initrd-cleanup.service
+survives the switch to rootfs (since it has no ordering constraints against
+initrd-switch-root.target) and is stopped right after when default.target is
+isolated. This led to initrd-cleanup.service entering in failed state as it
+happens when oneshot services are stopped.
+
+This patch along with a8cb1dc3e0fa81aff should fix issue #4343.
+
+Fixes: #4343
+(cherry picked from commit e2c7c94ea35fe7e669afb51bfc2251158b522ea5)
+(cherry picked from commit 7cb978f8289f04b7fde7a6bdc5603b5003e3590d)
+---
+ units/initrd-switch-root.target | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/units/initrd-switch-root.target b/units/initrd-switch-root.target
+index ad82245..ea4f026 100644
+--- a/units/initrd-switch-root.target
++++ b/units/initrd-switch-root.target
+@@ -15,4 +15,4 @@ Requires=initrd-switch-root.service
+ Before=initrd-switch-root.service
+ AllowIsolate=yes
+ Wants=initrd-udevadm-cleanup-db.service initrd-root-fs.target initrd-fs.target systemd-journald.service initrd-cleanup.service
+-After=initrd-udevadm-cleanup-db.service initrd-root-fs.target initrd-fs.target emergency.service emergency.target
++After=initrd-udevadm-cleanup-db.service initrd-root-fs.target initrd-fs.target emergency.service emergency.target initrd-cleanup.service

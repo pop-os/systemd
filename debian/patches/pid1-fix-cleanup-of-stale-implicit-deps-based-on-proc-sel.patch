@@ -1,0 +1,58 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 17 Jan 2019 16:09:13 +0100
+Subject: pid1: fix cleanup of stale implicit deps based on
+ /proc/self/mountinfo
+
+The problem was introduced in a37422045fbb68ad68f734e5dc00e0a5b1759773:
+we have a unit which has a fragment, and when we'd update it based on
+/proc/self/mountinfo, we'd say that e.g. What=/dev/loop8 has origin-fragment.
+This commit changes two things:
+- origin-fragment is changed to origin-mountinfo-implicit
+- when we stop a unit, mountinfo information is flushed and all deps based
+  on it are dropped.
+
+The second step is important, because when we restart the unit, we want to
+notice that we have "fresh" mountinfo information. We could keep the old info
+around and solve this in a different way, but keeping stale information seems
+inelegant.
+
+Fixes #11342.
+
+(cherry picked from commit c52c2dc64f2443dd2e1f0cc82f577b68520ceb8f)
+(cherry picked from commit e2ab6edf56169f43db7842f83c8803c510615e4f)
+---
+ src/core/mount.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/mount.c b/src/core/mount.c
+index d7ecfd0..6df5d60 100644
+--- a/src/core/mount.c
++++ b/src/core/mount.c
+@@ -378,7 +378,8 @@ static int mount_add_device_dependencies(Mount *m) {
+          * automatically stopped when the device disappears suddenly. */
+         dep = mount_is_bound_to_device(m) ? UNIT_BINDS_TO : UNIT_REQUIRES;
+ 
+-        mask = m->from_fragment ? UNIT_DEPENDENCY_FILE : UNIT_DEPENDENCY_MOUNTINFO_IMPLICIT;
++        /* We always use 'what' from /proc/self/mountinfo if mounted */
++        mask = m->from_proc_self_mountinfo ? UNIT_DEPENDENCY_MOUNTINFO_IMPLICIT : UNIT_DEPENDENCY_FILE;
+ 
+         r = unit_add_node_dependency(UNIT(m), p->what, device_wants_mount, dep, mask);
+         if (r < 0)
+@@ -849,6 +850,9 @@ static void mount_enter_dead(Mount *m, MountResult f) {
+         unit_unref_uid_gid(UNIT(m), true);
+ 
+         dynamic_creds_destroy(&m->dynamic_creds);
++
++        /* Any dependencies based on /proc/self/mountinfo are now stale */
++        unit_remove_dependencies(UNIT(m), UNIT_DEPENDENCY_MOUNTINFO_IMPLICIT);
+ }
+ 
+ static void mount_enter_mounted(Mount *m, MountResult f) {
+@@ -1844,6 +1848,7 @@ static int mount_dispatch_io(sd_event_source *source, int fd, uint32_t revents,
+                         }
+ 
+                         mount->from_proc_self_mountinfo = false;
++                        assert_se(update_parameters_proc_self_mount_info(mount, NULL, NULL, NULL) >= 0);
+ 
+                         switch (mount->state) {
+ 

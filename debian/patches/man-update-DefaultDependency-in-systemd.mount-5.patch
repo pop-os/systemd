@@ -1,0 +1,35 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 26 Jan 2019 13:05:27 +0100
+Subject: man: update DefaultDependency= in systemd.mount(5)
+
+Follow-up for d54bab90e64f70c1ecf9b0683a98adb8485ed09e and the
+previous commit.
+
+(cherry picked from commit 321cd1c17c511c771cab86d5244032b999aed261)
+(cherry picked from commit 9087a321308613cc9c4ff67122abe967a0561075)
+---
+ man/systemd.mount.xml | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/man/systemd.mount.xml b/man/systemd.mount.xml
+index 6d8c873..7355b13 100644
+--- a/man/systemd.mount.xml
++++ b/man/systemd.mount.xml
+@@ -131,11 +131,15 @@
+         <filename>umount.target</filename> in order to be stopped during shutdown.</para></listitem>
+ 
+         <listitem><para>Mount units referring to local file systems automatically gain
+-        an <varname>After=</varname> dependency on <filename>local-fs-pre.target</filename>.</para></listitem>
++        an <varname>After=</varname> dependency on <filename>local-fs-pre.target</filename>, and a
++        <varname>Before=</varname> dependency on <filename>local-fs.target</filename> unless
++        <option>nofail</option> mount option is set.</para></listitem>
+ 
+         <listitem><para>Network mount units
+         automatically acquire <varname>After=</varname> dependencies on <filename>remote-fs-pre.target</filename>,
+-        <filename>network.target</filename> and <filename>network-online.target</filename>. Towards the latter a
++        <filename>network.target</filename> and <filename>network-online.target</filename>, and gain a
++        <varname>Before=</varname> dependency on <filename>remote-fs.target</filename> unless
++        <option>nofail</option> mount option is set. Towards the latter a
+         <varname>Wants=</varname> unit is added as well.</para></listitem>
+       </itemizedlist>
+ 

@@ -1,0 +1,98 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 14 Jan 2019 00:30:37 +0900
+Subject: network: make Link and NetDev always have the valid poiter to
+ Manager
+
+c4397d94c3d94909188d82e086ebedf5d3690569 introduces
+link_detach_from_manager() and netdev_detach_from_manager(), and they
+set Link::manager or NetDev::manager NULL.
+But, at the time e.g. link is removed, hence link_drop() is called,
+there may be still some asynchronous netlink call is waiting, and
+their callbacks hit assertion.
+
+This make {link,netdev}_detach_from_manager() just drop all references
+from manager, but keep the pointer to manager.
+
+Fixes #11411.
+
+(cherry picked from commit 9e2bbf9915255770836d16cd99eeb6536297079d)
+(cherry picked from commit 629786915a8242923037a35393dd087e23ddda0b)
+---
+ src/network/netdev/netdev.c    | 9 +++++++--
+ src/network/netdev/netdev.h    | 1 +
+ src/network/netdev/wireguard.c | 6 ++----
+ src/network/networkd-link.c    | 2 --
+ 4 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/src/network/netdev/netdev.c b/src/network/netdev/netdev.c
+index f0e9d00..65959f4 100644
+--- a/src/network/netdev/netdev.c
++++ b/src/network/netdev/netdev.c
+@@ -148,11 +148,16 @@ static void netdev_callbacks_clear(NetDev *netdev) {
+         }
+ }
+ 
++bool netdev_is_managed(NetDev *netdev) {
++        if (!netdev || !netdev->manager || !netdev->ifname)
++                return false;
++
++        return hashmap_get(netdev->manager->netdevs, netdev->ifname) == netdev;
++}
++
+ static void netdev_detach_from_manager(NetDev *netdev) {
+         if (netdev->ifname && netdev->manager)
+                 hashmap_remove(netdev->manager->netdevs, netdev->ifname);
+-
+-        netdev->manager = NULL;
+ }
+ 
+ static NetDev *netdev_free(NetDev *netdev) {
+diff --git a/src/network/netdev/netdev.h b/src/network/netdev/netdev.h
+index bfe1094..d6524da 100644
+--- a/src/network/netdev/netdev.h
++++ b/src/network/netdev/netdev.h
+@@ -156,6 +156,7 @@ NetDev *netdev_ref(NetDev *netdev);
+ DEFINE_TRIVIAL_DESTRUCTOR(netdev_destroy_callback, NetDev, netdev_unref);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(NetDev*, netdev_unref);
+ 
++bool netdev_is_managed(NetDev *netdev);
+ int netdev_get(Manager *manager, const char *name, NetDev **ret);
+ int netdev_set_ifindex(NetDev *netdev, sd_netlink_message *newlink);
+ int netdev_get_mac(const char *ifname, struct ether_addr **ret);
+diff --git a/src/network/netdev/wireguard.c b/src/network/netdev/wireguard.c
+index 167cf65..45b7c7c 100644
+--- a/src/network/netdev/wireguard.c
++++ b/src/network/netdev/wireguard.c
+@@ -224,8 +224,7 @@ static int on_resolve_retry(sd_event_source *s, usec_t usec, void *userdata) {
+         w = WIREGUARD(netdev);
+         assert(w);
+ 
+-        if (!netdev->manager)
+-                /* The netdev is detached. */
++        if (!netdev_is_managed(netdev))
+                 return 0;
+ 
+         assert(!w->unresolved_endpoints);
+@@ -260,8 +259,7 @@ static int wireguard_resolve_handler(sd_resolve_query *q,
+         w = WIREGUARD(netdev);
+         assert(w);
+ 
+-        if (!netdev->manager)
+-                /* The netdev is detached. */
++        if (!netdev_is_managed(netdev))
+                 return 0;
+ 
+         if (ret != 0) {
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 1e00e8e..14ef73c 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -547,8 +547,6 @@ static void link_detach_from_manager(Link *link) {
+         hashmap_remove(link->manager->links, INT_TO_PTR(link->ifindex));
+         set_remove(link->manager->links_requesting_uuid, link);
+         link_clean(link);
+-
+-        link->manager = NULL;
+ }
+ 
+ static Link *link_free(Link *link) {

@@ -1,0 +1,89 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sat, 26 Jan 2019 11:27:18 +0100
+Subject: basic/prioq: add prioq_peek_item()
+
+(cherry picked from commit ef21b3b5bf824e652addf850bcfd9374c7b33ce8)
+(cherry picked from commit 5ae9eda582a81a2a3e53c5525e995848d1ac16db)
+---
+ src/basic/prioq.c     |  7 +++----
+ src/basic/prioq.h     |  8 +++++++-
+ src/test/test-prioq.c | 16 ++++++++++++++++
+ 3 files changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/src/basic/prioq.c b/src/basic/prioq.c
+index cfd08d5..76b27fa 100644
+--- a/src/basic/prioq.c
++++ b/src/basic/prioq.c
+@@ -259,15 +259,14 @@ int prioq_reshuffle(Prioq *q, void *data, unsigned *idx) {
+         return 1;
+ }
+ 
+-void *prioq_peek(Prioq *q) {
+-
++void *prioq_peek_by_index(Prioq *q, unsigned idx) {
+         if (!q)
+                 return NULL;
+ 
+-        if (q->n_items <= 0)
++        if (idx >= q->n_items)
+                 return NULL;
+ 
+-        return q->items[0].data;
++        return q->items[idx].data;
+ }
+ 
+ void *prioq_pop(Prioq *q) {
+diff --git a/src/basic/prioq.h b/src/basic/prioq.h
+index bba5c7c..1fb57bf 100644
+--- a/src/basic/prioq.h
++++ b/src/basic/prioq.h
+@@ -19,8 +19,14 @@ int prioq_put(Prioq *q, void *data, unsigned *idx);
+ int prioq_remove(Prioq *q, void *data, unsigned *idx);
+ int prioq_reshuffle(Prioq *q, void *data, unsigned *idx);
+ 
+-void *prioq_peek(Prioq *q) _pure_;
++void *prioq_peek_by_index(Prioq *q, unsigned idx) _pure_;
++static inline void *prioq_peek(Prioq *q) {
++        return prioq_peek_by_index(q, 0);
++}
+ void *prioq_pop(Prioq *q);
+ 
++#define PRIOQ_FOREACH_ITEM(q, p)                                \
++        for (unsigned _i = 0; (p = prioq_peek_by_index(q, _i)); _i++)
++
+ unsigned prioq_size(Prioq *q) _pure_;
+ bool prioq_isempty(Prioq *q) _pure_;
+diff --git a/src/test/test-prioq.c b/src/test/test-prioq.c
+index bc5fdd1..53c9e09 100644
+--- a/src/test/test-prioq.c
++++ b/src/test/test-prioq.c
+@@ -69,6 +69,11 @@ static void test_struct(void) {
+         assert_se(q = prioq_new((compare_func_t) test_compare));
+         assert_se(s = set_new(&test_hash_ops));
+ 
++        assert_se(prioq_peek(q) == NULL);
++        assert_se(prioq_peek_by_index(q, 0) == NULL);
++        assert_se(prioq_peek_by_index(q, 1) == NULL);
++        assert_se(prioq_peek_by_index(q, (unsigned) -1) == NULL);
++
+         for (i = 0; i < SET_SIZE; i++) {
+                 assert_se(t = new0(struct test, 1));
+                 t->value = (unsigned) rand();
+@@ -79,6 +84,17 @@ static void test_struct(void) {
+                         assert_se(set_consume(s, t) >= 0);
+         }
+ 
++        for (i = 0; i < SET_SIZE; i++)
++                assert_se(prioq_peek_by_index(q, i));
++        assert_se(prioq_peek_by_index(q, SET_SIZE) == NULL);
++
++        unsigned count = 0;
++        PRIOQ_FOREACH_ITEM(q, t) {
++                assert_se(t);
++                count++;
++        }
++        assert_se(count == SET_SIZE);
++
+         while ((t = set_steal_first(s))) {
+                 assert_se(prioq_remove(q, t, &t->idx) == 1);
+                 assert_se(prioq_remove(q, t, &t->idx) == 0);

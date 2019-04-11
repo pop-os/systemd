@@ -1,0 +1,25 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 6 Feb 2019 16:17:59 +0100
+Subject: pull: fix invalid error check
+
+This fixes a bug introduced by 0d94088e4e9e00f5ca9afdb8e68c94558fe23268.
+
+(cherry picked from commit 9b5b4bed1778d16680d97b73a4555568d956e588)
+(cherry picked from commit 9b130fa54c67855facb977c80a810607c61653e0)
+---
+ src/import/pull-job.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/import/pull-job.c b/src/import/pull-job.c
+index a44e0a7..6881bd6 100644
+--- a/src/import/pull-job.c
++++ b/src/import/pull-job.c
+@@ -537,7 +537,7 @@ int pull_job_new(PullJob **ret, const char *url, CurlGlue *glue, void *userdata)
+         assert(ret);
+ 
+         u = strdup(url);
+-        if (u)
++        if (!u)
+                 return -ENOMEM;
+ 
+         j = new(PullJob, 1);

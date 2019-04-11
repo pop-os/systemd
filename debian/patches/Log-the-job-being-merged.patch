@@ -1,0 +1,49 @@
+From: bl33pbl0p <bl0pbl33p@gmail.com>
+Date: Wed, 16 Jan 2019 00:03:22 +0000
+Subject: Log the job being merged
+
+Makes it easier to understand what was merged (and easier to realize why).
+
+Example is a start job running, and another unit triggering a verify-active job. It is not clear what job was it that from baz.service that merged into the installed job for bar.service in the debug logs. This makes it useful when debugging issues.
+
+Jan 15 11:45:58 jupiter systemd[1218]: baz.service: Trying to enqueue job baz.service/start/replace
+Jan 15 11:45:58 jupiter systemd[1218]: baz.service: Installed new job baz.service/start as 498
+Jan 15 11:45:58 jupiter systemd[1218]: bar.service: Merged into installed job bar.service/start as 497
+Jan 15 11:45:58 jupiter systemd[1218]: baz.service: Enqueued job baz.service/start as 498
+
+It becomes:
+Jan 15 11:45:58 jupiter systemd[1218]: bar.service: Merged bar.service/verify-active into installed job bar.service/start as 497
+
+(cherry picked from commit 28d78d07261bdfebbf36f7136bbb0d0f5f2029f1)
+(cherry picked from commit 9d68d722c6ff513d00bcaf4c8714bc3383770014)
+---
+ src/core/job.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/job.c b/src/core/job.c
+index fc212d0..d820646 100644
+--- a/src/core/job.c
++++ b/src/core/job.c
+@@ -208,8 +208,9 @@ Job* job_install(Job *j) {
+                             (job_type_allows_late_merge(j->type) && job_type_is_superset(uj->type, j->type))) {
+                                 job_merge_into_installed(uj, j);
+                                 log_unit_debug(uj->unit,
+-                                               "Merged into installed job %s/%s as %u",
+-                                               uj->unit->id, job_type_to_string(uj->type), (unsigned) uj->id);
++                                               "Merged %s/%s into installed job %s/%s as %"PRIu32,
++                                               j->unit->id, job_type_to_string(j->type), uj->unit->id, 
++                                               job_type_to_string(uj->type), uj->id);
+                                 return uj;
+                         } else {
+                                 /* already running and not safe to merge into */
+@@ -218,8 +219,8 @@ Job* job_install(Job *j) {
+                                  * not currently possible to have more than one installed job per unit. */
+                                 job_merge_into_installed(uj, j);
+                                 log_unit_debug(uj->unit,
+-                                               "Merged into running job, re-running: %s/%s as %u",
+-                                               uj->unit->id, job_type_to_string(uj->type), (unsigned) uj->id);
++                                               "Merged into running job, re-running: %s/%s as %"PRIu32,
++                                               uj->unit->id, job_type_to_string(uj->type), uj->id);
+ 
+                                 job_set_state(uj, JOB_WAITING);
+                                 return uj;

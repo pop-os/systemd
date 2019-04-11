@@ -1,0 +1,165 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 18 Jan 2019 12:55:15 +0900
+Subject: network: unset Network::manager when loading .network file fails
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Otherwise, LIST_REMOVE() in network_free() fails.
+
+This fixes the following assertion:
+```
+systemd-networkd[2595]: Bus bus-api-network: changing state UNSET → OPENING
+systemd-networkd[2595]: Bus bus-api-network: changing state OPENING → AUTHENTICATING
+systemd-networkd[2595]: timestamp of '/etc/systemd/network' changed
+systemd-networkd[2595]: /etc/systemd/network/10-hoge.network:1: Invalid section header '[Network]Address=192.168.0.1'
+systemd-networkd[2595]: /etc/systemd/network/10-hoge.network:1: Failed to parse file: Bad message
+systemd-networkd[2595]: Assertion '*_head == _item' failed at ../../home/watanabe/git/systemd/src/network/networkd-network.c:378, function network_free(). Aborting.
+valgrind[2595]: ==2595==
+valgrind[2595]: ==2595== Process terminating with default action of signal 6 (SIGABRT): dumping core
+valgrind[2595]: ==2595==    at 0x4BCA53F: raise (in /usr/lib64/libc-2.28.so)
+valgrind[2595]: ==2595==    by 0x4BB4894: abort (in /usr/lib64/libc-2.28.so)
+valgrind[2595]: ==2595==    by 0x4955F09: log_assert_failed_realm (log.c:795)
+valgrind[2595]: ==2595==    by 0x417101: network_free (networkd-network.c:378)
+valgrind[2595]: ==2595==    by 0x415E99: network_freep (networkd-network.h:282)
+valgrind[2595]: ==2595==    by 0x416AB2: network_load_one (networkd-network.c:101)
+valgrind[2595]: ==2595==    by 0x416C39: network_load (networkd-network.c:293)
+valgrind[2595]: ==2595==    by 0x414031: manager_load_config (networkd-manager.c:1502)
+valgrind[2595]: ==2595==    by 0x40B258: run (networkd.c:82)
+valgrind[2595]: ==2595==    by 0x40B74A: main (networkd.c:117)
+valgrind[2595]: ==2595==
+valgrind[2595]: ==2595== HEAP SUMMARY:
+valgrind[2595]: ==2595==     in use at exit: 32,621 bytes in 201 blocks
+valgrind[2595]: ==2595==   total heap usage: 746 allocs, 545 frees, 241,027 bytes allocated
+valgrind[2595]: ==2595==
+valgrind[2595]: ==2595== LEAK SUMMARY:
+valgrind[2595]: ==2595==    definitely lost: 0 bytes in 0 blocks
+valgrind[2595]: ==2595==    indirectly lost: 0 bytes in 0 blocks
+valgrind[2595]: ==2595==      possibly lost: 0 bytes in 0 blocks
+valgrind[2595]: ==2595==    still reachable: 32,621 bytes in 201 blocks
+valgrind[2595]: ==2595==         suppressed: 0 bytes in 0 blocks
+valgrind[2595]: ==2595== Reachable blocks (those to which a pointer was found) are not shown.
+valgrind[2595]: ==2595== To see them, rerun with: --leak-check=full --show-leak-kinds=all
+valgrind[2595]: ==2595==
+valgrind[2595]: ==2595== For counts of detected and suppressed errors, rerun with: -v
+valgrind[2595]: ==2595== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+systemd-coredump[2600]: Process 2595 (memcheck-amd64-) of user 192 dumped core.
+```
+
+(cherry picked from commit 838b2f7a30dbb68f4d6939626a165b313cc94542)
+(cherry picked from commit fffa75f7ff6ff60a7cf1c6f9a31b1d4768ea6f07)
+---
+ src/network/networkd-network.c | 50 +++++++++++++++++++++++-------------------
+ 1 file changed, 27 insertions(+), 23 deletions(-)
+
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index e05f385..fb579ca 100644
+--- a/src/network/networkd-network.c
++++ b/src/network/networkd-network.c
+@@ -98,12 +98,13 @@ void network_apply_anonymize_if_set(Network *network) {
+ }
+ 
+ int network_load_one(Manager *manager, const char *filename) {
++        _cleanup_free_ char *fname = NULL, *name = NULL;
+         _cleanup_(network_freep) Network *network = NULL;
+         _cleanup_fclose_ FILE *file = NULL;
+-        char *d;
+         const char *dropin_dirname;
+-        Route *route;
+         Address *address;
++        Route *route;
++        char *d;
+         int r;
+ 
+         assert(manager);
+@@ -122,12 +123,30 @@ int network_load_one(Manager *manager, const char *filename) {
+                 return 0;
+         }
+ 
++        fname = strdup(filename);
++        if (!fname)
++                return log_oom();
++
++        name = strdup(basename(filename));
++        if (!name)
++                return log_oom();
++
++        d = strrchr(name, '.');
++        if (!d)
++                return -EINVAL;
++
++        *d = '\0';
++
++        dropin_dirname = strjoina(name, ".network.d");
++
+         network = new(Network, 1);
+         if (!network)
+                 return log_oom();
+ 
+         *network = (Network) {
+                 .manager = manager,
++                .filename = TAKE_PTR(fname),
++                .name = TAKE_PTR(name),
+ 
+                 .required_for_online = true,
+                 .dhcp = ADDRESS_FAMILY_NO,
+@@ -192,22 +211,6 @@ int network_load_one(Manager *manager, const char *filename) {
+                 .ipv6_accept_ra_route_table = RT_TABLE_MAIN,
+         };
+ 
+-        network->filename = strdup(filename);
+-        if (!network->filename)
+-                return log_oom();
+-
+-        network->name = strdup(basename(filename));
+-        if (!network->name)
+-                return log_oom();
+-
+-        d = strrchr(network->name, '.');
+-        if (!d)
+-                return -EINVAL;
+-
+-        *d = '\0';
+-
+-        dropin_dirname = strjoina(network->name, ".network.d");
+-
+         r = config_parse_many(filename, network_dirs, dropin_dirname,
+                               "Match\0"
+                               "Link\0"
+@@ -230,8 +233,11 @@ int network_load_one(Manager *manager, const char *filename) {
+                               "CAN\0",
+                               config_item_perf_lookup, network_network_gperf_lookup,
+                               CONFIG_PARSE_WARN, network);
+-        if (r < 0)
++        if (r < 0) {
++                /* Unset manager here. Otherwise, LIST_REMOVE() in network_free() fails. */
++                network->manager = NULL;
+                 return r;
++        }
+ 
+         network_apply_anonymize_if_set(network);
+ 
+@@ -255,21 +261,19 @@ int network_load_one(Manager *manager, const char *filename) {
+         if (r < 0)
+                 return r;
+ 
+-        LIST_FOREACH(routes, route, network->static_routes) {
++        LIST_FOREACH(routes, route, network->static_routes)
+                 if (!route->family) {
+                         log_warning("Route section without Gateway field configured in %s. "
+                                     "Ignoring", filename);
+                         return 0;
+                 }
+-        }
+ 
+-        LIST_FOREACH(addresses, address, network->static_addresses) {
++        LIST_FOREACH(addresses, address, network->static_addresses)
+                 if (!address->family) {
+                         log_warning("Address section without Address field configured in %s. "
+                                     "Ignoring", filename);
+                         return 0;
+                 }
+-        }
+ 
+         network = NULL;
+ 

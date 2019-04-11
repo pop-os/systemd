@@ -1,0 +1,23 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 16 Jan 2019 13:02:04 +0900
+Subject: udev: 'val' may be NULL, use strempty()
+
+(cherry picked from commit 7e8bd58eb126324ce796150b076aae5d52ea2072)
+(cherry picked from commit 9ca9e999c041b9d5b83d24b99bf1269c2eed1023)
+---
+ src/udev/udev-builtin.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/udev/udev-builtin.c b/src/udev/udev-builtin.c
+index 3a61be1..48ce295 100644
+--- a/src/udev/udev-builtin.c
++++ b/src/udev/udev-builtin.c
+@@ -139,7 +139,7 @@ int udev_builtin_add_property(sd_device *dev, bool test, const char *key, const
+                                               key, val ? "=" : "", strempty(val));
+ 
+         if (test)
+-                printf("%s=%s\n", key, val);
++                printf("%s=%s\n", key, strempty(val));
+ 
+         return 0;
+ }

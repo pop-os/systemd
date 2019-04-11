@@ -1,0 +1,25 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 6 Feb 2019 16:18:58 +0100
+Subject: curl-util: fix use after free
+
+This fixes a bug introduced by c3e658004a66115fa09abcf602d573e65e577aa9.
+
+(cherry picked from commit 67577508d8de4169f3d62c23da0016a481ac096d)
+(cherry picked from commit 55320b9f9fff1a8ce662f0ec7c7bd684d0cc8fd1)
+---
+ src/import/curl-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/import/curl-util.c b/src/import/curl-util.c
+index 05b17c3..1284a18 100644
+--- a/src/import/curl-util.c
++++ b/src/import/curl-util.c
+@@ -290,7 +290,7 @@ int curl_glue_make(CURL **ret, const char *url, void *userdata) {
+         if (curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L) != CURLE_OK)
+                 return -EIO;
+ 
+-        *ret = c;
++        *ret = TAKE_PTR(c);
+         return 0;
+ }
+ 

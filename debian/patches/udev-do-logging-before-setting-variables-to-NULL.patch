@@ -1,0 +1,33 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 15 Jan 2019 08:17:44 +0100
+Subject: udev: do logging before setting variables to NULL
+
+gcc-9 diagnoses this as an error.
+Reported by Jeff Law.
+
+(cherry picked from commit a6ca3c192165e0acf646845fddd54c91c67d1b94)
+(cherry picked from commit 68c110e2c16726a8025f826a58ed2e466c70b719)
+---
+ src/udev/udev-rules.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+index f697972..14612b2 100644
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -2231,13 +2231,12 @@ int udev_rules_apply_to_event(
+                         r = hashmap_put(event->seclabel_list, name, label);
+                         if (r < 0)
+                                 return log_oom();
+-
+-                        name = label = NULL;
+-
+                         log_device_debug(dev, "SECLABEL{%s}='%s' %s:%u",
+                                          name, label,
+                                          rules_str(rules, rule->rule.filename_off),
+                                          rule->rule.filename_line);
++                        name = label = NULL;
++
+                         break;
+                 }
+                 case TK_A_ENV: {

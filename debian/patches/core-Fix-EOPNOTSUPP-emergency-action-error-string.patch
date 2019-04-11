@@ -1,0 +1,38 @@
+From: Aaron Plattner <aplattner@nvidia.com>
+Date: Wed, 16 Jan 2019 10:26:15 -0800
+Subject: core: Fix -EOPNOTSUPP emergency action error string
+
+The error string for operations that are not supported (e.g. "shutdown" for
+user-defined units) should take two arguments, where the first one is the type
+of action being defined (i.e. "FailureAction" vs. "SuccessAction") and the
+second is the string that was invalid.
+
+Currently, the code prints this:
+
+ $ systemd-run --user --wait -p SuccessAction=poweroff true
+ Failed to start transient service unit: EmergencyAction setting invalid for manager type: SuccessAction
+
+Change the format string to instead print:
+
+ $ systemd-run --user --wait -p SuccessAction=poweroff true
+ Failed to start transient service unit: SuccessAction setting invalid for manager type: poweroff
+
+(cherry picked from commit 119f0f2876ea340cc41525e844487aa88551c219)
+(cherry picked from commit 8deae90e1a74a5fadfcf7d167eaf305abc6d0341)
+---
+ src/core/dbus-unit.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index 385ee8b..17c2003 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -1387,7 +1387,7 @@ static int bus_set_transient_emergency_action(
+         r = parse_emergency_action(s, system, &v);
+         if (r < 0)
+                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
+-                                         r == -EOPNOTSUPP ? "EmergencyAction setting invalid for manager type: %s"
++                                         r == -EOPNOTSUPP ? "%s setting invalid for manager type: %s"
+                                                           : "Invalid %s setting: %s",
+                                          name, s);
+ 

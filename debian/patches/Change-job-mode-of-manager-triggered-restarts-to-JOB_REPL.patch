@@ -1,0 +1,53 @@
+From: Jonathon Kowalski <bl0pbl33p@gmail.com>
+Date: Thu, 17 Jan 2019 17:08:00 +0000
+Subject: Change job mode of manager triggered restarts to JOB_REPLACE
+
+Fixes: #11305
+Fixes: #3260
+Related: #11456
+
+So, here's what happens in the described scenario in #11305. A unit goes
+down, and that triggeres stop jobs for the other two units as they were
+bound to it. Now, the timer for manager triggered restarts kicks in and
+schedules a restart job with the JOB_FAIL job mode. This means there is
+a stop job installed on those units, and now due to them being bound to
+us they also get a restart job enqueued. This however is a conflicts, as
+neither stop can merge into restart, nor restart into stop. However,
+restart should be able to replace stop in any case. If the stop
+procedure is ongoing, it can cancel the stop job, install itself, and
+then after reaching dead finish and convert itself to a start job.
+However, if we increase the timer, then it can always take those units
+from inactive -> auto-restart.
+
+We change the job mode to JOB_REPLACE so the restart job cancels the
+stop job and installs itself.
+
+Also, the original bug could be worked around by bumping RestartSec= to
+avoid the conflicting.
+
+This doesn't seem to be something that is going to break uses. That is
+because for those who already had it working, there must have never been
+conflicting jobs, as that would result in a desctructive transaction by
+virtue of the job mode used.
+
+After this change, the test case is able to work nicely without issues.
+
+(cherry picked from commit 03ff2dc71ecb09272d728d458498b44f7f132f51)
+(cherry picked from commit 677b4cc753f183731fc54fcb68ad46f806c394bc)
+---
+ src/core/service.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/service.c b/src/core/service.c
+index cfa3271..324dcf2 100644
+--- a/src/core/service.c
++++ b/src/core/service.c
+@@ -2154,7 +2154,7 @@ static void service_enter_restart(Service *s) {
+          * restarted. We use JOB_RESTART (instead of the more obvious
+          * JOB_START) here so that those dependency jobs will be added
+          * as well. */
+-        r = manager_add_job(UNIT(s)->manager, JOB_RESTART, UNIT(s), JOB_FAIL, &error, NULL);
++        r = manager_add_job(UNIT(s)->manager, JOB_RESTART, UNIT(s), JOB_REPLACE, &error, NULL);
+         if (r < 0)
+                 goto fail;
+ 

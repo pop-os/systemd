@@ -1,0 +1,32 @@
+From: YmrDtnJu <YmrDtnJu@users.noreply.github.com>
+Date: Fri, 1 Feb 2019 11:38:35 +0100
+Subject: shared: Revert commit 49fe5c099 in parts for function parse_acl.
+
+Too much code has been removed while replacing startswith with STARTSWITH_SET
+so that every ACL specified e.g. in tmpfiles.d was parsed as a default ACL.
+
+(cherry picked from commit f2ea9cc746ce43959d627bf013719d069db81e32)
+(cherry picked from commit 5b3437338286fde71f66952726840ba7dbdd86b4)
+---
+ src/shared/acl-util.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/shared/acl-util.c b/src/shared/acl-util.c
+index 6f06571..9633514 100644
+--- a/src/shared/acl-util.c
++++ b/src/shared/acl-util.c
+@@ -220,10 +220,10 @@ int parse_acl(const char *text, acl_t *acl_access, acl_t *acl_default, bool want
+                 char *p;
+ 
+                 p = STARTSWITH_SET(*entry, "default:", "d:");
+-                if (!p)
+-                        p = *entry;
+-
+-                r = strv_push(&d, p);
++                if (p)
++                        r = strv_push(&d, p);
++                else
++                        r = strv_push(&a, *entry);
+                 if (r < 0)
+                         return r;
+         }

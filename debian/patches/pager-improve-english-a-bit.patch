@@ -1,0 +1,32 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 23 Jan 2019 17:00:09 +0100
+Subject: pager: improve english a bit
+
+(cherry picked from commit 118dccc9489829ad74a5d1063ee7fe7e3b86cf62)
+(cherry picked from commit fba0494df1777cbe11a328134d4ab8b3b727f723)
+---
+ src/shared/pager.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/pager.c b/src/shared/pager.c
+index ce4ca9b..bf2597e 100644
+--- a/src/shared/pager.c
++++ b/src/shared/pager.c
+@@ -173,7 +173,7 @@ int pager_open(PagerFlags flags) {
+ 
+                         execvp(pager_args[0], pager_args);
+                         log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_WARNING, errno,
+-                                       "Failed execute %s, using fallback pagers: %m", pager_args[0]);
++                                       "Failed to execute '%s', using fallback pagers: %m", pager_args[0]);
+                 }
+ 
+                 /* Debian's alternatives command for pagers is
+@@ -190,7 +190,7 @@ int pager_open(PagerFlags flags) {
+                         }
+                         execlp(exe, exe, NULL);
+                         log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_WARNING, errno,
+-                                       "Failed execute %s, using next fallback pager: %m", exe);
++                                       "Failed to execute '%s', using next fallback pager: %m", exe);
+                 }
+ 
+                 r = loop_write(exe_name_pipe[1], "(built-in)", strlen("(built-in") + 1, false);

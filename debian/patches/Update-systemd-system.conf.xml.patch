@@ -1,0 +1,27 @@
+From: Mikhail Kasimov <mikhail.kasimov@gmail.com>
+Date: Tue, 15 Jan 2019 14:52:34 +0200
+Subject: Update systemd-system.conf.xml
+
+Updating due to phrase "Defaults to DefaultTimeoutStartSec= from the manager configuration file, except when Type=oneshot is used, in which case the timeout is disabled by default (see systemd-system.conf)" from [0] https://github.com/systemd/systemd/blob/master/man/systemd.service.xml
+
+(cherry picked from commit 06156ed2cf2bb6a1b83a379f5ac22a14db5eb8fa)
+(cherry picked from commit 8ce4d5b9f42fbcbd416971f2d4b4b8b9ad977fd9)
+---
+ man/systemd-system.conf.xml | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd-system.conf.xml b/man/systemd-system.conf.xml
+index daf3d15..ea27c2b 100644
+--- a/man/systemd-system.conf.xml
++++ b/man/systemd-system.conf.xml
+@@ -251,7 +251,9 @@
+         <varname>TimeoutStopSec=</varname> and
+         <varname>RestartSec=</varname> (for services, see
+         <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+-        for details on the per-unit settings). For non-service units,
++        for details on the per-unit settings). Disabled by default, when
++        service with <varname>Type=oneshot</varname> is used.
++        For non-service units,
+         <varname>DefaultTimeoutStartSec=</varname> sets the default
+         <varname>TimeoutSec=</varname>
+         value. <varname>DefaultTimeoutStartSec=</varname> and

@@ -1,0 +1,35 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 18 Jan 2019 13:45:10 +0100
+Subject: NEWS: retroactively describe .include deprecation
+
+Closes #11479.
+
+(cherry picked from commit f26ad32197e99c6e24005f9216267573eec9eeb5)
+(cherry picked from commit 1c7502a080df3c90f50d0e05a908e7cb9652443d)
+---
+ NEWS | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/NEWS b/NEWS
+index ccd2643..c4e3301 100644
+--- a/NEWS
++++ b/NEWS
+@@ -874,6 +874,8 @@ CHANGES WITH 239:
+           allows ordering services before the service that executes the actual
+           update process in a generic way.
+ 
++        * Systemd now emits warnings whenever .include syntax is used.
++
+         Contributions from: Adam Duskett, Alan Jenkins, Alessandro Casale,
+         Alexander Kurtz, Alex Gartrell, Anssi Hannula, Arnaud Rebillout, Brian
+         J. Murrell, Bruno Vernay, Chris Lamb, Chris Lesiak, Christian Brauner,
+@@ -6243,6 +6245,9 @@ CHANGES WITH 210:
+           IFUNC. Please make sure to use --enable-compat-libs only
+           during a transitional period!
+ 
++        * The .include syntax has been deprecated and is not documented
++          anymore. Drop-in files in .d directories should be used instead.
++
+         Contributions from: Andreas Fuchs, Armin K., Colin Walters,
+         Daniel Mack, Dave Reisner, David Herrmann, Djalal Harouni,
+         Holger Schurig, Jason A. Donenfeld, Jason St. John, Jasper

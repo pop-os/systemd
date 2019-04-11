@@ -1,0 +1,50 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 26 Jan 2019 12:00:04 +0100
+Subject: core/mount: do not add Before=local-fs.target or remote-fs.target if
+ nofail mount option is set
+
+Follow-up for d54bab90e64f70c1ecf9b0683a98adb8485ed09e.
+
+Fixes #11558.
+
+(cherry picked from commit 8c8203db90b584420f221b6c50b63389d39c100e)
+(cherry picked from commit fc52e62db1e078a0734d3737b7ca16c4e2a5df1b)
+---
+ src/core/mount.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/mount.c b/src/core/mount.c
+index 6df5d60..be02e05 100644
+--- a/src/core/mount.c
++++ b/src/core/mount.c
+@@ -453,6 +453,7 @@ static int mount_add_default_dependencies(Mount *m) {
+         const char *after, *before;
+         UnitDependencyMask mask;
+         MountParameters *p;
++        bool nofail;
+         int r;
+ 
+         assert(m);
+@@ -471,6 +472,7 @@ static int mount_add_default_dependencies(Mount *m) {
+                 return 0;
+ 
+         mask = m->from_fragment ? UNIT_DEPENDENCY_FILE : UNIT_DEPENDENCY_MOUNTINFO_DEFAULT;
++        nofail = m->from_fragment ? fstab_test_yes_no_option(m->parameters_fragment.options, "nofail\0" "fail\0") : false;
+ 
+         if (mount_is_network(p)) {
+                 /* We order ourselves after network.target. This is
+@@ -501,9 +503,11 @@ static int mount_add_default_dependencies(Mount *m) {
+                 before = SPECIAL_LOCAL_FS_TARGET;
+         }
+ 
+-        r = unit_add_dependency_by_name(UNIT(m), UNIT_BEFORE, before, true, mask);
+-        if (r < 0)
+-                return r;
++        if (!nofail) {
++                r = unit_add_dependency_by_name(UNIT(m), UNIT_BEFORE, before, true, mask);
++                if (r < 0)
++                        return r;
++        }
+ 
+         r = unit_add_dependency_by_name(UNIT(m), UNIT_AFTER, after, true, mask);
+         if (r < 0)

@@ -1,0 +1,71 @@
+From: Aaron Plattner <aplattner@nvidia.com>
+Date: Wed, 16 Jan 2019 10:00:21 -0800
+Subject: core: Fix return argument check for parse_emergency_action
+
+This function returns 0 on success and a negative value on failure. On success,
+it writes the parsed action to the address passed in its third argument.
+
+`bus_set_transient_emergency_action` does this:
+
+ r = parse_emergency_action(s, system, &v);
+ if (v < 0)
+     // handle failure
+
+However, `v` is not updated if the function fails, and this should be checking
+`r` instead of `v`.
+
+The result of this is that if an invalid failure (or success) action is
+specified, systemd ends up creating the unit anyway and then misbehaves if it
+tries to run the failure action because the action value comes from
+uninitialized stack data. In my case, this resulted in a failed assertion:
+
+ Program received signal SIGABRT, Aborted.
+ 0x00007fe52cca0d7f in raise () from /snap/usr/lib/libc.so.6
+ (gdb) bt
+ #0  0x00007fe52cca0d7f in raise () from /snap/usr/lib/libc.so.6
+ #1  0x00007fe52cc8b672 in abort () from /snap/usr/lib/libc.so.6
+ #2  0x00007fe52d66f169 in log_assert_failed_realm (realm=LOG_REALM_SYSTEMD, text=0x56177ab8e000 "action < _EMERGENCY_ACTION_MAX", file=0x56177ab8dfb8 "../src/core/emergency-action.c", line=33, func=0x56177ab8e2b0 <__PRETTY_FUNCTION__.14207> "emergency_action") at ../src/basic/log.c:795
+ #3  0x000056177aa98cf4 in emergency_action (m=0x56177c992cb0, action=2059118610, options=(unknown: 0), reboot_arg=0x0, exit_status=1, reason=0x7ffdd2df4290 "unit run-u0.service failed") at ../src/core/emergency-action.c:33
+ #4  0x000056177ab2b739 in unit_notify (u=0x56177c9eb340, os=UNIT_ACTIVE, ns=UNIT_FAILED, flags=(unknown: 0)) at ../src/core/unit.c:2504
+ #5  0x000056177aaf62ed in service_set_state (s=0x56177c9eb340, state=SERVICE_FAILED) at ../src/core/service.c:1104
+ #6  0x000056177aaf8a29 in service_enter_dead (s=0x56177c9eb340, f=SERVICE_SUCCESS, allow_restart=true) at ../src/core/service.c:1712
+ #7  0x000056177aaf9233 in service_enter_signal (s=0x56177c9eb340, state=SERVICE_FINAL_SIGKILL, f=SERVICE_SUCCESS) at ../src/core/service.c:1854
+ #8  0x000056177aaf921b in service_enter_signal (s=0x56177c9eb340, state=SERVICE_FINAL_SIGTERM, f=SERVICE_SUCCESS) at ../src/core/service.c:1852
+ #9  0x000056177aaf8eb3 in service_enter_stop_post (s=0x56177c9eb340, f=SERVICE_SUCCESS) at ../src/core/service.c:1788
+ #10 0x000056177aaf91eb in service_enter_signal (s=0x56177c9eb340, state=SERVICE_STOP_SIGKILL, f=SERVICE_SUCCESS) at ../src/core/service.c:1850
+ #11 0x000056177aaf91bc in service_enter_signal (s=0x56177c9eb340, state=SERVICE_STOP_SIGTERM, f=SERVICE_FAILURE_EXIT_CODE) at ../src/core/service.c:1848
+ #12 0x000056177aaf9759 in service_enter_running (s=0x56177c9eb340, f=SERVICE_FAILURE_EXIT_CODE) at ../src/core/service.c:1941
+ #13 0x000056177ab005b7 in service_sigchld_event (u=0x56177c9eb340, pid=112, code=1, status=1) at ../src/core/service.c:3296
+ #14 0x000056177aad84b5 in manager_invoke_sigchld_event (m=0x56177c992cb0, u=0x56177c9eb340, si=0x7ffdd2df48f0) at ../src/core/manager.c:2444
+ #15 0x000056177aad88df in manager_dispatch_sigchld (source=0x56177c994710, userdata=0x56177c992cb0) at ../src/core/manager.c:2508
+ #16 0x00007fe52d72f807 in source_dispatch (s=0x56177c994710) at ../src/libsystemd/sd-event/sd-event.c:2846
+ #17 0x00007fe52d730f7d in sd_event_dispatch (e=0x56177c993530) at ../src/libsystemd/sd-event/sd-event.c:3229
+ #18 0x00007fe52d73142e in sd_event_run (e=0x56177c993530, timeout=18446744073709551615) at ../src/libsystemd/sd-event/sd-event.c:3286
+ #19 0x000056177aad9f71 in manager_loop (m=0x56177c992cb0) at ../src/core/manager.c:2906
+ #20 0x000056177aa7c876 in invoke_main_loop (m=0x56177c992cb0, ret_reexecute=0x7ffdd2df4bff, ret_retval=0x7ffdd2df4c04, ret_shutdown_verb=0x7ffdd2df4c58, ret_fds=0x7ffdd2df4c70, ret_switch_root_dir=0x7ffdd2df4c48, ret_switch_root_init=0x7ffdd2df4c50, ret_error_message=0x7ffdd2df4c60) at ../src/core/main.c:1792
+ #21 0x000056177aa7f251 in main (argc=2, argv=0x7ffdd2df4e78) at ../src/core/main.c:2573
+
+Fix this by checking the correct variable.
+
+(cherry picked from commit db2df5500ef3027476ce2434e6f4432cc0aa6b64)
+(cherry picked from commit 6d1e85d26cb4b42d43b3c098fa2ab40fcc298e0f)
+---
+ src/core/dbus-unit.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index 968166e..385ee8b 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -1385,9 +1385,9 @@ static int bus_set_transient_emergency_action(
+ 
+         system = MANAGER_IS_SYSTEM(u->manager);
+         r = parse_emergency_action(s, system, &v);
+-        if (v < 0)
++        if (r < 0)
+                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS,
+-                                         v == -EOPNOTSUPP ? "EmergencyAction setting invalid for manager type: %s"
++                                         r == -EOPNOTSUPP ? "EmergencyAction setting invalid for manager type: %s"
+                                                           : "Invalid %s setting: %s",
+                                          name, s);
+ 

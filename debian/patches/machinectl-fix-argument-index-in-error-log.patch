@@ -1,0 +1,34 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 2 Feb 2019 15:03:17 +0100
+Subject: machinectl: fix argument index in error log
+
+Fixes #11628.
+
+(cherry picked from commit 19df01f5295941ce9fa2933fd8e4bf5af8417ac8)
+(cherry picked from commit 41a3fdabc18a5a7b4c8a78d5b0aeaebd8c29644b)
+---
+ src/machine/machinectl.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/machine/machinectl.c b/src/machine/machinectl.c
+index 44e6c76..e009dec 100644
+--- a/src/machine/machinectl.c
++++ b/src/machine/machinectl.c
+@@ -1740,7 +1740,7 @@ static int start_machine(int argc, char *argv[], void *userdata) {
+                 if (r < 0)
+                         return r;
+                 if (r == 0) {
+-                        log_error("Machine image '%s' does not exist.", argv[1]);
++                        log_error("Machine image '%s' does not exist.", argv[i]);
+                         return -ENXIO;
+                 }
+ 
+@@ -1812,7 +1812,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
+                 if (r < 0)
+                         return r;
+                 if (r == 0) {
+-                        log_error("Machine image '%s' does not exist.", argv[1]);
++                        log_error("Machine image '%s' does not exist.", argv[i]);
+                         return -ENXIO;
+                 }
+ 

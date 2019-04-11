@@ -1,0 +1,44 @@
+From: bl33pbl0p <bl0pbl33p@gmail.com>
+Date: Wed, 16 Jan 2019 20:53:42 +0000
+Subject: Add note about transactions being genereated independently of a
+ unit's state.
+
+Meanwhile, change dead -> inactive as it is not a unit state.
+
+(cherry picked from commit 05d4db2051f1de33a2051c7e83e764752bc1fe19)
+(cherry picked from commit 0c6ed85fc048f3aef457b08d8199bef414c4e61b)
+---
+ man/systemd.xml | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd.xml b/man/systemd.xml
+index 49a29f9..680f800 100644
+--- a/man/systemd.xml
++++ b/man/systemd.xml
+@@ -396,7 +396,7 @@
+     loaded into memory are those for which at least one of the following conditions is true:</para>
+ 
+     <orderedlist>
+-      <listitem><para>It is in an active, activating, deactivating or failed state (i.e. in any unit state except for <literal>dead</literal>)</para></listitem>
++      <listitem><para>It is in an active, activating, deactivating or failed state (i.e. in any unit state except for <literal>inactive</literal>)</para></listitem>
+       <listitem><para>It has a job queued for it</para></listitem>
+       <listitem><para>It is a dependency of some sort of at least one other unit that is loaded into memory</para></listitem>
+       <listitem><para>It has some form of resource still allocated (e.g. a service unit that is inactive but for which
+@@ -452,6 +452,17 @@
+     means that before executing a requested operation, systemd will
+     verify that it makes sense, fixing it if possible, and only
+     failing if it really cannot work.</para>
++    
++    <para>Note that transactions are generated independently of a unit's
++    state at runtime, hence, for example, if a start job is requested on an
++    already started unit, it will still generate a transaction and wake up any
++    inactive dependencies (and cause propagation of other jobs as per the
++    defined relationships). This is because the enqueued job is at the time of
++    execution compared to the target unit's state and is marked successful and
++    complete when both satisfy. However, this job also pulls in other
++    dependencies due to the defined relationships and thus leads to, in our
++    our example, start jobs for any of those inactive units getting queued as
++    well.</para>
+ 
+     <para>systemd contains native implementations of various tasks
+     that need to be executed as part of the boot process. For example,

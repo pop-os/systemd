@@ -1,0 +1,24 @@
+From: Philip Withnall <withnall@endlessm.com>
+Date: Wed, 16 Jan 2019 12:03:53 +0000
+Subject: man: Fix a typo in systemd.exec.xml
+
+Signed-off-by: Philip Withnall <withnall@endlessm.com>
+(cherry picked from commit 35f2c0ba6afd70c4a1f74865d9231b85f4a01380)
+(cherry picked from commit 2095b992ad14d05b379ac523652503ac77691bac)
+---
+ man/systemd.exec.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index 46aa473..bd0091e 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -820,7 +820,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
+         names must be relative, and may not include <literal>..</literal>. If set, one or more
+         directories by the specified names will be created (including their parents) below the locations
+         defined in the following table, when the unit is started. Also, the corresponding environment variable
+-        is defined with the full path of directories. If multiple directories are set, then int the environment variable
++        is defined with the full path of directories. If multiple directories are set, then in the environment variable
+         the paths are concatenated with colon (<literal>:</literal>).</para>
+         <table>
+           <title>Automatic directory creation and environment variables</title>

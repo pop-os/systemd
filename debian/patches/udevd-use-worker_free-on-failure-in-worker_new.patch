@@ -1,0 +1,34 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 18 Dec 2018 14:49:17 +0900
+Subject: udevd: use worker_free() on failure in worker_new()
+
+Otherwise, worker_monitor may not unrefed correctly.
+
+(cherry picked from commit 1f3f6bd0078b9d76d5ed72b74b890ca5e3a1756c)
+(cherry picked from commit 9c54f0f97b9be01d22a9941831970e9c74f61f79)
+---
+ src/udev/udevd.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/udev/udevd.c b/src/udev/udevd.c
+index 7302b06..d827035 100644
+--- a/src/udev/udevd.c
++++ b/src/udev/udevd.c
+@@ -185,6 +185,8 @@ static void worker_free(struct worker *worker) {
+         free(worker);
+ }
+ 
++DEFINE_TRIVIAL_CLEANUP_FUNC(struct worker *, worker_free);
++
+ static void manager_workers_free(Manager *manager) {
+         struct worker *worker;
+         Iterator i;
+@@ -198,7 +200,7 @@ static void manager_workers_free(Manager *manager) {
+ }
+ 
+ static int worker_new(struct worker **ret, Manager *manager, sd_device_monitor *worker_monitor, pid_t pid) {
+-        _cleanup_free_ struct worker *worker = NULL;
++        _cleanup_(worker_freep) struct worker *worker = NULL;
+         int r;
+ 
+         assert(ret);

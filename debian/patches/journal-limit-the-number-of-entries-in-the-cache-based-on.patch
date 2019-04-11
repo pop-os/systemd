@@ -1,0 +1,79 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 22 Jan 2019 16:12:52 +0100
+Subject: journal: limit the number of entries in the cache based on available
+ memory
+
+This is far from perfect, but should give mostly reasonable values. My
+assumption is that if somebody has a few hundred MB of memory, they are
+unlikely to have thousands of processes logging. A hundred would already be a
+lot. So let's scale the cache size propritionally to the total memory size,
+with clamping on both ends.
+
+The formula gives 64 cache entries for each GB of RAM.
+
+(cherry picked from commit b12a480829c5ca8f4d4fa9cde8716b5f2f12a3ad)
+(cherry picked from commit e1910696b0175e7939f80ba2d46358a368f064c4)
+---
+ src/journal/journald-context.c | 35 +++++++++++++++++++++++++++++++++--
+ 1 file changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/src/journal/journald-context.c b/src/journal/journald-context.c
+index 2d711bc..09fc12f 100644
+--- a/src/journal/journald-context.c
++++ b/src/journal/journald-context.c
+@@ -16,6 +16,7 @@
+ #include "parse-util.h"
+ #include "path-util.h"
+ #include "process-util.h"
++#include "procfs-util.h"
+ #include "string-util.h"
+ #include "syslog-util.h"
+ #include "unaligned.h"
+@@ -60,7 +61,37 @@
+ /* Keep at most 16K entries in the cache. (Note though that this limit may be violated if enough streams pin entries in
+  * the cache, in which case we *do* permit this limit to be breached. That's safe however, as the number of stream
+  * clients itself is limited.) */
+-#define CACHE_MAX (16*1024)
++#define CACHE_MAX_FALLBACK 128U
++#define CACHE_MAX_MAX (16*1024U)
++#define CACHE_MAX_MIN 64U
++
++static size_t cache_max(void) {
++        static size_t cached = -1;
++
++        if (cached == (size_t) -1) {
++                uint64_t mem_total;
++                int r;
++
++                r = procfs_memory_get(&mem_total, NULL);
++                if (r < 0) {
++                        log_warning_errno(r, "Cannot query /proc/meminfo for MemTotal: %m");
++                        cached = CACHE_MAX_FALLBACK;
++                } else {
++                        /* Cache entries are usually a few kB, but the process cmdline is controlled by the
++                         * user and can be up to _SC_ARG_MAX, usually 2MB. Let's say that approximately up to
++                         * 1/8th of memory may be used by the cache.
++                         *
++                         * In the common case, this formula gives 64 cache entries for each GB of RAM.
++                         */
++                        long l = sysconf(_SC_ARG_MAX);
++                        assert(l > 0);
++
++                        cached = CLAMP(mem_total / 8 / (uint64_t) l, CACHE_MAX_MIN, CACHE_MAX_MAX);
++                }
++        }
++
++        return cached;
++}
+ 
+ static int client_context_compare(const void *a, const void *b) {
+         const ClientContext *x = a, *y = b;
+@@ -627,7 +658,7 @@ static int client_context_get_internal(
+                 return 0;
+         }
+ 
+-        client_context_try_shrink_to(s, CACHE_MAX-1);
++        client_context_try_shrink_to(s, cache_max()-1);
+ 
+         r = client_context_new(s, pid, &c);
+         if (r < 0)

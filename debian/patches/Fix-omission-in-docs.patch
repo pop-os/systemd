@@ -1,0 +1,27 @@
+From: Joost Heitbrink <joostheitbrink@outlook.com>
+Date: Tue, 15 Jan 2019 21:27:08 +0100
+Subject: Fix omission in docs
+
+change "if is missing" to "if /etc/machine-id is missing".
+
+(cherry picked from commit 850115b3a1119c87f14ecb7634615632ef0b1933)
+(cherry picked from commit 91c715958a53ee864be8917845b5de5f631d2212)
+---
+ man/sd_id128_get_machine.xml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/man/sd_id128_get_machine.xml b/man/sd_id128_get_machine.xml
+index 0884838..0bfe1b5 100644
+--- a/man/sd_id128_get_machine.xml
++++ b/man/sd_id128_get_machine.xml
+@@ -122,8 +122,8 @@
+     <function>sd_id128_get_machine()</function>,
+     <function>sd_id128_get_machine_app_specific()</function>, and
+     <function>sd_id128_get_boot_app_specific()</function> return <constant>-ENOENT</constant> if
+-    <filename>/etc/machine-id</filename> is missing, and <constant>-ENOMEDIUM</constant> if is empty
+-    or all zeros.</para>
++    <filename>/etc/machine-id</filename> is missing, and <constant>-ENOMEDIUM</constant> if
++    <filename>/etc/machine-id</filename> is empty or all zeros.</para>
+   </refsect1>
+ 
+   <xi:include href="libsystemd-pkgconfig.xml" />

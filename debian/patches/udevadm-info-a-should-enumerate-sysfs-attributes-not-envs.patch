@@ -1,0 +1,34 @@
+From: =?utf-8?q?Mantas_Mikul=C4=97nas?= <grawity@gmail.com>
+Date: Tue, 5 Feb 2019 06:30:49 +0200
+Subject: udevadm info: "-a" should enumerate sysfs attributes,
+ not envs (#11642)
+
+This fixes a bug introduced by 13aca847695f49afeb93367ecdad76035fa6c139.
+
+(cherry picked from commit 6d6308f6774b4c684de7f3aab12cb752c59d5e2f)
+(cherry picked from commit d8c8d06448b5991a969710ed283ea94c949438e6)
+---
+ src/udev/udevadm-info.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/udev/udevadm-info.c b/src/udev/udevadm-info.c
+index d141bc7..f55dec7 100644
+--- a/src/udev/udevadm-info.c
++++ b/src/udev/udevadm-info.c
+@@ -61,12 +61,15 @@ static bool skip_attribute(const char *name) {
+ static void print_all_attributes(sd_device *device, const char *key) {
+         const char *name, *value;
+ 
+-        FOREACH_DEVICE_PROPERTY(device, name, value) {
++        FOREACH_DEVICE_SYSATTR(device, name) {
+                 size_t len;
+ 
+                 if (skip_attribute(name))
+                         continue;
+ 
++                if (sd_device_get_sysattr_value(device, name, &value) < 0)
++                        continue;
++
+                 /* skip any values that look like a path */
+                 if (value[0] == '/')
+                         continue;

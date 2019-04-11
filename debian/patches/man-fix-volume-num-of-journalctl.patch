@@ -1,0 +1,37 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 1 Feb 2019 12:30:36 +0100
+Subject: man: fix volume num of journalctl
+
+(cherry picked from commit 68d838f71dea795eb59e38d01a0fa4618a80c911)
+(cherry picked from commit 0d3df37b48f99e49c5827ab6596343441f96cdfe)
+---
+ man/systemd.exec.xml | 2 +-
+ man/systemd.kill.xml | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index bd0091e..ff5be8c 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -2878,7 +2878,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
+         <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd-analyze</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+-        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+diff --git a/man/systemd.kill.xml b/man/systemd.kill.xml
+index 9b264ec..1b4a4a8 100644
+--- a/man/systemd.kill.xml
++++ b/man/systemd.kill.xml
+@@ -176,7 +176,7 @@
+       <para>
+         <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+-        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++        <citerefentry><refentrytitle>journalctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+         <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
