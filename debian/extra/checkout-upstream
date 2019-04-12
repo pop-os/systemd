@@ -34,7 +34,8 @@ mkdir -p debian/tmp
  $CO
  git config user.email "invalid@example.com"
  git config user.name "Merge dummy user"
- git rebase master)
+ git rebase master
+ git submodule update --init --recursive)
 UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//')
 
 # clean out original upstream sources and patches
