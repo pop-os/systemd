@@ -4,6 +4,9 @@
 #include <mntent.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "sd-device.h"
 
@@ -16,12 +19,12 @@
 #include "log.h"
 #include "main-func.h"
 #include "mount-util.h"
+#include "nulstr-util.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "pretty-print.h"
 #include "string-util.h"
 #include "strv.h"
-#include "pretty-print.h"
-#include "util.h"
 
 /* internal helper */
 #define ANY_LUKS "LUKS"
@@ -44,6 +47,8 @@ static unsigned arg_tries = 3;
 static bool arg_readonly = false;
 static bool arg_verify = false;
 static bool arg_discards = false;
+static bool arg_same_cpu_crypt = false;
+static bool arg_submit_from_crypt_cpus = false;
 static bool arg_tcrypt_hidden = false;
 static bool arg_tcrypt_system = false;
 #ifdef CRYPT_TCRYPT_VERA_MODES
@@ -199,6 +204,10 @@ static int parse_one_option(const char *option) {
                 arg_verify = true;
         else if (STR_IN_SET(option, "allow-discards", "discard"))
                 arg_discards = true;
+        else if (streq(option, "same-cpu-crypt"))
+                arg_same_cpu_crypt = true;
+        else if (streq(option, "submit-from-crypt-cpus"))
+                arg_submit_from_crypt_cpus = true;
         else if (streq(option, "luks"))
                 arg_type = ANY_LUKS;
         else if (streq(option, "tcrypt"))
@@ -557,6 +566,10 @@ static int attach_luks_or_plain(struct crypt_device *cd,
                         log_error_errno(r, "Failed to activate with key file '%s'. (Key data incorrect?)", key_file);
                         return -EAGAIN; /* Log actual error, but return EAGAIN */
                 }
+                if (r == -EINVAL) {
+                        log_error_errno(r, "Failed to activate with key file '%s'. (Key file missing?)", key_file);
+                        return -EAGAIN; /* Log actual error, but return EAGAIN */
+                }
                 if (r < 0)
                         return log_error_errno(r, "Failed to activate with key file '%s': %m", key_file);
         } else {
@@ -600,6 +613,24 @@ static int help(void) {
         );
 
         return 0;
+}
+
+static uint32_t determine_flags(void) {
+        uint32_t flags = 0;
+
+        if (arg_readonly)
+                flags |= CRYPT_ACTIVATE_READONLY;
+
+        if (arg_discards)
+                flags |= CRYPT_ACTIVATE_ALLOW_DISCARDS;
+
+        if (arg_same_cpu_crypt)
+                flags |= CRYPT_ACTIVATE_SAME_CPU_CRYPT;
+
+        if (arg_submit_from_crypt_cpus)
+                flags |= CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS;
+
+        return flags;
 }
 
 static int run(int argc, char *argv[]) {
@@ -666,11 +697,7 @@ static int run(int argc, char *argv[]) {
                         return 0;
                 }
 
-                if (arg_readonly)
-                        flags |= CRYPT_ACTIVATE_READONLY;
-
-                if (arg_discards)
-                        flags |= CRYPT_ACTIVATE_ALLOW_DISCARDS;
+                flags = determine_flags();
 
                 if (arg_timeout == USEC_INFINITY)
                         until = 0;

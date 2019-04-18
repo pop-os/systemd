@@ -1589,66 +1589,43 @@ fail:
         return log_unit_debug_errno(u, r, "Failed to load configuration: %m");
 }
 
-static bool unit_condition_test_list(Unit *u, Condition *first, const char *(*to_string)(ConditionType t)) {
-        Condition *c;
-        int triggered = -1;
+_printf_(7, 8)
+static int log_unit_internal(void *userdata, int level, int error, const char *file, int line, const char *func, const char *format, ...) {
+        Unit *u = userdata;
+        va_list ap;
+        int r;
 
-        assert(u);
-        assert(to_string);
+        va_start(ap, format);
+        if (u)
+                r = log_object_internalv(level, error, file, line, func,
+                                         u->manager->unit_log_field,
+                                         u->id,
+                                         u->manager->invocation_log_field,
+                                         u->invocation_id_string,
+                                         format, ap);
+        else
+                r = log_internalv(level, error,  file, line, func, format, ap);
+        va_end(ap);
 
-        /* If the condition list is empty, then it is true */
-        if (!first)
-                return true;
-
-        /* Otherwise, if all of the non-trigger conditions apply and
-         * if any of the trigger conditions apply (unless there are
-         * none) we return true */
-        LIST_FOREACH(conditions, c, first) {
-                int r;
-
-                r = condition_test(c);
-                if (r < 0)
-                        log_unit_warning(u,
-                                         "Couldn't determine result for %s=%s%s%s, assuming failed: %m",
-                                         to_string(c->type),
-                                         c->trigger ? "|" : "",
-                                         c->negate ? "!" : "",
-                                         c->parameter);
-                else
-                        log_unit_debug(u,
-                                       "%s=%s%s%s %s.",
-                                       to_string(c->type),
-                                       c->trigger ? "|" : "",
-                                       c->negate ? "!" : "",
-                                       c->parameter,
-                                       condition_result_to_string(c->result));
-
-                if (!c->trigger && r <= 0)
-                        return false;
-
-                if (c->trigger && triggered <= 0)
-                        triggered = r > 0;
-        }
-
-        return triggered != 0;
+        return r;
 }
 
-static bool unit_condition_test(Unit *u) {
+static bool unit_test_condition(Unit *u) {
         assert(u);
 
         dual_timestamp_get(&u->condition_timestamp);
-        u->condition_result = unit_condition_test_list(u, u->conditions, condition_type_to_string);
+        u->condition_result = condition_test_list(u->conditions, condition_type_to_string, log_unit_internal, u);
 
         unit_add_to_dbus_queue(u);
 
         return u->condition_result;
 }
 
-static bool unit_assert_test(Unit *u) {
+static bool unit_test_assert(Unit *u) {
         assert(u);
 
         dual_timestamp_get(&u->assert_timestamp);
-        u->assert_result = unit_condition_test_list(u, u->asserts, assert_type_to_string);
+        u->assert_result = condition_test_list(u->asserts, assert_type_to_string, log_unit_internal, u);
 
         unit_add_to_dbus_queue(u);
 
@@ -1667,7 +1644,7 @@ void unit_status_printf(Unit *u, const char *status, const char *unit_status_msg
         REENABLE_WARNING;
 }
 
-int unit_start_limit_test(Unit *u) {
+int unit_test_start_limit(Unit *u) {
         const char *reason;
 
         assert(u);
@@ -1682,9 +1659,11 @@ int unit_start_limit_test(Unit *u) {
 
         reason = strjoina("unit ", u->id, " failed");
 
-        return emergency_action(u->manager, u->start_limit_action,
-                                EMERGENCY_ACTION_IS_WATCHDOG|EMERGENCY_ACTION_WARN,
-                                u->reboot_arg, -1, reason);
+        emergency_action(u->manager, u->start_limit_action,
+                         EMERGENCY_ACTION_IS_WATCHDOG|EMERGENCY_ACTION_WARN,
+                         u->reboot_arg, -1, reason);
+
+        return -ECANCELED;
 }
 
 bool unit_shall_confirm_spawn(Unit *u) {
@@ -1725,27 +1704,31 @@ static bool unit_verify_deps(Unit *u) {
         return true;
 }
 
-/* Errors:
- *         -EBADR:      This unit type does not support starting.
+/* Errors that aren't really errors:
  *         -EALREADY:   Unit is already started.
+ *         -ECOMM:      Condition failed
  *         -EAGAIN:     An operation is already in progress. Retry later.
- *         -ECANCELED:  Too many requests for now.
+ *
+ * Errors that are real errors:
+ *         -EBADR:      This unit type does not support starting.
+ *         -ECANCELED:  Start limit hit, too many requests for now
  *         -EPROTO:     Assert failed
  *         -EINVAL:     Unit not loaded
  *         -EOPNOTSUPP: Unit type not supported
  *         -ENOLINK:    The necessary dependencies are not fulfilled.
  *         -ESTALE:     This unit has been started before and can't be started a second time
+ *         -ENOENT:     This is a triggering unit and unit to trigger is not loaded
  */
 int unit_start(Unit *u) {
         UnitActiveState state;
         Unit *following;
+        int r;
 
         assert(u);
 
-        /* If this is already started, then this will succeed. Note
-         * that this will even succeed if this unit is not startable
-         * by the user. This is relied on to detect when we need to
-         * wait for units and when waiting is finished. */
+        /* If this is already started, then this will succeed. Note that this will even succeed if this unit
+         * is not startable by the user. This is relied on to detect when we need to wait for units and when
+         * waiting is finished. */
         state = unit_active_state(u);
         if (UNIT_IS_ACTIVE_OR_RELOADING(state))
                 return -EALREADY;
@@ -1758,35 +1741,45 @@ int unit_start(Unit *u) {
         if (UNIT_VTABLE(u)->once_only && dual_timestamp_is_set(&u->inactive_enter_timestamp))
                 return -ESTALE;
 
-        /* If the conditions failed, don't do anything at all. If we
-         * already are activating this call might still be useful to
-         * speed up activation in case there is some hold-off time,
-         * but we don't want to recheck the condition in that case. */
+        /* If the conditions failed, don't do anything at all. If we already are activating this call might
+         * still be useful to speed up activation in case there is some hold-off time, but we don't want to
+         * recheck the condition in that case. */
         if (state != UNIT_ACTIVATING &&
-            !unit_condition_test(u)) {
-                log_unit_debug(u, "Starting requested but condition failed. Not starting unit.");
-                return -ECOMM;
+            !unit_test_condition(u)) {
+
+                /* Let's also check the start limit here. Normally, the start limit is only checked by the
+                 * .start() method of the unit type after it did some additional checks verifying everything
+                 * is in order (so that those other checks can propagate errors properly). However, if a
+                 * condition check doesn't hold we don't get that far but we should still ensure we are not
+                 * called in a tight loop without a rate limit check enforced, hence do the check here. Note
+                 * that ECOMM is generally not a reason for a job to fail, unlike most other errors here,
+                 * hence the chance is big that any triggering unit for us will trigger us again. Note this
+                 * condition check is a bit different from the condition check inside the per-unit .start()
+                 * function, as this one will not change the unit's state in any way (and we shouldn't here,
+                 * after all the condition failed). */
+
+                r = unit_test_start_limit(u);
+                if (r < 0)
+                        return r;
+
+                return log_unit_debug_errno(u, SYNTHETIC_ERRNO(ECOMM), "Starting requested but condition failed. Not starting unit.");
         }
 
         /* If the asserts failed, fail the entire job */
         if (state != UNIT_ACTIVATING &&
-            !unit_assert_test(u)) {
-                log_unit_notice(u, "Starting requested but asserts failed.");
-                return -EPROTO;
-        }
+            !unit_test_assert(u))
+                return log_unit_notice_errno(u, SYNTHETIC_ERRNO(EPROTO), "Starting requested but asserts failed.");
 
-        /* Units of types that aren't supported cannot be
-         * started. Note that we do this test only after the condition
-         * checks, so that we rather return condition check errors
-         * (which are usually not considered a true failure) than "not
-         * supported" errors (which are considered a failure).
+        /* Units of types that aren't supported cannot be started. Note that we do this test only after the
+         * condition checks, so that we rather return condition check errors (which are usually not
+         * considered a true failure) than "not supported" errors (which are considered a failure).
          */
         if (!unit_supported(u))
                 return -EOPNOTSUPP;
 
-        /* Let's make sure that the deps really are in order before we start this. Normally the job engine should have
-         * taken care of this already, but let's check this here again. After all, our dependencies might not be in
-         * effect anymore, due to a reload or due to a failed condition. */
+        /* Let's make sure that the deps really are in order before we start this. Normally the job engine
+         * should have taken care of this already, but let's check this here again. After all, our
+         * dependencies might not be in effect anymore, due to a reload or due to a failed condition. */
         if (!unit_verify_deps(u))
                 return -ENOLINK;
 
@@ -1801,11 +1794,9 @@ int unit_start(Unit *u) {
         if (!UNIT_VTABLE(u)->start)
                 return -EBADR;
 
-        /* We don't suppress calls to ->start() here when we are
-         * already starting, to allow this request to be used as a
-         * "hurry up" call, for example when the unit is in some "auto
-         * restart" state where it waits for a holdoff timer to elapse
-         * before it will start again. */
+        /* We don't suppress calls to ->start() here when we are already starting, to allow this request to
+         * be used as a "hurry up" call, for example when the unit is in some "auto restart" state where it
+         * waits for a holdoff timer to elapse before it will start again. */
 
         unit_add_to_dbus_queue(u);
 
@@ -1895,7 +1886,7 @@ int unit_reload(Unit *u) {
 
         state = unit_active_state(u);
         if (state == UNIT_RELOADING)
-                return -EALREADY;
+                return -EAGAIN;
 
         if (state != UNIT_ACTIVE) {
                 log_unit_warning(u, "Unit cannot be reloaded because it is inactive.");
@@ -2044,7 +2035,7 @@ static void unit_check_binds_to(Unit *u) {
         log_unit_info(u, "Unit is bound to inactive unit %s. Stopping, too.", other->id);
 
         /* A unit we need to run is gone. Sniff. Let's stop this. */
-        r = manager_add_job(u->manager, JOB_STOP, u, JOB_FAIL, &error, NULL);
+        r = manager_add_job(u->manager, JOB_STOP, u, JOB_FAIL, NULL, &error, NULL);
         if (r < 0)
                 log_unit_warning_errno(u, r, "Failed to enqueue stop job, ignoring: %s", bus_error_message(&error, r));
 }
@@ -2060,25 +2051,25 @@ static void retroactively_start_dependencies(Unit *u) {
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REQUIRES], i)
                 if (!hashmap_get(u->dependencies[UNIT_AFTER], other) &&
                     !UNIT_IS_ACTIVE_OR_ACTIVATING(unit_active_state(other)))
-                        manager_add_job(u->manager, JOB_START, other, JOB_REPLACE, NULL, NULL);
+                        manager_add_job(u->manager, JOB_START, other, JOB_REPLACE, NULL, NULL, NULL);
 
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_BINDS_TO], i)
                 if (!hashmap_get(u->dependencies[UNIT_AFTER], other) &&
                     !UNIT_IS_ACTIVE_OR_ACTIVATING(unit_active_state(other)))
-                        manager_add_job(u->manager, JOB_START, other, JOB_REPLACE, NULL, NULL);
+                        manager_add_job(u->manager, JOB_START, other, JOB_REPLACE, NULL, NULL, NULL);
 
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_WANTS], i)
                 if (!hashmap_get(u->dependencies[UNIT_AFTER], other) &&
                     !UNIT_IS_ACTIVE_OR_ACTIVATING(unit_active_state(other)))
-                        manager_add_job(u->manager, JOB_START, other, JOB_FAIL, NULL, NULL);
+                        manager_add_job(u->manager, JOB_START, other, JOB_FAIL, NULL, NULL, NULL);
 
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_CONFLICTS], i)
                 if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL);
+                        manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL, NULL);
 
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_CONFLICTED_BY], i)
                 if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL);
+                        manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL, NULL);
 }
 
 static void retroactively_stop_dependencies(Unit *u) {
@@ -2092,7 +2083,7 @@ static void retroactively_stop_dependencies(Unit *u) {
         /* Pull down units which are bound to us recursively if enabled */
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_BOUND_BY], i)
                 if (!UNIT_IS_INACTIVE_OR_DEACTIVATING(unit_active_state(other)))
-                        manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL);
+                        manager_add_job(u->manager, JOB_STOP, other, JOB_REPLACE, NULL, NULL, NULL);
 }
 
 void unit_start_on_failure(Unit *u) {
@@ -2111,7 +2102,7 @@ void unit_start_on_failure(Unit *u) {
         HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_ON_FAILURE], i) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
 
-                r = manager_add_job(u->manager, JOB_START, other, u->on_failure_job_mode, &error, NULL);
+                r = manager_add_job(u->manager, JOB_START, other, u->on_failure_job_mode, NULL, &error, NULL);
                 if (r < 0)
                         log_unit_warning_errno(u, r, "Failed to enqueue OnFailure= job, ignoring: %s", bus_error_message(&error, r));
         }
@@ -2501,23 +2492,29 @@ void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlag
 
                 if (os != UNIT_FAILED && ns == UNIT_FAILED) {
                         reason = strjoina("unit ", u->id, " failed");
-                        (void) emergency_action(m, u->failure_action, 0, u->reboot_arg, unit_failure_action_exit_status(u), reason);
+                        emergency_action(m, u->failure_action, 0, u->reboot_arg, unit_failure_action_exit_status(u), reason);
                 } else if (!UNIT_IS_INACTIVE_OR_FAILED(os) && ns == UNIT_INACTIVE) {
                         reason = strjoina("unit ", u->id, " succeeded");
-                        (void) emergency_action(m, u->success_action, 0, u->reboot_arg, unit_success_action_exit_status(u), reason);
+                        emergency_action(m, u->success_action, 0, u->reboot_arg, unit_success_action_exit_status(u), reason);
                 }
         }
 
         unit_add_to_gc_queue(u);
 }
 
-int unit_watch_pid(Unit *u, pid_t pid) {
+int unit_watch_pid(Unit *u, pid_t pid, bool exclusive) {
         int r;
 
         assert(u);
         assert(pid_is_valid(pid));
 
         /* Watch a specific PID */
+
+        /* Caller might be sure that this PID belongs to this unit only. Let's take this
+         * opportunity to remove any stalled references to this PID as they can be created
+         * easily (when watching a process which is not our direct child). */
+        if (exclusive)
+                manager_unwatch_pid(u->manager, pid);
 
         r = set_ensure_allocated(&u->pids, NULL);
         if (r < 0)
@@ -3198,7 +3195,7 @@ static int serialize_cgroup_mask(FILE *f, const char *key, CGroupMask mask) {
         return serialize_item(f, key, s);
 }
 
-static const char *ip_accounting_metric_field[_CGROUP_IP_ACCOUNTING_METRIC_MAX] = {
+static const char *const ip_accounting_metric_field[_CGROUP_IP_ACCOUNTING_METRIC_MAX] = {
         [CGROUP_IP_INGRESS_BYTES] = "ip-accounting-ingress-bytes",
         [CGROUP_IP_INGRESS_PACKETS] = "ip-accounting-ingress-packets",
         [CGROUP_IP_EGRESS_BYTES] = "ip-accounting-egress-bytes",
@@ -4091,14 +4088,20 @@ int unit_patch_contexts(Unit *u) {
                                         return -ENOMEM;
                         }
 
-                        /* If the dynamic user option is on, let's make sure that the unit can't leave its UID/GID
-                         * around in the file system or on IPC objects. Hence enforce a strict sandbox. */
+                        /* If the dynamic user option is on, let's make sure that the unit can't leave its
+                         * UID/GID around in the file system or on IPC objects. Hence enforce a strict
+                         * sandbox. */
 
                         ec->private_tmp = true;
                         ec->remove_ipc = true;
                         ec->protect_system = PROTECT_SYSTEM_STRICT;
                         if (ec->protect_home == PROTECT_HOME_NO)
                                 ec->protect_home = PROTECT_HOME_READ_ONLY;
+
+                        /* Make sure this service can neither benefit from SUID/SGID binaries nor create
+                         * them. */
+                        ec->no_new_privileges = true;
+                        ec->restrict_suid_sgid = true;
                 }
         }
 
@@ -4428,7 +4431,7 @@ int unit_make_transient(Unit *u) {
         return 0;
 }
 
-static void log_kill(pid_t pid, int sig, void *userdata) {
+static int log_kill(pid_t pid, int sig, void *userdata) {
         _cleanup_free_ char *comm = NULL;
 
         (void) get_process_comm(pid, &comm);
@@ -4436,13 +4439,15 @@ static void log_kill(pid_t pid, int sig, void *userdata) {
         /* Don't log about processes marked with brackets, under the assumption that these are temporary processes
            only, like for example systemd's own PAM stub process. */
         if (comm && comm[0] == '(')
-                return;
+                return 0;
 
         log_unit_notice(userdata,
                         "Killing process " PID_FMT " (%s) with signal SIG%s.",
                         pid,
                         strna(comm),
                         signal_to_string(sig));
+
+        return 1;
 }
 
 static int operation_to_signal(KillContext *c, KillOperation k) {
@@ -4607,7 +4612,7 @@ int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask) 
         if (!p)
                 return -ENOMEM;
 
-        path = path_simplify(p, false);
+        path = path_simplify(p, true);
 
         if (!path_is_normalized(path))
                 return -EPERM;
@@ -5394,29 +5399,31 @@ int unit_prepare_exec(Unit *u) {
         return 0;
 }
 
-static void log_leftover(pid_t pid, int sig, void *userdata) {
+static int log_leftover(pid_t pid, int sig, void *userdata) {
         _cleanup_free_ char *comm = NULL;
 
         (void) get_process_comm(pid, &comm);
 
         if (comm && comm[0] == '(') /* Most likely our own helper process (PAM?), ignore */
-                return;
+                return 0;
 
         log_unit_warning(userdata,
                          "Found left-over process " PID_FMT " (%s) in control group while starting unit. Ignoring.\n"
                          "This usually indicates unclean termination of a previous run, or service implementation deficiencies.",
                          pid, strna(comm));
+
+        return 1;
 }
 
-void unit_warn_leftover_processes(Unit *u) {
+int unit_warn_leftover_processes(Unit *u) {
         assert(u);
 
         (void) unit_pick_cgroup_path(u);
 
         if (!u->cgroup_path)
-                return;
+                return 0;
 
-        (void) cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, 0, 0, NULL, log_leftover, u);
+        return cg_kill_recursive(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, 0, 0, NULL, log_leftover, u);
 }
 
 bool unit_needs_console(Unit *u) {
@@ -5583,6 +5590,20 @@ int unit_success_action_exit_status(Unit *u) {
                 return 255;
 
         return r;
+}
+
+int unit_test_trigger_loaded(Unit *u) {
+        Unit *trigger;
+
+        /* Tests whether the unit to trigger is loaded */
+
+        trigger = UNIT_TRIGGER(u);
+        if (!trigger)
+                return log_unit_error_errno(u, SYNTHETIC_ERRNO(ENOENT), "Refusing to start, unit to trigger not loaded.");
+        if (trigger->load_state != UNIT_LOADED)
+                return log_unit_error_errno(u, SYNTHETIC_ERRNO(ENOENT), "Refusing to start, unit %s to trigger not loaded.", u->id);
+
+        return 0;
 }
 
 static const char* const collect_mode_table[_COLLECT_MODE_MAX] = {

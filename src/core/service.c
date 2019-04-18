@@ -2,6 +2,8 @@
 
 #include <errno.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "sd-messages.h"
@@ -143,8 +145,6 @@ static void service_unwatch_pid_file(Service *s) {
 }
 
 static int service_set_main_pid(Service *s, pid_t pid) {
-        pid_t ppid;
-
         assert(s);
 
         if (pid <= 1)
@@ -163,12 +163,10 @@ static int service_set_main_pid(Service *s, pid_t pid) {
 
         s->main_pid = pid;
         s->main_pid_known = true;
+        s->main_pid_alien = pid_is_my_child(pid) == 0;
 
-        if (get_process_ppid(pid, &ppid) >= 0 && ppid != getpid_cached()) {
+        if (s->main_pid_alien)
                 log_unit_warning(UNIT(s), "Supervising process "PID_FMT" which is not our child. We'll most likely not notice when it exits.", pid);
-                s->main_pid_alien = true;
-        } else
-                s->main_pid_alien = false;
 
         return 0;
 }
@@ -994,7 +992,7 @@ static int service_load_pid_file(Service *s, bool may_warn) {
         if (r < 0)
                 return r;
 
-        r = unit_watch_pid(UNIT(s), pid);
+        r = unit_watch_pid(UNIT(s), pid, false);
         if (r < 0) /* FIXME: we need to do something here */
                 return log_unit_warning_errno(UNIT(s), r, "Failed to watch PID "PID_FMT" for service: %m", pid);
 
@@ -1024,7 +1022,7 @@ static void service_search_main_pid(Service *s) {
         if (service_set_main_pid(s, pid) < 0)
                 return;
 
-        r = unit_watch_pid(UNIT(s), pid);
+        r = unit_watch_pid(UNIT(s), pid, false);
         if (r < 0)
                 /* FIXME: we need to do something here */
                 log_unit_warning_errno(UNIT(s), r, "Failed to watch PID "PID_FMT" from: %m", pid);
@@ -1158,7 +1156,7 @@ static int service_coldplug(Unit *u) {
                     SERVICE_RUNNING, SERVICE_RELOAD,
                     SERVICE_STOP, SERVICE_STOP_WATCHDOG, SERVICE_STOP_SIGTERM, SERVICE_STOP_SIGKILL, SERVICE_STOP_POST,
                     SERVICE_FINAL_SIGTERM, SERVICE_FINAL_SIGKILL))) {
-                r = unit_watch_pid(UNIT(s), s->main_pid);
+                r = unit_watch_pid(UNIT(s), s->main_pid, false);
                 if (r < 0)
                         return r;
         }
@@ -1170,7 +1168,7 @@ static int service_coldplug(Unit *u) {
                    SERVICE_RELOAD,
                    SERVICE_STOP, SERVICE_STOP_WATCHDOG, SERVICE_STOP_SIGTERM, SERVICE_STOP_SIGKILL, SERVICE_STOP_POST,
                    SERVICE_FINAL_SIGTERM, SERVICE_FINAL_SIGKILL)) {
-                r = unit_watch_pid(UNIT(s), s->control_pid);
+                r = unit_watch_pid(UNIT(s), s->control_pid, false);
                 if (r < 0)
                         return r;
         }
@@ -1458,7 +1456,7 @@ static int service_spawn(
         if (r < 0)
                 return r;
 
-        our_env = new0(char*, 9);
+        our_env = new0(char*, 10);
         if (!our_env)
                 return -ENOMEM;
 
@@ -1472,6 +1470,10 @@ static int service_spawn(
 
         if (MANAGER_IS_USER(UNIT(s)->manager))
                 if (asprintf(our_env + n_env++, "MANAGERPID="PID_FMT, getpid_cached()) < 0)
+                        return -ENOMEM;
+
+        if (s->pid_file)
+                if (asprintf(our_env + n_env++, "PIDFILE=%s", s->pid_file) < 0)
                         return -ENOMEM;
 
         if (s->socket_fd >= 0) {
@@ -1566,8 +1568,8 @@ static int service_spawn(
         s->exec_fd_event_source = TAKE_PTR(exec_fd_source);
         s->exec_fd_hot = false;
 
-        r = unit_watch_pid(UNIT(s), pid);
-        if (r < 0) /* FIXME: we need to do something here */
+        r = unit_watch_pid(UNIT(s), pid, true);
+        if (r < 0)
                 return r;
 
         *_pid = pid;
@@ -1753,6 +1755,9 @@ static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) 
          * let's remove it. */
         if (s->pid_file)
                 (void) unlink(s->pid_file);
+
+        /* Reset TTY ownership if necessary */
+        exec_context_revert_tty(&s->exec_context);
 
         return;
 
@@ -2006,6 +2011,26 @@ static void service_kill_control_process(Service *s) {
         }
 }
 
+static int service_adverse_to_leftover_processes(Service *s) {
+        assert(s);
+
+        /* KillMode=mixed and control group are used to indicate that all process should be killed off.
+         * SendSIGKILL is used for services that require a clean shutdown. These are typically database
+         * service where a SigKilled process would result in a lengthy recovery and who's shutdown or
+         * startup time is quite variable (so Timeout settings aren't of use).
+         *
+         * Here we take these two factors and refuse to start a service if there are existing processes
+         * within a control group. Databases, while generally having some protection against multiple
+         * instances running, lets not stress the rigor of these. Also ExecStartPre parts of the service
+         * aren't as rigoriously written to protect aganst against multiple use. */
+        if (unit_warn_leftover_processes(UNIT(s)) &&
+            IN_SET(s->kill_context.kill_mode, KILL_MIXED, KILL_CONTROL_GROUP) &&
+            !s->kill_context.send_sigkill) {
+               return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(EBUSY), "Will not start SendSIGKILL=no service of type KillMode=control-group or mixed while processes exist");
+        }
+        return 0;
+}
+
 static void service_enter_start(Service *s) {
         ExecCommand *c;
         usec_t timeout;
@@ -2017,7 +2042,9 @@ static void service_enter_start(Service *s) {
         service_unwatch_control_pid(s);
         service_unwatch_main_pid(s);
 
-        unit_warn_leftover_processes(UNIT(s));
+        r = service_adverse_to_leftover_processes(s);
+        if (r < 0)
+                goto fail;
 
         if (s->type == SERVICE_FORKING) {
                 s->control_command_id = SERVICE_EXEC_START;
@@ -2110,7 +2137,9 @@ static void service_enter_start_pre(Service *s) {
         s->control_command = s->exec_command[SERVICE_EXEC_START_PRE];
         if (s->control_command) {
 
-                unit_warn_leftover_processes(UNIT(s));
+                r = service_adverse_to_leftover_processes(s);
+                if (r < 0)
+                        goto fail;
 
                 s->control_command_id = SERVICE_EXEC_START_PRE;
 
@@ -2154,7 +2183,7 @@ static void service_enter_restart(Service *s) {
          * restarted. We use JOB_RESTART (instead of the more obvious
          * JOB_START) here so that those dependency jobs will be added
          * as well. */
-        r = manager_add_job(UNIT(s)->manager, JOB_RESTART, UNIT(s), JOB_REPLACE, &error, NULL);
+        r = manager_add_job(UNIT(s)->manager, JOB_RESTART, UNIT(s), JOB_REPLACE, NULL, &error, NULL);
         if (r < 0)
                 goto fail;
 
@@ -2336,7 +2365,7 @@ static int service_start(Unit *u) {
         assert(IN_SET(s->state, SERVICE_DEAD, SERVICE_FAILED));
 
         /* Make sure we don't enter a busy loop of some kind. */
-        r = unit_start_limit_test(u);
+        r = unit_test_start_limit(u);
         if (r < 0) {
                 service_enter_dead(s, SERVICE_FAILURE_START_LIMIT_HIT, false);
                 return r;
@@ -3186,11 +3215,19 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         bool notify_dbus = true;
         Service *s = SERVICE(u);
         ServiceResult f;
+        ExitClean clean_mode;
 
         assert(s);
         assert(pid >= 0);
 
-        if (is_clean_exit(code, status, s->type == SERVICE_ONESHOT ? EXIT_CLEAN_COMMAND : EXIT_CLEAN_DAEMON, &s->success_status))
+        /* Oneshot services and non-SERVICE_EXEC_START commands should not be
+         * considered daemons as they are typically not long running. */
+        if (s->type == SERVICE_ONESHOT || (s->control_pid == pid && s->control_command_id != SERVICE_EXEC_START))
+                clean_mode = EXIT_CLEAN_COMMAND;
+        else
+                clean_mode = EXIT_CLEAN_DAEMON;
+
+        if (is_clean_exit(code, status, clean_mode, &s->success_status))
                 f = SERVICE_SUCCESS;
         else if (code == CLD_EXITED)
                 f = SERVICE_FAILURE_EXIT_CODE;
@@ -3439,8 +3476,7 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                 if (main_pid_good(s) <= 0)
                                         service_enter_stop_post(s, f);
 
-                                /* If there is still a service
-                                 * process around, wait until
+                                /* If there is still a service process around, wait until
                                  * that one quit, too */
                                 break;
 
@@ -3462,10 +3498,14 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         if (notify_dbus)
                 unit_add_to_dbus_queue(u);
 
-        /* If we get a SIGCHLD event for one of the processes we were interested in, then we look for others to watch,
-         * under the assumption that we'll sooner or later get a SIGCHLD for them, as the original process we watched
-         * was probably the parent of them, and they are hence now our children. */
-        (void) unit_enqueue_rewatch_pids(u);
+        /* We watch the main/control process otherwise we can't retrieve the unit they
+         * belong to with cgroupv1. But if they are not our direct child, we won't get a
+         * SIGCHLD for them. Therefore we need to look for others to watch so we can
+         * detect when the cgroup becomes empty. Note that the control process is always
+         * our child so it's pointless to watch all other processes. */
+        if (!control_pid_good(s))
+                if (!s->main_pid_known || s->main_pid_alien)
+                        (void) unit_enqueue_rewatch_pids(u);
 }
 
 static int service_dispatch_timer(sd_event_source *source, usec_t usec, void *userdata) {
@@ -3673,7 +3713,7 @@ static void service_notify_message(
                         if (r > 0) {
                                 service_set_main_pid(s, new_main_pid);
 
-                                r = unit_watch_pid(UNIT(s), new_main_pid);
+                                r = unit_watch_pid(UNIT(s), new_main_pid, false);
                                 if (r < 0)
                                         log_unit_warning_errno(UNIT(s), r, "Failed to watch new main PID "PID_FMT" for service: %m", new_main_pid);
 
@@ -3891,7 +3931,7 @@ static void service_bus_name_owner_change(
                         log_unit_debug(u, "D-Bus name %s is now owned by process " PID_FMT, name, pid);
 
                         service_set_main_pid(s, pid);
-                        unit_watch_pid(UNIT(s), pid);
+                        unit_watch_pid(UNIT(s), pid, false);
                 }
         }
 }

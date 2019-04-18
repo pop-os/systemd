@@ -1,12 +1,8 @@
 Bugfixes:
 
-* copy.c: set the right chattrs before copying files and others after
-
 * Many manager configuration settings that are only applicable to user
   manager or system manager can be always set. It would be better to reject
   them when parsing config.
-
-* Clarify what IPAddress* matches (source, destination, both?)
 
 External:
 
@@ -22,6 +18,19 @@ Janitorial Clean-ups:
   semantics, like we do for device.c now
 
 Features:
+
+* tweak journald context caching. In addition to caching per-process attributes
+  keyed by PID, cache per-cgroup attributes (i.e. the various xattrs we read)
+  keyed by cgroup path, and guarded by ctime changes. This should provide us
+  with a nice speed-up on services that have many processes running in the same
+  cgroup.
+
+* clean up sleep.c:
+  - Use CLOCK_BOOTTIME_ALARM for waking up s2h instead of RTC ioctls
+  - Parse sleep.conf only once, and parse its whole contents so that we don't
+    have to parse it again and again in s2h
+  - Make sure resume= and resume_offset= on the kernel cmdline always take
+    precedence
 
 * make MAINPID= message reception checks even stricter: if service uses User=,
   then check sending UID and ignore message if it doesn't match the user or
@@ -51,12 +60,7 @@ Features:
 * When logind.conf contains HandleLidSwitch=suspend-then-hibernate and we can't
   hibernate because the swap partition isn't large enough, still suspend
 
-* bootctl: implement Type #2 boot loader entry discovery
-
 * bootctl,sd-boot: actually honour the "architecture" key
-
-* when a socket unit is spawned with an AF_UNIX path in /var/run, complain and
-  patch it to use /run instead
 
 * set memory.oom.group in cgroup v2 for all leaf cgroups (kernel v4.19+)
 
@@ -65,7 +69,7 @@ Features:
 
 * paranoia: whenever we process passwords, call mlock() on the memory
   first. i.e. look for all places we use string_erase()/string_free_erase() and
-  augment them with mlock()
+  augment them with mlock(). Also use MADV_DONTDUMP
 
 * whenever oom_kill memory.event event is triggered print a nice log message
 
@@ -76,8 +80,6 @@ Features:
 
 * maybe implicitly attach monotonic+realtime timestamps to outgoing messages in
   log.c and sd-journal-send
-
-* chown() tty a service is attached to after the service goes down
 
 * optionally: turn on cgroup delegation for per-session scope units
 
@@ -90,22 +92,11 @@ Features:
   show state of these flags, and optionally trigger such a factory reset on
   next boot by setting the flag.
 
-* sd-boot: search drop-ins in $BOOT, too
-
-* sd-boot: add "oneshot boot timeout" variable support
-
 * sd-boot: automatically load EFI modules from some drop-in dir, so that people
   can add in file system drivers and such
 
-* esp generator: also mount $BOOT if found
-
 * sd-boot: optionally, show boot menu when previous default boot item has
   non-zero "tries done" count
-
-* logind: add "boot into bootmenu" API, and possibly even "boot into windows"
-  and "boot into macos".
-
-* bootspec.c: also enumerate EFI unified kernel images.
 
 * maybe set a special xattr on cgroups that have delegate=yes set, to make it
   easy to mark cut points
@@ -149,9 +140,6 @@ Features:
 
 * When reloading configuration PID 1 should reset all its properties to the
   original defaults before calling parse_config()
-
-* Add OnTimezoneChange= and OnTimeChange= stanzas to .timer units in order to
-  schedule events based on time and timezone changes.
 
 * nspawn: greater control over selinux label?
 
@@ -267,8 +255,6 @@ Features:
   as the unit is running or has a job queued.
 
 * support projid-based quota in machinectl for containers
-
-* Add NetworkNamespacePath= to specify a path to a network namespace
 
 * maybe use SOURCE_DATE_EPOCH (i.e. the env var the reproducible builds folks
   introduced) as the RTC epoch, instead of the mtime of NEWS.
@@ -449,8 +435,6 @@ Features:
 
 * optionally, also require WATCHDOG=1 notifications during service start-up and shutdown
 
-* resolved: when routing queries, make sure only look for the *longest* suffix...
-
 * delay activation of logind until somebody logs in, or when /dev/tty0 pulls it
   in or lingering is on (so that containers don't bother with it until PAM is used). also exit-on-idle
 
@@ -595,12 +579,6 @@ Features:
   service instances processing the listening socket, and open this up
   for ReusePort=
 
-* socket units: support creating sockets in different namespace,
-  opening it up for JoinsNamespaceOf=. This would require to fork off
-  a tiny process that joins the namespace and creates/binds the socket
-  and passes this back to PID1 via SCM_RIGHTS. This also could be used
-  to allow Chown/chgrp on sockets without requiring NSS in PID 1.
-
 * introduce bus call FreezeUnit(s, b), as well as "systemctl freeze
   $UNIT" and "systemctl thaw $UNIT" as wrappers around this. The calls
   should SIGSTOP all unit processes in a loop until all processes of
@@ -640,9 +618,6 @@ Features:
 * man: the documentation of Restart= currently is very misleading and suggests the tools from ExecStartPre= might get restarted.
 
 * load .d/*.conf dropins for device units
-
-* allow implementation of InaccessibleDirectories=/ plus
-  ReadOnlyDirectories=... for whitelisting files for a service.
 
 * sd-bus:
   - EBADSLT handling
@@ -710,6 +685,10 @@ Features:
   - honor language efi variables for default language selection (if there are any?)
   - honor timezone efi variables for default timezone selection (if there are any?)
   - change bootctl to be backed by systemd-bootd to control temporary and persistent default boot goal plus efi variables
+* bootctl
+  - verify that the files boot entries point to exist
+  - recognize the case when not booted on EFI
+  - specify paths for boot entries
 
 * maybe do not install getty@tty1.service symlink in /etc but in /usr?
 
@@ -741,8 +720,6 @@ Features:
     make assumptions about their slice anymore.
   - follow PropertiesChanged state more closely, to deal with quick logouts and
     relogins
-
-* exec: when deinitializating a tty device fix the perms and group, too, not only when initializing. Set access mode/gid to 0620/tty.
 
 * journal:
   - consider introducing implicit _TTY= + _PPID= + _EUID= + _EGID= + _FSUID= + _FSGID= fields
@@ -825,6 +802,7 @@ Features:
   - man: document the very specific env the shutdown drop-in tools live in
   - man: add more examples to man pages
   - man: maybe sort directives in man pages, and take sections from --help and apply them to man too
+  - document root=gpt-auto properly
 
 * systemctl:
   - add systemctl switch to dump transaction without executing it
@@ -844,9 +822,7 @@ Features:
 
 * timer units:
   - timer units should get the ability to trigger when:
-    o CLOCK_REALTIME makes jumps (TFD_TIMER_CANCEL_ON_SET)
     o DST changes
-    o timezone changes
   - Modulate timer frequency based on battery state
 
 * add libsystemd-password or so to query passwords during boot using the password agent logic

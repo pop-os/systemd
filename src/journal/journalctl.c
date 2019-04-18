@@ -50,7 +50,9 @@
 #include "locale-util.h"
 #include "log.h"
 #include "logs-show.h"
+#include "memory-util.h"
 #include "mkdir.h"
+#include "nulstr-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -119,6 +121,7 @@ static int arg_boot_offset = 0;
 static bool arg_dmesg = false;
 static bool arg_no_hostname = false;
 static const char *arg_cursor = NULL;
+static const char *arg_cursor_file = NULL;
 static const char *arg_after_cursor = NULL;
 static bool arg_show_cursor = false;
 static const char *arg_directory = NULL;
@@ -263,7 +266,11 @@ static int parse_boot_descriptor(const char *x, sd_id128_t *boot_id, int *offset
         sd_id128_t id = SD_ID128_NULL;
         int off = 0, r;
 
-        if (strlen(x) >= 32) {
+        if (streq(x, "all")) {
+                *boot_id = SD_ID128_NULL;
+                *offset = 0;
+                return 0;
+        } else if (strlen(x) >= 32) {
                 char *t;
 
                 t = strndupa(x, 32);
@@ -291,7 +298,7 @@ static int parse_boot_descriptor(const char *x, sd_id128_t *boot_id, int *offset
         if (offset)
                 *offset = off;
 
-        return 0;
+        return 1;
 }
 
 static int help(void) {
@@ -315,6 +322,7 @@ static int help(void) {
                "  -c --cursor=CURSOR         Show entries starting at the specified cursor\n"
                "     --after-cursor=CURSOR   Show entries after the specified cursor\n"
                "     --show-cursor           Print the cursor after all the entries\n"
+               "     --cursor-file=FILE      Show entries after cursor in FILE and update FILE\n"
                "  -b --boot[=ID]             Show current boot or the specified boot\n"
                "     --list-boots            Show terse information about recorded boots\n"
                "  -k --dmesg                 Show kernel message log from the current boot\n"
@@ -396,6 +404,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_VERIFY_KEY,
                 ARG_DISK_USAGE,
                 ARG_AFTER_CURSOR,
+                ARG_CURSOR_FILE,
                 ARG_SHOW_CURSOR,
                 ARG_USER_UNIT,
                 ARG_LIST_CATALOG,
@@ -450,6 +459,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "verify-key",     required_argument, NULL, ARG_VERIFY_KEY     },
                 { "disk-usage",     no_argument,       NULL, ARG_DISK_USAGE     },
                 { "cursor",         required_argument, NULL, 'c'                },
+                { "cursor-file",    required_argument, NULL, ARG_CURSOR_FILE    },
                 { "after-cursor",   required_argument, NULL, ARG_AFTER_CURSOR   },
                 { "show-cursor",    no_argument,       NULL, ARG_SHOW_CURSOR    },
                 { "since",          required_argument, NULL, 'S'                },
@@ -587,30 +597,34 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_THIS_BOOT:
                         arg_boot = true;
+                        arg_boot_id = SD_ID128_NULL;
+                        arg_boot_offset = 0;
                         break;
 
                 case 'b':
                         arg_boot = true;
+                        arg_boot_id = SD_ID128_NULL;
+                        arg_boot_offset = 0;
 
                         if (optarg) {
                                 r = parse_boot_descriptor(optarg, &arg_boot_id, &arg_boot_offset);
-                                if (r < 0) {
-                                        log_error("Failed to parse boot descriptor '%s'", optarg);
-                                        return -EINVAL;
-                                }
-                        } else {
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to parse boot descriptor '%s'", optarg);
 
-                                /* Hmm, no argument? Maybe the next
-                                 * word on the command line is
-                                 * supposed to be the argument? Let's
-                                 * see if there is one and is parsable
-                                 * as a boot descriptor... */
+                                arg_boot = r;
 
-                                if (optind < argc &&
-                                    parse_boot_descriptor(argv[optind], &arg_boot_id, &arg_boot_offset) >= 0)
+                        /* Hmm, no argument? Maybe the next
+                         * word on the command line is
+                         * supposed to be the argument? Let's
+                         * see if there is one and is parsable
+                         * as a boot descriptor... */
+                        } else if (optind < argc) {
+                                r = parse_boot_descriptor(argv[optind], &arg_boot_id, &arg_boot_offset);
+                                if (r >= 0) {
+                                        arg_boot = r;
                                         optind++;
+                                }
                         }
-
                         break;
 
                 case ARG_LIST_BOOTS:
@@ -659,6 +673,10 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case 'c':
                         arg_cursor = optarg;
+                        break;
+
+                case ARG_CURSOR_FILE:
+                        arg_cursor_file = optarg;
                         break;
 
                 case ARG_AFTER_CURSOR:
@@ -1823,7 +1841,7 @@ finish:
         safe_close(fd);
 
         if (k) {
-                unlink(k);
+                (void) unlink(k);
                 free(k);
         }
 
@@ -1883,6 +1901,21 @@ static int verify(sd_journal *j) {
         return r;
 }
 
+static int watch_run_systemd_journal(uint32_t mask) {
+        _cleanup_close_ int watch_fd = -1;
+
+        (void) mkdir_p("/run/systemd/journal", 0755);
+
+        watch_fd = inotify_init1(IN_NONBLOCK|IN_CLOEXEC);
+        if (watch_fd < 0)
+                return log_error_errno(errno, "Failed to create inotify object: %m");
+
+        if (inotify_add_watch(watch_fd, "/run/systemd/journal", mask) < 0)
+                return log_error_errno(errno, "Failed to watch \"/run/systemd/journal\": %m");
+
+        return TAKE_FD(watch_fd);
+}
+
 static int flush_to_var(void) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
@@ -1916,19 +1949,13 @@ static int flush_to_var(void) {
         if (r < 0)
                 return log_error_errno(r, "Failed to kill journal service: %s", bus_error_message(&error, r));
 
-        mkdir_p("/run/systemd/journal", 0755);
-
-        watch_fd = inotify_init1(IN_NONBLOCK|IN_CLOEXEC);
+        watch_fd = watch_run_systemd_journal(IN_CREATE|IN_DONT_FOLLOW|IN_ONLYDIR);
         if (watch_fd < 0)
-                return log_error_errno(errno, "Failed to create inotify watch: %m");
-
-        r = inotify_add_watch(watch_fd, "/run/systemd/journal", IN_CREATE|IN_DONT_FOLLOW|IN_ONLYDIR);
-        if (r < 0)
-                return log_error_errno(errno, "Failed to watch journal directory: %m");
+                return watch_fd;
 
         for (;;) {
                 if (access("/run/systemd/journal/flushed", F_OK) >= 0)
-                        break;
+                        return 0;
 
                 if (errno != ENOENT)
                         return log_error_errno(errno, "Failed to check for existence of /run/systemd/journal/flushed: %m");
@@ -1941,8 +1968,6 @@ static int flush_to_var(void) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to flush inotify events: %m");
         }
-
-        return 0;
 }
 
 static int send_signal_and_wait(int sig, const char *watch_path) {
@@ -1998,23 +2023,15 @@ static int send_signal_and_wait(int sig, const char *watch_path) {
 
                 /* Let's install the inotify watch, if we didn't do that yet. */
                 if (watch_fd < 0) {
-
-                        mkdir_p("/run/systemd/journal", 0755);
-
-                        watch_fd = inotify_init1(IN_NONBLOCK|IN_CLOEXEC);
+                        watch_fd = watch_run_systemd_journal(IN_MOVED_TO|IN_DONT_FOLLOW|IN_ONLYDIR);
                         if (watch_fd < 0)
-                                return log_error_errno(errno, "Failed to create inotify watch: %m");
-
-                        r = inotify_add_watch(watch_fd, "/run/systemd/journal", IN_MOVED_TO|IN_DONT_FOLLOW|IN_ONLYDIR);
-                        if (r < 0)
-                                return log_error_errno(errno, "Failed to watch journal directory: %m");
+                                return watch_fd;
 
                         /* Recheck the flag file immediately, so that we don't miss any event since the last check. */
                         continue;
                 }
 
-                /* OK, all preparatory steps done, let's wait until
-                 * inotify reports an event. */
+                /* OK, all preparatory steps done, let's wait until inotify reports an event. */
 
                 r = fd_wait_for_event(watch_fd, POLLIN, USEC_INFINITY);
                 if (r < 0)
@@ -2077,6 +2094,7 @@ static int wait_for_change(sd_journal *j, int poll_fd) {
 
 int main(int argc, char *argv[]) {
         bool previous_boot_id_valid = false, first_line = true, ellipsized = false, need_seek = false;
+        bool use_cursor = false, after_cursor = false;
         _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         sd_id128_t previous_boot_id;
         int n_shown = 0, r, poll_fd = -1;
@@ -2420,19 +2438,41 @@ int main(int argc, char *argv[]) {
                 }
         }
 
-        if (arg_cursor || arg_after_cursor) {
-                r = sd_journal_seek_cursor(j, arg_cursor ?: arg_after_cursor);
-                if (r < 0) {
-                        log_error_errno(r, "Failed to seek to cursor: %m");
-                        goto finish;
+        if (arg_cursor || arg_after_cursor || arg_cursor_file) {
+                _cleanup_free_ char *cursor_from_file = NULL;
+                const char *cursor = arg_cursor ?: arg_after_cursor;
+
+                if (arg_cursor_file) {
+                        r = read_one_line_file(arg_cursor_file, &cursor_from_file);
+                        if (r < 0 && r != -ENOENT) {
+                                log_error_errno(r, "Failed to read cursor file %s: %m", arg_cursor_file);
+                                goto finish;
+                        }
+
+                        if (r > 0) {
+                                cursor = cursor_from_file;
+                                after_cursor = true;
+                        }
+                } else
+                        after_cursor = !!arg_after_cursor;
+
+                if (cursor) {
+                        r = sd_journal_seek_cursor(j, cursor);
+                        if (r < 0) {
+                                log_error_errno(r, "Failed to seek to cursor: %m");
+                                goto finish;
+                        }
+                        use_cursor = true;
                 }
+        }
 
+        if (use_cursor) {
                 if (!arg_reverse)
-                        r = sd_journal_next_skip(j, 1 + !!arg_after_cursor);
+                        r = sd_journal_next_skip(j, 1 + after_cursor);
                 else
-                        r = sd_journal_previous_skip(j, 1 + !!arg_after_cursor);
+                        r = sd_journal_previous_skip(j, 1 + after_cursor);
 
-                if (arg_after_cursor && r < 2) {
+                if (after_cursor && r < 2) {
                         /* We couldn't find the next entry after the cursor. */
                         if (arg_follow)
                                 need_seek = true;
@@ -2661,14 +2701,26 @@ int main(int argc, char *argv[]) {
                         if (n_shown == 0 && !arg_quiet)
                                 printf("-- No entries --\n");
 
-                        if (arg_show_cursor) {
+                        if (arg_show_cursor || arg_cursor_file) {
                                 _cleanup_free_ char *cursor = NULL;
 
                                 r = sd_journal_get_cursor(j, &cursor);
                                 if (r < 0 && r != -EADDRNOTAVAIL)
                                         log_error_errno(r, "Failed to get cursor: %m");
-                                else if (r >= 0)
-                                        printf("-- cursor: %s\n", cursor);
+                                else if (r >= 0) {
+                                        if (arg_show_cursor)
+                                                printf("-- cursor: %s\n", cursor);
+
+                                        if (arg_cursor_file) {
+                                                r = write_string_file(arg_cursor_file, cursor,
+                                                                      WRITE_STRING_FILE_CREATE |
+                                                                      WRITE_STRING_FILE_ATOMIC);
+                                                if (r < 0)
+                                                        log_error_errno(r,
+                                                                        "Failed to write new cursor to %s: %m",
+                                                                        arg_cursor_file);
+                                        }
+                                }
                         }
 
                         break;

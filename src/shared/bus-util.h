@@ -12,6 +12,7 @@
 #include "hashmap.h"
 #include "macro.h"
 #include "string-util.h"
+#include "time-util.h"
 
 typedef enum BusTransport {
         BUS_TRANSPORT_LOCAL,
@@ -64,7 +65,8 @@ int bus_connect_transport_systemd(BusTransport transport, const char *host, bool
 
 typedef int (*bus_message_print_t) (const char *name, const char *expected_value, sd_bus_message *m, bool value, bool all);
 
-int bus_print_property_value(const char *name, const char *expected_value, bool only_value, const char *fmt, ...) _printf_(4,5);
+int bus_print_property_value(const char *name, const char *expected_value, bool only_value, const char *value);
+int bus_print_property_valuef(const char *name, const char *expected_value, bool only_value, const char *fmt, ...) _printf_(4,5);
 int bus_message_print_all_properties(sd_bus_message *m, bus_message_print_t func, char **filter, bool value, bool all, Set **found_properties);
 int bus_print_all_properties(sd_bus *bus, const char *dest, const char *path, bus_message_print_t func, char **filter, bool value, bool all, Set **found_properties);
 

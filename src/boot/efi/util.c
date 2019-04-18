@@ -117,10 +117,12 @@ EFI_STATUS efivar_get(const CHAR16 *name, CHAR16 **value) {
         if ((size % 2) != 0)
                 return EFI_INVALID_PARAMETER;
 
+        if (!value)
+                return EFI_SUCCESS;
+
         /* Return buffer directly if it happens to be NUL terminated already */
         if (size >= 2 && buf[size-2] == 0 && buf[size-1] == 0) {
-                *value = (CHAR16*) buf;
-                buf = NULL;
+                *value = (CHAR16*) TAKE_PTR(buf);
                 return EFI_SUCCESS;
         }
 
@@ -141,7 +143,7 @@ EFI_STATUS efivar_get_int(const CHAR16 *name, UINTN *i) {
         EFI_STATUS err;
 
         err = efivar_get(name, &val);
-        if (!EFI_ERROR(err))
+        if (!EFI_ERROR(err) && i)
                 *i = Atoi(val);
 
         return err;
@@ -159,8 +161,10 @@ EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const CHAR16 *name, CHAR8 **bu
 
         err = uefi_call_wrapper(RT->GetVariable, 5, (CHAR16*) name, (EFI_GUID *)vendor, NULL, &l, buf);
         if (!EFI_ERROR(err)) {
-                *buffer = buf;
-                buf = NULL;
+
+                if (buffer)
+                        *buffer = TAKE_PTR(buf);
+
                 if (size)
                         *size = l;
         }

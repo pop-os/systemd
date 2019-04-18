@@ -349,6 +349,9 @@ typedef struct Unit {
         bool exported_log_rate_limit_interval:1;
         bool exported_log_rate_limit_burst:1;
 
+        /* Whether we warned about clamping the CPU quota period */
+        bool warned_clamping_cpu_quota_period:1;
+
         /* When writing transient unit files, stores which section we stored last. If < 0, we didn't write any yet. If
          * == 0 we are in the [Unit] section, if > 0 we are in the unit type-specific section. */
         signed int last_section_private:2;
@@ -675,7 +678,7 @@ typedef enum UnitNotifyFlags {
 
 void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlags flags);
 
-int unit_watch_pid(Unit *u, pid_t pid);
+int unit_watch_pid(Unit *u, pid_t pid, bool exclusive);
 void unit_unwatch_pid(Unit *u, pid_t pid);
 void unit_unwatch_all_pids(Unit *u);
 
@@ -775,7 +778,7 @@ static inline bool unit_supported(Unit *u) {
 void unit_warn_if_dir_nonempty(Unit *u, const char* where);
 int unit_fail_if_noncanonical(Unit *u, const char* where);
 
-int unit_start_limit_test(Unit *u);
+int unit_test_start_limit(Unit *u);
 
 void unit_unref_uid(Unit *u, bool destroy_now);
 int unit_ref_uid(Unit *u, uid_t uid, bool clean_ipc);
@@ -804,7 +807,7 @@ void unit_unlink_state_files(Unit *u);
 
 int unit_prepare_exec(Unit *u);
 
-void unit_warn_leftover_processes(Unit *u);
+int unit_warn_leftover_processes(Unit *u);
 
 bool unit_needs_console(Unit *u);
 
@@ -826,6 +829,8 @@ void unit_log_process_exit(Unit *u, int level, const char *kind, const char *com
 int unit_exit_status(Unit *u);
 int unit_success_action_exit_status(Unit *u);
 int unit_failure_action_exit_status(Unit *u);
+
+int unit_test_trigger_loaded(Unit *u);
 
 /* Macros which append UNIT= or USER_UNIT= to the message */
 

@@ -395,6 +395,8 @@ struct Manager {
          * multiple times on the same unit. */
         unsigned sigchldgen;
         unsigned notifygen;
+
+        bool honor_device_enumeration;
 };
 
 #define MANAGER_IS_SYSTEM(m) ((m)->unit_file_scope == UNIT_FILE_SYSTEM)
@@ -425,9 +427,9 @@ int manager_load_unit(Manager *m, const char *name, const char *path, sd_bus_err
 int manager_load_startable_unit_or_warn(Manager *m, const char *name, const char *path, Unit **ret);
 int manager_load_unit_from_dbus_path(Manager *m, const char *s, sd_bus_error *e, Unit **_u);
 
-int manager_add_job(Manager *m, JobType type, Unit *unit, JobMode mode, sd_bus_error *e, Job **_ret);
-int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode mode, sd_bus_error *e, Job **_ret);
-int manager_add_job_by_name_and_warn(Manager *m, JobType type, const char *name, JobMode mode, Job **ret);
+int manager_add_job(Manager *m, JobType type, Unit *unit, JobMode mode, Set *affected_jobs, sd_bus_error *e, Job **_ret);
+int manager_add_job_by_name(Manager *m, JobType type, const char *name, JobMode mode, Set *affected_jobs, sd_bus_error *e, Job **_ret);
+int manager_add_job_by_name_and_warn(Manager *m, JobType type, const char *name, JobMode mode, Set *affected_jobs,  Job **ret);
 int manager_propagate_reload(Manager *m, Unit *unit, JobMode mode, sd_bus_error *e);
 
 void manager_dump_units(Manager *s, FILE *f, const char *prefix);
@@ -436,6 +438,8 @@ void manager_dump(Manager *s, FILE *f, const char *prefix);
 int manager_get_dump_string(Manager *m, char **ret);
 
 void manager_clear_jobs(Manager *m);
+
+void manager_unwatch_pid(Manager *m, pid_t pid);
 
 unsigned manager_dispatch_load_queue(Manager *m);
 

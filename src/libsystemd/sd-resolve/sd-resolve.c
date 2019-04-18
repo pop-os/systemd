@@ -16,14 +16,15 @@
 
 #include "alloc-util.h"
 #include "dns-domain.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "io-util.h"
 #include "list.h"
+#include "memory-util.h"
 #include "missing.h"
+#include "process-util.h"
 #include "resolve-private.h"
 #include "socket-util.h"
-#include "util.h"
-#include "process-util.h"
 
 #define WORKERS_MIN 1U
 #define WORKERS_MAX 16U

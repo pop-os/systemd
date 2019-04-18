@@ -3,20 +3,23 @@
 #include <errno.h>
 #include <stdio_ext.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "bus-util.h"
-#include "def.h"
-#include "env-file.h"
 #include "env-file-label.h"
+#include "env-file.h"
 #include "env-util.h"
 #include "fd-util.h"
 #include "fileio-label.h"
 #include "fileio.h"
+#include "kbd-util.h"
 #include "keymap-util.h"
 #include "locale-util.h"
 #include "macro.h"
 #include "mkdir.h"
+#include "nulstr-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tmpfile-util.h"
@@ -27,10 +30,6 @@ static bool startswith_comma(const char *s, const char *prefix) {
                 return false;
 
         return IN_SET(*s, ',', '\0');
-}
-
-static const char* strnulldash(const char *s) {
-        return isempty(s) || streq(s, "-") ? NULL : s;
 }
 
 static const char* systemd_kbd_model_map(void) {
@@ -419,8 +418,7 @@ int x11_write_data(Context *c) {
                 return 0;
         }
 
-        mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
-
+        (void) mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
         r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
         if (r < 0)
                 return r;
@@ -549,15 +547,15 @@ int vconsole_convert_to_x11(Context *c) {
                         if (!streq(c->vc_keymap, a[0]))
                                 continue;
 
-                        if (!streq_ptr(c->x11_layout, strnulldash(a[1])) ||
-                            !streq_ptr(c->x11_model, strnulldash(a[2])) ||
-                            !streq_ptr(c->x11_variant, strnulldash(a[3])) ||
-                            !streq_ptr(c->x11_options, strnulldash(a[4]))) {
+                        if (!streq_ptr(c->x11_layout, empty_or_dash_to_null(a[1])) ||
+                            !streq_ptr(c->x11_model, empty_or_dash_to_null(a[2])) ||
+                            !streq_ptr(c->x11_variant, empty_or_dash_to_null(a[3])) ||
+                            !streq_ptr(c->x11_options, empty_or_dash_to_null(a[4]))) {
 
-                                if (free_and_strdup(&c->x11_layout, strnulldash(a[1])) < 0 ||
-                                    free_and_strdup(&c->x11_model, strnulldash(a[2])) < 0 ||
-                                    free_and_strdup(&c->x11_variant, strnulldash(a[3])) < 0 ||
-                                    free_and_strdup(&c->x11_options, strnulldash(a[4])) < 0)
+                                if (free_and_strdup(&c->x11_layout, empty_or_dash_to_null(a[1])) < 0 ||
+                                    free_and_strdup(&c->x11_model, empty_or_dash_to_null(a[2])) < 0 ||
+                                    free_and_strdup(&c->x11_variant, empty_or_dash_to_null(a[3])) < 0 ||
+                                    free_and_strdup(&c->x11_options, empty_or_dash_to_null(a[4])) < 0)
                                         return -ENOMEM;
 
                                 modified = true;

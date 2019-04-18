@@ -4,6 +4,7 @@
 #include <linux/if.h>
 #include <linux/fib_rules.h>
 #include <stdio_ext.h>
+#include <unistd.h>
 
 #include "sd-daemon.h"
 #include "sd-netlink.h"
@@ -12,31 +13,26 @@
 #include "bus-util.h"
 #include "conf-parser.h"
 #include "def.h"
+#include "device-private.h"
 #include "device-util.h"
 #include "dns-domain.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "local-addresses.h"
 #include "netlink-util.h"
+#include "network-internal.h"
 #include "networkd-manager.h"
 #include "ordered-set.h"
 #include "path-util.h"
 #include "set.h"
 #include "strv.h"
+#include "sysctl-util.h"
 #include "tmpfile-util.h"
+#include "udev-util.h"
 #include "virt.h"
 
 /* use 8 MB for receive socket kernel queue. */
 #define RCVBUF_SIZE    (8*1024*1024)
-
-const char* const network_dirs[] = {
-        "/etc/systemd/network",
-        "/run/systemd/network",
-        "/usr/lib/systemd/network",
-#if HAVE_SPLIT_USR
-        "/lib/systemd/network",
-#endif
-        NULL};
 
 static int setup_default_address_pool(Manager *m) {
         AddressPool *p;
@@ -46,11 +42,11 @@ static int setup_default_address_pool(Manager *m) {
 
         /* Add in the well-known private address ranges. */
 
-        r = address_pool_new_from_string(m, &p, AF_INET6, "fc00::", 7);
+        r = address_pool_new_from_string(m, &p, AF_INET6, "fd00::", 8);
         if (r < 0)
                 return r;
 
-        r = address_pool_new_from_string(m, &p, AF_INET, "192.168.0.0", 16);
+        r = address_pool_new_from_string(m, &p, AF_INET, "10.0.0.0", 8);
         if (r < 0)
                 return r;
 
@@ -58,7 +54,7 @@ static int setup_default_address_pool(Manager *m) {
         if (r < 0)
                 return r;
 
-        r = address_pool_new_from_string(m, &p, AF_INET, "10.0.0.0", 8);
+        r = address_pool_new_from_string(m, &p, AF_INET, "192.168.0.0", 16);
         if (r < 0)
                 return r;
 
@@ -188,27 +184,38 @@ int manager_connect_bus(Manager *m) {
 
 static int manager_udev_process_link(sd_device_monitor *monitor, sd_device *device, void *userdata) {
         Manager *m = userdata;
-        const char *action;
+        DeviceAction action;
         Link *link = NULL;
         int r, ifindex;
 
         assert(m);
         assert(device);
 
-        r = sd_device_get_property_value(device, "ACTION", &action);
+        r = device_get_action(device, &action);
         if (r < 0) {
-                log_device_debug_errno(device, r, "Failed to get 'ACTION' property, ignoring device: %m");
+                log_device_debug_errno(device, r, "Failed to get udev action, ignoring device: %m");
                 return 0;
         }
 
-        if (!STR_IN_SET(action, "add", "change")) {
-                log_device_debug(device, "Ignoring udev %s event for device.", action);
+        if (!IN_SET(action, DEVICE_ACTION_ADD, DEVICE_ACTION_CHANGE, DEVICE_ACTION_MOVE)) {
+                log_device_debug(device, "Ignoring udev %s event for device.", device_action_to_string(action));
                 return 0;
         }
 
         r = sd_device_get_ifindex(device, &ifindex);
         if (r < 0) {
                 log_device_debug_errno(device, r, "Ignoring udev ADD event for device without ifindex or with invalid ifindex: %m");
+                return 0;
+        }
+
+        r = device_is_renaming(device);
+        if (r < 0) {
+                log_device_error_errno(device, r, "Failed to determine the device is renamed or not, ignoring '%s' uevent: %m",
+                                       device_action_to_string(action));
+                return 0;
+        }
+        if (r > 0) {
+                log_device_debug(device, "Interface is under renaming, wait for the interface to be renamed: %m");
                 return 0;
         }
 
@@ -421,6 +428,28 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
         }
 
         (void) route_get(link, family, &dst, dst_prefixlen, tos, priority, table, &route);
+
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *buf_dst = NULL, *buf_dst_prefixlen = NULL,
+                        *buf_src = NULL, *buf_gw = NULL, *buf_prefsrc = NULL;
+
+                if (!in_addr_is_null(family, &dst)) {
+                        (void) in_addr_to_string(family, &dst, &buf_dst);
+                        (void) asprintf(&buf_dst_prefixlen, "/%u", dst_prefixlen);
+                }
+                if (!in_addr_is_null(family, &src))
+                        (void) in_addr_to_string(family, &src, &buf_src);
+                if (!in_addr_is_null(family, &gw))
+                        (void) in_addr_to_string(family, &gw, &buf_gw);
+                if (!in_addr_is_null(family, &prefsrc))
+                        (void) in_addr_to_string(family, &prefsrc, &buf_prefsrc);
+
+                log_link_debug(link,
+                               "%s route: dst: %s%s, src: %s, gw: %s, prefsrc: %s",
+                               type == RTM_DELROUTE ? "Removing" : route ? "Updating" : "Adding",
+                               strna(buf_dst), strempty(buf_dst_prefixlen),
+                               strna(buf_src), strna(buf_gw), strna(buf_prefsrc));
+        }
 
         switch (type) {
         case RTM_NEWROUTE:
@@ -1022,14 +1051,19 @@ static int ordered_set_put_in4_addr(OrderedSet *s, const struct in_addr *address
         return r;
 }
 
-static int ordered_set_put_in4_addrv(OrderedSet *s, const struct in_addr *addresses, unsigned n) {
+static int ordered_set_put_in4_addrv(OrderedSet *s,
+                                     const struct in_addr *addresses,
+                                     size_t n,
+                                     bool (*predicate)(const struct in_addr *addr)) {
         int r, c = 0;
-        unsigned i;
+        size_t i;
 
         assert(s);
         assert(n == 0 || addresses);
 
         for (i = 0; i < n; i++) {
+                if (predicate && !predicate(&addresses[i]))
+                        continue;
                 r = ordered_set_put_in4_addr(s, addresses+i);
                 if (r < 0)
                         return r;
@@ -1038,22 +1072,6 @@ static int ordered_set_put_in4_addrv(OrderedSet *s, const struct in_addr *addres
         }
 
         return c;
-}
-
-static void print_string_set(FILE *f, const char *field, OrderedSet *s) {
-        bool space = false;
-        Iterator i;
-        char *p;
-
-        if (ordered_set_isempty(s))
-                return;
-
-        fputs(field, f);
-
-        ORDERED_SET_FOREACH(p, s, i)
-                fputs_with_space(f, p, NULL, &space);
-
-        fputc('\n', f);
 }
 
 static int manager_save(Manager *m) {
@@ -1105,11 +1123,11 @@ static int manager_save(Manager *m) {
                 if (r < 0)
                         return r;
 
-                r = ordered_set_put_strdupv(search_domains, link->network->search_domains);
+                r = ordered_set_put_string_set(search_domains, link->network->search_domains);
                 if (r < 0)
                         return r;
 
-                r = ordered_set_put_strdupv(route_domains, link->network->route_domains);
+                r = ordered_set_put_string_set(route_domains, link->network->route_domains);
                 if (r < 0)
                         return r;
 
@@ -1122,7 +1140,7 @@ static int manager_save(Manager *m) {
 
                         r = sd_dhcp_lease_get_dns(link->dhcp_lease, &addresses);
                         if (r > 0) {
-                                r = ordered_set_put_in4_addrv(dns, addresses, r);
+                                r = ordered_set_put_in4_addrv(dns, addresses, r, in4_addr_is_non_local);
                                 if (r < 0)
                                         return r;
                         } else if (r < 0 && r != -ENODATA)
@@ -1134,7 +1152,7 @@ static int manager_save(Manager *m) {
 
                         r = sd_dhcp_lease_get_ntp(link->dhcp_lease, &addresses);
                         if (r > 0) {
-                                r = ordered_set_put_in4_addrv(ntp, addresses, r);
+                                r = ordered_set_put_in4_addrv(ntp, addresses, r, in4_addr_is_non_local);
                                 if (r < 0)
                                         return r;
                         } else if (r < 0 && r != -ENODATA)
@@ -1178,10 +1196,10 @@ static int manager_save(Manager *m) {
                 "# This is private data. Do not parse.\n"
                 "OPER_STATE=%s\n", operstate_str);
 
-        print_string_set(f, "DNS=", dns);
-        print_string_set(f, "NTP=", ntp);
-        print_string_set(f, "DOMAINS=", search_domains);
-        print_string_set(f, "ROUTE_DOMAINS=", route_domains);
+        ordered_set_print(f, "DNS=", dns);
+        ordered_set_print(f, "NTP=", ntp);
+        ordered_set_print(f, "DOMAINS=", search_domains);
+        ordered_set_print(f, "ROUTE_DOMAINS=", route_domains);
 
         r = routing_policy_serialize_rules(m->rules, f);
         if (r < 0)
@@ -1360,6 +1378,8 @@ int manager_new(Manager **ret) {
         if (!m->state_file)
                 return -ENOMEM;
 
+        m->sysctl_ipv6_enabled = -1;
+
         r = sd_event_default(&m->event);
         if (r < 0)
                 return r;
@@ -1421,9 +1441,6 @@ void manager_free(Manager *m) {
         sd_netlink_unref(m->genl);
         sd_resolve_unref(m->resolve);
 
-        while ((network = m->networks))
-                network_free(network);
-
         while ((link = hashmap_first(m->dhcp6_prefixes)))
                 manager_dhcp6_prefix_remove_all(m, link);
         hashmap_free(m->dhcp6_prefixes);
@@ -1438,6 +1455,9 @@ void manager_free(Manager *m) {
         m->links = hashmap_free(m->links);
         m->links_requesting_uuid = set_free(m->links_requesting_uuid);
         set_free(m->duids_requesting_uuid);
+
+        while ((network = m->networks))
+                network_free(network);
 
         hashmap_free(m->networks_by_name);
 
@@ -1485,7 +1505,7 @@ int manager_load_config(Manager *m) {
         int r;
 
         /* update timestamp */
-        paths_check_timestamp(network_dirs, &m->network_dirs_ts_usec, true);
+        paths_check_timestamp(NETWORK_DIRS, &m->network_dirs_ts_usec, true);
 
         r = netdev_load(m);
         if (r < 0)
@@ -1499,7 +1519,7 @@ int manager_load_config(Manager *m) {
 }
 
 bool manager_should_reload(Manager *m) {
-        return paths_check_timestamp(network_dirs, &m->network_dirs_ts_usec, false);
+        return paths_check_timestamp(NETWORK_DIRS, &m->network_dirs_ts_usec, false);
 }
 
 int manager_rtnl_enumerate_links(Manager *m) {
@@ -1857,4 +1877,19 @@ int manager_request_product_uuid(Manager *m, Link *link) {
                 return log_warning_errno(r, "Failed to get product UUID: %m");
 
         return 0;
+}
+
+int manager_sysctl_ipv6_enabled(Manager *manager) {
+        _cleanup_free_ char *value = NULL;
+        int r;
+
+        if (manager->sysctl_ipv6_enabled >= 0)
+                return manager->sysctl_ipv6_enabled;
+
+        r = sysctl_read_ip_property(AF_INET6, "all", "disable_ipv6", &value);
+        if (r < 0)
+                return log_warning_errno(r, "Failed to read net.ipv6.conf.all.disable_ipv6 sysctl property: %m");
+
+        manager->sysctl_ipv6_enabled = value[0] == '0';
+        return manager->sysctl_ipv6_enabled;
 }

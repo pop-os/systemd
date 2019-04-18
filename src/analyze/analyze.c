@@ -8,6 +8,7 @@
 #include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "sd-bus.h"
 
@@ -29,6 +30,7 @@
 #include "locale-util.h"
 #include "log.h"
 #include "main-func.h"
+#include "nulstr-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -36,11 +38,12 @@
 #if HAVE_SECCOMP
 #  include "seccomp-util.h"
 #endif
+#include "sort-util.h"
 #include "special.h"
 #include "strv.h"
 #include "strxcpyx.h"
-#include "time-util.h"
 #include "terminal-util.h"
+#include "time-util.h"
 #include "unit-name.h"
 #include "util.h"
 #include "verbs.h"
@@ -78,6 +81,7 @@ static UnitFileScope arg_scope = UNIT_FILE_SYSTEM;
 static bool arg_man = true;
 static bool arg_generators = false;
 static const char *arg_root = NULL;
+static unsigned arg_iterations = 1;
 
 STATIC_DESTRUCTOR_REGISTER(arg_dot_from_patterns, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_dot_to_patterns, strv_freep);
@@ -270,14 +274,13 @@ static int acquire_boot_times(sd_bus *bus, struct boot_times **bt) {
         if (r < 0)
                 return log_error_errno(r, "Failed to get timestamp properties: %s", bus_error_message(&error, r));
 
-        if (times.finish_time <= 0) {
-                log_error("Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=%"PRIu64").\n"
-                          "Please try again later.\n"
-                          "Hint: Use 'systemctl%s list-jobs' to see active jobs",
-                          times.finish_time,
-                          arg_scope == UNIT_FILE_SYSTEM ? "" : " --user");
-                return -EINPROGRESS;
-        }
+        if (times.finish_time <= 0)
+                return log_error_errno(SYNTHETIC_ERRNO(EINPROGRESS),
+                                       "Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=%"PRIu64").\n"
+                                       "Please try again later.\n"
+                                       "Hint: Use 'systemctl%s list-jobs' to see active jobs",
+                                       times.finish_time,
+                                       arg_scope == UNIT_FILE_SYSTEM ? "" : " --user");
 
         if (arg_scope == UNIT_FILE_SYSTEM && times.security_start_time > 0) {
                 /* security_start_time is set when systemd is not running under container environment. */
@@ -312,7 +315,6 @@ finish:
 }
 
 static void free_host_info(struct host_info *hi) {
-
         if (!hi)
                 return;
 
@@ -385,7 +387,8 @@ static int acquire_time_data(sd_bus *bus, struct unit_times **out) {
                                 NULL,
                                 t);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to get timestamp properties of unit %s: %s", u.id, bus_error_message(&error, r));
+                        return log_error_errno(r, "Failed to get timestamp properties of unit %s: %s",
+                                               u.id, bus_error_message(&error, r));
 
                 subtract_timestamp(&t->activating, boot_times->reverse_offset);
                 subtract_timestamp(&t->activated, boot_times->reverse_offset);
@@ -458,7 +461,8 @@ static int acquire_host_info(sd_bus *bus, struct host_info **hi) {
                                    NULL,
                                    host);
         if (r < 0) {
-                log_debug_errno(r, "Failed to get host information from systemd-hostnamed, ignoring: %s", bus_error_message(&error, r));
+                log_debug_errno(r, "Failed to get host information from systemd-hostnamed, ignoring: %s",
+                                bus_error_message(&error, r));
                 sd_bus_error_free(&error);
         }
 
@@ -472,10 +476,10 @@ manager:
                                    NULL,
                                    host);
         if (r < 0)
-                return log_error_errno(r, "Failed to get host information from systemd: %s", bus_error_message(&error, r));
+                return log_error_errno(r, "Failed to get host information from systemd: %s",
+                                       bus_error_message(&error, r));
 
         *hi = TAKE_PTR(host);
-
         return 0;
 }
 
@@ -1033,8 +1037,8 @@ static int analyze_critical_chain(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        puts("The time after the unit is active or started is printed after the \"@\" character.\n"
-             "The time the unit takes to start is printed after the \"+\" character.\n");
+        puts("The time when unit became active or started is printed after the \"@\" character.\n"
+             "The time the unit took to start is printed after the \"+\" character.\n");
 
         if (argc > 1) {
                 char **name;
@@ -1328,7 +1332,8 @@ static int dump(int argc, char *argv[], void *userdata) {
         if (r < 0) {
                 /* fall back to Dump if DumpByFileDescriptor is not supported */
                 if (!IN_SET(r, -EACCES, -EBADR))
-                        return log_error_errno(r, "Failed to issue method call DumpByFileDescriptor: %s", bus_error_message(&error, r));
+                        return log_error_errno(r, "Failed to issue method call DumpByFileDescriptor: %s",
+                                               bus_error_message(&error, r));
 
                 return dump_fallback(bus);
         }
@@ -1365,8 +1370,7 @@ static int cat_config(int argc, char *argv[], void *userdata) {
 
                         if (!t)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Path %s does not start with any known prefix.",
-                                                       *arg);
+                                                       "Path %s does not start with any known prefix.", *arg);
                 } else
                         t = *arg;
 
@@ -1515,9 +1519,15 @@ static int load_kernel_syscalls(Set **ret) {
         /* Let's read the available system calls from the list of available tracing events. Slightly dirty, but good
          * enough for analysis purposes. */
 
-        f = fopen("/sys/kernel/debug/tracing/available_events", "re");
-        if (!f)
-                return log_full_errno(IN_SET(errno, EPERM, EACCES, ENOENT) ? LOG_DEBUG : LOG_WARNING, errno, "Can't read open /sys/kernel/debug/tracing/available_events: %m");
+        f = fopen("/sys/kernel/tracing/available_events", "re");
+        if (!f) {
+                /* We tried the non-debugfs mount point and that didn't work. If it wasn't mounted, maybe the
+                 * old debugfs mount point works? */
+                f = fopen("/sys/kernel/debug/tracing/available_events", "re");
+                if (!f)
+                        return log_full_errno(IN_SET(errno, EPERM, EACCES, ENOENT) ? LOG_DEBUG : LOG_WARNING, errno,
+                                              "Can't read open tracefs' available_events file: %m");
+        }
 
         for (;;) {
                 _cleanup_free_ char *line = NULL;
@@ -1628,8 +1638,8 @@ static int dump_syscall_filters(int argc, char *argv[], void *userdata) {
                                 /* make sure the error appears below normal output */
                                 fflush(stdout);
 
-                                log_error("Filter set \"%s\" not found.", *name);
-                                return -ENOENT;
+                                return log_error_errno(SYNTHETIC_ERRNO(ENOENT),
+                                                       "Filter set \"%s\" not found.", *name);
                         }
 
                         dump_syscall_filter(set);
@@ -1670,57 +1680,80 @@ static int dump_timespan(int argc, char *argv[], void *userdata) {
         return EXIT_SUCCESS;
 }
 
+static int test_calendar_one(usec_t n, const char *p) {
+        _cleanup_(calendar_spec_freep) CalendarSpec *spec = NULL;
+        _cleanup_free_ char *t = NULL;
+        int r;
+
+        r = calendar_spec_from_string(p, &spec);
+        if (r < 0)
+                return log_error_errno(r, "Failed to parse calendar specification '%s': %m", p);
+
+        r = calendar_spec_normalize(spec);
+        if (r < 0)
+                return log_error_errno(r, "Failed to normalize calendar specification '%s': %m", p);
+
+        r = calendar_spec_to_string(spec, &t);
+        if (r < 0)
+                return log_error_errno(r, "Failed to format calendar specification '%s': %m", p);
+
+        if (!streq(t, p))
+                printf("  Original form: %s\n", p);
+
+        printf("Normalized form: %s\n", t);
+
+        for (unsigned i = 0; i < arg_iterations; i++) {
+                char buffer[CONST_MAX(FORMAT_TIMESTAMP_MAX, FORMAT_TIMESTAMP_RELATIVE_MAX)];
+                usec_t next;
+
+                r = calendar_spec_next_usec(spec, n, &next);
+                if (r == -ENOENT) {
+                        if (i == 0)
+                                printf("    Next elapse: %snever%s\n",
+                                       ansi_highlight_yellow(), ansi_normal());
+                        return 0;
+                }
+                if (r < 0)
+                        return log_error_errno(r, "Failed to determine next elapse for '%s': %m", p);
+
+                if (i == 0)
+                        printf("    Next elapse: %s%s%s\n",
+                               ansi_highlight_blue(), format_timestamp(buffer, sizeof(buffer), next), ansi_normal());
+                else {
+                        int k = DECIMAL_STR_WIDTH(i+1);
+
+                        if (k < 8)
+                                k = 8 - k;
+                        else
+                                k = 0;
+
+                        printf("%*sIter. #%u: %s%s%s\n",
+                               k, "", i+1,
+                               ansi_highlight_blue(), format_timestamp(buffer, sizeof(buffer), next), ansi_normal());
+                }
+
+                if (!in_utc_timezone())
+                        printf("       (in UTC): %s\n", format_timestamp_utc(buffer, sizeof(buffer), next));
+
+                printf("       From now: %s\n", format_timestamp_relative(buffer, sizeof(buffer), next));
+
+                n = next;
+        }
+
+        return 0;
+}
+
 static int test_calendar(int argc, char *argv[], void *userdata) {
         int ret = 0, r;
         char **p;
         usec_t n;
 
-        n = now(CLOCK_REALTIME);
+        n = now(CLOCK_REALTIME); /* We want to use the same "base" for all expressions */
 
         STRV_FOREACH(p, strv_skip(argv, 1)) {
-                _cleanup_(calendar_spec_freep) CalendarSpec *spec = NULL;
-                _cleanup_free_ char *t = NULL;
-                usec_t next;
-
-                r = calendar_spec_from_string(*p, &spec);
-                if (r < 0) {
-                        ret = log_error_errno(r, "Failed to parse calendar specification '%s': %m", *p);
-                        continue;
-                }
-
-                r = calendar_spec_normalize(spec);
-                if (r < 0) {
-                        ret = log_error_errno(r, "Failed to normalize calendar specification '%s': %m", *p);
-                        continue;
-                }
-
-                r = calendar_spec_to_string(spec, &t);
-                if (r < 0) {
-                        ret = log_error_errno(r, "Failed to format calendar specification '%s': %m", *p);
-                        continue;
-                }
-
-                if (!streq(t, *p))
-                        printf("  Original form: %s\n", *p);
-
-                printf("Normalized form: %s\n", t);
-
-                r = calendar_spec_next_usec(spec, n, &next);
-                if (r == -ENOENT)
-                        printf("    Next elapse: never\n");
-                else if (r < 0) {
-                        ret = log_error_errno(r, "Failed to determine next elapse for '%s': %m", *p);
-                        continue;
-                } else {
-                        char buffer[CONST_MAX(FORMAT_TIMESTAMP_MAX, FORMAT_TIMESTAMP_RELATIVE_MAX)];
-
-                        printf("    Next elapse: %s\n", format_timestamp(buffer, sizeof(buffer), next));
-
-                        if (!in_utc_timezone())
-                                printf("       (in UTC): %s\n", format_timestamp_utc(buffer, sizeof(buffer), next));
-
-                        printf("       From now: %s\n", format_timestamp_relative(buffer, sizeof(buffer), next));
-                }
+                r = test_calendar_one(n, *p);
+                if (ret == 0 && r < 0)
+                        ret = r;
 
                 if (*(p+1))
                         putchar('\n');
@@ -1827,6 +1860,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "                           earlier than the latest in the branch\n"
                "     --man[=BOOL]          Do [not] check for existence of man pages\n"
                "     --generators[=BOOL]   Do [not] run unit generators (requires privileges)\n"
+               "     --iterations=N        Show the specified number of iterations\n"
                "\nCommands:\n"
                "  time                     Print time spent in the kernel\n"
                "  blame                    Print list of running units ordered by time to init\n"
@@ -1870,6 +1904,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_NO_PAGER,
                 ARG_MAN,
                 ARG_GENERATORS,
+                ARG_ITERATIONS,
         };
 
         static const struct option options[] = {
@@ -1889,6 +1924,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "generators",   optional_argument, NULL, ARG_GENERATORS       },
                 { "host",         required_argument, NULL, 'H'                  },
                 { "machine",      required_argument, NULL, 'M'                  },
+                { "iterations",   required_argument, NULL, ARG_ITERATIONS       },
                 {}
         };
 
@@ -1988,6 +2024,13 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
+                case ARG_ITERATIONS:
+                        r = safe_atou(optarg, &arg_iterations);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse iterations: %s", optarg);
+
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -1999,6 +2042,10 @@ static int parse_argv(int argc, char *argv[]) {
             !STR_IN_SET(argv[optind] ?: "time", "dot", "unit-paths", "verify"))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Option --global only makes sense with verbs dot, unit-paths, verify.");
+
+        if (streq_ptr(argv[optind], "cat-config") && arg_scope == UNIT_FILE_USER)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Option --user is not supported for cat-config right now.");
 
         if (arg_root && !streq_ptr(argv[optind], "cat-config"))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),

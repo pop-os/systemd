@@ -1,11 +1,15 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
+#include <fcntl.h>
 #include <inttypes.h>
 #include <linux/fiemap.h>
 #include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "fd-util.h"
 #include "log.h"
+#include "memory-util.h"
 #include "sleep-config.h"
 #include "strv.h"
 #include "tests.h"

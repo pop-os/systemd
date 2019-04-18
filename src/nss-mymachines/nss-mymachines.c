@@ -9,14 +9,16 @@
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "env-util.h"
+#include "errno-util.h"
+#include "format-util.h"
 #include "hostname-util.h"
 #include "in-addr-util.h"
 #include "macro.h"
+#include "memory-util.h"
 #include "nss-util.h"
 #include "signal-util.h"
 #include "string-util.h"
 #include "user-util.h"
-#include "util.h"
 
 NSS_GETHOSTBYNAME_PROTOTYPES(mymachines);
 NSS_GETPW_PROTOTYPES(mymachines);
@@ -230,7 +232,7 @@ enum nss_status _nss_mymachines_gethostbyname4_r(
 fail:
         UNPROTECT_ERRNO;
         *errnop = -r;
-        *h_errnop = NO_DATA;
+        *h_errnop = NO_RECOVERY;
         return NSS_STATUS_UNAVAIL;
 }
 
@@ -401,7 +403,7 @@ enum nss_status _nss_mymachines_gethostbyname3_r(
 fail:
         UNPROTECT_ERRNO;
         *errnop = -r;
-        *h_errnop = NO_DATA;
+        *h_errnop = NO_RECOVERY;
         return NSS_STATUS_UNAVAIL;
 }
 

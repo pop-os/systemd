@@ -5,15 +5,20 @@
 ***/
 
 #include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <linux/fiemap.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "sd-messages.h"
 
 #include "def.h"
 #include "exec-util.h"
 #include "fd-util.h"
+#include "format-util.h"
 #include "fileio.h"
 #include "log.h"
 #include "main-func.h"
@@ -166,7 +171,7 @@ static int execute(char **modes, char **states) {
                         return log_error_errno(r, "Failed to write mode to /sys/power/disk: %m");;
         }
 
-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL);
+        (void) execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL, EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS);
 
         log_struct(LOG_INFO,
                    "MESSAGE_ID=" SD_MESSAGE_SLEEP_START_STR,
@@ -186,7 +191,7 @@ static int execute(char **modes, char **states) {
                            "SLEEP=%s", arg_verb);
 
         arguments[1] = (char*) "post";
-        execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL);
+        (void) execute_directories(dirs, DEFAULT_TIMEOUT_USEC, NULL, NULL, arguments, NULL, EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS);
 
         return r;
 }

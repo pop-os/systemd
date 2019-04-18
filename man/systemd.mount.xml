@@ -1,10 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-
-<!--
-  SPDX-License-Identifier: LGPL-2.1+
--->
+<!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
 <refentry id="systemd.mount">
   <refentryinfo>
@@ -86,6 +83,11 @@
     disabled. For a longer discussion see <ulink
     url="https://www.freedesktop.org/wiki/Software/systemd/APIFileSystems">API
     File Systems</ulink>.</para>
+
+    <para>The
+    <citerefentry><refentrytitle>systemd-mount</refentrytitle><manvolnum>1</manvolnum></citerefentry> command
+    allows creating <filename>.mount</filename> and <filename>.automount</filename> units dynamically and
+    transiently from the command line.</para>
   </refsect1>
 
   <refsect1>
@@ -538,7 +540,8 @@
         <citerefentry project='man-pages'><refentrytitle>proc</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry project='man-pages'><refentrytitle>mount</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+        <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+        <citerefentry><refentrytitle>systemd-mount</refentrytitle><manvolnum>1</manvolnum></citerefentry>
       </para>
   </refsect1>
 

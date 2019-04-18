@@ -771,12 +771,15 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("ConfigurationDirectory", "as", NULL, offsetof(ExecContext, directories[EXEC_DIRECTORY_CONFIGURATION].paths), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("MemoryDenyWriteExecute", "b", bus_property_get_bool, offsetof(ExecContext, memory_deny_write_execute), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RestrictRealtime", "b", bus_property_get_bool, offsetof(ExecContext, restrict_realtime), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("RestrictSUIDSGID", "b", bus_property_get_bool, offsetof(ExecContext, restrict_suid_sgid), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("RestrictNamespaces", "t", bus_property_get_ulong, offsetof(ExecContext, restrict_namespaces), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("BindPaths", "a(ssbt)", property_get_bind_paths, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("BindReadOnlyPaths", "a(ssbt)", property_get_bind_paths, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("TemporaryFileSystem", "a(ss)", property_get_temporary_filesystems, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("MountAPIVFS", "b", bus_property_get_bool, offsetof(ExecContext, mount_apivfs), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("KeyringMode", "s", property_get_exec_keyring_mode, offsetof(ExecContext, keyring_mode), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("ProtectHostname", "b", bus_property_get_bool, offsetof(ExecContext, protect_hostname), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("NetworkNamespacePath", "s", NULL, offsetof(ExecContext, network_namespace_path), SD_BUS_VTABLE_PROPERTY_CONST),
 
         /* Obsolete/redundant properties: */
         SD_BUS_PROPERTY("Capabilities", "s", property_get_empty_string, 0, SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
@@ -1126,6 +1129,9 @@ int bus_exec_context_set_transient_property(
         if (streq(name, "RestrictRealtime"))
                 return bus_set_transient_bool(u, name, &c->restrict_realtime, message, flags, error);
 
+        if (streq(name, "RestrictSUIDSGID"))
+                return bus_set_transient_bool(u, name, &c->restrict_suid_sgid, message, flags, error);
+
         if (streq(name, "DynamicUser"))
                 return bus_set_transient_bool(u, name, &c->dynamic_user, message, flags, error);
 
@@ -1152,6 +1158,9 @@ int bus_exec_context_set_transient_property(
 
         if (streq(name, "LockPersonality"))
                 return bus_set_transient_bool(u, name, &c->lock_personality, message, flags, error);
+
+        if (streq(name, "ProtectHostname"))
+                return bus_set_transient_bool(u, name, &c->protect_hostname, message, flags, error);
 
         if (streq(name, "UtmpIdentifier"))
                 return bus_set_transient_string(u, name, &c->utmp_id, message, flags, error);
@@ -1212,6 +1221,9 @@ int bus_exec_context_set_transient_property(
 
         if (streq(name, "MountFlags"))
                 return bus_set_transient_mount_flags(u, name, &c->mount_flags, message, flags, error);
+
+        if (streq(name, "NetworkNamespacePath"))
+                return bus_set_transient_path(u, name, &c->network_namespace_path, message, flags, error);
 
         if (streq(name, "SupplementaryGroups")) {
                 _cleanup_strv_free_ char **l = NULL;
@@ -1383,7 +1395,7 @@ int bus_exec_context_set_transient_property(
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         _cleanup_free_ char *joined = NULL;
-                        bool invert = !whitelist;
+                        SeccompParseFlags invert_flag = whitelist ? 0 : SECCOMP_PARSE_INVERT;
                         char **s;
 
                         if (strv_isempty(l)) {
@@ -1402,7 +1414,12 @@ int bus_exec_context_set_transient_property(
                                 c->syscall_whitelist = whitelist;
 
                                 if (c->syscall_whitelist) {
-                                        r = seccomp_parse_syscall_filter("@default", -1, c->syscall_filter, SECCOMP_PARSE_WHITELIST | (invert ? SECCOMP_PARSE_INVERT : 0));
+                                        r = seccomp_parse_syscall_filter("@default",
+                                                                         -1,
+                                                                         c->syscall_filter,
+                                                                         SECCOMP_PARSE_WHITELIST | invert_flag,
+                                                                         u->id,
+                                                                         NULL, 0);
                                         if (r < 0)
                                                 return r;
                                 }
@@ -1416,7 +1433,12 @@ int bus_exec_context_set_transient_property(
                                 if (r < 0)
                                         return r;
 
-                                r = seccomp_parse_syscall_filter(n, e, c->syscall_filter, (invert ? SECCOMP_PARSE_INVERT : 0) | (c->syscall_whitelist ? SECCOMP_PARSE_WHITELIST : 0));
+                                r = seccomp_parse_syscall_filter(n,
+                                                                 e,
+                                                                 c->syscall_filter,
+                                                                 (c->syscall_whitelist ? SECCOMP_PARSE_WHITELIST : 0) | invert_flag,
+                                                                 u->id,
+                                                                 NULL, 0);
                                 if (r < 0)
                                         return r;
                         }
@@ -1494,7 +1516,6 @@ int bus_exec_context_set_transient_property(
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         _cleanup_free_ char *joined = NULL;
-                        bool invert = !whitelist;
                         char **s;
 
                         if (strv_isempty(l)) {
@@ -1520,7 +1541,7 @@ int bus_exec_context_set_transient_property(
                                 if (af < 0)
                                         return af;
 
-                                if (!invert == c->address_families_whitelist) {
+                                if (whitelist == c->address_families_whitelist) {
                                         r = set_put(c->address_families, INT_TO_PTR(af));
                                         if (r < 0)
                                                 return r;
@@ -2177,26 +2198,21 @@ int bus_exec_context_set_transient_property(
                 }
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
-                        char ***dirs = NULL;
                         ExecDirectoryType i;
+                        ExecDirectory *d;
 
-                        for (i = 0; i < _EXEC_DIRECTORY_TYPE_MAX; i++)
-                                if (streq(name, exec_directory_type_to_string(i))) {
-                                        dirs = &c->directories[i].paths;
-                                        break;
-                                }
-
-                        assert(dirs);
+                        assert_se((i = exec_directory_type_from_string(name)) >= 0);
+                        d = c->directories + i;
 
                         if (strv_isempty(l)) {
-                                *dirs = strv_free(*dirs);
+                                d->paths = strv_free(d->paths);
                                 unit_write_settingf(u, flags, name, "%s=", name);
                         } else {
                                 _cleanup_free_ char *joined = NULL;
 
-                                r = strv_extend_strv(dirs, l, true);
+                                r = strv_extend_strv(&d->paths, l, true);
                                 if (r < 0)
-                                        return -ENOMEM;
+                                        return r;
 
                                 joined = unit_concat_strv(l, UNIT_ESCAPE_SPECIFIERS);
                                 if (!joined)

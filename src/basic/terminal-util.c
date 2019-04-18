@@ -32,6 +32,7 @@
 #include "io-util.h"
 #include "log.h"
 #include "macro.h"
+#include "namespace-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "proc-cmdline.h"
@@ -890,50 +891,39 @@ bool on_tty(void) {
 }
 
 int getttyname_malloc(int fd, char **ret) {
-        size_t l = 100;
+        char path[PATH_MAX], *c; /* PATH_MAX is counted *with* the trailing NUL byte */
         int r;
 
         assert(fd >= 0);
         assert(ret);
 
-        for (;;) {
-                char path[l];
+        r = ttyname_r(fd, path, sizeof path); /* positive error */
+        assert(r >= 0);
+        if (r == ERANGE)
+                return -ENAMETOOLONG;
+        if (r > 0)
+                return -r;
 
-                r = ttyname_r(fd, path, sizeof(path));
-                if (r == 0) {
-                        char *c;
+        c = strdup(skip_dev_prefix(path));
+        if (!c)
+                return -ENOMEM;
 
-                        c = strdup(skip_dev_prefix(path));
-                        if (!c)
-                                return -ENOMEM;
-
-                        *ret = c;
-                        return 0;
-                }
-
-                if (r != ERANGE)
-                        return -r;
-
-                l *= 2;
-        }
-
+        *ret = c;
         return 0;
 }
 
-int getttyname_harder(int fd, char **r) {
-        int k;
-        char *s = NULL;
+int getttyname_harder(int fd, char **ret) {
+        _cleanup_free_ char *s = NULL;
+        int r;
 
-        k = getttyname_malloc(fd, &s);
-        if (k < 0)
-                return k;
+        r = getttyname_malloc(fd, &s);
+        if (r < 0)
+                return r;
 
-        if (streq(s, "tty")) {
-                free(s);
-                return get_ctty(0, NULL, r);
-        }
+        if (streq(s, "tty"))
+                return get_ctty(0, NULL, ret);
 
-        *r = s;
+        *ret = TAKE_PTR(s);
         return 0;
 }
 
@@ -1051,6 +1041,10 @@ int ptsname_malloc(int fd, char **ret) {
                 }
 
                 free(c);
+
+                if (l > SIZE_MAX / 2)
+                        return -ENOMEM;
+
                 l *= 2;
         }
 }

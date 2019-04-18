@@ -15,6 +15,7 @@
 #include "alloc-util.h"
 #include "conf-files.h"
 #include "conf-parser.h"
+#include "def.h"
 #include "dirent-util.h"
 #include "extract-word.h"
 #include "fd-util.h"
@@ -116,7 +117,7 @@ bool unit_type_may_template(UnitType type) {
                       UNIT_PATH);
 }
 
-static const char *unit_file_type_table[_UNIT_FILE_TYPE_MAX] = {
+static const char *const unit_file_type_table[_UNIT_FILE_TYPE_MAX] = {
         [UNIT_FILE_TYPE_REGULAR] = "regular",
         [UNIT_FILE_TYPE_SYMLINK] = "symlink",
         [UNIT_FILE_TYPE_MASKED] = "masked",
@@ -2796,7 +2797,7 @@ static int split_pattern_into_name_and_instances(const char *pattern, char **out
         assert(out_instances);
         assert(out_unit_name);
 
-        r = extract_first_word(&pattern, &unit_name, NULL, 0);
+        r = extract_first_word(&pattern, &unit_name, NULL, EXTRACT_RETAIN_ESCAPE);
         if (r < 0)
                 return r;
 
@@ -2820,6 +2821,24 @@ static int split_pattern_into_name_and_instances(const char *pattern, char **out
         return 0;
 }
 
+static int presets_find_config(UnitFileScope scope, const char *root_dir, char ***files) {
+        static const char* const system_dirs[] = {CONF_PATHS("systemd/system-preset"), NULL};
+        static const char* const user_dirs[] = {CONF_PATHS_USR("systemd/user-preset"), NULL};
+        const char* const* dirs;
+
+        assert(scope >= 0);
+        assert(scope < _UNIT_FILE_SCOPE_MAX);
+
+        if (scope == UNIT_FILE_SYSTEM)
+                dirs = system_dirs;
+        else if (IN_SET(scope, UNIT_FILE_GLOBAL, UNIT_FILE_USER))
+                dirs = user_dirs;
+        else
+                assert_not_reached("Invalid unit file scope");
+
+        return conf_files_list_strv(files, ".preset", root_dir, 0, dirs);
+}
+
 static int read_presets(UnitFileScope scope, const char *root_dir, Presets *presets) {
         _cleanup_(presets_freep) Presets ps = {};
         size_t n_allocated = 0;
@@ -2831,33 +2850,7 @@ static int read_presets(UnitFileScope scope, const char *root_dir, Presets *pres
         assert(scope < _UNIT_FILE_SCOPE_MAX);
         assert(presets);
 
-        switch (scope) {
-        case UNIT_FILE_SYSTEM:
-                r = conf_files_list(&files, ".preset", root_dir, 0,
-                                    "/etc/systemd/system-preset",
-                                    "/run/systemd/system-preset",
-                                    "/usr/local/lib/systemd/system-preset",
-                                    "/usr/lib/systemd/system-preset",
-#if HAVE_SPLIT_USR
-                                    "/lib/systemd/system-preset",
-#endif
-                                    NULL);
-                break;
-
-        case UNIT_FILE_GLOBAL:
-        case UNIT_FILE_USER:
-                r = conf_files_list(&files, ".preset", root_dir, 0,
-                                    "/etc/systemd/user-preset",
-                                    "/run/systemd/user-preset",
-                                    "/usr/local/lib/systemd/user-preset",
-                                    "/usr/lib/systemd/user-preset",
-                                    NULL);
-                break;
-
-        default:
-                assert_not_reached("Invalid unit file scope");
-        }
-
+        r = presets_find_config(scope, root_dir, &files);
         if (r < 0)
                 return r;
 

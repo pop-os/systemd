@@ -3,6 +3,8 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/utsname.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -19,6 +21,7 @@
 #include "main-func.h"
 #include "missing_capability.h"
 #include "nscd-flush.h"
+#include "nulstr-util.h"
 #include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"

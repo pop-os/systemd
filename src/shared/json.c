@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
+#include <locale.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio_ext.h>
@@ -11,6 +12,7 @@
 #include "sd-messages.h"
 
 #include "alloc-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "float.h"
@@ -18,6 +20,7 @@
 #include "json-internal.h"
 #include "json.h"
 #include "macro.h"
+#include "memory-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -1756,7 +1759,6 @@ static void inc_lines_columns(unsigned *line, unsigned *column, const char *s, s
         assert(s || n == 0);
 
         while (n > 0) {
-
                 if (*s == '\n') {
                         (*line)++;
                         *column = 1;
@@ -1765,7 +1767,7 @@ static void inc_lines_columns(unsigned *line, unsigned *column, const char *s, s
                 else {
                         int w;
 
-                        w = utf8_encoded_valid_unichar(s);
+                        w = utf8_encoded_valid_unichar(s, n);
                         if (w < 0) /* count invalid unichars as normal characters */
                                 w = 1;
                         else if ((size_t) w > n) /* never read more than the specified number of characters */
@@ -1930,7 +1932,7 @@ static int json_parse_string(const char **p, char **ret) {
                         continue;
                 }
 
-                len = utf8_encoded_valid_unichar(c);
+                len = utf8_encoded_valid_unichar(c, (size_t) -1);
                 if (len < 0)
                         return len;
 
@@ -3109,8 +3111,6 @@ finish:
 
         free(stack);
 
-        va_end(ap);
-
         return r;
 }
 
@@ -3167,7 +3167,7 @@ int json_log_internal(
                                 "CONFIG_FILE=%s", source,
                                 "CONFIG_LINE=%u", source_line,
                                 "CONFIG_COLUMN=%u", source_column,
-                                LOG_MESSAGE("%s:%u: %s", source, line, buffer),
+                                LOG_MESSAGE("%s:%u:%u: %s", source, source_line, source_column, buffer),
                                 NULL);
         else
                 return log_struct_internal(
@@ -3297,10 +3297,8 @@ int json_dispatch_boolean(const char *name, JsonVariant *variant, JsonDispatchFl
         assert(variant);
         assert(b);
 
-        if (!json_variant_is_boolean(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not a boolean.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_boolean(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a boolean.", strna(name));
 
         *b = json_variant_boolean(variant);
         return 0;
@@ -3312,10 +3310,8 @@ int json_dispatch_tristate(const char *name, JsonVariant *variant, JsonDispatchF
         assert(variant);
         assert(b);
 
-        if (!json_variant_is_boolean(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not a boolean.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_boolean(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a boolean.", strna(name));
 
         *b = json_variant_boolean(variant);
         return 0;
@@ -3327,10 +3323,8 @@ int json_dispatch_integer(const char *name, JsonVariant *variant, JsonDispatchFl
         assert(variant);
         assert(i);
 
-        if (!json_variant_is_integer(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not an integer.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_integer(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an integer.", strna(name));
 
         *i = json_variant_integer(variant);
         return 0;
@@ -3342,10 +3336,8 @@ int json_dispatch_unsigned(const char *name, JsonVariant *variant, JsonDispatchF
         assert(variant);
         assert(u);
 
-        if (!json_variant_is_unsigned(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not an unsigned integer.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_unsigned(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an unsigned integer.", strna(name));
 
         *u = json_variant_unsigned(variant);
         return 0;
@@ -3357,15 +3349,11 @@ int json_dispatch_uint32(const char *name, JsonVariant *variant, JsonDispatchFla
         assert(variant);
         assert(u);
 
-        if (!json_variant_is_unsigned(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not an unsigned integer.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_unsigned(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an unsigned integer.", strna(name));
 
-        if (json_variant_unsigned(variant) > UINT32_MAX) {
-                json_log(variant, flags, 0, "JSON field '%s' out of bounds.", strna(name));
-                return -ERANGE;
-        }
+        if (json_variant_unsigned(variant) > UINT32_MAX)
+                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE), "JSON field '%s' out of bounds.", strna(name));
 
         *u = (uint32_t) json_variant_unsigned(variant);
         return 0;
@@ -3377,15 +3365,11 @@ int json_dispatch_int32(const char *name, JsonVariant *variant, JsonDispatchFlag
         assert(variant);
         assert(i);
 
-        if (!json_variant_is_integer(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not an integer.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_integer(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an integer.", strna(name));
 
-        if (json_variant_integer(variant) < INT32_MIN || json_variant_integer(variant) > INT32_MAX) {
-                json_log(variant, flags, 0, "JSON field '%s' out of bounds.", strna(name));
-                return -ERANGE;
-        }
+        if (json_variant_integer(variant) < INT32_MIN || json_variant_integer(variant) > INT32_MAX)
+                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE), "JSON field '%s' out of bounds.", strna(name));
 
         *i = (int32_t) json_variant_integer(variant);
         return 0;
@@ -3403,10 +3387,8 @@ int json_dispatch_string(const char *name, JsonVariant *variant, JsonDispatchFla
                 return 0;
         }
 
-        if (!json_variant_is_string(variant)) {
-                json_log(variant, flags, 0, "JSON field '%s' is not a string.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_string(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a string.", strna(name));
 
         r = free_and_strdup(s, json_variant_string(variant));
         if (r < 0)
@@ -3429,20 +3411,16 @@ int json_dispatch_strv(const char *name, JsonVariant *variant, JsonDispatchFlags
                 return 0;
         }
 
-        if (!json_variant_is_array(variant)) {
-                json_log(variant, 0, flags, "JSON field '%s' is not an array.", strna(name));
-                return -EINVAL;
-        }
+        if (!json_variant_is_array(variant))
+                return json_log(variant, SYNTHETIC_ERRNO(EINVAL), flags, "JSON field '%s' is not an array.", strna(name));
 
         for (i = 0; i < json_variant_elements(variant); i++) {
                 JsonVariant *e;
 
                 assert_se(e = json_variant_by_index(variant, i));
 
-                if (!json_variant_is_string(e)) {
-                        json_log(e, 0, flags, "JSON array element is not a string.");
-                        return -EINVAL;
-                }
+                if (!json_variant_is_string(e))
+                        return json_log(e, flags, SYNTHETIC_ERRNO(EINVAL), "JSON array element is not a string.");
 
                 r = strv_extend(&l, json_variant_string(e));
                 if (r < 0)

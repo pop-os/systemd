@@ -228,6 +228,11 @@ tests += [
          [],
          []],
 
+        [['src/test/test-libmount.c'],
+         [],
+         [threads,
+          libmount]],
+
         [['src/test/test-mount-util.c'],
          [],
          []],
@@ -440,6 +445,10 @@ tests += [
          [],
          []],
 
+        [['src/test/test-ordered-set.c'],
+         [],
+         []],
+
         [['src/test/test-set-disable-mempool.c'],
          [],
          [threads]],
@@ -559,6 +568,11 @@ tests += [
          [],
          [],
          '', 'manual'],
+
+        [['src/test/test-cgroup-cpu.c'],
+         [libcore,
+          libshared],
+         []],
 
         [['src/test/test-cgroup-mask.c',
           'src/test/test-helper.c'],
@@ -705,11 +719,10 @@ tests += [
          'ENABLE_NSS', 'manual'],
 
         [['src/test/test-umount.c',
-          'src/core/mount-setup.c',
-          'src/core/mount-setup.h',
-          'src/core/umount.c',
-          'src/core/umount.h'],
-         [],
+          'src/shutdown/umount.c',
+          'src/shutdown/umount.h'],
+         [libcore_shared,
+          libshared],
          [libmount]],
 
         [['src/test/test-bus-util.c'],
@@ -855,6 +868,10 @@ tests += [
           libdbus]],
 
         [['src/libsystemd/sd-bus/test-bus-signature.c'],
+         [],
+         [threads]],
+
+        [['src/libsystemd/sd-bus/test-bus-queue-ref-cycle.c'],
          [],
          [threads]],
 

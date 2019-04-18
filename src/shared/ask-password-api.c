@@ -31,6 +31,7 @@
 #include "io-util.h"
 #include "log.h"
 #include "macro.h"
+#include "memory-util.h"
 #include "missing.h"
 #include "mkdir.h"
 #include "process-util.h"
@@ -44,7 +45,6 @@
 #include "tmpfile-util.h"
 #include "umask-util.h"
 #include "utf8.h"
-#include "util.h"
 
 #define KEYRING_TIMEOUT_USEC ((5 * USEC_PER_MINUTE) / 2)
 
@@ -77,13 +77,18 @@ static int retrieve_key(key_serial_t serial, char ***ret) {
                 n = keyctl(KEYCTL_READ, (unsigned long) serial, (unsigned long) p, (unsigned long) m, 0);
                 if (n < 0)
                         return -errno;
-
                 if (n < m)
                         break;
 
                 explicit_bzero_safe(p, n);
-                free(p);
+
+                if (m > LONG_MAX / 2) /* overflow check */
+                        return -ENOMEM;
                 m *= 2;
+                if ((long) (size_t) m != m) /* make sure that this still fits if converted to size_t */
+                        return -ENOMEM;
+
+                free(p);
         }
 
         l = strv_parse_nulstr(p, n);
@@ -306,9 +311,9 @@ int ask_password_tty(
         };
 
         for (;;) {
+                _cleanup_(erase_char) char c;
                 int sleep_for = -1, k;
                 ssize_t n;
-                char c;
 
                 if (until > 0) {
                         usec_t y;
@@ -385,13 +390,13 @@ int ask_password_tty(
                                 if (!(flags & ASK_PASSWORD_SILENT))
                                         backspace_chars(ttyfd, 1);
 
-                                /* Remove a full UTF-8 codepoint from the end. For that, figure out where the last one
-                                 * begins */
+                                /* Remove a full UTF-8 codepoint from the end. For that, figure out where the
+                                 * last one begins */
                                 q = 0;
                                 for (;;) {
                                         size_t z;
 
-                                        z = utf8_encoded_valid_unichar(passphrase + q);
+                                        z = utf8_encoded_valid_unichar(passphrase + q, (size_t) -1);
                                         if (z == 0) {
                                                 q = (size_t) -1; /* Invalid UTF8! */
                                                 break;
@@ -410,8 +415,8 @@ int ask_password_tty(
 
                                 flags |= ASK_PASSWORD_SILENT;
 
-                                /* There are two ways to enter silent mode. Either by pressing backspace as first key
-                                 * (and only as first key), or ... */
+                                /* There are two ways to enter silent mode. Either by pressing backspace as
+                                 * first key (and only as first key), or ... */
 
                                 if (ttyfd >= 0)
                                         (void) loop_write(ttyfd, "(no echo) ", 10, false);
@@ -440,18 +445,18 @@ int ask_password_tty(
 
                         if (!(flags & ASK_PASSWORD_SILENT) && ttyfd >= 0) {
                                 /* Check if we got a complete UTF-8 character now. If so, let's output one '*'. */
-                                n = utf8_encoded_valid_unichar(passphrase + codepoint);
+                                n = utf8_encoded_valid_unichar(passphrase + codepoint, (size_t) -1);
                                 if (n >= 0) {
+                                        if (flags & ASK_PASSWORD_ECHO)
+                                                (void) loop_write(ttyfd, passphrase + codepoint, n, false);
+                                        else
+                                                (void) loop_write(ttyfd, "*", 1, false);
                                         codepoint = p;
-                                        (void) loop_write(ttyfd, (flags & ASK_PASSWORD_ECHO) ? &c : "*", 1, false);
                                 }
                         }
 
                         dirty = true;
                 }
-
-                /* Let's forget this char, just to not keep needlessly copies of key material around */
-                c = 'x';
         }
 
         x = strndup(passphrase, p);

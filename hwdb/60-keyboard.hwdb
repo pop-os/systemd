@@ -188,6 +188,7 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAcer*:pnAOA*:pvr*
 ###########################################################
 
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAlienware*:pn*
+ KEYBOARD_KEY_81=f21                                    # Touchpad toggle
  KEYBOARD_KEY_8a=ejectcd
 
 # Alienware/Dell reserves these keys; safe to apply on all their devices
@@ -209,6 +210,10 @@ evdev:name:Asus WMI hotkeys:dmi:bvn*:bvr*:bd*:svnASUS*:pn*:pvr*
 evdev:name:Eee PC WMI hotkeys:dmi:bvn*:bvr*:bd*:svnASUS*:pn*:pvr*
 evdev:name:Asus Laptop extra buttons:dmi:bvn*:bvr*:bd*:svnASUS*:pn*:pvr*
  KEYBOARD_KEY_6b=f21                                    # Touchpad Toggle
+
+# USB keyboard in Asus FX503VD
+evdev:input:b0003v0B05p1869*
+ KEYBOARD_KEY_ff31007c=f20                              # Remap micmute to f20
 
 ###########################################################
 # BenQ
@@ -499,7 +504,8 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHewlett-Packard*:pnHP*Pavilion*dv7*Notebook*PC:
  KEYBOARD_KEY_c6=break
  KEYBOARD_KEY_94=reserved
 
-# Pavilion x360 13 (Prevents random airplane mode activation)
+# Pavilion and Spectre x360 13 (Prevents random airplane mode activation)
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHewlett-Packard*:pn*[sS][pP][eE][cC][tT][rR][eE]*x360*13*:pvr*
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHewlett-Packard*:pn*[pP][aA][vV][iI][lL][iI][oO][nN]*13*x360*:pvr*
  KEYBOARD_KEY_d7=unknown
 
@@ -801,6 +807,10 @@ evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO*:pn*IdeaPad*Z370*:pvr*
  KEYBOARD_KEY_a0=!mute
  KEYBOARD_KEY_ae=!volumedown
  KEYBOARD_KEY_b0=!volumeup
+
+# Lenovo Y50-70
+evdev:atkbd:dmi:bvn*:bvr*:svnLENOVO*:pn*20378*:pvr*
+ KEYBOARD_KEY_f3=f21      # Fn+F6 (toggle touchpad)
 
 # V480
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnLENOVO*:pn*Lenovo*V480*:pvr*

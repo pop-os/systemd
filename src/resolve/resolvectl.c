@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <getopt.h>
+#include <locale.h>
 #include <net/if.h>
 
 #include "sd-bus.h"
@@ -118,10 +119,8 @@ int ifname_mangle(const char *s) {
                 }
         }
 
-        if (arg_ifindex > 0 && arg_ifindex != ifi) {
-                log_error("Specified multiple different interfaces. Refusing.");
-                return -EINVAL;
-        }
+        if (arg_ifindex > 0 && arg_ifindex != ifi)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Specified multiple different interfaces. Refusing.");
 
         arg_ifindex = ifi;
         free_and_replace(arg_ifname, iface);

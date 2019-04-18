@@ -53,9 +53,17 @@ static int parse_argv(int argc, char *argv[]) {
 
         while ((c = getopt_long(argc, argv, "a:N:Vh", options, NULL)) >= 0)
                 switch (c) {
-                case 'a':
+                case 'a': {
+                        DeviceAction a;
+
+                        a = device_action_from_string(optarg);
+                        if (a < 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Invalid action '%s'", optarg);
+
                         arg_action = optarg;
                         break;
+                }
                 case 'N':
                         arg_resolve_name_timing = resolve_name_timing_from_string(optarg);
                         if (arg_resolve_name_timing < 0)
@@ -135,7 +143,7 @@ int test_main(int argc, char *argv[], void *userdata) {
         FOREACH_DEVICE_PROPERTY(dev, key, value)
                 printf("%s=%s\n", key, value);
 
-        HASHMAP_FOREACH_KEY(val, cmd, event->run_list, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(val, cmd, event->run_list, i) {
                 char program[UTIL_PATH_SIZE];
 
                 udev_event_apply_format(event, cmd, program, sizeof(program), false);
