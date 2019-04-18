@@ -1,3 +1,9 @@
+systemd (242-1) UNRELEASED; urgency=medium
+
+  * New upstream version 242
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 19 Apr 2019 01:16:09 +0200
+
 systemd (241-3) unstable; urgency=high
 
   [ Michael Biebl ]
