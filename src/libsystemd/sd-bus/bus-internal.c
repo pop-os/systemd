@@ -43,7 +43,7 @@ bool object_path_is_valid(const char *p) {
         if (slash)
                 return false;
 
-        return true;
+        return (q - p) <= BUS_PATH_SIZE_MAX;
 }
 
 char* object_path_startswith(const char *a, const char *b) {
@@ -97,7 +97,7 @@ bool interface_name_is_valid(const char *p) {
                         dot = false;
                 }
 
-        if (q - p > 255)
+        if (q - p > SD_BUS_MAXIMUM_NAME_LENGTH)
                 return false;
 
         if (dot)
@@ -139,7 +139,7 @@ bool service_name_is_valid(const char *p) {
                         dot = false;
                 }
 
-        if (q - p > 255)
+        if (q - p > SD_BUS_MAXIMUM_NAME_LENGTH)
                 return false;
 
         if (dot)
@@ -170,7 +170,7 @@ bool member_name_is_valid(const char *p) {
                         return false;
         }
 
-        if (q - p > 255)
+        if (q - p > SD_BUS_MAXIMUM_NAME_LENGTH)
                 return false;
 
         return true;

@@ -1,10 +1,7 @@
 <?xml version='1.0'?>
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-
-<!--
-  SPDX-License-Identifier: LGPL-2.1+
--->
+<!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
 <refentry id="systemd.network" conditional='ENABLE_NETWORKD'>
 
@@ -37,17 +34,17 @@
     <para>The main network file must have the extension <filename>.network</filename>; other
     extensions are ignored. Networks are applied to links whenever the links appear.</para>
 
-    <para>The <filename>.network</filename> files are read from the files located in the system
-    network directory <filename>/usr/lib/systemd/network</filename>, the volatile runtime network
-    directory <filename>/run/systemd/network</filename> and the local administration network
-    directory <filename>/etc/systemd/network</filename>. All configuration files are collectively
-    sorted and processed in lexical order, regardless of the directories in which they live.
-    However, files with identical filenames replace each other. Files in <filename>/etc</filename>
-    have the highest priority, files in <filename>/run</filename> take precedence over files with
-    the same name in <filename>/usr/lib</filename>. This can be used to override a system-supplied
-    configuration file with a local file if needed. As a special case, an empty file (file size 0)
-    or symlink with the same name pointing to <filename>/dev/null</filename> disables the
-    configuration file entirely (it is "masked").</para>
+    <para>The <filename>.network</filename> files are read from the files located in the system network
+    directories <filename>/usr/lib/systemd/network</filename> and
+    <filename>/usr/local/lib/systemd/network</filename>, the volatile runtime network directory
+    <filename>/run/systemd/network</filename> and the local administration network directory
+    <filename>/etc/systemd/network</filename>. All configuration files are collectively sorted and processed
+    in lexical order, regardless of the directories in which they live. However, files with identical
+    filenames replace each other. Files in <filename>/etc</filename> have the highest priority, files in
+    <filename>/run</filename> take precedence over files with the same name under
+    <filename>/usr</filename>. This can be used to override a system-supplied configuration file with a local
+    file if needed. As a special case, an empty file (file size 0) or symlink with the same name pointing to
+    <filename>/dev/null</filename> disables the configuration file entirely (it is "masked").</para>
 
     <para>Along with the network file <filename>foo.network</filename>, a "drop-in" directory
     <filename>foo.network.d/</filename> may exist. All files with the suffix
@@ -60,9 +57,7 @@
     <filename>/run/systemd/network</filename> directories. Drop-in files in
     <filename>/etc</filename> take precedence over those in <filename>/run</filename> which in turn
     take precedence over those in <filename>/usr/lib</filename>. Drop-in files under any of these
-    directories take precedence over the main netdev file wherever located. (Of course, since
-    <filename>/run</filename> is temporary and <filename>/usr/lib</filename> is for vendors, it is
-    unlikely drop-ins should be used in either of those places.)</para>
+    directories take precedence over the main netdev file wherever located.</para>
 
     <para>Note that an interface without any static IPv6 addresses configured, and neither DHCPv6
     nor IPv6LL enabled, shall be considered to have no IPv6 support. IPv6 will be automatically
@@ -142,53 +137,55 @@
         <varlistentry>
           <term><varname>Host=</varname></term>
           <listitem>
-            <para>Matches against the hostname or machine ID of the
-            host. See <literal>ConditionHost=</literal> in
+            <para>Matches against the hostname or machine ID of the host. See
+            <literal>ConditionHost=</literal> in
             <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-            for details.
+            for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+            If an empty string is assigned, then previously assigned value is cleared.
             </para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>Virtualization=</varname></term>
           <listitem>
-            <para>Checks whether the system is executed in a virtualized
-            environment and optionally test whether it is a specific
-            implementation. See <literal>ConditionVirtualization=</literal> in
+            <para>Checks whether the system is executed in a virtualized environment and optionally test
+            whether it is a specific implementation. See <literal>ConditionVirtualization=</literal> in
             <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-            for details.
+            for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+            If an empty string is assigned, then previously assigned value is cleared.
             </para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>KernelCommandLine=</varname></term>
           <listitem>
-            <para>Checks whether a specific kernel command line option is
-            set (or if prefixed with the exclamation mark unset). See
+            <para>Checks whether a specific kernel command line option is set. See
             <literal>ConditionKernelCommandLine=</literal> in
             <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-            for details.
+            for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+            If an empty string is assigned, then previously assigned value is cleared.
             </para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>KernelVersion=</varname></term>
           <listitem>
-            <para>Checks whether the kernel version (as reported by <command>uname -r</command>) matches a certain
-            expression (or if prefixed with the exclamation mark does not match it). See
-            <literal>ConditionKernelVersion=</literal> in
-            <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
-            details.
+            <para>Checks whether the kernel version (as reported by <command>uname -r</command>) matches a
+            certain expression. See <literal>ConditionKernelVersion=</literal> in
+            <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+            for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+            If an empty string is assigned, then previously assigned value is cleared.
             </para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>Architecture=</varname></term>
           <listitem>
-            <para>Checks whether the system is running on a specific
-            architecture. See <literal>ConditionArchitecture=</literal> in
+            <para>Checks whether the system is running on a specific architecture. See
+            <literal>ConditionArchitecture=</literal> in
             <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-            for details.
+            for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+            If an empty string is assigned, then previously assigned value is cleared.
             </para>
           </listitem>
         </varlistentry>
@@ -257,15 +254,19 @@
       <varlistentry>
         <term><varname>RequiredForOnline=</varname></term>
         <listitem>
-          <para>Takes a boolean. When <literal>yes</literal>, the network is deemed
-          required when determining whether the system is online when running
-          <literal>systemd-networkd-wait-online</literal>.
-          When <literal>no</literal>, the network is ignored when checking for
-          online state. Defaults to <literal>yes</literal>.</para>
+          <para>Takes a boolean or operational state. Please see
+          <citerefentry><refentrytitle>networkctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+          for possible operational states. When <literal>yes</literal>, the network is deemed required when
+          determining whether the system is online when running
+          <command>systemd-networkd-wait-online</command>. When <literal>no</literal>, the network is ignored
+          when checking for online state. When an operational state is set, <literal>yes</literal> is implied,
+          and this controls the operational state required for the network interface to be considered online.
+          Defaults to <literal>yes</literal>.</para>
+
           <para>The network will be brought up normally in all cases, but in
           the event that there is no address being assigned by DHCP or the
           cable is not plugged in, the link will simply remain offline and be
-          skipped automatically by <literal>systemd-networkd-wait-online</literal>
+          skipped automatically by <command>systemd-networkd-wait-online</command>
           if <literal>RequiredForOnline=no</literal>.</para>
         </listitem>
       </varlistentry>
@@ -311,7 +312,7 @@
         <varlistentry>
           <term><varname>DHCPServer=</varname></term>
           <listitem>
-            <para>Takes a boolean. If set to <literal>yes</literal>, DHCPv4 server will be start. Defaults
+            <para>Takes a boolean. If set to <literal>yes</literal>, DHCPv4 server will be started. Defaults
             to <literal>no</literal>. Further settings for the DHCP
             server may be set in the <literal>[DHCPServer]</literal>
             section described below.</para>
@@ -320,10 +321,10 @@
         <varlistentry>
           <term><varname>LinkLocalAddressing=</varname></term>
           <listitem>
-            <para>Enables link-local address autoconfiguration. Accepts
-            <literal>yes</literal>, <literal>no</literal>,
-            <literal>ipv4</literal>, or <literal>ipv6</literal>. Defaults to
-            <literal>ipv6</literal>.</para>
+            <para>Enables link-local address autoconfiguration. Accepts <literal>yes</literal>,
+            <literal>no</literal>, <literal>ipv4</literal>, or <literal>ipv6</literal>. If
+            <varname>Bridge=</varname> is set, defaults to <literal>no</literal>, and if not,
+            defaults to <literal>ipv6</literal>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -481,18 +482,14 @@
             specified more than once.
             </para>
 
-            <para>If the specified address is 0.0.0.0 (for IPv4) or
-            [::] (for IPv6), a new address range of the requested size
-            is automatically allocated from a system-wide pool of
-            unused ranges. The allocated range is checked against all
-            current network interfaces and all known network
-            configuration files to avoid address range conflicts. The
-            default system-wide pool consists of 192.168.0.0/16,
-            172.16.0.0/12 and 10.0.0.0/8 for IPv4, and fc00::/7 for
-            IPv6. This functionality is useful to manage a large
-            number of dynamically created network interfaces with the
-            same network configuration and automatic address range
-            assignment.</para>
+            <para>If the specified address is <literal>0.0.0.0</literal> (for IPv4) or <literal>::</literal>
+            (for IPv6), a new address range of the requested size is automatically allocated from a
+            system-wide pool of unused ranges. Note that the prefix length must be equal or larger than 8 for
+            IPv4, and 64 for IPv6. The allocated range is checked against all current network interfaces and
+            all known network configuration files to avoid address range conflicts. The default system-wide
+            pool consists of 192.168.0.0/16, 172.16.0.0/12 and 10.0.0.0/8 for IPv4, and fd00::/8 for IPv6.
+            This functionality is useful to manage a large number of dynamically created network interfaces
+            with the same network configuration and automatic address range assignment.</para>
 
           </listitem>
         </varlistentry>
@@ -632,6 +629,11 @@
           url="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt">ip-sysctl.txt</ulink> in the kernel
           documentation regarding <literal>accept_ra</literal>, but note that systemd's setting of
           <constant>1</constant> (i.e. true) corresponds to kernel's setting of <constant>2</constant>.</para>
+
+          <para>Note that if this option is enabled a userspace implementation of the IPv6 RA protocol is
+          used, and the kernel's own implementation remains disabled, since `networkd` needs to know all
+          details supplied in the advertisements, and these are not available from the kernel if the kernel's
+          own implemenation is used.</para>
         </listitem>
         </varlistentry>
         <varlistentry>
@@ -800,6 +802,15 @@
           </para>
         </listitem>
       </varlistentry>
+      <varlistentry>
+        <term><varname>IgnoreCarrierLoss=</varname></term>
+        <listitem>
+          <para>A boolean. Allows networkd to retain both the static and dynamic configuration of the
+          interface even if its carrier is lost. Defaults to false.
+          </para>
+        </listitem>
+      </varlistentry>
+
       </variablelist>
 
   </refsect1>
@@ -815,15 +826,15 @@
         <varlistentry>
           <term><varname>Address=</varname></term>
           <listitem>
-            <para>As in the <literal>[Network]</literal> section. This
-            key is mandatory.</para>
+            <para>As in the <literal>[Network]</literal> section. This key is mandatory. Each
+            <literal>[Address]</literal> section can contain one <varname>Address=</varname> setting.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>Peer=</varname></term>
           <listitem>
             <para>The peer address in a point-to-point connection.
-            Accepts the same format as the <literal>Address</literal>
+            Accepts the same format as the <varname>Address=</varname>
             key.</para>
           </listitem>
         </varlistentry>
@@ -834,7 +845,7 @@
             described in
             <citerefentry project='man-pages'><refentrytitle>inet_pton</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
             This key only applies to IPv4 addresses. If it is not
-            given, it is derived from the <literal>Address</literal>
+            given, it is derived from the <varname>Address=</varname>
             key.</para>
           </listitem>
         </varlistentry>
@@ -1074,7 +1085,7 @@
           </listitem>
         </varlistentry>
          <varlistentry>
-           <term><varname>GatewayOnlink=</varname></term>
+           <term><varname>GatewayOnLink=</varname></term>
            <listitem>
              <para>Takes a boolean. If set to true, the kernel does not have
              to check if the gateway is reachable directly by the current machine (i.e., the kernel does
@@ -1256,6 +1267,11 @@
             <varname>UseRoutes=</varname>, <varname>SendHostname=</varname>,
             <varname>UseMTU=</varname>, <varname>VendorClassIdentifier=</varname>,
             <varname>UseTimezone=</varname>.</para>
+
+            <para>With this option enabled DHCP requests will mimic those generated by Microsoft Windows, in
+            order to reduce the ability to fingerprint and recognize installations. This means DHCP request
+            sizes will grow and lease data will be more comprehensive than normally, though most of the
+            requested data is not actually used.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1504,6 +1520,23 @@
             </para>
           </listitem>
         </varlistentry>
+
+        <varlistentry>
+          <term><varname>UseAutonomousPrefix=</varname></term>
+          <listitem>
+            <para>When true (the default), the autonomous prefix received in the Router Advertisement will be used and take
+            precedence over any statically configured ones.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>UseOnLinkPrefix=</varname></term>
+          <listitem>
+            <para>When true (the default), the onlink prefix received in the Router Advertisement will be used and take
+            precedence over any statically configured ones.</para>
+          </listitem>
+        </varlistentry>
+
       </variablelist>
   </refsect1>
 
@@ -1766,11 +1799,36 @@
           </listitem>
         </varlistentry>
         <varlistentry>
+          <term><varname>MulticastFlood=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Controls whether the bridge should flood
+            traffic for which an MDB entry is missing and the destination
+            is unknown through this port. When unset, the kernel's default will be used.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
           <term><varname>MulticastToUnicast=</varname></term>
           <listitem>
             <para>Takes a boolean. Multicast to unicast works on top of the multicast snooping feature of
             the bridge. Which means unicast copies are only delivered to hosts which are interested in it.
             When unset, the kernel's default will be used.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>NeighborSuppression=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Configures whether ARP and ND neighbor suppression is enabled for
+            this port. When unset, the kernel's default will be used.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Learning=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Configures whether MAC address learning is enabled for
+            this port. When unset, the kernel's default will be used.
             </para>
           </listitem>
         </varlistentry>
@@ -1881,6 +1939,13 @@
             be specified using decimals (e.g. <literal>0.1s</literal>) or a <literal>ms</literal> or
             <literal>us</literal> postfix. Using <literal>infinity</literal> or <literal>0</literal> will turn the
             automatic restart off. By default automatic restart is disabled.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>TripleSampling=</varname></term>
+          <listitem>
+            <para>Takes a boolean. When <literal>yes</literal>, three samples (instead of one) are used to determine
+            the value of a received bit by majority rule. When unset, the kernel's default will be used.</para>
           </listitem>
         </varlistentry>
       </variablelist>

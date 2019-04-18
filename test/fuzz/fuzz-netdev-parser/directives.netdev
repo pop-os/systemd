@@ -9,6 +9,7 @@ Mode=
 [WireGuard]
 ListenPort=
 PrivateKey=
+PrivateKeyFile=
 FwMark=
 [MACVTAP]
 Mode=
@@ -51,6 +52,7 @@ Name=
 [WireGuardPeer]
 Endpoint=
 PresharedKey=
+PresharedKeyFile=
 PersistentKeepalive=
 PublicKey=
 AllowedIPs=
@@ -155,4 +157,20 @@ Kind=
 MACAddress=
 MTUBytes=
 Description=
+Name=
+[L2TP]
+TunnelId=
+PeerTunnelId=
+UDPSourcePort=
+UDPDestinationPort=
+Local=
+Remote=
+EncapsulationType=
+UDPCheckSum=
+UDP6CheckSumRx=
+UDP6CheckSumTx=
+[L2TPSession]
+SessionId=
+PeerSessionId=
+Layer2SpecificHeader=
 Name=

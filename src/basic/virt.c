@@ -40,6 +40,8 @@ static int detect_vm_cpuid(void) {
                 /* https://wiki.freebsd.org/bhyve */
                 { "bhyve bhyve ", VIRTUALIZATION_BHYVE     },
                 { "QNXQVMBSQG",   VIRTUALIZATION_QNX       },
+                /* https://projectacrn.org */
+                { "ACRNACRNACRN", VIRTUALIZATION_ACRN      },
         };
 
         uint32_t eax, ebx, ecx, edx;
@@ -202,7 +204,7 @@ static int detect_vm_xen_dom0(void) {
         r = read_one_line_file(PATH_FEATURES, &domcap);
         if (r < 0 && r != -ENOENT)
                 return r;
-        if (r == 0) {
+        if (r >= 0) {
                 unsigned long features;
 
                 /* Here, we need to use sscanf() instead of safe_atoul()
@@ -436,10 +438,12 @@ int detect_container(void) {
                 { "systemd-nspawn", VIRTUALIZATION_SYSTEMD_NSPAWN },
                 { "docker",         VIRTUALIZATION_DOCKER         },
                 { "rkt",            VIRTUALIZATION_RKT            },
+                { "wsl",            VIRTUALIZATION_WSL            },
         };
 
         static thread_local int cached_found = _VIRTUALIZATION_INVALID;
         _cleanup_free_ char *m = NULL;
+        _cleanup_free_ char *o = NULL;
         const char *e = NULL;
         unsigned j;
         int r;
@@ -452,6 +456,15 @@ int detect_container(void) {
             access("/proc/bc", F_OK) < 0) {
                 r = VIRTUALIZATION_OPENVZ;
                 goto finish;
+        }
+
+        /* "Official" way of detecting WSL https://github.com/Microsoft/WSL/issues/423#issuecomment-221627364 */
+        r = read_one_line_file("/proc/sys/kernel/osrelease", &o);
+        if (r >= 0) {
+                if (strstr(o, "Microsoft") || strstr(o, "WSL")) {
+                        r = VIRTUALIZATION_WSL;
+                        goto finish;
+                }
         }
 
         if (getpid_cached() == 1) {
@@ -469,11 +482,11 @@ int detect_container(void) {
         /* Otherwise, PID 1 might have dropped this information into a file in /run. This is better than accessing
          * /proc/1/environ, since we don't need CAP_SYS_PTRACE for that. */
         r = read_one_line_file("/run/systemd/container", &m);
-        if (r >= 0) {
+        if (r > 0) {
                 e = m;
                 goto translate_name;
         }
-        if (r != -ENOENT)
+        if (!IN_SET(r, -ENOENT, 0))
                 return log_debug_errno(r, "Failed to read /run/systemd/container: %m");
 
         /* Fallback for cases where PID 1 was not systemd (for example, cases where init=/bin/sh is used. */
@@ -628,6 +641,7 @@ static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {
         [VIRTUALIZATION_PARALLELS] = "parallels",
         [VIRTUALIZATION_BHYVE] = "bhyve",
         [VIRTUALIZATION_QNX] = "qnx",
+        [VIRTUALIZATION_ACRN] = "acrn",
         [VIRTUALIZATION_VM_OTHER] = "vm-other",
 
         [VIRTUALIZATION_SYSTEMD_NSPAWN] = "systemd-nspawn",
@@ -636,6 +650,7 @@ static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {
         [VIRTUALIZATION_OPENVZ] = "openvz",
         [VIRTUALIZATION_DOCKER] = "docker",
         [VIRTUALIZATION_RKT] = "rkt",
+        [VIRTUALIZATION_WSL] = "wsl",
         [VIRTUALIZATION_CONTAINER_OTHER] = "container-other",
 };
 

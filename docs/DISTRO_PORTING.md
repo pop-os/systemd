@@ -31,6 +31,20 @@ distribution:
    print the initial transaction it would execute during boot-up.
    This will also inform you about ordering loops and suchlike.
 
+## Compilation options
+
+The default configuration does not enable any optimization or hardening
+options. This is suitable for development and testing, but not for end-user
+installations.
+
+For deployment, optimization (`-O2` or `-O3` compiler options), link time
+optimization (`-Db_lto=true` meson option), and hardening (e.g.
+`-D_FORTIFY_SOURCE=2`, `-fstack-protector-strong`, `-fstack-clash-protection`,
+`-fcf-protection`, `-pie` compiler options, and `-z relro`, `-z now`,
+`--as-needed` linker options) are recommended. The most appropriate set of
+options depends on the architecture and distribution specifics so no default is
+provided.
+
 ## NTP Pool
 
 By default, systemd-timesyncd uses the Google Public NTP servers
@@ -49,8 +63,8 @@ NTP servers.
 
 ## DNS Servers
 
-By default, systemd-resolved uses the Google Public DNS servers
-`8.8.8.8`, `8.8.4.4`, `2001:4860:4860::8888`, `2001:4860:4860::8844`
+By default, systemd-resolved uses Cloudflare and Google Public DNS servers
+`1.1.1.1`, `8.8.8.8`, `1.0.0.1`, `8.8.4.4`, `2606:4700:4700::1111`, `2001:4860:4860::8888`, `2606:4700:4700::1001`, `2001:4860:4860::8844`
 as fallback, if no other DNS configuration is available.
 
 Use `-Ddns-servers=` to direct systemd-resolved to different fallback

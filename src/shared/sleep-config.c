@@ -4,12 +4,15 @@
 ***/
 
 #include <errno.h>
+#include <fcntl.h>
 #include <linux/fs.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <syslog.h>
 #include <unistd.h>
 
@@ -17,6 +20,7 @@
 #include "conf-parser.h"
 #include "def.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "log.h"
@@ -201,8 +205,7 @@ int find_hibernate_location(char **device, char **type, size_t *size, size_t *us
         if (!f) {
                 log_full(errno == ENOENT ? LOG_DEBUG : LOG_WARNING,
                          "Failed to retrieve open /proc/swaps: %m");
-                assert(errno > 0);
-                return -errno;
+                return negative_errno();
         }
 
         (void) fscanf(f, "%*s %*s %*s %*s %*s\n");

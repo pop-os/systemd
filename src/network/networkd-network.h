@@ -20,6 +20,7 @@
 #include "networkd-route.h"
 #include "networkd-routing-policy-rule.h"
 #include "networkd-util.h"
+#include "ordered-set.h"
 #include "resolve-util.h"
 
 #define DHCP_ROUTE_METRIC 1024
@@ -83,16 +84,6 @@ typedef enum RADVPrefixDelegation {
         _RADV_PREFIX_DELEGATION_INVALID = -1,
 } RADVPrefixDelegation;
 
-typedef struct NetworkConfigSection {
-        unsigned line;
-        char filename[];
-} NetworkConfigSection;
-
-int network_config_section_new(const char *filename, unsigned line, NetworkConfigSection **s);
-void network_config_section_free(NetworkConfigSection *network);
-DEFINE_TRIVIAL_CLEANUP_FUNC(NetworkConfigSection*, network_config_section_free);
-extern const struct hash_ops network_config_hash_ops;
-
 typedef struct Manager Manager;
 
 struct Network {
@@ -106,12 +97,7 @@ struct Network {
         char **match_driver;
         char **match_type;
         char **match_name;
-
-        Condition *match_host;
-        Condition *match_virt;
-        Condition *match_kernel_cmdline;
-        Condition *match_kernel_version;
-        Condition *match_arch;
+        LIST_HEAD(Condition, conditions);
 
         char *description;
 
@@ -119,6 +105,10 @@ struct Network {
         NetDev *bond;
         NetDev *vrf;
         Hashmap *stacked_netdevs;
+        char *bridge_name;
+        char *bond_name;
+        char *vrf_name;
+        Hashmap *stacked_netdev_names;
 
         /* DHCP Client Support */
         AddressFamilyBoolean dhcp;
@@ -173,7 +163,7 @@ struct Network {
         usec_t router_dns_lifetime_usec;
         struct in6_addr *router_dns;
         unsigned n_router_dns;
-        char **router_search_domains;
+        OrderedSet *router_search_domains;
         bool dhcp6_force_pd_other_information; /* Start DHCPv6 PD also when 'O'
                                                   RA flag is set, see RFC 7084,
                                                   WPD-4 */
@@ -184,7 +174,10 @@ struct Network {
         int fast_leave;
         int allow_port_to_be_root;
         int unicast_flood;
+        int multicast_flood;
         int multicast_to_unicast;
+        int neighbor_suppression;
+        int learning;
         uint32_t cost;
         uint16_t priority;
 
@@ -197,6 +190,7 @@ struct Network {
         size_t can_bitrate;
         unsigned can_sample_point;
         usec_t can_restart_us;
+        int can_triple_sampling;
 
         AddressFamilyBoolean ip_forward;
         bool ip_masquerade;
@@ -209,27 +203,33 @@ struct Network {
         uint32_t ipv6_mtu;
 
         bool ipv6_accept_ra_use_dns;
+        bool ipv6_accept_ra_use_autonomous_prefix;
+        bool ipv6_accept_ra_use_onlink_prefix;
         bool active_slave;
         bool primary_slave;
         DHCPUseDomains ipv6_accept_ra_use_domains;
         uint32_t ipv6_accept_ra_route_table;
+        bool ipv6_accept_ra_route_table_set;
 
         union in_addr_union ipv6_token;
         IPv6PrivacyExtensions ipv6_privacy_extensions;
 
         struct ether_addr *mac;
         uint32_t mtu;
+        bool mtu_is_set; /* Indicate MTUBytes= is specified. */
         int arp;
         int multicast;
         int allmulticast;
         bool unmanaged;
         bool configure_without_carrier;
+        bool ignore_carrier_loss;
         uint32_t iaid;
         DUID duid;
 
         bool iaid_set;
 
         bool required_for_online; /* Is this network required to be considered online? */
+        LinkOperationalState required_operstate_for_online;
 
         LLDPMode lldp_mode; /* LLDP reception */
         LLDPEmit lldp_emit; /* LLDP transmission */
@@ -263,7 +263,8 @@ struct Network {
         /* All kinds of DNS configuration */
         struct in_addr_data *dns;
         unsigned n_dns;
-        char **search_domains, **route_domains;
+        OrderedSet *search_domains, *route_domains;
+
         int dns_default_route;
         ResolveSupport llmnr;
         ResolveSupport mdns;
@@ -283,6 +284,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Network*, network_free);
 
 int network_load(Manager *manager);
 int network_load_one(Manager *manager, const char *filename);
+int network_verify(Network *network);
 
 int network_get_by_name(Manager *manager, const char *name, Network **ret);
 int network_get(Manager *manager, sd_device *device, const char *ifname, const struct ether_addr *mac, Network **ret);
@@ -291,7 +293,7 @@ void network_apply_anonymize_if_set(Network *network);
 
 bool network_has_static_ipv6_addresses(Network *network);
 
-CONFIG_PARSER_PROTOTYPE(config_parse_netdev);
+CONFIG_PARSER_PROTOTYPE(config_parse_stacked_netdev);
 CONFIG_PARSER_PROTOTYPE(config_parse_domains);
 CONFIG_PARSER_PROTOTYPE(config_parse_tunnel);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp);
@@ -308,10 +310,11 @@ CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_server_ntp);
 CONFIG_PARSER_PROTOTYPE(config_parse_dnssec_negative_trust_anchors);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_domains);
 CONFIG_PARSER_PROTOTYPE(config_parse_lldp_mode);
-CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_route_table);
+CONFIG_PARSER_PROTOTYPE(config_parse_section_route_table);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_user_class);
 CONFIG_PARSER_PROTOTYPE(config_parse_ntp);
 CONFIG_PARSER_PROTOTYPE(config_parse_iaid);
+CONFIG_PARSER_PROTOTYPE(config_parse_required_for_online);
 /* Legacy IPv4LL support */
 CONFIG_PARSER_PROTOTYPE(config_parse_ipv4ll);
 

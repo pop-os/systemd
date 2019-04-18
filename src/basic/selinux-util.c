@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <malloc.h>
 #include <stddef.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <sys/un.h>
 #include <syslog.h>
 
@@ -16,6 +18,7 @@
 #endif
 
 #include "alloc-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "log.h"
 #include "macro.h"
@@ -23,7 +26,6 @@
 #include "selinux-util.h"
 #include "stdio-util.h"
 #include "time-util.h"
-#include "util.h"
 
 #if HAVE_SELINUX
 DEFINE_TRIVIAL_CLEANUP_FUNC(char*, freecon);

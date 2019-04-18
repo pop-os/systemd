@@ -10,14 +10,17 @@
 #include <security/pam_modules.h>
 #include <security/pam_modutil.h>
 #include <sys/file.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "audit-util.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
+#include "bus-internal.h"
 #include "bus-util.h"
 #include "cgroup-util.h"
-#include "def.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
@@ -31,7 +34,6 @@
 #include "stdio-util.h"
 #include "strv.h"
 #include "terminal-util.h"
-#include "util.h"
 
 static int parse_argv(
                 pam_handle_t *handle,
@@ -113,6 +115,15 @@ static int get_user_data(
         *ret_username = username;
 
         return PAM_SUCCESS;
+}
+
+static bool display_is_local(const char *display) {
+        assert(display);
+
+        return
+                display[0] == ':' &&
+                display[1] >= '0' &&
+                display[1] <= '9';
 }
 
 static int socket_from_display(const char *display, char **path) {
@@ -316,14 +327,21 @@ static const char* getenv_harder(pam_handle_t *handle, const char *key, const ch
         assert(handle);
         assert(key);
 
-        /* Looks for an environment variable, preferrably in the environment block associated with the specified PAM
-         * handle, falling back to the process' block instead. */
+        /* Looks for an environment variable, preferrably in the environment block associated with the
+         * specified PAM handle, falling back to the process' block instead. Why check both? Because we want
+         * to permit configuration of session properties from unit files that invoke PAM services, so that
+         * PAM services don't have to be reworked to set systemd-specific properties, but these properties
+         * can still be set from the unit file Environment= block. */
 
         v = pam_getenv(handle, key);
         if (!isempty(v))
                 return v;
 
-        v = getenv(key);
+        /* We use secure_getenv() here, since we might get loaded into su/sudo, which are SUID. Ideally
+         * they'd clean up the environment before invoking foreign code (such as PAM modules), but alas they
+         * currently don't (to be precise, they clean up the environment they pass to their children, but
+         * not their own environ[]). */
+        v = secure_getenv(key);
         if (!isempty(v))
                 return v;
 

@@ -22,10 +22,12 @@
 #include "journal-def.h"
 #include "journal-file.h"
 #include "lookup3.h"
+#include "memory-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "random-util.h"
 #include "set.h"
+#include "sort-util.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -237,6 +239,9 @@ int journal_file_set_offline(JournalFile *f, bool wait) {
                 int k;
 
                 assert_se(sigfillset(&ss) >= 0);
+                /* Don't block SIGBUS since the offlining thread accesses a memory mapped file.
+                 * Asynchronous SIGBUS signals can safely be handled by either thread. */
+                assert_se(sigdelset(&ss, SIGBUS) >= 0);
 
                 r = pthread_sigmask(SIG_BLOCK, &ss, &saved_ss);
                 if (r > 0)
@@ -1791,7 +1796,9 @@ static int journal_file_append_entry_internal(
         o->entry.realtime = htole64(ts->realtime);
         o->entry.monotonic = htole64(ts->monotonic);
         o->entry.xor_hash = htole64(xor_hash);
-        o->entry.boot_id = boot_id ? *boot_id : f->header->boot_id;
+        if (boot_id)
+                f->header->boot_id = *boot_id;
+        o->entry.boot_id = f->header->boot_id;
 
 #if HAVE_GCRYPT
         r = journal_file_hmac_put_object(f, OBJECT_ENTRY, o, np);

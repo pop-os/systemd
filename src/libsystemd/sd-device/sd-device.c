@@ -43,6 +43,7 @@ int device_new_aux(sd_device **ret) {
                 .devmode = (mode_t) -1,
                 .devuid = (uid_t) -1,
                 .devgid = (gid_t) -1,
+                .action = _DEVICE_ACTION_INVALID,
         };
 
         *ret = device;
@@ -236,7 +237,7 @@ _public_ int sd_device_new_from_devnum(sd_device **ret, char type, dev_t devnum)
         assert_return(IN_SET(type, 'b', 'c'), -EINVAL);
 
         /* use /sys/dev/{block,char}/<maj>:<min> link */
-        snprintf(id, sizeof(id), "%u:%u", major(devnum), minor(devnum));
+        xsprintf(id, "%u:%u", major(devnum), minor(devnum));
 
         syspath = strjoina("/sys/dev/", (type == 'b' ? "block" : "char"), "/", id);
 
@@ -1110,6 +1111,7 @@ int device_add_devlink(sd_device *device, const char *devlink) {
 static int device_add_property_internal_from_string(sd_device *device, const char *str) {
         _cleanup_free_ char *key = NULL;
         char *value;
+        int r;
 
         assert(device);
         assert(str);
@@ -1127,7 +1129,13 @@ static int device_add_property_internal_from_string(sd_device *device, const cha
         if (isempty(++value))
                 value = NULL;
 
-        return device_add_property_internal(device, key, value);
+        /* Add the property to both sd_device::properties and sd_device::properties_db,
+         * as this is called by only handle_db_line(). */
+        r = device_add_property_aux(device, key, value, false);
+        if (r < 0)
+                return r;
+
+        return device_add_property_aux(device, key, value, true);
 }
 
 int device_set_usec_initialized(sd_device *device, usec_t when) {
@@ -1266,13 +1274,11 @@ int device_get_id_filename(sd_device *device, const char **ret) {
         return 0;
 }
 
-int device_read_db_internal(sd_device *device, bool force) {
+int device_read_db_internal_filename(sd_device *device, const char *filename) {
         _cleanup_free_ char *db = NULL;
-        char *path;
-        const char *id, *value;
+        const char *value;
+        size_t db_len, i;
         char key;
-        size_t db_len;
-        unsigned i;
         int r;
 
         enum {
@@ -1284,22 +1290,14 @@ int device_read_db_internal(sd_device *device, bool force) {
         } state = PRE_KEY;
 
         assert(device);
+        assert(filename);
 
-        if (device->db_loaded || (!force && device->sealed))
-                return 0;
-
-        r = device_get_id_filename(device, &id);
-        if (r < 0)
-                return r;
-
-        path = strjoina("/run/udev/data/", id);
-
-        r = read_full_file(path, &db, &db_len);
+        r = read_full_file(filename, &db, &db_len);
         if (r < 0) {
                 if (r == -ENOENT)
                         return 0;
-                else
-                        return log_device_debug_errno(device, r, "sd-device: Failed to read db '%s': %m", path);
+
+                return log_device_debug_errno(device, r, "sd-device: Failed to read db '%s': %m", filename);
         }
 
         /* devices with a database entry are initialized */
@@ -1352,11 +1350,29 @@ int device_read_db_internal(sd_device *device, bool force) {
 
                         break;
                 default:
-                        assert_not_reached("Invalid state when parsing db");
+                        return log_device_debug_errno(device, SYNTHETIC_ERRNO(EINVAL), "sd-device: invalid db syntax.");
                 }
         }
 
         return 0;
+}
+
+int device_read_db_internal(sd_device *device, bool force) {
+        const char *id, *path;
+        int r;
+
+        assert(device);
+
+        if (device->db_loaded || (!force && device->sealed))
+                return 0;
+
+        r = device_get_id_filename(device, &id);
+        if (r < 0)
+                return r;
+
+        path = strjoina("/run/udev/data/", id);
+
+        return device_read_db_internal_filename(device, path);
 }
 
 _public_ int sd_device_get_is_initialized(sd_device *device) {

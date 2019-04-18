@@ -15,6 +15,8 @@
 #include "sd-netlink.h"
 
 #include "list.h"
+#include "log-link.h"
+#include "network-util.h"
 #include "set.h"
 
 typedef enum LinkState {
@@ -27,17 +29,6 @@ typedef enum LinkState {
         _LINK_STATE_MAX,
         _LINK_STATE_INVALID = -1
 } LinkState;
-
-typedef enum LinkOperationalState {
-        LINK_OPERSTATE_OFF,
-        LINK_OPERSTATE_NO_CARRIER,
-        LINK_OPERSTATE_DORMANT,
-        LINK_OPERSTATE_CARRIER,
-        LINK_OPERSTATE_DEGRADED,
-        LINK_OPERSTATE_ROUTABLE,
-        _LINK_OPERSTATE_MAX,
-        _LINK_OPERSTATE_INVALID = -1
-} LinkOperationalState;
 
 typedef struct Manager Manager;
 typedef struct Network Network;
@@ -75,6 +66,8 @@ typedef struct Link {
         unsigned routing_policy_rule_messages;
         unsigned routing_policy_rule_remove_messages;
         unsigned enslaving;
+        /* link_is_enslaved() has additional checks. So, it is named _raw. */
+        bool enslaved_raw;
 
         Set *addresses;
         Set *addresses_foreign;
@@ -128,6 +121,7 @@ typedef struct Link {
 
         Hashmap *bound_by_links;
         Hashmap *bound_to_links;
+        Hashmap *slaves;
 } Link;
 
 typedef int (*link_netlink_message_handler_t)(sd_netlink*, sd_netlink_message*, Link*);
@@ -150,7 +144,7 @@ int link_initialized(Link *link, sd_device *device);
 
 void link_check_ready(Link *link);
 
-void link_update_operstate(Link *link);
+void link_update_operstate(Link *link, bool also_update_bond_master);
 int link_update(Link *link, sd_netlink_message *message);
 
 void link_dirty(Link *link);
@@ -162,7 +156,7 @@ bool link_has_carrier(Link *link);
 
 int link_ipv6ll_gained(Link *link, const struct in6_addr *address);
 
-int link_set_mtu(Link *link, uint32_t mtu);
+int link_set_mtu(Link *link, uint32_t mtu, bool force);
 
 int ipv4ll_configure(Link *link);
 int dhcp4_configure(Link *link);
@@ -176,38 +170,15 @@ int dhcp6_lease_pd_prefix_lost(sd_dhcp6_client *client, Link* link);
 const char* link_state_to_string(LinkState s) _const_;
 LinkState link_state_from_string(const char *s) _pure_;
 
-const char* link_operstate_to_string(LinkOperationalState s) _const_;
-LinkOperationalState link_operstate_from_string(const char *s) _pure_;
-
 extern const sd_bus_vtable link_vtable[];
 
 int link_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***nodes, sd_bus_error *error);
 int link_object_find(sd_bus *bus, const char *path, const char *interface, void *userdata, void **found, sd_bus_error *error);
 int link_send_changed(Link *link, const char *property, ...) _sentinel_;
 
-/* Macros which append INTERFACE= to the message */
-
-#define log_link_full(link, level, error, ...)                          \
-        ({                                                              \
-                const Link *_l = (link);                                \
-                _l ? log_object_internal(level, error, __FILE__, __LINE__, __func__, "INTERFACE=", _l->ifname, NULL, NULL, ##__VA_ARGS__) : \
-                        log_internal(level, error, __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
-        })                                                              \
-
-#define log_link_debug(link, ...)   log_link_full(link, LOG_DEBUG, 0, ##__VA_ARGS__)
-#define log_link_info(link, ...)    log_link_full(link, LOG_INFO, 0, ##__VA_ARGS__)
-#define log_link_notice(link, ...)  log_link_full(link, LOG_NOTICE, 0, ##__VA_ARGS__)
-#define log_link_warning(link, ...) log_link_full(link, LOG_WARNING, 0, ##__VA_ARGS__)
-#define log_link_error(link, ...)   log_link_full(link, LOG_ERR, 0, ##__VA_ARGS__)
-
-#define log_link_debug_errno(link, error, ...)   log_link_full(link, LOG_DEBUG, error, ##__VA_ARGS__)
-#define log_link_info_errno(link, error, ...)    log_link_full(link, LOG_INFO, error, ##__VA_ARGS__)
-#define log_link_notice_errno(link, error, ...)  log_link_full(link, LOG_NOTICE, error, ##__VA_ARGS__)
-#define log_link_warning_errno(link, error, ...) log_link_full(link, LOG_WARNING, error, ##__VA_ARGS__)
-#define log_link_error_errno(link, error, ...)   log_link_full(link, LOG_ERR, error, ##__VA_ARGS__)
-
-#define LOG_LINK_MESSAGE(link, fmt, ...) "MESSAGE=%s: " fmt, (link)->ifname, ##__VA_ARGS__
-#define LOG_LINK_INTERFACE(link) "INTERFACE=%s", (link)->ifname
+uint32_t link_get_vrf_table(Link *link);
+uint32_t link_get_dhcp_route_table(Link *link);
+uint32_t link_get_ipv6_accept_ra_route_table(Link *link);
 
 #define ADDRESS_FMT_VAL(address)                   \
         be32toh((address).s_addr) >> 24,           \

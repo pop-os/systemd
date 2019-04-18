@@ -183,7 +183,7 @@ static int raw_import_maybe_convert_qcow2(RawImport *i) {
 
         r = qcow2_convert(i->output_fd, converted_fd);
         if (r < 0) {
-                unlink(t);
+                (void) unlink(t);
                 return log_error_errno(r, "Failed to convert qcow2 image: %m");
         }
 
@@ -215,7 +215,7 @@ static int raw_import_finish(RawImport *i) {
                 return r;
 
         if (S_ISREG(i->st.st_mode)) {
-                (void) copy_times(i->input_fd, i->output_fd);
+                (void) copy_times(i->input_fd, i->output_fd, COPY_CRTIME);
                 (void) copy_xattr(i->input_fd, i->output_fd);
         }
 

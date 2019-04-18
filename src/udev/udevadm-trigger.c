@@ -7,6 +7,7 @@
 #include "sd-event.h"
 
 #include "device-enumerator-private.h"
+#include "device-private.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "path-util.h"
@@ -59,6 +60,7 @@ static int exec_list(sd_device_enumerator *e, const char *action, Set *settle_se
 }
 
 static int device_monitor_handler(sd_device_monitor *m, sd_device *dev, void *userdata) {
+        _cleanup_free_ char *val = NULL;
         Set *settle_set = userdata;
         const char *syspath;
 
@@ -71,7 +73,8 @@ static int device_monitor_handler(sd_device_monitor *m, sd_device *dev, void *us
         if (arg_verbose)
                 printf("settle %s\n", syspath);
 
-        if (!set_remove(settle_set, syspath))
+        val = set_remove(settle_set, syspath);
+        if (!val)
                 log_debug("Got epoll event on syspath %s not present in syspath set", syspath);
 
         if (set_isempty(settle_set))
@@ -199,11 +202,10 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown type --type=%s", optarg);
                         break;
                 case 'c':
-                        if (STR_IN_SET(optarg, "add", "remove", "change"))
-                                action = optarg;
-                        else
-                                log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown action '%s'", optarg);
+                        if (device_action_from_string(optarg) < 0)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown action '%s'", optarg);
 
+                        action = optarg;
                         break;
                 case 's':
                         r = sd_device_enumerator_add_match_subsystem(e, optarg, true);
@@ -256,7 +258,7 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to open the device '%s': %m", optarg);
 
-                        r = sd_device_enumerator_add_match_parent(e, dev);
+                        r = device_enumerator_add_match_parent_incremental(e, dev);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to add parent match '%s': %m", optarg);
                         break;
@@ -272,7 +274,7 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to open the device '%s': %m", optarg);
 
-                        r = sd_device_enumerator_add_match_parent(e, dev);
+                        r = device_enumerator_add_match_parent_incremental(e, dev);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to add parent match '%s': %m", optarg);
                         break;
@@ -308,13 +310,17 @@ int trigger_main(int argc, char *argv[], void *userdata) {
         if (ping) {
                 _cleanup_(udev_ctrl_unrefp) struct udev_ctrl *uctrl = NULL;
 
-                uctrl = udev_ctrl_new();
-                if (!uctrl)
-                        return log_oom();
+                r = udev_ctrl_new(&uctrl);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to initialize udev control: %m");
 
-                r = udev_ctrl_send_ping(uctrl, ping_timeout_usec);
+                r = udev_ctrl_send_ping(uctrl);
                 if (r < 0)
                         return log_error_errno(r, "Failed to connect to udev daemon: %m");
+
+                r = udev_ctrl_wait(uctrl, ping_timeout_usec);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to wait for daemon to reply: %m");
         }
 
         for (; optind < argc; optind++) {
@@ -324,7 +330,7 @@ int trigger_main(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to open the device '%s': %m", argv[optind]);
 
-                r = sd_device_enumerator_add_match_parent(e, dev);
+                r = device_enumerator_add_match_parent_incremental(e, dev);
                 if (r < 0)
                         return log_error_errno(r, "Failed to add parent match '%s': %m", argv[optind]);
         }

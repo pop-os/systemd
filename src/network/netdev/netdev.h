@@ -46,7 +46,9 @@ typedef enum NetDevKind {
         NETDEV_KIND_NETDEVSIM,
         NETDEV_KIND_FOU,
         NETDEV_KIND_ERSPAN,
+        NETDEV_KIND_L2TP,
         _NETDEV_KIND_MAX,
+        _NETDEV_KIND_TUNNEL, /* Used by config_parse_stacked_netdev() */
         _NETDEV_KIND_INVALID = -1
 } NetDevKind;
 
@@ -64,6 +66,7 @@ typedef enum NetDevCreateType {
         NETDEV_CREATE_INDEPENDENT,
         NETDEV_CREATE_MASTER,
         NETDEV_CREATE_STACKED,
+        NETDEV_CREATE_AFTER_CONFIGURED,
         _NETDEV_CREATE_MAX,
         _NETDEV_CREATE_INVALID = -1,
 } NetDevCreateType;
@@ -78,11 +81,7 @@ typedef struct NetDev {
 
         char *filename;
 
-        Condition *match_host;
-        Condition *match_virt;
-        Condition *match_kernel_cmdline;
-        Condition *match_kernel_version;
-        Condition *match_arch;
+        LIST_HEAD(Condition, conditions);
 
         NetDevState state;
         NetDevKind kind;
@@ -121,6 +120,9 @@ typedef struct NetDevVTable {
 
         /* create netdev, if not done via rtnl */
         int (*create)(NetDev *netdev);
+
+        /* create netdev after link is fully configured */
+        int (*create_after_configured)(NetDev *netdev, Link *link);
 
         /* perform additional configuration after netdev has been createad */
         int (*post_create)(NetDev *netdev, Link *link, sd_netlink_message *message);
@@ -161,9 +163,18 @@ int netdev_get(Manager *manager, const char *name, NetDev **ret);
 int netdev_set_ifindex(NetDev *netdev, sd_netlink_message *newlink);
 int netdev_get_mac(const char *ifname, struct ether_addr **ret);
 int netdev_join(NetDev *netdev, Link *link, link_netlink_message_handler_t cb);
+int netdev_join_after_configured(NetDev *netdev, Link *link, link_netlink_message_handler_t callback);
 
 const char *netdev_kind_to_string(NetDevKind d) _const_;
 NetDevKind netdev_kind_from_string(const char *d) _pure_;
+
+static inline NetDevCreateType netdev_get_create_type(NetDev *netdev) {
+        assert(netdev);
+        assert(NETDEV_VTABLE(netdev));
+
+        return NETDEV_VTABLE(netdev)->create_type;
+}
+
 
 CONFIG_PARSER_PROTOTYPE(config_parse_netdev_kind);
 

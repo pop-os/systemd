@@ -124,8 +124,8 @@ int prefix_new(Prefix **ret) {
         return 0;
 }
 
-int prefix_new_static(Network *network, const char *filename,
-                      unsigned section_line, Prefix **ret) {
+static int prefix_new_static(Network *network, const char *filename,
+                             unsigned section_line, Prefix **ret) {
         _cleanup_(network_config_section_freep) NetworkConfigSection *n = NULL;
         _cleanup_(prefix_freep) Prefix *prefix = NULL;
         int r;
@@ -186,7 +186,7 @@ int config_parse_prefix(const char *unit,
                 void *userdata) {
 
         Network *network = userdata;
-        _cleanup_(prefix_freep) Prefix *p = NULL;
+        _cleanup_(prefix_free_or_set_invalidp) Prefix *p = NULL;
         uint8_t prefixlen = 64;
         union in_addr_union in6addr;
         int r;
@@ -228,7 +228,7 @@ int config_parse_prefix_flags(const char *unit,
                               void *data,
                               void *userdata) {
         Network *network = userdata;
-        _cleanup_(prefix_freep) Prefix *p = NULL;
+        _cleanup_(prefix_free_or_set_invalidp) Prefix *p = NULL;
         int r, val;
 
         assert(filename);
@@ -272,7 +272,7 @@ int config_parse_prefix_lifetime(const char *unit,
                                  void *data,
                                  void *userdata) {
         Network *network = userdata;
-        _cleanup_(prefix_freep) Prefix *p = NULL;
+        _cleanup_(prefix_free_or_set_invalidp) Prefix *p = NULL;
         usec_t usec;
         int r;
 
@@ -391,8 +391,9 @@ static int radv_set_dns(Link *link, Link *uplink) {
 }
 
 static int radv_set_domains(Link *link, Link *uplink) {
-        char **search_domains;
+        OrderedSet *search_domains;
         usec_t lifetime_usec;
+        _cleanup_free_ char **s = NULL; /* just free() because the strings are owned by the set */
 
         if (!link->network->router_emit_domains)
                 return 0;
@@ -423,9 +424,13 @@ static int radv_set_domains(Link *link, Link *uplink) {
         return 0;
 
  set_domains:
+        s = ordered_set_get_strv(search_domains);
+        if (!s)
+                return log_oom();
+
         return sd_radv_set_dnssl(link->radv,
                                  DIV_ROUND_UP(lifetime_usec, USEC_PER_SEC),
-                                 search_domains);
+                                 s);
 
 }
 

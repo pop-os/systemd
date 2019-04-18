@@ -28,16 +28,17 @@
 #include "bus-util.h"
 #include "cgroup-util.h"
 #include "def.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "hexdecoct.h"
 #include "hostname-util.h"
 #include "macro.h"
+#include "memory-util.h"
 #include "missing.h"
 #include "parse-util.h"
 #include "process-util.h"
 #include "string-util.h"
 #include "strv.h"
-#include "util.h"
 
 #define log_debug_bus_message(m)                                         \
         do {                                                             \
@@ -146,13 +147,13 @@ static void bus_reset_queues(sd_bus *b) {
         assert(b);
 
         while (b->rqueue_size > 0)
-                sd_bus_message_unref(b->rqueue[--b->rqueue_size]);
+                bus_message_unref_queued(b->rqueue[--b->rqueue_size], b);
 
         b->rqueue = mfree(b->rqueue);
         b->rqueue_allocated = 0;
 
         while (b->wqueue_size > 0)
-                sd_bus_message_unref(b->wqueue[--b->wqueue_size]);
+                bus_message_unref_queued(b->wqueue[--b->wqueue_size], b);
 
         b->wqueue = mfree(b->wqueue);
         b->wqueue_allocated = 0;
@@ -236,7 +237,7 @@ _public_ int sd_bus_new(sd_bus **ret) {
                 return -ENOMEM;
 
         *b = (sd_bus) {
-                .n_ref = REFCNT_INIT,
+                .n_ref = 1,
                 .input_fd = -1,
                 .output_fd = -1,
                 .inotify_fd = -1,
@@ -248,11 +249,11 @@ _public_ int sd_bus_new(sd_bus **ret) {
                 .close_on_exit = true,
         };
 
-        assert_se(pthread_mutex_init(&b->memfd_cache_mutex, NULL) == 0);
-
         /* We guarantee that wqueue always has space for at least one entry */
         if (!GREEDY_REALLOC(b->wqueue, b->wqueue_allocated, 1))
                 return -ENOMEM;
+
+        assert_se(pthread_mutex_init(&b->memfd_cache_mutex, NULL) == 0);
 
         *ret = TAKE_PTR(b);
         return 0;
@@ -493,7 +494,7 @@ static int synthesize_connected_signal(sd_bus *bus) {
 
         /* Insert at the very front */
         memmove(bus->rqueue + 1, bus->rqueue, sizeof(sd_bus_message*) * bus->rqueue_size);
-        bus->rqueue[0] = TAKE_PTR(m);
+        bus->rqueue[0] = bus_message_ref_queued(m, bus);
         bus->rqueue_size++;
 
         return 0;
@@ -1585,7 +1586,7 @@ void bus_enter_closing(sd_bus *bus) {
         bus_set_state(bus, BUS_CLOSING);
 }
 
-DEFINE_PUBLIC_ATOMIC_REF_UNREF_FUNC(sd_bus, sd_bus, bus_free);
+DEFINE_PUBLIC_TRIVIAL_REF_UNREF_FUNC(sd_bus, sd_bus, bus_free);
 
 _public_ int sd_bus_is_open(sd_bus *bus) {
         assert_return(bus, -EINVAL);
@@ -1644,6 +1645,47 @@ _public_ int sd_bus_get_bus_id(sd_bus *bus, sd_id128_t *id) {
         return 0;
 }
 
+#define COOKIE_CYCLED (UINT32_C(1) << 31)
+
+static uint64_t cookie_inc(uint64_t cookie) {
+
+        /* Stay within the 32bit range, since classic D-Bus can't deal with more */
+        if (cookie >= UINT32_MAX)
+                return COOKIE_CYCLED; /* Don't go back to zero, but use the highest bit for checking
+                                       * whether we are looping. */
+
+        return cookie + 1;
+}
+
+static int next_cookie(sd_bus *b) {
+        uint64_t new_cookie;
+
+        assert(b);
+
+        new_cookie = cookie_inc(b->cookie);
+
+        /* Small optimization: don't bother with checking for cookie reuse until we overran cookiespace at
+         * least once, but then do it thorougly. */
+        if (FLAGS_SET(new_cookie, COOKIE_CYCLED)) {
+                uint32_t i;
+
+                /* Check if the cookie is currently in use. If so, pick the next one */
+                for (i = 0; i < COOKIE_CYCLED; i++) {
+                        if (!ordered_hashmap_contains(b->reply_callbacks, &new_cookie))
+                                goto good;
+
+                        new_cookie = cookie_inc(new_cookie);
+                }
+
+                /* Can't fulfill request */
+                return -EBUSY;
+        }
+
+good:
+        b->cookie = new_cookie;
+        return 0;
+}
+
 static int bus_seal_message(sd_bus *b, sd_bus_message *m, usec_t timeout) {
         int r;
 
@@ -1670,7 +1712,11 @@ static int bus_seal_message(sd_bus *b, sd_bus_message *m, usec_t timeout) {
                         return r;
         }
 
-        return sd_bus_message_seal(m, ++b->cookie, timeout);
+        r = next_cookie(b);
+        if (r < 0)
+                return r;
+
+        return sd_bus_message_seal(m, b->cookie, timeout);
 }
 
 static int bus_remarshal_message(sd_bus *b, sd_bus_message **m) {
@@ -1766,7 +1812,7 @@ static int dispatch_wqueue(sd_bus *bus) {
                          * anyway. */
 
                         bus->wqueue_size--;
-                        sd_bus_message_unref(bus->wqueue[0]);
+                        bus_message_unref_queued(bus->wqueue[0], bus);
                         memmove(bus->wqueue, bus->wqueue + 1, sizeof(sd_bus_message*) * bus->wqueue_size);
                         bus->windex = 0;
 
@@ -1795,6 +1841,15 @@ int bus_rqueue_make_room(sd_bus *bus) {
         return 0;
 }
 
+static void rqueue_drop_one(sd_bus *bus, size_t i) {
+        assert(bus);
+        assert(i < bus->rqueue_size);
+
+        bus_message_unref_queued(bus->rqueue[i], bus);
+        memmove(bus->rqueue + i, bus->rqueue + i + 1, sizeof(sd_bus_message*) * (bus->rqueue_size - i - 1));
+        bus->rqueue_size--;
+}
+
 static int dispatch_rqueue(sd_bus *bus, bool hint_priority, int64_t priority, sd_bus_message **m) {
         int r, ret = 0;
 
@@ -1809,10 +1864,8 @@ static int dispatch_rqueue(sd_bus *bus, bool hint_priority, int64_t priority, sd
         for (;;) {
                 if (bus->rqueue_size > 0) {
                         /* Dispatch a queued message */
-
-                        *m = bus->rqueue[0];
-                        bus->rqueue_size--;
-                        memmove(bus->rqueue, bus->rqueue + 1, sizeof(sd_bus_message*) * bus->rqueue_size);
+                        *m = sd_bus_message_ref(bus->rqueue[0]);
+                        rqueue_drop_one(bus, 0);
                         return 1;
                 }
 
@@ -1820,8 +1873,10 @@ static int dispatch_rqueue(sd_bus *bus, bool hint_priority, int64_t priority, sd
                 r = bus_read_message(bus, hint_priority, priority);
                 if (r < 0)
                         return r;
-                if (r == 0)
+                if (r == 0) {
+                        *m = NULL;
                         return ret;
+                }
 
                 ret = 1;
         }
@@ -1874,7 +1929,7 @@ _public_ int sd_bus_send(sd_bus *bus, sd_bus_message *_m, uint64_t *cookie) {
 
                 r = bus_write_message(bus, m, &idx);
                 if (r < 0) {
-                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
+                        if (ERRNO_IS_DISCONNECT(r)) {
                                 bus_enter_closing(bus);
                                 return -ECONNRESET;
                         }
@@ -1888,7 +1943,7 @@ _public_ int sd_bus_send(sd_bus *bus, sd_bus_message *_m, uint64_t *cookie) {
                          * of the wqueue array is always allocated so
                          * that we always can remember how much was
                          * written. */
-                        bus->wqueue[0] = sd_bus_message_ref(m);
+                        bus->wqueue[0] = bus_message_ref_queued(m, bus);
                         bus->wqueue_size = 1;
                         bus->windex = idx;
                 }
@@ -1902,7 +1957,7 @@ _public_ int sd_bus_send(sd_bus *bus, sd_bus_message *_m, uint64_t *cookie) {
                 if (!GREEDY_REALLOC(bus->wqueue, bus->wqueue_allocated, bus->wqueue_size + 1))
                         return -ENOMEM;
 
-                bus->wqueue[bus->wqueue_size++] = sd_bus_message_ref(m);
+                bus->wqueue[bus->wqueue_size++] = bus_message_ref_queued(m, bus);
         }
 
 finish:
@@ -2080,7 +2135,7 @@ _public_ int sd_bus_call(
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = sd_bus_message_ref(_m);
         usec_t timeout;
         uint64_t cookie;
-        unsigned i;
+        size_t i;
         int r;
 
         bus_assert_return(m, -EINVAL, error);
@@ -2122,37 +2177,30 @@ _public_ int sd_bus_call(
                 usec_t left;
 
                 while (i < bus->rqueue_size) {
-                        sd_bus_message *incoming = NULL;
+                        _cleanup_(sd_bus_message_unrefp) sd_bus_message *incoming = NULL;
 
-                        incoming = bus->rqueue[i];
+                        incoming = sd_bus_message_ref(bus->rqueue[i]);
 
                         if (incoming->reply_cookie == cookie) {
                                 /* Found a match! */
 
-                                memmove(bus->rqueue + i, bus->rqueue + i + 1, sizeof(sd_bus_message*) * (bus->rqueue_size - i - 1));
-                                bus->rqueue_size--;
+                                rqueue_drop_one(bus, i);
                                 log_debug_bus_message(incoming);
 
                                 if (incoming->header->type == SD_BUS_MESSAGE_METHOD_RETURN) {
 
                                         if (incoming->n_fds <= 0 || bus->accept_fd) {
                                                 if (reply)
-                                                        *reply = incoming;
-                                                else
-                                                        sd_bus_message_unref(incoming);
+                                                        *reply = TAKE_PTR(incoming);
 
                                                 return 1;
                                         }
 
-                                        r = sd_bus_error_setf(error, SD_BUS_ERROR_INCONSISTENT_MESSAGE, "Reply message contained file descriptors which I couldn't accept. Sorry.");
-                                        sd_bus_message_unref(incoming);
-                                        return r;
+                                        return sd_bus_error_setf(error, SD_BUS_ERROR_INCONSISTENT_MESSAGE, "Reply message contained file descriptors which I couldn't accept. Sorry.");
 
-                                } else if (incoming->header->type == SD_BUS_MESSAGE_METHOD_ERROR) {
-                                        r = sd_bus_error_copy(error, &incoming->error);
-                                        sd_bus_message_unref(incoming);
-                                        return r;
-                                } else {
+                                } else if (incoming->header->type == SD_BUS_MESSAGE_METHOD_ERROR)
+                                        return sd_bus_error_copy(error, &incoming->error);
+                                else {
                                         r = -EIO;
                                         goto fail;
                                 }
@@ -2162,15 +2210,11 @@ _public_ int sd_bus_call(
                                    incoming->sender &&
                                    streq(bus->unique_name, incoming->sender)) {
 
-                                memmove(bus->rqueue + i, bus->rqueue + i + 1, sizeof(sd_bus_message*) * (bus->rqueue_size - i - 1));
-                                bus->rqueue_size--;
+                                rqueue_drop_one(bus, i);
 
-                                /* Our own message? Somebody is trying
-                                 * to send its own client a message,
-                                 * let's not dead-lock, let's fail
-                                 * immediately. */
+                                /* Our own message? Somebody is trying to send its own client a message,
+                                 * let's not dead-lock, let's fail immediately. */
 
-                                sd_bus_message_unref(incoming);
                                 r = -ELOOP;
                                 goto fail;
                         }
@@ -2181,7 +2225,7 @@ _public_ int sd_bus_call(
 
                 r = bus_read_message(bus, false, 0);
                 if (r < 0) {
-                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
+                        if (ERRNO_IS_DISCONNECT(r)) {
                                 bus_enter_closing(bus);
                                 r = -ECONNRESET;
                         }
@@ -2214,7 +2258,7 @@ _public_ int sd_bus_call(
 
                 r = dispatch_wqueue(bus);
                 if (r < 0) {
-                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
+                        if (ERRNO_IS_DISCONNECT(r)) {
                                 bus_enter_closing(bus);
                                 r = -ECONNRESET;
                         }
@@ -2628,7 +2672,6 @@ static int process_builtin(sd_bus *bus, sd_bus_message *m) {
                                 SD_BUS_ERROR_UNKNOWN_METHOD,
                                  "Unknown method '%s' on interface '%s'.", m->member, m->interface);
         }
-
         if (r < 0)
                 return r;
 
@@ -2752,7 +2795,6 @@ static int process_running(sd_bus *bus, bool hint_priority, int64_t priority, sd
                         return r;
 
                 *ret = TAKE_PTR(m);
-
                 return 1;
         }
 
@@ -2974,7 +3016,7 @@ static int bus_process_internal(sd_bus *bus, bool hint_priority, int64_t priorit
                 assert_not_reached("Unknown state");
         }
 
-        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
+        if (ERRNO_IS_DISCONNECT(r)) {
                 bus_enter_closing(bus);
                 r = 1;
         } else if (r < 0)
@@ -3105,7 +3147,7 @@ _public_ int sd_bus_flush(sd_bus *bus) {
         for (;;) {
                 r = dispatch_wqueue(bus);
                 if (r < 0) {
-                        if (IN_SET(r, -ENOTCONN, -ECONNRESET, -EPIPE, -ESHUTDOWN)) {
+                        if (ERRNO_IS_DISCONNECT(r)) {
                                 bus_enter_closing(bus);
                                 return -ECONNRESET;
                         }

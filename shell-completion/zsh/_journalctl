@@ -85,6 +85,7 @@ _arguments -s \
     {-h,--help}'[Show this help]' \
     '--version[Show package version]' \
     '--no-pager[Do not pipe output into a pager]' \
+    --no-hostname"[Don't show the hostname of local log messages]" \
     {-l,--full}'[Show long fields in full]' \
     {-a,--all}'[Show all fields, including long and unprintable]' \
     {-f,--follow}'[Follow journal]' \
@@ -104,6 +105,7 @@ _arguments -s \
     {-p+,--priority=}'[Show only messages within the specified priority range]:priority:_journalctl_field_values PRIORITY' \
     {-t+,--identifier=}'[Show only messages with the specified syslog identifier]:identifier:_journalctl_field_values SYSLOG_IDENTIFIER' \
     {-c+,--cursor=}'[Start showing entries from the specified cursor]:cursors:_journalctl_field_values __CURSORS' \
+    '--cursor-file=[Show entries using cursor store in file]:file:_files' \
     '--after-cursor=[Start showing entries from after the specified cursor]:cursors:_journalctl_field_values __CURSORS' \
     '--since=[Start showing entries on or newer than the specified date]:YYYY-MM-DD HH\:MM\:SS' \
     '--until=[Stop showing entries on or older than the specified date]:YYYY-MM-DD HH\:MM\:SS' \

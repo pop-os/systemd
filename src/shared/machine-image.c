@@ -31,6 +31,7 @@
 #include "machine-image.h"
 #include "macro.h"
 #include "mkdir.h"
+#include "nulstr-util.h"
 #include "os-util.h"
 #include "path-util.h"
 #include "rm-rf.h"
@@ -39,7 +40,6 @@
 #include "strv.h"
 #include "time-util.h"
 #include "utf8.h"
-#include "util.h"
 #include "xattr-util.h"
 
 static const char* const image_search_path[_IMAGE_CLASS_MAX] = {
@@ -808,7 +808,7 @@ static int clone_auxiliary_file(const char *path, const char *new_name, const ch
         if (!rs)
                 return -ENOMEM;
 
-        return copy_file_atomic(path, rs, 0664, 0, COPY_REFLINK);
+        return copy_file_atomic(path, rs, 0664, 0, 0, COPY_REFLINK);
 }
 
 int image_clone(Image *i, const char *new_name, bool read_only) {
@@ -870,7 +870,7 @@ int image_clone(Image *i, const char *new_name, bool read_only) {
         case IMAGE_RAW:
                 new_path = strjoina("/var/lib/machines/", new_name, ".raw");
 
-                r = copy_file_atomic(i->path, new_path, read_only ? 0444 : 0644, FS_NOCOW_FL, COPY_REFLINK);
+                r = copy_file_atomic(i->path, new_path, read_only ? 0444 : 0644, FS_NOCOW_FL, FS_NOCOW_FL, COPY_REFLINK|COPY_CRTIME);
                 break;
 
         case IMAGE_BLOCK:
@@ -1032,7 +1032,7 @@ int image_path_lock(const char *path, int operation, LockFile *global, LockFile 
         }
 
         if (p) {
-                mkdir_p("/run/systemd/nspawn/locks", 0700);
+                (void) mkdir_p("/run/systemd/nspawn/locks", 0700);
 
                 r = make_lock_file(p, operation, global);
                 if (r < 0) {
@@ -1169,8 +1169,6 @@ int image_read_metadata(Image *i) {
 }
 
 int image_name_lock(const char *name, int operation, LockFile *ret) {
-        const char *p;
-
         assert(name);
         assert(ret);
 
@@ -1187,9 +1185,8 @@ int image_name_lock(const char *name, int operation, LockFile *ret) {
         if (streq(name, ".host"))
                 return -EBUSY;
 
-        mkdir_p("/run/systemd/nspawn/locks", 0700);
-        p = strjoina("/run/systemd/nspawn/locks/name-", name);
-
+        const char *p = strjoina("/run/systemd/nspawn/locks/name-", name);
+        (void) mkdir_p("/run/systemd/nspawn/locks", 0700);
         return make_lock_file(p, operation, ret);
 }
 

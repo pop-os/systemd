@@ -21,9 +21,9 @@
 #include <unistd.h>
 
 #include "log.h"
+#include "memory-util.h"
 #include "random-util.h"
 #include "udev-util.h"
-#include "util.h"
 
 /* device info */
 static unsigned cd_cd_rom;
@@ -585,7 +585,7 @@ out:
 static int cd_media_info(int fd) {
         struct scsi_cmd sc;
         unsigned char header[32];
-        static const char *media_status[] = {
+        static const char *const media_status[] = {
                 "blank",
                 "appendable",
                 "complete",

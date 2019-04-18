@@ -550,7 +550,7 @@ static int swap_coldplug(Unit *u) {
             pid_is_unwaited(s->control_pid) &&
             SWAP_STATE_WITH_PROCESS(new_state)) {
 
-                r = unit_watch_pid(UNIT(s), s->control_pid);
+                r = unit_watch_pid(UNIT(s), s->control_pid, false);
                 if (r < 0)
                         return r;
 
@@ -657,9 +657,8 @@ static int swap_spawn(Swap *s, ExecCommand *c, pid_t *_pid) {
         if (r < 0)
                 goto fail;
 
-        r = unit_watch_pid(UNIT(s), pid);
+        r = unit_watch_pid(UNIT(s), pid, true);
         if (r < 0)
-                /* FIXME: we need to do something here */
                 goto fail;
 
         *_pid = pid;
@@ -871,7 +870,7 @@ static int swap_start(Unit *u) {
                 if (UNIT(other)->job && UNIT(other)->job->state == JOB_RUNNING)
                         return -EAGAIN;
 
-        r = unit_start_limit_test(u);
+        r = unit_test_start_limit(u);
         if (r < 0) {
                 swap_enter_dead(s, SWAP_FAILURE_START_LIMIT_HIT);
                 return r;

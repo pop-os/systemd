@@ -9,11 +9,11 @@
 #include "ethtool-util.h"
 #include "link-config.h"
 #include "log.h"
+#include "memory-util.h"
 #include "missing.h"
 #include "socket-util.h"
 #include "string-table.h"
 #include "strxcpyx.h"
-#include "util.h"
 
 static const char* const duplex_table[_DUP_MAX] = {
         [DUP_FULL] = "full",
@@ -358,7 +358,7 @@ static int find_feature_index(struct ethtool_gstrings *strings, const char *feat
                         return i;
         }
 
-        return -1;
+        return -ENODATA;
 }
 
 int ethtool_set_features(int *fd, const char *ifname, int *features) {
@@ -775,7 +775,9 @@ int config_parse_advertise(const char *unit,
                         break;
 
                 mode = ethtool_link_mode_bit_from_string(w);
-                if (mode < 0) {
+                /* We reuse the kernel provided enum which does not contain negative value. So, the cast
+                 * below is mandatory. Otherwise, the check below always passes and access an invalid address. */
+                if ((int) mode < 0) {
                         log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse advertise mode, ignoring: %s", w);
                         continue;
                 }

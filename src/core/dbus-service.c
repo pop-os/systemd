@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <stdio_ext.h>
+#include <fcntl.h>
 
 #include "alloc-util.h"
 #include "async.h"
@@ -55,7 +56,7 @@ static int property_get_exit_status_set(
                 return r;
 
         SET_FOREACH(id, status_set->status, i) {
-                int val = PTR_TO_INT(id);
+                int32_t val = PTR_TO_INT(id);
 
                 if (val < 0 || val > 255)
                         continue;
@@ -74,10 +75,10 @@ static int property_get_exit_status_set(
                 return r;
 
         SET_FOREACH(id, status_set->signal, i) {
-                int val = PTR_TO_INT(id);
+                int32_t val = PTR_TO_INT(id);
                 const char *str;
 
-                str = signal_to_string(val);
+                str = signal_to_string((int) val);
                 if (!str)
                         continue;
 
@@ -120,6 +121,7 @@ const sd_bus_vtable bus_service_vtable[] = {
         SD_BUS_PROPERTY("StatusText", "s", NULL, offsetof(Service, status_text), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("StatusErrno", "i", bus_property_get_int, offsetof(Service, status_errno), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("Result", "s", property_get_result, offsetof(Service, result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("ReloadResult", "s", property_get_result, offsetof(Service, reload_result), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("USBFunctionDescriptors", "s", NULL, offsetof(Service, usb_function_descriptors), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("USBFunctionStrings", "s", NULL, offsetof(Service, usb_function_strings), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("UID", "u", bus_property_get_uid, offsetof(Unit, ref_uid), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
@@ -151,7 +153,7 @@ static int bus_set_transient_exit_status(
                 UnitWriteFlags flags,
                 sd_bus_error *error) {
 
-        const int *status, *signal;
+        const int32_t *status, *signal;
         size_t sz_status, sz_signal, i;
         int r;
 
@@ -171,6 +173,9 @@ static int bus_set_transient_exit_status(
         if (r < 0)
                 return r;
 
+        sz_status /= sizeof(int32_t);
+        sz_signal /= sizeof(int32_t);
+
         if (sz_status == 0 && sz_signal == 0 && !UNIT_WRITE_FLAGS_NOOP(flags)) {
                 exit_status_set_free(status_set);
                 unit_write_settingf(u, flags, name, "%s=", name);
@@ -179,34 +184,34 @@ static int bus_set_transient_exit_status(
 
         for (i = 0; i < sz_status; i++) {
                 if (status[i] < 0 || status[i] > 255)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid status code in %s: %i", name, status[i]);
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid status code in %s: %"PRIi32, name, status[i]);
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         r = set_ensure_allocated(&status_set->status, NULL);
                         if (r < 0)
                                 return r;
 
-                        r = set_put(status_set->status, INT_TO_PTR(status[i]));
+                        r = set_put(status_set->status, INT_TO_PTR((int) status[i]));
                         if (r < 0)
                                 return r;
 
-                        unit_write_settingf(u, flags, name, "%s=%i", name, status[i]);
+                        unit_write_settingf(u, flags, name, "%s=%"PRIi32, name, status[i]);
                 }
         }
 
         for (i = 0; i < sz_signal; i++) {
                 const char *str;
 
-                str = signal_to_string(signal[i]);
+                str = signal_to_string((int) signal[i]);
                 if (!str)
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid signal in %s: %i", name, signal[i]);
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid signal in %s: %"PRIi32, name, signal[i]);
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         r = set_ensure_allocated(&status_set->signal, NULL);
                         if (r < 0)
                                 return r;
 
-                        r = set_put(status_set->signal, INT_TO_PTR(signal[i]));
+                        r = set_put(status_set->signal, INT_TO_PTR((int) signal[i]));
                         if (r < 0)
                                 return r;
 

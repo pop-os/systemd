@@ -1,10 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
-        "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-
-<!--
-  SPDX-License-Identifier: LGPL-2.1+
--->
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
+  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+<!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
   <refentry id="journalctl"
             xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -464,8 +461,8 @@
       </varlistentry>
 
       <varlistentry>
-        <term><option>-b <optional><replaceable>ID</replaceable></optional><optional><replaceable>±offset</replaceable></optional></option></term>
-        <term><option>--boot=<optional><replaceable>ID</replaceable></optional><optional><replaceable>±offset</replaceable></optional></option></term>
+        <term><option>-b <optional><optional><replaceable>ID</replaceable></optional><optional><replaceable>±offset</replaceable></optional>|<constant>all</constant></optional></option></term>
+        <term><option>--boot<optional>=<optional><replaceable>ID</replaceable></optional><optional><replaceable>±offset</replaceable></optional>|<constant>all</constant></optional></option></term>
 
         <listitem><para>Show messages from a specific boot. This will
         add a match for <literal>_BOOT_ID=</literal>.</para>
@@ -497,6 +494,10 @@
         <replaceable>offset</replaceable> is not specified, a value of
         zero is assumed, and the logs for the boot given by
         <replaceable>ID</replaceable> are shown.</para>
+
+        <para>The special argument <constant>all</constant> can be
+        used to negate the effect of an earlier use of
+        <option>-b</option>.</para>
         </listitem>
       </varlistentry>
 
@@ -616,6 +617,17 @@
 
         <listitem><para>Start showing entries from the location in the
         journal specified by the passed cursor.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--cursor-file=<replaceable>FILE</replaceable></option></term>
+
+        <listitem><para>If <replaceable>FILE</replaceable> exists and contains a
+        cursor, start showing entries <emphasis>after</emphasis> this location.
+        Otherwise the show entries according the other given options. At the end,
+        write the cursor of the last entry to <replaceable>FILE</replaceable>. Use
+        this option to continually read the journal by sequentially calling
+        <command>journalctl</command>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
