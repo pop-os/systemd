@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index 0c990a0..dff5d2f 100644
+index d949900..e7d747a 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -657,6 +657,7 @@ manpages = [
+@@ -659,6 +659,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index d340736..d4887d5 100644
+index 79195c9..60907bb 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2395,6 +2395,14 @@ executable('systemd-makefs',
+@@ -2415,6 +2415,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  
@@ -268,7 +268,7 @@ index 029261c..d709ddb 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..fffea29
+index 0000000..4c1fe88
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,690 @@
@@ -322,6 +322,7 @@ index 0000000..fffea29
 +#include "util.h"
 +#include "alloc-util.h"
 +#include "locale-util.h"
++#include "plymouth-util.h"
 +
 +#define FSCKD_SOCKET_PATH "/run/systemd/fsck.progress"
 +#define IDLE_TIME_SECONDS 30
@@ -897,8 +898,7 @@ index 0000000..fffea29
 +                        return 0;
 +
 +                case ARG_VERSION:
-+                        puts("systemd " GIT_VERSION);
-+                        puts(SYSTEMD_FEATURES);
++                        version();
 +                        return 0;
 +
 +                case '?':
@@ -963,10 +963,10 @@ index 0000000..fffea29
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index d695084..ab489b3 100644
+index a561050..ed77977 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -87,6 +87,7 @@ units = [
+@@ -84,6 +84,7 @@ units = [
          ['systemd-coredump.socket',             'ENABLE_COREDUMP',
           'sockets.target.wants/'],
          ['systemd-exit.service',                 ''],
@@ -974,7 +974,7 @@ index d695084..ab489b3 100644
          ['systemd-initctl.socket',              '',
           'sockets.target.wants/'],
          ['systemd-journal-gatewayd.socket',     'ENABLE_REMOTE HAVE_MICROHTTPD'],
-@@ -143,6 +144,7 @@ in_units = [
+@@ -140,6 +141,7 @@ in_units = [
           'sysinit.target.wants/'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],

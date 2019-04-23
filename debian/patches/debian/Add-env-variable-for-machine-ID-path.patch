@@ -20,7 +20,7 @@ Bug: https://bugs.freedesktop.org/show_bug.cgi?id=62344
  2 files changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
-index e72af15..b194143 100644
+index e5f82b8..4483f09 100644
 --- a/src/libsystemd/sd-id128/sd-id128.c
 +++ b/src/libsystemd/sd-id128/sd-id128.c
 @@ -88,7 +88,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
@@ -33,10 +33,10 @@ index e72af15..b194143 100644
                          return r;
  
 diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
-index e049abc..fef8515 100644
+index f0f0150..2b3d13e 100644
 --- a/src/test/test-fs-util.c
 +++ b/src/test/test-fs-util.c
-@@ -185,7 +185,7 @@ static void test_chase_symlinks(void) {
+@@ -209,7 +209,7 @@ static void test_chase_symlinks(void) {
          assert_se(streq(result, "/test-chase.fsldajfl"));
          result = mfree(result);
  
@@ -45,7 +45,7 @@ index e049abc..fef8515 100644
          assert_se(r == -ENOTDIR);
          result = mfree(result);
  
-@@ -258,23 +258,26 @@ static void test_chase_symlinks(void) {
+@@ -282,23 +282,26 @@ static void test_chase_symlinks(void) {
                  assert_se(chase_symlinks(q, NULL, CHASE_SAFE, NULL) >= 0);
          }
  

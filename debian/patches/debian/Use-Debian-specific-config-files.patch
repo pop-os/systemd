@@ -11,15 +11,15 @@ Read/write /etc/timezone if /etc/localtime does not exist.
 ---
  src/basic/time-util.c    |  21 ++++-
  src/core/locale-setup.c  |  21 +++++
- src/locale/keymap-util.c | 209 +++++++++++++++++++++++------------------------
+ src/locale/keymap-util.c | 210 +++++++++++++++++++++++------------------------
  src/timedate/timedated.c |  10 +++
- 4 files changed, 154 insertions(+), 107 deletions(-)
+ 4 files changed, 155 insertions(+), 107 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 62cdc30..d66f506 100644
+index daf952b..b7d54ad 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1381,8 +1381,25 @@ int get_timezone(char **tz) {
+@@ -1390,8 +1390,25 @@ int get_timezone(char **tz) {
          int r;
  
          r = readlink_malloc("/etc/localtime", &t);
@@ -80,10 +80,10 @@ index aa4a89c..8f36bbe 100644
                  char *s;
  
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index 6b6b32a..cb63d45 100644
+index b8bd181..793b71e 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
-@@ -95,6 +95,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
+@@ -94,6 +94,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
  int locale_read_data(Context *c, sd_bus_message *m) {
          struct stat st;
          int r;
@@ -91,7 +91,7 @@ index 6b6b32a..cb63d45 100644
  
          /* Do not try to re-read the file within single bus operation. */
          if (m) {
-@@ -105,7 +106,11 @@ int locale_read_data(Context *c, sd_bus_message *m) {
+@@ -104,7 +105,11 @@ int locale_read_data(Context *c, sd_bus_message *m) {
                  c->locale_cache = sd_bus_message_ref(m);
          }
  
@@ -104,7 +104,7 @@ index 6b6b32a..cb63d45 100644
          if (r < 0 && errno != ENOENT)
                  return -errno;
  
-@@ -120,7 +125,7 @@ int locale_read_data(Context *c, sd_bus_message *m) {
+@@ -119,7 +124,7 @@ int locale_read_data(Context *c, sd_bus_message *m) {
                  c->locale_mtime = t;
                  context_free_locale(c);
  
@@ -113,7 +113,7 @@ index 6b6b32a..cb63d45 100644
                                     "LANG",              &c->locale[VARIABLE_LANG],
                                     "LANGUAGE",          &c->locale[VARIABLE_LANGUAGE],
                                     "LC_CTYPE",          &c->locale[VARIABLE_LC_CTYPE],
-@@ -201,8 +206,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
+@@ -200,8 +205,6 @@ int vconsole_read_data(Context *c, sd_bus_message *m) {
  }
  
  int x11_read_data(Context *c, sd_bus_message *m) {
@@ -122,7 +122,7 @@ index 6b6b32a..cb63d45 100644
          struct stat st;
          usec_t t;
          int r;
-@@ -216,7 +219,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+@@ -215,7 +218,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
                  c->x11_cache = sd_bus_message_ref(m);
          }
  
@@ -131,7 +131,7 @@ index 6b6b32a..cb63d45 100644
                  if (errno != ENOENT)
                          return -errno;
  
-@@ -233,61 +236,14 @@ int x11_read_data(Context *c, sd_bus_message *m) {
+@@ -232,61 +235,14 @@ int x11_read_data(Context *c, sd_bus_message *m) {
          c->x11_mtime = t;
          context_free_x11(c);
  
@@ -162,7 +162,12 @@ index 6b6b32a..cb63d45 100644
 -
 -                        if (strv_length(a) == 3) {
 -                                char **p = NULL;
--
++        r = parse_env_file(NULL, "/etc/default/keyboard",
++                           "XKBMODEL",          &c->x11_model,
++                           "XKBLAYOUT",         &c->x11_layout,
++                           "XKBVARIANT",        &c->x11_variant,
++                           "XKBOPTIONS",        &c->x11_options);
+ 
 -                                if (streq(a[1], "XkbLayout"))
 -                                        p = &c->x11_layout;
 -                                else if (streq(a[1], "XkbModel"))
@@ -176,12 +181,7 @@ index 6b6b32a..cb63d45 100644
 -                                        free_and_replace(*p, a[2]);
 -                                }
 -                        }
-+        r = parse_env_file(NULL, "/etc/default/keyboard",
-+                           "XKBMODEL",          &c->x11_model,
-+                           "XKBLAYOUT",         &c->x11_layout,
-+                           "XKBVARIANT",        &c->x11_variant,
-+                           "XKBOPTIONS",        &c->x11_options);
- 
+-
 -                } else if (!in_section && first_word(l, "Section")) {
 -                        _cleanup_strv_free_ char **a = NULL;
 -
@@ -200,7 +200,7 @@ index 6b6b32a..cb63d45 100644
  
          return 0;
  }
-@@ -296,9 +252,18 @@ int locale_write_data(Context *c, char ***settings) {
+@@ -295,9 +251,18 @@ int locale_write_data(Context *c, char ***settings) {
          _cleanup_strv_free_ char **l = NULL;
          struct stat st;
          int r, p;
@@ -219,7 +219,7 @@ index 6b6b32a..cb63d45 100644
          for (p = 0; p < _VARIABLE_LC_MAX; p++) {
                  _cleanup_free_ char *t = NULL;
                  char **u;
-@@ -321,20 +286,20 @@ int locale_write_data(Context *c, char ***settings) {
+@@ -320,20 +285,20 @@ int locale_write_data(Context *c, char ***settings) {
          }
  
          if (strv_isempty(l)) {
@@ -243,7 +243,7 @@ index 6b6b32a..cb63d45 100644
                  c->locale_mtime = timespec_load(&st.st_mtim);
  
          return 0;
-@@ -402,70 +367,104 @@ int vconsole_write_data(Context *c) {
+@@ -401,69 +366,104 @@ int vconsole_write_data(Context *c) {
  }
  
  int x11_write_data(Context *c) {
@@ -286,7 +286,10 @@ index 6b6b32a..cb63d45 100644
 +                l = u;
          }
  
--        mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
+-        (void) mkdir_p_label("/etc/X11/xorg.conf.d", 0755);
+-        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
+-        if (r < 0)
+-                return r;
 +        if (isempty(c->x11_model)) {
 +                l = strv_env_unset(l, "XKBMODEL");
 +        } else {
@@ -294,21 +297,12 @@ index 6b6b32a..cb63d45 100644
 +                        strv_free(l);
 +                        return -ENOMEM;
 +                }
-+
-+                u = strv_env_set(l, t);
-+                free(t);
-+                strv_free(l);
- 
--        r = fopen_temporary("/etc/X11/xorg.conf.d/00-keyboard.conf", &f, &temp_path);
--        if (r < 0)
--                return r;
-+                if (!u)
-+                        return -ENOMEM;
  
 -        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
 -        (void) fchmod(fileno(f), 0644);
-+                l = u;
-+        }
++                u = strv_env_set(l, t);
++                free(t);
++                strv_free(l);
  
 -        fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
 -              "# probably wise not to edit this file manually. Use localectl(1) to\n"
@@ -316,6 +310,12 @@ index 6b6b32a..cb63d45 100644
 -              "Section \"InputClass\"\n"
 -              "        Identifier \"system-keyboard\"\n"
 -              "        MatchIsKeyboard \"on\"\n", f);
++                if (!u)
++                        return -ENOMEM;
++
++                l = u;
++        }
++
 +        if (isempty(c->x11_variant)) {
 +                l = strv_env_unset(l, "XKBVARIANT");
 +        } else {
@@ -392,10 +392,10 @@ index 6b6b32a..cb63d45 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 324d4a4..4d54ac3 100644
+index fe91854..f2ad916 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -215,6 +215,7 @@ static int context_read_data(Context *c) {
+@@ -217,6 +217,7 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          int r = 0;
@@ -403,7 +403,7 @@ index 324d4a4..4d54ac3 100644
  
          assert(c);
  
-@@ -222,6 +223,9 @@ static int context_write_data_timezone(Context *c) {
+@@ -224,6 +225,9 @@ static int context_write_data_timezone(Context *c) {
                  if (unlink("/etc/localtime") < 0 && errno != ENOENT)
                          r = -errno;
  
@@ -413,7 +413,7 @@ index 324d4a4..4d54ac3 100644
                  return r;
          }
  
-@@ -233,6 +237,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -235,6 +239,12 @@ static int context_write_data_timezone(Context *c) {
          if (r < 0)
                  return r;
  
