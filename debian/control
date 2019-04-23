@@ -76,14 +76,9 @@ Depends: ${shlibs:Depends},
          adduser,
 Conflicts: consolekit,
            libpam-ck-connector,
-Breaks: apparmor (<< 2.9.2-1),
-        systemd-shim (<< 10-4~),
-        ifupdown (<< 0.8.5~),
-        udev (<< 228-5),
-        laptop-mode-tools (<< 1.68~),
+Breaks: systemd-shim (<< 10-4~),
         python-dbusmock (<< 0.18),
         python3-dbusmock (<< 0.18),
-Replaces: udev (<< 228-5),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
@@ -104,13 +99,10 @@ Section: admin
 Priority: important
 Conflicts: sysvinit-core,
            upstart (<< 1.13.2-0ubuntu10~),
-           upstart-sysv,
-           openrc (<< 0.20.4-2.1),
            file-rc,
            systemd-shim,
 Replaces: sysvinit-core,
           upstart (<< 1.13.2-0ubuntu10~),
-          upstart-sysv,
 Pre-Depends: systemd
 Depends: ${shlibs:Depends},
          ${misc:Depends}
@@ -141,8 +133,6 @@ Depends: ${shlibs:Depends},
          dbus
 Recommends: btrfs-progs,
             libnss-mymachines,
-Breaks: systemd (<< 224-2)
-Replaces: systemd (<< 224-2)
 Description: systemd container/nspawn tools
  This package provides systemd's tools for nspawn and container/VM management:
   * systemd-nspawn
@@ -178,9 +168,8 @@ Depends: ${shlibs:Depends},
          adduser,
          systemd
 Conflicts: core-dump-handler
-Replaces: core-dump-handler, systemd (<< 229-2)
+Replaces: core-dump-handler
 Provides: core-dump-handler
-Breaks: systemd (<< 229-2)
 Description: tools for storing and retrieving coredumps
  This package provides systemd tools for storing and retrieving coredumps:
   * systemd-coredump
@@ -227,8 +216,6 @@ Priority: optional
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-Breaks: systemd (<< 222-1)
-Replaces: systemd (<< 222-1)
 Description: nss module providing fallback resolution for the current hostname
  This package contains a plugin for the Name Service Switch, providing host
  name resolution for the locally configured system hostname as returned by
@@ -251,8 +238,6 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd-container (= ${binary:Version}),
-Breaks: systemd (<< 222-1)
-Replaces: systemd (<< 222-1)
 Description: nss module to resolve hostnames for local container instances
  nss-mymachines is a plugin for the GNU Name Service Switch (NSS) functionality
  of the GNU C Library (glibc) providing hostname resolution for local containers
@@ -270,8 +255,6 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
-Breaks: systemd (<< 227-3)
-Replaces: systemd (<< 227-3)
 Description: nss module to resolve names via systemd-resolved
  nss-resolve is a plugin for the GNU Name Service Switch (NSS) functionality
  of the GNU C Library (glibc) providing DNS and LLMNR resolution to programs via
@@ -337,9 +320,6 @@ Depends: ${shlibs:Depends},
          s390-tools (>> 1.6.2) [s390],
 Conflicts: hal
 Breaks: systemd (<< 233-4),
-        ifupdown (<< 0.8.5~),
-        ifplugd (<< 0.28-19.1~),
-        joystick (<< 1:1.4.9-1~),
 Replaces: systemd (<< 233-4)
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from

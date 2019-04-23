@@ -44,12 +44,4 @@ if [ "$1" = configure ] && [ -z "$2" ]; then
     fi
 fi
 
-# Fix nsswitch action on upgrades
-if [ "$1" = configure ] && dpkg --compare-versions "$2" lt-nl "231-10"; then
-    if ! grep -q '^hosts:.*resolve[[:space:]]*\[' /etc/nsswitch.conf; then
-        echo "Adjusting 'resolv' entry in /etc/nsswitch.conf.."
-        sed -i '/^hosts:/ { s/resolve/& [!UNAVAIL=return]/}' /etc/nsswitch.conf
-    fi
-fi
-
 #DEBHELPER#
