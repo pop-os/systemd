@@ -1,8 +1,26 @@
-systemd (242-1) UNRELEASED; urgency=medium
+systemd (242-1) experimental; urgency=medium
 
   * New upstream version 242
+    - Change ownership/mode of the execution directories also for static users
+      (Closes: #919231)
+    - A new boolean sandboxing option RestrictSUIDSGID= has been added that is
+      built on seccomp. When turned on, creation of SUID/SGID files is
+      prohibited. The NoNewPrivileges= and the new RestrictSUIDSGID= options
+      are now implied if DynamicUser= is turned on for a service.
+      (Closes: #928102, CVE-2019-3843, CVE-2019-3844)
+  * Drop Revert-udev-network-device-renaming-immediately-give.patch.
+    This patch needs ongoing maintenance work to be adapted to new releases
+    and fails to apply with v242. Instead of investing more time into it we
+    are going to drop the patch as it was a hack anyway.
+  * Rebase patches
+  * Drop pre-stretch migration code
+  * Drop /sbin/udevadm compat symlink (Closes: #852580)
+  * socket-util: Make sure flush_accept() doesn't hang on unexpected
+    EOPNOTSUPP
+  * Enable regexp matching support in journalctl using pcre2 (Closes: #898892)
+  * Switch from libidn to libidn2 (Closes: #928615)
 
- -- Michael Biebl <biebl@debian.org>  Fri, 19 Apr 2019 01:16:09 +0200
+ -- Michael Biebl <biebl@debian.org>  Wed, 08 May 2019 01:33:56 +0200
 
 systemd (241-3) unstable; urgency=high
 
