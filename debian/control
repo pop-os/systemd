@@ -139,6 +139,7 @@ Description: systemd container/nspawn tools
   * systemd-nspawn
   * systemd-machined and machinectl
   * systemd-importd
+  * systemd-portabled and portablectl
 
 Package: systemd-journal-remote
 Build-Profiles: <!stage1>
