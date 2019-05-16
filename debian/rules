@@ -225,10 +225,6 @@ override_dh_install:
 		-name ldconfig.service -o \
 		-name etc.conf \) -delete
 	rm -rf debian/install/*/usr/share/factory/
-	# remove symlinks enabling default-on services
-	rm -rf debian/install/*/etc/systemd/system/*.target.wants/
-	# remove aliases
-	find debian/install/*/etc/systemd/system/ -type l -delete
 	# replace upstream sysusers.d/basic.conf with proper users for Debian
 	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
 	# remove resolvconf compat symlink
