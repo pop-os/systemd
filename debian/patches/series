@@ -142,3 +142,5 @@ pull-fix-invalid-error-check.patch
 curl-util-fix-use-after-free.patch
 shared-dissect-image-make-sure-that-we-don-t-truncate-dev.patch
 journal-avoid-buffer-overread-when-locale-name-is-too-lon.patch
+Move-verify_vc_kbmode-to-terminal-util.c-as-vt_verify_kbm.patch
+Add-check-to-switch-VTs-only-between-K_XLATE-or-K_UNICODE.patch
