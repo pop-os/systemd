@@ -1,3 +1,11 @@
+systemd (240-6ubuntu6) eoan; urgency=medium
+
+  * Add check to switch VTs only between K_XLATE or K_UNICODE.
+    Switching to K_UNICODE from other than L_XLATE can make the keyboard
+    unusable and possibly leak keypresses from X. (LP: #1803993)
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 16 May 2019 23:22:15 +0200
+
 systemd (240-6ubuntu5) disco; urgency=medium
 
   * systemd-stable: cherrypick many bugfixes from the v240-stable branch.
