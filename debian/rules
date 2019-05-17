@@ -86,7 +86,6 @@ CONFFLAGS_deb = \
 	-Dsysusers=true \
 	-Dinstall-tests=true \
 	-Defi=true \
-	-Dman=true \
 	-Dnss-myhostname=true \
 	-Dnss-mymachines=true \
 	-Dnss-resolve=true \
