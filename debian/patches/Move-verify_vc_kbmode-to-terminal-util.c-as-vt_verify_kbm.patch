@@ -1,0 +1,106 @@
+From: Balint Reczey <balint.reczey@canonical.com>
+Date: Wed, 24 Apr 2019 16:35:32 +0200
+Subject: Move verify_vc_kbmode() to terminal-util.c as vt_verify_kbmode()
+
+(cherry picked from commit bb5ac84d79ac3aef606a4a9eeaafef94a1f199be)
+---
+ src/basic/terminal-util.c     | 17 +++++++++++++++++
+ src/basic/terminal-util.h     |  1 +
+ src/vconsole/vconsole-setup.c | 23 +++--------------------
+ 3 files changed, 21 insertions(+), 20 deletions(-)
+
+diff --git a/src/basic/terminal-util.c b/src/basic/terminal-util.c
+index 0f38120..48ede7d 100644
+--- a/src/basic/terminal-util.c
++++ b/src/basic/terminal-util.c
+@@ -1255,6 +1255,23 @@ int vt_default_utf8(void) {
+         return parse_boolean(b);
+ }
+ 
++int vt_verify_kbmode(int fd) {
++        int curr_mode;
++
++        /*
++         * Make sure we only adjust consoles in K_XLATE or K_UNICODE mode.
++         * Otherwise we would (likely) interfere with X11's processing of the
++         * key events.
++         *
++         * http://lists.freedesktop.org/archives/systemd-devel/2013-February/008573.html
++         */
++
++        if (ioctl(fd, KDGKBMODE, &curr_mode) < 0)
++                return -errno;
++
++        return IN_SET(curr_mode, K_XLATE, K_UNICODE) ? 0 : -EBUSY;
++}
++
+ int vt_reset_keyboard(int fd) {
+         int kb;
+ 
+diff --git a/src/basic/terminal-util.h b/src/basic/terminal-util.h
+index c885e0a..b32528f 100644
+--- a/src/basic/terminal-util.h
++++ b/src/basic/terminal-util.h
+@@ -155,6 +155,7 @@ int openpt_in_namespace(pid_t pid, int flags);
+ int open_terminal_in_namespace(pid_t pid, const char *name, int mode);
+ 
+ int vt_default_utf8(void);
++int vt_verify_kbmode(int fd);
+ int vt_reset_keyboard(int fd);
+ int vt_restore(int fd);
+ int vt_release(int fd, bool restore_vt);
+diff --git a/src/vconsole/vconsole-setup.c b/src/vconsole/vconsole-setup.c
+index ebdeba3..be09619 100644
+--- a/src/vconsole/vconsole-setup.c
++++ b/src/vconsole/vconsole-setup.c
+@@ -68,23 +68,6 @@ static int verify_vc_allocation_byfd(int fd) {
+         return verify_vc_allocation(vcs.v_active);
+ }
+ 
+-static int verify_vc_kbmode(int fd) {
+-        int curr_mode;
+-
+-        /*
+-         * Make sure we only adjust consoles in K_XLATE or K_UNICODE mode.
+-         * Otherwise we would (likely) interfere with X11's processing of the
+-         * key events.
+-         *
+-         * http://lists.freedesktop.org/archives/systemd-devel/2013-February/008573.html
+-         */
+-
+-        if (ioctl(fd, KDGKBMODE, &curr_mode) < 0)
+-                return -errno;
+-
+-        return IN_SET(curr_mode, K_XLATE, K_UNICODE) ? 0 : -EBUSY;
+-}
+-
+ static int toggle_utf8(const char *name, int fd, bool utf8) {
+         int r;
+         struct termios tc = {};
+@@ -288,7 +271,7 @@ static void setup_remaining_vcs(int src_fd, unsigned src_idx, bool utf8) {
+                         continue;
+                 }
+ 
+-                if (verify_vc_kbmode(fd_d) < 0)
++                if (vt_verify_kbmode(fd_d) < 0)
+                         continue;
+ 
+                 toggle_utf8(ttyname, fd_d, utf8);
+@@ -363,7 +346,7 @@ static int find_source_vc(char **ret_path, unsigned *ret_idx) {
+                                 err = -fd;
+                         continue;
+                 }
+-                r = verify_vc_kbmode(fd);
++                r = vt_verify_kbmode(fd);
+                 if (r < 0) {
+                         if (!err)
+                                 err = -r;
+@@ -396,7 +379,7 @@ static int verify_source_vc(char **ret_path, const char *src_vc) {
+         if (r < 0)
+                 return log_error_errno(r, "Virtual console %s is not allocated: %m", src_vc);
+ 
+-        r = verify_vc_kbmode(fd);
++        r = vt_verify_kbmode(fd);
+         if (r < 0)
+                 return log_error_errno(r, "Virtual console %s is not in K_XLATE or K_UNICODE: %m", src_vc);
+ 
