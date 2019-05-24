@@ -19,8 +19,6 @@ pam-systemd-use-secure_getenv-rather-than-getenv.patch
 journal-remote-do-not-request-Content-Length-if-Transfer-.patch
 systemctl-restore-systemctl-reboot-ARG-functionality.patch
 random-util-eat-up-bad-RDRAND-values-seen-on-AMD-CPUs.patch
-Move-verify_vc_kbmode-to-terminal-util.c-as-vt_verify_kbm.patch
-Add-check-to-switch-VTs-only-between-K_XLATE-or-K_UNICODE.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
