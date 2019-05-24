@@ -1,3 +1,11 @@
+systemd (241-5) unstable; urgency=medium
+
+  * Revert "Add check to switch VTs only between K_XLATE or K_UNICODE"
+    This change left the keyboard in an unusable state when exiting an X
+    session. (Closes: #929229)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 24 May 2019 22:58:59 +0200
+
 systemd (241-4) unstable; urgency=medium
 
   * journal-remote: Do not request Content-Length if Transfer-Encoding is
