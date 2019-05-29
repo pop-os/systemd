@@ -130,7 +130,6 @@ class FsckdTest(unittest.TestCase):
             self.assertWasRunning('plymouth-start')
             self.assertSystemRunning()
 
-    @unittest.expectedFailure
     def test_systemd_fsck_with_plymouth_failure(self):
         '''Ensure that a failing plymouth doesn't prevent fsckd to reconnect/exit'''
         if not self._after_reboot:
