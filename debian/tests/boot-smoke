@@ -5,6 +5,10 @@
 # with --copy /host/path/systemd-foo:/tmp/systemd-replace/systemd-foo
 set -e
 
+RUNNING_TIMEOUT=35
+JOBS_TIMEOUT=35
+REBOOTS=5
+
 . `dirname $0`/assert.sh
 
 if [ -z "$ADT_REBOOT_MARK" ]; then
@@ -32,7 +36,7 @@ else
     ret=0
 
     echo "waiting to boot..."
-    TIMEOUT=35
+    TIMEOUT=$RUNNING_TIMEOUT
     while [ $TIMEOUT -ge 0 ]; do
         state="$(systemctl is-system-running || true)"
         case $state in
@@ -71,9 +75,15 @@ else
     fi
 
     echo "checking that there are no running jobs"
-    running="$(systemctl --no-pager --no-legend list-jobs || true)"
+    TIMEOUT=$JOBS_TIMEOUT
+    while [ $TIMEOUT -ge 0 ]; do
+        running="$(systemctl --no-pager --no-legend list-jobs || true)"
+        [ -n "$running" ] || break
+        sleep 1
+        TIMEOUT=$((TIMEOUT - 1))
+    done
     if [ -n "$running" ]; then
-        echo "running jobs after remaining timeout $TIMEOUT: $running"
+        echo "running jobs after remaining timeout $JOBS_TIMEOUT: $running"
         journalctl --sync
         journalctl -ab > $ADT_ARTIFACTS/journal.txt
         udevadm info --export-db > $ADT_ARTIFACTS/udevdb.txt
@@ -85,7 +95,7 @@ else
     fi
 fi
 
-if [ "$ADT_REBOOT_MARK" -ge 5 ]; then
+if [ "$ADT_REBOOT_MARK" -ge "$REBOOTS" ]; then
     exit 0
 fi
 
