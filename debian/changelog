@@ -1,3 +1,42 @@
+systemd (240-6ubuntu7) eoan; urgency=medium
+
+  * Revert "Add check to switch VTs only between K_XLATE or K_UNICODE"
+    This reverts commit 60407728a1a453104e3975ecfdf25a254dd7cc44.
+    Files:
+    - debian/patches/Add-check-to-switch-VTs-only-between-K_XLATE-or-K_UNICODE.patch
+    - debian/patches/Move-verify_vc_kbmode-to-terminal-util.c-as-vt_verify_kbm.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=18029ab5ff436bfb3b401f24cd1e3a4cf2a1579c
+
+  * Cherrypick missing systemd-stable patches to unbreak wireguard peer endpoints.
+    Signed-off-by: Dimitri John Ledkov <xnox@ubuntu.com> (LP: #1825378)
+    Author: Dan Streetman
+    Files:
+    - debian/patches/network-wireguard-fixes-sending-wireguard-peer-setti.patch
+    - debian/patches/network-wireguard-use-sd_netlink_message_append_sock.patch
+    - debian/patches/sd-netlink-introduce-sd_netlink_message_append_socka.patch
+    - debian/patches/test-network-add-more-checks-in-NetworkdNetDevTests..patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4046f515e40c4dc80d18d2303466737f1f451f11
+
+  * Remove expected failure from passing test.
+    Signed-off-by: Dimitri John Ledkov <xnox@ubuntu.com> (LP: #1829450)
+    Author: Dan Streetman
+    File: debian/tests/systemd-fsckd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c43b12037d08555dc1d26593307726d7c7992df0
+
+  * Fix false negative checking for running jobs after boot.
+    Signed-off-by: Dimitri John Ledkov <xnox@ubuntu.com> (LP: #1825997)
+    Author: Dan Streetman
+    File: debian/tests/boot-smoke
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=aeb01631efbaf3fe851dee15d496e0b66b5c347f
+
+  * Cherrypick ask-password: prevent buffer overrow when reading from keyring.
+    Signed-off-by: Dimitri John Ledkov <xnox@ubuntu.com> (LP: #1814373)
+    Author: Dan Streetman
+    File: debian/patches/ask-password-prevent-buffer-overrow-when-reading-fro.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6d6e9cbd4fc6e018031a4762e88f2c3aa19e24e8
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Wed, 29 May 2019 19:54:37 +0100
+
 systemd (240-6ubuntu6) eoan; urgency=medium
 
   * Add check to switch VTs only between K_XLATE or K_UNICODE.
