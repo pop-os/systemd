@@ -1,0 +1,105 @@
+From abd48ec87f2ac5dd571a99dcb4db88c4affdffc8 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 28 Jan 2019 12:19:29 +0100
+Subject: [PATCH] sd-netlink: introduce
+ sd_netlink_message_append_sockaddr_in{,6}()
+
+Origin: upstream, https://github.com/systemd/systemd/pull/11580/commits/abd48ec87f2ac5dd571a99dcb4db88c4affdffc8
+Bug: https://github.com/systemd/systemd/issues/11579
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1825378
+
+---
+ src/libsystemd/sd-netlink/netlink-message.c | 36 +++++++++++++++++++++
+ src/libsystemd/sd-netlink/netlink-types.c   |  2 +-
+ src/libsystemd/sd-netlink/netlink-types.h   |  1 +
+ src/systemd/sd-netlink.h                    |  2 ++
+ 4 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/src/libsystemd/sd-netlink/netlink-message.c b/src/libsystemd/sd-netlink/netlink-message.c
+index b0b25639f4..5e9bc45139 100644
+--- a/src/libsystemd/sd-netlink/netlink-message.c
++++ b/src/libsystemd/sd-netlink/netlink-message.c
+@@ -370,6 +370,42 @@ int sd_netlink_message_append_in6_addr(sd_netlink_message *m, unsigned short typ
+         return 0;
+ }
+ 
++int sd_netlink_message_append_sockaddr_in(sd_netlink_message *m, unsigned short type, const struct sockaddr_in *data) {
++        int r;
++
++        assert_return(m, -EINVAL);
++        assert_return(!m->sealed, -EPERM);
++        assert_return(data, -EINVAL);
++
++        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_SOCKADDR);
++        if (r < 0)
++                return r;
++
++        r = add_rtattr(m, type, data, sizeof(struct sockaddr_in));
++        if (r < 0)
++                return r;
++
++        return 0;
++}
++
++int sd_netlink_message_append_sockaddr_in6(sd_netlink_message *m, unsigned short type, const struct sockaddr_in6 *data) {
++        int r;
++
++        assert_return(m, -EINVAL);
++        assert_return(!m->sealed, -EPERM);
++        assert_return(data, -EINVAL);
++
++        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_SOCKADDR);
++        if (r < 0)
++                return r;
++
++        r = add_rtattr(m, type, data, sizeof(struct sockaddr_in6));
++        if (r < 0)
++                return r;
++
++        return 0;
++}
++
+ int sd_netlink_message_append_ether_addr(sd_netlink_message *m, unsigned short type, const struct ether_addr *data) {
+         int r;
+ 
+diff --git a/src/libsystemd/sd-netlink/netlink-types.c b/src/libsystemd/sd-netlink/netlink-types.c
+index bb7e8c33ba..9dcd3f2ac8 100644
+--- a/src/libsystemd/sd-netlink/netlink-types.c
++++ b/src/libsystemd/sd-netlink/netlink-types.c
+@@ -721,7 +721,7 @@ static const NLType genl_wireguard_peer_types[] = {
+         [WGPEER_A_FLAGS] = { .type = NETLINK_TYPE_U32 },
+         [WGPEER_A_PRESHARED_KEY] = { .size = WG_KEY_LEN },
+         [WGPEER_A_PERSISTENT_KEEPALIVE_INTERVAL] = { .type = NETLINK_TYPE_U16 },
+-        [WGPEER_A_ENDPOINT] = { /* either size of sockaddr_in or sockaddr_in6 depending on address family */ },
++        [WGPEER_A_ENDPOINT] = { .type = NETLINK_TYPE_SOCKADDR },
+         [WGPEER_A_ALLOWEDIPS] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_wireguard_allowedip_type_system },
+ };
+ 
+diff --git a/src/libsystemd/sd-netlink/netlink-types.h b/src/libsystemd/sd-netlink/netlink-types.h
+index 3133e4863d..b84fa4762b 100644
+--- a/src/libsystemd/sd-netlink/netlink-types.h
++++ b/src/libsystemd/sd-netlink/netlink-types.h
+@@ -16,6 +16,7 @@ enum {
+         NETLINK_TYPE_CACHE_INFO,
+         NETLINK_TYPE_NESTED,                    /* NLA_NESTED */
+         NETLINK_TYPE_UNION,
++        NETLINK_TYPE_SOCKADDR,
+ };
+ 
+ typedef enum NLMatchType {
+diff --git a/src/systemd/sd-netlink.h b/src/systemd/sd-netlink.h
+index a97a965ec4..9e6e437bab 100644
+--- a/src/systemd/sd-netlink.h
++++ b/src/systemd/sd-netlink.h
+@@ -78,6 +78,8 @@ int sd_netlink_message_append_u32(sd_netlink_message *m, unsigned short type, ui
+ int sd_netlink_message_append_data(sd_netlink_message *m, unsigned short type, const void *data, size_t len);
+ int sd_netlink_message_append_in_addr(sd_netlink_message *m, unsigned short type, const struct in_addr *data);
+ int sd_netlink_message_append_in6_addr(sd_netlink_message *m, unsigned short type, const struct in6_addr *data);
++int sd_netlink_message_append_sockaddr_in(sd_netlink_message *m, unsigned short type, const struct sockaddr_in *data);
++int sd_netlink_message_append_sockaddr_in6(sd_netlink_message *m, unsigned short type, const struct sockaddr_in6 *data);
+ int sd_netlink_message_append_ether_addr(sd_netlink_message *m, unsigned short type, const struct ether_addr *data);
+ int sd_netlink_message_append_cache_info(sd_netlink_message *m, unsigned short type, const struct ifa_cacheinfo *info);
+ 
+-- 
+2.20.1
+

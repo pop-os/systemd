@@ -1,0 +1,33 @@
+From 2301c54fa91379f5fe2458e28ed902aff5cf12d2 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 28 Jan 2019 09:42:35 +0100
+Subject: [PATCH] network/wireguard: fixes sending wireguard peer settings
+
+This fixes a bug introduced by e1f717d4a02e15ae11a191dd4962b2f4d117678d.
+
+Fixes #11579.
+
+Origin: upstream, https://github.com/systemd/systemd/pull/11580/commits/2301c54fa91379f5fe2458e28ed902aff5cf12d2
+Bug: https://github.com/systemd/systemd/issues/11579
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1825378
+
+---
+ src/network/netdev/wireguard.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/network/netdev/wireguard.c b/src/network/netdev/wireguard.c
+index 1efd8863f6..dd239f79a8 100644
+--- a/src/network/netdev/wireguard.c
++++ b/src/network/netdev/wireguard.c
+@@ -109,7 +109,7 @@ static int wireguard_set_peer_one(NetDev *netdev, sd_netlink_message *message, c
+         if (r < 0)
+                 goto cancel;
+ 
+-        if (!start) {
++        if (!*mask_start) {
+                 r = sd_netlink_message_append_data(message, WGPEER_A_PRESHARED_KEY, &peer->preshared_key, WG_KEY_LEN);
+                 if (r < 0)
+                         goto cancel;
+-- 
+2.20.1
+

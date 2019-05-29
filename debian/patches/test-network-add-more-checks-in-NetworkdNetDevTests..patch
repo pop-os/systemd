@@ -1,0 +1,45 @@
+From 16ab043bda149ab1117b27464aa98d98ed4f2616 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 28 Jan 2019 10:09:22 +0100
+Subject: [PATCH] test-network: add more checks in
+ NetworkdNetDevTests.test_wireguard
+
+Origin: upstream, https://github.com/systemd/systemd/pull/11580/commits/16ab043bda149ab1117b27464aa98d98ed4f2616
+Bug: https://github.com/systemd/systemd/issues/11579
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1825378
+
+---
+ test/test-network/conf/25-wireguard.netdev  |  3 ++-
+ test/test-network/systemd-networkd-tests.py | 10 ++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+--- a/test/test-network/conf/25-wireguard.netdev
++++ b/test/test-network/conf/25-wireguard.netdev
+@@ -10,6 +10,7 @@
+ [WireGuardPeer]
+ PublicKey=RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=
+ AllowedIPs=fd31:bf08:57cb::/48,192.168.26.0/24
+-Endpoint=wireguard.example.com:51820
++#Endpoint=wireguard.example.com:51820
++Endpoint=192.168.27.3:51820
+ PresharedKey=IIWIV17wutHv7t4cR6pOT91z6NSz/T8Arh0yaywhw3M=
+ PersistentKeepalive=20
+--- a/test/test-network/systemd-networkd-tests.py
++++ b/test/test-network/systemd-networkd-tests.py
+@@ -388,6 +388,16 @@
+ 
+         if shutil.which('wg'):
+             subprocess.call('wg')
++            output = subprocess.check_output(['wg', 'show', 'wg99', 'listen-port']).rstrip().decode('utf-8')
++            self.assertTrue(output, '51820')
++            output = subprocess.check_output(['wg', 'show', 'wg99', 'fwmark']).rstrip().decode('utf-8')
++            self.assertTrue(output, '0x4d2')
++            output = subprocess.check_output(['wg', 'show', 'wg99', 'allowed-ips']).rstrip().decode('utf-8')
++            self.assertTrue(output, 'RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=\t192.168.26.0/24 fd31:bf08:57cb::/48')
++            output = subprocess.check_output(['wg', 'show', 'wg99', 'persistent-keepalive']).rstrip().decode('utf-8')
++            self.assertTrue(output, 'RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=\t20')
++            output = subprocess.check_output(['wg', 'show', 'wg99', 'endpoints']).rstrip().decode('utf-8')
++            self.assertTrue(output, 'RDf+LSpeEre7YEIKaxg+wbpsNV7du+ktR99uBEtIiCA=\t192.168.27.3:51820')
+ 
+         self.assertTrue(self.link_exits('wg99'))
+ 

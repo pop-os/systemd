@@ -142,3 +142,7 @@ pull-fix-invalid-error-check.patch
 curl-util-fix-use-after-free.patch
 shared-dissect-image-make-sure-that-we-don-t-truncate-dev.patch
 journal-avoid-buffer-overread-when-locale-name-is-too-lon.patch
+network-wireguard-fixes-sending-wireguard-peer-setti.patch
+test-network-add-more-checks-in-NetworkdNetDevTests..patch
+sd-netlink-introduce-sd_netlink_message_append_socka.patch
+network-wireguard-use-sd_netlink_message_append_sock.patch
