@@ -1,3 +1,23 @@
+systemd (240-6ubuntu8) eoan; urgency=medium
+
+  * Only restart resolved on changes in dhclient enter hook.
+    This prevents spurious restarts of resolved on rebounds when
+    the addresses did not change. (LP: #1805183)
+    Author: Julian Andres Klode
+    File: debian/extra/dhclient-enter-resolved-hook
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=258893bae8cbb12670e4807636fe8f7e9fb5407a
+
+  * Wait for cryptsetup unit to start, before stopping.
+    Patch from cascardo. Plus small refactor for readability. (LP: #1814373)
+    File: debian/tests/storage
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b65aa350be7e61c65927fbc0921a750fcfaa51cd
+
+  * Wait for systemctl is-system-running state.
+    File: debian/tests/boot-smoke
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=776998f1f55c445b6e385cab69a4219c42d00838
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 30 May 2019 14:59:04 +0100
+
 systemd (240-6ubuntu7) eoan; urgency=medium
 
   * Revert "Add check to switch VTs only between K_XLATE or K_UNICODE"
