@@ -1,3 +1,15 @@
+systemd (240-6ubuntu9) eoan; urgency=medium
+
+  * Fix typpo in storage test.
+    File: debian/tests/storage
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f28aa5fe4ab175b99b6ea702559c59ca473b4ca8
+
+  * Fix bashism
+    File: debian/extra/dhclient-enter-resolved-hook
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0725c1169ddde4f41cacba7af3e546704e2206be
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 30 May 2019 21:45:50 +0100
+
 systemd (240-6ubuntu8) eoan; urgency=medium
 
   * Only restart resolved on changes in dhclient enter hook.
