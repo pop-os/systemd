@@ -38,7 +38,7 @@ else
     echo "waiting to boot..."
     TIMEOUT=$RUNNING_TIMEOUT
     while [ $TIMEOUT -ge 0 ]; do
-        state="$(systemctl is-system-running || true)"
+        state="$(systemctl --wait is-system-running || true)"
         case $state in
             running|degraded)
                 break
