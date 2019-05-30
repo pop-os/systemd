@@ -18,7 +18,7 @@ class FakeDriveTestBase(unittest.TestCase):
     @classmethod
     def setUpClass(klass):
         if os.path.isdir('/sys/module/scsi_debug'):
-            subprocess.check_call(['rmmode', 'scsi_debug'])
+            subprocess.check_call(['rmmod', 'scsi_debug'])
         # create a fake SCSI hard drive
         subprocess.check_call(['modprobe', 'scsi_debug', 'dev_size_mb=32'])
         # wait until drive got created
