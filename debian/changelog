@@ -1,3 +1,24 @@
+systemd (242-2) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * Drop dependency on lsb-base.
+    It is only needed when booting with sysvinit and initscripts, but
+    initscripts already Depends on lsb-base (see #864999).
+  * Stop removing enablement symlinks in /etc/systemd/system.
+    With v242 this is no longer necessary as `ninja install` will no longer
+    create those symlinks.
+  * Replace manual removal of halt-local.service with upstream patch
+
+  [ Dimitri John Ledkov ]
+  * Build manpages in .deb variant.
+    Upstream snapshots are switching to building manpages off by default.
+
+  [ Luca Boccassi ]
+  * Enable portabled and install related files in systemd-container.
+    Keep disabled for the udeb profile. (Closes: #918606)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 07 Jun 2019 22:41:50 +0200
+
 systemd (242-1) experimental; urgency=medium
 
   * New upstream version 242
