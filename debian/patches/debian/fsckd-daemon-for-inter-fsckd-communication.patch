@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 79195c9..60907bb 100644
+index 71e08d7..c4ec42c 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2415,6 +2415,14 @@ executable('systemd-makefs',
+@@ -2413,6 +2413,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  
@@ -963,7 +963,7 @@ index 0000000..4c1fe88
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index a561050..ed77977 100644
+index 52f8b77..2f3a350 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -84,6 +84,7 @@ units = [
@@ -974,7 +974,7 @@ index a561050..ed77977 100644
          ['systemd-initctl.socket',              '',
           'sockets.target.wants/'],
          ['systemd-journal-gatewayd.socket',     'ENABLE_REMOTE HAVE_MICROHTTPD'],
-@@ -140,6 +141,7 @@ in_units = [
+@@ -139,6 +140,7 @@ in_units = [
           'sysinit.target.wants/'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],
