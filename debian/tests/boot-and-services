@@ -418,7 +418,7 @@ SystemCallFilter=access
         subprocess.check_call(['systemctl', 'reset-failed', 'scfail.service'])
 
         self.assertIn(b'failed', out)
-        self.assertIn(b'code=killed, signal=SYS', out)
+        self.assertRegex(out, b'code=(killed|dumped), signal=SYS')
         with open('/etc/machine-id') as f:
             self.assertNotIn(f.read().strip().encode('ASCII'), out)
 
