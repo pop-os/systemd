@@ -22,6 +22,12 @@ random-util-eat-up-bad-RDRAND-values-seen-on-AMD-CPUs.patch
 ask-password-prevent-buffer-overflow-when-reading-from-ke.patch
 core-unset-HOME-that-the-kernel-gives-us.patch
 man-add-note-that-h-u-U-are-mostly-useless.patch
+sysctl-util-add-sysctl_read_ip_property.patch
+network-check-whether-ipv6-is-enabled-in-sysctl.patch
+network-ignore-requested-ipv6-addresses-when-ipv6-is-disa.patch
+network-ignore-requested-ipv6-route-when-ipv6-is-disabled.patch
+network-ignore-requested-ipv6-routing-policy-rule-when-ip.patch
+network-read-link-specific-sysctl-value.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
