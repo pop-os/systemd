@@ -20,6 +20,8 @@ journal-remote-do-not-request-Content-Length-if-Transfer-.patch
 systemctl-restore-systemctl-reboot-ARG-functionality.patch
 random-util-eat-up-bad-RDRAND-values-seen-on-AMD-CPUs.patch
 ask-password-prevent-buffer-overflow-when-reading-from-ke.patch
+core-unset-HOME-that-the-kernel-gives-us.patch
+man-add-note-that-h-u-U-are-mostly-useless.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
