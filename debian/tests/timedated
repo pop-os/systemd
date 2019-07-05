@@ -168,7 +168,7 @@ wait_mon() {
 
 echo 'disable NTP'
 timedatectl set-ntp false
-while systemctl is-active --quiet systemd-timesyncd; do sleep 1; done
+while [ "$(systemctl --no-pager show systemd-timesyncd --property ActiveState)" != "ActiveState=inactive" ]; do sleep 1; done
 assert_ntp false
 assert_rc 3 systemctl is-active --quiet systemd-timesyncd
 
@@ -177,7 +177,7 @@ start_mon
 timedatectl set-ntp true
 wait_mon "NTP" "boolean true"
 assert_ntp true
-while [ "$(systemctl is-active systemd-timesyncd)" = "activating" ]; do sleep 1; done
+while [ "$(systemctl --no-pager show systemd-timesyncd --property ActiveState)" != "ActiveState=active" ]; do sleep 1; done
 assert_rc 0 systemctl is-active --quiet systemd-timesyncd
 
 echo 're-disable NTP'
