@@ -108,7 +108,7 @@ Depends: systemd-tests,
   acl,
   iputils-ping,
   dbus-user-session,
-Restrictions: needs-root, allow-stderr, isolation-container
+Restrictions: needs-root, allow-stderr, isolation-container, breaks-testbed
 
 Tests: upstream
 Depends: libsystemd-dev,
