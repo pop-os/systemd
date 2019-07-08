@@ -1,3 +1,21 @@
+systemd (241-6) unstable; urgency=medium
+
+  * ask-password: Prevent buffer overflow when reading from keyring.
+    Fixes a possible memory corruption that causes systemd-cryptsetup to
+    crash either when a single large password is used or when multiple
+    passwords have already been pushed to the keyring. (Closes: #929726)
+  * Clarify documentation regarding %h/%u/%U specifiers.
+    Make it clear, that setting "User=" has no effect on those specifiers.
+    Also ensure that "%h" is actually resolved to "/root" for the system
+    manager instance as documented in the systemd.unit man page.
+    (Closes: #927911)
+  * network: Behave more gracefully when IPv6 has been disabled.
+    Ignore any configured IPv6 settings when IPv6 has been disabled in the
+    kernel via sysctl. Instead of failing completely, continue and log a
+    warning instead. (Closes: #929469)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 08 Jul 2019 11:27:51 +0200
+
 systemd (241-5) unstable; urgency=medium
 
   * Revert "Add check to switch VTs only between K_XLATE or K_UNICODE"
