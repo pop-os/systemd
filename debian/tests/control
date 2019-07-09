@@ -103,7 +103,7 @@ Depends: systemd-tests,
   tree,
   perl,
   xz-utils,
-Restrictions: needs-root, allow-stderr, isolation-container
+Restrictions: needs-root, allow-stderr, isolation-container, skippable
 
 Tests: root-unittests
 Depends: systemd-tests,
