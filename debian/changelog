@@ -1,3 +1,21 @@
+systemd (241-7) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * network: Fix failure to bring up interface with Linux kernel 5.2.
+    Backport two patches from systemd master in order to fix a bug with 5.2
+    kernels where the network interface fails to come up with the following
+    error: "enp3s0: Could not bring up interface: Invalid argument"
+    (Closes: #931636)
+  * Use /usr/sbin/nologin as nologin shell.
+    In Debian the nologin shell is installed in /usr/sbin, not /sbin.
+    (Closes: #931850)
+
+  [ Mert Dirik ]
+  * 40-systemd: Don't fail if SysV init script uses set -u and $1 is unset
+    (Closes: #931719)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 18 Jul 2019 19:38:23 +0200
+
 systemd (241-6) unstable; urgency=medium
 
   * ask-password: Prevent buffer overflow when reading from keyring.
