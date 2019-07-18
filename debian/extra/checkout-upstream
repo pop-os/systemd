@@ -32,6 +32,12 @@ rm -rf debian/patches
 # disable tests which are not for upstream
 sed -i '/# NOUPSTREAM/ q' debian/tests/control
 
+# create new git commit with debian/ changes
+if [ -d .git -a -n "$(git status --short debian)" ]; then
+    git add debian
+    git commit -n -m "checkout-upstream: edit debian/ files for upstream testing"
+fi
+
 ########
 # Everything below this changes only code outside debian/
 # besides temporary use of debian/tmp/
@@ -57,6 +63,12 @@ find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xarg
 mv debian/tmp/upstream/* .
 rm -rf debian/tmp
 
+# create new git commit with upstream code
+if [ -d .git -a -n "$(git status --short)" ] ; then
+    git add .
+    git commit -n -m "checkout-upstream: replace with upstream code at version ${UPSTREAM_VER}"
+fi
+
 if [ -z "${UPSTREAM_KEEP_CHANGELOG:-}" ] ; then
     # craft changelog
     cat << EOF > debian/changelog.new
@@ -69,5 +81,10 @@ systemd (${UPSTREAM_VER}-0) UNRELEASED; urgency=low
 EOF
     cat debian/changelog >> debian/changelog.new
     mv debian/changelog.new debian/changelog
-fi
 
+    # create new git commit with changelog entry
+    if [ -d .git ] ; then
+        git add debian
+        git commit -n -m "checkout-upstream: update changelog to version ${UPSTREAM_VER}-0"
+    fi
+fi
