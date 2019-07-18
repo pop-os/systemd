@@ -26,6 +26,18 @@ else
     exit 0
 fi
 
+# drop our patches
+rm -rf debian/patches
+
+# disable tests which are not for upstream
+sed -i '/# NOUPSTREAM/ q' debian/tests/control
+
+########
+# Everything below this changes only code outside debian/
+# besides temporary use of debian/tmp/
+# and the update to debian/changelog
+########
+
 mkdir -p debian/tmp
 (cd debian/tmp
  git clone https://github.com/systemd/systemd.git upstream || (rm -rf upstream; sleep 60; git clone https://github.com/systemd/systemd.git upstream)
@@ -38,9 +50,8 @@ mkdir -p debian/tmp
  git submodule update --init --recursive)
 UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//')
 
-# clean out original upstream sources and patches
+# clean out original upstream sources
 find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xargs -0n1 rm -rf
-rm -rf debian/patches
 
 # replace with checkout
 mv debian/tmp/upstream/* .
@@ -58,5 +69,3 @@ EOF
 cat debian/changelog >> debian/changelog.new
 mv debian/changelog.new debian/changelog
 
-# disable tests which are not for upstream
-sed -i '/# NOUPSTREAM/ q' debian/tests/control
