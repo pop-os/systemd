@@ -39,7 +39,7 @@ mkdir -p debian/tmp
 UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//')
 
 # clean out original upstream sources and patches
-find -mindepth 1 -maxdepth 1 -name debian -prune -o -print0 | xargs -0n1 rm -rf
+find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xargs -0n1 rm -rf
 rm -rf debian/patches
 
 # replace with checkout
