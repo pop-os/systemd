@@ -30,6 +30,7 @@ network-ignore-requested-ipv6-routing-policy-rule-when-ip.patch
 network-read-link-specific-sysctl-value.patch
 networkd-fix-link_up-12505.patch
 network-do-not-send-ipv6-token-to-kernel.patch
+meson-make-nologin-path-build-time-configurable.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
