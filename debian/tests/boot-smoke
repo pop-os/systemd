@@ -75,7 +75,7 @@ else
     fi
 
     echo "checking that polkitd runs"
-    pidof polkitd
+    pidof polkitd || fail "polkitd was not running"
 
     echo "checking that there are no running jobs"
     TIMEOUT=10
