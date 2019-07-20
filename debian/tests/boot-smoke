@@ -12,6 +12,7 @@ fail() {
     set +e
     journalctl --sync
     journalctl -a > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-journal.txt"
+    systemctl --no-pager --no-legend list-jobs > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-running-jobs.txt"
     udevadm info --export-db > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-udevdb.txt"
     exit 1
 }
