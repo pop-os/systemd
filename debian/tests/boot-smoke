@@ -76,17 +76,6 @@ else
 
     echo "checking that polkitd runs"
     pidof polkitd || fail "polkitd was not running"
-
-    echo "checking that there are no running jobs"
-    TIMEOUT=10
-    while [ $TIMEOUT -ge 0 ]; do
-        running="$(systemctl --no-pager --no-legend list-jobs || true)"
-        [ -n "$running" ] || break
-        TIMEOUT=$((TIMEOUT - 1))
-    done
-    if [ -n "$running" ]; then
-        fail "running jobs after remaining timeout $JOBS_TIMEOUT: $running"
-    fi
 fi
 
 if [ "$AUTOPKGTEST_REBOOT_MARK" -ge 5 ]; then
