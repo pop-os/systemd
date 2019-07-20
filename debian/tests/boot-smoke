@@ -8,6 +8,7 @@ set -e
 . `dirname $0`/assert.sh
 
 fail() {
+    [ -n "$1" ] && echo "$1"
     journalctl --sync
     journalctl -a > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-journal.txt"
     udevadm info --export-db > "$AUTOPKGTEST_ARTIFACTS/boot-smoke-udevdb.txt"
@@ -39,12 +40,12 @@ else
     echo "checking for failed unmounts for user systemd"
     # grep complete journal to catch shutdown messages
     if journalctl | grep -E "systemd\[([2-9]|[1-9][0-9]+)\].*Failed unmounting"; then
-        fail
+        fail "found failed unmount in journal"
     fi
     # grep only this boot's journal, earlier ones complain about missing "render" group
     echo "checking for connection timeouts"
     if journalctl -b | grep "Connection timed out"; then
-        fail
+        fail "found connection timeout in journal for this boot"
     fi
 
     echo "checking that polkitd runs"
@@ -58,8 +59,7 @@ else
         TIMEOUT=$((TIMEOUT - 1))
     done
     if [ -n "$running" ]; then
-        echo "running jobs after remaining timeout $TIMEOUT: $running"
-        fail
+        fail "running jobs after remaining timeout $JOBS_TIMEOUT: $running"
     fi
 fi
 
