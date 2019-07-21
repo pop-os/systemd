@@ -49,8 +49,10 @@ class FakeDriveTestBase(unittest.TestCase):
 
 class CryptsetupTest(FakeDriveTestBase):
     def setUp(self):
-        self.plaintext_name = 'testcrypt1'
+        testname = self.id().split('.')[-1]
+        self.plaintext_name = 'testcrypt_%s' % testname
         self.plaintext_dev = '/dev/mapper/' + self.plaintext_name
+        self.service_name = 'systemd-cryptsetup@%s.service' % self.plaintext_name
         if os.path.exists(self.plaintext_dev):
             self.fail('%s exists already' % self.plaintext_dev)
 
@@ -67,9 +69,9 @@ class CryptsetupTest(FakeDriveTestBase):
             os.waitpid(self.password_agent, 0)
             self.password_agent = None
         subprocess.call(['umount', self.plaintext_dev], stderr=subprocess.DEVNULL)
-        subprocess.call(['systemctl', 'start', '--no-ask-password', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
+        subprocess.call(['systemctl', 'start', '--no-ask-password', self.service_name],
                         stderr=subprocess.STDOUT)
-        subprocess.call(['systemctl', 'stop', 'systemd-cryptsetup@%s.service' % self.plaintext_name],
+        subprocess.call(['systemctl', 'stop', self.service_name],
                         stderr=subprocess.STDOUT)
         if os.path.exists('/etc/crypttab'):
             os.unlink('/etc/crypttab')
