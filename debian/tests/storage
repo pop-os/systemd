@@ -4,15 +4,18 @@
 # Author: Martin Pitt <martin.pitt@ubuntu.com>
 
 import os
-import sys
-import unittest
-import subprocess
-import time
 import random
+import subprocess
+import sys
+import time
+import unittest
+
 from glob import glob
+from threading import Thread
 
 
 TIMEOUT_SERVICE_START = 10
+TIMEOUT_PASSWORD_AGENT_STOP = 10
 TIMEOUT_PLAINTEXT_DEV = 30
 TIMEOUT_SCSI_DEBUG_ADD_HOST = 5
 
@@ -72,11 +75,13 @@ class CryptsetupTest(FakeDriveTestBase):
             os.rename('/etc/crypttab', '/etc/crypttab.systemdtest')
         self.password = 'pwd%i' % random.randint(1000, 10000)
         self.password_agent = None
+        self.password_agent_stop = False
 
     def tearDown(self):
         if self.password_agent:
-            os.kill(self.password_agent, 9)
-            os.waitpid(self.password_agent, 0)
+            self.password_agent_stop = True
+            self.password_agent.join(timeout=TIMEOUT_PASSWORD_AGENT_STOP)
+            self.assertFalse(self.password_agent.is_alive())
             self.password_agent = None
         for timeout in range(TIMEOUT_SERVICE_START):
             state = subprocess.run(['systemctl', 'show', '--no-pager', self.service_name, '--property', 'ActiveState'],
@@ -114,11 +119,6 @@ class CryptsetupTest(FakeDriveTestBase):
     def start_password_agent(self):
         '''Run password agent to answer passphrase request for crypt device'''
 
-        pid = os.fork()
-        if pid > 0:
-            self.password_agent = pid
-            return
-
         # wait for incoming request
         found = False
         while not found:
@@ -129,6 +129,8 @@ class CryptsetupTest(FakeDriveTestBase):
                         found = True
                         break
             if not found:
+                if self.password_agent_stop:
+                    return
                 time.sleep(0.5)
 
         # parse Socket=
@@ -141,16 +143,15 @@ class CryptsetupTest(FakeDriveTestBase):
         p = subprocess.Popen(['/lib/systemd/systemd-reply-password', '1', socket],
                              stdin=subprocess.PIPE)
         p.communicate(self.password.encode())
-        assert p.returncode == 0
-
-        os._exit(0)
+        self.assertEqual(p.returncode, 0)
 
     def apply(self, target):
         '''Tell systemd to generate and run the cryptsetup units'''
 
         subprocess.check_call(['systemctl', 'daemon-reload'])
 
-        self.start_password_agent()
+        self.password_agent = Thread(target=self.start_password_agent);
+        self.password_agent.start()
         subprocess.check_call(['systemctl', '--no-ask-password', 'restart', target])
         for timeout in range(TIMEOUT_PLAINTEXT_DEV):
             if os.path.exists(self.plaintext_dev):
