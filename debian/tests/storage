@@ -138,6 +138,8 @@ class CryptsetupTest(FakeDriveTestBase):
             if line.startswith('Socket='):
                 socket = line.split('=', 1)[1]
                 break
+        else:
+            self.fail('Could not find socket')
 
         # send reply
         p = subprocess.Popen(['/lib/systemd/systemd-reply-password', '1', socket],
