@@ -12,6 +12,7 @@ import random
 from glob import glob
 
 
+TIMEOUT_SERVICE_START = 10
 TIMEOUT_PLAINTEXT_DEV = 30
 
 
@@ -71,11 +72,18 @@ class CryptsetupTest(FakeDriveTestBase):
             os.kill(self.password_agent, 9)
             os.waitpid(self.password_agent, 0)
             self.password_agent = None
+        for timeout in range(TIMEOUT_SERVICE_START):
+            state = subprocess.run(['systemctl', 'show', '--no-pager', self.service_name, '--property', 'ActiveState'],
+                                   stdout=subprocess.PIPE, universal_newlines=True).stdout
+            state = state.strip().replace('ActiveState=', '', 1)
+            if state in ['active', 'failed']:
+                break
+            time.sleep(1)
+        else:
+            self.fail('Timed out waiting for %s to start (or fail)' % self.service_name)
         subprocess.call(['umount', self.plaintext_dev], stderr=subprocess.DEVNULL)
-        subprocess.call(['systemctl', 'start', '--no-ask-password', self.service_name],
-                        stderr=subprocess.STDOUT)
-        subprocess.call(['systemctl', 'stop', self.service_name],
-                        stderr=subprocess.STDOUT)
+        if state == 'active':
+            subprocess.call(['systemctl', 'stop', self.service_name], stderr=subprocess.STDOUT)
         if os.path.exists('/etc/crypttab'):
             os.unlink('/etc/crypttab')
         if os.path.exists('/etc/crypttab.systemdtest'):
