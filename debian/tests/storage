@@ -12,6 +12,9 @@ import random
 from glob import glob
 
 
+TIMEOUT_PLAINTEXT_DEV = 30
+
+
 @unittest.skipIf(os.path.isdir('/sys/module/scsi_debug'),
                  'The scsi_debug module is already loaded')
 class FakeDriveTestBase(unittest.TestCase):
@@ -134,12 +137,12 @@ class CryptsetupTest(FakeDriveTestBase):
 
         self.start_password_agent()
         subprocess.check_call(['systemctl', '--no-ask-password', 'restart', target])
-        for timeout in range(50):
+        for timeout in range(TIMEOUT_PLAINTEXT_DEV):
             if os.path.exists(self.plaintext_dev):
                 break
-            time.sleep(0.1)
+            time.sleep(1)
         else:
-            self.fail('timed out for %s to appear' % self.plaintext_dev)
+            self.fail('Timed out waiting for %s to appear' % self.plaintext_dev)
 
     def test_luks_by_devname(self):
         '''LUKS device by plain device name, empty'''
