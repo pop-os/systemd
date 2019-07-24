@@ -118,7 +118,7 @@ class CryptsetupTest(FakeDriveTestBase):
             for ask in glob('/run/systemd/ask-password/ask.*'):
                 with open(ask) as f:
                     contents = f.read()
-                    if 'disk scsi_debug' in contents and self.plaintext_name in contents:
+                    if self.plaintext_name in contents:
                         found = True
                         break
             if not found:
