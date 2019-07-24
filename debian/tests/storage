@@ -15,40 +15,39 @@ from glob import glob
 TIMEOUT_SERVICE_START = 10
 TIMEOUT_PLAINTEXT_DEV = 30
 
+SCSI_DEBUG_DIR = '/sys/bus/pseudo/drivers/scsi_debug'
 
-@unittest.skipIf(os.path.isdir('/sys/module/scsi_debug'),
-                 'The scsi_debug module is already loaded')
 class FakeDriveTestBase(unittest.TestCase):
     @classmethod
-    def setUpClass(klass):
-        # create a fake SCSI hard drive
-        subprocess.check_call(['modprobe', 'scsi_debug', 'dev_size_mb=32'])
-        # wait until drive got created
-        sys_dirs = []
-        while not sys_dirs:
-            sys_dirs = glob('/sys/bus/pseudo/drivers/scsi_debug/adapter*/host*/target*/*:*/block')
-            time.sleep(0.1)
-        assert len(sys_dirs) == 1
-        devs = os.listdir(sys_dirs[0])
-        assert len(devs) == 1
-        klass.device = '/dev/' + devs[0]
+    def setUpClass(cls):
+        if os.path.isdir(SCSI_DEBUG_DIR):
+            return
 
-    @classmethod
-    def tearDownClass(klass):
-        # create a fake SCSI hard drive
-        subprocess.check_call(['rmmod', 'scsi_debug'])
+        # Consider missing scsi_debug module a test failure
+        subprocess.check_call(['modprobe', 'scsi_debug', 'dev_size_mb=32'])
+        assert os.path.isdir(SCSI_DEBUG_DIR)
+
+    def setUp(self):
+        existing_adapters = set(glob(os.path.join(SCSI_DEBUG_DIR, 'adapter*')))
+        with open(os.path.join(SCSI_DEBUG_DIR, 'add_host'), 'w') as f:
+            f.write('1')
+        new_adapters = set(glob(os.path.join(SCSI_DEBUG_DIR, 'adapter*'))) - existing_adapters
+        self.assertEqual(len(new_adapters), 1)
+        self.adapter = new_adapters.pop()
+        devices = set(glob(os.path.join(self.adapter, 'host*/target*/*:*/block/*')))
+        self.assertEqual(len(devices), 1)
+        self.device = os.path.join('/dev/', os.path.basename(devices.pop()))
 
     def tearDown(self):
-        # clear drive
-        with open(self.device, 'wb') as f:
-            block = b'0' * 1048576
-            try:
-                while True:
-                    f.write(block)
-            except OSError:
-                pass
-        subprocess.check_call(['udevadm', 'settle'])
-        subprocess.check_call(['systemctl', 'daemon-reload'])
+        existing_adapters = set(glob(os.path.join(SCSI_DEBUG_DIR, 'adapter*')))
+        with open(os.path.join(SCSI_DEBUG_DIR, 'add_host'), 'w') as f:
+            f.write('-1')
+        removed_adapters = existing_adapters - set(glob(os.path.join(SCSI_DEBUG_DIR, 'adapter*')))
+        self.assertEqual(len(removed_adapters), 1)
+        adapter = removed_adapters.pop()
+        self.assertEqual(self.adapter, adapter)
+        self.adapter = None
+        self.device = None
 
 
 class CryptsetupTest(FakeDriveTestBase):
@@ -91,6 +90,7 @@ class CryptsetupTest(FakeDriveTestBase):
         if os.path.exists(self.plaintext_dev):
             subprocess.call(['dmsetup', 'remove', self.plaintext_dev],
                             stderr=subprocess.STDOUT)
+        subprocess.check_call(['systemctl', 'daemon-reload'])
 
         super().tearDown()
 
