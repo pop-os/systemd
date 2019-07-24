@@ -54,7 +54,6 @@ core-when-we-uninstall-a-job-add-unit-to-dbus-queue.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
-debian/Revert-udev-network-device-renaming-immediately-give.patch
 debian/Add-support-for-TuxOnIce-hibernation.patch
 debian/Re-enable-journal-forwarding-to-syslog.patch
 debian/Don-t-enable-audit-by-default.patch

@@ -13,6 +13,14 @@ systemd (240-6ubuntu10) UNRELEASED; urgency=medium
   * random-util: eat up bad RDRAND values seen on AMD CPUs.
     This fixes AMD Ryzen 3000 series failing to boot (LP: #1835809)
 
+  [ You-Sheng Yang ]
+  * d/p/d/Revert-udev-network-device-renaming-immediately-give.patch:
+    - udev: drop Revert-udev-network-device-renaming-immediately-give.patch.
+      The removing patch was for the already deprecated
+      "75-persistent-net-generator.rules" based interface renaming mechanism,
+      and it's causing unnecessary problem when a system happends to NICs with
+      same MAC address, e.g. Dell's MAC address pass-thru. (LP: #1837700)
+
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 22 Aug 2019 13:28:38 +0100
 
 systemd (240-6ubuntu9) eoan; urgency=medium
