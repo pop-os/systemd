@@ -14,6 +14,7 @@ from glob import glob
 
 TIMEOUT_SERVICE_START = 10
 TIMEOUT_PLAINTEXT_DEV = 30
+TIMEOUT_SCSI_DEBUG_ADD_HOST = 5
 
 SCSI_DEBUG_DIR = '/sys/bus/pseudo/drivers/scsi_debug'
 
@@ -34,7 +35,13 @@ class FakeDriveTestBase(unittest.TestCase):
         new_adapters = set(glob(os.path.join(SCSI_DEBUG_DIR, 'adapter*'))) - existing_adapters
         self.assertEqual(len(new_adapters), 1)
         self.adapter = new_adapters.pop()
-        devices = set(glob(os.path.join(self.adapter, 'host*/target*/*:*/block/*')))
+        for timeout in range(TIMEOUT_SCSI_DEBUG_ADD_HOST):
+            devices = set(glob(os.path.join(self.adapter, 'host*/target*/*:*/block/*')))
+            if len(devices) > 0:
+                break
+            time.sleep(1)
+        else:
+            self.fail('Timed out waiting for scsi_debug block device name')
         self.assertEqual(len(devices), 1)
         self.device = os.path.join('/dev/', os.path.basename(devices.pop()))
 
