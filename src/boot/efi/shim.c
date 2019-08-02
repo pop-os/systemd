@@ -14,9 +14,6 @@
 #include "util.h"
 #include "shim.h"
 
-/* well known shim lock guid */
-#define SHIM_LOCK_GUID
-
 struct ShimLock {
         EFI_STATUS __attribute__((sysv_abi)) (*shim_verify) (VOID *buffer, UINT32 size);
 
@@ -158,7 +155,7 @@ static EFIAPI EFI_STATUS security_policy_authentication (const EFI_SECURITY_PROT
         if (status != EFI_SUCCESS)
                 return status;
 
-        /* No need to check return value, this already happend in efi_main() */
+        /* No need to check return value, this already happened in efi_main() */
         root = LibOpenRoot(h);
         dev_path_str = DevicePathToStr(dev_path);
 

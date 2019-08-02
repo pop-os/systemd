@@ -298,7 +298,7 @@ static int boot_entry_load_unified(
         if (!k)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Path is not below root: %s", path);
 
-        f = fmemopen((void*) osrelease, strlen(osrelease), "r");
+        f = fmemopen_unlocked((void*) osrelease, strlen(osrelease), "r");
         if (!f)
                 return log_error_errno(errno, "Failed to open os-release buffer: %m");
 
@@ -725,8 +725,8 @@ int boot_entries_load_config_auto(
         return boot_entries_load_config(esp_where, xbootldr_where, config);
 }
 
+#if ENABLE_EFI
 int boot_entries_augment_from_loader(BootConfig *config, bool only_auto) {
-
         static const char * const title_table[] = {
                 /* Pretty names for a few well-known automatically discovered entries. */
                 "auto-osx",                      "macOS",
@@ -755,7 +755,7 @@ int boot_entries_augment_from_loader(BootConfig *config, bool only_auto) {
         n_allocated = config->n_entries;
 
         STRV_FOREACH(i, found_by_loader) {
-                _cleanup_free_ char *c = NULL, *t = NULL;
+                _cleanup_free_ char *c = NULL, *t = NULL, *p = NULL;
                 char **a, **b;
 
                 if (boot_config_has_entry(config, *i))
@@ -776,6 +776,10 @@ int boot_entries_augment_from_loader(BootConfig *config, bool only_auto) {
                                 break;
                         }
 
+                p = efi_variable_path(EFI_VENDOR_LOADER, "LoaderEntries");
+                if (!p)
+                        return log_oom();
+
                 if (!GREEDY_REALLOC0(config->entries, n_allocated, config->n_entries + 1))
                         return log_oom();
 
@@ -783,11 +787,13 @@ int boot_entries_augment_from_loader(BootConfig *config, bool only_auto) {
                         .type = BOOT_ENTRY_LOADER,
                         .id = TAKE_PTR(c),
                         .title = TAKE_PTR(t),
+                        .path = TAKE_PTR(p),
                 };
         }
 
         return 0;
 }
+#endif
 
 /********************************************************************************/
 
@@ -1077,12 +1083,12 @@ static int verify_esp(
          *
          *  -ENOENT        → if 'searching' is set, and the dir doesn't exist
          *  -EADDRNOTAVAIL → if 'searching' is set, and the dir doesn't look like an ESP
-         *  -EACESS        → if 'unprivileged_mode' is set, and we have trouble acessing the thing
+         *  -EACESS        → if 'unprivileged_mode' is set, and we have trouble accessing the thing
          */
 
         relax_checks = getenv_bool("SYSTEMD_RELAX_ESP_CHECKS") > 0;
 
-        /* Non-root user can only check the status, so if an error occured in the following, it does not cause any
+        /* Non-root user can only check the status, so if an error occurred in the following, it does not cause any
          * issues. Let's also, silence the error messages. */
 
         if (!relax_checks) {
@@ -1418,11 +1424,3 @@ found:
 
         return 0;
 }
-
-static const char* const boot_entry_type_table[_BOOT_ENTRY_MAX] = {
-        [BOOT_ENTRY_CONF] = "conf",
-        [BOOT_ENTRY_UNIFIED] = "unified",
-        [BOOT_ENTRY_LOADER] = "loader",
-};
-
-DEFINE_STRING_TABLE_LOOKUP(boot_entry_type, BootEntryType);

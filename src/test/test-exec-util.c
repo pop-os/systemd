@@ -324,7 +324,7 @@ static void test_environment_gathering(void) {
         assert_se(chmod(name3, 0755) == 0);
 
         /* When booting in containers or without initramfs there might not be
-         * any PATH in the environ and if there is no PATH /bin/sh built-in
+         * any PATH in the environment and if there is no PATH /bin/sh built-in
          * PATH may leak and override systemd's DEFAULT_PATH which is not
          * good. Force our own PATH in environment, to prevent expansion of sh
          * built-in $PATH */
@@ -361,7 +361,10 @@ static void test_environment_gathering(void) {
         assert_se(streq(strv_env_get(env, "PATH"), DEFAULT_PATH ":/no/such/file"));
 
         /* reset environ PATH */
-        (void) setenv("PATH", old, 1);
+        if (old)
+                (void) setenv("PATH", old, 1);
+        else
+                (void) unsetenv("PATH");
 }
 
 static void test_error_catching(void) {
@@ -399,6 +402,50 @@ static void test_error_catching(void) {
         assert_se(r == 42);
 }
 
+static void test_exec_command_flags_from_strv(void) {
+        ExecCommandFlags flags = 0;
+        char **valid_strv = STRV_MAKE("no-env-expand", "no-setuid", "ignore-failure");
+        char **invalid_strv = STRV_MAKE("no-env-expand", "no-setuid", "nonexistent-option", "ignore-failure");
+        int r;
+
+        r = exec_command_flags_from_strv(valid_strv, &flags);
+
+        assert_se(r == 0);
+        assert_se(FLAGS_SET(flags, EXEC_COMMAND_NO_ENV_EXPAND));
+        assert_se(FLAGS_SET(flags, EXEC_COMMAND_NO_SETUID));
+        assert_se(FLAGS_SET(flags, EXEC_COMMAND_IGNORE_FAILURE));
+        assert_se(!FLAGS_SET(flags, EXEC_COMMAND_AMBIENT_MAGIC));
+        assert_se(!FLAGS_SET(flags, EXEC_COMMAND_FULLY_PRIVILEGED));
+
+        r = exec_command_flags_from_strv(invalid_strv, &flags);
+
+        assert_se(r == -EINVAL);
+}
+
+static void test_exec_command_flags_to_strv(void) {
+        _cleanup_strv_free_ char **opts = NULL, **empty_opts = NULL, **invalid_opts = NULL;
+        ExecCommandFlags flags = 0;
+        int r;
+
+        flags |= (EXEC_COMMAND_AMBIENT_MAGIC|EXEC_COMMAND_NO_ENV_EXPAND|EXEC_COMMAND_IGNORE_FAILURE);
+
+        r = exec_command_flags_to_strv(flags, &opts);
+
+        assert_se(r == 0);
+        assert_se(strv_equal(opts, STRV_MAKE("ignore-failure", "ambient", "no-env-expand")));
+
+        r = exec_command_flags_to_strv(0, &empty_opts);
+
+        assert_se(r == 0);
+        assert_se(strv_equal(empty_opts, STRV_MAKE_EMPTY));
+
+        flags = _EXEC_COMMAND_FLAGS_INVALID;
+
+        r = exec_command_flags_to_strv(flags, &invalid_opts);
+
+        assert_se(r == -EINVAL);
+}
+
 int main(int argc, char *argv[]) {
         test_setup_logging(LOG_DEBUG);
 
@@ -408,6 +455,8 @@ int main(int argc, char *argv[]) {
         test_stdout_gathering();
         test_environment_gathering();
         test_error_catching();
+        test_exec_command_flags_from_strv();
+        test_exec_command_flags_to_strv();
 
         return 0;
 }

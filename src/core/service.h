@@ -36,6 +36,7 @@ typedef enum ServiceType {
 } ServiceType;
 
 typedef enum ServiceExecCommand {
+        SERVICE_EXEC_CONDITION,
         SERVICE_EXEC_START_PRE,
         SERVICE_EXEC_START,
         SERVICE_EXEC_START_POST,
@@ -67,6 +68,8 @@ typedef enum ServiceResult {
         SERVICE_FAILURE_CORE_DUMP,
         SERVICE_FAILURE_WATCHDOG,
         SERVICE_FAILURE_START_LIMIT_HIT,
+        SERVICE_FAILURE_OOM_KILL,
+        SERVICE_SKIP_CONDITION,
         _SERVICE_RESULT_MAX,
         _SERVICE_RESULT_INVALID = -1
 } ServiceResult;
@@ -96,6 +99,9 @@ struct Service {
         usec_t restart_usec;
         usec_t timeout_start_usec;
         usec_t timeout_stop_usec;
+        usec_t timeout_abort_usec;
+        bool timeout_abort_set;
+        usec_t timeout_clean_usec;
         usec_t runtime_max_usec;
 
         dual_timestamp watchdog_timestamp;
@@ -144,6 +150,7 @@ struct Service {
         /* If we shut down, remember why */
         ServiceResult result;
         ServiceResult reload_result;
+        ServiceResult clean_result;
 
         bool main_pid_known:1;
         bool main_pid_alien:1;
@@ -184,7 +191,14 @@ struct Service {
 
         unsigned n_restarts;
         bool flush_n_restarts;
+
+        OOMPolicy oom_policy;
 };
+
+static inline usec_t service_timeout_abort_usec(Service *s) {
+        assert(s);
+        return s->timeout_abort_set ? s->timeout_abort_usec : s->timeout_stop_usec;
+}
 
 extern const UnitVTable service_vtable;
 
@@ -199,6 +213,9 @@ ServiceType service_type_from_string(const char *s) _pure_;
 
 const char* service_exec_command_to_string(ServiceExecCommand i) _const_;
 ServiceExecCommand service_exec_command_from_string(const char *s) _pure_;
+
+const char* service_exec_ex_command_to_string(ServiceExecCommand i) _const_;
+ServiceExecCommand service_exec_ex_command_from_string(const char *s) _pure_;
 
 const char* notify_state_to_string(NotifyState i) _const_;
 NotifyState notify_state_from_string(const char *s) _pure_;

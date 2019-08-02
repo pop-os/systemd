@@ -25,7 +25,7 @@ typedef enum CGroupDevicePolicy {
         /* Everything forbidden, except built-in ones and listed ones. */
         CGROUP_CLOSED,
 
-        /* Everythings forbidden, except for the listed devices */
+        /* Everything forbidden, except for the listed devices */
         CGROUP_STRICT,
 
         _CGROUP_DEVICE_POLICY_MAX,
@@ -79,6 +79,9 @@ struct CGroupContext {
         bool tasks_accounting;
         bool ip_accounting;
 
+        /* Configures the memory.oom.group attribute (on unified) */
+        bool memory_oom_group;
+
         bool delegate;
         CGroupMask delegate_controllers;
         CGroupMask disable_controllers;
@@ -95,14 +98,24 @@ struct CGroupContext {
         LIST_HEAD(CGroupIODeviceLimit, io_device_limits);
         LIST_HEAD(CGroupIODeviceLatency, io_device_latencies);
 
+        uint64_t default_memory_min;
+        uint64_t default_memory_low;
         uint64_t memory_min;
         uint64_t memory_low;
         uint64_t memory_high;
         uint64_t memory_max;
         uint64_t memory_swap_max;
 
+        bool default_memory_min_set;
+        bool default_memory_low_set;
+        bool memory_min_set;
+        bool memory_low_set;
+
         LIST_HEAD(IPAddressAccessItem, ip_address_allow);
         LIST_HEAD(IPAddressAccessItem, ip_address_deny);
+
+        char **ip_filters_ingress;
+        char **ip_filters_egress;
 
         /* For legacy hierarchies */
         uint64_t cpu_shares;
@@ -131,6 +144,16 @@ typedef enum CGroupIPAccountingMetric {
         _CGROUP_IP_ACCOUNTING_METRIC_MAX,
         _CGROUP_IP_ACCOUNTING_METRIC_INVALID = -1,
 } CGroupIPAccountingMetric;
+
+/* Used when querying IO accounting data */
+typedef enum CGroupIOAccountingMetric {
+        CGROUP_IO_READ_BYTES,
+        CGROUP_IO_WRITE_BYTES,
+        CGROUP_IO_READ_OPERATIONS,
+        CGROUP_IO_WRITE_OPERATIONS,
+        _CGROUP_IO_ACCOUNTING_METRIC_MAX,
+        _CGROUP_IO_ACCOUNTING_METRIC_INVALID = -1,
+} CGroupIOAccountingMetric;
 
 typedef struct Unit Unit;
 typedef struct Manager Manager;
@@ -174,8 +197,10 @@ int unit_realize_cgroup(Unit *u);
 void unit_release_cgroup(Unit *u);
 void unit_prune_cgroup(Unit *u);
 int unit_watch_cgroup(Unit *u);
+int unit_watch_cgroup_memory(Unit *u);
 
 void unit_add_to_cgroup_empty_queue(Unit *u);
+int unit_check_oom(Unit *u);
 
 int unit_attach_pids_to_cgroup(Unit *u, Set *pids, const char *suffix_path);
 
@@ -188,6 +213,9 @@ Unit *manager_get_unit_by_cgroup(Manager *m, const char *cgroup);
 Unit *manager_get_unit_by_pid_cgroup(Manager *m, pid_t pid);
 Unit* manager_get_unit_by_pid(Manager *m, pid_t pid);
 
+uint64_t unit_get_ancestor_memory_min(Unit *u);
+uint64_t unit_get_ancestor_memory_low(Unit *u);
+
 int unit_search_main_pid(Unit *u, pid_t *ret);
 int unit_watch_all_pids(Unit *u);
 
@@ -196,10 +224,13 @@ int unit_synthesize_cgroup_empty_event(Unit *u);
 int unit_get_memory_current(Unit *u, uint64_t *ret);
 int unit_get_tasks_current(Unit *u, uint64_t *ret);
 int unit_get_cpu_usage(Unit *u, nsec_t *ret);
+int unit_get_io_accounting(Unit *u, CGroupIOAccountingMetric metric, bool allow_cache, uint64_t *ret);
 int unit_get_ip_accounting(Unit *u, CGroupIPAccountingMetric metric, uint64_t *ret);
 
 int unit_reset_cpu_accounting(Unit *u);
 int unit_reset_ip_accounting(Unit *u);
+int unit_reset_io_accounting(Unit *u);
+int unit_reset_accounting(Unit *u);
 
 #define UNIT_CGROUP_BOOL(u, name)                       \
         ({                                              \
@@ -221,3 +252,5 @@ const char* cgroup_device_policy_to_string(CGroupDevicePolicy i) _const_;
 CGroupDevicePolicy cgroup_device_policy_from_string(const char *s) _pure_;
 
 bool unit_cgroup_delegate(Unit *u);
+
+int compare_job_priority(const void *a, const void *b);

@@ -151,6 +151,7 @@ static int run(int argc, char* argv[]) {
         unsigned i = 0;
         int r;
 
+        log_show_color(true);
         log_parse_environment();
         log_open();
 
@@ -165,7 +166,7 @@ static int run(int argc, char* argv[]) {
                 our_env[i++] = (char*) "READY=1";
 
         if (arg_status) {
-                status = strappend("STATUS=", arg_status);
+                status = strjoin("STATUS=", arg_status);
                 if (!status)
                         return log_oom();
 
@@ -192,7 +193,7 @@ static int run(int argc, char* argv[]) {
         if (!n)
                 return log_oom();
 
-        /* If this is requested change to the requested UID/GID. Note thta we only change the real UID here, and leave
+        /* If this is requested change to the requested UID/GID. Note that we only change the real UID here, and leave
            the effective UID in effect (which is 0 for this to work). That's because we want the privileges to fake the
            ucred data, and sd_pid_notify() uses the real UID for filling in ucred. */
 

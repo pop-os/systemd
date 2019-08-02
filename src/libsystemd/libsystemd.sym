@@ -676,3 +676,9 @@ LIBSYSTEMD_241 {
 global:
         sd_bus_close_unref;
 } LIBSYSTEMD_240;
+
+LIBSYSTEMD_243 {
+global:
+        sd_bus_object_vtable_format;
+        sd_event_source_disable_unref;
+} LIBSYSTEMD_241;

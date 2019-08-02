@@ -22,8 +22,11 @@ struct Neighbor {
 
         int family;
         union in_addr_union in_addr;
-        bool mac_configured;
-        struct ether_addr mac;
+        union {
+                struct ether_addr mac;
+                union in_addr_union ip;
+        } lladdr;
+        size_t lladdr_size;
 
         LIST_FIELDS(Neighbor, neighbors);
 };
@@ -34,5 +37,8 @@ DEFINE_NETWORK_SECTION_FUNCTIONS(Neighbor, neighbor_free);
 
 int neighbor_configure(Neighbor *neighbor, Link *link, link_netlink_message_handler_t callback);
 
+int neighbor_section_verify(Neighbor *neighbor);
+
 CONFIG_PARSER_PROTOTYPE(config_parse_neighbor_address);
 CONFIG_PARSER_PROTOTYPE(config_parse_neighbor_hwaddr);
+CONFIG_PARSER_PROTOTYPE(config_parse_neighbor_lladdr);
