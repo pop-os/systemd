@@ -58,6 +58,7 @@ CONFFLAGS = \
 	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
+	-Ddefault-hierarchy=hybrid \
 	-Dpamconfdir=no \
 	-Drpmmacrosdir=no \
 	-Dqrencode=false \
