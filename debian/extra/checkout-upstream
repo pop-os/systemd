@@ -30,12 +30,26 @@ DUMMY_USER_NAME="Merge dummy user"
 DUMMY_USER_EMAIL="invalid@example.com"
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/systemd/systemd.git}"
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 
 # Use git, if in a git repo
 if [ -d .git ]; then
     # make sure user.name/user.email are set, git commit wants them
     git config --get user.name || git config user.name "$DUMMY_USER_NAME"
     git config --get user.email || git config user.email "$DUMMY_USER_EMAIL"
+fi
+
+if [ -n "${KEEP_DEBIAN_PATCHES:-}" ]; then
+        # set up pq branch if it does not exist
+        if [ "$BRANCH_NAME" = HEAD ]; then
+                echo "ERROR: $0 must be started from a branch when using KEEP_DEBIAN_PATCHES" >&2
+                exit 1
+        fi
+        gbp pq import 2> /dev/null && gbp pq switch || true
+        if ! git branch --contains "$BRANCH_NAME" | grep -q patch-queue/"$BRANCH_NAME"; then
+                echo "ERROR: patch-queue/$BRANCH_NAME exists but it is not rebased, please rebase it." >&2
+                exit 1
+        fi
 fi
 
 # switch to native instead of quilt
@@ -84,6 +98,17 @@ rm -rf debian/tmp
 if [ -d .git -a -n "$(git status --short)" ] ; then
     git add .
     git commit -n -m "checkout-upstream: replace with upstream code at version ${UPSTREAM_VER}"
+fi
+
+# import Debian patches which apply cleanly
+if [ -n "${KEEP_DEBIAN_PATCHES:-}" ]; then
+    for c in $(git log "$BRANCH_NAME"..patch-queue/"$BRANCH_NAME" --format='%H' --reverse); do
+        if ! git cherry-pick $c; then
+            git cherry-pick --abort
+            git reset --hard
+            git clean -dxf
+        fi
+    done
 fi
 
 if [ -z "${UPSTREAM_KEEP_CHANGELOG:-}" ] ; then
