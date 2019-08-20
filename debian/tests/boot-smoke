@@ -74,8 +74,8 @@ else
         fail "found connection timeout in journal for this boot"
     fi
 
-    echo "checking that polkitd runs"
-    pidof polkitd || fail "polkitd was not running"
+    echo "checking that NetworkManager runs"
+    pidof NetworkManager || fail "NetworkManager was not running"
 fi
 
 if [ "$AUTOPKGTEST_REBOOT_MARK" -ge 5 ]; then
