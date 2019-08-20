@@ -1,3 +1,44 @@
+systemd (242-3) experimental; urgency=medium
+
+  [ Dan Streetman ]
+  * d/t/boot-and-services: fix test_failing()
+  * d/t/boot-and-services: check for any kernel message, not just first kernel
+    message (Closes: #929730)
+  * d/t/upstream: add TEST-30, TEST-34 to blacklist
+  * d/t/timedated: replace systemctl is-active with systemctl show
+  * d/t/control: root-unittests can break networking, add breaks-testbed
+  * d/t/control: mark udev test skippable
+  * d/t/upstream: always cleanup after (and before) each test
+  * d/t/control: upstream test requires dmeventd
+  * d/e/checkout-upstream: don't remove .git
+  * d/e/checkout-upstream: move change to debian/ files above other changes
+  * d/e/checkout-upstream: add UPSTREAM_KEEP_CHANGELOG param
+  * d/e/checkout-upstream: create git commits for each change
+  * d/e/checkout-upstream: switch from 'quilt' to 'native' format
+  * d/e/checkout-upstream: set user.name, user.email if unset
+  * d/t/storage: change plaintext_name to include testname
+  * d/t/storage: increase wait for plaintext_dev from 5 to 30 seconds
+  * d/t/storage: wait for service to start, only stop if active
+  * d/t/storage: don't search for 'scsi_debug' in ask_password
+  * d/t/storage: manage scsi_debug using add_hosts (Closes: #929728)
+  * d/t/storage: use short timeout waiting for scsi_debug block dev to appear
+  * d/t/storage: convert password agent into normal Thread
+  * d/t/storage: fail if socket info not in ask_password contents
+  * d/t/boot-smoke: pass failure reason to fail() to print instead of separate
+    echo
+  * d/t/boot-smoke: in fail() set +e so errors are ignored while gathering
+    data
+  * d/t/boot-smoke: gather still running jobs in fail()
+  * d/t/boot-smoke: wait for is-system-running
+  * d/t/boot-smoke: call fail if pidof polkitd fails
+  * d/t/boot-smoke: remove check for running jobs
+
+  [ Michael Biebl ]
+  * d/t/boot-smoke: check for NetworkManager instead of D-Bus activated
+    polkitd (Closes: #934992)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 21 Aug 2019 00:12:22 +0200
+
 systemd (242-2) experimental; urgency=medium
 
   [ Michael Biebl ]
