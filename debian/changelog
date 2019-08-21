@@ -84,6 +84,70 @@ systemd (242-1) experimental; urgency=medium
 
  -- Michael Biebl <biebl@debian.org>  Wed, 08 May 2019 01:33:56 +0200
 
+systemd (241-7) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * network: Fix failure to bring up interface with Linux kernel 5.2.
+    Backport two patches from systemd master in order to fix a bug with 5.2
+    kernels where the network interface fails to come up with the following
+    error: "enp3s0: Could not bring up interface: Invalid argument"
+    (Closes: #931636)
+  * Use /usr/sbin/nologin as nologin shell.
+    In Debian the nologin shell is installed in /usr/sbin, not /sbin.
+    (Closes: #931850)
+
+  [ Mert Dirik ]
+  * 40-systemd: Don't fail if SysV init script uses set -u and $1 is unset
+    (Closes: #931719)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 18 Jul 2019 19:38:23 +0200
+
+systemd (241-6) unstable; urgency=medium
+
+  * ask-password: Prevent buffer overflow when reading from keyring.
+    Fixes a possible memory corruption that causes systemd-cryptsetup to
+    crash either when a single large password is used or when multiple
+    passwords have already been pushed to the keyring. (Closes: #929726)
+  * Clarify documentation regarding %h/%u/%U specifiers.
+    Make it clear, that setting "User=" has no effect on those specifiers.
+    Also ensure that "%h" is actually resolved to "/root" for the system
+    manager instance as documented in the systemd.unit man page.
+    (Closes: #927911)
+  * network: Behave more gracefully when IPv6 has been disabled.
+    Ignore any configured IPv6 settings when IPv6 has been disabled in the
+    kernel via sysctl. Instead of failing completely, continue and log a
+    warning instead. (Closes: #929469)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 08 Jul 2019 11:27:51 +0200
+
+systemd (241-5) unstable; urgency=medium
+
+  * Revert "Add check to switch VTs only between K_XLATE or K_UNICODE"
+    This change left the keyboard in an unusable state when exiting an X
+    session. (Closes: #929229)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 24 May 2019 22:58:59 +0200
+
+systemd (241-4) unstable; urgency=medium
+
+  * journal-remote: Do not request Content-Length if Transfer-Encoding is
+    chunked (Closes: #927008)
+  * systemctl: Restore "systemctl reboot ARG" functionality.
+    Fixes a regression introduced in v240. (Closes: #928659)
+  * random-util: Eat up bad RDRAND values seen on AMD CPUs.
+    Some AMD CPUs return bogus data via RDRAND after a suspend/resume cycle
+    while still reporting success via the carry flag.
+    Filter out invalid data like -1 (and also 0, just to be sure).
+    (Closes: #921267)
+  * Add check to switch VTs only between K_XLATE or K_UNICODE.
+    Switching to K_UNICODE from other than L_XLATE can make the keyboard
+    unusable and possibly leak keypresses from X.
+    (CVE-2018-20839, Closes: #929116)
+  * Document that DRM render nodes are now owned by group "render"
+    (Closes: #926886)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 17 May 2019 21:16:33 +0200
+
 systemd (241-3) unstable; urgency=high
 
   [ Michael Biebl ]
