@@ -1,3 +1,9 @@
+systemd (242-4) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 21 Aug 2019 22:09:13 +0200
+
 systemd (242-3) experimental; urgency=medium
 
   [ Dan Streetman ]
