@@ -51,6 +51,13 @@ Install-routes-after-addresses-are-ready.patch
 tests-Add-test-for-IPv6-source-routing.patch
 pam-systemd-use-secure_getenv-rather-than-getenv.patch
 core-when-we-uninstall-a-job-add-unit-to-dbus-queue.patch
+seccomp-drop-mincore-from-system-service-syscall-filter-g.patch
+seccomp-shm-get-at-dt-now-have-their-own-numbers-everywhe.patch
+seccomp-allow-shmat-to-be-a-separate-syscall-on-architect.patch
+seccomp-add-rseq-to-default-list-of-syscalls-to-whitelist.patch
+seccomp-add-new-5.1-syscall-pidfd_send_signal-to-filter-s.patch
+src-shared-seccomp-util.c-Add-mmap-definitions-for-s390.patch
+shared-seccomp-add-sync_file_range2.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
