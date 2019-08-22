@@ -1,3 +1,13 @@
+systemd (240-6ubuntu12) eoan; urgency=medium
+
+  * Depends on g++-8 as well
+    Files:
+    - debian/control
+    - debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5594b4f2ba2a4f68911ecebb5fab4f3cf99a5f30
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 22 Aug 2019 16:41:11 +0100
+
 systemd (240-6ubuntu11) eoan; urgency=medium
 
   [ Dan Streetman ]

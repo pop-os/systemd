@@ -16,6 +16,7 @@ Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper (>= 10.4~),
                pkg-config,
                gcc-8,
+               g++-8,
                xsltproc,
                docbook-xsl,
                docbook-xml,
