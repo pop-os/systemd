@@ -1,3 +1,20 @@
+systemd (240-6ubuntu10) UNRELEASED; urgency=medium
+
+  [ Dan Streetman ]
+  * d/p/lp1835581-src-network-networkd-dhcp4.c-set-prefsrc-for-classle.patch:
+    - Set src address for dhcp 'classless' routes (LP: #1835581)
+
+  [ Jorge Niedbalski ]
+  * d/p/lp1668771-resolved-switch-cache-option-to-a-tri-state-option-s.patch:
+    Allows cache=no-negative option to be set, ignoring negative
+    answers to be cached (LP: #1668771).
+
+  [ Jeremy Soller ]
+  * random-util: eat up bad RDRAND values seen on AMD CPUs.
+    This fixes AMD Ryzen 3000 series failing to boot (LP: #1835809)
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 22 Aug 2019 13:28:38 +0100
+
 systemd (240-6ubuntu9) eoan; urgency=medium
 
   * Fix typpo in storage test.

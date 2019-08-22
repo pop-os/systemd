@@ -1,0 +1,203 @@
+From 412dcec58773b7debedd503c528760d5466739da Mon Sep 17 00:00:00 2001
+From: Jorge Niedbalski <jnr@metaklass.org>
+Bug: https://github.com/systemd/systemd/issues/5552
+Origin: upstream, https://github.com/systemd/systemd/pull/13047
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1668771
+Date: Fri, 12 Jul 2019 15:34:24 -0400
+Subject: [PATCH] resolved: switch cache option to a tri-state option
+ (systemd#5552).
+
+Change the resolved.conf Cache option to a tri-state "no, no-negative, yes" values.
+
+If a lookup returns SERVFAIL systemd-resolved will cache the result for 30s (See 201d995),
+however, there are several use cases on which this condition is not acceptable (See systemd#5552 comments)
+and the only workaround would be to disable cache entirely or flush it , which isn't optimal.
+
+This change adds the 'no-negative' option when set it avoids putting in cache
+negative answers but still works the same heuristics for positive answers.
+
+Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
+---
+ man/resolved.conf.xml                  |  3 ++-
+ src/resolve/resolved-dns-cache.c       |  8 ++++++++
+ src/resolve/resolved-dns-cache.h       |  3 ++-
+ src/resolve/resolved-dns-transaction.c |  3 ++-
+ src/resolve/resolved-gperf.gperf       |  4 ++--
+ src/resolve/resolved-manager.c         |  2 +-
+ src/resolve/resolved-manager.h         |  2 +-
+ src/resolve/resolved-mdns.c            |  2 +-
+ src/shared/resolve-util.c              | 10 ++++++++++
+ src/shared/resolve-util.h              | 14 ++++++++++++++
+ 10 files changed, 43 insertions(+), 8 deletions(-)
+
+--- a/man/resolved.conf.xml
++++ b/man/resolved.conf.xml
+@@ -227,10 +227,11 @@
+ 
+       <varlistentry>
+         <term><varname>Cache=</varname></term>
+-        <listitem><para>Takes a boolean argument. If <literal>yes</literal> (the default), resolving a domain name
++        <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If <literal>yes</literal> (the default), resolving a domain name
+         which already got queried earlier will return the previous result as long as it is still valid, and thus does
+         not result in a new network request. Be aware that turning off caching comes at a performance penalty, which
+         is particularly high when DNSSEC is used.</para>
++        If <literal>no-negative</literal>, only positive answers are cached.
+ 
+         <para>Note that caching is turned off implicitly if the configured DNS server is on a host-local IP address
+         (such as 127.0.0.1 or ::1), in order to avoid duplicate local caching.</para></listitem>
+--- a/src/resolve/resolved-dns-cache.c
++++ b/src/resolve/resolved-dns-cache.c
+@@ -619,6 +619,7 @@
+ 
+ int dns_cache_put(
+                 DnsCache *c,
++                DnsCacheMode cache_mode,
+                 DnsResourceKey *key,
+                 int rcode,
+                 DnsAnswer *answer,
+@@ -726,6 +727,13 @@
+                         return 0;
+         }
+ 
++        if (cache_mode == DNS_CACHE_MODE_NO_NEGATIVE) {
++                char key_str[DNS_RESOURCE_KEY_STRING_MAX];
++                log_debug("Not caching negative entry for: %s, cache mode set to no-negative",
++                        dns_resource_key_to_string(key, key_str, sizeof key_str));
++                return 0;
++        }
++
+         r = dns_cache_put_negative(
+                         c,
+                         key,
+--- a/src/resolve/resolved-dns-cache.h
++++ b/src/resolve/resolved-dns-cache.h
+@@ -4,6 +4,7 @@
+ #include "hashmap.h"
+ #include "list.h"
+ #include "prioq.h"
++#include "resolve-util.h"
+ #include "time-util.h"
+ 
+ typedef struct DnsCache {
+@@ -21,7 +22,7 @@
+ void dns_cache_flush(DnsCache *c);
+ void dns_cache_prune(DnsCache *c);
+ 
+-int dns_cache_put(DnsCache *c, DnsResourceKey *key, int rcode, DnsAnswer *answer, bool authenticated, uint32_t nsec_ttl, usec_t timestamp, int owner_family, const union in_addr_union *owner_address);
++int dns_cache_put(DnsCache *c, DnsCacheMode cache_mode, DnsResourceKey *key, int rcode, DnsAnswer *answer, bool authenticated, uint32_t nsec_ttl, usec_t timestamp, int owner_family, const union in_addr_union *owner_address);
+ int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, bool clamp_ttl, int *rcode, DnsAnswer **answer, bool *authenticated);
+ 
+ int dns_cache_check_conflicts(DnsCache *cache, DnsResourceRecord *rr, int owner_family, const union in_addr_union *owner_address);
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -673,7 +673,7 @@
+                 return;
+ 
+         /* Caching disabled? */
+-        if (!t->scope->manager->enable_cache)
++        if (t->scope->manager->enable_cache == DNS_CACHE_MODE_NO)
+                 return;
+ 
+         /* We never cache if this packet is from the local host, under
+@@ -684,6 +684,7 @@
+                 return;
+ 
+         dns_cache_put(&t->scope->cache,
++                      t->scope->manager->enable_cache,
+                       t->key,
+                       t->answer_rcode,
+                       t->answer,
+--- a/src/resolve/resolved-gperf.gperf
++++ b/src/resolve/resolved-gperf.gperf
+@@ -24,6 +24,6 @@
+ Resolve.MulticastDNS,    config_parse_resolve_support,        0,                   offsetof(Manager, mdns_support)
+ Resolve.DNSSEC,          config_parse_dnssec_mode,            0,                   offsetof(Manager, dnssec_mode)
+ Resolve.DNSOverTLS,      config_parse_dns_over_tls_mode,      0,                   offsetof(Manager, dns_over_tls_mode)
+-Resolve.Cache,           config_parse_bool,                   0,                   offsetof(Manager, enable_cache)
++Resolve.Cache,           config_parse_dns_cache_mode,         DNS_CACHE_MODE_YES,  offsetof(Manager, enable_cache)
+ Resolve.DNSStubListener, config_parse_dns_stub_listener_mode, 0,                   offsetof(Manager, dns_stub_listener_mode)
+ Resolve.ReadEtcHosts,    config_parse_bool,                   0,                   offsetof(Manager, read_etc_hosts)
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -579,7 +579,7 @@
+                 .mdns_support = RESOLVE_SUPPORT_NO,
+                 .dnssec_mode = DEFAULT_DNSSEC_MODE,
+                 .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
+-                .enable_cache = true,
++                .enable_cache = DNS_CACHE_MODE_YES,
+                 .dns_stub_listener_mode = DNS_STUB_LISTENER_YES,
+                 .read_resolv_conf = true,
+                 .need_builtin_fallbacks = true,
+--- a/src/resolve/resolved-manager.h
++++ b/src/resolve/resolved-manager.h
+@@ -36,7 +36,7 @@
+         ResolveSupport mdns_support;
+         DnssecMode dnssec_mode;
+         DnsOverTlsMode dns_over_tls_mode;
+-        bool enable_cache;
++        DnsCacheMode enable_cache;
+         DnsStubListenerMode dns_stub_listener_mode;
+ 
+         /* Network */
+--- a/src/resolve/resolved-mdns.c
++++ b/src/resolve/resolved-mdns.c
+@@ -318,7 +318,7 @@
+                                 dns_transaction_process_reply(t, p);
+                 }
+ 
+-                dns_cache_put(&scope->cache, NULL, DNS_PACKET_RCODE(p), p->answer, false, (uint32_t) -1, 0, p->family, &p->sender);
++                dns_cache_put(&scope->cache, scope->manager->enable_cache, NULL, DNS_PACKET_RCODE(p), p->answer, false, (uint32_t) -1, 0, p->family, &p->sender);
+ 
+         } else if (dns_packet_validate_query(p) > 0)  {
+                 log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));
+--- a/src/shared/resolve-util.c
++++ b/src/shared/resolve-util.c
+@@ -26,4 +26,14 @@
+         [DNS_OVER_TLS_NO] = "no",
+         [DNS_OVER_TLS_OPPORTUNISTIC] = "opportunistic",
+ };
++
+ DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(dns_over_tls_mode, DnsOverTlsMode, _DNS_OVER_TLS_MODE_INVALID);
++
++DEFINE_CONFIG_PARSE_ENUM(config_parse_dns_cache_mode, dns_cache_mode, DnsCacheMode, "Failed to parse DNS cache mode setting")
++
++static const char* const dns_cache_mode_table[_DNS_CACHE_MODE_MAX] = {
++        [DNS_CACHE_MODE_YES] = "yes",
++        [DNS_CACHE_MODE_NO] = "no",
++        [DNS_CACHE_MODE_NO_NEGATIVE] = "no-negative",
++};
++DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(dns_cache_mode, DnsCacheMode, DNS_CACHE_MODE_YES);
+--- a/src/shared/resolve-util.h
++++ b/src/shared/resolve-util.h
+@@ -4,6 +4,16 @@
+ #include "conf-parser.h"
+ #include "macro.h"
+ 
++typedef enum DnsCacheMode DnsCacheMode;
++
++enum DnsCacheMode {
++        DNS_CACHE_MODE_NO,
++        DNS_CACHE_MODE_YES,
++        DNS_CACHE_MODE_NO_NEGATIVE,
++        _DNS_CACHE_MODE_MAX,
++        _DNS_CACHE_MODE_INVALID = 1
++};
++
+ typedef enum ResolveSupport ResolveSupport;
+ typedef enum DnssecMode DnssecMode;
+ typedef enum DnsOverTlsMode DnsOverTlsMode;
+@@ -49,6 +59,7 @@
+ CONFIG_PARSER_PROTOTYPE(config_parse_resolve_support);
+ CONFIG_PARSER_PROTOTYPE(config_parse_dnssec_mode);
+ CONFIG_PARSER_PROTOTYPE(config_parse_dns_over_tls_mode);
++CONFIG_PARSER_PROTOTYPE(config_parse_dns_cache_mode);
+ 
+ const char* resolve_support_to_string(ResolveSupport p) _const_;
+ ResolveSupport resolve_support_from_string(const char *s) _pure_;
+@@ -58,3 +69,6 @@
+ 
+ const char* dns_over_tls_mode_to_string(DnsOverTlsMode p) _const_;
+ DnsOverTlsMode dns_over_tls_mode_from_string(const char *s) _pure_;
++
++const char* dns_cache_mode_to_string(DnsCacheMode p) _const_;
++DnsCacheMode dns_cache_mode_from_string(const char *s) _pure_;

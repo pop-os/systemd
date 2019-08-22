@@ -147,3 +147,6 @@ test-network-add-more-checks-in-NetworkdNetDevTests..patch
 sd-netlink-introduce-sd_netlink_message_append_socka.patch
 network-wireguard-use-sd_netlink_message_append_sock.patch
 ask-password-prevent-buffer-overrow-when-reading-fro.patch
+rdrand-workaround-on-amd.patch
+lp1835581-src-network-networkd-dhcp4.c-set-prefsrc-for-classle.patch
+lp1668771-resolved-switch-cache-option-to-a-tri-state-option-s.patch
