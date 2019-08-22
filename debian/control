@@ -15,6 +15,7 @@ Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper (>= 10.4~),
                pkg-config,
+               gcc-8,
                xsltproc,
                docbook-xsl,
                docbook-xml,
