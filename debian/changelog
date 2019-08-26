@@ -1,3 +1,12 @@
+systemd (240-6ubuntu13) eoan; urgency=medium
+
+  * Drop s390x seccomp fix causing regression on s390x
+    Files:
+    - debian/patches/src-shared-seccomp-util.c-Add-mmap-definitions-for-s390.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=da95e1d022e94a4d3ce0b69bd6eb398c95d09f24
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 26 Aug 2019 17:02:54 +0200
+
 systemd (240-6ubuntu12) eoan; urgency=medium
 
   * Depends on g++-8 as well
