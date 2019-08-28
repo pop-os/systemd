@@ -441,8 +441,8 @@ static void dump_rules(UdevRules *rules) {
                 dump_token(rules, &rules->tokens[i]);
 }
 #else
-static inline void dump_token(UdevRules *rules, struct token *token) {}
-static inline void dump_rules(UdevRules *rules) {}
+static void dump_token(UdevRules *rules, struct token *token) {}
+static void dump_rules(UdevRules *rules) {}
 #endif /* ENABLE_DEBUG_UDEV */
 
 static int add_token(UdevRules *rules, struct token *token) {
@@ -645,11 +645,13 @@ static int import_program_into_properties(UdevEvent *event,
                                           const char *program) {
         char result[UTIL_LINE_SIZE];
         char *line;
-        int err;
+        int r;
 
-        err = udev_event_spawn(event, timeout_usec, true, program, result, sizeof(result));
-        if (err < 0)
-                return err;
+        r = udev_event_spawn(event, timeout_usec, false, program, result, sizeof result);
+        if (r < 0)
+                return r;
+        if (r > 0)
+                return -EIO;
 
         line = result;
         while (line) {
@@ -831,13 +833,15 @@ static const char *get_key_attribute(char *str) {
         return NULL;
 }
 
-static void rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
-                         enum operation_type op,
-                         const char *value, const void *data) {
+static int rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
+                        enum operation_type op,
+                        const char *value, const void *data) {
         struct token *token = rule_tmp->token + rule_tmp->token_cur;
         const char *attr = NULL;
 
-        assert(rule_tmp->token_cur < ELEMENTSOF(rule_tmp->token));
+        if (rule_tmp->token_cur >= ELEMENTSOF(rule_tmp->token))
+                return -E2BIG;
+
         memzero(token, sizeof(struct token));
 
         switch (type) {
@@ -968,6 +972,8 @@ static void rule_add_key(struct rule_tmp *rule_tmp, enum token_type type,
         token->key.type = type;
         token->key.op = op;
         rule_tmp->token_cur++;
+
+        return 0;
 }
 
 static int sort_token(UdevRules *rules, struct rule_tmp *rule_tmp) {
@@ -1009,6 +1015,7 @@ static int sort_token(UdevRules *rules, struct rule_tmp *rule_tmp) {
 #define LOG_RULE_WARNING(fmt, ...) LOG_RULE_FULL(LOG_WARNING, fmt, ##__VA_ARGS__)
 #define LOG_RULE_DEBUG(fmt, ...) LOG_RULE_FULL(LOG_DEBUG, fmt, ##__VA_ARGS__)
 #define LOG_AND_RETURN(fmt, ...) { LOG_RULE_ERROR(fmt, __VA_ARGS__); return; }
+#define LOG_AND_RETURN_ADD_KEY LOG_AND_RETURN("Temporary rule array too small, aborting event processing with %u items", rule_tmp.token_cur);
 
 static void add_rule(UdevRules *rules, char *line,
                      const char *filename, unsigned filename_off, unsigned lineno) {
@@ -1018,6 +1025,7 @@ static void add_rule(UdevRules *rules, char *line,
                 .rules = rules,
                 .rule.type = TK_RULE,
         };
+        int r;
 
         /* the offset in the rule is limited to unsigned short */
         if (filename_off < USHRT_MAX)
@@ -1051,26 +1059,26 @@ static void add_rule(UdevRules *rules, char *line,
                         break;
                 }
 
-                if (rule_tmp.token_cur >= ELEMENTSOF(rule_tmp.token))
-                        LOG_AND_RETURN("Temporary rule array too small, aborting event processing with %u items", rule_tmp.token_cur);
-
                 if (streq(key, "ACTION")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_ACTION, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_ACTION, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "DEVPATH")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_DEVPATH, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_DEVPATH, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "KERNEL")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_KERNEL, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_KERNEL, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "SUBSYSTEM")) {
                         if (op > OP_MATCH_MAX)
@@ -1081,15 +1089,18 @@ static void add_rule(UdevRules *rules, char *line,
                                 if (!streq(value, "subsystem"))
                                         LOG_RULE_WARNING("'%s' must be specified as 'subsystem'; please fix", value);
 
-                                rule_add_key(&rule_tmp, TK_M_SUBSYSTEM, op, "subsystem|class|bus", NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_SUBSYSTEM, op, "subsystem|class|bus", NULL);
                         } else
-                                rule_add_key(&rule_tmp, TK_M_SUBSYSTEM, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_SUBSYSTEM, op, value, NULL);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "DRIVER")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_DRIVER, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_DRIVER, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "ATTR{")) {
                         attr = get_key_attribute(key + STRLEN("ATTR"));
@@ -1100,9 +1111,11 @@ static void add_rule(UdevRules *rules, char *line,
                                 LOG_AND_RETURN("Invalid %s operation", "ATTR");
 
                         if (op < OP_MATCH_MAX)
-                                rule_add_key(&rule_tmp, TK_M_ATTR, op, value, attr);
+                                r = rule_add_key(&rule_tmp, TK_M_ATTR, op, value, attr);
                         else
-                                rule_add_key(&rule_tmp, TK_A_ATTR, op, value, attr);
+                                r = rule_add_key(&rule_tmp, TK_A_ATTR, op, value, attr);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "SYSCTL{")) {
                         attr = get_key_attribute(key + STRLEN("SYSCTL"));
@@ -1113,9 +1126,11 @@ static void add_rule(UdevRules *rules, char *line,
                                 LOG_AND_RETURN("Invalid %s operation", "ATTR");
 
                         if (op < OP_MATCH_MAX)
-                                rule_add_key(&rule_tmp, TK_M_SYSCTL, op, value, attr);
+                                r = rule_add_key(&rule_tmp, TK_M_SYSCTL, op, value, attr);
                         else
-                                rule_add_key(&rule_tmp, TK_A_SYSCTL, op, value, attr);
+                                r = rule_add_key(&rule_tmp, TK_A_SYSCTL, op, value, attr);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "SECLABEL{")) {
                         attr = get_key_attribute(key + STRLEN("SECLABEL"));
@@ -1125,25 +1140,29 @@ static void add_rule(UdevRules *rules, char *line,
                         if (op == OP_REMOVE)
                                 LOG_AND_RETURN("Invalid %s operation", "SECLABEL");
 
-                        rule_add_key(&rule_tmp, TK_A_SECLABEL, op, value, attr);
+                        if (rule_add_key(&rule_tmp, TK_A_SECLABEL, op, value, attr) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "KERNELS")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_KERNELS, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_KERNELS, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "SUBSYSTEMS")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_SUBSYSTEMS, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_SUBSYSTEMS, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "DRIVERS")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_DRIVERS, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_DRIVERS, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "ATTRS{")) {
                         if (op > OP_MATCH_MAX)
@@ -1157,13 +1176,15 @@ static void add_rule(UdevRules *rules, char *line,
                                 LOG_RULE_WARNING("'device' link may not be available in future kernels; please fix");
                         if (strstr(attr, "../"))
                                 LOG_RULE_WARNING("Direct reference to parent sysfs directory, may break in future kernels; please fix");
-                        rule_add_key(&rule_tmp, TK_M_ATTRS, op, value, attr);
+                        if (rule_add_key(&rule_tmp, TK_M_ATTRS, op, value, attr) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "TAGS")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_TAGS, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_TAGS, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "ENV{")) {
                         attr = get_key_attribute(key + STRLEN("ENV"));
@@ -1174,7 +1195,7 @@ static void add_rule(UdevRules *rules, char *line,
                                 LOG_AND_RETURN("Invalid %s operation", "ENV");
 
                         if (op < OP_MATCH_MAX)
-                                rule_add_key(&rule_tmp, TK_M_ENV, op, value, attr);
+                                r = rule_add_key(&rule_tmp, TK_M_ENV, op, value, attr);
                         else {
                                 if (STR_IN_SET(attr,
                                                "ACTION",
@@ -1190,26 +1211,32 @@ static void add_rule(UdevRules *rules, char *line,
                                                "TAGS"))
                                         LOG_AND_RETURN("Invalid ENV attribute, '%s' cannot be set", attr);
 
-                                rule_add_key(&rule_tmp, TK_A_ENV, op, value, attr);
+                                r = rule_add_key(&rule_tmp, TK_A_ENV, op, value, attr);
                         }
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "TAG")) {
                         if (op < OP_MATCH_MAX)
-                                rule_add_key(&rule_tmp, TK_M_TAG, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_TAG, op, value, NULL);
                         else
-                                rule_add_key(&rule_tmp, TK_A_TAG, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_A_TAG, op, value, NULL);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "PROGRAM")) {
                         if (op == OP_REMOVE)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_PROGRAM, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_PROGRAM, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "RESULT")) {
                         if (op > OP_MATCH_MAX)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_M_RESULT, op, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_M_RESULT, op, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "IMPORT")) {
                         attr = get_key_attribute(key + STRLEN("IMPORT"));
@@ -1227,28 +1254,34 @@ static void add_rule(UdevRules *rules, char *line,
 
                                         if (cmd >= 0) {
                                                 LOG_RULE_DEBUG("IMPORT found builtin '%s', replacing", value);
-                                                rule_add_key(&rule_tmp, TK_M_IMPORT_BUILTIN, op, value, &cmd);
+                                                if (rule_add_key(&rule_tmp, TK_M_IMPORT_BUILTIN, op, value, &cmd) < 0)
+                                                        LOG_AND_RETURN_ADD_KEY;
                                                 continue;
                                         }
                                 }
-                                rule_add_key(&rule_tmp, TK_M_IMPORT_PROG, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_IMPORT_PROG, op, value, NULL);
                         } else if (streq(attr, "builtin")) {
                                 const enum udev_builtin_cmd cmd = udev_builtin_lookup(value);
 
-                                if (cmd < 0)
-                                        LOG_RULE_WARNING("IMPORT{builtin} '%s' unknown", value);
-                                else
-                                        rule_add_key(&rule_tmp, TK_M_IMPORT_BUILTIN, op, value, &cmd);
+                                if (cmd < 0) {
+                                        LOG_RULE_WARNING("IMPORT{builtin} '%s' unknown, ignoring", value);
+                                        continue;
+                                } else
+                                        r = rule_add_key(&rule_tmp, TK_M_IMPORT_BUILTIN, op, value, &cmd);
                         } else if (streq(attr, "file"))
-                                rule_add_key(&rule_tmp, TK_M_IMPORT_FILE, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_IMPORT_FILE, op, value, NULL);
                         else if (streq(attr, "db"))
-                                rule_add_key(&rule_tmp, TK_M_IMPORT_DB, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_IMPORT_DB, op, value, NULL);
                         else if (streq(attr, "cmdline"))
-                                rule_add_key(&rule_tmp, TK_M_IMPORT_CMDLINE, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_IMPORT_CMDLINE, op, value, NULL);
                         else if (streq(attr, "parent"))
-                                rule_add_key(&rule_tmp, TK_M_IMPORT_PARENT, op, value, NULL);
-                        else
+                                r = rule_add_key(&rule_tmp, TK_M_IMPORT_PARENT, op, value, NULL);
+                        else {
                                 LOG_RULE_ERROR("Ignoring unknown %s{} type '%s'", "IMPORT", attr);
+                                continue;
+                        }
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "TEST")) {
                         mode_t mode = 0;
@@ -1259,9 +1292,11 @@ static void add_rule(UdevRules *rules, char *line,
                         attr = get_key_attribute(key + STRLEN("TEST"));
                         if (attr) {
                                 mode = strtol(attr, NULL, 8);
-                                rule_add_key(&rule_tmp, TK_M_TEST, op, value, &mode);
+                                r = rule_add_key(&rule_tmp, TK_M_TEST, op, value, &mode);
                         } else
-                                rule_add_key(&rule_tmp, TK_M_TEST, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_TEST, op, value, NULL);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "RUN")) {
                         attr = get_key_attribute(key + STRLEN("RUN"));
@@ -1273,16 +1308,21 @@ static void add_rule(UdevRules *rules, char *line,
                         if (streq(attr, "builtin")) {
                                 const enum udev_builtin_cmd cmd = udev_builtin_lookup(value);
 
-                                if (cmd < 0)
-                                        LOG_RULE_ERROR("RUN{builtin}: '%s' unknown", value);
-                                else
-                                        rule_add_key(&rule_tmp, TK_A_RUN_BUILTIN, op, value, &cmd);
+                                if (cmd < 0) {
+                                        LOG_RULE_ERROR("RUN{builtin}: '%s' unknown, ignoring", value);
+                                        continue;
+                                } else
+                                        r = rule_add_key(&rule_tmp, TK_A_RUN_BUILTIN, op, value, &cmd);
                         } else if (streq(attr, "program")) {
                                 const enum udev_builtin_cmd cmd = _UDEV_BUILTIN_MAX;
 
-                                rule_add_key(&rule_tmp, TK_A_RUN_PROGRAM, op, value, &cmd);
-                        } else
+                                r = rule_add_key(&rule_tmp, TK_A_RUN_PROGRAM, op, value, &cmd);
+                        } else {
                                 LOG_RULE_ERROR("Ignoring unknown %s{} type '%s'", "RUN", attr);
+                                continue;
+                        }
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (streq(key, "LABEL")) {
                         if (op == OP_REMOVE)
@@ -1294,14 +1334,15 @@ static void add_rule(UdevRules *rules, char *line,
                         if (op == OP_REMOVE)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
-                        rule_add_key(&rule_tmp, TK_A_GOTO, 0, value, NULL);
+                        if (rule_add_key(&rule_tmp, TK_A_GOTO, 0, value, NULL) < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                 } else if (startswith(key, "NAME")) {
                         if (op == OP_REMOVE)
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
                         if (op < OP_MATCH_MAX)
-                                rule_add_key(&rule_tmp, TK_M_NAME, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_NAME, op, value, NULL);
                         else {
                                 if (streq(value, "%k")) {
                                         LOG_RULE_WARNING("NAME=\"%%k\" is ignored, because it breaks kernel supplied names; please remove");
@@ -1311,8 +1352,10 @@ static void add_rule(UdevRules *rules, char *line,
                                         LOG_RULE_DEBUG("NAME=\"\" is ignored, because udev will not delete any device nodes; please remove");
                                         continue;
                                 }
-                                rule_add_key(&rule_tmp, TK_A_NAME, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_A_NAME, op, value, NULL);
                         }
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
                         rule_tmp.rule.rule.can_set_name = true;
 
                 } else if (streq(key, "SYMLINK")) {
@@ -1320,9 +1363,11 @@ static void add_rule(UdevRules *rules, char *line,
                                 LOG_AND_RETURN("Invalid %s operation", key);
 
                         if (op < OP_MATCH_MAX)
-                                rule_add_key(&rule_tmp, TK_M_DEVLINK, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_M_DEVLINK, op, value, NULL);
                         else
-                                rule_add_key(&rule_tmp, TK_A_DEVLINK, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_A_DEVLINK, op, value, NULL);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
                         rule_tmp.rule.rule.can_set_name = true;
 
                 } else if (streq(key, "OWNER")) {
@@ -1334,12 +1379,18 @@ static void add_rule(UdevRules *rules, char *line,
 
                         uid = strtoul(value, &endptr, 10);
                         if (endptr[0] == '\0')
-                                rule_add_key(&rule_tmp, TK_A_OWNER_ID, op, NULL, &uid);
+                                r = rule_add_key(&rule_tmp, TK_A_OWNER_ID, op, NULL, &uid);
                         else if (rules->resolve_name_timing == RESOLVE_NAME_EARLY && !strchr("$%", value[0])) {
                                 uid = add_uid(rules, value);
-                                rule_add_key(&rule_tmp, TK_A_OWNER_ID, op, NULL, &uid);
+                                r = rule_add_key(&rule_tmp, TK_A_OWNER_ID, op, NULL, &uid);
                         } else if (rules->resolve_name_timing != RESOLVE_NAME_NEVER)
-                                rule_add_key(&rule_tmp, TK_A_OWNER, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_A_OWNER, op, value, NULL);
+                        else {
+                                LOG_RULE_ERROR("Invalid %s operation", key);
+                                continue;
+                        }
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                         rule_tmp.rule.rule.can_set_name = true;
 
@@ -1352,12 +1403,18 @@ static void add_rule(UdevRules *rules, char *line,
 
                         gid = strtoul(value, &endptr, 10);
                         if (endptr[0] == '\0')
-                                rule_add_key(&rule_tmp, TK_A_GROUP_ID, op, NULL, &gid);
+                                r = rule_add_key(&rule_tmp, TK_A_GROUP_ID, op, NULL, &gid);
                         else if ((rules->resolve_name_timing == RESOLVE_NAME_EARLY) && !strchr("$%", value[0])) {
                                 gid = add_gid(rules, value);
-                                rule_add_key(&rule_tmp, TK_A_GROUP_ID, op, NULL, &gid);
+                                r = rule_add_key(&rule_tmp, TK_A_GROUP_ID, op, NULL, &gid);
                         } else if (rules->resolve_name_timing != RESOLVE_NAME_NEVER)
-                                rule_add_key(&rule_tmp, TK_A_GROUP, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_A_GROUP, op, value, NULL);
+                        else {
+                                LOG_RULE_ERROR("Invalid %s operation", key);
+                                continue;
+                        }
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
 
                         rule_tmp.rule.rule.can_set_name = true;
 
@@ -1370,9 +1427,12 @@ static void add_rule(UdevRules *rules, char *line,
 
                         mode = strtol(value, &endptr, 8);
                         if (endptr[0] == '\0')
-                                rule_add_key(&rule_tmp, TK_A_MODE_ID, op, NULL, &mode);
+                                r = rule_add_key(&rule_tmp, TK_A_MODE_ID, op, NULL, &mode);
                         else
-                                rule_add_key(&rule_tmp, TK_A_MODE, op, value, NULL);
+                                r = rule_add_key(&rule_tmp, TK_A_MODE, op, value, NULL);
+                        if (r < 0)
+                                LOG_AND_RETURN_ADD_KEY;
+
                         rule_tmp.rule.rule.can_set_name = true;
 
                 } else if (streq(key, "OPTIONS")) {
@@ -1385,37 +1445,48 @@ static void add_rule(UdevRules *rules, char *line,
                         if (pos) {
                                 int prio = atoi(pos + STRLEN("link_priority="));
 
-                                rule_add_key(&rule_tmp, TK_A_DEVLINK_PRIO, op, NULL, &prio);
+                                if (rule_add_key(&rule_tmp, TK_A_DEVLINK_PRIO, op, NULL, &prio) < 0)
+                                        LOG_AND_RETURN_ADD_KEY;
                         }
 
                         pos = strstr(value, "string_escape=");
                         if (pos) {
                                 pos += STRLEN("string_escape=");
                                 if (startswith(pos, "none"))
-                                        rule_add_key(&rule_tmp, TK_A_STRING_ESCAPE_NONE, op, NULL, NULL);
+                                        r = rule_add_key(&rule_tmp, TK_A_STRING_ESCAPE_NONE, op, NULL, NULL);
                                 else if (startswith(pos, "replace"))
-                                        rule_add_key(&rule_tmp, TK_A_STRING_ESCAPE_REPLACE, op, NULL, NULL);
+                                        r = rule_add_key(&rule_tmp, TK_A_STRING_ESCAPE_REPLACE, op, NULL, NULL);
+                                else {
+                                        LOG_RULE_ERROR("OPTIONS: unknown string_escape mode '%s', ignoring", pos);
+                                        r = 0;
+                                }
+                                if (r < 0)
+                                        LOG_AND_RETURN_ADD_KEY;
                         }
 
                         pos = strstr(value, "db_persist");
                         if (pos)
-                                rule_add_key(&rule_tmp, TK_A_DB_PERSIST, op, NULL, NULL);
+                                if (rule_add_key(&rule_tmp, TK_A_DB_PERSIST, op, NULL, NULL) < 0)
+                                        LOG_AND_RETURN_ADD_KEY;
 
                         pos = strstr(value, "nowatch");
                         if (pos) {
                                 static const int zero = 0;
-                                rule_add_key(&rule_tmp, TK_A_INOTIFY_WATCH, op, NULL, &zero);
+                                if (rule_add_key(&rule_tmp, TK_A_INOTIFY_WATCH, op, NULL, &zero) < 0)
+                                        LOG_AND_RETURN_ADD_KEY;
                         } else {
                                 static const int one = 1;
                                 pos = strstr(value, "watch");
                                 if (pos)
-                                        rule_add_key(&rule_tmp, TK_A_INOTIFY_WATCH, op, NULL, &one);
+                                        if (rule_add_key(&rule_tmp, TK_A_INOTIFY_WATCH, op, NULL, &one) < 0)
+                                                LOG_AND_RETURN_ADD_KEY;
                         }
 
                         pos = strstr(value, "static_node=");
                         if (pos) {
                                 pos += STRLEN("static_node=");
-                                rule_add_key(&rule_tmp, TK_A_STATIC_NODE, op, pos, NULL);
+                                if (rule_add_key(&rule_tmp, TK_A_STATIC_NODE, op, pos, NULL) < 0)
+                                        LOG_AND_RETURN_ADD_KEY;
                                 rule_tmp.rule.rule.has_static_node = true;
                         }
 
@@ -1959,7 +2030,7 @@ int udev_rules_apply_to_event(
                                          rules_str(rules, rule->rule.filename_off),
                                          rule->rule.filename_line);
 
-                        if (udev_event_spawn(event, timeout_usec, true, program, result, sizeof(result)) < 0) {
+                        if (udev_event_spawn(event, timeout_usec, true, program, result, sizeof(result)) != 0) {
                                 if (cur->key.op != OP_NOMATCH)
                                         goto nomatch;
                         } else {
@@ -2229,13 +2300,12 @@ int udev_rules_apply_to_event(
                         r = hashmap_put(event->seclabel_list, name, label);
                         if (r < 0)
                                 return log_oom();
-
-                        name = label = NULL;
-
                         log_device_debug(dev, "SECLABEL{%s}='%s' %s:%u",
                                          name, label,
                                          rules_str(rules, rule->rule.filename_off),
                                          rule->rule.filename_line);
+                        name = label = NULL;
+
                         break;
                 }
                 case TK_A_ENV: {

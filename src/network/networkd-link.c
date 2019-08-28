@@ -517,8 +517,6 @@ static void link_detach_from_manager(Link *link) {
         hashmap_remove(link->manager->links, INT_TO_PTR(link->ifindex));
         set_remove(link->manager->links_requesting_uuid, link);
         link_clean(link);
-
-        link->manager = NULL;
 }
 
 static Link *link_free(Link *link) {
@@ -730,69 +728,15 @@ static void link_enter_configured(Link *link) {
         link_dirty(link);
 }
 
-void link_check_ready(Link *link) {
-        Address *a;
-        Iterator i;
-
-        assert(link);
-
-        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
-                return;
-
-        if (!link->network)
-                return;
-
-        if (!link->addresses_configured)
-                return;
-
-        if (!link->neighbors_configured)
-                return;
-
-        if (!link->static_routes_configured)
-                return;
-
-        if (!link->routing_policy_rules_configured)
-                return;
-
-        if (link_ipv4ll_enabled(link))
-                if (!link->ipv4ll_address ||
-                    !link->ipv4ll_route)
-                        return;
-
-        if (!link->network->bridge) {
-
-                if (link_ipv6ll_enabled(link))
-                        if (in_addr_is_null(AF_INET6, (const union in_addr_union*) &link->ipv6ll_address) > 0)
-                                return;
-
-                if ((link_dhcp4_enabled(link) && !link_dhcp6_enabled(link) &&
-                     !link->dhcp4_configured) ||
-                    (link_dhcp6_enabled(link) && !link_dhcp4_enabled(link) &&
-                     !link->dhcp6_configured) ||
-                    (link_dhcp4_enabled(link) && link_dhcp6_enabled(link) &&
-                     !link->dhcp4_configured && !link->dhcp6_configured))
-                        return;
-
-                if (link_ipv6_accept_ra_enabled(link) && !link->ndisc_configured)
-                        return;
-        }
-
-        SET_FOREACH(a, link->addresses, i)
-                if (!address_is_ready(a))
-                        return;
-
-        if (link->state != LINK_STATE_CONFIGURED)
-                link_enter_configured(link);
-
-        return;
-}
-
-static int link_set_routing_policy_rule(Link *link) {
+static int link_request_set_routing_policy_rule(Link *link) {
         RoutingPolicyRule *rule, *rrule = NULL;
         int r;
 
         assert(link);
         assert(link->network);
+
+        link_set_state(link, LINK_STATE_CONFIGURING);
+        link->routing_policy_rules_configured = false;
 
         LIST_FOREACH(rules, rule, link->network->rules) {
                 r = routing_policy_rule_get(link->manager, rule->family, &rule->from, rule->from_prefixlen, &rule->to,
@@ -865,8 +809,11 @@ static int link_request_set_routes(Link *link) {
         assert(link->state != _LINK_STATE_INVALID);
 
         link_set_state(link, LINK_STATE_CONFIGURING);
+        link->static_routes_configured = false;
 
-        (void) link_set_routing_policy_rule(link);
+        r = link_request_set_routing_policy_rule(link);
+        if (r < 0)
+                return r;
 
         /* First add the routes that enable us to talk to gateways, then add in the others that need a gateway. */
         for (phase = 0; phase < _PHASE_MAX; phase++)
@@ -894,6 +841,68 @@ static int link_request_set_routes(Link *link) {
         return 0;
 }
 
+void link_check_ready(Link *link) {
+        Address *a;
+        Iterator i;
+
+        assert(link);
+
+        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
+                return;
+
+        if (!link->network)
+                return;
+
+        if (!link->addresses_configured)
+                return;
+
+        if (!link->neighbors_configured)
+                return;
+
+        SET_FOREACH(a, link->addresses, i)
+                if (!address_is_ready(a))
+                        return;
+
+        if (!link->addresses_ready) {
+                link->addresses_ready = true;
+                link_request_set_routes(link);
+        }
+
+        if (!link->static_routes_configured)
+                return;
+
+        if (!link->routing_policy_rules_configured)
+                return;
+
+        if (link_ipv4ll_enabled(link))
+                if (!link->ipv4ll_address ||
+                    !link->ipv4ll_route)
+                        return;
+
+        if (!link->network->bridge) {
+
+                if (link_ipv6ll_enabled(link))
+                        if (in_addr_is_null(AF_INET6, (const union in_addr_union*) &link->ipv6ll_address) > 0)
+                                return;
+
+                if ((link_dhcp4_enabled(link) && !link_dhcp6_enabled(link) &&
+                     !link->dhcp4_configured) ||
+                    (link_dhcp6_enabled(link) && !link_dhcp4_enabled(link) &&
+                     !link->dhcp6_configured) ||
+                    (link_dhcp4_enabled(link) && link_dhcp6_enabled(link) &&
+                     !link->dhcp4_configured && !link->dhcp6_configured))
+                        return;
+
+                if (link_ipv6_accept_ra_enabled(link) && !link->ndisc_configured)
+                        return;
+        }
+
+        if (link->state != LINK_STATE_CONFIGURED)
+                link_enter_configured(link);
+
+        return;
+}
+
 static int link_request_set_neighbors(Link *link) {
         Neighbor *neighbor;
         int r;
@@ -903,6 +912,7 @@ static int link_request_set_neighbors(Link *link) {
         assert(link->state != _LINK_STATE_INVALID);
 
         link_set_state(link, LINK_STATE_CONFIGURING);
+        link->neighbors_configured = false;
 
         LIST_FOREACH(neighbors, neighbor, link->network->neighbors) {
                 r = neighbor_configure(neighbor, link, NULL);
@@ -947,7 +957,7 @@ static int address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) 
         if (link->address_messages == 0) {
                 log_link_debug(link, "Addresses set");
                 link->addresses_configured = true;
-                link_request_set_routes(link);
+                link_check_ready(link);
         }
 
         return 1;
@@ -1073,16 +1083,29 @@ static int link_request_set_addresses(Link *link) {
         assert(link->network);
         assert(link->state != _LINK_STATE_INVALID);
 
+        link_set_state(link, LINK_STATE_CONFIGURING);
+
+        /* Reset all *_configured flags we are configuring. */
+        link->addresses_configured = false;
+        link->addresses_ready = false;
+        link->neighbors_configured = false;
+        link->static_routes_configured = false;
+        link->routing_policy_rules_configured = false;
+
         r = link_set_bridge_fdb(link);
         if (r < 0)
                 return r;
 
-        link_set_state(link, LINK_STATE_CONFIGURING);
-
-        link_request_set_neighbors(link);
+        r = link_request_set_neighbors(link);
+        if (r < 0)
+                return r;
 
         LIST_FOREACH(addresses, ad, link->network->static_addresses) {
-                r = address_configure(ad, link, address_handler, false);
+                bool update;
+
+                update = address_get(link, ad->family, &ad->in_addr, ad->prefixlen, NULL) > 0;
+
+                r = address_configure(ad, link, address_handler, update);
                 if (r < 0) {
                         log_link_warning_errno(link, r, "Could not set addresses: %m");
                         link_enter_failed(link);
@@ -1207,14 +1230,15 @@ static int link_request_set_addresses(Link *link) {
                                         return r;
                         }
                 }
+                if (!sd_dhcp_server_is_running(link->dhcp_server)) {
+                        r = sd_dhcp_server_start(link->dhcp_server);
+                        if (r < 0) {
+                                log_link_warning_errno(link, r, "Could not start DHCPv4 server instance: %m");
 
-                r = sd_dhcp_server_start(link->dhcp_server);
-                if (r < 0) {
-                        log_link_warning_errno(link, r, "Could not start DHCPv4 server instance: %m");
+                                link_enter_failed(link);
 
-                        link_enter_failed(link);
-
-                        return 0;
+                                return 0;
+                        }
                 }
 
                 log_link_debug(link, "Offering DHCPv4 leases");
@@ -1222,7 +1246,7 @@ static int link_request_set_addresses(Link *link) {
 
         if (link->address_messages == 0) {
                 link->addresses_configured = true;
-                link_request_set_routes(link);
+                link_check_ready(link);
         } else
                 log_link_debug(link, "Setting addresses");
 
@@ -1739,6 +1763,84 @@ bool link_has_carrier(Link *link) {
         return false;
 }
 
+static int link_address_genmode_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+        int r;
+
+        assert(link);
+
+        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
+                return 1;
+
+        r = sd_netlink_message_get_errno(m);
+        if (r < 0)
+                log_link_warning_errno(link, r, "Could not set address genmode for interface: %m");
+
+        return 1;
+}
+
+static int link_configure_addrgen_mode(Link *link) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
+        uint8_t ipv6ll_mode;
+        int r;
+
+        assert(link);
+        assert(link->network);
+        assert(link->manager);
+        assert(link->manager->rtnl);
+
+        log_link_debug(link, "Setting address genmode for link");
+
+        r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_SETLINK, link->ifindex);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not allocate RTM_SETLINK message: %m");
+
+        r = sd_netlink_message_open_container(req, IFLA_AF_SPEC);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not open IFLA_AF_SPEC container: %m");
+
+        r = sd_netlink_message_open_container(req, AF_INET6);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not open AF_INET6 container: %m");
+
+        if (!link_ipv6ll_enabled(link))
+                ipv6ll_mode = IN6_ADDR_GEN_MODE_NONE;
+        else {
+                const char *p = NULL;
+                _cleanup_free_ char *stable_secret = NULL;
+
+                p = strjoina("/proc/sys/net/ipv6/conf/", link->ifname, "/stable_secret");
+
+                /* The file may not exist. And event if it exists, when stable_secret is unset,
+                 * then reading the file fails and EIO is returned. */
+                r = read_one_line_file(p, &stable_secret);
+                if (r < 0)
+                        ipv6ll_mode = IN6_ADDR_GEN_MODE_EUI64;
+                else
+                        ipv6ll_mode = IN6_ADDR_GEN_MODE_STABLE_PRIVACY;
+        }
+
+        r = sd_netlink_message_append_u8(req, IFLA_INET6_ADDR_GEN_MODE, ipv6ll_mode);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not append IFLA_INET6_ADDR_GEN_MODE: %m");
+
+        r = sd_netlink_message_close_container(req);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not close AF_INET6 container: %m");
+
+        r = sd_netlink_message_close_container(req);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not close IFLA_AF_SPEC container: %m");
+
+        r = netlink_call_async(link->manager->rtnl, NULL, req, link_address_genmode_handler,
+                               link_netlink_destroy_callback, link);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Could not send rtnetlink message: %m");
+
+        link_ref(link);
+
+        return 0;
+}
+
 static int link_up_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
         int r;
 
@@ -1755,9 +1857,8 @@ static int link_up_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) 
         return 1;
 }
 
-int link_up(Link *link) {
+static int link_up(Link *link) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
-        uint8_t ipv6ll_mode;
         int r;
 
         assert(link);
@@ -1788,33 +1889,15 @@ int link_up(Link *link) {
                         return log_link_error_errno(link, r, "Could not set MAC address: %m");
         }
 
-        r = sd_netlink_message_open_container(req, IFLA_AF_SPEC);
-        if (r < 0)
-                return log_link_error_errno(link, r, "Could not open IFLA_AF_SPEC container: %m");
-
         if (link_ipv6_enabled(link)) {
+                r = sd_netlink_message_open_container(req, IFLA_AF_SPEC);
+                if (r < 0)
+                        return log_link_error_errno(link, r, "Could not open IFLA_AF_SPEC container: %m");
+
                 /* if the kernel lacks ipv6 support setting IFF_UP fails if any ipv6 options are passed */
                 r = sd_netlink_message_open_container(req, AF_INET6);
                 if (r < 0)
                         return log_link_error_errno(link, r, "Could not open AF_INET6 container: %m");
-
-                if (!link_ipv6ll_enabled(link))
-                        ipv6ll_mode = IN6_ADDR_GEN_MODE_NONE;
-                else {
-                        const char *p = NULL;
-                        _cleanup_free_ char *stable_secret = NULL;
-
-                        p = strjoina("/proc/sys/net/ipv6/conf/", link->ifname, "/stable_secret");
-                        r = read_one_line_file(p, &stable_secret);
-
-                        if (r < 0)
-                                ipv6ll_mode = IN6_ADDR_GEN_MODE_EUI64;
-                        else
-                                ipv6ll_mode = IN6_ADDR_GEN_MODE_STABLE_PRIVACY;
-                }
-                r = sd_netlink_message_append_u8(req, IFLA_INET6_ADDR_GEN_MODE, ipv6ll_mode);
-                if (r < 0)
-                        return log_link_error_errno(link, r, "Could not append IFLA_INET6_ADDR_GEN_MODE: %m");
 
                 if (!in_addr_is_null(AF_INET6, &link->network->ipv6_token)) {
                         r = sd_netlink_message_append_in6_addr(req, IFLA_INET6_TOKEN, &link->network->ipv6_token.in6);
@@ -1825,11 +1908,11 @@ int link_up(Link *link) {
                 r = sd_netlink_message_close_container(req);
                 if (r < 0)
                         return log_link_error_errno(link, r, "Could not close AF_INET6 container: %m");
-        }
 
-        r = sd_netlink_message_close_container(req);
-        if (r < 0)
-                return log_link_error_errno(link, r, "Could not close IFLA_AF_SPEC container: %m");
+                r = sd_netlink_message_close_container(req);
+                if (r < 0)
+                        return log_link_error_errno(link, r, "Could not close IFLA_AF_SPEC container: %m");
+        }
 
         r = netlink_call_async(link->manager->rtnl, NULL, req, link_up_handler,
                                link_netlink_destroy_callback, link);
@@ -2914,6 +2997,12 @@ static int link_configure(Link *link) {
 
         if (link->network->mtu > 0) {
                 r = link_set_mtu(link, link->network->mtu);
+                if (r < 0)
+                        return r;
+        }
+
+        if (socket_ipv6_is_supported()) {
+                r = link_configure_addrgen_mode(link);
                 if (r < 0)
                         return r;
         }

@@ -431,6 +431,13 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGIGABYTE:pnU2442:*
  KEYBOARD_KEY_a0=!                                      # mute
 
 ###########################################################
+# Gemini
+###########################################################
+
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnGeminiDevices:pnNC14V1006:*
+ KEYBOARD_KEY_9c=enter
+
+###########################################################
 # Genius
 ###########################################################
 
@@ -617,6 +624,31 @@ evdev:atkbd:dmi:bvn*:bvr*:svnHP*:pnHP*ProBook*640*G2*
 evdev:atkbd:dmi:bvn*:bvr*:svnHP*:pnHP*ProBook*645*G4*
  KEYBOARD_KEY_73=slash                                  # Slash key
  KEYBOARD_KEY_f8=wlan                                   # Wireless HW switch button
+
+# HP Stream 7
+# The ACPI tables contains a gpio-keys entry for a non connected GPIO
+# causing spurious events, map this to unknown to disable it
+# older kernels use "ev:23" newer kernels "ev:3"
+evdev:name:gpio-keys:phys:gpio-keys/input0:ev:3:dmi:*:svnHewlett-Packard:pnHPStream7Tablet:*
+evdev:name:gpio-keys:phys:gpio-keys/input0:ev:23:dmi:*:svnHewlett-Packard:pnHPStream7Tablet:*
+ KEYBOARD_KEY_0=unknown
+
+##########################################################
+# Huawei
+##########################################################
+
+# Huawei WMI hotkeys driver
+evdev:name:Huawei WMI hotkeys:dmi:bvn*:bvr*:bd*:svnHUAWEI*
+ KEYBOARD_KEY_287=f20                                   # Microphone mute button, should be micmute
+
+# Huawei MACH-WX9
+evdev:atkbd:dmi:bvn*:bvr*:svnHUAWEI*:pnMACH-WX9:pvr*
+ KEYBOARD_KEY_f7=unknown
+ KEYBOARD_KEY_f8=fn
+
+evdev:name:Huawei WMI hotkeys:dmi:bvn*:bvr*:bd*:svnHUAWEI*:pnMACH-WX9:pvr*
+ KEYBOARD_KEY_281=unknown                               # Brightness Down, also emitted by acpi-video, ignore
+ KEYBOARD_KEY_282=unknown                               # Brightness Up, also emitted by acpi-video, ignore
 
 ###########################################################
 # IBM
@@ -982,10 +1014,6 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMicro-Star*:pn*PR200*:pvr*
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMICRO-STAR*:pnU90/U100:*
  KEYBOARD_KEY_e4=reserved
 
-# MSI GS65 Stealth Thin has a physical backslash key next to the space bar
-evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMicro-Star*:pnGS65StealthThin*:pvr*
- KEYBOARD_KEY_56=backslash
-
 ###########################################################
 # MSI
 ###########################################################
@@ -1104,6 +1132,10 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnPurism*:pn*Librem13v2*:pvr*
 
 # Purism Librem 13 V3
 evdev:atkbd:dmi:bvn*:bvr*:bd*:svnPurism*:pn*Librem13v3*:pvr*
+ KEYBOARD_KEY_56=backslash
+
+# Purism Librem 13 V4
+evdev:atkbd:dmi:bvn*:bvr*:bd*:svnPurism*:pn*Librem13v4*:pvr*
  KEYBOARD_KEY_56=backslash
 
 ###########################################################

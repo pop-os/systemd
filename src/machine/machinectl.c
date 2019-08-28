@@ -1309,7 +1309,7 @@ static int on_machine_removed(sd_bus_message *m, void *userdata, sd_bus_error *r
 static int process_forward(sd_event *event, PTYForward **forward, int master, PTYForwardFlags flags, const char *name) {
         char last_char = 0;
         bool machine_died;
-        int ret = 0, r;
+        int r;
 
         assert(event);
         assert(master >= 0);
@@ -1355,8 +1355,7 @@ static int process_forward(sd_event *event, PTYForward **forward, int master, PT
                         log_info("Connection to machine %s terminated.", name);
         }
 
-        sd_event_get_exit_code(event, &ret);
-        return ret;
+        return 0;
 }
 
 static int parse_machine_uid(const char *spec, const char **machine, char **uid) {
@@ -1740,7 +1739,7 @@ static int start_machine(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return r;
                 if (r == 0) {
-                        log_error("Machine image '%s' does not exist.", argv[1]);
+                        log_error("Machine image '%s' does not exist.", argv[i]);
                         return -ENXIO;
                 }
 
@@ -1812,7 +1811,7 @@ static int enable_machine(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return r;
                 if (r == 0) {
-                        log_error("Machine image '%s' does not exist.", argv[1]);
+                        log_error("Machine image '%s' does not exist.", argv[i]);
                         return -ENXIO;
                 }
 

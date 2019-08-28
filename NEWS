@@ -1,5 +1,108 @@
 systemd System and Service Manager
 
+CHANGES WITH 241:
+
+        * The default locale can now be configured at compile time. Otherwise,
+          a suitable default will be selected automatically (one of C.UTF-8,
+          en_US.UTF-8, and C).
+
+        * The version string shown by systemd and other tools now includes the
+          git commit hash when built from git. An override may be specified
+          during compilation, which is intended to be used by distributions to
+          include the package release information.
+
+        * systemd-cat can now filter standard input and standard error streams
+          for different syslog priorities using the new --stderr-priority=
+          option.
+
+        * systemd-journald and systemd-journal-remote reject entries which
+          contain too many fields (CVE-2018-16865) and set limits on the
+          process' command line length (CVE-2018-16864).
+
+        * $DBUS_SESSION_BUS_ADDRESS environment variable is set by pam_systemd
+          again.
+
+        * A new network device NamePolicy "keep" is implemented for link files,
+          and used by default in 99-default.link (the fallback configuration
+          provided by systemd). With this policy, if the network device name
+          was already set by userspace, the device will not be renamed again.
+          This matches the naming scheme that was implemented before
+          systemd-240. If naming-scheme < 240 is specified, the "keep" policy
+          is also enabled by default, even if not specified. Effectively, this
+          means that if naming-scheme >= 240 is specified, network devices will
+          be renamed according to the configuration, even if they have been
+          renamed already, if "keep" is not specified as the naming policy in
+          the .link file. The 99-default.link file provided by systemd includes
+          "keep" for backwards compatibility, but it is recommended for user
+          installed .link files to *not* include it.
+
+          The "kernel" policy, which keeps kernel names declared to be
+          "persistent", now works again as documented.
+
+        * kernel-install script now optionally takes the paths to one or more
+          initrd files, and passes them to all plugins.
+
+        * The mincore() system call has been dropped from the @system-service
+          system call filter group, as it is pretty exotic and may potentially
+          used for side-channel attacks.
+
+        * -fPIE is dropped from compiler and linker options. Please specify
+          -Db_pie=true option to meson to build position-independent
+          executables. Note that the meson option is supported since meson-0.49.
+
+        * The fs.protected_regular and fs.protected_fifos sysctls, which were
+          added in Linux 4.19 to make some data spoofing attacks harder, are
+          now enabled by default. While this will hopefully improve the
+          security of most installations, it is technically a backwards
+          incompatible change; to disable these sysctls again, place the
+          following lines in /etc/sysctl.d/60-protected.conf or a similar file:
+
+              fs.protected_regular = 0
+              fs.protected_fifos = 0
+
+          Note that the similar hardlink and symlink protection has been
+          enabled since v199, and may be disabled likewise.
+
+        * The files read from the EnvironmentFile= setting in unit files now
+          parse backslashes inside quotes literally, matching the behaviour of
+          POSIX shells.
+
+        * udevadm trigger, udevadm control, udevadm settle and udevadm monitor
+          now automatically become NOPs when run in a chroot() environment.
+
+        * The tmpfiles.d/ "C" line type will now copy directory trees not only
+          when the destination is so far missing, but also if it already exists
+          as a directory and is empty. This is useful to cater for systems
+          where directory trees are put together from multiple separate mount
+          points but otherwise empty.
+
+        * A new function sd_bus_close_unref() (and the associated
+          sd_bus_close_unrefp()) has been added to libsystemd, that combines
+          sd_bus_close() and sd_bus_unref() in one.
+
+        * udevadm control learnt a new option for --ping for testing whether a
+          systemd-udevd instance is running and reacting.
+
+        Contributions from: Aaron Plattner, Alberts Muktupāvels, Alex Mayer,
+        Ayman Bagabas, Beniamino Galvani, Burt P, Chris Down, Chris Lamb, Chris
+        Morin, Christian Hesse, Claudius Ellsel, dana, Daniel Axtens, Daniele
+        Medri, Dave Reisner, David Santamaría Rogado, Diego Canuhe, Dimitri
+        John Ledkov, Evgeny Vereshchagin, Fabrice Fontaine, Filipe
+        Brandenburger, Franck Bui, Frantisek Sumsal, govwin, Hans de Goede,
+        James Hilliard, Jan Engelhardt, Jani Uusitalo, Jan Janssen, Jan
+        Synacek, Jonathan McDowell, Jonathan Roemer, Jonathon Kowalski, Joost
+        Heitbrink, Jörg Thalheim, Lance, Lennart Poettering, Louis Taylor,
+        Lucas Werkmeister, Mantas Mikulėnas, Marc-Antoine Perennou,
+        marvelousblack, Michael Biebl, Michael Sloan, Michal Sekletar, Mike
+        Auty, Mike Gilbert, Mikhail Kasimov, Neil Brown, Niklas Hambüchen,
+        Patrick Williams, Paul Seyfert, Peter Hutterer, Philip Withnall, Roger
+        James, Ronnie P. Thomas, Ryan Gonzalez, Sam Morris, Stephan Edel,
+        Stephan Gerhold, Susant Sahani, Taro Yamada, Thomas Haller, Topi
+        Miettinen, YiFei Zhu, YmrDtnJu, YunQiang Su, Yu Watanabe, Zbigniew
+        Jędrzejewski-Szmek, zsergeant77, Дамјан Георгиевски
+
+        — Berlin, 2018-02-14
+
 CHANGES WITH 240:
 
         * NoNewPrivileges=yes has been set for all long-running services
@@ -17,6 +120,8 @@ CHANGES WITH 240:
           by systemd-sysusers again. Distributors or system administrators
           may need to create these users and groups if they not exist (or need
           to re-enable DynamicUser= for those units) while upgrading systemd.
+          Also, the clock file for systemd-timesyncd may need to move from
+          /var/lib/private/systemd/timesync/clock to /var/lib/systemd/timesync/clock.
 
         * When unit files are loaded from disk, previously systemd would
           sometimes (depending on the unit loading order) load units from the
@@ -100,7 +205,7 @@ CHANGES WITH 240:
           file descriptors currently enforced (fs.file-max, fs.nr_open,
           RLIMIT_NOFILE hard, RLIMIT_NOFILE soft) we turn off the first two,
           and keep only the latter two. A set of build-time options
-          (-Dbump-proc-sys-fs-file-max=no and -Dbump-proc-sys-fs-nr-open=no)
+          (-Dbump-proc-sys-fs-file-max=false and -Dbump-proc-sys-fs-nr-open=false)
           has been added to revert this change in behaviour, which might be
           an option for systems that turn off memcg in the kernel.
 
@@ -133,13 +238,13 @@ CHANGES WITH 240:
 
         * The new "MemoryMin=" unit file property may now be used to set the
           memory usage protection limit of processes invoked by the unit. This
-          controls the cgroupsv2 memory.min attribute. Similarly, the new
+          controls the cgroup v2 memory.min attribute. Similarly, the new
           "IODeviceLatencyTargetSec=" property has been added, wrapping the new
-          cgroupsv2 io.latency cgroup property for configuring per-service I/O
+          cgroup v2 io.latency cgroup property for configuring per-service I/O
           latency.
 
-        * systemd now supports the cgroupsv2 devices BPF logic, as counterpart
-          to the cgroupsv1 "devices" cgroup controller.
+        * systemd now supports the cgroup v2 devices BPF logic, as counterpart
+          to the cgroup v1 "devices" cgroup controller.
 
         * systemd-escape now is able to combine --unescape with --template. It
           also learnt a new option --instance for extracting and unescaping the
@@ -355,7 +460,7 @@ CHANGES WITH 240:
 
         * The JoinControllers= option in system.conf is no longer supported, as
           it didn't work correctly, is hard to support properly, is legacy (as
-          the concept only exists on cgroupsv1) and apparently wasn't used.
+          the concept only exists on cgroup v1) and apparently wasn't used.
 
         * Journal messages that are generated whenever a unit enters the failed
           state are now tagged with a unique MESSAGE_ID. Similarly, messages
@@ -452,6 +557,22 @@ CHANGES WITH 240:
           incompatible kernel change. The relevant kernel developers have been
           notified about this userspace breakage quickly, but they chose to
           ignore it.
+
+        * PermissionsStartOnly= setting is deprecated (but is still supported
+          for backwards compatibility). The same functionality is provided by
+          the more flexible "+", "!", and "!!" prefixes to ExecStart= and other
+          commands.
+
+        * $DBUS_SESSION_BUS_ADDRESS environment variable is not set by
+          pam_systemd anymore.
+
+        * The naming scheme for network devices was changed to always rename
+          devices, even if they were already renamed by userspace. The "kernel"
+          policy was changed to only apply as a fallback, if no other naming
+          policy took effect.
+
+        * The requirements to build systemd is bumped to meson-0.46 and
+          python-3.5.
 
         Contributions from: afg, Alan Jenkins, Aleksei Timofeyev, Alexander
         Filippov, Alexander Kurtz, Alexey Bogdanenko, Andreas Henriksson,
@@ -866,6 +987,8 @@ CHANGES WITH 239:
           allows ordering services before the service that executes the actual
           update process in a generic way.
 
+        * Systemd now emits warnings whenever .include syntax is used.
+
         Contributions from: Adam Duskett, Alan Jenkins, Alessandro Casale,
         Alexander Kurtz, Alex Gartrell, Anssi Hannula, Arnaud Rebillout, Brian
         J. Murrell, Bruno Vernay, Chris Lamb, Chris Lesiak, Christian Brauner,
@@ -992,7 +1115,7 @@ CHANGES WITH 238:
           instance to migrate processes if it itself gets the request to
           migrate processes and the kernel refuses this due to access
           restrictions.  Thanks to this "systemd-run --scope --user …" works
-          again in pure cgroups v2 environments when invoked from the user
+          again in pure cgroup v2 environments when invoked from the user
           session scope.
 
         * A new TemporaryFileSystem= setting can be used to mask out part of
@@ -2708,7 +2831,7 @@ CHANGES WITH 231:
           desired options.
 
         * systemd now supports the "memory" cgroup controller also on
-          cgroupsv2.
+          cgroup v2.
 
         * The systemd-cgtop tool now optionally takes a control group path as
           command line argument. If specified, the control group list shown is
@@ -6234,6 +6357,9 @@ CHANGES WITH 210:
           for other architectures like x86 and does not support
           IFUNC. Please make sure to use --enable-compat-libs only
           during a transitional period!
+
+        * The .include syntax has been deprecated and is not documented
+          anymore. Drop-in files in .d directories should be used instead.
 
         Contributions from: Andreas Fuchs, Armin K., Colin Walters,
         Daniel Mack, Dave Reisner, David Herrmann, Djalal Harouni,

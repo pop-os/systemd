@@ -16,10 +16,10 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 154 insertions(+), 107 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 557c75d..ea5f6a4 100644
+index 62cdc30..d66f506 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1382,8 +1382,25 @@ int get_timezone(char **tz) {
+@@ -1381,8 +1381,25 @@ int get_timezone(char **tz) {
          int r;
  
          r = readlink_malloc("/etc/localtime", &t);
@@ -48,7 +48,7 @@ index 557c75d..ea5f6a4 100644
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 584fb22..bb8e17f 100644
+index aa4a89c..8f36bbe 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
 @@ -59,6 +59,27 @@ int locale_setup(char ***environment) {
@@ -392,7 +392,7 @@ index 6b6b32a..cb63d45 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index e168889..7485f2b 100644
+index 324d4a4..4d54ac3 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -215,6 +215,7 @@ static int context_read_data(Context *c) {

@@ -163,14 +163,16 @@ REQUIREMENTS:
         docbook-xsl (optional, required for documentation)
         xsltproc    (optional, required for documentation)
         python-lxml (optional, required to build the indices)
-        python >= 3.5, meson >= 0.46, ninja
+        python >= 3.5
+        meson >= 0.46 (>= 0.49 is required to build position-independent executables)
+        ninja
         gcc, awk, sed, grep, m4, and similar tools
 
         During runtime, you need the following additional
         dependencies:
 
         util-linux >= v2.27.1 required
-        dbus >= 1.9.14 (strictly speaking optional, but recommended)
+        dbus >= 1.4.0 (strictly speaking optional, but recommended)
                 NOTE: If using dbus < 1.9.18, you should override the default
                 policy directory (--with-dbuspolicydir=/etc/dbus-1/system.d).
         dracut (optional)

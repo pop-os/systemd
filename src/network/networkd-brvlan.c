@@ -9,6 +9,7 @@
 
 #include "alloc-util.h"
 #include "conf-parser.h"
+#include "missing_if_bridge.h"
 #include "netlink-util.h"
 #include "networkd-brvlan.h"
 #include "networkd-link.h"
@@ -22,7 +23,7 @@ static bool is_bit_set(unsigned bit, uint32_t scope) {
         return scope & (1 << bit);
 }
 
-static inline void set_bit(unsigned nr, uint32_t *addr) {
+static void set_bit(unsigned nr, uint32_t *addr) {
         if (nr < BRIDGE_VLAN_BITMAP_MAX)
                 addr[nr / 32] |= (((uint32_t) 1) << (nr % 32));
 }

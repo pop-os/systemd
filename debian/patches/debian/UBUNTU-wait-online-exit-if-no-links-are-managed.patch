@@ -8,7 +8,7 @@ Subject: wait-online: exit, if no links are managed.
  1 file changed, 7 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/wait-online/manager.c b/src/network/wait-online/manager.c
-index e1ccc9f..655fa0a 100644
+index 67218b6..b7675cd 100644
 --- a/src/network/wait-online/manager.c
 +++ b/src/network/wait-online/manager.c
 @@ -37,6 +37,7 @@ bool manager_all_configured(Manager *m) {

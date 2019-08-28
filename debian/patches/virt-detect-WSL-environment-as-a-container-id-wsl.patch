@@ -48,7 +48,7 @@ index c4763fd..9e37fd1 100644
  
    <refsect1>
 diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
-index 7e1b3cb..6c86eba 100644
+index be6355d..0e7303f 100644
 --- a/man/systemd.unit.xml
 +++ b/man/systemd.unit.xml
 @@ -1093,7 +1093,8 @@

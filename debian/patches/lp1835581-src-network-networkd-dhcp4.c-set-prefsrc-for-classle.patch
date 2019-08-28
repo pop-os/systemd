@@ -1,8 +1,4 @@
-From ac2dce5f36bb8b1a877ff765e6a4dfde6bfb2d49 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
-Bug: https://github.com/systemd/systemd/issues/12969
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1835581
-Origin: upstream, https://github.com/systemd/systemd/commit/ac2dce5f36bb8b1a877ff765e6a4dfde6bfb2d49
 Date: Fri, 5 Jul 2019 16:42:38 -0400
 Subject: [PATCH] src/network/networkd-dhcp4.c: set prefsrc for classless or
  static routes
@@ -27,12 +23,14 @@ networking through the router will not work.
 
 Fixes: #12969
 ---
- src/network/networkd-dhcp4.c | 4 ++++
- 1 file changed, 4 insertions(+)
+ src/network/networkd-dhcp4.c | 2 ++
+ 1 file changed, 2 insertions(+)
 
+diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
+index d8ac455..d01d5ca 100644
 --- a/src/network/networkd-dhcp4.c
 +++ b/src/network/networkd-dhcp4.c
-@@ -115,6 +115,8 @@
+@@ -115,6 +115,8 @@ static int link_set_dhcp_routes(Link *link) {
                  route->priority = link->network->dhcp_route_metric;
                  route->table = table;
                  route->scope = route_scope_from_address(route, &address);

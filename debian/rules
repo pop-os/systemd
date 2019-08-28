@@ -4,15 +4,13 @@
 #export DEB_BUILD_OPTIONS = nostrip
 
 export LC_ALL = C.UTF-8
-export CC = gcc-8
-export CXX = g++-8
 
 include /usr/share/dpkg/default.mk
 
 ifeq ($(DEB_VENDOR),Ubuntu)
     DEFAULT_NTP_SERVERS = ntp.ubuntu.com
     SUPPORT_URL = http://www.ubuntu.com/support
-    CONFFLAGS_DISTRO = -Ddns-servers=''
+    CONFFLAGS_DISTRO =
 else
     DEFAULT_NTP_SERVERS = 0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
     SUPPORT_URL = https://www.debian.org/support
@@ -51,6 +49,7 @@ CONFFLAGS = \
 	-Dumount-path=/bin/umount \
 	-Dloadkeys-path=/bin/loadkeys \
 	-Dsetfont-path=/bin/setfont \
+	-Dnologin-path=/usr/sbin/nologin \
 	-Dtelinit-path=/lib/sysvinit/telinit \
 	-Dsysvinit-path=/etc/init.d \
 	-Dsysvrcnd-path=/etc \
@@ -68,13 +67,15 @@ CONFFLAGS = \
 	-Dportabled=false \
 	-Dwheel-group=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
+	-Ddns-servers='' \
 	-Dlink-udev-shared=false \
 	-Dsystem-uid-max=999 \
 	-Dsystem-gid-max=999 \
 	-Dnobody-user=nobody \
 	-Dnobody-group=nogroup \
 	-Dbump-proc-sys-fs-nr-open=false \
-	-Ddev-kvm-mode=0660
+	-Ddev-kvm-mode=0660 \
+	-Dgroup-render-mode=0660
 
 # resolved's DNSSEC support is still not mature enough, don't enable it by
 # default on stable Debian or any Ubuntu releases
@@ -255,7 +256,7 @@ endif
 	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd); do \
 		echo "... from $$pkg..."; \
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
-		(cd debian/$$pkg; find -mindepth 1 -type d) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
+		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
 	done
 
 	# Ubuntu specific files

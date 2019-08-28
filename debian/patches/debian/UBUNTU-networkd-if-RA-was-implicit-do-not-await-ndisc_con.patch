@@ -14,10 +14,10 @@ LP: #1765173
  1 file changed, 13 insertions(+), 4 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index a9a1f89..1e00e8e 100644
+index ac76c86..8a8edec 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -217,7 +217,7 @@ static bool link_proxy_arp_enabled(Link *link) {
+@@ -244,7 +244,7 @@ static bool link_proxy_arp_enabled(Link *link) {
          return true;
  }
  
@@ -26,7 +26,7 @@ index a9a1f89..1e00e8e 100644
          assert(link);
  
          if (!socket_ipv6_is_supported())
-@@ -236,9 +236,12 @@ static bool link_ipv6_accept_ra_enabled(Link *link) {
+@@ -263,9 +263,12 @@ static bool link_ipv6_accept_ra_enabled(Link *link) {
           * disabled if local forwarding is enabled).
           * If set, ignore or enforce RA independent of local forwarding state.
           */
@@ -40,7 +40,7 @@ index a9a1f89..1e00e8e 100644
          else if (link->network->ipv6_accept_ra > 0)
                  /* accept RA even if ip_forward is enabled */
                  return true;
-@@ -247,6 +250,10 @@ static bool link_ipv6_accept_ra_enabled(Link *link) {
+@@ -274,6 +277,10 @@ static bool link_ipv6_accept_ra_enabled(Link *link) {
                  return false;
  }
  
@@ -51,7 +51,7 @@ index a9a1f89..1e00e8e 100644
  static IPv6PrivacyExtensions link_ipv6_privacy_extensions(Link *link) {
          assert(link);
  
-@@ -918,8 +925,10 @@ void link_check_ready(Link *link) {
+@@ -921,8 +928,10 @@ void link_check_ready(Link *link) {
                       !link->dhcp4_configured && !link->dhcp6_configured))
                          return;
  

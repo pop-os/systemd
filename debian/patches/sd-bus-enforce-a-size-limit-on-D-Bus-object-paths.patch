@@ -45,7 +45,7 @@ index f208b29..a8d61bf 100644
  #define BUS_CONTAINER_DEPTH 128
  
 diff --git a/src/libsystemd/sd-bus/bus-objects.c b/src/libsystemd/sd-bus/bus-objects.c
-index d053810..983921d 100644
+index 58329f3..983921d 100644
 --- a/src/libsystemd/sd-bus/bus-objects.c
 +++ b/src/libsystemd/sd-bus/bus-objects.c
 @@ -1133,7 +1133,8 @@ static int object_manager_serialize_path_and_fallbacks(
@@ -62,7 +62,7 @@ index d053810..983921d 100644
                  return 0;
  
          /* Second, add fallback vtables registered for any of the prefixes */
--        prefix = alloca(strlen(path) + 1);
+-        prefix = newa(char, strlen(path) + 1);
 +        pl = strlen(path);
 +        assert(pl <= BUS_PATH_SIZE_MAX);
 +        prefix = new(char, pl + 1);
@@ -102,7 +102,7 @@ index d053810..983921d 100644
 +                _cleanup_free_ char *prefix = NULL;
 +                size_t pl;
  
--                prefix = alloca(strlen(path) + 1);
+-                prefix = newa(char, strlen(path) + 1);
 +                pl = strlen(path);
 +                assert(pl <= BUS_PATH_SIZE_MAX);
 +                prefix = new(char, pl + 1);
@@ -139,7 +139,7 @@ index d053810..983921d 100644
                  if (bus->nodes_modified)
                          continue;
  
--                prefix = alloca(strlen(path) + 1);
+-                prefix = newa(char, strlen(path) + 1);
                  OBJECT_PATH_FOREACH_PREFIX(prefix, path) {
                          r = emit_properties_changed_on_interface(bus, prefix, path, interface, true, &found_interface, names);
                          if (r != 0)
@@ -157,7 +157,7 @@ index d053810..983921d 100644
          if (bus->nodes_modified)
                  return 0;
  
--        prefix = alloca(strlen(path) + 1);
+-        prefix = newa(char, strlen(path) + 1);
 +        pl = strlen(path);
 +        assert(pl <= BUS_PATH_SIZE_MAX);
 +        prefix = new(char, pl + 1);
@@ -180,7 +180,7 @@ index d053810..983921d 100644
          if (bus->nodes_modified)
                  return 0;
  
--        prefix = alloca(strlen(path) + 1);
+-        prefix = newa(char, strlen(path) + 1);
 +        pl = strlen(path);
 +        assert(pl <= BUS_PATH_SIZE_MAX);
 +        prefix = new(char, pl + 1);
@@ -203,7 +203,7 @@ index d053810..983921d 100644
          if (bus->nodes_modified)
                  return 0;
  
--        prefix = alloca(strlen(path) + 1);
+-        prefix = newa(char, strlen(path) + 1);
 +        pl = strlen(path);
 +        assert(pl <= BUS_PATH_SIZE_MAX);
 +        prefix = new(char, pl + 1);

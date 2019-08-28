@@ -10,10 +10,10 @@ And explain why in a comment.
  1 file changed, 10 insertions(+), 3 deletions(-)
 
 diff --git a/src/login/pam_systemd.c b/src/login/pam_systemd.c
-index cdec102..3b07ff6 100644
+index 997b74e..ea245c8 100644
 --- a/src/login/pam_systemd.c
 +++ b/src/login/pam_systemd.c
-@@ -310,14 +310,21 @@ static const char* getenv_harder(pam_handle_t *handle, const char *key, const ch
+@@ -316,14 +316,21 @@ static const char* getenv_harder(pam_handle_t *handle, const char *key, const ch
          assert(handle);
          assert(key);
  

@@ -6,6 +6,7 @@ COMMAND="$1"
 KERNEL_VERSION="$2"
 BOOT_DIR_ABS="$3"
 KERNEL_IMAGE="$4"
+INITRD_OPTIONS_START="5"
 
 if ! [[ $KERNEL_INSTALL_MACHINE_ID ]]; then
     exit 0
@@ -82,6 +83,24 @@ cp "$KERNEL_IMAGE" "$BOOT_DIR_ABS/linux" &&
     exit 1
 }
 
+INITRD_OPTIONS=( "${@:${INITRD_OPTIONS_START}}" )
+
+for initrd in "${INITRD_OPTIONS[@]}"; do
+    if [[ -f "${initrd}" ]]; then
+        initrd_basename="$(basename ${initrd})"
+        cp "${initrd}" "$BOOT_DIR_ABS/${initrd_basename}" &&
+            chown root:root "$BOOT_DIR_ABS/${initrd_basename}" &&
+            chmod 0644 "$BOOT_DIR_ABS/${initrd_basename}" || {
+             echo "Could not copy '${initrd}' to '$BOOT_DIR_ABS/${initrd_basename}'." >&2
+             exit 1
+        }
+    fi
+done
+
+# If no initrd option is supplied, fallback to "initrd" which is
+# the name used by dracut when generating it in its kernel-install hook
+[[ ${#INITRD_OPTIONS[@]} == 0 ]] && INITRD_OPTIONS=( initrd )
+
 mkdir -p "${LOADER_ENTRY%/*}" || {
     echo "Could not create loader entry directory '${LOADER_ENTRY%/*}'." >&2
     exit 1
@@ -93,8 +112,10 @@ mkdir -p "${LOADER_ENTRY%/*}" || {
     echo "machine-id $MACHINE_ID"
     echo "options    ${BOOT_OPTIONS[*]}"
     echo "linux      $BOOT_DIR/linux"
-    [[ -f $BOOT_DIR_ABS/initrd ]] && \
-        echo "initrd     $BOOT_DIR/initrd"
+    for initrd in "${INITRD_OPTIONS[@]}"; do
+        [[ -f $BOOT_DIR_ABS/$(basename ${initrd}) ]] && \
+            echo "initrd     $BOOT_DIR/$(basename ${initrd})"
+    done
     :
 } > "$LOADER_ENTRY" || {
     echo "Could not create loader entry '$LOADER_ENTRY'." >&2

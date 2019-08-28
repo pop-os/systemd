@@ -139,11 +139,11 @@ static void test_container_of(void) {
                 uint64_t v1;
                 uint8_t pad2[2];
                 uint32_t v2;
-        } _packed_ myval = { };
+        } myval = { };
 
         log_info("/* %s */", __func__);
 
-        assert_cc(sizeof(myval) == 17);
+        assert_cc(sizeof(myval) >= 17);
         assert_se(container_of(&myval.v1, struct mytype, v1) == &myval);
         assert_se(container_of(&myval.v2, struct mytype, v2) == &myval);
         assert_se(container_of(&container_of(&myval.v2,
@@ -211,6 +211,30 @@ static void test_protect_errno(void) {
                 errno = 11;
         }
         assert_se(errno == 12);
+}
+
+static void test_unprotect_errno_inner_function(void) {
+        PROTECT_ERRNO;
+
+        errno = 2222;
+}
+
+static void test_unprotect_errno(void) {
+        log_info("/* %s */", __func__);
+
+        errno = 4711;
+
+        PROTECT_ERRNO;
+
+        errno = 815;
+
+        UNPROTECT_ERRNO;
+
+        assert_se(errno == 4711);
+
+        test_unprotect_errno_inner_function();
+
+        assert_se(errno == 4711);
 }
 
 static void test_in_set(void) {
@@ -383,6 +407,7 @@ int main(int argc, char *argv[]) {
         test_div_round_up();
         test_u64log2();
         test_protect_errno();
+        test_unprotect_errno();
         test_in_set();
         test_log2i();
         test_eqzero();

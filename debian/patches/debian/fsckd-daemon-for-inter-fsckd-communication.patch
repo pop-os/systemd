@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index e6b28e1..a87bb57 100644
+index 3afe168..b340139 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2372,6 +2372,14 @@ executable('systemd-makefs',
+@@ -2396,6 +2396,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  
@@ -268,7 +268,7 @@ index 029261c..d709ddb 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..d48e53a
+index 0000000..fffea29
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,690 @@
@@ -897,7 +897,7 @@ index 0000000..d48e53a
 +                        return 0;
 +
 +                case ARG_VERSION:
-+                        puts(PACKAGE_STRING);
++                        puts("systemd " GIT_VERSION);
 +                        puts(SYSTEMD_FEATURES);
 +                        return 0;
 +

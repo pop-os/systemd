@@ -151,6 +151,8 @@ void job_uninstall(Job *j) {
 
         unit_add_to_gc_queue(j->unit);
 
+        unit_add_to_dbus_queue(j->unit); /* The Job property of the unit has changed now */
+
         hashmap_remove_value(j->manager->jobs, UINT32_TO_PTR(j->id), j);
         j->installed = false;
 }
@@ -206,8 +208,9 @@ Job* job_install(Job *j) {
                             (job_type_allows_late_merge(j->type) && job_type_is_superset(uj->type, j->type))) {
                                 job_merge_into_installed(uj, j);
                                 log_unit_debug(uj->unit,
-                                               "Merged into installed job %s/%s as %u",
-                                               uj->unit->id, job_type_to_string(uj->type), (unsigned) uj->id);
+                                               "Merged %s/%s into installed job %s/%s as %"PRIu32,
+                                               j->unit->id, job_type_to_string(j->type), uj->unit->id,
+                                               job_type_to_string(uj->type), uj->id);
                                 return uj;
                         } else {
                                 /* already running and not safe to merge into */
@@ -216,8 +219,8 @@ Job* job_install(Job *j) {
                                  * not currently possible to have more than one installed job per unit. */
                                 job_merge_into_installed(uj, j);
                                 log_unit_debug(uj->unit,
-                                               "Merged into running job, re-running: %s/%s as %u",
-                                               uj->unit->id, job_type_to_string(uj->type), (unsigned) uj->id);
+                                               "Merged into running job, re-running: %s/%s as %"PRIu32,
+                                               uj->unit->id, job_type_to_string(uj->type), uj->id);
 
                                 job_set_state(uj, JOB_WAITING);
                                 return uj;

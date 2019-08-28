@@ -181,6 +181,9 @@ static int link_find_prioritized(sd_device *dev, bool add, const char *stackdir,
                 priority = db_prio;
         }
 
+        if (!target)
+                return -ENOENT;
+
         *ret = TAKE_PTR(target);
         return 0;
 }
@@ -297,7 +300,7 @@ static int node_permissions_apply(sd_device *dev, bool apply,
                 return log_device_debug_errno(dev, errno, "cannot stat() node '%s' (%m)", devnode);
 
         if (((stats.st_mode & S_IFMT) != (mode & S_IFMT)) || (stats.st_rdev != devnum))
-                return log_device_debug_errno(dev, EEXIST, "Found node '%s' with non-matching devnum %s, skip handling",
+                return log_device_debug_errno(dev, SYNTHETIC_ERRNO(EEXIST), "Found node '%s' with non-matching devnum %s, skip handling",
                                               devnode, id_filename);
 
         if (apply) {

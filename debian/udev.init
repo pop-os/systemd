@@ -166,7 +166,8 @@ case "$1" in
 
     log_daemon_msg "Starting $DESC" "$NAME"
     if start-stop-daemon --start --name $NAME --user root --quiet \
-        --pidfile $PIDFILE --exec $DAEMON --background --make-pidfile; then
+        --pidfile $PIDFILE --exec $DAEMON --background --make-pidfile \
+        --notify-await; then
         # prevents udevd to be killed by sendsigs (see #791944)
         mkdir -p $OMITDIR
         ln -sf $PIDFILE $OMITDIR/$NAME
@@ -226,7 +227,8 @@ case "$1" in
 
     log_daemon_msg "Starting $DESC" "$NAME"
     if start-stop-daemon --start --name $NAME --user root --quiet \
-        --pidfile $PIDFILE --exec $DAEMON --background --make-pidfile; then
+        --pidfile $PIDFILE --exec $DAEMON --background --make-pidfile \
+        --notify-await; then
         # prevents udevd to be killed by sendsigs (see #791944)
         mkdir -p $OMITDIR
         ln -sf $PIDFILE $OMITDIR/$NAME

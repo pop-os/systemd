@@ -1595,7 +1595,7 @@ static int apply_lock_personality(const Unit* u, const ExecContext *c) {
 
 #endif
 
-static void do_idle_pipe_dance(int idle_pipe[4]) {
+static void do_idle_pipe_dance(int idle_pipe[static 4]) {
         assert(idle_pipe);
 
         idle_pipe[1] = safe_close(idle_pipe[1]);
@@ -2160,8 +2160,21 @@ static int setup_exec_directory(
                         r = mkdir_label(p, context->directories[type].mode);
                         if (r < 0 && r != -EEXIST)
                                 goto fail;
-                        if (r == -EEXIST && !context->dynamic_user)
-                                continue;
+                        if (r == -EEXIST) {
+                                struct stat st;
+
+                                if (stat(p, &st) < 0) {
+                                        r = -errno;
+                                        goto fail;
+                                }
+                                if (((st.st_mode ^ context->directories[type].mode) & 07777) != 0)
+                                        log_warning("%s \'%s\' already exists but the mode is different. "
+                                                    "(filesystem: %o %sMode: %o)",
+                                                    exec_directory_type_to_string(type), *rt,
+                                                    st.st_mode & 07777, exec_directory_type_to_string(type), context->directories[type].mode & 07777);
+                                if (!context->dynamic_user)
+                                        continue;
+                        }
                 }
 
                 /* Don't change the owner of the configuration directory, as in the common case it is not written to by
@@ -2618,7 +2631,7 @@ out:
         return r;
 }
 
-static void append_socket_pair(int *array, size_t *n, const int pair[2]) {
+static void append_socket_pair(int *array, size_t *n, const int pair[static 2]) {
         assert(array);
         assert(n);
 
@@ -3137,9 +3150,9 @@ static int exec_child(
                 }
         }
 
-        /* If delegation is enabled we'll pass ownership of the cgroup to the user of the new process. On cgroupsv1
+        /* If delegation is enabled we'll pass ownership of the cgroup to the user of the new process. On cgroup v1
          * this is only about systemd's own hierarchy, i.e. not the controller hierarchies, simply because that's not
-         * safe. On cgroupsv2 there's only one hierarchy anyway, and delegation is safe there, hence in that case only
+         * safe. On cgroup v2 there's only one hierarchy anyway, and delegation is safe there, hence in that case only
          * touch a single hierarchy too. */
         if (params->cgroup_path && context->user && (params->flags & EXEC_CGROUP_DELEGATE)) {
                 r = cg_set_access(SYSTEMD_CGROUP_CONTROLLER, params->cgroup_path, uid, gid);
@@ -3226,7 +3239,24 @@ static int exec_child(
 #endif
         }
 
+        if (needs_sandboxing) {
+                int which_failed;
+
+                /* Let's set the resource limits before we call into PAM, so that pam_limits wins over what
+                 * is set here. (See below.) */
+
+                r = setrlimit_closest_all((const struct rlimit* const *) context->rlimit, &which_failed);
+                if (r < 0) {
+                        *exit_status = EXIT_LIMITS;
+                        return log_unit_error_errno(unit, r, "Failed to adjust resource limit RLIMIT_%s: %m", rlimit_to_string(which_failed));
+                }
+        }
+
         if (needs_setuid) {
+
+                /* Let's call into PAM after we set up our own idea of resource limits to that pam_limits
+                 * wins here. (See above.) */
+
                 if (context->pam_name && username) {
                         r = setup_pam(context->pam_name, username, uid, gid, context->tty_path, &accum_env, fds, n_fds);
                         if (r < 0) {
@@ -3343,15 +3373,10 @@ static int exec_child(
 
         if (needs_sandboxing) {
                 uint64_t bset;
-                int which_failed;
 
-                r = setrlimit_closest_all((const struct rlimit* const *) context->rlimit, &which_failed);
-                if (r < 0) {
-                        *exit_status = EXIT_LIMITS;
-                        return log_unit_error_errno(unit, r, "Failed to adjust resource limit RLIMIT_%s: %m", rlimit_to_string(which_failed));
-                }
-
-                /* Set the RTPRIO resource limit to 0, but only if nothing else was explicitly requested. */
+                /* Set the RTPRIO resource limit to 0, but only if nothing else was explicitly
+                 * requested. (Note this is placed after the general resource limit initialization, see
+                 * above, in order to take precedence.) */
                 if (context->restrict_realtime && !context->rlimit[RLIMIT_RTPRIO]) {
                         if (setrlimit(RLIMIT_RTPRIO, &RLIMIT_MAKE_CONST(0)) < 0) {
                                 *exit_status = EXIT_LIMITS;
@@ -3942,7 +3967,7 @@ const char* exec_context_fdname(const ExecContext *c, int fd_index) {
         }
 }
 
-static int exec_context_named_iofds(const ExecContext *c, const ExecParameters *p, int named_iofds[3]) {
+static int exec_context_named_iofds(const ExecContext *c, const ExecParameters *p, int named_iofds[static 3]) {
         size_t i, targets;
         const char* stdio_fdname[3];
         size_t n_fds;

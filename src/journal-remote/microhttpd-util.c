@@ -32,21 +32,16 @@ static int mhd_respond_internal(struct MHD_Connection *connection,
                                 const char *buffer,
                                 size_t size,
                                 enum MHD_ResponseMemoryMode mode) {
-        struct MHD_Response *response;
-        int r;
-
         assert(connection);
 
-        response = MHD_create_response_from_buffer(size, (char*) buffer, mode);
+        _cleanup_(MHD_destroy_responsep) struct MHD_Response *response
+                = MHD_create_response_from_buffer(size, (char*) buffer, mode);
         if (!response)
                 return MHD_NO;
 
         log_debug("Queueing response %u: %s", code, buffer);
         MHD_add_response_header(response, "Content-Type", "text/plain");
-        r = MHD_queue_response(connection, code, response);
-        MHD_destroy_response(response);
-
-        return r;
+        return MHD_queue_response(connection, code, response);
 }
 
 int mhd_respond(struct MHD_Connection *connection,
@@ -249,7 +244,7 @@ static int get_auth_dn(gnutls_x509_crt_t client_cert, char **buf) {
         return 0;
 }
 
-static inline void gnutls_x509_crt_deinitp(gnutls_x509_crt_t *p) {
+static void gnutls_x509_crt_deinitp(gnutls_x509_crt_t *p) {
         gnutls_x509_crt_deinit(*p);
 }
 

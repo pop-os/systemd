@@ -1,3 +1,178 @@
+systemd (241-7) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * network: Fix failure to bring up interface with Linux kernel 5.2.
+    Backport two patches from systemd master in order to fix a bug with 5.2
+    kernels where the network interface fails to come up with the following
+    error: "enp3s0: Could not bring up interface: Invalid argument"
+    (Closes: #931636)
+  * Use /usr/sbin/nologin as nologin shell.
+    In Debian the nologin shell is installed in /usr/sbin, not /sbin.
+    (Closes: #931850)
+
+  [ Mert Dirik ]
+  * 40-systemd: Don't fail if SysV init script uses set -u and $1 is unset
+    (Closes: #931719)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 18 Jul 2019 19:38:23 +0200
+
+systemd (241-6) unstable; urgency=medium
+
+  * ask-password: Prevent buffer overflow when reading from keyring.
+    Fixes a possible memory corruption that causes systemd-cryptsetup to
+    crash either when a single large password is used or when multiple
+    passwords have already been pushed to the keyring. (Closes: #929726)
+  * Clarify documentation regarding %h/%u/%U specifiers.
+    Make it clear, that setting "User=" has no effect on those specifiers.
+    Also ensure that "%h" is actually resolved to "/root" for the system
+    manager instance as documented in the systemd.unit man page.
+    (Closes: #927911)
+  * network: Behave more gracefully when IPv6 has been disabled.
+    Ignore any configured IPv6 settings when IPv6 has been disabled in the
+    kernel via sysctl. Instead of failing completely, continue and log a
+    warning instead. (Closes: #929469)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 08 Jul 2019 11:27:51 +0200
+
+systemd (241-5) unstable; urgency=medium
+
+  * Revert "Add check to switch VTs only between K_XLATE or K_UNICODE"
+    This change left the keyboard in an unusable state when exiting an X
+    session. (Closes: #929229)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 24 May 2019 22:58:59 +0200
+
+systemd (241-4) unstable; urgency=medium
+
+  * journal-remote: Do not request Content-Length if Transfer-Encoding is
+    chunked (Closes: #927008)
+  * systemctl: Restore "systemctl reboot ARG" functionality.
+    Fixes a regression introduced in v240. (Closes: #928659)
+  * random-util: Eat up bad RDRAND values seen on AMD CPUs.
+    Some AMD CPUs return bogus data via RDRAND after a suspend/resume cycle
+    while still reporting success via the carry flag.
+    Filter out invalid data like -1 (and also 0, just to be sure).
+    (Closes: #921267)
+  * Add check to switch VTs only between K_XLATE or K_UNICODE.
+    Switching to K_UNICODE from other than L_XLATE can make the keyboard
+    unusable and possibly leak keypresses from X.
+    (CVE-2018-20839, Closes: #929116)
+  * Document that DRM render nodes are now owned by group "render"
+    (Closes: #926886)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 17 May 2019 21:16:33 +0200
+
+systemd (241-3) unstable; urgency=high
+
+  [ Michael Biebl ]
+  * Drop systemd-shim alternative from libpam-systemd.
+    A fixed systemd-shim package which works with newer versions of systemd
+    is unlikely to happen given that the systemd-shim package has been
+    removed from the archive. Drop the alternative dependency from
+    libpam-systemd accordingly.
+  * Properly remove duplicate directories from systemd package.
+    When removing duplicate directories from the systemd package, sort the
+    list of directories in reverse order so we properly delete nested
+    directories.
+  * udev: Run programs in the specified order (Closes: #925190)
+  * bash-completion: Use default completion for redirect operators
+    (Closes: #924541)
+  * networkd: Clarify that IPv6 RA uses our own stack, no the kernel's
+    (Closes: #815582)
+  * Revert "Drop systemd-timesyncd.service.d/disable-with-time-daemon.conf"
+    Apparently Conflicts= are not a reliable mechanism to ensure alternative
+    NTP implementations take precedence over systemd-timesyncd.
+    (Closes: #902026)
+  * network: Fix routing policy rule issue.
+    When multiple links request a routing policy, make sure they are all
+    applied correctly. (Closes: #924406)
+  * pam-systemd: Use secure_getenv() rather than getenv()
+    Fixes a vulnerability in the systemd PAM module which insecurely uses
+    the environment and lacks seat verification permitting spoofing an
+    active session to PolicyKit. (CVE-2019-3842)
+
+  [ Martin Pitt ]
+  * Enable udev autopkgtest in containers.
+    This test doesn't actually need udev.service (which is disabled in
+    containers) and works fine in LXC.
+  * Enable boot-and-service autopkgtest in containers
+    - Skip tests which can't work in containers.
+    - Add missing rsyslog test dependency.
+    - e2scrub_reap.service fails in containers, ignore (filed as #926138)
+    - Relax pgrep pattern for gdm, as there's no wayland session in
+      containers.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 08 Apr 2019 12:59:32 +0200
+
+systemd (241-2) unstable; urgency=medium
+
+  [ Martin Pitt ]
+  * debian/tests/boot-smoke: Create journal and udevdb artifacts on all
+    failures
+  * autopkgtests: Replace obsolete $ADT_* variables
+  * networkd-test: Ignore failures of test_route_only_dns* in containers.
+    This test exposes a race condition when running in LXC, see issue #11848
+    for details. Until that is understood and fixed, skip the test as it's
+    not a recent regression. (Closes: #924539)
+  * Bump Standards-Version to 4.3.0.
+    No changes necessary.
+  * debian/tests/boot-smoke: Only check current boot for connection timeouts.
+    Otherwise we'll catch some
+        Failed to resolve group 'render': Connection timed out
+    messages that happen in earlier boots during VM setup, before the
+    "render" group is created.
+    Fixes https://github.com/systemd/systemd/issues/11875
+  * timedated: Fix emitted value when ntp client is enabled/disabled.
+    Fixes a regression introduced in 241.
+  * debian/tests/timedated: Check enabling/disabling NTP.
+    Assert that `timedatectl set-ntp` correctly controls the service, sets
+    the `org.freedesktop.timedate1 NTP` property, and sends the right
+    `PropertiesChanged` signal.
+    This reproduces <https://github.com/systemd/systemd/issues/11944> and
+    also the earlier <https://github.com/systemd/systemd/issues/9672>.
+
+  [ Michael Biebl ]
+  * Disable fallback DNS servers in resolved (Closes: #923081)
+  * cgtop: Fix processing of controllers other than CPU (Closes: #921280)
+  * udev: Restore debug level when logging a failure in the external prog
+    called by IMPORT{program} (Closes: #924199)
+  * core: Remove "." path components from required mount paths.
+    Fixes mount related failures when a user's home directory contains "/./"
+    (Closes: #923881)
+  * udev.init: Use new s-s-d --notify-await to start udev daemon.
+    Fixes a race condition during startup under SysV init.
+    Add versioned dependency on dpkg (>= 1.19.3) to ensure that a version
+    of start-stop-daemon which supports --notify-await is installed.
+    (Closes: #908796)
+  * Make /dev/dri/renderD* accessible to group "render"
+    Follow upstream and make render nodes available to a dedicated system
+    group "render" instead of "video". Keep the uaccess tag for local,
+    active users.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 15 Mar 2019 18:33:54 +0100
+
+systemd (241-1) unstable; urgency=medium
+
+  [ Adam Borowski ]
+  * Make libpam-systemd Provide: logind, default-logind.
+    This allows alternate logind implementations such as elogind, without
+    having to recompile every dependent package -- as long as the client API
+    remains compatible.
+    These new virtual packages got policy-approved in #917431. (Closes: #915407)
+
+  [ Felipe Sateler ]
+  * New upstream version 241
+    - Refresh patches
+    - Backport upstream fix for Driver= matches in .network files
+
+  [ Martin Pitt ]
+  * debian/libsystemd0.symbols: Add new symbol from release 241
+  * Fix various bugs and races in networkd tests.
+    This should get the autopkgtest back to green, which regressed with
+    dnsmasq 2.80.
+
+ -- Felipe Sateler <fsateler@debian.org>  Thu, 21 Feb 2019 20:10:15 -0300
+
 systemd (240-6ubuntu13) eoan; urgency=medium
 
   * Drop s390x seccomp fix causing regression on s390x

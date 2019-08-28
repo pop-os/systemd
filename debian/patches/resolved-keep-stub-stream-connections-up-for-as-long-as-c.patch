@@ -14,7 +14,7 @@ Fixes: #11332
  4 files changed, 38 insertions(+), 41 deletions(-)
 
 diff --git a/src/resolve/resolved-dns-query.c b/src/resolve/resolved-dns-query.c
-index 7a4f977..248b06d 100644
+index 535ef4e..4a41921 100644
 --- a/src/resolve/resolved-dns-query.c
 +++ b/src/resolve/resolved-dns-query.c
 @@ -387,10 +387,8 @@ DnsQuery *dns_query_free(DnsQuery *q) {

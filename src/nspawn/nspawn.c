@@ -1964,11 +1964,11 @@ static int setup_hostname(void) {
 }
 
 static int setup_journal(const char *directory) {
-        sd_id128_t this_id;
         _cleanup_free_ char *d = NULL;
-        const char *p, *q;
+        const char *dirname, *p, *q;
+        sd_id128_t this_id;
+        char id[33];
         bool try;
-        char id[33], *dirname;
         int r;
 
         /* Don't link journals in ephemeral mode */
@@ -4229,6 +4229,11 @@ int main(int argc, char *argv[]) {
         r = detect_unified_cgroup_hierarchy_from_environment();
         if (r < 0)
                 goto finish;
+
+        /* Ignore SIGPIPE here, because we use splice() on the ptyfwd stuff and that will generate SIGPIPE if
+         * the result is closed. Note that the container payload child will reset signal mask+handler anyway,
+         * so just turning this off here means we only turn it off in nspawn itself, not any children. */
+        (void) ignore_signals(SIGPIPE, -1);
 
         n_fd_passed = sd_listen_fds(false);
         if (n_fd_passed > 0) {

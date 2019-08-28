@@ -23,3 +23,12 @@ assert_in() {
     fi
 }
 
+assert_rc() {
+    local exp=$1
+    shift
+    set +e
+    $@
+    RC=$?
+    set -e
+    assert_eq $RC $exp
+}

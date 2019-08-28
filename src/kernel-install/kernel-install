@@ -24,7 +24,7 @@ SKIP_REMAINING=77
 usage()
 {
     echo "Usage:"
-    echo "        $0 add KERNEL-VERSION KERNEL-IMAGE"
+    echo "        $0 add KERNEL-VERSION KERNEL-IMAGE [INITRD-FILE ...]"
     echo "        $0 remove KERNEL-VERSION"
 }
 
@@ -65,9 +65,12 @@ done
 
 if [[ "${0##*/}" == 'installkernel' ]]; then
     COMMAND='add'
+    # make install doesn't pass any parameter wrt initrd handling
+    INITRD_OPTIONS=()
 else
     COMMAND="$1"
     shift
+    INITRD_OPTIONS=( "${@:3}" )
 fi
 
 KERNEL_VERSION="$1"
@@ -123,7 +126,7 @@ case $COMMAND in
 
         for f in "${PLUGINS[@]}"; do
             if [[ -x $f ]]; then
-                "$f" add "$KERNEL_VERSION" "$BOOT_DIR_ABS" "$KERNEL_IMAGE"
+                "$f" add "$KERNEL_VERSION" "$BOOT_DIR_ABS" "$KERNEL_IMAGE" "${INITRD_OPTIONS[@]}"
                 x=$?
                 if [[ $x == $SKIP_REMAINING ]]; then
                     ret=0

@@ -8,27 +8,15 @@ From https://github.com/systemd/systemd/pull/12536
 LP: #1835809
 ===================================================================
 ---
- src/basic/random-util.c | 16 +++++++++++++++-
- 1 file changed, 15 insertions(+), 1 deletion(-)
+ src/basic/random-util.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
 
 diff --git a/src/basic/random-util.c b/src/basic/random-util.c
-index f7decf6..857027f 100644
+index 38f8180..a45bd61 100644
 --- a/src/basic/random-util.c
 +++ b/src/basic/random-util.c
-@@ -37,6 +37,7 @@ int rdrand(unsigned long *ret) {
- 
- #if defined(__i386__) || defined(__x86_64__)
-         static int have_rdrand = -1;
-+        unsigned long v;
-         unsigned char err;
- 
-         if (have_rdrand < 0) {
-@@ -56,9 +57,22 @@ int rdrand(unsigned long *ret) {
- 
-         asm volatile("rdrand %0;"
-                      "setc %1"
--                     : "=r" (*ret),
-+                     : "=r" (v),
+@@ -60,6 +60,19 @@ int rdrand(unsigned long *ret) {
+                      : "=r" (v),
                         "=qm" (err));
  
 +       /* Apparently on some AMD CPUs RDRAND will sometimes (after a suspend/resume cycle?) report success

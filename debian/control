@@ -8,15 +8,13 @@ Uploaders: Michael Biebl <biebl@debian.org>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>,
            Felipe Sateler <fsateler@debian.org>
-Standards-Version: 4.2.1
+Standards-Version: 4.3.0
 Rules-Requires-Root: no
 Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper (>= 10.4~),
                pkg-config,
-               gcc-8,
-               g++-8,
                xsltproc,
                docbook-xsl,
                docbook-xml,
@@ -215,6 +213,7 @@ Depends: ${shlibs:Depends},
          libpam-runtime (>= 1.0.1-6),
          dbus,
          systemd-sysv
+Provides: logind (= ${binary:Version}), default-logind (= ${binary:Version})
 Description: system and service manager - PAM module
  This package contains the PAM module which registers user sessions in
  the systemd control group hierarchy for logind.
@@ -334,6 +333,7 @@ Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          adduser,
+         dpkg (>= 1.19.3) | systemd-sysv,
          libudev1 (= ${binary:Version}),
          lsb-base (>= 3.0-6),
          util-linux (>= 2.27.1),

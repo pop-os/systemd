@@ -929,7 +929,8 @@ tests += [
 
         [['src/libsystemd/sd-resolve/test-resolve.c'],
          [],
-         [threads]],
+         [threads],
+         '', 'timeout=120'],
 
         [['src/libsystemd/sd-login/test-login.c'],
          [],
@@ -957,7 +958,7 @@ tests += [
 
 ]
 
-if cxx.found()
+if cxx_cmd != ''
         tests += [
                 [['src/libsystemd/sd-bus/test-bus-vtable-cc.cc'],
                  [],

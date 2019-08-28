@@ -1,8 +1,4 @@
-From 412dcec58773b7debedd503c528760d5466739da Mon Sep 17 00:00:00 2001
 From: Jorge Niedbalski <jnr@metaklass.org>
-Bug: https://github.com/systemd/systemd/issues/5552
-Origin: upstream, https://github.com/systemd/systemd/pull/13047
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1668771
 Date: Fri, 12 Jul 2019 15:34:24 -0400
 Subject: [PATCH] resolved: switch cache option to a tri-state option
  (systemd#5552).
@@ -22,14 +18,16 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  src/resolve/resolved-dns-cache.c       |  8 ++++++++
  src/resolve/resolved-dns-cache.h       |  3 ++-
  src/resolve/resolved-dns-transaction.c |  3 ++-
- src/resolve/resolved-gperf.gperf       |  4 ++--
+ src/resolve/resolved-gperf.gperf       |  2 +-
  src/resolve/resolved-manager.c         |  2 +-
  src/resolve/resolved-manager.h         |  2 +-
  src/resolve/resolved-mdns.c            |  2 +-
  src/shared/resolve-util.c              | 10 ++++++++++
  src/shared/resolve-util.h              | 14 ++++++++++++++
- 10 files changed, 43 insertions(+), 8 deletions(-)
+ 10 files changed, 42 insertions(+), 7 deletions(-)
 
+diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
+index d37bf0d..4f396ae 100644
 --- a/man/resolved.conf.xml
 +++ b/man/resolved.conf.xml
 @@ -227,10 +227,11 @@
@@ -45,9 +43,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  
          <para>Note that caching is turned off implicitly if the configured DNS server is on a host-local IP address
          (such as 127.0.0.1 or ::1), in order to avoid duplicate local caching.</para></listitem>
+diff --git a/src/resolve/resolved-dns-cache.c b/src/resolve/resolved-dns-cache.c
+index 99dec28..ceb4ce1 100644
 --- a/src/resolve/resolved-dns-cache.c
 +++ b/src/resolve/resolved-dns-cache.c
-@@ -619,6 +619,7 @@
+@@ -619,6 +619,7 @@ static bool rr_eligible(DnsResourceRecord *rr) {
  
  int dns_cache_put(
                  DnsCache *c,
@@ -55,7 +55,7 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
                  DnsResourceKey *key,
                  int rcode,
                  DnsAnswer *answer,
-@@ -726,6 +727,13 @@
+@@ -726,6 +727,13 @@ int dns_cache_put(
                          return 0;
          }
  
@@ -69,6 +69,8 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
          r = dns_cache_put_negative(
                          c,
                          key,
+diff --git a/src/resolve/resolved-dns-cache.h b/src/resolve/resolved-dns-cache.h
+index 48a3bde..afd7d45 100644
 --- a/src/resolve/resolved-dns-cache.h
 +++ b/src/resolve/resolved-dns-cache.h
 @@ -4,6 +4,7 @@
@@ -79,7 +81,7 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  #include "time-util.h"
  
  typedef struct DnsCache {
-@@ -21,7 +22,7 @@
+@@ -21,7 +22,7 @@ typedef struct DnsCache {
  void dns_cache_flush(DnsCache *c);
  void dns_cache_prune(DnsCache *c);
  
@@ -88,9 +90,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  int dns_cache_lookup(DnsCache *c, DnsResourceKey *key, bool clamp_ttl, int *rcode, DnsAnswer **answer, bool *authenticated);
  
  int dns_cache_check_conflicts(DnsCache *cache, DnsResourceRecord *rr, int owner_family, const union in_addr_union *owner_address);
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 738dd30..d5a42ac 100644
 --- a/src/resolve/resolved-dns-transaction.c
 +++ b/src/resolve/resolved-dns-transaction.c
-@@ -673,7 +673,7 @@
+@@ -673,7 +673,7 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
                  return;
  
          /* Caching disabled? */
@@ -99,7 +103,7 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
                  return;
  
          /* We never cache if this packet is from the local host, under
-@@ -684,6 +684,7 @@
+@@ -684,6 +684,7 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
                  return;
  
          dns_cache_put(&t->scope->cache,
@@ -107,9 +111,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
                        t->key,
                        t->answer_rcode,
                        t->answer,
+diff --git a/src/resolve/resolved-gperf.gperf b/src/resolve/resolved-gperf.gperf
+index 9b9290b..e783ccb 100644
 --- a/src/resolve/resolved-gperf.gperf
 +++ b/src/resolve/resolved-gperf.gperf
-@@ -24,6 +24,6 @@
+@@ -24,6 +24,6 @@ Resolve.LLMNR,           config_parse_resolve_support,        0,
  Resolve.MulticastDNS,    config_parse_resolve_support,        0,                   offsetof(Manager, mdns_support)
  Resolve.DNSSEC,          config_parse_dnssec_mode,            0,                   offsetof(Manager, dnssec_mode)
  Resolve.DNSOverTLS,      config_parse_dns_over_tls_mode,      0,                   offsetof(Manager, dns_over_tls_mode)
@@ -117,9 +123,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
 +Resolve.Cache,           config_parse_dns_cache_mode,         DNS_CACHE_MODE_YES,  offsetof(Manager, enable_cache)
  Resolve.DNSStubListener, config_parse_dns_stub_listener_mode, 0,                   offsetof(Manager, dns_stub_listener_mode)
  Resolve.ReadEtcHosts,    config_parse_bool,                   0,                   offsetof(Manager, read_etc_hosts)
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index 2956d2a..de48870 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -579,7 +579,7 @@
+@@ -579,7 +579,7 @@ int manager_new(Manager **ret) {
                  .mdns_support = RESOLVE_SUPPORT_NO,
                  .dnssec_mode = DEFAULT_DNSSEC_MODE,
                  .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
@@ -128,9 +136,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
                  .dns_stub_listener_mode = DNS_STUB_LISTENER_YES,
                  .read_resolv_conf = true,
                  .need_builtin_fallbacks = true,
+diff --git a/src/resolve/resolved-manager.h b/src/resolve/resolved-manager.h
+index 72171f8..78b96ed 100644
 --- a/src/resolve/resolved-manager.h
 +++ b/src/resolve/resolved-manager.h
-@@ -36,7 +36,7 @@
+@@ -36,7 +36,7 @@ struct Manager {
          ResolveSupport mdns_support;
          DnssecMode dnssec_mode;
          DnsOverTlsMode dns_over_tls_mode;
@@ -139,9 +149,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
          DnsStubListenerMode dns_stub_listener_mode;
  
          /* Network */
+diff --git a/src/resolve/resolved-mdns.c b/src/resolve/resolved-mdns.c
+index 89c2497..2d5b058 100644
 --- a/src/resolve/resolved-mdns.c
 +++ b/src/resolve/resolved-mdns.c
-@@ -318,7 +318,7 @@
+@@ -318,7 +318,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                                  dns_transaction_process_reply(t, p);
                  }
  
@@ -150,9 +162,11 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  
          } else if (dns_packet_validate_query(p) > 0)  {
                  log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));
+diff --git a/src/shared/resolve-util.c b/src/shared/resolve-util.c
+index a5d4a14..2a4a440 100644
 --- a/src/shared/resolve-util.c
 +++ b/src/shared/resolve-util.c
-@@ -26,4 +26,14 @@
+@@ -26,4 +26,14 @@ static const char* const dns_over_tls_mode_table[_DNS_OVER_TLS_MODE_MAX] = {
          [DNS_OVER_TLS_NO] = "no",
          [DNS_OVER_TLS_OPPORTUNISTIC] = "opportunistic",
  };
@@ -167,6 +181,8 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
 +        [DNS_CACHE_MODE_NO_NEGATIVE] = "no-negative",
 +};
 +DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(dns_cache_mode, DnsCacheMode, DNS_CACHE_MODE_YES);
+diff --git a/src/shared/resolve-util.h b/src/shared/resolve-util.h
+index 5883342..c65f4cf 100644
 --- a/src/shared/resolve-util.h
 +++ b/src/shared/resolve-util.h
 @@ -4,6 +4,16 @@
@@ -186,7 +202,7 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  typedef enum ResolveSupport ResolveSupport;
  typedef enum DnssecMode DnssecMode;
  typedef enum DnsOverTlsMode DnsOverTlsMode;
-@@ -49,6 +59,7 @@
+@@ -49,6 +59,7 @@ enum DnsOverTlsMode {
  CONFIG_PARSER_PROTOTYPE(config_parse_resolve_support);
  CONFIG_PARSER_PROTOTYPE(config_parse_dnssec_mode);
  CONFIG_PARSER_PROTOTYPE(config_parse_dns_over_tls_mode);
@@ -194,7 +210,7 @@ Signed-off-by: Jorge Niedbalski <jnr@metaklass.org>
  
  const char* resolve_support_to_string(ResolveSupport p) _const_;
  ResolveSupport resolve_support_from_string(const char *s) _pure_;
-@@ -58,3 +69,6 @@
+@@ -58,3 +69,6 @@ DnssecMode dnssec_mode_from_string(const char *s) _pure_;
  
  const char* dns_over_tls_mode_to_string(DnsOverTlsMode p) _const_;
  DnsOverTlsMode dns_over_tls_mode_from_string(const char *s) _pure_;
