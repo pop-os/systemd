@@ -1,3 +1,310 @@
+systemd (241-7ubuntu1) eoan; urgency=medium
+
+  * Merge from unstable
+    - Dropped changes:
+      * debian/tests: Switch to gdm
+        Files:
+        - debian/tests/boot-and-services
+        - debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f350b43ccc1aa31c745b4ccebbb4084d5cea41ff
+      * Cherrypick proposed patch to fix LinkLocalAddressing post-unify-MTU settings.
+        File: debian/patches/networkd-honour-LinkLocalAddressing.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cd9ba0d0f47634c9e5d862b8208cdc3178f25496
+      * Import patches to support PPC64LE qemu based testing.
+        Files:
+        - debian/tests/control
+        - debian/patches/test-test-functions-on-PP64-use-vmlinux.patch
+        - debian/patches/test-test-functions-on-PPC64-use-hvc0-console.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=483a4daba07f809883883e8e8b9c365cfbf7256e
+      * networkd: [Route] PreferredSource not working in *.network files.
+        Files:
+        - debian/patches/Install-routes-after-addresses-are-ready.patch
+        - debian/patches/Move-link_check_ready-to-later-in-the-file.patch
+        - debian/patches/tests-Add-test-for-IPv6-source-routing.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4e2ee0b2ac1be2ae78952890a56a2d5398df518
+      * udevadm: Fix segfault with subsystem-match containing '/' (Closes: #919206)
+        File: debian/patches/udevadm-fix-segfault.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=736973d38676301f276716f22a746aed2489baac
+      * Blacklist TEST-10-ISSUE-2467 #11706
+        File: debian/tests/upstream
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f93b9e46b54388370da7b0cd7f858031be3a2578
+      * Fix comment about why we disable hwclock.service.
+        File: debian/systemd.links
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8473f88fffdb9db1f5ba547bb692a911997f2569
+      * debian/tests/storage: fix for LUKS2 and avoid interactive password prompts.
+        File: debian/tests/storage
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5594ebf325816e76a8c58043c56fc94f2d52b2a6
+      * d/p/network-remove-routing-policy-rule-from-foreign-rule.patch
+      * d/p/network-do-not-remove-rule-when-it-is-requested-by-e.patch
+        - Fix RoutingPolicyRule does not apply correctly
+      * core: queue jobs on uninstall to generate PropertiesChanged signal.
+        File: debian/patches/core-when-we-uninstall-a-job-add-unit-to-dbus-queue.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=241deca98fb9a0f1ba9a6ba781f738fb31a3bd80
+      * systemd-stable: cherrypick many bugfixes from the v240-stable branch.
+        Files:
+        - debian/patches/Add-missing-dash-to-all-option-in-the-timedatectl-man-pag.patch
+        - debian/patches/Add-note-about-transactions-being-genereated-independentl.patch
+        - debian/patches/Change-job-mode-of-manager-triggered-restarts-to-JOB_REPL.patch
+        - debian/patches/Fix-omission-in-docs.patch
+        - debian/patches/Log-the-job-being-merged.patch
+        - debian/patches/NEWS-document-deprecation-of-PermissionsStartOnly-in-v240.patch
+        - debian/patches/NEWS-retroactively-describe-.include-deprecation.patch
+        - debian/patches/Update-systemd-system.conf.xml.patch
+        - debian/patches/basic-prioq-add-prioq_peek_item.patch
+        - debian/patches/core-Fix-EOPNOTSUPP-emergency-action-error-string.patch
+        - debian/patches/core-Fix-return-argument-check-for-parse_emergency_action.patch
+        - debian/patches/core-mount-do-not-add-Before-local-fs.target-or-remote-fs.patch
+        - debian/patches/core-mount-move-static-function-earlier-in-file.patch
+        - debian/patches/curl-util-fix-use-after-free.patch
+        - debian/patches/ethtool-Make-sure-advertise-is-actually-set-when-autonego.patch
+        - debian/patches/journal-avoid-buffer-overread-when-locale-name-is-too-lon.patch
+        - debian/patches/journal-limit-the-number-of-entries-in-the-cache-based-on.patch
+        - debian/patches/journald-periodically-drop-cache-for-all-dead-PIDs.patch
+        - debian/patches/machinectl-fix-argument-index-in-error-log.patch
+        - debian/patches/man-Fix-a-typo-in-systemd.exec.xml.patch
+        - debian/patches/man-fix-reference.patch
+        - debian/patches/man-fix-volume-num-of-journalctl.patch
+        - debian/patches/man-update-DefaultDependency-in-systemd.mount-5.patch
+        - debian/patches/netlink-set-maximum-size-of-WGDEVICE_A_IFNAME.patch
+        - debian/patches/network-make-Link-and-NetDev-always-have-the-valid-poiter.patch
+        - debian/patches/network-unset-Network-manager-when-loading-.network-file-.patch
+        - debian/patches/network-wireguard-rename-and-split-set_wireguard_interfac.patch
+        - debian/patches/networkd-wait-for-kernel-to-reply-ipv6-peer-address.patch
+        - debian/patches/nspawn-ignore-SIGPIPE-for-nspawn-itself.patch
+        - debian/patches/pager-improve-english-a-bit.patch
+        - debian/patches/pid1-fix-cleanup-of-stale-implicit-deps-based-on-proc-sel.patch
+        - debian/patches/procfs-util-expose-functionality-to-query-total-memory.patch
+        - debian/patches/pull-fix-invalid-error-check.patch
+        - debian/patches/shared-Revert-commit-49fe5c099-in-parts-for-function-pars.patch
+        - debian/patches/shared-dissect-image-make-sure-that-we-don-t-truncate-dev.patch
+        - debian/patches/test-execute-unset-HOME-before-testing.patch
+        - debian/patches/udev-do-logging-before-setting-variables-to-NULL.patch
+        - debian/patches/udev-val-may-be-NULL-use-strempty.patch
+        - debian/patches/udevadm-info-a-should-enumerate-sysfs-attributes-not-envs.patch
+        - debian/patches/udevd-use-worker_free-on-failure-in-worker_new.patch
+        - debian/patches/units-make-sure-initrd-cleanup.service-terminates-before-.patch
+        - debian/patches/wait-online-do-not-fail-if-we-receive-invalid-messages.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2b3db732ba7e5418d45ca42884e8d075189f2724
+      * Cherrypick missing systemd-stable patches to unbreak wireguard peer endpoints.
+        Files:
+        - debian/patches/network-wireguard-fixes-sending-wireguard-peer-setti.patch
+        - debian/patches/network-wireguard-use-sd_netlink_message_append_sock.patch
+        - debian/patches/sd-netlink-introduce-sd_netlink_message_append_socka.patch
+        - debian/patches/test-network-add-more-checks-in-NetworkdNetDevTests..patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4046f515e40c4dc80d18d2303466737f1f451f11
+      * Cherry-pick patches to fix FTBFS with GCC 9:
+        - d/p/strv-rework-FOREACH_STRING-macro.patch
+        - d/p/test-systemctl-nspawn-use-const-char-instead-of-char-as-i.patch
+    - Remaining changes:
+      * Skip starting systemd-remount-fs.service in containers
+        even when /etc/fstab is present.
+        File: debian/patches/debian/Skip-starting-systemd-remount-fs.service-in-containers.patch
+      * resolved: add support for pipelined requests
+        Files:
+        - debian/patches/llmnr-add-comment-why-we-install-no-complete-handler-on-s.patch
+        - debian/patches/resolved-add-comment-to-dns_stream_complete-about-its-err.patch
+        - debian/patches/resolved-keep-stub-stream-connections-up-for-as-long-as-c.patch
+        - debian/patches/resolved-only-call-complete-with-zero-argument-in-LLMNR-c.patch
+        - debian/patches/resolved-restart-stream-timeout-whenever-we-managed-to-re.patch
+        - debian/patches/stream-follow-coding-style-don-t-use-degrade-to-bool-for-.patch
+        - debian/patches/stream-track-type-of-DnsStream-object.patch
+        - debian/patches/transaction-simplify-handling-if-we-get-an-unexpected-DNS.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8ad1db08c2135af098a33957ce7cffbe21fb683f
+      * networkd: [Route] PreferredSource not working in *.network files.
+        Files:
+        - debian/patches/debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4e2ee0b2ac1be2ae78952890a56a2d5398df518
+      * virt: detect WSL environment as a container
+        Files:
+        - debian/patches/virt-detect-WSL-environment-as-a-container-id-wsl.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=20b10ce955ad6ddb85c185a13e05a72c3e717f20
+      * pam-systemd: use secure_getenv() rather than getenv()
+        File: debian/patches/pam-systemd-use-secure_getenv-rather-than-getenv.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f3291e9e8c3eafd0c8921cb26a0d5ee0fd563b3c
+      * Set UseDomains to true, by default, on Ubuntu.
+        File: debian/patches/debian/Ubuntu-UseDomains-by-default.patch
+      * Enable systemd-resolved by default
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=05adfa0902115f51c1196ad623165a75bb8b4313
+      * Create /etc/resolv.conf at postinst, pointing at the stub resolver.
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ef4adf46bbbe2d22508b70b889d23da53b85039d
+      * libnss-resolve: do not disable and stop systemd-resolved
+        File: debian/libnss-resolve.postrm
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=95577d14e84e19b614b83b2e24985d89e8c2dac0
+      * Ignore failures to set Nice priority on services in containers.
+        File: debian/patches/debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5b8e457f8d883fc6f55d33d46b3474926a495d29
+      * units: set ConditionVirtualization=!private-users on journald audit socket.
+        File: debian/patches/debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03ed18a9940731bbf794ad320fabf337488835c6
+      * debian/tests: Enforce udev upgrade.
+        Files:
+        - debian/tests/boot-and-services
+        - debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f350b43ccc1aa31c745b4ccebbb4084d5cea41ff
+      * Always setup /etc/resolv.conf on new installations.
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=20bc8a37fa3c9620bed21a56a4eabd71db71d861
+      * Ubuntu/extra: ship dhclient-enter hook.
+        Files:
+        - debian/extra/dhclient-enter-resolved-hook
+        - debian/rules
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f3398a213f80b02bf3db0c1ce9e22d69f6d56764
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=258893bae8cbb12670e4807636fe8f7e9fb5407a
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0725c1169ddde4f41cacba7af3e546704e2206be
+      * Disable systemd-networkd-wait-online by default.
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=694473d812b50d2fefd6494d494ca02b91bc8785
+      * postinst: drop empty/stock /etc/rc.local
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e7d071a26a79558771303b0b87f007e650eaebbe
+      * Ship systemd sysctl settings.
+        Files:
+        - debian/patches/debian/UBUNTU-drop-kernel.-settings-from-sysctl-defaults-shipped.patch
+        - debian/rules
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7cd041a6d0ef459e4b2a82d8ea5fa1ce05184dfb
+      * systemd.postinst: enable persistent journal
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f94f18d9dbc085b6a9ff33c141a6e542142f85b5
+      * Disable LLMNR and MulticastDNS by default
+        Files:
+        - debian/patches/debian/UBUNTU-resolved-disable-global-LLMNR-and-MulticastDNS.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4ec428e83696a5cd0405b677a35e97681867629
+      * Add "AssumedApparmorLabel=unconfined" to timedate1 dbus service file
+        File: debian/patches/debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5ad0879e10bbe3d641f940260b93c7eb2cf4624c
+      * debian/tests/systemd-fsckd: update assertions expectations for v237
+        File: debian/tests/systemd-fsckd
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d5becd9a416b55dcdb7b9a7aba60c4e3d304e6a6
+      * test/test-functions: launch qemu-system with -vga none.
+        File: debian/patches/debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=90af1fa893cce5ed49999d16da0b793da6523394
+      * tests/boot-smoke: ignore udevd connection timeouts resolving colord group.
+        File: debian/tests/boot-smoke
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e1477b764fa9ef23f5181ef3d31a1332191c3e0b
+      * Drop systemd.prerm safety check.
+        File: debian/systemd.prerm
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0244c4d56556317f14eecc2f51871969ef02ba7b
+      * wait-online: do not wait, if no links are managed (neither configured, or failed).
+        File: debian/patches/debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=31f04c3fc769dacb3cf2a78240a1710a99a865b8
+      * journald.service: set Nice=-1 to dodge watchdog on soft lockups.
+        File: debian/patches/debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e0a9aeffac556492bf517ce2d23313ff7a277926
+      * Workaround captive portals not responding to EDNS0 queries (DVE-2018-0001).
+        File: debian/patches/resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=87d3fe81b7281687ecf3c0b9a8356e90cc714d0b
+      * Recommend networkd-dispatcher
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d1e3b2c7e4757119da0d550b0b3c0a6626a176dc
+      * networkd: if RA was implicit, do not await ndisc_configured.
+        File: debian/patches/debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f749ff528d1b788aa4ca778e954c16b213ee629
+      * udev-udeb: ship modprobe.d snippet to force scsi_mod.scan=sync in d-i.
+        Files:
+        - debian/extra/modprobe.d-udeb/scsi-mod-scan-sync.conf
+        - debian/udev-udeb.install
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=eb6d8a2b9504917abb7aa2c4035fdbb7b98227f7
+      * Disable dh_installinit generation of tmpfiles for the systemd package.
+        Files:
+        - debian/rules
+        - debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1fd144cbe31cc7a9383cc76f21f4b84c22a9dd1b
+      * Enable EFI/bootctl on armhf.
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=043122f7d8a1487bfd357e815a6ece1ceea6e7d1
+      * boot-and-services: stderr is ok, for status command on the c1 container.
+        File: debian/tests/boot-and-services
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=da14d34e7cc33c44ad67e64c9fd092f8cc1675f9
+      * Skip systemd-fsckd on arm64, because of broken/lack of clean shutdown.
+        File: debian/tests/systemd-fsckd
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bf5b501ac934497dbef5f64908ff37643dc7288e
+      * adt: boot-and-services: assert any kernel syslog messages.
+        File: debian/tests/boot-and-services
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=29dc34f7a6e5dc505f6212c17c42e4420b47ed16
+      * debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin to the kernel (we previously only set it in modprobe.d)
+        Files:
+        - debian/extra/start-udev
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6b72628f8de991e2c67ac4289fc74daf3abe7d14
+      * units: conditionalize more units to not start in containers.
+        Files:
+        - debian/patches/debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3689afa1a782de8c19a757459b6360de1195ad55
+      * test-sleep: skip test_fiemap upon inapproriate ioctl for device.
+        File: debian/patches/debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6ebb5b9f6b77760a5470e8a780d69875b1db76f7
+      * Re-add support for /etc/writable for core18
+        File: debian/patches/debian/UBUNTU-Support-system-image-read-only-etc.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a5b5fca66c1127068e4ce0cc9ab497814211f4f7
+      * debian/control: strengthen dependencies.
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d1ecf0c372f5212129c85ae60fddf26b2271a1fe
+      * Improve autopkgtest success rate, by bumping up timeouts
+        File: debian/patches/debian/UBUNTU-bump-selftest-timeouts.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c05586d9da033bbfd6b6a74e10b87520843c7c48
+      * units: Disable journald Watchdog
+        File: debian/patches/debian/UBUNTU-units-disable-journald-watchdog.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=64d2b4f1d0d057073fba585f19823332e2a6eed5
+      * Add conflicts with upstart and systemd-shim
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=83ed7496afc7c27be026014d109855f7d0ad1176
+      * Specify Ubuntu's Vcs-Git
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fd832930ef280c9a4a9dda2440d5a46a6fdb6232
+      * debian/systemd.postinst: Skip daemon-reexec and try-restarts during shutdown
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=51daab96ae79483b5e5fb62e1e0477c87ee11fd1
+      * Switch gbp.conf to disco.
+        File: debian/gbp.conf
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fea585b259e3e766d8d3dbc9690e879c054ddc87
+      * core: set /run size to 10%, like initramfs-tools does.
+        File: debian/patches/debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1fac2568fe716dc1a41bada78293dc6327a6df0d
+      * support PPC64LE qemu based testing.
+        Files:
+        - debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=483a4daba07f809883883e8e8b9c365cfbf7256e
+      * core: Revert strict mount namespacing/sandboxing, until LXD allows the needed mounts.
+        File: debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=030919ba5e4931d6ee576d0259fae67fe4ed9770
+      * networkd: [Route] PreferredSource not working in *.network files.
+        Files:
+        - debian/patches/debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4e2ee0b2ac1be2ae78952890a56a2d5398df518
+      * debian/tests: blacklist upstream test-24-unit-tests on ppc64le.
+        File: debian/tests/upstream
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8062b9a2712c390010d2948eaf764a1b52e68715
+      * debian/control: Update Vcs-{Browser|Git} to Ubuntu's packaging repository
+      * debian/gbp.conf: Set tag format to ubuntu/*
+      * Only test that gdm3 comes up on amd64. Stalls on other arches.
+        File: debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=97cb13685dfb353045c449ec5d6d1df60f661079
+      * tests/storage: make the test more resilient.
+        File: debian/tests/storage
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c08dcb1ffe372acd3a21496758a1984ff78dcdd4
+      * Fix false negative checking for running jobs after boot.
+        File: debian/tests/boot-smoke
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=aeb01631efbaf3fe851dee15d496e0b66b5c347f
+      * Cherrypick ask-password: prevent buffer overrow when reading from keyring.
+        File: debian/patches/ask-password-prevent-buffer-overrow-when-reading-fro.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6d6e9cbd4fc6e018031a4762e88f2c3aa19e24e8
+      * Wait for cryptsetup unit to start, before stopping.
+        File: debian/tests/storage
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b65aa350be7e61c65927fbc0921a750fcfaa51cd
+      * Wait for systemctl is-system-running state.
+        File: debian/tests/boot-smoke
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=776998f1f55c445b6e385cab69a4219c42d00838
+      * Fix typpo in storage test.
+        File: debian/tests/storage
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f28aa5fe4ab175b99b6ea702559c59ca473b4ca8
+      * random-util: eat up bad RDRAND values seen on AMD CPUs.
+        File: debian/patches/+rdrand-workaround-on-amd.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?h=ubuntu-eoan&id=6ab88231efca4b04b26de6cfb5d671be154aabe0
+  * Refresh patches
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 28 Aug 2019 17:19:28 +0200
+
 systemd (241-7) unstable; urgency=medium
 
   [ Michael Biebl ]
