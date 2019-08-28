@@ -603,7 +603,7 @@ static int assess_ip_address_allow(
                 d = strdup("Service defines IP address whitelist with non-localhost entries");
                 b = 5;
         } else if (info->ip_address_allow_localhost) {
-                d = strdup("Service defines IP address whitelits with only localhost entries");
+                d = strdup("Service defines IP address whitelist with only localhost entries");
                 b = 2;
         } else {
                 d = strdup("Service blocks all IP address ranges");
@@ -1514,6 +1514,8 @@ static int assess(const struct security_info *info, Table *overview_table, Analy
                 }
         }
 
+        assert(weight_sum > 0);
+
         if (details_table) {
                 size_t row;
 
@@ -1545,7 +1547,6 @@ static int assess(const struct security_info *info, Table *overview_table, Analy
                         return log_error_errno(r, "Failed to output table: %m");
         }
 
-        assert(weight_sum > 0);
         exposure = DIV_ROUND_UP(badness_sum * 100U, weight_sum);
 
         for (i = 0; i < ELEMENTSOF(badness_table); i++)

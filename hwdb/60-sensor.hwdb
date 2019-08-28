@@ -160,6 +160,10 @@ sensor:modalias:acpi:BMA250E*:dmi:bvnINSYDECorp.:bvrG1D_S165*:svnilife:pnS165:*
 sensor:modalias:acpi:BOSC0200*:dmi:*:svnHampoo:pnX1D3_C806N:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
+# Chuwi Hi10 (CWI1515)
+sensor:modalias:acpi:BOSC0200*:dmi:bvnAmericanMegatrendsInc.:bvrP02A_C106.60E:*:svnDefaultstring:pnDefaultstring:* 
+ ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
+
 # Chuwi Hi10 Pro
 sensor:modalias:acpi:BOSC0200*:dmi:*:svn*CHUWIINNOVATIONANDTECHNOLOGY*:pnHi10protablet:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
@@ -263,7 +267,12 @@ sensor:modalias:acpi:KIOX000A*:dmi:bvnINSYDECorp.:bvrBYT70A.YNCHENG.WIN.007:*:sv
 # quirk from "can play neverball" to "matches Windows 8 orientation"
 # is then applied below.
 sensor:modalias:platform:lis3lv02d:dmi:*svn*Hewlett-Packard*:*
-  ACCEL_MOUNT_MATRIX=1, 0, 0; 0, 0, -1; 0, 1, 0
+ ACCEL_MOUNT_MATRIX=1, 0, 0; 0, 0, -1; 0, 1, 0
+
+# HP laptops which have the lis3lv02d device in the base, tell iio-sensor-proxy
+# about this so that the sensor is not used for display orientation
+sensor:modalias:platform:lis3lv02d:dmi:*svn*Hewlett-Packard*:*pnHPProBook4535s*
+ ACCEL_LOCATION=base
 
 sensor:modalias:acpi:SMO8500*:dmi:*:svnHewlett-Packard:pnHPStream7Tablet:*
 sensor:modalias:acpi:SMO8500*:dmi:*:svnHewlett-Packard:pnHPStream8Tablet:*
@@ -271,7 +280,7 @@ sensor:modalias:acpi:SMO8500*:dmi:*:svnHewlett-Packard:pnHPStream8Tablet:*
 
 # HP Pavillion X2 10-n000nd
 sensor:modalias:i2c:bmc150_accel:dmi:*:svnHewlett-Packard:pnHPPavilionx2Detachable:*:rn815D:*
-  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
+ ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
 #########################################
 # I.T.Works
@@ -384,6 +393,10 @@ sensor:modalias:acpi:SMO8500*:dmi:*:svnMEDION:pnAkoyaE2212TMD99720:*
 
 # Medion Akoya E3216 MD60900
 sensor:modalias:acpi:KIOX010A*:dmi:*:svnMEDION*:pnE3216*:*
+ ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
+
+# Medion Akoya E3221 MD61237
+sensor:modalias:acpi:KIOX010A*:dmi:*:svnMEDION:pnE3221MD61237:*
  ACCEL_MOUNT_MATRIX=0, -1, 0; -1, 0, 0; 0, 0, 1
 
 # Medion Akoya E3222 MD62450

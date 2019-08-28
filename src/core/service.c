@@ -3417,14 +3417,11 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                 f = SERVICE_SUCCESS;
                 }
 
-                /* When this is a successful exit, let's log about the exit code on DEBUG level. If this is a failure
-                 * and the process exited on its own via exit(), then let's make this a NOTICE, under the assumption
-                 * that the service already logged the reason at a higher log level on its own. (Internally,
-                 * unit_log_process_exit() will possibly bump this to WARNING if the service died due to a signal.) */
                 unit_log_process_exit(
-                                u, f == SERVICE_SUCCESS ? LOG_DEBUG : LOG_NOTICE,
+                                u,
                                 "Main process",
                                 service_exec_command_to_string(SERVICE_EXEC_START),
+                                f == SERVICE_SUCCESS,
                                 code, status);
 
                 if (s->result == SERVICE_SUCCESS)
@@ -3519,9 +3516,10 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                 }
 
                 unit_log_process_exit(
-                                u, f == SERVICE_SUCCESS ? LOG_DEBUG : LOG_NOTICE,
+                                u,
                                 "Control process",
                                 service_exec_command_to_string(s->control_command_id),
+                                f == SERVICE_SUCCESS,
                                 code, status);
 
                 if (s->state != SERVICE_RELOAD && s->result == SERVICE_SUCCESS)
@@ -4067,7 +4065,6 @@ static int service_get_timeout(Unit *u, usec_t *timeout) {
 
 static void service_bus_name_owner_change(
                 Unit *u,
-                const char *name,
                 const char *old_owner,
                 const char *new_owner) {
 
@@ -4075,17 +4072,15 @@ static void service_bus_name_owner_change(
         int r;
 
         assert(s);
-        assert(name);
 
-        assert(streq(s->bus_name, name));
         assert(old_owner || new_owner);
 
         if (old_owner && new_owner)
-                log_unit_debug(u, "D-Bus name %s changed owner from %s to %s", name, old_owner, new_owner);
+                log_unit_debug(u, "D-Bus name %s changed owner from %s to %s", s->bus_name, old_owner, new_owner);
         else if (old_owner)
-                log_unit_debug(u, "D-Bus name %s no longer registered by %s", name, old_owner);
+                log_unit_debug(u, "D-Bus name %s no longer registered by %s", s->bus_name, old_owner);
         else
-                log_unit_debug(u, "D-Bus name %s now registered by %s", name, new_owner);
+                log_unit_debug(u, "D-Bus name %s now registered by %s", s->bus_name, new_owner);
 
         s->bus_name_good = !!new_owner;
 
@@ -4118,11 +4113,11 @@ static void service_bus_name_owner_change(
 
                 /* Try to acquire PID from bus service */
 
-                r = sd_bus_get_name_creds(u->manager->api_bus, name, SD_BUS_CREDS_PID, &creds);
+                r = sd_bus_get_name_creds(u->manager->api_bus, s->bus_name, SD_BUS_CREDS_PID, &creds);
                 if (r >= 0)
                         r = sd_bus_creds_get_pid(creds, &pid);
                 if (r >= 0) {
-                        log_unit_debug(u, "D-Bus name %s is now owned by process " PID_FMT, name, pid);
+                        log_unit_debug(u, "D-Bus name %s is now owned by process " PID_FMT, s->bus_name, pid);
 
                         service_set_main_pid(s, pid);
                         unit_watch_pid(UNIT(s), pid, false);

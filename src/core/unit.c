@@ -3242,7 +3242,46 @@ static int signal_name_owner_changed(sd_bus_message *message, void *userdata, sd
         new_owner = empty_to_null(new_owner);
 
         if (UNIT_VTABLE(u)->bus_name_owner_change)
-                UNIT_VTABLE(u)->bus_name_owner_change(u, name, old_owner, new_owner);
+                UNIT_VTABLE(u)->bus_name_owner_change(u, old_owner, new_owner);
+
+        return 0;
+}
+
+static int get_name_owner_handler(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        const sd_bus_error *e;
+        const char *new_owner;
+        Unit *u = userdata;
+        int r;
+
+        assert(message);
+        assert(u);
+
+        u->get_name_owner_slot = sd_bus_slot_unref(u->get_name_owner_slot);
+
+        if (sd_bus_error_is_set(error)) {
+                log_error("Failed to get name owner from bus: %s", error->message);
+                return 0;
+        }
+
+        e = sd_bus_message_get_error(message);
+        if (sd_bus_error_has_name(e, "org.freedesktop.DBus.Error.NameHasNoOwner"))
+                return 0;
+
+        if (e) {
+                log_error("Unexpected error response from GetNameOwner: %s", e->message);
+                return 0;
+        }
+
+        r = sd_bus_message_read(message, "s", &new_owner);
+        if (r < 0) {
+                bus_log_parse_error(r);
+                return 0;
+        }
+
+        new_owner = empty_to_null(new_owner);
+
+        if (UNIT_VTABLE(u)->bus_name_owner_change)
+                UNIT_VTABLE(u)->bus_name_owner_change(u, NULL, new_owner);
 
         return 0;
 }
@@ -3264,7 +3303,19 @@ int unit_install_bus_match(Unit *u, sd_bus *bus, const char *name) {
                          "member='NameOwnerChanged',"
                          "arg0='", name, "'");
 
-        return sd_bus_add_match_async(bus, &u->match_bus_slot, match, signal_name_owner_changed, NULL, u);
+        int r = sd_bus_add_match_async(bus, &u->match_bus_slot, match, signal_name_owner_changed, NULL, u);
+        if (r < 0)
+                return r;
+
+        return sd_bus_call_method_async(bus,
+                                        &u->get_name_owner_slot,
+                                        "org.freedesktop.DBus",
+                                        "/org/freedesktop/DBus",
+                                        "org.freedesktop.DBus",
+                                        "GetNameOwner",
+                                        get_name_owner_handler,
+                                        u,
+                                        "s", name);
 }
 
 int unit_watch_bus_name(Unit *u, const char *name) {
@@ -3299,6 +3350,7 @@ void unit_unwatch_bus_name(Unit *u, const char *name) {
 
         (void) hashmap_remove_value(u->manager->watch_bus, name, u);
         u->match_bus_slot = sd_bus_slot_unref(u->match_bus_slot);
+        u->get_name_owner_slot = sd_bus_slot_unref(u->get_name_owner_slot);
 }
 
 bool unit_can_serialize(Unit *u) {
@@ -4531,6 +4583,15 @@ int unit_write_setting(Unit *u, UnitWriteFlags flags, const char *name, const ch
                 return r;
 
         (void) mkdir_p_label(p, 0755);
+
+        /* Make sure the drop-in dir is registered in our path cache. This way we don't need to stupidly
+         * recreate the cache after every drop-in we write. */
+        if (u->manager->unit_path_cache) {
+                r = set_put_strdup(u->manager->unit_path_cache, p);
+                if (r < 0)
+                        return r;
+        }
+
         r = write_string_file_atomic_label(q, wrapped);
         if (r < 0)
                 return r;
@@ -5718,16 +5779,26 @@ void unit_log_skip(Unit *u, const char *result) {
 
 void unit_log_process_exit(
                 Unit *u,
-                int level,
                 const char *kind,
                 const char *command,
+                bool success,
                 int code,
                 int status) {
+
+        int level;
 
         assert(u);
         assert(kind);
 
-        if (code != CLD_EXITED)
+        /* If this is a successful exit, let's log about the exit code on DEBUG level. If this is a failure
+         * and the process exited on its own via exit(), then let's make this a NOTICE, under the assumption
+         * that the service already logged the reason at a higher log level on its own. Otherwise, make it a
+         * WARNING. */
+        if (success)
+                level = LOG_DEBUG;
+        else if (code == CLD_EXITED)
+                level = LOG_NOTICE;
+        else
                 level = LOG_WARNING;
 
         log_struct(level,

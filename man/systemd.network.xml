@@ -57,7 +57,7 @@
     <filename>/run/systemd/network</filename> directories. Drop-in files in
     <filename>/etc</filename> take precedence over those in <filename>/run</filename> which in turn
     take precedence over those in <filename>/usr/lib</filename>. Drop-in files under any of these
-    directories take precedence over the main netdev file wherever located.</para>
+    directories take precedence over the main network file wherever located.</para>
 
     <para>Note that an interface without any static IPv6 addresses configured, and neither DHCPv6
     nor IPv6LL enabled, shall be considered to have no IPv6 support. IPv6 will be automatically
@@ -90,7 +90,7 @@
           <term><varname>MACAddress=</varname></term>
           <listitem>
             <para>A whitespace-separated list of hardware addresses. Use full colon-, hyphen- or dot-delimited hexadecimal. See the example below.
-            This option may appear more than one, in which case the lists are merged. If the empty string is assigned to this option, the list
+            This option may appear more than once, in which case the lists are merged. If the empty string is assigned to this option, the list
             of hardware addresses defined prior to this is reset.</para>
 
             <para>Example:
@@ -1137,6 +1137,16 @@
           <term><varname>InvertRule=</varname></term>
           <listitem>
             <para>A boolean. Specifies whether the rule to be inverted. Defaults to false.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Family=</varname></term>
+          <listitem>
+            <para>Takes a special value <literal>ipv4</literal>, <literal>ipv6</literal>, or
+            <literal>both</literal>. By default, the address family is determined by the address
+            specified in <varname>To=</varname> or <varname>From=</varname>. If neither
+            <varname>To=</varname> nor <varname>From=</varname> are specified, then defaults to
+            <literal>ipv4</literal>.</para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -2204,6 +2214,27 @@ DHCP=yes</programlisting>
 
       <para>This will enable DHCPv4 and DHCPv6 on all interfaces with names starting with
       <literal>en</literal> (i.e. ethernet interfaces).</para>
+    </example>
+
+    <example>
+      <title>IPv6 Prefix Delegation</title>
+
+      <programlisting># /etc/systemd/network/55-ipv6-pd-upstream.network
+[Match]
+Name=enp1s0
+
+[Network]
+DHCP=ipv6</programlisting>
+
+      <programlisting># /etc/systemd/network/56-ipv6-pd-downstream.network
+[Match]
+Name=enp2s0
+
+[Network]
+IPv6PrefixDelegation=dhcpv6</programlisting>
+
+      <para>This will enable IPv6 PD on the interface enp1s0 as an upstream interface where the
+      DHCPv6 client is running and enp2s0 as a downstream interface where the prefix is delegated to.</para>
     </example>
 
     <example>

@@ -1412,7 +1412,7 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         '24-keep-configuration-static.network',
         '24-search-domain.network',
         '25-address-link-section.network',
-        '25-address-preferred-lifetime-zero-ipv6.network',
+        '25-address-preferred-lifetime-zero.network',
         '25-address-static.network',
         '25-bind-carrier.network',
         '25-bond-active-backup-slave.netdev',
@@ -1422,6 +1422,7 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         '25-ip6gre-tunnel-remote-any.netdev',
         '25-ipv6-address-label-section.network',
         '25-neighbor-section.network',
+        '25-neighbor-next.network',
         '25-neighbor-ipv6.network',
         '25-neighbor-ip-dummy.network',
         '25-neighbor-ip.network',
@@ -1430,13 +1431,15 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         '25-link-section-unmanaged.network',
         '25-route-ipv6-src.network',
         '25-route-static.network',
+        '25-gateway-static.network',
+        '25-gateway-next-static.network',
         '25-sysctl-disable-ipv6.network',
         '25-sysctl.network',
         'configure-without-carrier.network',
         'routing-policy-rule-dummy98.network',
         'routing-policy-rule-test1.network']
 
-    routing_policy_rule_tables = ['7', '8']
+    routing_policy_rule_tables = ['7', '8', '9']
     routes = [['blackhole', '202.54.1.2'], ['unreachable', '202.54.1.3'], ['prohibit', '202.54.1.4']]
 
     def setUp(self):
@@ -1490,16 +1493,19 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         self.assertRegex(output, 'inet6 fd[0-9a-f:]*1/64 scope global')
 
     def test_address_preferred_lifetime_zero_ipv6(self):
-        copy_unit_to_networkd_unit_path('25-address-preferred-lifetime-zero-ipv6.network', '12-dummy.netdev')
+        copy_unit_to_networkd_unit_path('25-address-preferred-lifetime-zero.network', '12-dummy.netdev')
         start_networkd(5)
 
-        self.check_link_exists('dummy98')
-        self.check_operstate('dummy98', 'routable', setup_state='configuring')
+        self.wait_online(['dummy98:routable'])
 
         output = check_output('ip address show dummy98')
         print(output)
         self.assertRegex(output, 'inet 10.2.3.4/16 brd 10.2.255.255 scope link deprecated dummy98')
         self.assertRegex(output, 'inet6 2001:db8:0:f101::1/64 scope global')
+
+        output = check_output('ip route show dev dummy98')
+        print(output)
+        self.assertRegex(output, 'default via 20.20.20.1 proto static')
 
     def test_configure_without_carrier(self):
         copy_unit_to_networkd_unit_path('configure-without-carrier.network', '11-dummy.netdev')
@@ -1517,14 +1523,35 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         start_networkd()
         self.wait_online(['test1:degraded'])
 
-        output = check_output('ip rule')
+        output = check_output('ip rule list iif test1 priority 111')
         print(output)
-        self.assertRegex(output, '111')
+        self.assertRegex(output, '111:')
         self.assertRegex(output, 'from 192.168.100.18')
         self.assertRegex(output, r'tos (?:0x08|throughput)\s')
         self.assertRegex(output, 'iif test1')
         self.assertRegex(output, 'oif test1')
         self.assertRegex(output, 'lookup 7')
+
+        output = check_output('ip rule list iif test1 priority 101')
+        print(output)
+        self.assertRegex(output, '101:')
+        self.assertRegex(output, 'from all')
+        self.assertRegex(output, 'iif test1')
+        self.assertRegex(output, 'lookup 9')
+
+        output = check_output('ip -6 rule list iif test1 priority 100')
+        print(output)
+        self.assertRegex(output, '100:')
+        self.assertRegex(output, 'from all')
+        self.assertRegex(output, 'iif test1')
+        self.assertRegex(output, 'lookup 8')
+
+        output = check_output('ip -6 rule list iif test1 priority 101')
+        print(output)
+        self.assertRegex(output, '101:')
+        self.assertRegex(output, 'from all')
+        self.assertRegex(output, 'iif test1')
+        self.assertRegex(output, 'lookup 9')
 
     def test_routing_policy_rule_issue_11280(self):
         copy_unit_to_networkd_unit_path('routing-policy-rule-test1.network', '11-dummy.netdev',
@@ -1632,6 +1659,26 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         print(output)
         self.assertRegex(output, 'prohibit 202.54.1.4 proto static')
 
+    def test_gateway_reconfigure(self):
+        copy_unit_to_networkd_unit_path('25-gateway-static.network', '12-dummy.netdev')
+        start_networkd()
+        self.wait_online(['dummy98:routable'])
+        print('### ip -4 route show dev dummy98 default')
+        output = check_output('ip -4 route show dev dummy98 default')
+        print(output)
+        self.assertRegex(output, 'default via 149.10.124.59 proto static')
+        self.assertNotRegex(output, '149.10.124.60')
+
+        remove_unit_from_networkd_path(['25-gateway-static.network'])
+        copy_unit_to_networkd_unit_path('25-gateway-next-static.network')
+        restart_networkd(3)
+        self.wait_online(['dummy98:routable'])
+        print('### ip -4 route show dev dummy98 default')
+        output = check_output('ip -4 route show dev dummy98 default')
+        print(output)
+        self.assertNotRegex(output, '149.10.124.59')
+        self.assertRegex(output, 'default via 149.10.124.60 proto static')
+
     def test_ip_route_ipv6_src_route(self):
         # a dummy device does not make the addresses go through tentative state, so we
         # reuse a bond from an earlier test, which does make the addresses go through
@@ -1677,10 +1724,33 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
         start_networkd()
         self.wait_online(['dummy98:degraded'], timeout='40s')
 
+        print('### ip neigh list dev dummy98')
         output = check_output('ip neigh list dev dummy98')
         print(output)
         self.assertRegex(output, '192.168.10.1.*00:00:5e:00:02:65.*PERMANENT')
         self.assertRegex(output, '2004:da8:1::1.*00:00:5e:00:02:66.*PERMANENT')
+
+    def test_neighbor_reconfigure(self):
+        copy_unit_to_networkd_unit_path('25-neighbor-section.network', '12-dummy.netdev')
+        start_networkd()
+        self.wait_online(['dummy98:degraded'], timeout='40s')
+
+        print('### ip neigh list dev dummy98')
+        output = check_output('ip neigh list dev dummy98')
+        print(output)
+        self.assertRegex(output, '192.168.10.1.*00:00:5e:00:02:65.*PERMANENT')
+        self.assertRegex(output, '2004:da8:1::1.*00:00:5e:00:02:66.*PERMANENT')
+
+        remove_unit_from_networkd_path(['25-neighbor-section.network'])
+        copy_unit_to_networkd_unit_path('25-neighbor-next.network')
+        restart_networkd(3)
+        self.wait_online(['dummy98:degraded'], timeout='40s')
+        print('### ip neigh list dev dummy98')
+        output = check_output('ip neigh list dev dummy98')
+        print(output)
+        self.assertNotRegex(output, '192.168.10.1.*00:00:5e:00:02:65.*PERMANENT')
+        self.assertRegex(output, '192.168.10.1.*00:00:5e:00:02:66.*PERMANENT')
+        self.assertNotRegex(output, '2004:da8:1::1.*PERMANENT')
 
     def test_neighbor_gre(self):
         copy_unit_to_networkd_unit_path('25-neighbor-ip.network', '25-neighbor-ipv6.network', '25-neighbor-ip-dummy.network',

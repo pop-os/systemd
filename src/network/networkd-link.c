@@ -150,7 +150,7 @@ static bool link_dhcp4_server_enabled(Link *link) {
         return link->network->dhcp_server;
 }
 
-bool link_ipv4ll_enabled(Link *link, AddressFamilyBoolean mask) {
+bool link_ipv4ll_enabled(Link *link, AddressFamily mask) {
         assert(link);
         assert((mask & ~(ADDRESS_FAMILY_IPV4 | ADDRESS_FAMILY_FALLBACK_IPV4)) == 0);
 
@@ -242,7 +242,7 @@ static bool link_ipv4_forward_enabled(Link *link) {
         if (!link->network)
                 return false;
 
-        if (link->network->ip_forward == _ADDRESS_FAMILY_BOOLEAN_INVALID)
+        if (link->network->ip_forward == _ADDRESS_FAMILY_INVALID)
                 return false;
 
         return link->network->ip_forward & ADDRESS_FAMILY_IPV4;
@@ -260,7 +260,7 @@ static bool link_ipv6_forward_enabled(Link *link) {
         if (!link->network)
                 return false;
 
-        if (link->network->ip_forward == _ADDRESS_FAMILY_BOOLEAN_INVALID)
+        if (link->network->ip_forward == _ADDRESS_FAMILY_INVALID)
                 return false;
 
         if (link_sysctl_ipv6_enabled(link) == 0)
@@ -698,6 +698,9 @@ static Link *link_free(Link *link) {
 
         link->routes = set_free_with_destructor(link->routes, route_free);
         link->routes_foreign = set_free_with_destructor(link->routes_foreign, route_free);
+
+        link->neighbors = set_free_with_destructor(link->neighbors, neighbor_free);
+        link->neighbors_foreign = set_free_with_destructor(link->neighbors_foreign, neighbor_free);
 
         link->addresses = set_free_with_destructor(link->addresses, address_free);
         link->addresses_foreign = set_free_with_destructor(link->addresses_foreign, address_free);
@@ -1945,6 +1948,8 @@ static int link_append_to_master(Link *link, NetDev *netdev) {
         r = set_put(master->slaves, link);
         if (r < 0)
                 return r;
+        if (r == 0)
+                return 0;
 
         link_ref(link);
         return 0;
@@ -2347,6 +2352,22 @@ static bool link_is_static_address_configured(Link *link, Address *address) {
         return false;
 }
 
+static bool link_is_neighbor_configured(Link *link, Neighbor *neighbor) {
+        Neighbor *net_neighbor;
+
+        assert(link);
+        assert(neighbor);
+
+        if (!link->network)
+                return false;
+
+        LIST_FOREACH(neighbors, net_neighbor, link->network->neighbors)
+                if (neighbor_equal(net_neighbor, neighbor))
+                        return true;
+
+        return false;
+}
+
 static bool link_is_static_route_configured(Link *link, Route *route) {
         Route *net_route;
 
@@ -2392,6 +2413,7 @@ static bool link_address_is_dynamic(Link *link, Address *address) {
 
 static int link_drop_foreign_config(Link *link) {
         Address *address;
+        Neighbor *neighbor;
         Route *route;
         Iterator i;
         int r;
@@ -2413,6 +2435,18 @@ static int link_drop_foreign_config(Link *link) {
                                 return log_link_error_errno(link, r, "Failed to add address: %m");
                 } else {
                         r = address_remove(address, link, NULL);
+                        if (r < 0)
+                                return r;
+                }
+        }
+
+        SET_FOREACH(neighbor, link->neighbors_foreign, i) {
+                if (link_is_neighbor_configured(link, neighbor)) {
+                        r = neighbor_add(link, neighbor->family, &neighbor->in_addr, &neighbor->lladdr, neighbor->lladdr_size, NULL);
+                        if (r < 0)
+                                return r;
+                } else {
+                        r = neighbor_remove(neighbor, link, NULL);
                         if (r < 0)
                                 return r;
                 }
@@ -2441,7 +2475,7 @@ static int link_drop_foreign_config(Link *link) {
                         continue;
 
                 if (link_is_static_route_configured(link, route)) {
-                        r = route_add(link, route->family, &route->dst, route->dst_prefixlen, route->tos, route->priority, route->table, NULL);
+                        r = route_add(link, route->family, &route->dst, route->dst_prefixlen, &route->gw, route->tos, route->priority, route->table, NULL);
                         if (r < 0)
                                 return r;
                 } else {
@@ -2456,6 +2490,7 @@ static int link_drop_foreign_config(Link *link) {
 
 static int link_drop_config(Link *link) {
         Address *address, *pool_address;
+        Neighbor *neighbor;
         Route *route;
         Iterator i;
         int r;
@@ -2477,6 +2512,12 @@ static int link_drop_config(Link *link) {
                                 break;
                         }
                 }
+        }
+
+        SET_FOREACH(neighbor, link->neighbors, i) {
+                r = neighbor_remove(neighbor, link, NULL);
+                if (r < 0)
+                        return r;
         }
 
         SET_FOREACH(route, link->routes, i) {
@@ -2686,6 +2727,8 @@ int get_product_uuid_handler(sd_bus_message *m, void *userdata, sd_bus_error *re
 
 configure:
         while ((link = set_steal_first(manager->links_requesting_uuid))) {
+                link_unref(link);
+
                 r = link_configure(link);
                 if (r < 0)
                         link_enter_failed(link);
@@ -2758,6 +2801,8 @@ static int link_configure_duid(Link *link) {
                 r = set_put(m->duids_requesting_uuid, duid);
                 if (r < 0)
                         return log_oom();
+
+                link_ref(link);
         }
 
         return 0;
@@ -3014,7 +3059,7 @@ network_file_fail:
                                 continue;
                         }
 
-                        r = route_add(link, family, &route_dst, prefixlen, tos, priority, table, &route);
+                        r = route_add(link, family, &route_dst, prefixlen, NULL, tos, priority, table, &route);
                         if (r < 0)
                                 return log_link_error_errno(link, r, "Failed to add route: %m");
 

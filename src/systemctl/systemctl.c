@@ -83,6 +83,7 @@
 #include "terminal-util.h"
 #include "tmpfile-util.h"
 #include "unit-def.h"
+#include "unit-file.h"
 #include "unit-name.h"
 #include "user-util.h"
 #include "utf8.h"
@@ -5873,7 +5874,7 @@ static int cat(int argc, char *argv[], void *userdata) {
         bool first = true;
         int r;
 
-        /* Include all units by default - i.e. continue as if the --all
+        /* Include all units by default — i.e. continue as if the --all
          * option was used */
         if (strv_isempty(arg_states))
                 arg_all = true;
@@ -7902,6 +7903,10 @@ static void help_states(void) {
         if (!arg_no_legend)
                 puts("\nAvailable unit active states:");
         DUMP_STRING_TABLE(unit_active_state, UnitActiveState, _UNIT_ACTIVE_STATE_MAX);
+
+        if (!arg_no_legend)
+                puts("\nAvailable unit file states:");
+        DUMP_STRING_TABLE(unit_file_state, UnitFileState, _UNIT_FILE_STATE_MAX);
 
         if (!arg_no_legend)
                 puts("\nAvailable automount unit substates:");
