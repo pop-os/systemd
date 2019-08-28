@@ -19,10 +19,10 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index dffead5..adacad6 100644
+index bcce717..e052d7b 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -2458,8 +2458,6 @@ int main(int argc, char *argv[]) {
+@@ -2472,8 +2472,6 @@ int main(int argc, char *argv[]) {
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  
@@ -32,12 +32,12 @@ index dffead5..adacad6 100644
                  if (r < 0) {
                          log_emergency_errno(r, "Failed to fix up PID 1 environment: %m");
 diff --git a/sysctl.d/50-coredump.conf.in b/sysctl.d/50-coredump.conf.in
-index ccd5c2c..53e74a1 100644
+index 47bf847..1ab6a33 100644
 --- a/sysctl.d/50-coredump.conf.in
 +++ b/sysctl.d/50-coredump.conf.in
 @@ -9,4 +9,4 @@
  # and systemd-coredump(8) and core(5) for the explanation of the
  # setting below.
  
--kernel.core_pattern=|@rootlibexecdir@/systemd-coredump %P %u %g %s %t %c %h %e
-+kernel.core_pattern=|@rootlibexecdir@/systemd-coredump %P %u %g %s %t 9223372036854775808 %h %e
+-kernel.core_pattern=|@rootlibexecdir@/systemd-coredump %P %u %g %s %t %c %h
++kernel.core_pattern=|@rootlibexecdir@/systemd-coredump %P %u %g %s %t 9223372036854775808 %h
