@@ -279,7 +279,7 @@ KERNEL=="ttyACM0", SYMLINK+="modem"
 EOF
         },
         {
-                desc            => "sustitution of sysfs value (%s{file})",
+                desc            => "substitution of sysfs value (%s{file})",
                 devpath         => "/devices/pci0000:00/0000:00:1f.2/host0/target0:0:0/0:0:0:0/block/sda",
                 exp_name        => "disk-ATA-sda",
                 rules           => <<EOF
@@ -1713,6 +1713,12 @@ sub run_test {
 
 }
 
+sub cleanup {
+        system("rm", "-rf", "$udev_run");
+        system("umount", "$udev_tmpfs");
+        rmdir($udev_tmpfs);
+}
+
 # only run if we have root permissions
 # due to mknod restrictions
 if (!($<==0)) {
@@ -1729,11 +1735,13 @@ if ($? >> 8 == 0) {
 
 if (!udev_setup()) {
         warn "Failed to set up the environment, skipping the test";
+        cleanup();
         exit($EXIT_TEST_SKIP);
 }
 
 if (system($udev_bin, "check")) {
         warn "$udev_bin failed to set up the environment, skipping the test";
+        cleanup();
         exit($EXIT_TEST_SKIP);
 }
 
@@ -1776,10 +1784,7 @@ if ($list[0]) {
 
 print "$error errors occurred\n\n";
 
-# cleanup
-system("rm", "-rf", "$udev_run");
-system("umount", "$udev_tmpfs");
-rmdir($udev_tmpfs);
+cleanup();
 
 if ($error > 0) {
         exit(1);

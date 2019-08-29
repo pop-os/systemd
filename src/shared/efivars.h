@@ -10,6 +10,7 @@
 
 #include "sd-id128.h"
 
+#include "efi/loader-features.h"
 #include "time-util.h"
 
 #define EFI_VENDOR_LOADER SD_ID128_MAKE(4a,67,b0,82,0a,4c,41,cf,b6,c7,44,0b,29,bb,8c,4f)
@@ -17,12 +18,6 @@
 #define EFI_VARIABLE_NON_VOLATILE       0x0000000000000001
 #define EFI_VARIABLE_BOOTSERVICE_ACCESS 0x0000000000000002
 #define EFI_VARIABLE_RUNTIME_ACCESS     0x0000000000000004
-
-#define EFI_LOADER_FEATURE_CONFIG_TIMEOUT          (UINT64_C(1) << 0)
-#define EFI_LOADER_FEATURE_CONFIG_TIMEOUT_ONE_SHOT (UINT64_C(1) << 1)
-#define EFI_LOADER_FEATURE_ENTRY_DEFAULT           (UINT64_C(1) << 2)
-#define EFI_LOADER_FEATURE_ENTRY_ONESHOT           (UINT64_C(1) << 3)
-#define EFI_LOADER_FEATURE_BOOT_COUNTING           (UINT64_C(1) << 4)
 
 #if ENABLE_EFI
 
@@ -33,6 +28,7 @@ int efi_reboot_to_firmware_supported(void);
 int efi_get_reboot_to_firmware(void);
 int efi_set_reboot_to_firmware(bool value);
 
+char* efi_variable_path(sd_id128_t vendor, const char *name);
 int efi_get_variable(sd_id128_t vendor, const char *name, uint32_t *attribute, void **value, size_t *size);
 int efi_get_variable_string(sd_id128_t vendor, const char *name, char **p);
 int efi_set_variable(sd_id128_t vendor, const char *name, const void *value, size_t size);
@@ -76,6 +72,10 @@ static inline int efi_get_reboot_to_firmware(void) {
 
 static inline int efi_set_reboot_to_firmware(bool value) {
         return -EOPNOTSUPP;
+}
+
+static inline char* efi_variable_path(sd_id128_t vendor, const char *name) {
+        return NULL;
 }
 
 static inline int efi_get_variable(sd_id128_t vendor, const char *name, uint32_t *attribute, void **value, size_t *size) {

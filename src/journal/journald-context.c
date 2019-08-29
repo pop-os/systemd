@@ -7,6 +7,7 @@
 #include "alloc-util.h"
 #include "audit-util.h"
 #include "cgroup-util.h"
+#include "env-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -48,7 +49,7 @@
  *    previously had trouble associating the log message with the service.
  *
  * NB: With and without the metadata cache: the implicitly added entry metadata in the journal (with the exception of
- *     UID/PID/GID and SELinux label) must be understood as possibly slightly out of sync (i.e. sometimes slighly older
+ *     UID/PID/GID and SELinux label) must be understood as possibly slightly out of sync (i.e. sometimes slightly older
  *     and sometimes slightly newer than what was current at the log event).
  */
 
@@ -76,18 +77,14 @@ static size_t cache_max(void) {
                 if (r < 0) {
                         log_warning_errno(r, "Cannot query /proc/meminfo for MemTotal: %m");
                         cached = CACHE_MAX_FALLBACK;
-                } else {
+                } else
                         /* Cache entries are usually a few kB, but the process cmdline is controlled by the
                          * user and can be up to _SC_ARG_MAX, usually 2MB. Let's say that approximately up to
                          * 1/8th of memory may be used by the cache.
                          *
                          * In the common case, this formula gives 64 cache entries for each GB of RAM.
                          */
-                        long l = sysconf(_SC_ARG_MAX);
-                        assert(l > 0);
-
-                        cached = CLAMP(mem_total / 8 / (uint64_t) l, CACHE_MAX_MIN, CACHE_MAX_MAX);
-                }
+                        cached = CLAMP(mem_total / 8 / sc_arg_max(), CACHE_MAX_MIN, CACHE_MAX_MAX);
         }
 
         return cached;
@@ -233,7 +230,7 @@ static void client_context_read_basic(ClientContext *c) {
         if (get_process_exe(c->pid, &t) >= 0)
                 free_and_replace(c->exe, t);
 
-        if (get_process_cmdline(c->pid, 0, false, &t) >= 0)
+        if (get_process_cmdline(c->pid, SIZE_MAX, 0, &t) >= 0)
                 free_and_replace(c->cmdline, t);
 
         if (get_process_capeff(c->pid, &t) >= 0)

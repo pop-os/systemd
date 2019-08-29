@@ -43,6 +43,8 @@ static UnitFileFlags unit_file_bools_to_flags(bool runtime, bool force) {
                (force   ? UNIT_FILE_FORCE   : 0);
 }
 
+BUS_DEFINE_PROPERTY_GET_ENUM(bus_property_get_oom_policy, oom_policy, OOMPolicy);
+
 static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_version, "s", GIT_VERSION);
 static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_features, "s", SYSTEMD_FEATURES);
 static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_architecture, "s", architecture_to_string(uname_architecture()));
@@ -51,6 +53,7 @@ static BUS_DEFINE_PROPERTY_GET2(property_get_system_state, "s", Manager, manager
 static BUS_DEFINE_PROPERTY_GET_GLOBAL(property_get_timer_slack_nsec, "t", (uint64_t) prctl(PR_GET_TIMERSLACK));
 static BUS_DEFINE_PROPERTY_GET_REF(property_get_hashmap_size, "u", Hashmap *, hashmap_size);
 static BUS_DEFINE_PROPERTY_GET_REF(property_get_set_size, "u", Set *, set_size);
+static BUS_DEFINE_PROPERTY_GET(property_get_default_timeout_abort_usec, "t", Manager, manager_default_timeout_abort_usec);
 
 static int property_get_virtualization(
                 sd_bus *bus,
@@ -631,6 +634,12 @@ static int method_kill_unit(sd_bus_message *message, void *userdata, sd_bus_erro
         return method_generic_unit_operation(message, userdata, error, bus_unit_method_kill, 0);
 }
 
+static int method_clean_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        /* Load the unit if necessary, in order to load it, and insist on the unit being loaded to be
+         * cleaned */
+        return method_generic_unit_operation(message, userdata, error, bus_unit_method_clean, GENERIC_UNIT_LOAD|GENERIC_UNIT_VALIDATE_LOADED);
+}
+
 static int method_reset_failed_unit(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         /* Don't load the unit (because unloaded units can't be in failed state), and don't insist on the
          * unit to be loaded properly (since a failed unit might have its unit file disappeared) */
@@ -680,7 +689,7 @@ static int reply_unit_info(sd_bus_message *reply, Unit *u) {
                         unit_path,
                         u->job ? u->job->id : 0,
                         u->job ? job_type_to_string(u->job->type) : "",
-                        job_path ? job_path : "/");
+                        empty_to_root(job_path));
 }
 
 static int method_list_units_by_names(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -2400,7 +2409,10 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultStandardOutput", "s", bus_property_get_exec_output, offsetof(Manager, default_std_output), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultStandardError", "s", bus_property_get_exec_output, offsetof(Manager, default_std_output), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_WRITABLE_PROPERTY("RuntimeWatchdogUSec", "t", bus_property_get_usec, property_set_runtime_watchdog, offsetof(Manager, runtime_watchdog), 0),
-        SD_BUS_WRITABLE_PROPERTY("ShutdownWatchdogUSec", "t", bus_property_get_usec, bus_property_set_usec, offsetof(Manager, shutdown_watchdog), 0),
+        SD_BUS_WRITABLE_PROPERTY("RebootWatchdogUSec", "t", bus_property_get_usec, bus_property_set_usec, offsetof(Manager, reboot_watchdog), 0),
+        /* The following item is an obsolete alias */
+        SD_BUS_WRITABLE_PROPERTY("ShutdownWatchdogUSec", "t", bus_property_get_usec, bus_property_set_usec, offsetof(Manager, reboot_watchdog), SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_WRITABLE_PROPERTY("KExecWatchdogUSec", "t", bus_property_get_usec, bus_property_set_usec, offsetof(Manager, kexec_watchdog), 0),
         SD_BUS_WRITABLE_PROPERTY("ServiceWatchdogs", "b", bus_property_get_bool, bus_property_set_bool, offsetof(Manager, service_watchdogs), 0),
         SD_BUS_PROPERTY("ControlGroup", "s", NULL, offsetof(Manager, cgroup_root), 0),
         SD_BUS_PROPERTY("SystemState", "s", property_get_system_state, 0, 0),
@@ -2408,6 +2420,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultTimerAccuracyUSec", "t", bus_property_get_usec, offsetof(Manager, default_timer_accuracy_usec), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultTimeoutStartUSec", "t", bus_property_get_usec, offsetof(Manager, default_timeout_start_usec), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultTimeoutStopUSec", "t", bus_property_get_usec, offsetof(Manager, default_timeout_stop_usec), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("DefaultTimeoutAbortUSec", "t", property_get_default_timeout_abort_usec, 0, 0),
         SD_BUS_PROPERTY("DefaultRestartUSec", "t", bus_property_get_usec, offsetof(Manager, default_restart_usec), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultStartLimitIntervalUSec", "t", bus_property_get_usec, offsetof(Manager, default_start_limit_interval), SD_BUS_VTABLE_PROPERTY_CONST),
         /* The following two items are obsolete alias */
@@ -2452,6 +2465,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultLimitRTTIMESoft", "t", bus_property_get_rlimit, offsetof(Manager, rlimit[RLIMIT_RTTIME]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultTasksMax", "t", NULL, offsetof(Manager, default_tasks_max), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("TimerSlackNSec", "t", property_get_timer_slack_nsec, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("DefaultOOMPolicy", "s", bus_property_get_oom_policy, offsetof(Manager, default_oom_policy), SD_BUS_VTABLE_PROPERTY_CONST),
 
         SD_BUS_METHOD("GetUnit", "s", "o", method_get_unit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("GetUnitByPID", "u", "o", method_get_unit_by_pid, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -2468,6 +2482,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_METHOD("ReloadOrTryRestartUnit", "ss", "o", method_reload_or_try_restart_unit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("EnqueueUnitJob", "sss", "uososa(uosos)", method_enqueue_unit_job, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("KillUnit", "ssi", NULL, method_kill_unit, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("CleanUnit", "sas", NULL, method_clean_unit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("ResetFailedUnit", "s", NULL, method_reset_failed_unit, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetUnitProperties", "sba(sv)", NULL, method_set_unit_properties, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("RefUnit", "s", NULL, method_ref_unit, SD_BUS_VTABLE_UNPRIVILEGED),

@@ -22,6 +22,7 @@
 #include "device-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
+#include "fsck-util.h"
 #include "main-func.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -33,18 +34,6 @@
 #include "special.h"
 #include "stdio-util.h"
 #include "util.h"
-
-/* exit codes as defined in fsck(8) */
-enum {
-        FSCK_SUCCESS                 = 0,
-        FSCK_ERROR_CORRECTED         = 1 << 0,
-        FSCK_SYSTEM_SHOULD_REBOOT    = 1 << 1,
-        FSCK_ERRORS_LEFT_UNCORRECTED = 1 << 2,
-        FSCK_OPERATIONAL_ERROR       = 1 << 3,
-        FSCK_USAGE_OR_SYNTAX_ERROR   = 1 << 4,
-        FSCK_USER_CANCELLED          = 1 << 5,
-        FSCK_SHARED_LIB_ERROR        = 1 << 7,
-};
 
 static bool arg_skip = false;
 static bool arg_force = false;
@@ -180,12 +169,12 @@ static int process_progress(int fd) {
         f = fdopen(fd, "r");
         if (!f) {
                 safe_close(fd);
-                return -errno;
+                return log_debug_errno(errno, "Failed to use pipe: %m");
         }
 
         console = fopen("/dev/console", "we");
         if (!console)
-                return -ENOMEM;
+                return log_debug_errno(errno, "Failed to open /dev/console, can't print progress output: %m");
 
         for (;;) {
                 int pass, m;
@@ -200,10 +189,9 @@ static int process_progress(int fd) {
                                 r = log_warning_errno(errno, "Failed to read from progress pipe: %m");
                         else if (feof(f))
                                 r = 0;
-                        else {
-                                log_warning("Failed to parse progress pipe data");
-                                r = -EBADMSG;
-                        }
+                        else
+                                r = log_warning_errno(SYNTHETIC_ERRNO(errno), "Failed to parse progress pipe data");
+
                         break;
                 }
 

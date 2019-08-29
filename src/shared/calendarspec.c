@@ -6,7 +6,6 @@
 #include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <stdio_ext.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -330,11 +329,9 @@ int calendar_spec_to_string(const CalendarSpec *c, char **p) {
         assert(c);
         assert(p);
 
-        f = open_memstream(&buf, &sz);
+        f = open_memstream_unlocked(&buf, &sz);
         if (!f)
                 return -ENOMEM;
-
-        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
 
         if (c->weekdays_bits > 0 && c->weekdays_bits <= BITS_WEEKDAYS) {
                 format_weekdays(f, c);
@@ -865,7 +862,6 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
         int r;
 
         assert(p);
-        assert(spec);
 
         c = new(CalendarSpec, 1);
         if (!c)
@@ -1079,7 +1075,8 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
         if (!calendar_spec_valid(c))
                 return -EINVAL;
 
-        *spec = TAKE_PTR(c);
+        if (spec)
+                *spec = TAKE_PTR(c);
         return 0;
 }
 
@@ -1196,6 +1193,8 @@ static int find_next(const CalendarSpec *spec, struct tm *tm, usec_t *usec) {
         int tm_usec;
         int r;
 
+        /* Returns -ENOENT if the expression is not going to elapse anymore */
+
         assert(spec);
         assert(tm);
 
@@ -1288,14 +1287,13 @@ static int find_next(const CalendarSpec *spec, struct tm *tm, usec_t *usec) {
         }
 }
 
-static int calendar_spec_next_usec_impl(const CalendarSpec *spec, usec_t usec, usec_t *next) {
+static int calendar_spec_next_usec_impl(const CalendarSpec *spec, usec_t usec, usec_t *ret_next) {
         struct tm tm;
         time_t t;
         int r;
         usec_t tm_usec;
 
         assert(spec);
-        assert(next);
 
         if (usec > USEC_TIMESTAMP_FORMATTABLE_MAX)
                 return -EINVAL;
@@ -1313,7 +1311,9 @@ static int calendar_spec_next_usec_impl(const CalendarSpec *spec, usec_t usec, u
         if (t < 0)
                 return -EINVAL;
 
-        *next = (usec_t) t * USEC_PER_SEC + tm_usec;
+        if (ret_next)
+                *ret_next = (usec_t) t * USEC_PER_SEC + tm_usec;
+
         return 0;
 }
 
@@ -1322,12 +1322,14 @@ typedef struct SpecNextResult {
         int return_value;
 } SpecNextResult;
 
-int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *next) {
+int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *ret_next) {
         SpecNextResult *shared, tmp;
         int r;
 
+        assert(spec);
+
         if (isempty(spec->timezone))
-                return calendar_spec_next_usec_impl(spec, usec, next);
+                return calendar_spec_next_usec_impl(spec, usec, ret_next);
 
         shared = mmap(NULL, sizeof *shared, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
         if (shared == MAP_FAILED)
@@ -1355,8 +1357,8 @@ int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *next)
         if (munmap(shared, sizeof *shared) < 0)
                 return negative_errno();
 
-        if (tmp.return_value == 0)
-                *next = tmp.next;
+        if (tmp.return_value == 0 && ret_next)
+                *ret_next = tmp.next;
 
         return tmp.return_value;
 }

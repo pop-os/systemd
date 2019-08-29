@@ -4,6 +4,7 @@
 
 #include "alloc-util.h"
 #include "fd-util.h"
+#include "fileio.h"
 #include "json-internal.h"
 #include "json.h"
 #include "string-util.h"
@@ -88,6 +89,7 @@ static void test_variant(const char *data, Test test) {
         r = json_variant_format(v, 0, &s);
         assert_se(r >= 0);
         assert_se(s);
+        assert_se((size_t) r == strlen(s));
 
         log_info("formatted normally: %s\n", s);
 
@@ -104,6 +106,7 @@ static void test_variant(const char *data, Test test) {
         r = json_variant_format(v, JSON_FORMAT_PRETTY, &s);
         assert_se(r >= 0);
         assert_se(s);
+        assert_se((size_t) r == strlen(s));
 
         log_info("formatted prettily:\n%s", s);
 
@@ -119,12 +122,14 @@ static void test_variant(const char *data, Test test) {
         r = json_variant_format(v, JSON_FORMAT_COLOR, &s);
         assert_se(r >= 0);
         assert_se(s);
+        assert_se((size_t) r == strlen(s));
         printf("Normal with color: %s\n", s);
 
         s = mfree(s);
         r = json_variant_format(v, JSON_FORMAT_COLOR|JSON_FORMAT_PRETTY, &s);
         assert_se(r >= 0);
         assert_se(s);
+        assert_se((size_t) r == strlen(s));
         printf("Pretty with color:\n%s\n", s);
 
         if (test)
@@ -358,7 +363,7 @@ static void test_source(void) {
                "%s"
                "--- original end ---\n", data);
 
-        assert_se(f = fmemopen((void*) data, strlen(data), "r"));
+        assert_se(f = fmemopen_unlocked((void*) data, strlen(data), "r"));
 
         assert_se(json_parse_file(f, "waldo", &v, NULL, NULL) >= 0);
 

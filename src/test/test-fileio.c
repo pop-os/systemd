@@ -427,7 +427,7 @@ static void test_write_string_file(void) {
 static void test_write_string_file_no_create(void) {
         _cleanup_(unlink_tempfilep) char fn[] = "/tmp/test-write_string_file_no_create-XXXXXX";
         _cleanup_close_ int fd;
-        char buf[64] = {0};
+        char buf[64] = {};
 
         fd = mkostemp_safe(fn);
         assert_se(fd >= 0);
@@ -435,7 +435,7 @@ static void test_write_string_file_no_create(void) {
         assert_se(write_string_file("/a/file/which/does/not/exists/i/guess", "boohoo", 0) < 0);
         assert_se(write_string_file(fn, "boohoo", 0) == 0);
 
-        assert_se(read(fd, buf, sizeof(buf)) == STRLEN("boohoo\n"));
+        assert_se(read(fd, buf, sizeof buf) == (ssize_t) strlen("boohoo\n"));
         assert_se(streq(buf, "boohoo\n"));
 }
 
@@ -629,7 +629,6 @@ static void test_tempfn(void) {
 static const char chars[] =
         "Aąę„”\n루\377";
 
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wtype-limits"
 
@@ -637,7 +636,7 @@ static void test_fgetc(void) {
         _cleanup_fclose_ FILE *f = NULL;
         char c;
 
-        f = fmemopen((void*) chars, sizeof(chars), "re");
+        f = fmemopen_unlocked((void*) chars, sizeof(chars), "re");
         assert_se(f);
 
         for (unsigned i = 0; i < sizeof(chars); i++) {
@@ -717,7 +716,7 @@ static void test_read_line_one_file(FILE *f) {
         line = mfree(line);
 
         /* read_line() stopped when it hit the limit, that means when we continue reading we'll read at the first
-         * character after the previous limit. Let's make use of tha to continue our test. */
+         * character after the previous limit. Let's make use of that to continue our test. */
         assert_se(read_line(f, 1024, &line) == 62 && streq(line, "line that is supposed to be truncated, because it is so long"));
         line = mfree(line);
 
@@ -727,7 +726,7 @@ static void test_read_line_one_file(FILE *f) {
 static void test_read_line(void) {
         _cleanup_fclose_ FILE *f = NULL;
 
-        f = fmemopen((void*) buffer, sizeof(buffer), "re");
+        f = fmemopen_unlocked((void*) buffer, sizeof(buffer), "re");
         assert_se(f);
 
         test_read_line_one_file(f);
@@ -792,7 +791,7 @@ static void test_read_line4(void) {
                 _cleanup_fclose_ FILE *f = NULL;
                 _cleanup_free_ char *s = NULL;
 
-                assert_se(f = fmemopen((void*) eof_endings[i].string, eof_endings[i].length, "r"));
+                assert_se(f = fmemopen_unlocked((void*) eof_endings[i].string, eof_endings[i].length, "r"));
 
                 r = read_line(f, (size_t) -1, &s);
                 assert_se((size_t) r == eof_endings[i].length);
@@ -813,7 +812,7 @@ static void test_read_nul_string(void) {
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *s = NULL;
 
-        assert_se(f = fmemopen((void*) test, sizeof(test)-1, "r"));
+        assert_se(f = fmemopen_unlocked((void*) test, sizeof(test)-1, "r"));
 
         assert_se(read_nul_string(f, LONG_LINE_MAX, &s) == 13 && streq_ptr(s, "string nr. 1"));
         s = mfree(s);

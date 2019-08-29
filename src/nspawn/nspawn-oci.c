@@ -58,6 +58,7 @@
  * /bin/mount regarding NFS and FUSE required?
  * what does terminal=false mean?
  * sysctl inside or outside? whitelisting?
+ * swapiness typo -> swappiness
  *
  * Unsupported:
  *
@@ -271,7 +272,6 @@ static int oci_rlimits(const char *name, JsonVariant *v, JsonDispatchFlags flags
                         { "type", JSON_VARIANT_STRING, oci_rlimit_type,  offsetof(struct rlimit_data, type), JSON_MANDATORY },
                         {}
                 };
-
 
                 r = json_dispatch(e, table, oci_unexpected, flags, &data);
                 if (r < 0)
@@ -1265,8 +1265,7 @@ struct cpu_data {
         uint64_t shares;
         uint64_t quota;
         uint64_t period;
-        cpu_set_t *cpuset;
-        unsigned ncpus;
+        CPUSet cpu_set;
 };
 
 static int oci_cgroup_cpu_shares(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
@@ -1301,21 +1300,20 @@ static int oci_cgroup_cpu_quota(const char *name, JsonVariant *v, JsonDispatchFl
 
 static int oci_cgroup_cpu_cpus(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
         struct cpu_data *data = userdata;
-        cpu_set_t *set;
+        CPUSet set;
         const char *n;
-        int ncpus;
+        int r;
 
         assert(data);
 
         assert_se(n = json_variant_string(v));
 
-        ncpus = parse_cpu_set(n, &set);
-        if (ncpus < 0)
-                return json_log(v, flags, ncpus, "Failed to parse CPU set specification: %s", n);
+        r = parse_cpu_set(n, &set);
+        if (r < 0)
+                return json_log(v, flags, r, "Failed to parse CPU set specification: %s", n);
 
-        CPU_FREE(data->cpuset);
-        data->cpuset = set;
-        data->ncpus = ncpus;
+        cpu_set_reset(&data->cpu_set);
+        data->cpu_set = set;
 
         return 0;
 }
@@ -1344,13 +1342,12 @@ static int oci_cgroup_cpu(const char *name, JsonVariant *v, JsonDispatchFlags fl
 
         r = json_dispatch(v, table, oci_unexpected, flags, &data);
         if (r < 0) {
-                CPU_FREE(data.cpuset);
+                cpu_set_reset(&data.cpu_set);
                 return r;
         }
 
-        CPU_FREE(s->cpuset);
-        s->cpuset = data.cpuset;
-        s->cpuset_ncpus = data.ncpus;
+        cpu_set_reset(&s->cpu_set);
+        s->cpu_set = data.cpu_set;
 
         if (data.shares != UINT64_MAX) {
                 r = settings_allocate_properties(s);
@@ -1621,26 +1618,26 @@ static bool sysctl_key_valid(const char *s) {
 
 static int oci_sysctl(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
         Settings *s = userdata;
-        JsonVariant *k, *w;
+        JsonVariant *w;
+        const char *k;
         int r;
 
         assert(s);
 
         JSON_VARIANT_OBJECT_FOREACH(k, w, v) {
-                const char *n, *m;
+                const char *m;
 
                 if (!json_variant_is_string(w))
                         return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
                                         "sysctl parameter is not a string, refusing.");
 
-                assert_se(n = json_variant_string(k));
                 assert_se(m = json_variant_string(w));
 
-                if (sysctl_key_valid(n))
+                if (sysctl_key_valid(k))
                         return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
-                                        "sysctl key invalid, refusing: %s", n);
+                                        "sysctl key invalid, refusing: %s", k);
 
-                r = strv_extend_strv(&s->sysctl, STRV_MAKE(n, m), false);
+                r = strv_extend_strv(&s->sysctl, STRV_MAKE(k, m), false);
                 if (r < 0)
                         return log_oom();
         }
@@ -1655,13 +1652,19 @@ static int oci_seccomp_action_from_string(const char *name, uint32_t *ret) {
                 const char *name;
                 uint32_t action;
         } table[] = {
-                { "SCMP_ACT_ALLOW", SCMP_ACT_ALLOW        },
-                { "SCMP_ACT_ERRNO", SCMP_ACT_ERRNO(EPERM) }, /* the OCI spec doesn't document the error, but it appears EPERM is supposed to be used */
-                { "SCMP_ACT_KILL",  SCMP_ACT_KILL         },
-#ifdef SCMP_ACT_LOG
-                { "SCMP_ACT_LOG",   SCMP_ACT_LOG          },
+                { "SCMP_ACT_ALLOW",         SCMP_ACT_ALLOW        },
+                { "SCMP_ACT_ERRNO",         SCMP_ACT_ERRNO(EPERM) }, /* the OCI spec doesn't document the error, but it appears EPERM is supposed to be used */
+                { "SCMP_ACT_KILL",          SCMP_ACT_KILL         },
+#ifdef SCMP_ACT_KILL_PROCESS
+                { "SCMP_ACT_KILL_PROCESS",  SCMP_ACT_KILL_PROCESS },
 #endif
-                { "SCMP_ACT_TRAP",  SCMP_ACT_TRAP         },
+#ifdef SCMP_ACT_KILL_THREAD
+                { "SCMP_ACT_KILL_THREAD",   SCMP_ACT_KILL_THREAD  },
+#endif
+#ifdef SCMP_ACT_LOG
+                { "SCMP_ACT_LOG",           SCMP_ACT_LOG          },
+#endif
+                { "SCMP_ACT_TRAP",          SCMP_ACT_TRAP         },
 
                 /* We don't support SCMP_ACT_TRACE because that requires a tracer, and that doesn't really make sense
                  * here */
@@ -2089,13 +2092,9 @@ static int oci_hook_timeout(const char *name, JsonVariant *v, JsonDispatchFlags 
         uintmax_t k;
 
         k = json_variant_unsigned(v);
-        if (k == 0)
-                return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
-                                "Hook timeout cannot be zero.");
-
-        if (k > (UINT64_MAX-1/USEC_PER_SEC))
-                return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
-                                "Hook timeout too large.");
+        if (k == 0 || k > (UINT64_MAX-1)/USEC_PER_SEC)
+                return json_log(v, flags, SYNTHETIC_ERRNO(ERANGE),
+                                "Hook timeout value out of range.");
 
         *u = k * USEC_PER_SEC;
         return 0;
@@ -2171,22 +2170,20 @@ static int oci_hooks(const char *name, JsonVariant *v, JsonDispatchFlags flags, 
 }
 
 static int oci_annotations(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
-        JsonVariant *k, *w;
+        JsonVariant *w;
+        const char *k;
 
         JSON_VARIANT_OBJECT_FOREACH(k, w, v) {
-                const char *n;
 
-                assert_se(n = json_variant_string(k));
-
-                if (isempty(n))
-                        return json_log(k, flags, SYNTHETIC_ERRNO(EINVAL),
+                if (isempty(k))
+                        return json_log(v, flags, SYNTHETIC_ERRNO(EINVAL),
                                         "Annotation with empty key, refusing.");
 
                 if (!json_variant_is_string(w))
                         return json_log(w, flags, SYNTHETIC_ERRNO(EINVAL),
                                         "Annotation has non-string value, refusing.");
 
-                json_log(k, flags|JSON_DEBUG, 0, "Ignoring annotation '%s' with value '%s'.", n, json_variant_string(w));
+                json_log(w, flags|JSON_DEBUG, 0, "Ignoring annotation '%s' with value '%s'.", k, json_variant_string(w));
         }
 
         return 0;

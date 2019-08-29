@@ -3,7 +3,6 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
-#include <stdio_ext.h>
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
@@ -20,7 +19,9 @@
 #include "hashmap.h"
 #include "label.h"
 #include "limits-util.h"
+#include "logind-dbus.h"
 #include "logind-user.h"
+#include "logind-user-dbus.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -162,7 +163,6 @@ static int user_save_internal(User *u) {
         if (r < 0)
                 goto fail;
 
-        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
         (void) fchmod(fileno(f), 0644);
 
         fprintf(f,
@@ -371,7 +371,7 @@ int user_start(User *u) {
                 return 0;
 
         /* If u->stopping is set, the user is marked for removal and service stop-jobs are queued. We have to clear
-         * that flag before queing the start-jobs again. If they succeed, the user object can be re-used just fine
+         * that flag before queueing the start-jobs again. If they succeed, the user object can be re-used just fine
          * (pid1 takes care of job-ordering and proper restart), but if they fail, we want to force another user_stop()
          * so possibly pending units are stopped. */
         u->stopping = false;
@@ -665,12 +665,12 @@ static bool elect_display_filter(Session *s) {
         /* Return true if the session is a candidate for the user’s ‘primary session’ or ‘display’. */
         assert(s);
 
-        return s->class == SESSION_USER && s->started && !s->stopping;
+        return IN_SET(s->class, SESSION_USER, SESSION_GREETER) && s->started && !s->stopping;
 }
 
 static int elect_display_compare(Session *s1, Session *s2) {
         /* Indexed by SessionType. Lower numbers mean more preferred. */
-        const int type_ranks[_SESSION_TYPE_MAX] = {
+        static const int type_ranks[_SESSION_TYPE_MAX] = {
                 [SESSION_UNSPECIFIED] = 0,
                 [SESSION_TTY] = -2,
                 [SESSION_X11] = -3,
@@ -756,7 +756,7 @@ void user_update_last_session_timer(User *u) {
 
         assert(!u->timer_event_source);
 
-        if (u->manager->user_stop_delay == 0 || u->manager->user_stop_delay == USEC_INFINITY)
+        if (IN_SET(u->manager->user_stop_delay, 0, USEC_INFINITY))
                 return;
 
         if (sd_event_get_state(u->manager->event) == SD_EVENT_FINISHED) {
