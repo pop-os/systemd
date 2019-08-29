@@ -13,6 +13,7 @@ network-read-link-specific-sysctl-value.patch
 networkd-fix-link_up-12505.patch
 network-do-not-send-ipv6-token-to-kernel.patch
 meson-make-nologin-path-build-time-configurable.patch
+core-never-propagate-reload-failure-to-service-result.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
