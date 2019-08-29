@@ -1,0 +1,206 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 26 Aug 2019 08:58:41 +0200
+Subject: core: stop removing non-existent and duplicate lookup paths
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+When we would iterate over the lookup paths for each unit, making the list as
+short as possible was important for performance. With the current cache, it
+doesn't matter much. Two classes of paths were being removed:
+- paths which don't exist in the filesystem
+- paths which symlink to a path earlier in the search list
+Both of those points cause problems with the caching code:
+- if a user creates a directory that didn't exist before and puts units there,
+  now we will notice the new mtime an properly load the unit. When the path
+  was removed from list, we wouldn't.
+- we now properly detect whether a unit path is on the path or not.
+  Before, if e.g. /lib/systemd/system, /usr/lib/systemd/systemd were both on
+  the path, and /lib was a symlink to /usr/lib, the second directory would be
+  pruned from the path. Then, the code would think that a symlink
+  /etc/systemd/system/foo.service→/lib/systemd/system/foo.service is an alias,
+  but /etc/systemd/system/foo.service→/usr/lib/systemd/system/foo.service would
+  be considered a link (in the systemctl link sense).
+
+Removing the pruning has a slight negative performance impact in case of
+usr-merge systems which have systemd compiled with non-usr-merge paths.
+Non-usr-merge systems are deprecated, and this impact should be very small, so
+I think it's OK. If it turns out to be an issue, the loop in function that
+builds the cache could be improved to skip over "duplicate" directories with
+same logic that the cache pruning did before. I didn't want to add this,
+because it complicates the code to improve a corner case.
+
+Fixes #13272.
+
+(cherry picked from commit 581fef8d56a13390a331d4d404f178d7cc188ccf)
+---
+ src/core/manager.c          |  8 ++----
+ src/shared/path-lookup.c    | 67 ++-------------------------------------------
+ src/shared/path-lookup.h    |  2 +-
+ src/test/test-path-lookup.c |  6 ++--
+ 4 files changed, 9 insertions(+), 74 deletions(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 8d691a1..00bf6f7 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1629,9 +1629,7 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
+ 
+         manager_preset_all(m);
+ 
+-        r = lookup_paths_reduce(&m->lookup_paths);
+-        if (r < 0)
+-                log_warning_errno(r, "Failed to reduce unit file paths, ignoring: %m");
++        lookup_paths_log(&m->lookup_paths);
+ 
+         {
+                 /* This block is (optionally) done with the reloading counter bumped */
+@@ -3520,9 +3518,7 @@ int manager_reload(Manager *m) {
+         (void) manager_run_environment_generators(m);
+         (void) manager_run_generators(m);
+ 
+-        r = lookup_paths_reduce(&m->lookup_paths);
+-        if (r < 0)
+-                log_warning_errno(r, "Failed to reduce unit file paths, ignoring: %m");
++        lookup_paths_log(&m->lookup_paths);
+ 
+         /* We flushed out generated files, for which we don't watch mtime, so we should flush the old map. */
+         manager_free_unit_name_maps(m);
+diff --git a/src/shared/path-lookup.c b/src/shared/path-lookup.c
+index f1caddb..6bf0ff0 100644
+--- a/src/shared/path-lookup.c
++++ b/src/shared/path-lookup.c
+@@ -704,7 +704,7 @@ int lookup_paths_init(
+                 return -ENOMEM;
+ 
+         *p = (LookupPaths) {
+-                .search_path = strv_uniq(paths),
++                .search_path = strv_uniq(TAKE_PTR(paths)),
+ 
+                 .persistent_config = TAKE_PTR(persistent_config),
+                 .runtime_config = TAKE_PTR(runtime_config),
+@@ -725,7 +725,6 @@ int lookup_paths_init(
+                 .temporary_dir = TAKE_PTR(tempdir),
+         };
+ 
+-        paths = NULL;
+         return 0;
+ }
+ 
+@@ -754,64 +753,9 @@ void lookup_paths_free(LookupPaths *p) {
+         p->temporary_dir = mfree(p->temporary_dir);
+ }
+ 
+-int lookup_paths_reduce(LookupPaths *p) {
+-        _cleanup_free_ struct stat *stats = NULL;
+-        size_t n_stats = 0, allocated = 0;
+-        size_t c = 0;
+-        int r;
+-
++void lookup_paths_log(LookupPaths *p) {
+         assert(p);
+ 
+-        /* Drop duplicates and non-existing directories from the search path. We figure out whether two directories are
+-         * the same by comparing their device and inode numbers. */
+-
+-        if (!p->search_path)
+-                return 0;
+-
+-        while (p->search_path[c]) {
+-                struct stat st;
+-                size_t k;
+-
+-                /* Never strip the transient and control directories from the path */
+-                if (path_equal_ptr(p->search_path[c], p->transient) ||
+-                    path_equal_ptr(p->search_path[c], p->persistent_control) ||
+-                    path_equal_ptr(p->search_path[c], p->runtime_control)) {
+-                        c++;
+-                        continue;
+-                }
+-
+-                r = chase_symlinks_and_stat(p->search_path[c], p->root_dir, 0, NULL, &st);
+-                if (r == -ENOENT)
+-                        goto remove_item;
+-                if (r < 0) {
+-                        /* If something we don't grok happened, let's better leave it in. */
+-                        log_debug_errno(r, "Failed to chase and stat %s: %m", p->search_path[c]);
+-                        c++;
+-                        continue;
+-                }
+-
+-                for (k = 0; k < n_stats; k++)
+-                        if (stats[k].st_dev == st.st_dev &&
+-                            stats[k].st_ino == st.st_ino)
+-                                break;
+-
+-                if (k < n_stats) /* Is there already an entry with the same device/inode? */
+-                        goto remove_item;
+-
+-                if (!GREEDY_REALLOC(stats, allocated, n_stats+1))
+-                        return -ENOMEM;
+-
+-                stats[n_stats++] = st;
+-                c++;
+-                continue;
+-
+-        remove_item:
+-                free(p->search_path[c]);
+-                memmove(p->search_path + c,
+-                        p->search_path + c + 1,
+-                        (strv_length(p->search_path + c + 1) + 1) * sizeof(char*));
+-        }
+-
+         if (strv_isempty(p->search_path)) {
+                 log_debug("Ignoring unit files.");
+                 p->search_path = strv_free(p->search_path);
+@@ -819,13 +763,8 @@ int lookup_paths_reduce(LookupPaths *p) {
+                 _cleanup_free_ char *t;
+ 
+                 t = strv_join(p->search_path, "\n\t");
+-                if (!t)
+-                        return -ENOMEM;
+-
+-                log_debug("Looking for unit files in (higher priority first):\n\t%s", t);
++                log_debug("Looking for unit files in (higher priority first):\n\t%s", strna(t));
+         }
+-
+-        return 0;
+ }
+ 
+ int lookup_paths_mkdir_generator(LookupPaths *p) {
+diff --git a/src/shared/path-lookup.h b/src/shared/path-lookup.h
+index 7070b94..f0762d2 100644
+--- a/src/shared/path-lookup.h
++++ b/src/shared/path-lookup.h
+@@ -63,7 +63,7 @@ int xdg_user_data_dir(char **ret, const char *suffix);
+ bool path_is_user_data_dir(const char *path);
+ bool path_is_user_config_dir(const char *path);
+ 
+-int lookup_paths_reduce(LookupPaths *p);
++void lookup_paths_log(LookupPaths *p);
+ 
+ int lookup_paths_mkdir_generator(LookupPaths *p);
+ void lookup_paths_trim_generator(LookupPaths *p);
+diff --git a/src/test/test-path-lookup.c b/src/test/test-path-lookup.c
+index f208559..62ebc9c 100644
+--- a/src/test/test-path-lookup.c
++++ b/src/test/test-path-lookup.c
+@@ -22,15 +22,15 @@ static void test_paths(UnitFileScope scope) {
+         assert_se(unsetenv("SYSTEMD_UNIT_PATH") == 0);
+         assert_se(lookup_paths_init(&lp_without_env, scope, 0, NULL) >= 0);
+         assert_se(!strv_isempty(lp_without_env.search_path));
+-        assert_se(lookup_paths_reduce(&lp_without_env) >= 0);
++        lookup_paths_log(&lp_without_env);
+ 
+         systemd_unit_path = strjoina(template, "/systemd-unit-path");
+         assert_se(setenv("SYSTEMD_UNIT_PATH", systemd_unit_path, 1) == 0);
+         assert_se(lookup_paths_init(&lp_with_env, scope, 0, NULL) == 0);
+         assert_se(strv_length(lp_with_env.search_path) == 1);
+         assert_se(streq(lp_with_env.search_path[0], systemd_unit_path));
+-        assert_se(lookup_paths_reduce(&lp_with_env) >= 0);
+-        assert_se(strv_isempty(lp_with_env.search_path));
++        lookup_paths_log(&lp_with_env);
++        assert_se(strv_equal(lp_with_env.search_path, STRV_MAKE(systemd_unit_path)));
+ 
+         assert_se(rm_rf(template, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
+ }
