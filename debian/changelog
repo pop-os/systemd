@@ -1,3 +1,25 @@
+systemd (242-5) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * d/rules: add CONFFGLAGS_UPSTREAM to dh_auto_configure -- params
+
+  [ Michael Biebl ]
+  * core: never propagate reload failure to service result.
+    Fixes a regression introduced in v239 where the main process of a
+    service unit gets killed on reload if ExecReload fails. (Closes: #936032)
+  * shared/seccomp: add sync_file_range2.
+    Some architectures need the arguments to be reordered because of alignment
+    issues. Otherwise, it's the same as sync_file_range.
+    Fixes sync_file_range failures in nspawn containers on arm, ppc.
+    (Closes: #935091)
+  * bash-completion: don't sort syslog priorities.
+    By default, the available completions are sorted alphabetically, which
+    is counterproductive in case of syslog priorities. Override the default
+    behavior using the `nosort` option. (Closes: #913222)
+  * test-bpf: skip test when run inside containers
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 29 Aug 2019 16:18:18 +0200
+
 systemd (242-4) unstable; urgency=medium
 
   * Upload to unstable
