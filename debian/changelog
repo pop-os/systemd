@@ -1,4 +1,4 @@
-systemd (243~rc2-1) UNRELEASED; urgency=medium
+systemd (243~rc2-1) experimental; urgency=medium
 
   * New upstream version 243~rc2
     - man: document that "systemd-analyze blame/critical-chain" is not useful
@@ -11,8 +11,12 @@ systemd (243~rc2-1) UNRELEASED; urgency=medium
     - bash-completion: don't sort syslog priorities. (Closes: #913222)
     - man: add example for setting multiple properties at once.
       (Closes: #807464)
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * core: stop removing non-existent and duplicate lookup paths
+  * Install static-nodes-permissions.conf tmpfile in udev
 
- -- Michael Biebl <biebl@debian.org>  Fri, 30 Aug 2019 01:13:07 +0200
+ -- Michael Biebl <biebl@debian.org>  Sat, 31 Aug 2019 00:20:41 +0200
 
 systemd (242-5) unstable; urgency=medium
 
