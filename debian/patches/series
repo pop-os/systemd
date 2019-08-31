@@ -18,6 +18,7 @@ shared-seccomp-add-sync_file_range2.patch
 bash-completion-don-t-sort-syslog-priorities.patch
 test-bpf-skip-test-when-run-inside-containers.patch
 tests-skip-test-bpf-only-when-we-re-100-sure-it-s-run-in-.patch
+network-fix-ListenPort-in-WireGuard-section.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
