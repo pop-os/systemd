@@ -59,7 +59,7 @@ echo '3.0 (native)' > debian/source/format
 rm -rf debian/patches
 
 # disable tests which are not for upstream
-sed -i '/# NOUPSTREAM/ q' debian/tests/control
+[ -n "${KEEP_DEBIAN_TESTS:-}" ] || sed -i '/# NOUPSTREAM/ q' debian/tests/control
 
 # create new git commit with debian/ changes
 if [ -d .git -a -n "$(git status --short debian)" ]; then
