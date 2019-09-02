@@ -3,6 +3,7 @@
 # (C) 2014 Canonical Ltd.
 # Author: Martin Pitt <martin.pitt@ubuntu.com>
 
+import platform
 import sys
 import os
 import unittest
@@ -267,6 +268,7 @@ poweroff\n''')
 
 @unittest.skipUnless(os.path.exists('/sys/kernel/security/apparmor'),
                      'AppArmor not enabled')
+@unittest.skipIf(is_container and platform.machine().startswith('arm'), 'fails on armhf testbeds, see LP: #1842352')
 class AppArmorTest(unittest.TestCase):
     def test_profile(self):
         '''AppArmor confined unit'''
