@@ -1,6 +1,6 @@
 systemd System and Service Manager
 
-CHANGES WITH 243 in spe:
+CHANGES WITH 243:
 
         * This release enables unprivileged programs (i.e. requiring neither
           setuid nor file capabilities) to send ICMP Echo (i.e. ping) requests
@@ -279,6 +279,16 @@ CHANGES WITH 243 in spe:
           been renamed to LinkLayerAddress=, and it now allows configuration of
           IP addresses, too.
 
+        * systemd-networkd's handling of the kernel's disable_ipv6 sysctl is
+          simplified: systemd-networkd will disable the sysctl (enable IPv6) if
+          IPv6 configuration (static or DHCPv6) was found for a given
+          interface. It will not touch the sysctl otherwise.
+
+        * The order of entries is $PATH used by the user manager instance was
+          changed to put bin/ entries before the corresponding sbin/ entries.
+          It is recommended to not rely on this order, and only ever have one
+          binary with a given name in the system paths under /usr.
+
         * A new tool systemd-network-generator has been added that may generate
           .network, .netdev and .link files from IP configuration specified on
           the kernel command line in the format used by Dracut.
@@ -432,17 +442,22 @@ CHANGES WITH 243 in spe:
         * IOWeight= has learnt to properly set the IO weight when using the
           BFQ scheduler officially found in kernels 5.0+.
 
+        * A new mailing list has been created for reporting of security issues:
+          systemd-security@redhat.com. For mode details, see
+          https://systemd.io/CONTRIBUTING#security-vulnerability-reports.
+
         Contributions from: Aaron Barany, Adrian Bunk, Alan Jenkins, Albrecht
         Lohofener, Andrej Valek, Anita Zhang, Arian van Putten, Balint Reczey,
         Bastien Nocera, Ben Boeckel, Benjamin Robin, camoz, Chen Qi, Chris
         Chiu, Chris Down, Christian Kellner, Clinton Roy, Connor Reeder, Daniel
         Black, Daniele Medri, Dan Streetman, Dave Reisner, Dave Ross, David
-        Art, David Tardon, Debarshi Ray, Dominick Grift, Donald Buczek, Douglas
-        Christman, Eric DeVolder, EtherGraf, Evgeny Vereshchagin, Feldwor,
-        Felix Riemann, Florian Dollinger, Francesco Pennica, Franck Bui,
-        Frantisek Sumsal, Franz Pletz, frederik, Hans de Goede, Iago López
-        Galeiras, Insun Pyo, Ivan Shapovalov, Iwan Timmer, Jack, Jakob
-        Unterwurzacher, Jan Klötzke, Jan Pokorný, Jan Synacek, Jeka Pats,
+        Art, David Tardon, Debarshi Ray, Dimitri John Ledkov, Dominick Grift,
+        Donald Buczek, Douglas Christman, Eric DeVolder, EtherGraf, Evgeny
+        Vereshchagin, Feldwor, Felix Riemann, Florian Dollinger, Francesco
+        Pennica, Franck Bui, Frantisek Sumsal, Franz Pletz, frederik, Hans
+        de Goede, Iago López Galeiras, Insun Pyo, Ivan Shapovalov, Iwan Timmer,
+        Jack, Jakob Unterwurzacher, Jan Chren, Jan Klötzke, Jan Losinski, Jan
+        Pokorný, Jan Synacek, Jan-Michael Brummer, Jeka Pats, Jeremy Soller,
         Jérémy Rosen, Jiri Pirko, Joe Lin, Joerg Behrmann, Joe Richey, Jóhann
         B. Guðmundsson, Johannes Christ, Johannes Schmitz, Jonathan Rouleau,
         Jorge Niedbalski, Kai Krakow, Kai Lüke, Karel Zak, Kashyap Chamarthy,
@@ -456,12 +471,12 @@ CHANGES WITH 243 in spe:
         Santalla, Ronan Pigott, root, RussianNeuroMancer, Sebastian Jennen,
         shinygold, Shreyas Behera, Simon Schricker, Susant Sahani, Thadeu Lima
         de Souza Cascardo, Theo Ouzhinski, Thiebaud Weksteen, Thomas Haller,
-        Thomas Weißschuh, Tomas Mraz, Tommi Rantala, Topi Miettinen, ven,
-        Wieland Hoffmann, William A. Kennington III, William Wold, Xi Ruoyao,
-        Yuri Chornoivan, Yu Watanabe, Zach Smith, Zbigniew Jędrzejewski-Szmek,
-        Zhang Xianwei
+        Thomas Weißschuh, Tomas Mraz, Tommi Rantala, Topi Miettinen, VD-Lycos,
+        ven, Wieland Hoffmann, William A. Kennington III, William Wold, Xi
+        Ruoyao, Yuri Chornoivan, Yu Watanabe, Your Name, Zach Smith, Zbigniew
+        Jędrzejewski-Szmek, Zhang Xianwei
 
-        – Somewhere, SOME-TI-ME
+        – Camerino, 2019-09-03
 
 CHANGES WITH 242:
 
