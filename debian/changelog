@@ -1,8 +1,9 @@
-systemd (243-1) UNRELEASED; urgency=medium
+systemd (243-1) experimental; urgency=medium
 
   * New upstream version 243
+  * Merge changes from unstable branch
 
- -- Michael Biebl <biebl@debian.org>  Tue, 03 Sep 2019 20:04:39 +0200
+ -- Michael Biebl <biebl@debian.org>  Thu, 05 Sep 2019 01:21:49 +0200
 
 systemd (243~rc2-1) experimental; urgency=medium
 
