@@ -21,6 +21,7 @@ tests-skip-test-bpf-only-when-we-re-100-sure-it-s-run-in-.patch
 network-fix-ListenPort-in-WireGuard-section.patch
 Drop-dbus-activation-stub-service.patch
 Revert-core-check-start-limit-on-condition-checks-too.patch
+sleep-properly-pass-verb-to-sleep-script.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
