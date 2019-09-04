@@ -24,6 +24,51 @@ systemd (243~rc2-1) experimental; urgency=medium
 
  -- Michael Biebl <biebl@debian.org>  Sat, 31 Aug 2019 00:20:41 +0200
 
+systemd (242-7) unstable; urgency=medium
+
+  * sleep: properly pass verb to sleep script
+  * core: factor root_directory application out of apply_working_directory.
+    Fixes RootDirectory not working when used in combination with User.
+    (Closes: #939408)
+  * shared/bus-util: drop trusted annotation from
+    bus_open_system_watch_bind_with_description().
+    This ensures that access controls on systemd-resolved's D-Bus interface
+    are enforced properly.
+    (CVE-2019-15718, Closes: #939353)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 04 Sep 2019 19:34:17 +0200
+
+systemd (242-6) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * d/t/control: upstream test requires qemu-system-ppc on ppc64el
+  * d/t/control: install seabios for upstream test.
+    Some archs (at least arm64) qemu implementation require the vga bios.
+
+  [ Michael Biebl ]
+  * Drop unused lintian override
+  * network: fix ListenPort= in [WireGuard] section (Closes: #936198)
+  * d/e/r/73-usb-net-by-mac.rules: import net.ifnames only for network devices
+    (Closes: #934589)
+  * d/e/r/73-usb-net-by-mac.rules: skip if iface name was provided by
+    user-space
+  * Drop dbus activation stub service.
+    Since dbus 1.11.0, a dbus-daemon that is run with --systemd-activation
+    automatically assumes that o.fd.systemd1 is an activatable service.
+    As a result, with a new enough dbus version,
+    /usr/share/dbus-1/services/org.freedesktop.systemd1.service and
+    /usr/share/dbus-1/system-services/org.freedesktop.systemd1.service
+    become unnecessary and can be removed. (Closes: #914015)
+  * Revert "core: check start limit on condition checks too"
+    If a unit was referenced too often, it hit the restart limit and the
+    unit was marked as failed. Fixes a regression introduced in v242.
+    (Closes: #935829)
+
+  [ Michael Prokop ]
+  * README.Debian: document KillUserProcesses behavior in Debian
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 03 Sep 2019 11:09:07 +0200
+
 systemd (242-5) unstable; urgency=medium
 
   [ Dan Streetman ]
