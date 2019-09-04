@@ -13,6 +13,7 @@
 #include "conf-parser.h"
 #include "env-file.h"
 #include "fd-util.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "hashmap.h"
 #include "hostname-util.h"
@@ -20,6 +21,7 @@
 #include "install.h"
 #include "load-fragment.h"
 #include "macro.h"
+#include "memory-util.h"
 #include "rm-rf.h"
 #include "specifier.h"
 #include "string-util.h"
@@ -28,7 +30,6 @@
 #include "tests.h"
 #include "tmpfile-util.h"
 #include "user-util.h"
-#include "util.h"
 
 static int test_unit_file_get_set(void) {
         int r;

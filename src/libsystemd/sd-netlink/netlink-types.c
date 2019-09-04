@@ -15,6 +15,7 @@
 #include <linux/if_bridge.h>
 #include <linux/if_link.h>
 #include <linux/if_tunnel.h>
+#include <linux/l2tp.h>
 #include <linux/veth.h>
 
 #if HAVE_LINUX_FOU_H
@@ -308,6 +309,7 @@ static const NLType rtnl_link_info_data_geneve_types[] = {
 static const NLType rtnl_link_info_data_can_types[] = {
         [IFLA_CAN_BITTIMING]            = { .size = sizeof(struct can_bittiming) },
         [IFLA_CAN_RESTART_MS]           = { .type = NETLINK_TYPE_U32 },
+        [IFLA_CAN_CTRLMODE]             = { .size = sizeof(struct can_ctrlmode) },
 };
 
 /* these strings must match the .kind entries in the kernel */
@@ -651,19 +653,18 @@ static const NLType rtnl_routing_policy_rule_types[] = {
         [FRA_DST]                 = { .type = NETLINK_TYPE_IN_ADDR },
         [FRA_SRC]                 = { .type = NETLINK_TYPE_IN_ADDR },
         [FRA_IIFNAME]             = { .type = NETLINK_TYPE_STRING },
-        [RTA_OIF]                 = { .type = NETLINK_TYPE_U32 },
-        [RTA_GATEWAY]             = { .type = NETLINK_TYPE_IN_ADDR },
+        [FRA_GOTO]                = { .type = NETLINK_TYPE_U32 },
         [FRA_PRIORITY]            = { .type = NETLINK_TYPE_U32 },
         [FRA_FWMARK]              = { .type = NETLINK_TYPE_U32 },
         [FRA_FLOW]                = { .type = NETLINK_TYPE_U32 },
-        [FRA_TUN_ID]              = { .type = NETLINK_TYPE_U32 },
+        [FRA_TUN_ID]              = { .type = NETLINK_TYPE_U64 },
         [FRA_SUPPRESS_IFGROUP]    = { .type = NETLINK_TYPE_U32 },
         [FRA_SUPPRESS_PREFIXLEN]  = { .type = NETLINK_TYPE_U32 },
         [FRA_TABLE]               = { .type = NETLINK_TYPE_U32 },
         [FRA_FWMASK]              = { .type = NETLINK_TYPE_U32 },
         [FRA_OIFNAME]             = { .type = NETLINK_TYPE_STRING },
         [FRA_PAD]                 = { .type = NETLINK_TYPE_U32 },
-        [FRA_L3MDEV]              = { .type = NETLINK_TYPE_U64 },
+        [FRA_L3MDEV]              = { .type = NETLINK_TYPE_U8 },
         [FRA_UID_RANGE]           = { .size = sizeof(struct fib_rule_uid_range) },
         [FRA_PROTOCOL]            = { .type = NETLINK_TYPE_U8 },
         [FRA_IP_PROTO]            = { .type = NETLINK_TYPE_U8 },
@@ -797,10 +798,62 @@ static const NLTypeSystem genl_fou_cmds_type_system = {
         .types = genl_fou_cmds,
 };
 
+static const NLType genl_l2tp_types[] = {
+        [L2TP_ATTR_PW_TYPE]           = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_ENCAP_TYPE]        = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_OFFSET]            = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_DATA_SEQ]          = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_L2SPEC_TYPE]       = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_L2SPEC_LEN]        = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_PROTO_VERSION]     = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_IFNAME]            = { .type = NETLINK_TYPE_STRING },
+        [L2TP_ATTR_CONN_ID]           = { .type = NETLINK_TYPE_U32 },
+        [L2TP_ATTR_PEER_CONN_ID]      = { .type = NETLINK_TYPE_U32 },
+        [L2TP_ATTR_SESSION_ID]        = { .type = NETLINK_TYPE_U32 },
+        [L2TP_ATTR_PEER_SESSION_ID]   = { .type = NETLINK_TYPE_U32 },
+        [L2TP_ATTR_UDP_CSUM]          = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_VLAN_ID]           = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_RECV_SEQ]          = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_SEND_SEQ]          = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_LNS_MODE]          = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_USING_IPSEC]       = { .type = NETLINK_TYPE_U8 },
+        [L2TP_ATTR_FD]                = { .type = NETLINK_TYPE_U32 },
+        [L2TP_ATTR_IP_SADDR]          = { .type = NETLINK_TYPE_IN_ADDR },
+        [L2TP_ATTR_IP_DADDR]          = { .type = NETLINK_TYPE_IN_ADDR },
+        [L2TP_ATTR_UDP_SPORT]         = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_UDP_DPORT]         = { .type = NETLINK_TYPE_U16 },
+        [L2TP_ATTR_IP6_SADDR]         = { .type = NETLINK_TYPE_IN_ADDR },
+        [L2TP_ATTR_IP6_DADDR]         = { .type = NETLINK_TYPE_IN_ADDR },
+        [L2TP_ATTR_UDP_ZERO_CSUM6_TX] = { .type = NETLINK_TYPE_FLAG },
+        [L2TP_ATTR_UDP_ZERO_CSUM6_RX] = { .type = NETLINK_TYPE_FLAG },
+};
+
+static const NLTypeSystem genl_l2tp_type_system = {
+        .count = ELEMENTSOF(genl_l2tp_types),
+        .types = genl_l2tp_types,
+};
+
+static const NLType genl_l2tp[]   = {
+        [L2TP_CMD_TUNNEL_CREATE]  = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_TUNNEL_DELETE]  = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_TUNNEL_MODIFY]  = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_TUNNEL_GET]     = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_SESSION_CREATE] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_SESSION_DELETE] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_SESSION_MODIFY] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+        [L2TP_CMD_SESSION_GET]    = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_type_system },
+};
+
+static const NLTypeSystem genl_l2tp_tunnel_session_type_system = {
+        .count = ELEMENTSOF(genl_l2tp),
+        .types = genl_l2tp,
+};
+
 static const NLType genl_families[] = {
         [SD_GENL_ID_CTRL]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_ctrl_id_ctrl_type_system },
         [SD_GENL_WIREGUARD] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_wireguard_type_system },
         [SD_GENL_FOU]       = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_fou_cmds_type_system},
+        [SD_GENL_L2TP]      = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_tunnel_session_type_system },
 };
 
 const NLTypeSystem genl_family_type_system_root = {
@@ -809,6 +862,7 @@ const NLTypeSystem genl_family_type_system_root = {
 };
 
 static const NLType genl_types[] = {
+        [NLMSG_ERROR]  = { .type = NETLINK_TYPE_NESTED, .type_system = &empty_type_system, .size = sizeof(struct nlmsgerr) },
         [GENL_ID_CTRL] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_get_family_type_system, .size = sizeof(struct genlmsghdr) },
 };
 

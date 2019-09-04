@@ -1,10 +1,7 @@
 <?xml version='1.0'?>
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
-"http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-
-<!--
-  SPDX-License-Identifier: LGPL-2.1+
--->
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
+  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+<!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
 <refentry id="networkctl" conditional='ENABLE_NETWORKD'
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -78,11 +75,13 @@
       <varlistentry>
         <term>
           <command>list</command>
-          <optional><replaceable>LINK…</replaceable></optional>
+          <optional><replaceable>PATTERN…</replaceable></optional>
         </term>
 
         <listitem>
-          <para>Show a list of existing links and their status. If no further arguments are specified shows all links,
+          <para>Show a list of existing links and their status. If one ore more
+          <replaceable>PATTERN</replaceable>s are specified, only links matching one of them are shown.
+          If no further arguments are specified shows all links,
           otherwise just the specified links. Produces output similar to:
 
           <programlisting>IDX LINK         TYPE     OPERATIONAL SETUP
@@ -114,15 +113,29 @@
                 </listitem>
               </varlistentry>
               <varlistentry>
+                <term>degraded-carrier</term>
+                <listitem>
+                  <para>for bond or bridge master, one of the bonding or bridge slave network interfaces is
+                  in off, no-carrier, or dormant state</para>
+                </listitem>
+              </varlistentry>
+              <varlistentry>
                 <term>carrier</term>
                 <listitem>
-                  <para>the link has a carrier</para>
+                  <para>the link has a carrier, or for bond or bridge master, all bonding or bridge slave
+                  network interfaces are enslaved to the master.</para>
                 </listitem>
               </varlistentry>
               <varlistentry>
                 <term>degraded</term>
                 <listitem>
                   <para>the link has carrier and addresses valid on the local link configured</para>
+                </listitem>
+              </varlistentry>
+              <varlistentry>
+                <term>enslaved</term>
+                <listitem>
+                  <para>the link has carrier and is enslaved to bond or bridge master network interface</para>
                 </listitem>
               </varlistentry>
               <varlistentry>
@@ -180,13 +193,13 @@
       <varlistentry>
         <term>
           <command>status</command>
-          <optional><replaceable>LINK…</replaceable></optional>
+          <optional><replaceable>PATTERN…</replaceable></optional>
         </term>
 
         <listitem>
-          <para>Show information about the specified links: type,
-          state, kernel module driver, hardware and IP address,
-          configured DNS servers, etc.</para>
+          <para>Show information about the specified links: type, state, kernel module driver, hardware and
+          IP address, configured DNS servers, etc. If one ore more <replaceable>PATTERN</replaceable>s are
+          specified, only links matching one of them are shown.</para>
 
           <para>When no links are specified, an overall network status is shown. Also see the option
           <option>--all</option>.</para>
@@ -208,13 +221,14 @@
       <varlistentry>
         <term>
           <command>lldp</command>
-          <optional><replaceable>LINK…</replaceable></optional>
+          <optional><replaceable>PATTERN…</replaceable></optional>
         </term>
 
         <listitem>
-          <para>Show discovered LLDP (Link Layer Discovery Protocol) neighbors. If one or more link names are specified
-          only neighbors on those interfaces are shown. Otherwise shows discovered neighbors on all interfaces. Note
-          that for this feature to work, <varname>LLDP=</varname> must be turned on for the specific interface, see
+          <para>Show discovered LLDP (Link Layer Discovery Protocol) neighbors. If one or more
+          <replaceable>PATTERN</replaceable>s are specified only neighbors on those interfaces are shown.
+          Otherwise shows discovered neighbors on all interfaces. Note that for this feature to work,
+          <varname>LLDP=</varname> must be turned on for the specific interface, see
           <citerefentry><refentrytitle>systemd.network</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
           details.</para>
 

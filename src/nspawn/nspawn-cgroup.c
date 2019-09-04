@@ -5,6 +5,7 @@
 #include "alloc-util.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "mkdir.h"
 #include "mount-util.h"
@@ -263,7 +264,7 @@ static int mount_legacy_cgroup_hierarchy(
         if (r > 0)
                 return 0;
 
-        mkdir_p(to, 0755);
+        (void) mkdir_p(to, 0755);
 
         /* The superblock mount options of the mount point need to be
          * identical to the hosts', and hence writable... */

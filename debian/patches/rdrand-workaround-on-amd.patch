@@ -8,17 +8,18 @@ From https://github.com/systemd/systemd/pull/12536
 LP: #1835809
 ===================================================================
 ---
- src/basic/random-util.c | 13 +++++++++++++
- 1 file changed, 13 insertions(+)
+ src/basic/random-util.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
 
 diff --git a/src/basic/random-util.c b/src/basic/random-util.c
-index 38f8180..a45bd61 100644
+index b678900..0f48e88 100644
 --- a/src/basic/random-util.c
 +++ b/src/basic/random-util.c
-@@ -60,6 +60,19 @@ int rdrand(unsigned long *ret) {
+@@ -57,6 +57,20 @@ int rdrand(unsigned long *ret) {
                       : "=r" (v),
                         "=qm" (err));
- 
+         msan_unpoison(&err, sizeof(err));
++
 +       /* Apparently on some AMD CPUs RDRAND will sometimes (after a suspend/resume cycle?) report success
 +        * via the carry flag but nonetheless return the same fixed value -1 in all cases. This appears to be
 +        * a bad bug in the CPU or firmware. Let's deal with that and work-around this by explicitly checking
@@ -32,6 +33,6 @@ index 38f8180..a45bd61 100644
 +
 +       *ret = v;
 +
- #if HAS_FEATURE_MEMORY_SANITIZER
-         __msan_unpoison(&err, sizeof(err));
- #endif
+         if (!err)
+                 return -EAGAIN;
+ 

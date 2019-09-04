@@ -14,10 +14,10 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  1 file changed, 24 insertions(+), 4 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index 7777450..36f4780 100644
+index c35ef55..2e40e21 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
-@@ -22,6 +22,7 @@
+@@ -25,6 +25,7 @@
  #include "os-util.h"
  #include "parse-util.h"
  #include "path-util.h"
@@ -25,7 +25,7 @@ index 7777450..36f4780 100644
  #include "selinux-util.h"
  #include "signal-util.h"
  #include "strv.h"
-@@ -71,6 +72,25 @@ static void context_clear(Context *c) {
+@@ -74,6 +75,25 @@ static void context_clear(Context *c) {
          bus_verify_polkit_async_registry_free(c->polkit_registry);
  }
  
@@ -51,7 +51,7 @@ index 7777450..36f4780 100644
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -302,12 +322,12 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -305,12 +325,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -66,7 +66,7 @@ index 7777450..36f4780 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -352,13 +372,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -355,13 +375,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {

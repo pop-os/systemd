@@ -28,6 +28,7 @@
 #include "strxcpyx.h"
 #include "udev-builtin.h"
 #include "udev-node.h"
+#include "udev-util.h"
 #include "udev-watch.h"
 #include "udev.h"
 
@@ -71,8 +72,8 @@ UdevEvent *udev_event_free(UdevEvent *event) {
         sd_device_unref(event->dev);
         sd_device_unref(event->dev_db_clone);
         sd_netlink_unref(event->rtnl);
-        hashmap_free_free_key(event->run_list);
-        hashmap_free_free_free(event->seclabel_list);
+        ordered_hashmap_free_free_key(event->run_list);
+        ordered_hashmap_free_free_free(event->seclabel_list);
         free(event->program_result);
         free(event->name);
 
@@ -151,13 +152,15 @@ static ssize_t subst_format_var(UdevEvent *event,
                 break;
         case SUBST_KERNEL_NUMBER:
                 r = sd_device_get_sysnum(dev, &val);
+                if (r == -ENOENT)
+                        goto null_terminate;
                 if (r < 0)
-                        return r == -ENOENT ? 0 : r;
+                        return r;
                 l = strpcpy(&s, l, val);
                 break;
         case SUBST_ID:
                 if (!event->dev_parent)
-                        return 0;
+                        goto null_terminate;
                 r = sd_device_get_sysname(event->dev_parent, &val);
                 if (r < 0)
                         return r;
@@ -165,10 +168,12 @@ static ssize_t subst_format_var(UdevEvent *event,
                 break;
         case SUBST_DRIVER:
                 if (!event->dev_parent)
-                        return 0;
+                        goto null_terminate;
                 r = sd_device_get_driver(event->dev_parent, &val);
+                if (r == -ENOENT)
+                        goto null_terminate;
                 if (r < 0)
-                        return r == -ENOENT ? 0 : r;
+                        return r;
                 l = strpcpy(&s, l, val);
                 break;
         case SUBST_MAJOR:
@@ -187,7 +192,7 @@ static ssize_t subst_format_var(UdevEvent *event,
                 int i;
 
                 if (!event->program_result)
-                        return 0;
+                        goto null_terminate;
 
                 /* get part of the result string */
                 i = 0;
@@ -243,7 +248,7 @@ static ssize_t subst_format_var(UdevEvent *event,
                         (void) sd_device_get_sysattr_value(event->dev_parent, attr, &val);
 
                 if (!val)
-                        return 0;
+                        goto null_terminate;
 
                 /* strip trailing whitespace, and replace unwanted characters */
                 if (val != vbuf)
@@ -259,17 +264,23 @@ static ssize_t subst_format_var(UdevEvent *event,
         }
         case SUBST_PARENT:
                 r = sd_device_get_parent(dev, &parent);
+                if (r == -ENODEV)
+                        goto null_terminate;
                 if (r < 0)
-                        return r == -ENODEV ? 0 : r;
+                        return r;
                 r = sd_device_get_devname(parent, &val);
+                if (r == -ENOENT)
+                        goto null_terminate;
                 if (r < 0)
-                        return r == -ENOENT ? 0 : r;
+                        return r;
                 l = strpcpy(&s, l, val + STRLEN("/dev/"));
                 break;
         case SUBST_DEVNODE:
                 r = sd_device_get_devname(dev, &val);
+                if (r == -ENOENT)
+                        goto null_terminate;
                 if (r < 0)
-                        return r == -ENOENT ? 0 : r;
+                        return r;
                 l = strpcpy(&s, l, val);
                 break;
         case SUBST_NAME:
@@ -290,6 +301,8 @@ static ssize_t subst_format_var(UdevEvent *event,
                                 l = strpcpy(&s, l, val + STRLEN("/dev/"));
                         else
                                 l = strpcpyl(&s, l, " ", val + STRLEN("/dev/"), NULL);
+                if (s == dest)
+                        goto null_terminate;
                 break;
         case SUBST_ROOT:
                 l = strpcpy(&s, l, "/dev");
@@ -299,10 +312,12 @@ static ssize_t subst_format_var(UdevEvent *event,
                 break;
         case SUBST_ENV:
                 if (!attr)
-                        return 0;
+                        goto null_terminate;
                 r = sd_device_get_property_value(dev, attr, &val);
+                if (r == -ENOENT)
+                        goto null_terminate;
                 if (r < 0)
-                        return r == -ENOENT ? 0 : r;
+                        return r;
                 l = strpcpy(&s, l, val);
                 break;
         default:
@@ -310,6 +325,10 @@ static ssize_t subst_format_var(UdevEvent *event,
         }
 
         return s - dest;
+
+null_terminate:
+        *s = '\0';
+        return 0;
 }
 
 ssize_t udev_event_apply_format(UdevEvent *event,
@@ -677,8 +696,7 @@ int udev_event_spawn(UdevEvent *event,
 
 static int rename_netif(UdevEvent *event) {
         sd_device *dev = event->dev;
-        const char *action, *oldname;
-        char name[IFNAMSIZ];
+        const char *oldname;
         int ifindex, r;
 
         if (!event->name)
@@ -691,11 +709,7 @@ static int rename_netif(UdevEvent *event) {
         if (streq(event->name, oldname))
                 return 0; /* The interface name is already requested name. */
 
-        r = sd_device_get_property_value(dev, "ACTION", &action);
-        if (r < 0)
-                return log_device_error_errno(dev, r, "Failed to get property 'ACTION': %m");
-
-        if (!streq(action, "add"))
+        if (!device_for_action(dev, DEVICE_ACTION_ADD))
                 return 0; /* Rename the interface only when it is added. */
 
         r = sd_device_get_ifindex(dev, &ifindex);
@@ -704,23 +718,27 @@ static int rename_netif(UdevEvent *event) {
         if (r < 0)
                 return log_device_error_errno(dev, r, "Failed to get ifindex: %m");
 
-        strscpy(name, IFNAMSIZ, event->name);
-        r = rtnl_set_link_name(&event->rtnl, ifindex, name);
+        r = rtnl_set_link_name(&event->rtnl, ifindex, event->name);
         if (r < 0)
-                return log_device_error_errno(dev, r, "Failed to rename network interface %i from '%s' to '%s': %m", ifindex, oldname, name);
+                return log_device_error_errno(dev, r, "Failed to rename network interface %i from '%s' to '%s': %m",
+                                              ifindex, oldname, event->name);
+
+        /* Set ID_RENAMING boolean property here, and drop it in the corresponding move uevent later. */
+        r = device_add_property(dev, "ID_RENAMING", "1");
+        if (r < 0)
+                log_device_warning_errno(dev, r, "Failed to add 'ID_RENAMING' property: %m");
 
         r = device_rename(dev, event->name);
         if (r < 0)
-                return log_warning_errno(r, "Network interface %i is renamed from '%s' to '%s', but could not update sd_device object: %m", ifindex, oldname, name);
+                log_device_warning_errno(dev, r, "Failed to update properties with new name '%s': %m", event->name);
 
-        log_device_debug(dev, "Network interface %i is renamed from '%s' to '%s'", ifindex, oldname, name);
+        log_device_debug(dev, "Network interface %i is renamed from '%s' to '%s'", ifindex, oldname, event->name);
 
         return 1;
 }
 
 static int update_devnode(UdevEvent *event) {
         sd_device *dev = event->dev;
-        const char *action;
         bool apply;
         int r;
 
@@ -760,11 +778,7 @@ static int update_devnode(UdevEvent *event) {
                 }
         }
 
-        r = sd_device_get_property_value(dev, "ACTION", &action);
-        if (r < 0)
-                return log_device_error_errno(dev, r, "Failed to get property 'ACTION': %m");
-
-        apply = streq(action, "add") || event->owner_set || event->group_set || event->mode_set;
+        apply = device_for_action(dev, DEVICE_ACTION_ADD) || event->owner_set || event->group_set || event->mode_set;
         return udev_node_add(dev, apply, event->mode, event->uid, event->gid, event->seclabel_list);
 }
 
@@ -798,26 +812,48 @@ static void event_execute_rules_on_remove(
                 (void) udev_node_remove(dev);
 }
 
+static int udev_event_on_move(UdevEvent *event) {
+        sd_device *dev = event->dev;
+        int r;
+
+        if (event->dev_db_clone &&
+            sd_device_get_devnum(dev, NULL) < 0) {
+                r = device_copy_properties(dev, event->dev_db_clone);
+                if (r < 0)
+                        log_device_debug_errno(dev, r, "Failed to copy properties from cloned sd_device object, ignoring: %m");
+        }
+
+        /* Drop previously added property */
+        r = device_add_property(dev, "ID_RENAMING", NULL);
+        if (r < 0)
+                return log_device_debug_errno(dev, r, "Failed to remove 'ID_RENAMING' property, ignoring: %m");
+
+        return 0;
+}
+
 int udev_event_execute_rules(UdevEvent *event,
                              usec_t timeout_usec,
                              Hashmap *properties_list,
                              UdevRules *rules) {
-        sd_device *dev = event->dev;
-        const char *subsystem, *action;
+        const char *subsystem;
+        DeviceAction action;
+        sd_device *dev;
         int r;
 
         assert(event);
         assert(rules);
 
+        dev = event->dev;
+
         r = sd_device_get_subsystem(dev, &subsystem);
         if (r < 0)
                 return log_device_error_errno(dev, r, "Failed to get subsystem: %m");
 
-        r = sd_device_get_property_value(dev, "ACTION", &action);
+        r = device_get_action(dev, &action);
         if (r < 0)
-                return log_device_error_errno(dev, r, "Failed to get property 'ACTION': %m");
+                return log_device_error_errno(dev, r, "Failed to get ACTION: %m");
 
-        if (streq(action, "remove")) {
+        if (action == DEVICE_ACTION_REMOVE) {
                 event_execute_rules_on_remove(event, timeout_usec, properties_list, rules);
                 return 0;
         }
@@ -826,21 +862,12 @@ int udev_event_execute_rules(UdevEvent *event,
         if (r < 0)
                 log_device_debug_errno(dev, r, "Failed to clone sd_device object, ignoring: %m");
 
-        if (event->dev_db_clone) {
-                r = sd_device_get_devnum(dev, NULL);
-                if (r < 0) {
-                        if (r != -ENOENT)
-                                log_device_debug_errno(dev, r, "Failed to get devnum, ignoring: %m");
+        if (event->dev_db_clone && sd_device_get_devnum(dev, NULL) >= 0)
+                /* Disable watch during event processing. */
+                (void) udev_watch_end(event->dev_db_clone);
 
-                        if (streq(action, "move")) {
-                                r = device_copy_properties(dev, event->dev_db_clone);
-                                if (r < 0)
-                                        log_device_debug_errno(dev, r, "Failed to copy properties from cloned device, ignoring: %m");
-                        }
-                } else
-                        /* Disable watch during event processing. */
-                        (void) udev_watch_end(event->dev_db_clone);
-        }
+        if (action == DEVICE_ACTION_MOVE)
+                (void) udev_event_on_move(event);
 
         (void) udev_rules_apply_to_event(rules, event, timeout_usec, properties_list);
 
@@ -873,7 +900,7 @@ void udev_event_execute_run(UdevEvent *event, usec_t timeout_usec) {
         void *val;
         Iterator i;
 
-        HASHMAP_FOREACH_KEY(val, cmd, event->run_list, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(val, cmd, event->run_list, i) {
                 enum udev_builtin_cmd builtin_cmd = PTR_TO_INT(val);
                 char command[UTIL_PATH_SIZE];
 

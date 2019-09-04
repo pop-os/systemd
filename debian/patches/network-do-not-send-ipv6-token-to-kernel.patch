@@ -15,10 +15,10 @@ Follow-up for 0e2fdb83bb5e22047e0c7cc058b415d0e93f02cf and
  1 file changed, 6 insertions(+), 45 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 6445b94..ac76c86 100644
+index fb37688..75131d8 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -1816,6 +1816,9 @@ static int link_configure_addrgen_mode(Link *link) {
+@@ -2000,6 +2000,9 @@ static int link_configure_addrgen_mode(Link *link) {
          assert(link->manager);
          assert(link->manager->rtnl);
  
@@ -28,7 +28,7 @@ index 6445b94..ac76c86 100644
          log_link_debug(link, "Setting address genmode for link");
  
          r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_SETLINK, link->ifindex);
-@@ -1917,46 +1920,6 @@ static int link_up(Link *link) {
+@@ -2093,46 +2096,6 @@ static int link_up(Link *link) {
                          return log_link_error_errno(link, r, "Could not set MAC address: %m");
          }
  
@@ -75,9 +75,9 @@ index 6445b94..ac76c86 100644
          r = netlink_call_async(link->manager->rtnl, NULL, req, link_up_handler,
                                 link_netlink_destroy_callback, link);
          if (r < 0)
-@@ -3044,11 +3007,9 @@ static int link_configure(Link *link) {
-                         return r;
-         }
+@@ -3219,11 +3182,9 @@ static int link_configure(Link *link) {
+         if (r < 0)
+                 return r;
  
 -        if (socket_ipv6_is_supported()) {
 -                r = link_configure_addrgen_mode(link);

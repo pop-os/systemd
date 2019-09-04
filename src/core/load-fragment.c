@@ -36,10 +36,12 @@
 #include "ioprio.h"
 #include "ip-protocol-list.h"
 #include "journal-util.h"
+#include "limits-util.h"
 #include "load-fragment.h"
 #include "log.h"
 #include "missing.h"
 #include "mountpoint-util.h"
+#include "nulstr-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
@@ -54,6 +56,7 @@
 #include "unit-name.h"
 #include "unit-printf.h"
 #include "user-util.h"
+#include "time-util.h"
 #include "web-util.h"
 
 static int parse_socket_protocol(const char *s) {
@@ -309,23 +312,50 @@ int config_parse_unit_path_strv_printf(
                 if (r < 0)
                         return 0;
 
-                r = strv_push(x, k);
+                r = strv_consume(x, TAKE_PTR(k));
                 if (r < 0)
                         return log_oom();
-                k = NULL;
         }
 }
 
-int config_parse_socket_listen(const char *unit,
-                               const char *filename,
-                               unsigned line,
-                               const char *section,
-                               unsigned section_line,
-                               const char *lvalue,
-                               int ltype,
-                               const char *rvalue,
-                               void *data,
-                               void *userdata) {
+static int patch_var_run(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *lvalue,
+                char **path) {
+
+        const char *e;
+        char *z;
+
+        e = path_startswith(*path, "/var/run/");
+        if (!e)
+                return 0;
+
+        z = path_join("/run/", e);
+        if (!z)
+                return log_oom();
+
+        log_syntax(unit, LOG_NOTICE, filename, line, 0,
+                   "%s= references a path below legacy directory /var/run/, updating %s → %s; "
+                   "please update the unit file accordingly.", lvalue, *path, z);
+
+        free_and_replace(*path, z);
+
+        return 1;
+}
+
+int config_parse_socket_listen(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
 
         _cleanup_free_ SocketPort *p = NULL;
         SocketPort *tail;
@@ -362,6 +392,12 @@ int config_parse_socket_listen(const char *unit,
                 if (r < 0)
                         return 0;
 
+                if (ltype == SOCKET_FIFO) {
+                        r = patch_var_run(unit, filename, line, lvalue, &k);
+                        if (r < 0)
+                                return r;
+                }
+
                 free_and_replace(p->path, k);
                 p->type = ltype;
 
@@ -389,6 +425,12 @@ int config_parse_socket_listen(const char *unit,
                 if (r < 0) {
                         log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve unit specifiers in '%s', ignoring: %m", rvalue);
                         return 0;
+                }
+
+                if (k[0] == '/') { /* Only for AF_UNIX file system sockets… */
+                        r = patch_var_run(unit, filename, line, lvalue, &k);
+                        if (r < 0)
+                                return r;
                 }
 
                 r = socket_address_parse_and_warn(&p->address, k);
@@ -560,7 +602,8 @@ int config_parse_exec(
                 for (;;) {
                         /* We accept an absolute path as first argument.  If it's prefixed with - and the path doesn't
                          * exist, we ignore it instead of erroring out; if it's prefixed with @, we allow overriding of
-                         * argv[0]; if it's prefixed with +, it will be run with full privileges and no sandboxing; if
+                         * argv[0]; if it's prefixed with :, we will not do environment variable substitution;
+                         * if it's prefixed with +, it will be run with full privileges and no sandboxing; if
                          * it's prefixed with '!' we apply sandboxing, but do not change user/group credentials; if
                          * it's prefixed with '!!', then we apply user/group credentials if the kernel supports ambient
                          * capabilities -- if it doesn't we don't apply the credentials themselves, but do apply most
@@ -575,6 +618,8 @@ int config_parse_exec(
                                 ignore = true;
                         } else if (*f == '@' && !separate_argv0)
                                 separate_argv0 = true;
+                        else if (*f == ':' && !(flags & EXEC_COMMAND_NO_ENV_EXPAND))
+                                flags |= EXEC_COMMAND_NO_ENV_EXPAND;
                         else if (*f == '+' && !(flags & (EXEC_COMMAND_FULLY_PRIVILEGED|EXEC_COMMAND_NO_SETUID|EXEC_COMMAND_AMBIENT_MAGIC)))
                                 flags |= EXEC_COMMAND_FULLY_PRIVILEGED;
                         else if (*f == '!' && !(flags & (EXEC_COMMAND_FULLY_PRIVILEGED|EXEC_COMMAND_NO_SETUID|EXEC_COMMAND_AMBIENT_MAGIC)))
@@ -1453,24 +1498,24 @@ int config_parse_exec_smack_process_label(
         return 0;
 }
 
-int config_parse_timer(const char *unit,
-                       const char *filename,
-                       unsigned line,
-                       const char *section,
-                       unsigned section_line,
-                       const char *lvalue,
-                       int ltype,
-                       const char *rvalue,
-                       void *data,
-                       void *userdata) {
+int config_parse_timer(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
 
+        _cleanup_(calendar_spec_freep) CalendarSpec *c = NULL;
+        _cleanup_free_ char *k = NULL;
+        Unit *u = userdata;
         Timer *t = data;
         usec_t usec = 0;
         TimerValue *v;
-        TimerBase b;
-        _cleanup_(calendar_spec_freep) CalendarSpec *c = NULL;
-        Unit *u = userdata;
-        _cleanup_free_ char *k = NULL;
         int r;
 
         assert(filename);
@@ -1484,36 +1529,35 @@ int config_parse_timer(const char *unit,
                 return 0;
         }
 
-        b = timer_base_from_string(lvalue);
-        if (b < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse timer base, ignoring: %s", lvalue);
-                return 0;
-        }
-
         r = unit_full_printf(u, rvalue, &k);
         if (r < 0) {
                 log_syntax(unit, LOG_ERR, filename, line, r, "Failed to resolve unit specifiers in '%s', ignoring: %m", rvalue);
                 return 0;
         }
 
-        if (b == TIMER_CALENDAR) {
-                if (calendar_spec_from_string(k, &c) < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse calendar specification, ignoring: %s", k);
+        if (ltype == TIMER_CALENDAR) {
+                r = calendar_spec_from_string(k, &c);
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse calendar specification, ignoring: %s", k);
                         return 0;
                 }
-        } else
-                if (parse_sec(k, &usec) < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse timer value, ignoring: %s", k);
+        } else {
+                r = parse_sec(k, &usec);
+                if (r < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse timer value, ignoring: %s", k);
                         return 0;
                 }
+        }
 
-        v = new0(TimerValue, 1);
+        v = new(TimerValue, 1);
         if (!v)
                 return log_oom();
 
-        v->base = b;
-        v->value = usec;
-        v->calendar_spec = TAKE_PTR(c);
+        *v = (TimerValue) {
+                .base = ltype,
+                .value = usec,
+                .calendar_spec = TAKE_PTR(c),
+        };
 
         LIST_PREPEND(value, t->values, v);
 
@@ -2508,6 +2552,8 @@ int config_parse_unit_condition_null(
         assert(rvalue);
         assert(data);
 
+        log_syntax(unit, LOG_WARNING, filename, line, 0, "%s= is deprecated, please do not use.", lvalue);
+
         if (isempty(rvalue)) {
                 /* Empty assignment resets the list */
                 *list = condition_free_list(*list);
@@ -2687,7 +2733,11 @@ int config_parse_syscall_filter(
                         c->syscall_whitelist = true;
 
                         /* Accept default syscalls if we are on a whitelist */
-                        r = seccomp_parse_syscall_filter("@default", -1, c->syscall_filter, SECCOMP_PARSE_WHITELIST);
+                        r = seccomp_parse_syscall_filter(
+                                        "@default", -1, c->syscall_filter,
+                                        SECCOMP_PARSE_PERMISSIVE|SECCOMP_PARSE_WHITELIST,
+                                        unit,
+                                        NULL, 0);
                         if (r < 0)
                                 return r;
                 }
@@ -2714,9 +2764,12 @@ int config_parse_syscall_filter(
                         continue;
                 }
 
-                r = seccomp_parse_syscall_filter_full(name, num, c->syscall_filter,
-                                                      SECCOMP_PARSE_LOG|SECCOMP_PARSE_PERMISSIVE|(invert ? SECCOMP_PARSE_INVERT : 0)|(c->syscall_whitelist ? SECCOMP_PARSE_WHITELIST : 0),
-                                                      unit, filename, line);
+                r = seccomp_parse_syscall_filter(
+                                name, num, c->syscall_filter,
+                                SECCOMP_PARSE_LOG|SECCOMP_PARSE_PERMISSIVE|
+                                (invert ? SECCOMP_PARSE_INVERT : 0)|
+                                (c->syscall_whitelist ? SECCOMP_PARSE_WHITELIST : 0),
+                                unit, filename, line);
                 if (r < 0)
                         return r;
         }
@@ -4246,7 +4299,6 @@ int config_parse_pid_file(
         _cleanup_free_ char *k = NULL, *n = NULL;
         Unit *u = userdata;
         char **s = data;
-        const char *e;
         int r;
 
         assert(filename);
@@ -4276,20 +4328,11 @@ int config_parse_pid_file(
         if (r < 0)
                 return r;
 
-        e = path_startswith(n, "/var/run/");
-        if (e) {
-                char *z;
+        r = patch_var_run(unit, filename, line, lvalue, &n);
+        if (r < 0)
+                return r;
 
-                z = strjoin("/run/", e);
-                if (!z)
-                        return log_oom();
-
-                log_syntax(unit, LOG_NOTICE, filename, line, 0, "PIDFile= references path below legacy directory /var/run/, updating %s → %s; please update the unit file accordingly.", n, z);
-
-                free_and_replace(*s, z);
-        } else
-                free_and_replace(*s, n);
-
+        free_and_replace(*s, n);
         return 0;
 }
 

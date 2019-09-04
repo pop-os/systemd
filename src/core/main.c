@@ -47,6 +47,7 @@
 #include "ima-setup.h"
 #include "killall.h"
 #include "kmod-setup.h"
+#include "limits-util.h"
 #include "load-fragment.h"
 #include "log.h"
 #include "loopback-setup.h"
@@ -137,11 +138,11 @@ static EmergencyAction arg_cad_burst_action = EMERGENCY_ACTION_REBOOT_FORCE;
 
 _noreturn_ static void freeze_or_exit_or_reboot(void) {
 
-        /* If we are running in a contianer, let's prefer exiting, after all we can propagate an exit code to the
-         * container manager, and thus inform it that something went wrong. */
+        /* If we are running in a container, let's prefer exiting, after all we can propagate an exit code to
+         * the container manager, and thus inform it that something went wrong. */
         if (detect_container() > 0) {
                 log_emergency("Exiting PID 1...");
-                exit(EXIT_EXCEPTION);
+                _exit(EXIT_EXCEPTION);
         }
 
         if (arg_crash_reboot) {
@@ -1382,7 +1383,7 @@ static int bump_rlimit_memlock(struct rlimit *saved_rlimit) {
 
 static void test_usr(void) {
 
-        /* Check that /usr is not a separate fs */
+        /* Check that /usr is either on the same file system as / or mounted already. */
 
         if (dir_is_empty("/usr") <= 0)
                 return;
@@ -1907,9 +1908,8 @@ static int invoke_main_loop(
                         *ret_shutdown_verb = NULL;
 
                         /* Steal the switch root parameters */
-                        *ret_switch_root_dir = m->switch_root;
-                        *ret_switch_root_init = m->switch_root_init;
-                        m->switch_root = m->switch_root_init = NULL;
+                        *ret_switch_root_dir = TAKE_PTR(m->switch_root);
+                        *ret_switch_root_init = TAKE_PTR(m->switch_root_init);
 
                         return 0;
 
@@ -2120,13 +2120,13 @@ static int do_queue_default_job(
 
         assert(target->load_state == UNIT_LOADED);
 
-        r = manager_add_job(m, JOB_START, target, JOB_ISOLATE, &error, &default_unit_job);
+        r = manager_add_job(m, JOB_START, target, JOB_ISOLATE, NULL, &error, &default_unit_job);
         if (r == -EPERM) {
                 log_debug_errno(r, "Default target could not be isolated, starting instead: %s", bus_error_message(&error, r));
 
                 sd_bus_error_free(&error);
 
-                r = manager_add_job(m, JOB_START, target, JOB_REPLACE, &error, &default_unit_job);
+                r = manager_add_job(m, JOB_START, target, JOB_REPLACE, NULL, &error, &default_unit_job);
                 if (r < 0) {
                         *ret_error_message = "Failed to start default target";
                         return log_emergency_errno(r, "Failed to start default target: %s", bus_error_message(&error, r));
@@ -2379,8 +2379,7 @@ int main(int argc, char *argv[]) {
         (void) prctl(PR_SET_NAME, systemd);
 
         /* Save the original command line */
-        saved_argv = argv;
-        saved_argc = argc;
+        save_argc_argv(argc, argv);
 
         /* Make sure that if the user says "syslog" we actually log to the journal. */
         log_set_upgrade_syslog_to_journal(true);

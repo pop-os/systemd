@@ -21,10 +21,14 @@ shared_sources = files('''
         bootspec.h
         bpf-program.c
         bpf-program.h
+        bus-unit-procs.c
+        bus-unit-procs.h
         bus-unit-util.c
         bus-unit-util.h
         bus-util.c
         bus-util.h
+        bus-wait-for-jobs.c
+        bus-wait-for-jobs.h
         calendarspec.c
         calendarspec.h
         cgroup-show.c
@@ -91,8 +95,10 @@ shared_sources = files('''
         json-internal.h
         json.c
         json.h
+        libmount-util.h
         lockfile-util.c
         lockfile-util.h
+        log-link.h
         logs-show.c
         logs-show.h
         loop-util.c
@@ -117,6 +123,7 @@ shared_sources = files('''
         pager.h
         path-lookup.c
         path-lookup.h
+        pe-header.h
         pretty-print.c
         pretty-print.h
         ptyfwd.c

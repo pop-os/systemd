@@ -28,10 +28,10 @@ Closes #12504.
  1 file changed, 15 insertions(+)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 3cfdf4a..6445b94 100644
+index e3d4efb..fb37688 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -1918,6 +1918,8 @@ static int link_up(Link *link) {
+@@ -2094,6 +2094,8 @@ static int link_up(Link *link) {
          }
  
          if (link_ipv6_enabled(link)) {
@@ -40,7 +40,7 @@ index 3cfdf4a..6445b94 100644
                  r = sd_netlink_message_open_container(req, IFLA_AF_SPEC);
                  if (r < 0)
                          return log_link_error_errno(link, r, "Could not open IFLA_AF_SPEC container: %m");
-@@ -1933,6 +1935,19 @@ static int link_up(Link *link) {
+@@ -2109,6 +2111,19 @@ static int link_up(Link *link) {
                                  return log_link_error_errno(link, r, "Could not append IFLA_INET6_TOKEN: %m");
                  }
  

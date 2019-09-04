@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio_ext.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "alloc-util.h"
 #include "dropin.h"
@@ -262,6 +265,7 @@ static int create_disk(
                 "RemainAfterExit=yes\n"
                 "TimeoutSec=0\n" /* the binary handles timeouts anyway */
                 "KeyringMode=shared\n" /* make sure we can share cached keys among instances */
+                "OOMScoreAdjust=500\n" /* unlocking can allocate a lot of memory if Argon2 is used */
                 "ExecStart=" SYSTEMD_CRYPTSETUP_PATH " attach '%s' '%s' '%s' '%s'\n"
                 "ExecStop=" SYSTEMD_CRYPTSETUP_PATH " detach '%s'\n",
                 name_escaped, u_escaped, strempty(password_escaped), strempty(filtered_escaped),
@@ -287,10 +291,6 @@ static int create_disk(
                 return log_error_errno(r, "Failed to write unit file %s: %m", n);
 
         if (!noauto) {
-                r = generator_add_symlink(arg_dest, d, "wants", n);
-                if (r < 0)
-                        return r;
-
                 r = generator_add_symlink(arg_dest,
                                           netdev ? "remote-cryptsetup.target" : "cryptsetup.target",
                                           nofail ? "wants" : "requires", n);

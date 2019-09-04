@@ -133,7 +133,7 @@ int device_wait_for_initialization(sd_device *device, const char *subsystem, sd_
 
         /* Wait until the device is initialized, so that we can get access to the ID_PATH property */
 
-        r = sd_event_default(&event);
+        r = sd_event_new(&event);
         if (r < 0)
                 return log_error_errno(r, "Failed to get default event: %m");
 
@@ -168,4 +168,27 @@ int device_wait_for_initialization(sd_device *device, const char *subsystem, sd_
         if (ret)
                 *ret = TAKE_PTR(data.device);
         return 0;
+}
+
+int device_is_renaming(sd_device *dev) {
+        int r;
+
+        assert(dev);
+
+        r = sd_device_get_property_value(dev, "ID_RENAMING", NULL);
+        if (r < 0 && r != -ENOENT)
+                return r;
+
+        return r >= 0;
+}
+
+bool device_for_action(sd_device *dev, DeviceAction action) {
+        DeviceAction a;
+
+        assert(dev);
+
+        if (device_get_action(dev, &a) < 0)
+                return false;
+
+        return a == action;
 }

@@ -10,10 +10,10 @@ Subject: network: ignore requested ipv6 route when ipv6 is disabled by sysctl
  3 files changed, 14 insertions(+), 9 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 638aae0..5a181c2 100644
+index d3752b2..4de610b 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -840,8 +840,8 @@ static int link_request_set_routes(Link *link) {
+@@ -967,8 +967,8 @@ static int link_request_set_routes(Link *link) {
                                  link_enter_failed(link);
                                  return r;
                          }
@@ -25,7 +25,7 @@ index 638aae0..5a181c2 100644
  
          if (link->route_messages == 0) {
 diff --git a/src/network/networkd-ndisc.c b/src/network/networkd-ndisc.c
-index 78c98a0..36fbe29 100644
+index 05911bd..fd4f8df 100644
 --- a/src/network/networkd-ndisc.c
 +++ b/src/network/networkd-ndisc.c
 @@ -117,8 +117,8 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
@@ -62,10 +62,10 @@ index 78c98a0..36fbe29 100644
          return 0;
  }
 diff --git a/src/network/networkd-route.c b/src/network/networkd-route.c
-index 5553a7e..5b7e019 100644
+index 379077c..56a9c82 100644
 --- a/src/network/networkd-route.c
 +++ b/src/network/networkd-route.c
-@@ -509,6 +509,11 @@ int route_configure(
+@@ -498,6 +498,11 @@ int route_configure(
          assert(IN_SET(route->family, AF_INET, AF_INET6));
          assert(callback);
  
@@ -76,8 +76,8 @@ index 5553a7e..5b7e019 100644
 +
          if (route_get(link, route->family, &route->dst, route->dst_prefixlen, route->tos, route->priority, route->table, NULL) <= 0 &&
              set_size(link->routes) >= routes_max())
-                 return -E2BIG;
-@@ -675,7 +680,7 @@ int route_configure(
+                 return log_link_error_errno(link, SYNTHETIC_ERRNO(E2BIG),
+@@ -674,7 +679,7 @@ int route_configure(
          sd_event_source_unref(route->expire);
          route->expire = TAKE_PTR(expire);
  
@@ -85,4 +85,4 @@ index 5553a7e..5b7e019 100644
 +        return 1;
  }
  
- int config_parse_gateway(
+ int network_add_ipv4ll_route(Network *network) {

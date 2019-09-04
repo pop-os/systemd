@@ -36,10 +36,10 @@ Closes #13028
  22 files changed, 61 insertions(+), 52 deletions(-)
 
 diff --git a/man/nss-mymachines.xml b/man/nss-mymachines.xml
-index 5742d89..5100cd0 100644
+index ed03035..40b0abe 100644
 --- a/man/nss-mymachines.xml
 +++ b/man/nss-mymachines.xml
-@@ -101,8 +101,8 @@ MACHINE CLASS     SERVICE        OS     VERSION ADDRESSES
+@@ -98,8 +98,8 @@ MACHINE CLASS     SERVICE        OS     VERSION ADDRESSES
  rawhide container systemd-nspawn fedora 30      169.254.40.164 fe80::94aa:3aff:fe7b:d4b9
  
  $ getent passwd vu-rawhide-0 vu-rawhide-81
@@ -51,10 +51,10 @@ index 5742d89..5100cd0 100644
  $ getent group vg-rawhide-0 vg-rawhide-81
  vg-rawhide-0:*:20119552:
 diff --git a/man/sysusers.d.xml b/man/sysusers.d.xml
-index e47d36c..b470532 100644
+index 4314732..2e93715 100644
 --- a/man/sysusers.d.xml
 +++ b/man/sysusers.d.xml
-@@ -207,12 +207,12 @@ u     root     0              "Superuser"           /root          /bin/zsh</pro
+@@ -206,12 +206,12 @@ u     root     0              "Superuser"           /root          /bin/zsh</pro
        <title>Shell</title>
  
        <para>The login shell of the user. If not specified, this will be set to
@@ -70,10 +70,10 @@ index e47d36c..b470532 100644
    </refsect1>
  
 diff --git a/meson.build b/meson.build
-index d340736..3afe168 100644
+index 71e08d7..1166a2b 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -611,6 +611,7 @@ progs = [['quotaon',    '/usr/sbin/quotaon'    ],
+@@ -623,6 +623,7 @@ progs = [['quotaon',    '/usr/sbin/quotaon'    ],
           ['umount',     '/usr/bin/umount',     'UMOUNT_PATH'],
           ['loadkeys',   '/usr/bin/loadkeys',   'KBD_LOADKEYS'],
           ['setfont',    '/usr/bin/setfont',    'KBD_SETFONT'],
@@ -82,10 +82,10 @@ index d340736..3afe168 100644
  foreach prog : progs
          path = get_option(prog[0] + '-path')
 diff --git a/meson_options.txt b/meson_options.txt
-index 044bb79..6304511 100644
+index e1f700a..db9f041 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
-@@ -43,6 +43,7 @@ option('mount-path', type : 'string', description : 'path to mount')
+@@ -41,6 +41,7 @@ option('mount-path', type : 'string', description : 'path to mount')
  option('umount-path', type : 'string', description : 'path to umount')
  option('loadkeys-path', type : 'string', description : 'path to loadkeys')
  option('setfont-path', type : 'string', description : 'path to setfont')
@@ -94,7 +94,7 @@ index 044bb79..6304511 100644
  option('debug-shell', type : 'string', value : '/bin/sh',
         description : 'path to debug shell binary')
 diff --git a/src/basic/user-util.c b/src/basic/user-util.c
-index 260f3d2..78656d9 100644
+index a479590..050ce6a 100644
 --- a/src/basic/user-util.c
 +++ b/src/basic/user-util.c
 @@ -146,7 +146,7 @@ static int synthesize_user_creds(
@@ -106,7 +106,7 @@ index 260f3d2..78656d9 100644
  
                  return 0;
          }
-@@ -522,7 +522,7 @@ int get_shell(char **_s) {
+@@ -536,7 +536,7 @@ int get_shell(char **_s) {
          }
          if (synthesize_nobody() &&
              u == UID_NOBODY) {
@@ -116,10 +116,10 @@ index 260f3d2..78656d9 100644
                          return -ENOMEM;
  
 diff --git a/src/nss-mymachines/nss-mymachines.c b/src/nss-mymachines/nss-mymachines.c
-index 486a658..d576e69 100644
+index 0e76c43..364356d 100644
 --- a/src/nss-mymachines/nss-mymachines.c
 +++ b/src/nss-mymachines/nss-mymachines.c
-@@ -501,7 +501,7 @@ enum nss_status _nss_mymachines_getpwnam_r(
+@@ -503,7 +503,7 @@ enum nss_status _nss_mymachines_getpwnam_r(
          pwd->pw_gecos = buffer;
          pwd->pw_passwd = (char*) "*"; /* locked */
          pwd->pw_dir = (char*) "/";
@@ -128,7 +128,7 @@ index 486a658..d576e69 100644
  
          return NSS_STATUS_SUCCESS;
  
-@@ -581,7 +581,7 @@ enum nss_status _nss_mymachines_getpwuid_r(
+@@ -583,7 +583,7 @@ enum nss_status _nss_mymachines_getpwuid_r(
          pwd->pw_gecos = buffer;
          pwd->pw_passwd = (char*) "*"; /* locked */
          pwd->pw_dir = (char*) "/";
@@ -138,10 +138,10 @@ index 486a658..d576e69 100644
          return NSS_STATUS_SUCCESS;
  
 diff --git a/src/nss-systemd/nss-systemd.c b/src/nss-systemd/nss-systemd.c
-index f8db27a..0ca0e8d 100644
+index 8beae06..8ef1cd5 100644
 --- a/src/nss-systemd/nss-systemd.c
 +++ b/src/nss-systemd/nss-systemd.c
-@@ -23,7 +23,7 @@
+@@ -24,7 +24,7 @@
  #define DYNAMIC_USER_GECOS       "Dynamic User"
  #define DYNAMIC_USER_PASSWD      "*" /* locked */
  #define DYNAMIC_USER_DIR         "/"
@@ -150,7 +150,7 @@ index f8db27a..0ca0e8d 100644
  
  static const struct passwd root_passwd = {
          .pw_name = (char*) "root",
-@@ -42,7 +42,7 @@ static const struct passwd nobody_passwd = {
+@@ -43,7 +43,7 @@ static const struct passwd nobody_passwd = {
          .pw_gid = GID_NOBODY,
          .pw_gecos = (char*) "User Nobody",
          .pw_dir = (char*) "/",
@@ -160,7 +160,7 @@ index f8db27a..0ca0e8d 100644
  
  static const struct group root_group = {
 diff --git a/src/sysusers/sysusers.c b/src/sysusers/sysusers.c
-index df28bcf..91d46a7 100644
+index 843c383..a55a16c 100644
 --- a/src/sysusers/sysusers.c
 +++ b/src/sysusers/sysusers.c
 @@ -361,7 +361,7 @@ static int rename_and_apply_smack(const char *temp_path, const char *dest_path)
@@ -173,7 +173,7 @@ index df28bcf..91d46a7 100644
  
  static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char **tmpfile_path) {
 diff --git a/src/test/test-user-util.c b/src/test/test-user-util.c
-index 801824a..2e303ad 100644
+index 1a507bc..73f4834 100644
 --- a/src/test/test-user-util.c
 +++ b/src/test/test-user-util.c
 @@ -205,8 +205,8 @@ int main(int argc, char *argv[]) {

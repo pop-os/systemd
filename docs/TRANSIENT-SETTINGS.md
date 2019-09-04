@@ -155,6 +155,7 @@ All execution-related settings are available for transient units.
 ✓ MemoryDenyWriteExecute=
 ✓ RestrictNamespaces=
 ✓ RestrictRealtime=
+✓ RestrictSUIDSGID=
 ✓ RestrictAddressFamilies=
 ✓ LockPersonality=
 ✓ LimitCPU=
@@ -224,6 +225,7 @@ All cgroup/resource control settings are available for transient units
 ✓ CPUShares=
 ✓ StartupCPUShares=
 ✓ CPUQuota=
+✓ CPUQuotaPeriodSec=
 ✓ MemoryAccounting=
 ✓ MemoryMin=
 ✓ MemoryLow=
@@ -334,10 +336,12 @@ All automount unit setting is available to transient units:
 Most timer unit settings are available to transient units.
 
 ```
-✓ OnCalendar=
 ✓ OnActiveSec=
 ✓ OnBootSec=
+✓ OnCalendar=
+✓ OnClockChange=
 ✓ OnStartupSec=
+✓ OnTimezoneChange
 ✓ OnUnitActiveSec=
 ✓ OnUnitInactiveSec=
 ✓ Persistent=

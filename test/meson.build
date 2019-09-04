@@ -55,6 +55,7 @@ test_data_files = '''
         test-execute/exec-dynamicuser-statedir-migrate-step2.service
         test-execute/exec-dynamicuser-statedir.service
         test-execute/exec-dynamicuser-supplementarygroups.service
+        test-execute/exec-environment-no-substitute.service
         test-execute/exec-environment-empty.service
         test-execute/exec-environment-multiple.service
         test-execute/exec-environment.service
@@ -66,7 +67,7 @@ test_data_files = '''
         test-execute/exec-ignoresigpipe-no.service
         test-execute/exec-ignoresigpipe-yes.service
         test-execute/exec-inaccessiblepaths-mount-propagation.service
-        test-execute/exec-inaccessiblepaths-proc.service
+        test-execute/exec-inaccessiblepaths-sys.service
         test-execute/exec-ioschedulingclass-best-effort.service
         test-execute/exec-ioschedulingclass-idle.service
         test-execute/exec-ioschedulingclass-none.service
@@ -93,6 +94,7 @@ test_data_files = '''
         test-execute/exec-privatenetwork-yes.service
         test-execute/exec-privatetmp-no.service
         test-execute/exec-privatetmp-yes.service
+        test-execute/exec-protecthome-tmpfs-vs-protectsystem-strict.service
         test-execute/exec-protectkernelmodules-no-capabilities.service
         test-execute/exec-protectkernelmodules-yes-capabilities.service
         test-execute/exec-protectkernelmodules-yes-mount-propagation.service

@@ -17,10 +17,10 @@ conf.d snippet.
  3 files changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index 2791678..3a9e20a 100644
+index 57c2256..2aeadc7 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -296,7 +296,7 @@
+@@ -293,7 +293,7 @@
          the system console, or sent as wall messages to all logged-in users.  These
          options take boolean arguments. If forwarding to syslog is enabled but nothing
          reads messages from the socket, forwarding to syslog has no effect. By default,

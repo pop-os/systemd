@@ -46,6 +46,7 @@
 #include "hashmap.h"
 #include "io-util.h"
 #include "libudev-device-internal.h"
+#include "limits-util.h"
 #include "list.h"
 #include "main-func.h"
 #include "mkdir.h"
@@ -89,12 +90,9 @@ typedef struct Manager {
 
         sd_device_monitor *monitor;
         struct udev_ctrl *ctrl;
-        struct udev_ctrl_connection *ctrl_conn_blocking;
         int fd_inotify;
         int worker_watch[2];
 
-        sd_event_source *ctrl_event;
-        sd_event_source *uevent_event;
         sd_event_source *inotify_event;
         sd_event_source *kill_workers_event;
 
@@ -278,8 +276,6 @@ static void worker_attach_event(struct worker *worker, struct event *event) {
 static void manager_clear_for_worker(Manager *manager) {
         assert(manager);
 
-        manager->ctrl_event = sd_event_source_unref(manager->ctrl_event);
-        manager->uevent_event = sd_event_source_unref(manager->uevent_event);
         manager->inotify_event = sd_event_source_unref(manager->inotify_event);
         manager->kill_workers_event = sd_event_source_unref(manager->kill_workers_event);
 
@@ -289,7 +285,6 @@ static void manager_clear_for_worker(Manager *manager) {
         event_queue_cleanup(manager, EVENT_UNDEF);
 
         manager->monitor = sd_device_monitor_unref(manager->monitor);
-        manager->ctrl_conn_blocking = udev_ctrl_connection_unref(manager->ctrl_conn_blocking);
         manager->ctrl = udev_ctrl_unref(manager->ctrl);
 
         manager->worker_watch[READ_END] = safe_close(manager->worker_watch[READ_END]);
@@ -300,6 +295,9 @@ static void manager_free(Manager *manager) {
                 return;
 
         udev_builtin_exit();
+
+        if (manager->pid == getpid_cached())
+                udev_ctrl_cleanup(manager->ctrl);
 
         manager_clear_for_worker(manager);
 
@@ -339,11 +337,7 @@ static int worker_lock_block_device(sd_device *dev, int *ret_fd) {
          * udev has finished its event handling.
          */
 
-        r = sd_device_get_property_value(dev, "ACTION", &val);
-        if (r < 0)
-                return log_device_debug_errno(dev, r, "Failed to get the value of property 'ACTION': %m");
-
-        if (streq(val, "remove"))
+        if (device_for_action(dev, DEVICE_ACTION_REMOVE))
                 return 0;
 
         r = sd_device_get_subsystem(dev, &val);
@@ -391,21 +385,23 @@ static int worker_lock_block_device(sd_device *dev, int *ret_fd) {
 static int worker_process_device(Manager *manager, sd_device *dev) {
         _cleanup_(udev_event_freep) UdevEvent *udev_event = NULL;
         _cleanup_close_ int fd_lock = -1;
-        const char *seqnum, *action;
+        DeviceAction action;
+        uint64_t seqnum;
         int r;
 
         assert(manager);
         assert(dev);
 
-        r = sd_device_get_property_value(dev, "SEQNUM", &seqnum);
+        r = device_get_seqnum(dev, &seqnum);
         if (r < 0)
                 return log_device_debug_errno(dev, r, "Failed to get SEQNUM: %m");
 
-        r = sd_device_get_property_value(dev, "ACTION", &action);
+        r = device_get_action(dev, &action);
         if (r < 0)
                 return log_device_debug_errno(dev, r, "Failed to get ACTION: %m");
 
-        log_device_debug(dev, "Processing device (SEQNUM=%s, ACTION=%s)", seqnum, action);
+        log_device_debug(dev, "Processing device (SEQNUM=%"PRIu64", ACTION=%s)",
+                         seqnum, device_action_to_string(action));
 
         udev_event = udev_event_new(dev, arg_exec_delay_usec, manager->rtnl);
         if (!udev_event)
@@ -431,7 +427,8 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
                         return log_device_debug_errno(dev, r, "Failed to update database under /run/udev/data/: %m");
         }
 
-        log_device_debug(dev, "Device (SEQNUM=%s, ACTION=%s) processed", seqnum, action);
+        log_device_debug(dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) processed",
+                         seqnum, device_action_to_string(action));
 
         return 0;
 }
@@ -587,8 +584,8 @@ static void event_run(Manager *manager, struct event *event) {
 
 static int event_queue_insert(Manager *manager, sd_device *dev) {
         _cleanup_(sd_device_unrefp) sd_device *clone = NULL;
-        const char *val, *action;
         struct event *event;
+        DeviceAction action;
         uint64_t seqnum;
         int r;
 
@@ -596,25 +593,15 @@ static int event_queue_insert(Manager *manager, sd_device *dev) {
         assert(dev);
 
         /* only one process can add events to the queue */
-        if (manager->pid == 0)
-                manager->pid = getpid_cached();
-
         assert(manager->pid == getpid_cached());
 
         /* We only accepts devices received by device monitor. */
-        r = sd_device_get_property_value(dev, "SEQNUM", &val);
+        r = device_get_seqnum(dev, &seqnum);
         if (r < 0)
                 return r;
-
-        r = safe_atou64(val, &seqnum);
-        if (r < 0)
-                return r;
-
-        if (seqnum == 0)
-                return -EINVAL;
 
         /* Refuse devices do not have ACTION property. */
-        r = sd_device_get_property_value(dev, "ACTION", &action);
+        r = device_get_action(dev, &action);
         if (r < 0)
                 return r;
 
@@ -647,7 +634,8 @@ static int event_queue_insert(Manager *manager, sd_device *dev) {
 
         LIST_APPEND(event, manager->events, event);
 
-        log_device_debug(dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) is queued", seqnum, action);
+        log_device_debug(dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) is queued",
+                         seqnum, device_action_to_string(action));
 
         return 0;
 }
@@ -727,7 +715,7 @@ static int is_device_busy(Manager *manager, struct event *event) {
 
                         if (sd_device_get_devnum(loop_event->dev, &d) >= 0 &&
                             devnum == d && is_block == streq(s, "block"))
-                                return true;
+                                goto set_delaying_seqnum;
                 }
 
                 /* check network device ifindex */
@@ -736,17 +724,15 @@ static int is_device_busy(Manager *manager, struct event *event) {
 
                         if (sd_device_get_ifindex(loop_event->dev, &i) >= 0 &&
                             ifindex == i)
-                                return true;
+                                goto set_delaying_seqnum;
                 }
 
                 if (sd_device_get_devpath(loop_event->dev, &loop_devpath) < 0)
                         continue;
 
                 /* check our old name */
-                if (devpath_old && streq(devpath_old, loop_devpath)) {
-                        event->delaying_seqnum = loop_event->seqnum;
-                        return true;
-                }
+                if (devpath_old && streq(devpath_old, loop_devpath))
+                        goto set_delaying_seqnum;
 
                 loop_devpath_len = strlen(loop_devpath);
 
@@ -758,28 +744,23 @@ static int is_device_busy(Manager *manager, struct event *event) {
                         continue;
 
                 /* identical device event found */
-                if (devpath_len == loop_devpath_len) {
-                        /* devices names might have changed/swapped in the meantime */
-                        if (major(devnum) != 0 || ifindex > 0)
-                                continue;
-                        event->delaying_seqnum = loop_event->seqnum;
-                        return true;
-                }
+                if (devpath_len == loop_devpath_len)
+                        goto set_delaying_seqnum;
 
                 /* parent device event found */
-                if (devpath[common] == '/') {
-                        event->delaying_seqnum = loop_event->seqnum;
-                        return true;
-                }
+                if (devpath[common] == '/')
+                        goto set_delaying_seqnum;
 
                 /* child device event found */
-                if (loop_devpath[common] == '/') {
-                        event->delaying_seqnum = loop_event->seqnum;
-                        return true;
-                }
+                if (loop_devpath[common] == '/')
+                        goto set_delaying_seqnum;
         }
 
         return false;
+
+set_delaying_seqnum:
+        event->delaying_seqnum = loop_event->seqnum;
+        return true;
 }
 
 static int on_exit_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
@@ -806,13 +787,11 @@ static void manager_exit(Manager *manager) {
                   "STATUS=Starting shutdown...");
 
         /* close sources of new events and discard buffered events */
-        manager->ctrl_event = sd_event_source_unref(manager->ctrl_event);
         manager->ctrl = udev_ctrl_unref(manager->ctrl);
 
         manager->inotify_event = sd_event_source_unref(manager->inotify_event);
         manager->fd_inotify = safe_close(manager->fd_inotify);
 
-        manager->uevent_event = sd_event_source_unref(manager->uevent_event);
         manager->monitor = sd_device_monitor_unref(manager->monitor);
 
         /* discard queued events and kill workers */
@@ -1007,59 +986,44 @@ static int on_uevent(sd_device_monitor *monitor, sd_device *dev, void *userdata)
 }
 
 /* receive the udevd message from userspace */
-static int on_ctrl_msg(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
+static int on_ctrl_msg(struct udev_ctrl *uctrl, enum udev_ctrl_msg_type type, const union udev_ctrl_msg_value *value, void *userdata) {
         Manager *manager = userdata;
-        _cleanup_(udev_ctrl_connection_unrefp) struct udev_ctrl_connection *ctrl_conn = NULL;
-        _cleanup_(udev_ctrl_msg_unrefp) struct udev_ctrl_msg *ctrl_msg = NULL;
-        const char *str;
-        int i, r;
+        int r;
 
+        assert(value);
         assert(manager);
 
-        ctrl_conn = udev_ctrl_get_connection(manager->ctrl);
-        if (!ctrl_conn)
-                return 1;
-
-        ctrl_msg = udev_ctrl_receive_msg(ctrl_conn);
-        if (!ctrl_msg)
-                return 1;
-
-        i = udev_ctrl_get_set_log_level(ctrl_msg);
-        if (i >= 0) {
-                log_debug("Received udev control message (SET_LOG_LEVEL), setting log_priority=%i", i);
-                log_set_max_level_realm(LOG_REALM_UDEV, i);
-                log_set_max_level_realm(LOG_REALM_SYSTEMD, i);
+        switch (type) {
+        case UDEV_CTRL_SET_LOG_LEVEL:
+                log_debug("Received udev control message (SET_LOG_LEVEL), setting log_priority=%i", value->intval);
+                log_set_max_level_realm(LOG_REALM_UDEV, value->intval);
+                log_set_max_level_realm(LOG_REALM_SYSTEMD, value->intval);
                 manager_kill_workers(manager);
-        }
-
-        if (udev_ctrl_get_stop_exec_queue(ctrl_msg) > 0) {
+                break;
+        case UDEV_CTRL_STOP_EXEC_QUEUE:
                 log_debug("Received udev control message (STOP_EXEC_QUEUE)");
                 manager->stop_exec_queue = true;
-        }
-
-        if (udev_ctrl_get_start_exec_queue(ctrl_msg) > 0) {
+                break;
+        case UDEV_CTRL_START_EXEC_QUEUE:
                 log_debug("Received udev control message (START_EXEC_QUEUE)");
                 manager->stop_exec_queue = false;
                 event_queue_start(manager);
-        }
-
-        if (udev_ctrl_get_reload(ctrl_msg) > 0) {
+                break;
+        case UDEV_CTRL_RELOAD:
                 log_debug("Received udev control message (RELOAD)");
                 manager_reload(manager);
-        }
-
-        str = udev_ctrl_get_set_env(ctrl_msg);
-        if (str) {
+                break;
+        case UDEV_CTRL_SET_ENV: {
                 _cleanup_free_ char *key = NULL, *val = NULL, *old_key = NULL, *old_val = NULL;
-                char *eq;
+                const char *eq;
 
-                eq = strchr(str, '=');
+                eq = strchr(value->buf, '=');
                 if (!eq) {
-                        log_error("Invalid key format '%s'", str);
+                        log_error("Invalid key format '%s'", value->buf);
                         return 1;
                 }
 
-                key = strndup(str, eq - str);
+                key = strndup(value->buf, eq - value->buf);
                 if (!key) {
                         log_oom();
                         return 1;
@@ -1100,27 +1064,30 @@ static int on_ctrl_msg(sd_event_source *s, int fd, uint32_t revents, void *userd
 
                 key = val = NULL;
                 manager_kill_workers(manager);
+                break;
         }
+        case UDEV_CTRL_SET_CHILDREN_MAX:
+                if (value->intval <= 0) {
+                        log_debug("Received invalid udev control message (SET_MAX_CHILDREN, %i), ignoring.", value->intval);
+                        return 0;
+                }
 
-        i = udev_ctrl_get_set_children_max(ctrl_msg);
-        if (i >= 0) {
-                log_debug("Receivd udev control message (SET_MAX_CHILDREN), setting children_max=%i", i);
-                arg_children_max = i;
+                log_debug("Received udev control message (SET_MAX_CHILDREN), setting children_max=%i", value->intval);
+                arg_children_max = value->intval;
 
                 (void) sd_notifyf(false,
                                   "READY=1\n"
                                   "STATUS=Processing with %u children at max", arg_children_max);
-        }
-
-        if (udev_ctrl_get_ping(ctrl_msg) > 0)
+                break;
+        case UDEV_CTRL_PING:
                 log_debug("Received udev control message (PING)");
-
-        if (udev_ctrl_get_exit(ctrl_msg) > 0) {
+                break;
+        case UDEV_CTRL_EXIT:
                 log_debug("Received udev control message (EXIT)");
                 manager_exit(manager);
-                /* keep reference to block the client until we exit
-                   TODO: deal with several blocking exit requests */
-                manager->ctrl_conn_blocking = udev_ctrl_connection_ref(ctrl_conn);
+                break;
+        default:
+                log_debug("Received unknown udev control message, ignoring");
         }
 
         return 1;
@@ -1603,9 +1570,9 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent, const char *cg
                 .cgroup = cgroup,
         };
 
-        manager->ctrl = udev_ctrl_new_from_fd(fd_ctrl);
-        if (!manager->ctrl)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize udev control socket");
+        r = udev_ctrl_new_from_fd(&manager->ctrl, fd_ctrl);
+        if (r < 0)
+                return log_error_errno(r, "Failed to initialize udev control socket: %m");
 
         r = udev_ctrl_enable_receiving(manager->ctrl);
         if (r < 0)
@@ -1627,7 +1594,9 @@ static int manager_new(Manager **ret, int fd_ctrl, int fd_uevent, const char *cg
 }
 
 static int main_loop(Manager *manager) {
-        int fd_worker, fd_ctrl, r;
+        int fd_worker, r;
+
+        manager->pid = getpid_cached();
 
         /* unnamed socket from workers to the main daemon */
         r = socketpair(AF_LOCAL, SOCK_DGRAM|SOCK_CLOEXEC, 0, manager->worker_watch);
@@ -1674,19 +1643,19 @@ static int main_loop(Manager *manager) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create watchdog event source: %m");
 
-        fd_ctrl = udev_ctrl_get_fd(manager->ctrl);
-        if (fd_ctrl < 0)
-                return log_error_errno(fd_ctrl, "Failed to get udev control socket fd: %m");
-
-        r = sd_event_add_io(manager->event, &manager->ctrl_event, fd_ctrl, EPOLLIN, on_ctrl_msg, manager);
+        r = udev_ctrl_attach_event(manager->ctrl, manager->event);
         if (r < 0)
-                return log_error_errno(r, "Failed to create udev control event source: %m");
+                return log_error_errno(r, "Failed to attach event to udev control: %m");
+
+        r = udev_ctrl_start(manager->ctrl, on_ctrl_msg, manager);
+        if (r < 0)
+                return log_error_errno(r, "Failed to start device monitor: %m");
 
         /* This needs to be after the inotify and uevent handling, to make sure
          * that the ping is send back after fully processing the pending uevents
          * (including the synthetic ones we may create due to inotify events).
          */
-        r = sd_event_source_set_priority(manager->ctrl_event, SD_EVENT_PRIORITY_IDLE);
+        r = sd_event_source_set_priority(udev_ctrl_get_event_source(manager->ctrl), SD_EVENT_PRIORITY_IDLE);
         if (r < 0)
                 return log_error_errno(r, "Failed to set IDLE event priority for udev control event source: %m");
 
@@ -1846,10 +1815,7 @@ static int run(int argc, char *argv[]) {
                         log_debug_errno(r, "Failed to adjust OOM score, ignoring: %m");
         }
 
-        r = main_loop(manager);
-        /* FIXME: move this into manager_free() */
-        udev_ctrl_cleanup(manager->ctrl);
-        return r;
+        return main_loop(manager);
 }
 
 DEFINE_MAIN_FUNCTION(run);

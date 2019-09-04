@@ -12,9 +12,8 @@
 #include "netlink-internal.h"
 #include "netlink-types.h"
 #include "netlink-util.h"
-#include "refcnt.h"
 #include "socket-util.h"
-#include "util.h"
+#include "memory-util.h"
 
 #define GET_CONTAINER(m, i) ((i) < (m)->n_containers ? (struct rtattr*)((uint8_t*)(m)->hdr + (m)->containers[i].offset) : NULL)
 #define PUSH_CONTAINER(m, new) (m)->container_offsets[(m)->n_containers++] = (uint8_t*)(new) - (uint8_t*)(m)->hdr;
@@ -36,7 +35,7 @@ int message_new_empty(sd_netlink *rtnl, sd_netlink_message **ret) {
         if (!m)
                 return -ENOMEM;
 
-        m->n_ref = REFCNT_INIT;
+        m->n_ref = 1;
         m->protocol = rtnl->protocol;
         m->sealed = false;
 
@@ -96,12 +95,10 @@ int sd_netlink_message_request_dump(sd_netlink_message *m, int dump) {
         return 0;
 }
 
-DEFINE_ATOMIC_REF_FUNC(sd_netlink_message, sd_netlink_message);
+DEFINE_TRIVIAL_REF_FUNC(sd_netlink_message, sd_netlink_message);
 
 sd_netlink_message *sd_netlink_message_unref(sd_netlink_message *m) {
-        sd_netlink_message *t;
-
-        while (m && REFCNT_DEC(m->n_ref) == 0) {
+        while (m && --m->n_ref == 0) {
                 unsigned i;
 
                 free(m->hdr);
@@ -109,7 +106,7 @@ sd_netlink_message *sd_netlink_message_unref(sd_netlink_message *m) {
                 for (i = 0; i <= m->n_containers; i++)
                         free(m->containers[i].attributes);
 
-                t = m;
+                sd_netlink_message *t = m;
                 m = m->next;
                 free(t);
         }
@@ -334,36 +331,46 @@ int sd_netlink_message_append_data(sd_netlink_message *m, unsigned short type, c
         return 0;
 }
 
-int sd_netlink_message_append_in_addr(sd_netlink_message *m, unsigned short type, const struct in_addr *data) {
+int netlink_message_append_in_addr_union(sd_netlink_message *m, unsigned short type, int family, const union in_addr_union *data) {
         int r;
 
         assert_return(m, -EINVAL);
         assert_return(!m->sealed, -EPERM);
         assert_return(data, -EINVAL);
+        assert_return(IN_SET(family, AF_INET, AF_INET6), -EINVAL);
 
         r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_IN_ADDR);
         if (r < 0)
                 return r;
 
-        r = add_rtattr(m, type, data, sizeof(struct in_addr));
+        r = add_rtattr(m, type, data, FAMILY_ADDRESS_SIZE(family));
         if (r < 0)
                 return r;
 
         return 0;
 }
 
+int sd_netlink_message_append_in_addr(sd_netlink_message *m, unsigned short type, const struct in_addr *data) {
+        return netlink_message_append_in_addr_union(m, type, AF_INET, (const union in_addr_union *) data);
+}
+
 int sd_netlink_message_append_in6_addr(sd_netlink_message *m, unsigned short type, const struct in6_addr *data) {
+        return netlink_message_append_in_addr_union(m, type, AF_INET6, (const union in_addr_union *) data);
+}
+
+int netlink_message_append_sockaddr_union(sd_netlink_message *m, unsigned short type, const union sockaddr_union *data) {
         int r;
 
         assert_return(m, -EINVAL);
         assert_return(!m->sealed, -EPERM);
         assert_return(data, -EINVAL);
+        assert_return(IN_SET(data->sa.sa_family, AF_INET, AF_INET6), -EINVAL);
 
-        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_IN_ADDR);
+        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_SOCKADDR);
         if (r < 0)
                 return r;
 
-        r = add_rtattr(m, type, data, sizeof(struct in6_addr));
+        r = add_rtattr(m, type, data, data->sa.sa_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
         if (r < 0)
                 return r;
 
@@ -371,40 +378,13 @@ int sd_netlink_message_append_in6_addr(sd_netlink_message *m, unsigned short typ
 }
 
 int sd_netlink_message_append_sockaddr_in(sd_netlink_message *m, unsigned short type, const struct sockaddr_in *data) {
-        int r;
-
-        assert_return(m, -EINVAL);
-        assert_return(!m->sealed, -EPERM);
-        assert_return(data, -EINVAL);
-
-        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_SOCKADDR);
-        if (r < 0)
-                return r;
-
-        r = add_rtattr(m, type, data, sizeof(struct sockaddr_in));
-        if (r < 0)
-                return r;
-
-        return 0;
+        return netlink_message_append_sockaddr_union(m, type, (const union sockaddr_union *) data);
 }
 
 int sd_netlink_message_append_sockaddr_in6(sd_netlink_message *m, unsigned short type, const struct sockaddr_in6 *data) {
-        int r;
-
-        assert_return(m, -EINVAL);
-        assert_return(!m->sealed, -EPERM);
-        assert_return(data, -EINVAL);
-
-        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_SOCKADDR);
-        if (r < 0)
-                return r;
-
-        r = add_rtattr(m, type, data, sizeof(struct sockaddr_in6));
-        if (r < 0)
-                return r;
-
-        return 0;
+        return netlink_message_append_sockaddr_union(m, type, (const union sockaddr_union *) data);
 }
+
 
 int sd_netlink_message_append_ether_addr(sd_netlink_message *m, unsigned short type, const struct ether_addr *data) {
         int r;

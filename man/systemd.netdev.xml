@@ -1,10 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-
-<!--
-  SPDX-License-Identifier: LGPL-2.1+
--->
+<!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
 <refentry id="systemd.netdev" conditional='ENABLE_NETWORKD'>
 
@@ -101,9 +98,7 @@
           <entry>A Level 2 GRE tunnel over IPv4.</entry></row>
 
           <row><entry><varname>erspan</varname></entry>
-          <entry>ERSPAN mirrors traffic on one or more source ports and delivers the mirrored traffic to one or more destination ports on another switch.
-          The traffic is encapsulated in generic routing encapsulation (GRE) and is therefore routable across a layer 3 network between the source switch
-          and the destination switch.</entry></row>
+          <entry>ERSPAN mirrors traffic on one or more source ports and delivers the mirrored traffic to one or more destination ports on another switch. The traffic is encapsulated in generic routing encapsulation (GRE) and is therefore routable across a layer 3 network between the source switch and the destination switch.</entry></row>
 
           <row><entry><varname>ip6gre</varname></entry>
           <entry>A Level 3 GRE tunnel over IPv6.</entry></row>
@@ -153,6 +148,9 @@
           <row><entry><varname>geneve</varname></entry>
           <entry>A GEneric NEtwork Virtualization Encapsulation (GENEVE) netdev driver.</entry></row>
 
+          <row><entry><varname>l2tp</varname></entry>
+          <entry>A Layer 2 Tunneling Protocol (L2TP) is a tunneling protocol used to support virtual private networks (VPNs) or as part of the delivery of services by ISPs. It does not provide any encryption or confidentiality by itself</entry></row>
+
           <row><entry><varname>vrf</varname></entry>
           <entry>A Virtual Routing and Forwarding (<ulink url="https://www.kernel.org/doc/Documentation/networking/vrf.txt">VRF</ulink>) interface to create separate routing and forwarding domains.</entry></row>
 
@@ -190,53 +188,55 @@
       <varlistentry>
         <term><varname>Host=</varname></term>
         <listitem>
-          <para>Matches against the hostname or machine ID of the
-          host. See <literal>ConditionHost=</literal> in
+          <para>Matches against the hostname or machine ID of the host. See
+          <literal>ConditionHost=</literal> in
           <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-          for details.
+          for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+          If an empty string is assigned, then previously assigned value is cleared.
           </para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>Virtualization=</varname></term>
         <listitem>
-          <para>Checks whether the system is executed in a virtualized
-          environment and optionally test whether it is a specific
-          implementation. See
-          <literal>ConditionVirtualization=</literal> in
+          <para>Checks whether the system is executed in a virtualized environment and optionally test
+          whether it is a specific implementation. See <literal>ConditionVirtualization=</literal> in
           <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-          for details.
+          for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+          If an empty string is assigned, then previously assigned value is cleared.
           </para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>KernelCommandLine=</varname></term>
         <listitem>
-          <para>Checks whether a specific kernel command line option
-          is set (or if prefixed with the exclamation mark unset). See
+          <para>Checks whether a specific kernel command line option is set. See
           <literal>ConditionKernelCommandLine=</literal> in
           <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-          for details.
+          for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+          If an empty string is assigned, then previously assigned value is cleared.
           </para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>KernelVersion=</varname></term>
         <listitem>
-          <para>Checks whether the kernel version (as reported by <command>uname -r</command>) matches a certain
-          expression (or if prefixed with the exclamation mark does not match it). See
-          <literal>ConditionKernelVersion=</literal> in
-          <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry> for details.
+          <para>Checks whether the kernel version (as reported by <command>uname -r</command>) matches a
+          certain expression. See <literal>ConditionKernelVersion=</literal> in
+          <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+          for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+          If an empty string is assigned, then previously assigned value is cleared.
           </para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>Architecture=</varname></term>
         <listitem>
-          <para>Checks whether the system is running on a specific
-          architecture. See <literal>ConditionArchitecture=</literal> in
+          <para>Checks whether the system is running on a specific architecture. See
+          <literal>ConditionArchitecture=</literal> in
           <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
-          for details.
+          for details. When prefixed with an exclamation mark (<literal>!</literal>), the result is negated.
+          If an empty string is assigned, then previously assigned value is cleared.
           </para>
         </listitem>
       </varlistentry>
@@ -740,6 +740,118 @@
     </variablelist>
   </refsect1>
   <refsect1>
+    <title>[L2TP] Section Options</title>
+    <para>The <literal>[L2TP]</literal> section only applies for
+    netdevs of kind <literal>l2tp</literal>, and accepts the
+    following keys:</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>TunnelId=</varname></term>
+        <listitem>
+          <para>Specifies the tunnel id. The value used must match the <literal>PeerTunnelId=</literal> value being used at the peer.
+          Ranges a number between 1 and 4294967295). This option is compulsory.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>PeerTunnelId=</varname></term>
+        <listitem>
+          <para>Specifies the peer tunnel id. The value used must match the <literal>PeerTunnelId=</literal> value being used at the peer.
+          Ranges a number between 1 and 4294967295). This option is compulsory.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Remote=</varname></term>
+        <listitem>
+          <para>Specifies the IP address of the remote peer. This option is compulsory.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Local=</varname></term>
+        <listitem>
+          <para>Specifies the IP address of the local interface. Takes an IP address, or the special values
+          <literal>auto</literal>, <literal>static</literal>, or <literal>dynamic</literal>. When an address
+          is set, then the local interface must have the address. If <literal>auto</literal>, then one of the
+          addresses on the local interface is used. Similarly, if <literal>static</literal> or
+          <literal>dynamic</literal> is set, then one of the static or dynamic addresses on the local
+          interface is used. Defaults to <literal>auto</literal>.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>EncapsulationType=</varname></term>
+        <listitem>
+          <para>Specifies the encapsulation type of the tunnel. Takes one of <literal>udp</literal> or <literal>ip</literal>.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>UDPSourcePort=</varname></term>
+        <listitem>
+          <para>Specifies the UDP source port to be used for the tunnel. When UDP encapsulation is selected it's mandotory. Ignored when ip
+          encapsulation is selected.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>DestinationPort=</varname></term>
+        <listitem>
+          <para>Specifies destination port. When UDP encapsulation is selected it's mandotory. Ignored when ip
+          encapsulation is selected.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>UDPChecksum=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, specifies if UDP checksum is calculated for transmitted packets over IPv4.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>UDP6ZeroChecksumTx=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, skip UDP checksum calculation for transmitted packets over IPv6.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>UDP6ZeroChecksumRx=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, allows incoming UDP packets over IPv6 with zero checksum field.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+  <refsect1>
+    <title>[L2TPSession] Section Options</title>
+    <para>The <literal>[L2TPSession]</literal> section only applies for
+    netdevs of kind <literal>l2tp</literal>, and accepts the
+    following keys:</para>
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>Name=</varname></term>
+        <listitem>
+          <para>Specifies the name of the sesssion. This option is compulsory.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>SessionId=</varname></term>
+        <listitem>
+          <para>Specifies the sesssion id. The value used must match the <literal>SessionId=</literal> value being used at the peer.
+          Ranges a number between 1 and 4294967295). This option is compulsory.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>PeerSessionId=</varname></term>
+        <listitem>
+          <para>Specifies the peer session id. The value used must match the <literal>PeerSessionId=</literal> value being used at the peer.
+          Ranges a number between 1 and 4294967295). This option is compulsory.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Layer2SpecificHeader=</varname></term>
+        <listitem>
+          <para>Specifies layer2specific header type of the session. One of <literal>none</literal> or <literal>default</literal>. Defaults to <literal>default</literal>.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+  <refsect1>
     <title>[Tunnel] Section Options</title>
 
     <para>The <literal>[Tunnel]</literal> section only applies for
@@ -751,22 +863,24 @@
     <literal>ip6gre</literal>,
     <literal>ip6gretap</literal>,
     <literal>vti</literal>,
-    <literal>vti6</literal>, and
-    <literal>ip6tnl</literal> and accepts
+    <literal>vti6</literal>,
+    <literal>ip6tnl</literal>, and
+    <literal>erspan</literal> and accepts
     the following keys:</para>
 
     <variablelist class='network-directives'>
       <varlistentry>
         <term><varname>Local=</varname></term>
         <listitem>
-          <para>A static local address for tunneled packets. It must
-          be an address on another interface of this host.</para>
+          <para>A static local address for tunneled packets. It must be an address on another interface of
+          this host, or the special value <literal>any</literal>.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>Remote=</varname></term>
         <listitem>
-          <para>The remote endpoint of the tunnel.</para>
+          <para>The remote endpoint of the tunnel. Takes an IP address or the special value
+          <literal>any</literal>.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -843,22 +957,24 @@
           It is used as mark-configured SAD/SPD entry as part of the lookup key (both in data
           and control path) in ip xfrm (framework used to implement IPsec protocol).
           See <ulink url="http://man7.org/linux/man-pages/man8/ip-xfrm.8.html">
-          ip-xfrm — transform configuration</ulink> for details. It is only used for VTI/VTI6
-          tunnels.</para>
+          ip-xfrm — transform configuration</ulink> for details. It is only used for VTI/VTI6,
+          GRE, GRETAP, and ERSPAN tunnels.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>InputKey=</varname></term>
         <listitem>
           <para>The <varname>InputKey=</varname> parameter specifies the key to use for input.
-          The format is same as <varname>Key=</varname>. It is only used for VTI/VTI6 tunnels.</para>
+          The format is same as <varname>Key=</varname>. It is only used for VTI/VTI6, GRE, GRETAP,
+          and ERSPAN tunnels.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>OutputKey=</varname></term>
         <listitem>
           <para>The <varname>OutputKey=</varname> parameter specifies the key to use for output.
-          The format is same as <varname>Key=</varname>. It is only used for VTI/VTI6 tunnels.</para>
+          The format is same as <varname>Key=</varname>. It is only used for VTI/VTI6, GRE, GRETAP,
+          and ERSPAN tunnels.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -892,7 +1008,8 @@
         <term><varname>FooOverUDP=</varname></term>
         <listitem>
           <para>Takes a boolean. Specifies whether <varname>FooOverUDP=</varname> tunnel is to be configured.
-          Defaults to false. For more detail information see
+          Defaults to false. This takes effects only for IPIP, SIT, GRE, and GRETAP tunnels.
+          For more detail information see
           <ulink url="https://lwn.net/Articles/614348">Foo over UDP</ulink></para>
         </listitem>
       </varlistentry>
@@ -900,7 +1017,7 @@
         <term><varname>FOUDestinationPort=</varname></term>
         <listitem>
           <para>This setting specifies the UDP destination port for encapsulation.
-          This field is mandatory and is not set by default.</para>
+          This field is mandatory when <varname>FooOverUDP=yes</varname>, and is not set by default.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -913,7 +1030,7 @@
       <varlistentry>
         <term><varname>Encapsulation=</varname></term>
         <listitem>
-          <para>Accepts the same key as <literal>[FooOverUDP]</literal></para>
+          <para>Accepts the same key as in the <literal>[FooOverUDP]</literal> section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -934,8 +1051,8 @@
       <varlistentry>
         <term><varname>SerializeTunneledPackets=</varname></term>
         <listitem>
-          <para>Takes a boolean. If set to yes, then packets are serialized. Only applies for ERSPAN tunnel.
-          When unset, the kernel's default will be used.
+          <para>Takes a boolean. If set to yes, then packets are serialized. Only applies for GRE,
+          GRETAP, and ERSPAN tunnels. When unset, the kernel's default will be used.
           </para>
         </listitem>
       </varlistentry>
@@ -959,13 +1076,6 @@
 
     <variablelist class='network-directives'>
       <varlistentry>
-        <term><varname>Protocol=</varname></term>
-        <listitem>
-          <para>The <varname>Protocol=</varname> specifies the protocol number of the
-          packets arriving at the UDP port. This field is mandatory and is not set by default. Valid range is 1-255.</para>
-        </listitem>
-      </varlistentry>
-      <varlistentry>
         <term><varname>Encapsulation=</varname></term>
         <listitem>
           <para>Specifies the encapsulation mechanism used to store networking packets of various protocols inside the UDP packets. Supports the following values:
@@ -987,7 +1097,17 @@
           for delivery to the real destination. This option is mandatory.</para>
         </listitem>
         </varlistentry>
-      </variablelist>
+      <varlistentry>
+        <term><varname>Protocol=</varname></term>
+        <listitem>
+          <para>The <varname>Protocol=</varname> specifies the protocol number of the packets arriving
+          at the UDP port. When <varname>Encapsulation=FooOverUDP</varname>, this field is mandatory
+          and is not set by default. Takes an IP protocol name such as <literal>gre</literal> or
+          <literal>ipip</literal>, or an integer within the range 1-255. When
+          <varname>Encapsulation=GenericUDPEncapsulation</varname>, this must not be specified.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
   </refsect1>
   <refsect1>
     <title>[Peer] Section Options</title>
@@ -1112,10 +1232,20 @@
           <para>The Base64 encoded private key for the interface. It can be
             generated using the <command>wg genkey</command> command
             (see <citerefentry project="wireguard"><refentrytitle>wg</refentrytitle><manvolnum>8</manvolnum></citerefentry>).
-            This option is mandatory to use WireGuard.
+            This option or <varname>PrivateKeyFile=</varname> is mandatory to use WireGuard.
             Note that because this information is secret, you may want to set
             the permissions of the .netdev file to be owned by <literal>root:systemd-network</literal>
             with a <literal>0640</literal> file mode.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>PrivateKeyFile=</varname></term>
+        <listitem>
+          <para>Takes an absolute path to a file which contains the Base64 encoded private key for the interface.
+          When this option is specified, then <varname>PrivateKey=</varname> is ignored.
+          Note that the file must be readable by the user <literal>systemd-network</literal>, so it
+          should be, e.g., owned by <literal>root:systemd-network</literal> with a
+          <literal>0640</literal> file mode.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -1164,6 +1294,16 @@
             Note that because this information is secret, you may want to set
             the permissions of the .netdev file to be owned by <literal>root:systemd-networkd</literal>
             with a <literal>0640</literal> file mode.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>PresharedKeyFile=</varname></term>
+        <listitem>
+          <para>Takes an absolute path to a file which contains the Base64 encoded preshared key for the
+          peer. When this option is specified, then <varname>PresharedKey=</varname> is ignored.
+          Note that the file must be readable by the user <literal>systemd-network</literal>, so it
+          should be, e.g., owned by <literal>root:systemd-network</literal> with a
+          <literal>0640</literal> file mode.</para>
         </listitem>
       </varlistentry>
       <varlistentry>

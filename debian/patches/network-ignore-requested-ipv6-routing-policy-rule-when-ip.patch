@@ -10,10 +10,10 @@ Subject: network: ignore requested ipv6 routing policy rule when ipv6 is
  2 files changed, 8 insertions(+), 3 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 5a181c2..13852af 100644
+index 4de610b..91c828e 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -765,8 +765,8 @@ static int link_request_set_routing_policy_rule(Link *link) {
+@@ -892,8 +892,8 @@ static int link_request_set_routing_policy_rule(Link *link) {
                          link_enter_failed(link);
                          return r;
                  }
@@ -25,10 +25,10 @@ index 5a181c2..13852af 100644
  
          routing_policy_rule_purge(link->manager, link);
 diff --git a/src/network/networkd-routing-policy-rule.c b/src/network/networkd-routing-policy-rule.c
-index 65a9af2..0b62a0e 100644
+index f625321..d2b6f10 100644
 --- a/src/network/networkd-routing-policy-rule.c
 +++ b/src/network/networkd-routing-policy-rule.c
-@@ -492,6 +492,11 @@ int routing_policy_rule_configure(RoutingPolicyRule *rule, Link *link, link_netl
+@@ -484,6 +484,11 @@ int routing_policy_rule_configure(RoutingPolicyRule *rule, Link *link, link_netl
          assert(link->manager);
          assert(link->manager->rtnl);
  
@@ -40,7 +40,7 @@ index 65a9af2..0b62a0e 100644
          r = sd_rtnl_message_new_routing_policy_rule(link->manager->rtnl, &m, RTM_NEWRULE, rule->family);
          if (r < 0)
                  return log_error_errno(r, "Could not allocate RTM_NEWRULE message: %m");
-@@ -609,7 +614,7 @@ int routing_policy_rule_configure(RoutingPolicyRule *rule, Link *link, link_netl
+@@ -593,7 +598,7 @@ int routing_policy_rule_configure(RoutingPolicyRule *rule, Link *link, link_netl
          if (r < 0)
                  return log_error_errno(r, "Could not add rule: %m");
  

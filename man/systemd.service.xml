@@ -1,10 +1,7 @@
 <?xml version='1.0'?>
-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-
-<!--
-  SPDX-License-Identifier: LGPL-2.1+
--->
+<!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
 <refentry id="systemd.service">
   <refentryinfo>
@@ -62,6 +59,10 @@
     about the incompatibilities, see the <ulink
     url="https://www.freedesktop.org/wiki/Software/systemd/Incompatibilities">Incompatibilities
     with SysV</ulink> document.</para>
+
+    <para>The <citerefentry><refentrytitle>systemd-run</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+    command allows creating <filename>.service</filename> and <filename>.scope</filename> units dynamically
+    and transiently from the command line.</para>
   </refsect1>
 
   <refsect1>
@@ -339,6 +340,11 @@
               </row>
 
               <row>
+                <entry><literal>:</literal></entry>
+                <entry>If the executable path is prefixed with <literal>:</literal>, environment variable substitution (as described by the "Command Lines" section below) is not applied.</entry>
+              </row>
+
+              <row>
                 <entry><literal>+</literal></entry>
                 <entry>If the executable path is prefixed with <literal>+</literal> then the process is executed with full privileges. In this mode privilege restrictions configured with <varname>User=</varname>, <varname>Group=</varname>, <varname>CapabilityBoundingSet=</varname> or the various file system namespacing options (such as <varname>PrivateDevices=</varname>, <varname>PrivateTmp=</varname>) are not applied to the invoked command line (but still affect any other <varname>ExecStart=</varname>, <varname>ExecStop=</varname>, … lines).</entry>
               </row>
@@ -358,7 +364,7 @@
           </tgroup>
         </table>
 
-        <para><literal>@</literal>, <literal>-</literal>, and one of
+        <para><literal>@</literal>, <literal>-</literal>, <literal>:</literal>, and one of
         <literal>+</literal>/<literal>!</literal>/<literal>!!</literal> may be used together and they can appear in any
         order. However, only one of <literal>+</literal>, <literal>!</literal>, <literal>!!</literal> may be used at a
         time. Note that these prefixes are also supported for the other command line settings,
@@ -471,14 +477,18 @@
         start-up failed, for example because any of the commands specified in <varname>ExecStart=</varname>,
         <varname>ExecStartPre=</varname> or <varname>ExecStartPost=</varname> failed (and weren't prefixed with
         <literal>-</literal>, see above) or timed out. Use <varname>ExecStopPost=</varname> to invoke commands when a
-        service failed to start up correctly and is shut down again. Also note that, service restart requests are
-        implemented as stop operations followed by start operations. This means that <varname>ExecStop=</varname> and
-        <varname>ExecStopPost=</varname> are executed during a service restart operation.</para>
+        service failed to start up correctly and is shut down again. Also note that the stop operation is always
+        performed if the service started successfully, even if the processes in the service terminated on their
+        own or were killed. The stop commands must be prepared to deal with that case. <varname>$MAINPID</varname>
+        will be unset if systemd knows that the main process exited by the time the stop commands are called.</para>
 
-        <para>It is recommended to use this setting for commands that communicate with the service requesting clean
-        termination. When the commands specified with this option are executed it should be assumed that the service is
-        still fully up and is able to react correctly to all commands. For post-mortem clean-up steps use
-        <varname>ExecStopPost=</varname> instead.</para></listitem>
+        <para>Service restart requests are implemented as stop operations followed by start operations. This
+        means that <varname>ExecStop=</varname> and <varname>ExecStopPost=</varname> are executed during a
+        service restart operation.</para>
+
+        <para>It is recommended to use this setting for commands that communicate with the service requesting
+        clean termination. For post-mortem clean-up steps use <varname>ExecStopPost=</varname> instead.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -802,24 +812,26 @@
 
       <varlistentry>
         <term><varname>RestartPreventExitStatus=</varname></term>
-        <listitem><para>Takes a list of exit status definitions that,
-        when returned by the main service process, will prevent
-        automatic service restarts, regardless of the restart setting
-        configured with <varname>Restart=</varname>. Exit status
-        definitions can either be numeric exit codes or termination
-        signal names, and are separated by spaces. Defaults to the
-        empty list, so that, by default, no exit status is excluded
-        from the configured restart logic. For example:
+
+        <listitem><para>Takes a list of exit status definitions that, when returned by the main service
+        process, will prevent automatic service restarts, regardless of the restart setting configured with
+        <varname>Restart=</varname>. Exit status definitions can either be numeric exit codes or termination
+        signal names, and are separated by spaces. Defaults to the empty list, so that, by default, no exit
+        status is excluded from the configured restart logic. For example:
 
         <programlisting>RestartPreventExitStatus=1 6 SIGABRT</programlisting>
 
-        ensures that exit codes 1 and 6 and the termination signal
-        <constant>SIGABRT</constant> will not result in automatic
-        service restarting. This option may appear more than once, in
-        which case the list of restart-preventing statuses is
-        merged. If the empty string is assigned to this option, the
-        list is reset and all prior assignments of this option will
-        have no effect.</para></listitem>
+        ensures that exit codes 1 and 6 and the termination signal <constant>SIGABRT</constant> will not
+        result in automatic service restarting. This option may appear more than once, in which case the list
+        of restart-preventing statuses is merged. If the empty string is assigned to this option, the list is
+        reset and all prior assignments of this option will have no effect.</para>
+
+        <para>Note that this setting has no effect on processes configured via
+        <varname>ExecStartPre=</varname>, <varname>ExecStartPost=</varname>, <varname>ExecStop=</varname>,
+        <varname>ExecStopPost=</varname> or <varname>ExecReload=</varname>, but only on the main service
+        process, i.e. either the one invoked by <varname>ExecStart=</varname> or (depending on
+        <varname>Type=</varname>, <varname>PIDFile=</varname>, …) the otherwise configured main
+        process.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1421,7 +1433,8 @@ WantedBy=multi-user.target</programlisting>
         <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
         <citerefentry><refentrytitle>systemd.kill</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
-        <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+        <citerefentry><refentrytitle>systemd.directives</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+        <citerefentry><refentrytitle>systemd-run</refentrytitle><manvolnum>1</manvolnum></citerefentry>
       </para>
   </refsect1>
 

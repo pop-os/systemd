@@ -10,10 +10,10 @@ Fixes #12389.
  1 file changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
-index f21f9ea..be6355d 100644
+index 81a0225..ae834f0 100644
 --- a/man/systemd.unit.xml
 +++ b/man/systemd.unit.xml
-@@ -1580,7 +1580,9 @@
+@@ -1597,7 +1597,9 @@
            <row>
              <entry><literal>%h</literal></entry>
              <entry>User home directory</entry>
@@ -24,7 +24,7 @@ index f21f9ea..be6355d 100644
            </row>
            <row>
              <entry><literal>%H</literal></entry>
-@@ -1670,12 +1672,16 @@
+@@ -1687,12 +1689,16 @@
            <row>
              <entry><literal>%u</literal></entry>
              <entry>User name</entry>

@@ -9,10 +9,10 @@ LP: #1739672
  2 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index b3d35c8..2956d2a 100644
+index 9b8239b..8081801 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -575,8 +575,8 @@ int manager_new(Manager **ret) {
+@@ -579,8 +579,8 @@ int manager_new(Manager **ret) {
                  .dns_stub_tcp_fd = -1,
                  .hostname_fd = -1,
  

@@ -9,6 +9,7 @@
 #include "fileio.h"
 #include "hashmap.h"
 #include "macro.h"
+#include "memory-util.h"
 #include "mempool.h"
 #include "process-util.h"
 #include "random-util.h"
@@ -16,7 +17,6 @@
 #include "siphash24.h"
 #include "string-util.h"
 #include "strv.h"
-#include "util.h"
 
 #if ENABLE_DEBUG_HASHMAP
 #include <pthread.h>
@@ -1536,7 +1536,6 @@ void *internal_hashmap_first_key_and_value(HashmapBase *h, bool remove, void **r
 }
 
 unsigned internal_hashmap_size(HashmapBase *h) {
-
         if (!h)
                 return 0;
 
@@ -1544,7 +1543,6 @@ unsigned internal_hashmap_size(HashmapBase *h) {
 }
 
 unsigned internal_hashmap_buckets(HashmapBase *h) {
-
         if (!h)
                 return 0;
 
@@ -1904,8 +1902,7 @@ IteratedCache *iterated_cache_free(IteratedCache *cache) {
         if (cache) {
                 free(cache->keys.ptr);
                 free(cache->values.ptr);
-                free(cache);
         }
 
-        return NULL;
+        return mfree(cache);
 }

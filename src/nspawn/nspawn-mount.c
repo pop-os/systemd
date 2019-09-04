@@ -6,6 +6,7 @@
 #include "alloc-util.h"
 #include "escape.h"
 #include "fd-util.h"
+#include "format-util.h"
 #include "fs-util.h"
 #include "label.h"
 #include "mkdir.h"
@@ -16,12 +17,12 @@
 #include "path-util.h"
 #include "rm-rf.h"
 #include "set.h"
+#include "sort-util.h"
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tmpfile-util.h"
 #include "user-util.h"
-#include "util.h"
 
 CustomMount* custom_mount_add(CustomMount **l, size_t *n, CustomMountType t) {
         CustomMount *c, *ret;
@@ -65,6 +66,7 @@ void custom_mount_free_all(CustomMount *l, size_t n) {
                 }
 
                 strv_free(m->lower);
+                free(m->type_argument);
         }
 
         free(l);
@@ -116,32 +118,40 @@ int custom_mount_prepare_all(const char *dest, CustomMount *l, size_t n) {
         for (i = 0; i < n; i++) {
                 CustomMount *m = l + i;
 
-                if (m->source) {
-                        char *s;
+                /* /proc we mount in the inner child, i.e. when we acquired CLONE_NEWPID. All other mounts we mount
+                 * already in the outer child, so that the mounts are already established before CLONE_NEWPID and in
+                 * particular CLONE_NEWUSER. This also means any custom mounts below /proc also need to be mounted in
+                 * the inner child, not the outer one. Determine this here. */
+                m->in_userns = path_startswith(m->destination, "/proc");
 
-                        s = resolve_source_path(dest, m->source);
-                        if (!s)
-                                return log_oom();
+                if (m->type == CUSTOM_MOUNT_BIND) {
+                        if (m->source) {
+                                char *s;
 
-                        free_and_replace(m->source, s);
-                } else {
-                        /* No source specified? In that case, use a throw-away temporary directory in /var/tmp */
+                                s = resolve_source_path(dest, m->source);
+                                if (!s)
+                                        return log_oom();
 
-                        m->rm_rf_tmpdir = strdup("/var/tmp/nspawn-temp-XXXXXX");
-                        if (!m->rm_rf_tmpdir)
-                                return log_oom();
+                                free_and_replace(m->source, s);
+                        } else {
+                                /* No source specified? In that case, use a throw-away temporary directory in /var/tmp */
 
-                        if (!mkdtemp(m->rm_rf_tmpdir)) {
-                                m->rm_rf_tmpdir = mfree(m->rm_rf_tmpdir);
-                                return log_error_errno(errno, "Failed to acquire temporary directory: %m");
+                                m->rm_rf_tmpdir = strdup("/var/tmp/nspawn-temp-XXXXXX");
+                                if (!m->rm_rf_tmpdir)
+                                        return log_oom();
+
+                                if (!mkdtemp(m->rm_rf_tmpdir)) {
+                                        m->rm_rf_tmpdir = mfree(m->rm_rf_tmpdir);
+                                        return log_error_errno(errno, "Failed to acquire temporary directory: %m");
+                                }
+
+                                m->source = strjoin(m->rm_rf_tmpdir, "/src");
+                                if (!m->source)
+                                        return log_oom();
+
+                                if (mkdir(m->source, 0755) < 0)
+                                        return log_error_errno(errno, "Failed to create %s: %m", m->source);
                         }
-
-                        m->source = strjoin(m->rm_rf_tmpdir, "/src");
-                        if (!m->source)
-                                return log_oom();
-
-                        if (mkdir(m->source, 0755) < 0)
-                                return log_error_errno(errno, "Failed to create %s: %m", m->source);
                 }
 
                 if (m->type == CUSTOM_MOUNT_OVERLAY) {
@@ -206,23 +216,24 @@ int bind_mount_parse(CustomMount **l, size_t *n, const char *s, bool read_only) 
         }
 
         if (isempty(source))
-                source = NULL;
+                source = mfree(source);
         else if (!source_path_is_valid(source))
                 return -EINVAL;
 
         if (!path_is_absolute(destination))
+                return -EINVAL;
+        if (empty_or_root(destination))
                 return -EINVAL;
 
         m = custom_mount_add(l, n, CUSTOM_MOUNT_BIND);
         if (!m)
                 return -ENOMEM;
 
-        m->source = source;
-        m->destination = destination;
+        m->source = TAKE_PTR(source);
+        m->destination = TAKE_PTR(destination);
         m->read_only = read_only;
-        m->options = opts;
+        m->options = TAKE_PTR(opts);
 
-        source = destination = opts = NULL;
         return 0;
 }
 
@@ -250,6 +261,8 @@ int tmpfs_mount_parse(CustomMount **l, size_t *n, const char *s) {
                 return -ENOMEM;
 
         if (!path_is_absolute(path))
+                return -EINVAL;
+        if (empty_or_root(path))
                 return -EINVAL;
 
         m = custom_mount_add(l, n, CUSTOM_MOUNT_TMPFS);
@@ -302,13 +315,16 @@ int overlay_mount_parse(CustomMount **l, size_t *n, const char *s, bool read_onl
                 /* If the upper directory is unspecified, then let's create it automatically as a throw-away directory
                  * in /var/tmp */
                 if (isempty(upper))
-                        upper = NULL;
+                        upper = mfree(upper);
                 else if (!source_path_is_valid(upper))
                         return -EINVAL;
 
                 if (!path_is_absolute(destination))
                         return -EINVAL;
         }
+
+        if (empty_or_root(destination))
+                return -EINVAL;
 
         m = custom_mount_add(l, n, CUSTOM_MOUNT_OVERLAY);
         if (!m)
@@ -319,6 +335,29 @@ int overlay_mount_parse(CustomMount **l, size_t *n, const char *s, bool read_onl
         m->lower = TAKE_PTR(lower);
         m->read_only = read_only;
 
+        return 0;
+}
+
+int inaccessible_mount_parse(CustomMount **l, size_t *n, const char *s) {
+        _cleanup_free_ char *path = NULL;
+        CustomMount *m;
+
+        assert(l);
+        assert(n);
+        assert(s);
+
+        if (!path_is_absolute(s))
+                return -EINVAL;
+
+        path = strdup(s);
+        if (!path)
+                return -ENOMEM;
+
+        m = custom_mount_add(l, n, CUSTOM_MOUNT_INACCESSIBLE);
+        if (!m)
+                return -ENOMEM;
+
+        m->destination = TAKE_PTR(path);
         return 0;
 }
 
@@ -489,9 +528,9 @@ int mount_all(const char *dest,
               uid_t uid_shift,
               const char *selinux_apifs_context) {
 
-#define PROC_INACCESSIBLE(path)                                         \
-        { NULL, (path), NULL, NULL, MS_BIND,                            \
-          MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO|MOUNT_INACCESSIBLE_REG }, /* Bind mount first ... */ \
+#define PROC_INACCESSIBLE_REG(path)                                     \
+        { "/run/systemd/inaccessible/reg", (path), NULL, NULL, MS_BIND, \
+          MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO }, /* Bind mount first ... */ \
         { NULL, (path), NULL, NULL, MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_REMOUNT, \
           MOUNT_IN_USERNS|MOUNT_APPLY_APIVFS_RO } /* Then, make it r/o */
 
@@ -526,11 +565,11 @@ int mount_all(const char *dest,
 
                 /* Make these files inaccessible to container payloads: they potentially leak information about kernel
                  * internals or the host's execution environment to the container */
-                PROC_INACCESSIBLE("/proc/kallsyms"),
-                PROC_INACCESSIBLE("/proc/kcore"),
-                PROC_INACCESSIBLE("/proc/keys"),
-                PROC_INACCESSIBLE("/proc/sysrq-trigger"),
-                PROC_INACCESSIBLE("/proc/timer_list"),
+                PROC_INACCESSIBLE_REG("/proc/kallsyms"),
+                PROC_INACCESSIBLE_REG("/proc/kcore"),
+                PROC_INACCESSIBLE_REG("/proc/keys"),
+                PROC_INACCESSIBLE_REG("/proc/sysrq-trigger"),
+                PROC_INACCESSIBLE_REG("/proc/timer_list"),
 
                 /* Make these directories read-only to container payloads: they show hardware information, and in some
                  * cases contain tunables the container really shouldn't have access to. */
@@ -541,6 +580,9 @@ int mount_all(const char *dest,
                 PROC_READ_ONLY("/proc/fs"),
                 PROC_READ_ONLY("/proc/irq"),
                 PROC_READ_ONLY("/proc/scsi"),
+
+                { "mqueue",          "/dev/mqueue",     "mqueue", NULL,       MS_NOSUID|MS_NOEXEC|MS_NODEV,
+                  MOUNT_IN_USERNS },
 
                 /* Then we list outer child mounts (i.e. mounts applied *before* entering user namespacing) */
                 { "tmpfs",           "/tmp",            "tmpfs", "mode=1777", MS_NOSUID|MS_NODEV|MS_STRICTATIME,
@@ -557,8 +599,6 @@ int mount_all(const char *dest,
                   MOUNT_FATAL },
                 { "tmpfs",           "/run",            "tmpfs", "mode=755",  MS_NOSUID|MS_NODEV|MS_STRICTATIME,
                   MOUNT_FATAL },
-                { "mqueue",          "/dev/mqueue",     "mqueue", NULL,       0,
-                  MOUNT_FATAL },
 
 #if HAVE_SELINUX
                 { "/sys/fs/selinux", "/sys/fs/selinux", NULL,    NULL,        MS_BIND,
@@ -568,7 +608,6 @@ int mount_all(const char *dest,
 #endif
         };
 
-        _cleanup_(unlink_and_freep) char *inaccessible = NULL;
         bool use_userns = (mount_settings & MOUNT_USE_USERNS);
         bool netns = (mount_settings & MOUNT_APPLY_APIVFS_NETNS);
         bool ro = (mount_settings & MOUNT_APPLY_APIVFS_RO);
@@ -579,7 +618,7 @@ int mount_all(const char *dest,
 
         for (k = 0; k < ELEMENTSOF(mount_table); k++) {
                 _cleanup_free_ char *where = NULL, *options = NULL;
-                const char *o, *what;
+                const char *o;
                 bool fatal = (mount_table[k].mount_settings & MOUNT_FATAL);
 
                 if (in_userns != (bool)(mount_table[k].mount_settings & MOUNT_IN_USERNS))
@@ -598,33 +637,14 @@ int mount_all(const char *dest,
                 if (r < 0)
                         return log_error_errno(r, "Failed to resolve %s/%s: %m", dest, mount_table[k].where);
 
-                if (mount_table[k].mount_settings & MOUNT_INACCESSIBLE_REG) {
-
-                        if (!inaccessible) {
-                                _cleanup_free_ char *np = NULL;
-
-                                r = tempfn_random_child(NULL, "inaccessible", &np);
-                                if (r < 0)
-                                        return log_error_errno(r, "Failed to generate inaccessible file node path: %m");
-
-                                r = touch_file(np, false, USEC_INFINITY, UID_INVALID, GID_INVALID, 0000);
-                                if (r < 0)
-                                        return log_error_errno(r, "Failed to create inaccessible file node '%s': %m", np);
-
-                                inaccessible = TAKE_PTR(np);
-                        }
-
-                        what = inaccessible;
-                } else
-                        what = mount_table[k].what;
-
-                r = path_is_mount_point(where, NULL, 0);
-                if (r < 0 && r != -ENOENT)
-                        return log_error_errno(r, "Failed to detect whether %s is a mount point: %m", where);
-
                 /* Skip this entry if it is not a remount. */
-                if (what && r > 0)
-                        continue;
+                if (mount_table[k].what) {
+                        r = path_is_mount_point(where, NULL, 0);
+                        if (r < 0 && r != -ENOENT)
+                                return log_error_errno(r, "Failed to detect whether %s is a mount point: %m", where);
+                        if (r > 0)
+                                continue;
+                }
 
                 r = mkdir_userns_p(dest, where, 0755, (use_userns && !in_userns) ? uid_shift : UID_INVALID);
                 if (r < 0 && r != -EEXIST) {
@@ -649,7 +669,7 @@ int mount_all(const char *dest,
                 }
 
                 r = mount_verbose(fatal ? LOG_ERR : LOG_DEBUG,
-                                  what,
+                                  mount_table[k].what,
                                   where,
                                   mount_table[k].type,
                                   mount_table[k].flags,
@@ -662,7 +682,6 @@ int mount_all(const char *dest,
 }
 
 static int mount_bind(const char *dest, CustomMount *m) {
-
         _cleanup_free_ char *where = NULL;
         struct stat source_st, dest_st;
         int r;
@@ -706,7 +725,6 @@ static int mount_bind(const char *dest, CustomMount *m) {
                         r = touch(where);
                 if (r < 0)
                         return log_error_errno(r, "Failed to create mount point %s: %m", where);
-
         }
 
         r = mount_verbose(LOG_ERR, m->source, where, NULL, MS_BIND | MS_REC, m->options);
@@ -714,7 +732,7 @@ static int mount_bind(const char *dest, CustomMount *m) {
                 return r;
 
         if (m->read_only) {
-                r = bind_remount_recursive(where, true, NULL);
+                r = bind_remount_recursive(where, MS_RDONLY, MS_RDONLY, NULL);
                 if (r < 0)
                         return log_error_errno(r, "Read-only bind mount failed: %m");
         }
@@ -768,7 +786,6 @@ static char *joined_and_escaped_lower_dirs(char **lower) {
 }
 
 static int mount_overlay(const char *dest, CustomMount *m) {
-
         _cleanup_free_ char *lower = NULL, *where = NULL, *escaped_source = NULL;
         const char *options;
         int r;
@@ -810,11 +827,61 @@ static int mount_overlay(const char *dest, CustomMount *m) {
         return mount_verbose(LOG_ERR, "overlay", where, "overlay", m->read_only ? MS_RDONLY : 0, options);
 }
 
+static int mount_inaccessible(const char *dest, CustomMount *m) {
+        _cleanup_free_ char *where = NULL;
+        const char *source;
+        struct stat st;
+        int r;
+
+        assert(dest);
+        assert(m);
+
+        r = chase_symlinks_and_stat(m->destination, dest, CHASE_PREFIX_ROOT, &where, &st);
+        if (r < 0) {
+                log_full_errno(m->graceful ? LOG_DEBUG : LOG_ERR, r, "Failed to resolve %s/%s: %m", dest, m->destination);
+                return m->graceful ? 0 : r;
+        }
+
+        assert_se(source = mode_to_inaccessible_node(st.st_mode));
+
+        r = mount_verbose(m->graceful ? LOG_DEBUG : LOG_ERR, source, where, NULL, MS_BIND, NULL);
+        if (r < 0)
+                return m->graceful ? 0 : r;
+
+        r = mount_verbose(m->graceful ? LOG_DEBUG : LOG_ERR, NULL, where, NULL, MS_BIND|MS_RDONLY|MS_REMOUNT, NULL);
+        if (r < 0) {
+                umount_verbose(where);
+                return m->graceful ? 0 : r;
+        }
+
+        return 0;
+}
+
+static int mount_arbitrary(const char *dest, CustomMount *m) {
+        _cleanup_free_ char *where = NULL;
+        int r;
+
+        assert(dest);
+        assert(m);
+
+        r = chase_symlinks(m->destination, dest, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &where);
+        if (r < 0)
+                return log_error_errno(r, "Failed to resolve %s/%s: %m", dest, m->destination);
+        if (r == 0) { /* Doesn't exist yet? */
+                r = mkdir_p_label(where, 0755);
+                if (r < 0)
+                        return log_error_errno(r, "Creating mount point for mount %s failed: %m", where);
+        }
+
+        return mount_verbose(LOG_ERR, m->source, where, m->type_argument, 0, m->options);
+}
+
 int mount_custom(
                 const char *dest,
                 CustomMount *mounts, size_t n,
                 bool userns, uid_t uid_shift, uid_t uid_range,
-                const char *selinux_apifs_context) {
+                const char *selinux_apifs_context,
+                bool in_userns) {
 
         size_t i;
         int r;
@@ -823,6 +890,9 @@ int mount_custom(
 
         for (i = 0; i < n; i++) {
                 CustomMount *m = mounts + i;
+
+                if (m->in_userns != in_userns)
+                        continue;
 
                 switch (m->type) {
 
@@ -838,6 +908,14 @@ int mount_custom(
                         r = mount_overlay(dest, m);
                         break;
 
+                case CUSTOM_MOUNT_INACCESSIBLE:
+                        r = mount_inaccessible(dest, m);
+                        break;
+
+                case CUSTOM_MOUNT_ARBITRARY:
+                        r = mount_arbitrary(dest, m);
+                        break;
+
                 default:
                         assert_not_reached("Unknown custom mount type");
                 }
@@ -849,9 +927,8 @@ int mount_custom(
         return 0;
 }
 
-int setup_volatile_state(
+static int setup_volatile_state(
                 const char *directory,
-                VolatileMode mode,
                 bool userns, uid_t uid_shift, uid_t uid_range,
                 const char *selinux_apifs_context) {
 
@@ -861,13 +938,9 @@ int setup_volatile_state(
 
         assert(directory);
 
-        if (mode != VOLATILE_STATE)
-                return 0;
+        /* --volatile=state means we simply overmount /var with a tmpfs, and the rest read-only. */
 
-        /* --volatile=state means we simply overmount /var
-           with a tmpfs, and the rest read-only. */
-
-        r = bind_remount_recursive(directory, true, NULL);
+        r = bind_remount_recursive(directory, MS_RDONLY, MS_RDONLY, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to remount %s read-only: %m", directory);
 
@@ -886,9 +959,8 @@ int setup_volatile_state(
         return mount_verbose(LOG_ERR, "tmpfs", p, "tmpfs", MS_STRICTATIME, options);
 }
 
-int setup_volatile(
+static int setup_volatile_yes(
                 const char *directory,
-                VolatileMode mode,
                 bool userns, uid_t uid_shift, uid_t uid_range,
                 const char *selinux_apifs_context) {
 
@@ -900,11 +972,8 @@ int setup_volatile(
 
         assert(directory);
 
-        if (mode != VOLATILE_YES)
-                return 0;
-
-        /* --volatile=yes means we mount a tmpfs to the root dir, and
-           the original /usr to use inside it, and that read-only. */
+        /* --volatile=yes means we mount a tmpfs to the root dir, and the original /usr to use inside it, and that
+           read-only. */
 
         if (!mkdtemp(template))
                 return log_error_errno(errno, "Failed to create temporary directory: %m");
@@ -912,7 +981,7 @@ int setup_volatile(
         options = "mode=755";
         r = tmpfs_patch_options(options, uid_shift == 0 ? UID_INVALID : uid_shift, selinux_apifs_context, &buf);
         if (r < 0)
-                return log_oom();
+                goto fail;
         if (r > 0)
                 options = buf;
 
@@ -937,7 +1006,7 @@ int setup_volatile(
 
         bind_mounted = true;
 
-        r = bind_remount_recursive(t, true, NULL);
+        r = bind_remount_recursive(t, MS_RDONLY, MS_RDONLY, NULL);
         if (r < 0) {
                 log_error_errno(r, "Failed to remount %s read-only: %m", t);
                 goto fail;
@@ -959,6 +1028,93 @@ fail:
                 (void) umount_verbose(template);
         (void) rmdir(template);
         return r;
+}
+
+static int setup_volatile_overlay(
+                const char *directory,
+                bool userns, uid_t uid_shift, uid_t uid_range,
+                const char *selinux_apifs_context) {
+
+        _cleanup_free_ char *buf = NULL, *escaped_directory = NULL, *escaped_upper = NULL, *escaped_work = NULL;
+        char template[] = "/tmp/nspawn-volatile-XXXXXX";
+        const char *upper, *work, *options;
+        bool tmpfs_mounted = false;
+        int r;
+
+        assert(directory);
+
+        /* --volatile=overlay means we mount an overlayfs to the root dir. */
+
+        if (!mkdtemp(template))
+                return log_error_errno(errno, "Failed to create temporary directory: %m");
+
+        options = "mode=755";
+        r = tmpfs_patch_options(options, uid_shift == 0 ? UID_INVALID : uid_shift, selinux_apifs_context, &buf);
+        if (r < 0)
+                goto finish;
+        if (r > 0)
+                options = buf;
+
+        r = mount_verbose(LOG_ERR, "tmpfs", template, "tmpfs", MS_STRICTATIME, options);
+        if (r < 0)
+                goto finish;
+
+        tmpfs_mounted = true;
+
+        upper = strjoina(template, "/upper");
+        work = strjoina(template, "/work");
+
+        if (mkdir(upper, 0755) < 0) {
+                r = log_error_errno(errno, "Failed to create %s: %m", upper);
+                goto finish;
+        }
+        if (mkdir(work, 0755) < 0) {
+                r = log_error_errno(errno, "Failed to create %s: %m", work);
+                goto finish;
+        }
+
+        /* And now, let's overmount the root dir with an overlayfs that uses the root dir as lower dir. It's kinda nice
+         * that the kernel allows us to do that without going through some mount point rearrangements. */
+
+        escaped_directory = shell_escape(directory, ",:");
+        escaped_upper = shell_escape(upper, ",:");
+        escaped_work = shell_escape(work, ",:");
+        if (!escaped_directory || !escaped_upper || !escaped_work) {
+                r = -ENOMEM;
+                goto finish;
+        }
+
+        options = strjoina("lowerdir=", escaped_directory, ",upperdir=", escaped_upper, ",workdir=", escaped_work);
+        r = mount_verbose(LOG_ERR, "overlay", directory, "overlay", 0, options);
+
+finish:
+        if (tmpfs_mounted)
+                (void) umount_verbose(template);
+
+        (void) rmdir(template);
+        return r;
+}
+
+int setup_volatile_mode(
+                const char *directory,
+                VolatileMode mode,
+                bool userns, uid_t uid_shift, uid_t uid_range,
+                const char *selinux_apifs_context) {
+
+        switch (mode) {
+
+        case VOLATILE_YES:
+                return setup_volatile_yes(directory, userns, uid_shift, uid_range, selinux_apifs_context);
+
+        case VOLATILE_STATE:
+                return setup_volatile_state(directory, userns, uid_shift, uid_range, selinux_apifs_context);
+
+        case VOLATILE_OVERLAY:
+                return setup_volatile_overlay(directory, userns, uid_shift, uid_range, selinux_apifs_context);
+
+        default:
+                return 0;
+        }
 }
 
 /* Expects *pivot_root_new and *pivot_root_old to be initialised to allocated memory or NULL. */

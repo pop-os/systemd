@@ -25,11 +25,11 @@
 #include "pretty-print.h"
 #include "process-util.h"
 #include "procfs-util.h"
+#include "sort-util.h"
 #include "stdio-util.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "unit-name.h"
-#include "util.h"
 #include "virt.h"
 
 typedef struct Group {
@@ -223,71 +223,6 @@ static int process(
                 if (g->n_tasks > 0)
                         g->n_tasks_valid = true;
 
-        } else if (STR_IN_SET(controller, "cpu", "cpuacct") || cpu_accounting_is_cheap()) {
-                _cleanup_free_ char *p = NULL, *v = NULL;
-                uint64_t new_usage;
-                nsec_t timestamp;
-
-                if (is_root_cgroup(path)) {
-                        r = procfs_cpu_get_usage(&new_usage);
-                        if (r < 0)
-                                return r;
-                } else if (all_unified) {
-                        _cleanup_free_ char *val = NULL;
-
-                        if (!streq(controller, "cpu"))
-                                return 0;
-
-                        r = cg_get_keyed_attribute("cpu", path, "cpu.stat", STRV_MAKE("usage_usec"), &val);
-                        if (IN_SET(r, -ENOENT, -ENXIO))
-                                return 0;
-                        if (r < 0)
-                                return r;
-
-                        r = safe_atou64(val, &new_usage);
-                        if (r < 0)
-                                return r;
-
-                        new_usage *= NSEC_PER_USEC;
-                } else {
-                        if (!streq(controller, "cpuacct"))
-                                return 0;
-
-                        r = cg_get_path(controller, path, "cpuacct.usage", &p);
-                        if (r < 0)
-                                return r;
-
-                        r = read_one_line_file(p, &v);
-                        if (r == -ENOENT)
-                                return 0;
-                        if (r < 0)
-                                return r;
-
-                        r = safe_atou64(v, &new_usage);
-                        if (r < 0)
-                                return r;
-                }
-
-                timestamp = now_nsec(CLOCK_MONOTONIC);
-
-                if (g->cpu_iteration == iteration - 1 &&
-                    (nsec_t) new_usage > g->cpu_usage) {
-
-                        nsec_t x, y;
-
-                        x = timestamp - g->cpu_timestamp;
-                        if (x < 1)
-                                x = 1;
-
-                        y = (nsec_t) new_usage - g->cpu_usage;
-                        g->cpu_fraction = (double) y / (double) x;
-                        g->cpu_valid = true;
-                }
-
-                g->cpu_usage = (nsec_t) new_usage;
-                g->cpu_timestamp = timestamp;
-                g->cpu_iteration = iteration;
-
         } else if (streq(controller, "memory")) {
 
                 if (is_root_cgroup(path)) {
@@ -411,6 +346,71 @@ static int process(
                 g->io_output = wr;
                 g->io_timestamp = timestamp;
                 g->io_iteration = iteration;
+        } else if (STR_IN_SET(controller, "cpu", "cpuacct") || cpu_accounting_is_cheap()) {
+                _cleanup_free_ char *p = NULL, *v = NULL;
+                uint64_t new_usage;
+                nsec_t timestamp;
+
+                if (is_root_cgroup(path)) {
+                        r = procfs_cpu_get_usage(&new_usage);
+                        if (r < 0)
+                                return r;
+                } else if (all_unified) {
+                        _cleanup_free_ char *val = NULL;
+
+                        if (!streq(controller, "cpu"))
+                                return 0;
+
+                        r = cg_get_keyed_attribute("cpu", path, "cpu.stat", STRV_MAKE("usage_usec"), &val);
+                        if (IN_SET(r, -ENOENT, -ENXIO))
+                                return 0;
+                        if (r < 0)
+                                return r;
+
+                        r = safe_atou64(val, &new_usage);
+                        if (r < 0)
+                                return r;
+
+                        new_usage *= NSEC_PER_USEC;
+                } else {
+                        if (!streq(controller, "cpuacct"))
+                                return 0;
+
+                        r = cg_get_path(controller, path, "cpuacct.usage", &p);
+                        if (r < 0)
+                                return r;
+
+                        r = read_one_line_file(p, &v);
+                        if (r == -ENOENT)
+                                return 0;
+                        if (r < 0)
+                                return r;
+
+                        r = safe_atou64(v, &new_usage);
+                        if (r < 0)
+                                return r;
+                }
+
+                timestamp = now_nsec(CLOCK_MONOTONIC);
+
+                if (g->cpu_iteration == iteration - 1 &&
+                    (nsec_t) new_usage > g->cpu_usage) {
+
+                        nsec_t x, y;
+
+                        x = timestamp - g->cpu_timestamp;
+                        if (x < 1)
+                                x = 1;
+
+                        y = (nsec_t) new_usage - g->cpu_usage;
+                        g->cpu_fraction = (double) y / (double) x;
+                        g->cpu_valid = true;
+                }
+
+                g->cpu_usage = (nsec_t) new_usage;
+                g->cpu_timestamp = timestamp;
+                g->cpu_iteration = iteration;
+
         }
 
         if (ret)
@@ -922,10 +922,9 @@ static int run(int argc, char *argv[]) {
 
         arg_count = (mask & CGROUP_MASK_PIDS) ? COUNT_PIDS : COUNT_USERSPACE_PROCESSES;
 
-        if (arg_recursive_unset && arg_count == COUNT_PIDS) {
-                log_error("Non-recursive counting is only supported when counting processes, not tasks. Use -P or -k.");
-                return -EINVAL;
-        }
+        if (arg_recursive_unset && arg_count == COUNT_PIDS)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "Non-recursive counting is only supported when counting processes, not tasks. Use -P or -k.");
 
         r = show_cgroup_get_path_and_warn(arg_machine, arg_root, &root);
         if (r < 0)

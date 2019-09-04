@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <sysexits.h>
@@ -48,9 +49,11 @@
 #include "path-lookup.h"
 #include "path-util.h"
 #include "pretty-print.h"
+#include "rlimit-util.h"
 #include "rm-rf.h"
 #include "selinux-util.h"
 #include "set.h"
+#include "sort-util.h"
 #include "specifier.h"
 #include "stat-util.h"
 #include "stdio-util.h"
@@ -59,7 +62,6 @@
 #include "strv.h"
 #include "umask-util.h"
 #include "user-util.h"
-#include "util.h"
 
 /* This reads all files listed in /etc/tmpfiles.d/?*.conf and creates
  * them in the file system. This is intended to be used to create
@@ -525,7 +527,6 @@ static int dir_cleanup(
                 bool keep_this_level) {
 
         struct dirent *dent;
-        struct timespec times[2];
         bool deleted = false;
         int r = 0;
 
@@ -580,25 +581,30 @@ static int dir_cleanup(
                 }
 
                 if (S_ISDIR(s.st_mode)) {
+                        _cleanup_closedir_ DIR *sub_dir = NULL;
 
                         if (mountpoint &&
                             streq(dent->d_name, "lost+found") &&
                             s.st_uid == 0) {
-                                log_debug("Ignoring \"%s\".", sub_path);
+                                log_debug("Ignoring directory \"%s\".", sub_path);
                                 continue;
                         }
 
                         if (maxdepth <= 0)
                                 log_warning("Reached max depth on \"%s\".", sub_path);
                         else {
-                                _cleanup_closedir_ DIR *sub_dir;
                                 int q;
 
                                 sub_dir = xopendirat_nomod(dirfd(d), dent->d_name);
                                 if (!sub_dir) {
                                         if (errno != ENOENT)
-                                                r = log_error_errno(errno, "opendir(%s) failed: %m", sub_path);
+                                                r = log_warning_errno(errno, "Opening directory \"%s\" failed, ignoring: %m", sub_path);
 
+                                        continue;
+                                }
+
+                                if (flock(dirfd(sub_dir), LOCK_EX|LOCK_NB) < 0) {
+                                        log_debug_errno(errno, "Couldn't acquire shared BSD lock on directory \"%s\", skipping: %m", p);
                                         continue;
                                 }
 
@@ -607,15 +613,13 @@ static int dir_cleanup(
                                         r = q;
                         }
 
-                        /* Note: if you are wondering why we don't
-                         * support the sticky bit for excluding
-                         * directories from cleaning like we do it for
-                         * other file system objects: well, the sticky
-                         * bit already has a meaning for directories,
-                         * so we don't want to overload that. */
+                        /* Note: if you are wondering why we don't support the sticky bit for excluding
+                         * directories from cleaning like we do it for other file system objects: well, the
+                         * sticky bit already has a meaning for directories, so we don't want to overload
+                         * that. */
 
                         if (keep_this_level) {
-                                log_debug("Keeping \"%s\".", sub_path);
+                                log_debug("Keeping directory \"%s\".", sub_path);
                                 continue;
                         }
 
@@ -642,13 +646,11 @@ static int dir_cleanup(
                         log_debug("Removing directory \"%s\".", sub_path);
                         if (unlinkat(dirfd(d), dent->d_name, AT_REMOVEDIR) < 0)
                                 if (!IN_SET(errno, ENOENT, ENOTEMPTY))
-                                        r = log_error_errno(errno, "rmdir(%s): %m", sub_path);
+                                        r = log_warning_errno(errno, "Failed to remove directory \"%s\", ignoring: %m", sub_path);
 
                 } else {
-                        /* Skip files for which the sticky bit is
-                         * set. These are semantics we define, and are
-                         * unknown elsewhere. See XDG_RUNTIME_DIR
-                         * specification for details. */
+                        /* Skip files for which the sticky bit is set. These are semantics we define, and are
+                         * unknown elsewhere. See XDG_RUNTIME_DIR specification for details. */
                         if (s.st_mode & S_ISVTX) {
                                 log_debug("Skipping \"%s\": sticky bit set.", sub_path);
                                 continue;
@@ -675,8 +677,7 @@ static int dir_cleanup(
                                 continue;
                         }
 
-                        /* Keep files on this level around if this is
-                         * requested */
+                        /* Keep files on this level around if this is requested */
                         if (keep_this_level) {
                                 log_debug("Keeping \"%s\".", sub_path);
                                 continue;
@@ -710,11 +711,10 @@ static int dir_cleanup(
                                 continue;
                         }
 
-                        log_debug("unlink \"%s\"", sub_path);
-
+                        log_debug("Removing \"%s\".", sub_path);
                         if (unlinkat(dirfd(d), dent->d_name, 0) < 0)
                                 if (errno != ENOENT)
-                                        r = log_error_errno(errno, "unlink(%s): %m", sub_path);
+                                        r = log_warning_errno(errno, "Failed to remove \"%s\", ignoring: %m", sub_path);
 
                         deleted = true;
                 }
@@ -722,21 +722,22 @@ static int dir_cleanup(
 
 finish:
         if (deleted) {
-                usec_t age1, age2;
                 char a[FORMAT_TIMESTAMP_MAX], b[FORMAT_TIMESTAMP_MAX];
-
-                /* Restore original directory timestamps */
-                times[0] = ds->st_atim;
-                times[1] = ds->st_mtim;
+                usec_t age1, age2;
 
                 age1 = timespec_load(&ds->st_atim);
                 age2 = timespec_load(&ds->st_mtim);
+
                 log_debug("Restoring access and modification time on \"%s\": %s, %s",
                           p,
                           format_timestamp_us(a, sizeof(a), age1),
                           format_timestamp_us(b, sizeof(b), age2));
-                if (futimens(dirfd(d), times) < 0)
-                        log_error_errno(errno, "utimensat(%s): %m", p);
+
+                /* Restore original directory timestamps */
+                if (futimens(dirfd(d), (struct timespec[]) {
+                                ds->st_atim,
+                                ds->st_mtim }) < 0)
+                        log_warning_errno(errno, "Failed to revert timestamps of '%s', ignoring: %m", p);
         }
 
         return r;
@@ -855,7 +856,7 @@ static int path_open_parent_safe(const char *path) {
         if (!dn)
                 return log_oom();
 
-        fd = chase_symlinks(dn, NULL, CHASE_OPEN|CHASE_SAFE|CHASE_WARN, NULL);
+        fd = chase_symlinks(dn, arg_root, CHASE_OPEN|CHASE_SAFE|CHASE_WARN, NULL);
         if (fd < 0 && fd != -ENOLINK)
                 return log_error_errno(fd, "Failed to validate path %s: %m", path);
 
@@ -876,7 +877,7 @@ static int path_open_safe(const char *path) {
                                        "Failed to open invalid path '%s'.",
                                        path);
 
-        fd = chase_symlinks(path, NULL, CHASE_OPEN|CHASE_SAFE|CHASE_WARN|CHASE_NOFOLLOW, NULL);
+        fd = chase_symlinks(path, arg_root, CHASE_OPEN|CHASE_SAFE|CHASE_WARN|CHASE_NOFOLLOW, NULL);
         if (fd < 0 && fd != -ENOLINK)
                 return log_error_errno(fd, "Failed to validate path %s: %m", path);
 
@@ -1095,22 +1096,6 @@ static int path_set_acls(Item *item, const char *path) {
         return r;
 }
 
-#define ATTRIBUTES_ALL                          \
-        (FS_NOATIME_FL      |                   \
-         FS_SYNC_FL         |                   \
-         FS_DIRSYNC_FL      |                   \
-         FS_APPEND_FL       |                   \
-         FS_COMPR_FL        |                   \
-         FS_NODUMP_FL       |                   \
-         FS_EXTENT_FL       |                   \
-         FS_IMMUTABLE_FL    |                   \
-         FS_JOURNAL_DATA_FL |                   \
-         FS_SECRM_FL        |                   \
-         FS_UNRM_FL         |                   \
-         FS_NOTAIL_FL       |                   \
-         FS_TOPDIR_FL       |                   \
-         FS_NOCOW_FL)
-
 static int parse_attribute_from_arg(Item *item) {
 
         static const struct {
@@ -1131,6 +1116,7 @@ static int parse_attribute_from_arg(Item *item) {
                 { 't', FS_NOTAIL_FL },       /* file tail should not be merged */
                 { 'T', FS_TOPDIR_FL },       /* Top of directory hierarchies */
                 { 'C', FS_NOCOW_FL },        /* Do not cow file */
+                { 'P', FS_PROJINHERIT_FL },  /* Inherit the quota project ID */
         };
 
         enum {
@@ -1183,7 +1169,7 @@ static int parse_attribute_from_arg(Item *item) {
         }
 
         if (mode == MODE_SET)
-                mask |= ATTRIBUTES_ALL;
+                mask |= CHATTR_ALL_FL;
 
         assert(mask != 0);
 
@@ -1503,7 +1489,7 @@ typedef enum {
         _CREATION_MODE_INVALID = -1
 } CreationMode;
 
-static const char *creation_mode_verb_table[_CREATION_MODE_MAX] = {
+static const char *const creation_mode_verb_table[_CREATION_MODE_MAX] = {
         [CREATION_NORMAL] = "Created",
         [CREATION_EXISTING] = "Found existing",
         [CREATION_FORCE] = "Created replacement",
@@ -2255,7 +2241,7 @@ static int process_item(Item *i, OperationMask operation) {
 
         i->done |= operation;
 
-        r = chase_symlinks(i->path, NULL, CHASE_NO_AUTOFS|CHASE_WARN, NULL);
+        r = chase_symlinks(i->path, arg_root, CHASE_NO_AUTOFS|CHASE_WARN, NULL);
         if (r == -EREMOTE) {
                 log_notice_errno(r, "Skipping %s", i->path);
                 return 0;
@@ -2521,7 +2507,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
                 return -EIO;
         }
 
-        if (!isempty(buffer) && !streq(buffer, "-")) {
+        if (!empty_or_dash(buffer)) {
                 i.argument = strdup(buffer);
                 if (!i.argument)
                         return log_oom();
@@ -2718,7 +2704,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
                 free_and_replace(i.path, p);
         }
 
-        if (!isempty(user) && !streq(user, "-")) {
+        if (!empty_or_dash(user)) {
                 const char *u = user;
 
                 r = get_user_creds(&u, &i.uid, NULL, NULL, NULL, USER_CREDS_ALLOW_MISSING);
@@ -2730,7 +2716,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
                 i.uid_set = true;
         }
 
-        if (!isempty(group) && !streq(group, "-")) {
+        if (!empty_or_dash(group)) {
                 const char *g = group;
 
                 r = get_group_creds(&g, &i.gid, USER_CREDS_ALLOW_MISSING);
@@ -2743,7 +2729,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
                 i.gid_set = true;
         }
 
-        if (!isempty(mode) && !streq(mode, "-")) {
+        if (!empty_or_dash(mode)) {
                 const char *mm = mode;
                 unsigned m;
 
@@ -2763,7 +2749,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
         } else
                 i.mode = IN_SET(i.type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY, CREATE_SUBVOLUME, CREATE_SUBVOLUME_INHERIT_QUOTA, CREATE_SUBVOLUME_NEW_QUOTA) ? 0755 : 0644;
 
-        if (!isempty(age) && !streq(age, "-")) {
+        if (!empty_or_dash(age)) {
                 const char *a = age;
 
                 if (*a == '~') {
@@ -3174,6 +3160,9 @@ static int run(int argc, char *argv[]) {
                 return r;
 
         log_setup_service();
+
+        /* Descending down file system trees might take a lot of fds */
+        (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
 
         if (arg_user) {
                 r = user_config_paths(&config_dirs);

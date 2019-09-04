@@ -97,6 +97,10 @@ fuzzers += [
           libshared],
          []],
 
+        [['src/fuzz/fuzz-udev-database.c'],
+         [libshared],
+         []],
+
         [['src/fuzz/fuzz-udev-rules.c'],
          [libudev_core,
           libudev_static,
@@ -106,6 +110,36 @@ fuzzers += [
           libacl]],
 
         [['src/fuzz/fuzz-compress.c'],
+         [libshared],
+         []],
+
+        [['src/fuzz/fuzz-bus-label.c'],
+         [libshared],
+         []],
+
+        [['src/fuzz/fuzz-env-file.c'],
+         [libshared],
+         []],
+
+        [['src/fuzz/fuzz-hostname-util.c'],
+         [libshared],
+         []],
+
+        [['src/fuzz/fuzz-nspawn-settings.c'],
+         [libshared,
+          libnspawn_core],
+         []],
+
+        [['src/fuzz/fuzz-nspawn-oci.c'],
+         [libshared,
+          libnspawn_core],
+         []],
+
+        [['src/fuzz/fuzz-calendarspec.c'],
+         [libshared],
+         []],
+
+        [['src/fuzz/fuzz-time-util.c'],
          [libshared],
          []],
 ]

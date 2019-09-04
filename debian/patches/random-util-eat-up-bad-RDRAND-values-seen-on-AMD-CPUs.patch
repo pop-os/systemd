@@ -1,5 +1,5 @@
-From: Michael Biebl <biebl@debian.org>
-Date: Tue, 14 May 2019 13:12:35 +0200
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 10 May 2019 15:16:16 -0400
 Subject: random-util: eat up bad RDRAND values seen on AMD CPUs
 
 An ugly, ugly work-around for #11810. And no, we shouldn't have to do
@@ -13,10 +13,10 @@ Fixes: #11810
  1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/src/basic/random-util.c b/src/basic/random-util.c
-index f7decf6..38f8180 100644
+index ca25fd2..b678900 100644
 --- a/src/basic/random-util.c
 +++ b/src/basic/random-util.c
-@@ -37,6 +37,7 @@ int rdrand(unsigned long *ret) {
+@@ -34,6 +34,7 @@ int rdrand(unsigned long *ret) {
  
  #if defined(__i386__) || defined(__x86_64__)
          static int have_rdrand = -1;
@@ -24,16 +24,14 @@ index f7decf6..38f8180 100644
          unsigned char err;
  
          if (have_rdrand < 0) {
-@@ -56,7 +57,7 @@ int rdrand(unsigned long *ret) {
+@@ -53,12 +54,24 @@ int rdrand(unsigned long *ret) {
  
          asm volatile("rdrand %0;"
                       "setc %1"
 -                     : "=r" (*ret),
 +                     : "=r" (v),
                         "=qm" (err));
- 
- #if HAS_FEATURE_MEMORY_SANITIZER
-@@ -66,6 +67,18 @@ int rdrand(unsigned long *ret) {
+         msan_unpoison(&err, sizeof(err));
          if (!err)
                  return -EAGAIN;
  

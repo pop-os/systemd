@@ -18,8 +18,10 @@
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
+#include "bus-unit-procs.h"
 #include "bus-unit-util.h"
 #include "bus-util.h"
+#include "bus-wait-for-jobs.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
 #include "copy.h"
@@ -35,6 +37,7 @@
 #include "macro.h"
 #include "main-func.h"
 #include "mkdir.h"
+#include "nulstr-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -44,13 +47,13 @@
 #include "rlimit-util.h"
 #include "sigbus.h"
 #include "signal-util.h"
+#include "sort-util.h"
 #include "spawn-polkit-agent.h"
 #include "stdio-util.h"
 #include "string-table.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "unit-name.h"
-#include "util.h"
 #include "verbs.h"
 #include "web-util.h"
 
@@ -1990,16 +1993,6 @@ static int transfer_image_common(sd_bus *bus, sd_bus_message *m) {
         return -r;
 }
 
-static const char *nullify_dash(const char *p) {
-        if (isempty(p))
-                return NULL;
-
-        if (streq(p, "-"))
-                return NULL;
-
-        return p;
-}
-
 static int import_tar(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
         _cleanup_free_ char *ll = NULL, *fn = NULL;
@@ -2011,10 +2004,10 @@ static int import_tar(int argc, char *argv[], void *userdata) {
         assert(bus);
 
         if (argc >= 2)
-                path = nullify_dash(argv[1]);
+                path = empty_or_dash_to_null(argv[1]);
 
         if (argc >= 3)
-                local = nullify_dash(argv[2]);
+                local = empty_or_dash_to_null(argv[2]);
         else if (path) {
                 r = path_extract_filename(path, &fn);
                 if (r < 0)
@@ -2078,10 +2071,10 @@ static int import_raw(int argc, char *argv[], void *userdata) {
         assert(bus);
 
         if (argc >= 2)
-                path = nullify_dash(argv[1]);
+                path = empty_or_dash_to_null(argv[1]);
 
         if (argc >= 3)
-                local = nullify_dash(argv[2]);
+                local = empty_or_dash_to_null(argv[2]);
         else if (path) {
                 r = path_extract_filename(path, &fn);
                 if (r < 0)
@@ -2145,10 +2138,10 @@ static int import_fs(int argc, char *argv[], void *userdata) {
         assert(bus);
 
         if (argc >= 2)
-                path = nullify_dash(argv[1]);
+                path = empty_or_dash_to_null(argv[1]);
 
         if (argc >= 3)
-                local = nullify_dash(argv[2]);
+                local = empty_or_dash_to_null(argv[2]);
         else if (path) {
                 r = path_extract_filename(path, &fn);
                 if (r < 0)
@@ -2227,8 +2220,7 @@ static int export_tar(int argc, char *argv[], void *userdata) {
 
         if (argc >= 3)
                 path = argv[2];
-        if (isempty(path) || streq(path, "-"))
-                path = NULL;
+        path = empty_or_dash_to_null(path);
 
         if (path) {
                 determine_compression_from_filename(path);
@@ -2277,8 +2269,7 @@ static int export_raw(int argc, char *argv[], void *userdata) {
 
         if (argc >= 3)
                 path = argv[2];
-        if (isempty(path) || streq(path, "-"))
-                path = NULL;
+        path = empty_or_dash_to_null(path);
 
         if (path) {
                 determine_compression_from_filename(path);
@@ -2335,8 +2326,7 @@ static int pull_tar(int argc, char *argv[], void *userdata) {
                 local = l;
         }
 
-        if (isempty(local) || streq(local, "-"))
-                local = NULL;
+        local = empty_or_dash_to_null(local);
 
         if (local) {
                 r = tar_strip_suffixes(local, &ll);
@@ -2399,8 +2389,7 @@ static int pull_raw(int argc, char *argv[], void *userdata) {
                 local = l;
         }
 
-        if (isempty(local) || streq(local, "-"))
-                local = NULL;
+        local = empty_or_dash_to_null(local);
 
         if (local) {
                 r = raw_strip_suffixes(local, &ll);
@@ -2666,10 +2655,15 @@ static int clean_images(int argc, char *argv[], void *userdata) {
                 return bus_log_parse_error(r);
 
         while ((r = sd_bus_message_read(reply, "(st)", &name, &usage)) > 0) {
-                log_info("Removed image '%s'. Freed exclusive disk space: %s",
-                         name, format_bytes(fb, sizeof(fb), usage));
-
-                total += usage;
+                if (usage == UINT64_MAX) {
+                        log_info("Removed image '%s'", name);
+                        total = UINT64_MAX;
+                } else {
+                        log_info("Removed image '%s'. Freed exclusive disk space: %s",
+                                 name, format_bytes(fb, sizeof(fb), usage));
+                        if (total != UINT64_MAX)
+                                total += usage;
+                }
                 c++;
         }
 
@@ -2677,8 +2671,11 @@ static int clean_images(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        log_info("Removed %u images in total. Total freed exclusive disk space %s.",
-                 c, format_bytes(fb, sizeof(fb), total));
+        if (total == UINT64_MAX)
+                log_info("Removed %u images in total.", c);
+        else
+                log_info("Removed %u images in total. Total freed exclusive disk space: %s.",
+                         c, format_bytes(fb, sizeof(fb), total));
 
         return 0;
 }

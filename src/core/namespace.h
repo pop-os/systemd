@@ -52,12 +52,14 @@ struct NamespaceInfo {
         bool protect_kernel_tunables:1;
         bool protect_kernel_modules:1;
         bool mount_apivfs:1;
+        bool protect_hostname:1;
 };
 
 struct BindMount {
         char *source;
         char *destination;
         bool read_only:1;
+        bool nosuid:1;
         bool recursive:1;
         bool ignore_enoent:1;
 };
@@ -92,6 +94,7 @@ int setup_tmp_dirs(
                 char **var_tmp_dir);
 
 int setup_netns(int netns_storage_socket[static 2]);
+int open_netns_path(int netns_storage_socket[static 2], const char *path);
 
 const char* protect_home_to_string(ProtectHome p) _const_;
 ProtectHome protect_home_from_string(const char *s) _pure_;

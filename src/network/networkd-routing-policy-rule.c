@@ -369,12 +369,8 @@ int routing_policy_rule_remove(RoutingPolicyRule *routing_policy_rule, Link *lin
         if (r < 0)
                 return log_error_errno(r, "Could not allocate RTM_DELRULE message: %m");
 
-        if (!in_addr_is_null(routing_policy_rule->family, &routing_policy_rule->from)) {
-                if (routing_policy_rule->family == AF_INET)
-                        r = sd_netlink_message_append_in_addr(m, FRA_SRC, &routing_policy_rule->from.in);
-                else
-                        r = sd_netlink_message_append_in6_addr(m, FRA_SRC, &routing_policy_rule->from.in6);
-
+        if (in_addr_is_null(routing_policy_rule->family, &routing_policy_rule->from) == 0) {
+                r = netlink_message_append_in_addr_union(m, FRA_SRC, routing_policy_rule->family, &routing_policy_rule->from);
                 if (r < 0)
                         return log_error_errno(r, "Could not append FRA_SRC attribute: %m");
 
@@ -383,12 +379,8 @@ int routing_policy_rule_remove(RoutingPolicyRule *routing_policy_rule, Link *lin
                         return log_error_errno(r, "Could not set source prefix length: %m");
         }
 
-        if (!in_addr_is_null(routing_policy_rule->family, &routing_policy_rule->to)) {
-                if (routing_policy_rule->family == AF_INET)
-                        r = sd_netlink_message_append_in_addr(m, FRA_DST, &routing_policy_rule->to.in);
-                else
-                        r = sd_netlink_message_append_in6_addr(m, FRA_DST, &routing_policy_rule->to.in6);
-
+        if (in_addr_is_null(routing_policy_rule->family, &routing_policy_rule->to) == 0) {
+                r = netlink_message_append_in_addr_union(m, FRA_DST, routing_policy_rule->family, &routing_policy_rule->to);
                 if (r < 0)
                         return log_error_errno(r, "Could not append FRA_DST attribute: %m");
 
@@ -496,12 +488,8 @@ int routing_policy_rule_configure(RoutingPolicyRule *rule, Link *link, link_netl
         if (r < 0)
                 return log_error_errno(r, "Could not allocate RTM_NEWRULE message: %m");
 
-        if (!in_addr_is_null(rule->family, &rule->from)) {
-                if (rule->family == AF_INET)
-                        r = sd_netlink_message_append_in_addr(m, FRA_SRC, &rule->from.in);
-                else
-                        r = sd_netlink_message_append_in6_addr(m, FRA_SRC, &rule->from.in6);
-
+        if (in_addr_is_null(rule->family, &rule->from) == 0) {
+                r = netlink_message_append_in_addr_union(m, FRA_SRC, rule->family, &rule->from);
                 if (r < 0)
                         return log_error_errno(r, "Could not append FRA_SRC attribute: %m");
 
@@ -510,12 +498,8 @@ int routing_policy_rule_configure(RoutingPolicyRule *rule, Link *link, link_netl
                         return log_error_errno(r, "Could not set source prefix length: %m");
         }
 
-        if (!in_addr_is_null(rule->family, &rule->to)) {
-                if (rule->family == AF_INET)
-                        r = sd_netlink_message_append_in_addr(m, FRA_DST, &rule->to.in);
-                else
-                        r = sd_netlink_message_append_in6_addr(m, FRA_DST, &rule->to.in6);
-
+        if (in_addr_is_null(rule->family, &rule->to) == 0) {
+                r = netlink_message_append_in_addr_union(m, FRA_DST, rule->family, &rule->to);
                 if (r < 0)
                         return log_error_errno(r, "Could not append FRA_DST attribute: %m");
 
@@ -652,7 +636,7 @@ int config_parse_routing_policy_rule_tos(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -689,7 +673,7 @@ int config_parse_routing_policy_rule_priority(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -726,7 +710,7 @@ int config_parse_routing_policy_rule_table(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -763,7 +747,7 @@ int config_parse_routing_policy_rule_fwmark_mask(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -800,7 +784,7 @@ int config_parse_routing_policy_rule_prefix(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         union in_addr_union *buffer;
         uint8_t *prefixlen;
@@ -847,7 +831,7 @@ int config_parse_routing_policy_rule_device(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -892,7 +876,7 @@ int config_parse_routing_policy_rule_port_range(
                 const char *rvalue,
                 void *data,
                 void *userdata) {
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         uint16_t low, high;
         int r;
@@ -938,7 +922,7 @@ int config_parse_routing_policy_rule_ip_protocol(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -977,7 +961,7 @@ int config_parse_routing_policy_rule_invert(
                 void *data,
                 void *userdata) {
 
-        _cleanup_(routing_policy_rule_freep) RoutingPolicyRule *n = NULL;
+        _cleanup_(routing_policy_rule_free_or_set_invalidp) RoutingPolicyRule *n = NULL;
         Network *network = userdata;
         int r;
 
@@ -1250,6 +1234,26 @@ int routing_policy_load_rules(const char *state_file, Set **rules) {
         return 0;
 }
 
+static bool manager_links_have_routing_policy_rule(Manager *m, RoutingPolicyRule *rule) {
+        RoutingPolicyRule *link_rule;
+        Iterator i;
+        Link *link;
+
+        assert(m);
+        assert(rule);
+
+        HASHMAP_FOREACH(link, m->links, i) {
+                if (!link->network)
+                        continue;
+
+                LIST_FOREACH(rules, link_rule, link->network->rules)
+                        if (routing_policy_rule_compare_func(link_rule, rule) == 0)
+                                return true;
+        }
+
+        return false;
+}
+
 void routing_policy_rule_purge(Manager *m, Link *link) {
         RoutingPolicyRule *rule, *existing;
         Iterator i;
@@ -1260,15 +1264,24 @@ void routing_policy_rule_purge(Manager *m, Link *link) {
 
         SET_FOREACH(rule, m->rules_saved, i) {
                 existing = set_get(m->rules_foreign, rule);
-                if (existing) {
+                if (!existing)
+                        continue; /* Saved rule does not exist anymore. */
 
-                        r = routing_policy_rule_remove(rule, link, NULL);
-                        if (r < 0) {
-                                log_warning_errno(r, "Could not remove routing policy rules: %m");
-                                continue;
-                        }
+                if (manager_links_have_routing_policy_rule(m, existing))
+                        continue; /* Existing links have the saved rule. */
 
-                        link->routing_policy_rule_remove_messages++;
+                /* Existing links do not have the saved rule. Let's drop the rule now, and re-configure it
+                 * later when it is requested. */
+
+                r = routing_policy_rule_remove(existing, link, NULL);
+                if (r < 0) {
+                        log_warning_errno(r, "Could not remove routing policy rules: %m");
+                        continue;
                 }
+
+                link->routing_policy_rule_remove_messages++;
+
+                assert_se(set_remove(m->rules_foreign, existing) == existing);
+                routing_policy_rule_free(existing);
         }
 }

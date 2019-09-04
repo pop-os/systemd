@@ -13,10 +13,10 @@ this by resetting $HOME to the expected value.
  1 file changed, 5 insertions(+)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 561f956..bc7fcc6 100644
+index 46db471..dffead5 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -1503,6 +1503,11 @@ static int fixup_environment(void) {
+@@ -1504,6 +1504,11 @@ static int fixup_environment(void) {
          if (setenv("TERM", t, 1) < 0)
                  return -errno;
  

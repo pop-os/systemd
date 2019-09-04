@@ -4,34 +4,32 @@ Subject: wait-online: exit, if no links are managed.
 
 (cherry picked from commit 19d11f607ac0f8b1e31f72a8e9d3d44371b9dadb)
 ---
- src/network/wait-online/manager.c | 8 +++++++-
- 1 file changed, 7 insertions(+), 1 deletion(-)
+ src/network/wait-online/manager.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/wait-online/manager.c b/src/network/wait-online/manager.c
-index 67218b6..b7675cd 100644
+index e1f9a81..2ebd9d8 100644
 --- a/src/network/wait-online/manager.c
 +++ b/src/network/wait-online/manager.c
-@@ -37,6 +37,7 @@ bool manager_all_configured(Manager *m) {
-         Link *l;
-         char **ifname;
+@@ -61,6 +61,7 @@ static int manager_link_is_online(Manager *m, Link *l, LinkOperationalState s) {
+ 
+ bool manager_configured(Manager *m) {
          bool one_ready = false;
 +        bool none_managed = true;
- 
-         /* wait for all the links given on the command line to appear */
-         STRV_FOREACH(ifname, m->interfaces) {
-@@ -67,6 +68,11 @@ bool manager_all_configured(Manager *m) {
+         Iterator i;
+         const char *ifname;
+         void *p;
+@@ -105,13 +106,17 @@ bool manager_configured(Manager *m) {
+                 r = manager_link_is_online(m, l, _LINK_OPERSTATE_INVALID);
+                 if (r < 0 && !m->any)
                          return false;
-                 }
- 
-+                if (STR_IN_SET(l->state, "configured", "failed")) {
++                if (l->state && STR_IN_SET(l->state, "configured", "failed")) {
 +                        log_info("managing: %s", l->ifname);
 +                        none_managed = false;
 +                }
-+
-                 if (l->operational_state &&
-                     STR_IN_SET(l->operational_state, "degraded", "routable"))
+                 if (r > 0)
                          /* we wait for at least one link to be ready,
-@@ -74,7 +80,7 @@ bool manager_all_configured(Manager *m) {
+                          * regardless of who manages it */
                          one_ready = true;
          }
  

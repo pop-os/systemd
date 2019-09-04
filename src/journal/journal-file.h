@@ -2,6 +2,7 @@
 #pragma once
 
 #include <inttypes.h>
+#include <sys/uio.h>
 
 #if HAVE_GCRYPT
 #  include <gcrypt.h>
@@ -12,9 +13,9 @@
 
 #include "hashmap.h"
 #include "journal-def.h"
-#include "macro.h"
 #include "mmap-cache.h"
 #include "sparse-endian.h"
+#include "time-util.h"
 
 typedef struct JournalMetrics {
         /* For all these: -1 means "pick automatically", and 0 means "no limit enforced" */
