@@ -1,3 +1,17 @@
+systemd (242-7) unstable; urgency=medium
+
+  * sleep: properly pass verb to sleep script
+  * core: factor root_directory application out of apply_working_directory.
+    Fixes RootDirectory not working when used in combination with User.
+    (Closes: #939408)
+  * shared/bus-util: drop trusted annotation from
+    bus_open_system_watch_bind_with_description().
+    This ensures that access controls on systemd-resolved's D-Bus interface
+    are enforced properly.
+    (CVE-2019-15718, Closes: #939353)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 04 Sep 2019 19:34:17 +0200
+
 systemd (242-6) unstable; urgency=medium
 
   [ Dan Streetman ]
