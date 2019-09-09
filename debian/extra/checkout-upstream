@@ -85,7 +85,7 @@ mkdir -p debian/tmp
      git rebase master
  fi
  git submodule update --init --recursive)
-UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//')
+UPSTREAM_VER=$(cd debian/tmp/upstream; git describe | sed 's/^v//;s/-/./g')
 
 # clean out original upstream sources
 find -mindepth 1 -maxdepth 1 -name debian -o -name .git -prune -o -print0 | xargs -0n1 rm -rf
@@ -114,7 +114,7 @@ fi
 if [ -z "${UPSTREAM_KEEP_CHANGELOG:-}" ] ; then
     # craft changelog
     cat << EOF > debian/changelog.new
-systemd (${UPSTREAM_VER}-0) UNRELEASED; urgency=low
+systemd (${UPSTREAM_VER}.0) UNRELEASED; urgency=low
 
   * Automatic build from upstream $DESC
 
@@ -127,6 +127,6 @@ EOF
     # create new git commit with changelog entry
     if [ -d .git ] ; then
         git add debian
-        git commit -n -m "checkout-upstream: update changelog to version ${UPSTREAM_VER}-0"
+        git commit -n -m "checkout-upstream: update changelog to version ${UPSTREAM_VER}.0"
     fi
 fi
