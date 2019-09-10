@@ -56,3 +56,4 @@ resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
 Revert-namespace-be-more-careful-when-handling-namespacin.patch
 ask-password-prevent-buffer-overrow-when-reading-fro.patch
 rdrand-workaround-on-amd.patch
+Skip-falling-back-to-device-name-when-net_get_name-device.patch
