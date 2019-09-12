@@ -1,4 +1,4 @@
-systemd (242-6ubuntu1) UNRELEASED; urgency=medium
+systemd (242-6ubuntu1) eoan; urgency=medium
 
   [ Dan Streetman ]
   * d/t/control: mark udev test skippable.
@@ -228,8 +228,12 @@ systemd (242-6ubuntu1) UNRELEASED; urgency=medium
   * debian/tests/boot-smoke: Restore exit handling Ubuntu delta lost in 241 merge
     File: debian/tests/boot-smoke
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3bad1cf23cc91299471542e83c589f2b6237a162
+  * Skip falling back to device name when net_get_name(device) fails.
+    This fixes network-manager and netplan.io autopkgtests
+    File: debian/patches/Skip-falling-back-to-device-name-when-net_get_name-device.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c79fe0e2dc29834e0cd236ade6e4e44a6ffb74fa
 
- -- Balint Reczey <rbalint@ubuntu.com>  Wed, 04 Sep 2019 22:52:26 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 12 Sep 2019 10:28:46 +0200
 
 systemd (242-6) unstable; urgency=medium
 
