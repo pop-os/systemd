@@ -4,14 +4,14 @@ Subject: UBUNTU: drop unrelated settings from sysctl defaults shipped by
  systemd.
 
 ---
- sysctl.d/50-default.conf | 20 --------------------
- 1 file changed, 20 deletions(-)
+ sysctl.d/50-default.conf | 24 ------------------------
+ 1 file changed, 24 deletions(-)
 
 diff --git a/sysctl.d/50-default.conf b/sysctl.d/50-default.conf
-index 27084f6..8f355be 100644
+index 27084f6..36ae524 100644
 --- a/sysctl.d/50-default.conf
 +++ b/sysctl.d/50-default.conf
-@@ -11,32 +11,12 @@
+@@ -11,32 +11,8 @@
  # (e.g. /etc/sysctl.d/90-override.conf), and put any assignments
  # there.
  
@@ -36,11 +36,11 @@ index 27084f6..8f355be 100644
  
  # Fair Queue CoDel packet scheduler to fight bufferbloat
  net.core.default_qdisc = fq_codel
- 
+-
 -# Enable hard and soft link protection
 -fs.protected_hardlinks = 1
 -fs.protected_symlinks = 1
 -
- # Enable regular file and FIFO protection
- fs.protected_regular = 1
- fs.protected_fifos = 1
+-# Enable regular file and FIFO protection
+-fs.protected_regular = 1
+-fs.protected_fifos = 1
