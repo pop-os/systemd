@@ -1,4 +1,4 @@
-systemd (242-7ubuntu1) UNRELEASED; urgency=medium
+systemd (242-7ubuntu1) eoan; urgency=medium
 
   * Merge from unstable
   * UBUNTU: drop setting fs.protected_regular and fs.protected_fifos from
