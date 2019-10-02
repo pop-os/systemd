@@ -1,3 +1,18 @@
+systemd (242-7ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge from unstable
+  * UBUNTU: drop setting fs.protected_regular and fs.protected_fifos from
+    sysctl defaults shipped by systemd (LP: #1845637)
+    File: debian/patches/debian/UBUNTU-drop-kernel.-settings-from-sysctl-defaults-shipped.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6e583847b04c3f83a50f3bd6947dcae6a73d8388
+  * test-execute: Filter /dev/.lxc in exec-dynamicuser-statedir.service.
+    It appears in nested LXC containers and broke the armhf autopkgtest.
+    (LP: #1845337)
+    File: debian/patches/test-execute-Filter-dev-.lxc-in-exec-dynamicuser-statedir.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=75af888d5552f706b86182a56f12ccc8e83ca04e
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 02 Oct 2019 14:13:28 +0200
+
 systemd (242-7) unstable; urgency=medium
 
   * sleep: properly pass verb to sleep script
