@@ -10,7 +10,7 @@ BugLink: https://bugs.launchpad.net/bugs/1845337
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/test/test-execute/exec-dynamicuser-statedir.service b/test/test-execute/exec-dynamicuser-statedir.service
-index 2fb7b86..0bd9f04 100644
+index 2fb7b86..ca40934 100644
 --- a/test/test-execute/exec-dynamicuser-statedir.service
 +++ b/test/test-execute/exec-dynamicuser-statedir.service
 @@ -13,7 +13,7 @@ ExecStart=test -f /var/lib/private/quux/pief/yayyay

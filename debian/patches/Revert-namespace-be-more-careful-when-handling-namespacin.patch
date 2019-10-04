@@ -13,7 +13,7 @@ released in the snap store.
  1 file changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index 6dc63a8..f5b1a1b 100644
+index 3c54904..accb8e1 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
 @@ -2498,14 +2498,18 @@ static int apply_mount_namespace(
