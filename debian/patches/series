@@ -55,6 +55,7 @@ debian/UBUNTU-Support-system-image-read-only-etc.patch
 debian/UBUNTU-bump-selftest-timeouts.patch
 debian/UBUNTU-units-disable-journald-watchdog.patch
 debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
+debian/UBUNTU-test-Pass-personality-test-even-when-i386-userland-runs-o.patch
 resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
 Revert-namespace-be-more-careful-when-handling-namespacin.patch
 ask-password-prevent-buffer-overrow-when-reading-fro.patch
