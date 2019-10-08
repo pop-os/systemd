@@ -1,3 +1,27 @@
+systemd (242-7ubuntu2) eoan; urgency=medium
+
+  [ Bryan Quigley ]
+  * Update patch for resolved: Mitigate DVE-2018-0001, by retrying NXDOMAIN
+    without EDNS0. This disables the workaround if DNSSEC=yes.
+    Falls back directly to simple UDP instead of trying an intermediate.
+    (LP: #1796501)
+    Author: Bryan Quigley
+    File: debian/patches/resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2974114ed9b89ea922a23893e8eff70d5cac77fe
+
+  [ Balint Reczey ]
+  * Pass personality test even when i386 userland runs on amd64 kernel
+    File: debian/patches/debian/UBUNTU-test-Pass-personality-test-even-when-i386-userland-runs-o.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=42e0bfc426f19430f6768ef4922a9531a345765f
+  * Refresh patches
+    Files:
+    - debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
+    - debian/patches/debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
+    - debian/patches/test-execute-Filter-dev-.lxc-in-exec-dynamicuser-statedir.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ff8387be07322230e9afe87f1c767ee241e9a0e1
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 08 Oct 2019 22:31:17 +0200
+
 systemd (242-7ubuntu1) eoan; urgency=medium
 
   * Merge from unstable
