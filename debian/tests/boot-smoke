@@ -5,10 +5,6 @@
 # with --copy /host/path/systemd-foo:/tmp/systemd-replace/systemd-foo
 set -e
 
-RUNNING_TIMEOUT=35
-JOBS_TIMEOUT=35
-REBOOTS=5
-
 . `dirname $0`/assert.sh
 
 fail() {
@@ -43,10 +39,8 @@ EOF
         done
     fi
 else
-    ret=0
-
     echo "waiting to boot..."
-    TIMEOUT=$RUNNING_TIMEOUT
+    TIMEOUT=35
     while [ $TIMEOUT -ge 0 ]; do
         state="$(systemctl --wait is-system-running || true)"
         case $state in
@@ -71,22 +65,18 @@ else
     echo "checking for failed unmounts for user systemd"
     # grep complete journal to catch shutdown messages
     if journalctl | grep -E "systemd\[([2-9]|[1-9][0-9]+)\].*Failed unmounting"; then
-        ret=1
-        echo "found failed unmount in journal"
+        fail "found failed unmount in journal"
     fi
 
     # grep only this boot's journal, earlier ones complain about missing "render" group
-    echo "checking for connection timeouts (non fatal)"
+    echo "checking for connection timeouts"
     if journalctl -b | grep "Connection timed out"; then
-        # systemd-udevd started to time out resolving group 'colord'
-        # yet, not reproducible locally, investigating
-        ret=0
+        fail "found connection timeout in journal for this boot"
     fi
 
     echo "checking that polkitd runs"
     if ! pidof polkitd; then
-        echo "polkitd is NOT running"
-        ret=1
+        fail "polkitd is NOT running"
     fi
 
     echo "checking failed jobs (non fatal)"
@@ -104,13 +94,9 @@ else
         TIMEOUT=$((TIMEOUT - 1))
     done
     if [ -n "$running" ]; then
-        echo "running jobs after remaining timeout $TIMEOUT: $running"
-        ret=1
+        fail "running jobs after remaining timeout $TIMEOUT: $running"
     fi
 
-    if [ "$ret" != "0" ]; then
-       exit $ret
-    fi
     echo "checking that NetworkManager runs"
     pidof NetworkManager || fail "NetworkManager was not running"
 fi
