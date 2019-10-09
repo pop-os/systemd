@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index d949900..e7d747a 100644
+index 3b63311..890f109 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -659,6 +659,7 @@ manpages = [
+@@ -682,6 +682,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 1166a2b..760b393 100644
+index e5ceb1e..708ce80 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2414,6 +2414,14 @@ executable('systemd-makefs',
+@@ -2363,6 +2363,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  
@@ -258,10 +258,10 @@ index 1166a2b..760b393 100644
             'src/sleep/sleep.c',
             include_directories : includes,
 diff --git a/po/POTFILES.in b/po/POTFILES.in
-index 029261c..d709ddb 100644
+index 983f346..1e60287 100644
 --- a/po/POTFILES.in
 +++ b/po/POTFILES.in
-@@ -8,3 +8,4 @@ src/portable/org.freedesktop.portable1.policy
+@@ -9,3 +9,4 @@ src/portable/org.freedesktop.portable1.policy
  src/resolve/org.freedesktop.resolve1.policy
  src/timedate/org.freedesktop.timedate1.policy
  src/core/dbus-unit.c
@@ -963,7 +963,7 @@ index 0000000..4c1fe88
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index f8c9a42..90808c3 100644
+index e1ee9f8..d0947a0 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -84,6 +84,7 @@ units = [
@@ -974,7 +974,7 @@ index f8c9a42..90808c3 100644
          ['systemd-initctl.socket',              '',
           'sockets.target.wants/'],
          ['systemd-journal-gatewayd.socket',     'ENABLE_REMOTE HAVE_MICROHTTPD'],
-@@ -139,6 +140,7 @@ in_units = [
+@@ -142,6 +143,7 @@ in_units = [
           'sysinit.target.wants/'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],

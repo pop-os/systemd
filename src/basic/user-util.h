@@ -85,8 +85,20 @@ static inline bool userns_supported(void) {
         return access("/proc/self/uid_map", F_OK) >= 0;
 }
 
-bool valid_user_group_name(const char *u);
-bool valid_user_group_name_or_id(const char *u);
+bool valid_user_group_name_full(const char *u, bool strict);
+bool valid_user_group_name_or_id_full(const char *u, bool strict);
+static inline bool valid_user_group_name(const char *u) {
+        return valid_user_group_name_full(u, true);
+}
+static inline bool valid_user_group_name_or_id(const char *u) {
+        return valid_user_group_name_or_id_full(u, true);
+}
+static inline bool valid_user_group_name_compat(const char *u) {
+        return valid_user_group_name_full(u, false);
+}
+static inline bool valid_user_group_name_or_id_compat(const char *u) {
+        return valid_user_group_name_or_id_full(u, false);
+}
 bool valid_gecos(const char *d);
 bool valid_home(const char *p);
 
@@ -113,3 +125,5 @@ int putgrent_sane(const struct group *gr, FILE *stream);
 int fgetsgent_sane(FILE *stream, struct sgrp **sg);
 int putsgent_sane(const struct sgrp *sg, FILE *stream);
 #endif
+
+int make_salt(char **ret);

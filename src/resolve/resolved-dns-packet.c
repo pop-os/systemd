@@ -17,7 +17,7 @@
 
 #define EDNS0_OPT_DO (1<<15)
 
-assert_cc(DNS_PACKET_SIZE_START > DNS_PACKET_HEADER_SIZE)
+assert_cc(DNS_PACKET_SIZE_START > DNS_PACKET_HEADER_SIZE);
 
 typedef struct DnsPacketRewinder {
         DnsPacket *packet;
@@ -1949,7 +1949,7 @@ int dns_packet_read_rr(DnsPacket *p, DnsResourceRecord **ret, bool *ret_cache_fl
         case DNS_TYPE_NSEC: {
 
                 /*
-                 * RFC6762, section 18.14 explictly states mDNS should use name compression.
+                 * RFC6762, section 18.14 explicitly states mDNS should use name compression.
                  * This contradicts RFC3845, section 2.1.1
                  */
 

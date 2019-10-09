@@ -782,7 +782,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
 
                         r = socket_address_print(&p->address, &k);
                         if (r < 0)
-                                t = strerror(-r);
+                                t = strerror_safe(r);
                         else
                                 t = k;
 
@@ -1868,7 +1868,7 @@ static int socket_coldplug(Unit *u) {
                    SOCKET_RUNNING)) {
 
                 /* Originally, we used to simply reopen all sockets here that we didn't have file descriptors
-                 * for. However, this is problematic, as we won't traverse throught the SOCKET_START_CHOWN state for
+                 * for. However, this is problematic, as we won't traverse through the SOCKET_START_CHOWN state for
                  * them, and thus the UID/GID wouldn't be right. Hence, instead simply check if we have all fds open,
                  * and if there's a mismatch, warn loudly. */
 
@@ -2035,7 +2035,7 @@ static void socket_enter_dead(Socket *s, SocketResult f) {
 
         s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
 
-        exec_context_destroy_runtime_directory(&s->exec_context, UNIT(s)->manager->prefix[EXEC_DIRECTORY_RUNTIME]);
+        unit_destroy_runtime_directory(UNIT(s), &s->exec_context);
 
         unit_unref_uid_gid(UNIT(s), true);
 
@@ -2873,7 +2873,7 @@ static int socket_accept_in_cgroup(Socket *s, SocketPort *p, int fd) {
         assert(p);
         assert(fd >= 0);
 
-        /* Similar to socket_address_listen_in_cgroup(), but for accept() rathern than socket(): make sure that any
+        /* Similar to socket_address_listen_in_cgroup(), but for accept() rather than socket(): make sure that any
          * connection socket is also properly associated with the cgroup. */
 
         if (!IN_SET(p->address.sockaddr.sa.sa_family, AF_INET, AF_INET6))
@@ -3014,9 +3014,10 @@ static void socket_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         }
 
         unit_log_process_exit(
-                        u, f == SOCKET_SUCCESS ? LOG_DEBUG : LOG_NOTICE,
+                        u,
                         "Control process",
                         socket_exec_command_to_string(s->control_command_id),
+                        f == SOCKET_SUCCESS,
                         code, status);
 
         if (s->result == SOCKET_SUCCESS)
@@ -3351,6 +3352,8 @@ const UnitVTable socket_vtable = {
 
         .active_state = socket_active_state,
         .sub_state_to_string = socket_sub_state_to_string,
+
+        .will_restart = unit_will_restart_default,
 
         .may_gc = socket_may_gc,
 

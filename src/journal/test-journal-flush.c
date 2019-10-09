@@ -10,6 +10,7 @@
 #include "journal-file.h"
 #include "journal-internal.h"
 #include "macro.h"
+#include "path-util.h"
 #include "string-util.h"
 
 int main(int argc, char *argv[]) {
@@ -23,7 +24,7 @@ int main(int argc, char *argv[]) {
         assert_se(mkdtemp(dn));
         (void) chattr_path(dn, FS_NOCOW_FL, FS_NOCOW_FL, NULL);
 
-        fn = strappend(dn, "/test.journal");
+        fn = path_join(dn, "test.journal");
 
         r = journal_file_open(-1, fn, O_CREAT|O_RDWR, 0644, false, 0, false, NULL, NULL, NULL, NULL, &new_journal);
         assert_se(r >= 0);
@@ -41,13 +42,16 @@ int main(int argc, char *argv[]) {
                 assert_se(f && f->current_offset > 0);
 
                 r = journal_file_move_to_object(f, OBJECT_ENTRY, f->current_offset, &o);
+                if (r < 0)
+                        log_error_errno(r, "journal_file_move_to_object failed: %m");
                 assert_se(r >= 0);
 
                 r = journal_file_copy_entry(f, new_journal, o, f->current_offset);
+                if (r < 0)
+                        log_error_errno(r, "journal_file_copy_entry failed: %m");
                 assert_se(r >= 0);
 
-                n++;
-                if (n > 10000)
+                if (++n >= 10000)
                         break;
         }
 

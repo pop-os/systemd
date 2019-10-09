@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
+#include <stdio.h>
 #include <sys/mman.h>
 
 #include "alloc-util.h"
 #include "fd-util.h"
+#include "fileio.h"
 #include "fs-util.h"
 #include "hexdecoct.h"
 #include "macro.h"
@@ -37,12 +39,15 @@ int fopen_temporary(const char *path, FILE **_f, char **_temp_path) {
                 return -errno;
         }
 
-        f = fdopen(fd, "w");
-        if (!f) {
-                unlink_noerrno(t);
+        /* This assumes that returned FILE object is short-lived and used within the same single-threaded
+         * context and never shared externally, hence locking is not necessary. */
+
+        r = fdopen_unlocked(fd, "w", &f);
+        if (r < 0) {
+                unlink(t);
                 free(t);
                 safe_close(fd);
-                return -errno;
+                return r;
         }
 
         *_f = f;
@@ -53,12 +58,10 @@ int fopen_temporary(const char *path, FILE **_f, char **_temp_path) {
 
 /* This is much like mkostemp() but is subject to umask(). */
 int mkostemp_safe(char *pattern) {
-        _cleanup_umask_ mode_t u = 0;
+        _unused_ _cleanup_umask_ mode_t u = umask(0077);
         int fd;
 
         assert(pattern);
-
-        u = umask(077);
 
         fd = mkostemp(pattern, O_CLOEXEC);
         if (fd < 0)
@@ -317,7 +320,7 @@ int mkdtemp_malloc(const char *template, char **ret) {
                 if (r < 0)
                         return r;
 
-                p = strjoin(tmp, "/XXXXXX");
+                p = path_join(tmp, "XXXXXX");
         }
         if (!p)
                 return -ENOMEM;

@@ -19,17 +19,15 @@ Author: Christian Ehrhardt <christian.ehrhardt@canonical.com>
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1789841
 Last-Update: 2018-08-30
 ---
- test/TEST-08-ISSUE-2730/test.sh    | 2 +-
- test/TEST-09-ISSUE-2691/test.sh    | 2 +-
- test/TEST-18-FAILUREACTION/test.sh | 2 +-
- test/TEST-19-DELEGATE/test.sh      | 2 +-
- 4 files changed, 4 insertions(+), 4 deletions(-)
+ test/TEST-08-ISSUE-2730/test.sh | 2 +-
+ test/TEST-09-ISSUE-2691/test.sh | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/test/TEST-08-ISSUE-2730/test.sh b/test/TEST-08-ISSUE-2730/test.sh
-index b01df36..5b74be1 100755
+index 8643842..91f1888 100755
 --- a/test/TEST-08-ISSUE-2730/test.sh
 +++ b/test/TEST-08-ISSUE-2730/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2730"
+@@ -4,7 +4,7 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2730"
  TEST_NO_NSPAWN=1
  
  . $TEST_BASE_DIR/test-functions
@@ -39,10 +37,10 @@ index b01df36..5b74be1 100755
  
  test_setup() {
 diff --git a/test/TEST-09-ISSUE-2691/test.sh b/test/TEST-09-ISSUE-2691/test.sh
-index 01eb4db..7a7b318 100755
+index 1a8b900..f1a162a 100755
 --- a/test/TEST-09-ISSUE-2691/test.sh
 +++ b/test/TEST-09-ISSUE-2691/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2691"
+@@ -4,7 +4,7 @@ TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2691"
  TEST_NO_NSPAWN=1
  
  . $TEST_BASE_DIR/test-functions
@@ -50,30 +48,4 @@ index 01eb4db..7a7b318 100755
 +QEMU_TIMEOUT=300
  
  test_setup() {
-     create_empty_image
-diff --git a/test/TEST-18-FAILUREACTION/test.sh b/test/TEST-18-FAILUREACTION/test.sh
-index 783b3aa..c62e121 100755
---- a/test/TEST-18-FAILUREACTION/test.sh
-+++ b/test/TEST-18-FAILUREACTION/test.sh
-@@ -5,7 +5,7 @@ set -e
- TEST_DESCRIPTION="FailureAction= operation"
- 
- . $TEST_BASE_DIR/test-functions
--QEMU_TIMEOUT=180
-+QEMU_TIMEOUT=300
- 
- test_setup() {
-     create_empty_image
-diff --git a/test/TEST-19-DELEGATE/test.sh b/test/TEST-19-DELEGATE/test.sh
-index bb0c505..0d7793b 100755
---- a/test/TEST-19-DELEGATE/test.sh
-+++ b/test/TEST-19-DELEGATE/test.sh
-@@ -6,7 +6,7 @@ TEST_DESCRIPTION="test cgroup delegation in the unified hierarchy"
- TEST_NO_NSPAWN=1
- 
- . $TEST_BASE_DIR/test-functions
--QEMU_TIMEOUT=180
-+QEMU_TIMEOUT=300
- UNIFIED_CGROUP_HIERARCHY=yes
- 
- test_setup() {
+     create_empty_image_rootdir

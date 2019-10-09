@@ -24,6 +24,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_239@LIBSYSTEMD_239 239
  LIBSYSTEMD_240@LIBSYSTEMD_240 240
  LIBSYSTEMD_241@LIBSYSTEMD_241 241
+ LIBSYSTEMD_243@LIBSYSTEMD_243 243
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -223,6 +224,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_negotiate_fds@LIBSYSTEMD_221 221
  sd_bus_negotiate_timestamp@LIBSYSTEMD_221 221
  sd_bus_new@LIBSYSTEMD_221 221
+ sd_bus_object_vtable_format@LIBSYSTEMD_243 243
  sd_bus_open@LIBSYSTEMD_221 221
  sd_bus_open_system@LIBSYSTEMD_221 221
  sd_bus_open_system_machine@LIBSYSTEMD_221 221
@@ -390,6 +392,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_ref@LIBSYSTEMD_221 221
  sd_event_run@LIBSYSTEMD_221 221
  sd_event_set_watchdog@LIBSYSTEMD_221 221
+ sd_event_source_disable_unref@LIBSYSTEMD_243 243
  sd_event_source_get_child_pid@LIBSYSTEMD_221 221
  sd_event_source_get_description@LIBSYSTEMD_221 221
  sd_event_source_get_destroy_callback@LIBSYSTEMD_239 239

@@ -13,10 +13,10 @@ released in the snap store.
  1 file changed, 6 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index 3c54904..accb8e1 100644
+index 4de85b7..29ee273 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
-@@ -2498,14 +2498,18 @@ static int apply_mount_namespace(
+@@ -2548,14 +2548,18 @@ static int apply_mount_namespace(
                          log_unit_debug(u, "Failed to set up namespace, assuming containerized execution and ignoring.");
                          return 0;
                  }

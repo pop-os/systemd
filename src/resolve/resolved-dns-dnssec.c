@@ -1,9 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <stdio_ext.h>
-
 #if HAVE_GCRYPT
-#include <gcrypt.h>
+#  include <gcrypt.h>
 #endif
 
 #include "alloc-util.h"
@@ -803,10 +801,9 @@ int dnssec_verify_rrset(
         /* Bring the RRs into canonical order */
         typesafe_qsort(list, n, rr_compare);
 
-        f = open_memstream(&sig_data, &sig_size);
+        f = open_memstream_unlocked(&sig_data, &sig_size);
         if (!f)
                 return -ENOMEM;
-        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
 
         fwrite_uint16(f, rrsig->rrsig.type_covered);
         fwrite_uint8(f, rrsig->rrsig.algorithm);
@@ -1109,7 +1106,7 @@ int dnssec_has_rrsig(DnsAnswer *a, const DnsResourceKey *key) {
         DnsResourceRecord *rr;
         int r;
 
-        /* Checks whether there's at least one RRSIG in 'a' that proctects RRs of the specified key */
+        /* Checks whether there's at least one RRSIG in 'a' that protects RRs of the specified key */
 
         DNS_ANSWER_FOREACH(rr, a) {
                 r = dnssec_key_match_rrsig(key, rr);
@@ -1988,7 +1985,7 @@ int dnssec_nsec_test(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecResult *r
         if (have_nsec3)
                 return dnssec_test_nsec3(answer, key, result, authenticated, ttl);
 
-        /* No approproate NSEC RR found, report this. */
+        /* No appropriate NSEC RR found, report this. */
         *result = DNSSEC_NSEC_NO_RR;
         return 0;
 }
@@ -2185,7 +2182,7 @@ static int dnssec_test_positive_wildcard_nsec(
                         return -EBADMSG;
 
                 /* Replace the label we stripped off with an asterisk */
-                wc = strappend("*.", name);
+                wc = strjoin("*.", name);
                 if (!wc)
                         return -ENOMEM;
 

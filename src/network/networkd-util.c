@@ -8,40 +8,35 @@
 #include "string-util.h"
 #include "util.h"
 
-const char *address_family_boolean_to_string(AddressFamilyBoolean b) {
-        if (IN_SET(b, ADDRESS_FAMILY_YES, ADDRESS_FAMILY_NO))
-                return yes_no(b == ADDRESS_FAMILY_YES);
+static const char * const address_family_table[_ADDRESS_FAMILY_MAX] = {
+        [ADDRESS_FAMILY_NO]            = "no",
+        [ADDRESS_FAMILY_YES]           = "yes",
+        [ADDRESS_FAMILY_IPV4]          = "ipv4",
+        [ADDRESS_FAMILY_IPV6]          = "ipv6",
+};
 
-        if (b == ADDRESS_FAMILY_IPV4)
-                return "ipv4";
-        if (b == ADDRESS_FAMILY_IPV6)
-                return "ipv6";
+static const char * const link_local_address_family_table[_ADDRESS_FAMILY_MAX] = {
+        [ADDRESS_FAMILY_NO]            = "no",
+        [ADDRESS_FAMILY_YES]           = "yes",
+        [ADDRESS_FAMILY_IPV4]          = "ipv4",
+        [ADDRESS_FAMILY_IPV6]          = "ipv6",
+        [ADDRESS_FAMILY_FALLBACK]      = "fallback",
+        [ADDRESS_FAMILY_FALLBACK_IPV4] = "ipv4-fallback",
+};
 
-        return NULL;
-}
+static const char * const routing_policy_rule_address_family_table[_ADDRESS_FAMILY_MAX] = {
+        [ADDRESS_FAMILY_YES]           = "both",
+        [ADDRESS_FAMILY_IPV4]          = "ipv4",
+        [ADDRESS_FAMILY_IPV6]          = "ipv6",
+};
 
-AddressFamilyBoolean address_family_boolean_from_string(const char *s) {
-        int r;
+DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(address_family, AddressFamily, ADDRESS_FAMILY_YES);
+DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(link_local_address_family, AddressFamily, ADDRESS_FAMILY_YES);
+DEFINE_STRING_TABLE_LOOKUP(routing_policy_rule_address_family, AddressFamily);
+DEFINE_CONFIG_PARSE_ENUM(config_parse_link_local_address_family, link_local_address_family,
+                         AddressFamily, "Failed to parse option");
 
-        /* Make this a true superset of a boolean */
-
-        r = parse_boolean(s);
-        if (r > 0)
-                return ADDRESS_FAMILY_YES;
-        if (r == 0)
-                return ADDRESS_FAMILY_NO;
-
-        if (streq(s, "ipv4"))
-                return ADDRESS_FAMILY_IPV4;
-        if (streq(s, "ipv6"))
-                return ADDRESS_FAMILY_IPV6;
-
-        return _ADDRESS_FAMILY_BOOLEAN_INVALID;
-}
-
-DEFINE_CONFIG_PARSE_ENUM(config_parse_address_family_boolean, address_family_boolean, AddressFamilyBoolean, "Failed to parse option");
-
-int config_parse_address_family_boolean_with_kernel(
+int config_parse_address_family_with_kernel(
                 const char* unit,
                 const char *filename,
                 unsigned line,
@@ -53,7 +48,7 @@ int config_parse_address_family_boolean_with_kernel(
                 void *data,
                 void *userdata) {
 
-        AddressFamilyBoolean *fwd = data, s;
+        AddressFamily *fwd = data, s;
 
         assert(filename);
         assert(lvalue);
@@ -62,13 +57,13 @@ int config_parse_address_family_boolean_with_kernel(
 
         /* This function is mostly obsolete now. It simply redirects
          * "kernel" to "no". In older networkd versions we used to
-         * distuingish IPForward=off from IPForward=kernel, where the
+         * distinguish IPForward=off from IPForward=kernel, where the
          * former would explicitly turn off forwarding while the
          * latter would simply not touch the setting. But that logic
          * is gone, hence silently accept the old setting, but turn it
          * to "no". */
 
-        s = address_family_boolean_from_string(rvalue);
+        s = address_family_from_string(rvalue);
         if (s < 0) {
                 if (streq(rvalue, "kernel"))
                         s = ADDRESS_FAMILY_NO;
@@ -84,7 +79,7 @@ int config_parse_address_family_boolean_with_kernel(
 }
 
 /* Router lifetime can be set with netlink interface since kernel >= 4.5
- * so for the supported kernel we dont need to expire routes in userspace */
+ * so for the supported kernel we don't need to expire routes in userspace */
 int kernel_route_expiration_supported(void) {
         static int cached = -1;
         int r;

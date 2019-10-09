@@ -1,6 +1,4 @@
 #!/bin/bash
-# -*- mode: shell-script; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
-# ex: ts=8 sw=4 sts=4 et filetype=sh
 set -e
 TEST_DESCRIPTION="test OnClockChange= + OnTimezoneChange="
 TEST_NO_NSPAWN=1
@@ -8,9 +6,7 @@ TEST_NO_NSPAWN=1
 . $TEST_BASE_DIR/test-functions
 
 test_setup() {
-    create_empty_image
-    mkdir -p $TESTDIR/root
-    mount ${LOOPDEV}p1 $TESTDIR/root
+    create_empty_image_rootdir
 
     (
         LOG_LEVEL=5
@@ -51,10 +47,7 @@ EOF
         cp testsuite.sh $initdir/
 
         setup_testsuite
-    ) || return 1
-
-    ddebug "umount $TESTDIR/root"
-    umount $TESTDIR/root
+    )
 }
 
 do_test "$@"

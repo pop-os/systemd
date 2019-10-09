@@ -8,7 +8,7 @@ Subject: wait-online: exit, if no links are managed.
  1 file changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/src/network/wait-online/manager.c b/src/network/wait-online/manager.c
-index e1f9a81..2ebd9d8 100644
+index 6de3df9..a2a0fb9 100644
 --- a/src/network/wait-online/manager.c
 +++ b/src/network/wait-online/manager.c
 @@ -61,6 +61,7 @@ static int manager_link_is_online(Manager *m, Link *l, LinkOperationalState s) {

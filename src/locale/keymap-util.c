@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
-#include <stdio_ext.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -253,7 +252,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
                 if (in_section && first_word(l, "Option")) {
                         _cleanup_strv_free_ char **a = NULL;
 
-                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_QUOTES);
+                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
                         if (r < 0)
                                 return r;
 
@@ -277,7 +276,7 @@ int x11_read_data(Context *c, sd_bus_message *m) {
                 } else if (!in_section && first_word(l, "Section")) {
                         _cleanup_strv_free_ char **a = NULL;
 
-                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_QUOTES);
+                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
                         if (r < 0)
                                 return -ENOMEM;
 
@@ -354,7 +353,7 @@ int vconsole_write_data(Context *c) {
                 _cleanup_free_ char *s = NULL;
                 char **u;
 
-                s = strappend("KEYMAP=", c->vc_keymap);
+                s = strjoin("KEYMAP=", c->vc_keymap);
                 if (!s)
                         return -ENOMEM;
 
@@ -371,7 +370,7 @@ int vconsole_write_data(Context *c) {
                 _cleanup_free_ char *s = NULL;
                 char **u;
 
-                s = strappend("KEYMAP_TOGGLE=", c->vc_keymap_toggle);
+                s = strjoin("KEYMAP_TOGGLE=", c->vc_keymap_toggle);
                 if (!s)
                         return -ENOMEM;
 
@@ -423,7 +422,6 @@ int x11_write_data(Context *c) {
         if (r < 0)
                 return r;
 
-        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
         (void) fchmod(fileno(f), 0644);
 
         fputs("# Written by systemd-localed(8), read by systemd-localed and Xorg. It's\n"
@@ -493,7 +491,7 @@ static int read_next_mapping(const char* filename,
                 if (IN_SET(l[0], 0, '#'))
                         continue;
 
-                r = strv_split_extract(&b, l, WHITESPACE, EXTRACT_QUOTES);
+                r = strv_split_extract(&b, l, WHITESPACE, EXTRACT_UNQUOTE);
                 if (r < 0)
                         return r;
 
@@ -650,11 +648,11 @@ int find_legacy_keymap(Context *c, char **ret) {
                         if (startswith_comma(c->x11_layout, a[1]))
                                 matching = 5;
                         else  {
-                                char *x;
+                                _cleanup_free_ char *x = NULL;
 
                                 /* If that didn't work, strip off the
                                  * other layouts from the entry, too */
-                                x = strndupa(a[1], strcspn(a[1], ","));
+                                x = strndup(a[1], strcspn(a[1], ","));
                                 if (startswith_comma(c->x11_layout, x))
                                         matching = 1;
                         }

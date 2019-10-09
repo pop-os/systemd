@@ -25,9 +25,9 @@ m4_define(`EXEC_CONTEXT_CONFIG_ITEMS',
 `$1.WorkingDirectory,            config_parse_working_directory,     0,                             offsetof($1, exec_context)
 $1.RootDirectory,                config_parse_unit_path_printf,      true,                          offsetof($1, exec_context.root_directory)
 $1.RootImage,                    config_parse_unit_path_printf,      true,                          offsetof($1, exec_context.root_image)
-$1.User,                         config_parse_user_group,            0,                             offsetof($1, exec_context.user)
-$1.Group,                        config_parse_user_group,            0,                             offsetof($1, exec_context.group)
-$1.SupplementaryGroups,          config_parse_user_group_strv,       0,                             offsetof($1, exec_context.supplementary_groups)
+$1.User,                         config_parse_user_group_compat,     0,                             offsetof($1, exec_context.user)
+$1.Group,                        config_parse_user_group_compat,     0,                             offsetof($1, exec_context.group)
+$1.SupplementaryGroups,          config_parse_user_group_strv_compat, 0,                            offsetof($1, exec_context.supplementary_groups)
 $1.Nice,                         config_parse_exec_nice,             0,                             offsetof($1, exec_context)
 $1.OOMScoreAdjust,               config_parse_exec_oom_score_adjust, 0,                             offsetof($1, exec_context)
 $1.IOSchedulingClass,            config_parse_exec_io_class,         0,                             offsetof($1, exec_context)
@@ -36,6 +36,8 @@ $1.CPUSchedulingPolicy,          config_parse_exec_cpu_sched_policy, 0,         
 $1.CPUSchedulingPriority,        config_parse_exec_cpu_sched_prio,   0,                             offsetof($1, exec_context)
 $1.CPUSchedulingResetOnFork,     config_parse_bool,                  0,                             offsetof($1, exec_context.cpu_sched_reset_on_fork)
 $1.CPUAffinity,                  config_parse_exec_cpu_affinity,     0,                             offsetof($1, exec_context)
+$1.NUMAPolicy,                   config_parse_numa_policy,           0,                             offsetof($1, exec_context.numa_policy.type)
+$1.NUMAMask,                     config_parse_numa_mask,             0,                             offsetof($1, exec_context.numa_policy)
 $1.UMask,                        config_parse_mode,                  0,                             offsetof($1, exec_context.umask)
 $1.Environment,                  config_parse_environ,               0,                             offsetof($1, exec_context.environment)
 $1.EnvironmentFile,              config_parse_unit_env_file,         0,                             offsetof($1, exec_context.environment_files)
@@ -136,6 +138,7 @@ $1.LogsDirectoryMode,            config_parse_mode,                  0,         
 $1.LogsDirectory,                config_parse_exec_directories,      0,                             offsetof($1, exec_context.directories[EXEC_DIRECTORY_LOGS].paths)
 $1.ConfigurationDirectoryMode,   config_parse_mode,                  0,                             offsetof($1, exec_context.directories[EXEC_DIRECTORY_CONFIGURATION].mode)
 $1.ConfigurationDirectory,       config_parse_exec_directories,      0,                             offsetof($1, exec_context.directories[EXEC_DIRECTORY_CONFIGURATION].paths)
+$1.TimeoutCleanSec,              config_parse_sec,                   0,                             offsetof($1, exec_context.timeout_clean_usec)
 $1.ProtectHostname,              config_parse_bool,                  0,                             offsetof($1, exec_context.protect_hostname)
 m4_ifdef(`HAVE_PAM',
 `$1.PAMName,                     config_parse_unit_string_printf,    0,                             offsetof($1, exec_context.pam_name)',
@@ -172,6 +175,8 @@ $1.CPUQuota,                     config_parse_cpu_quota,             0,         
 $1.CPUQuotaPeriodSec,            config_parse_sec_def_infinity,      0,                             offsetof($1, cgroup_context.cpu_quota_period_usec)
 $1.MemoryAccounting,             config_parse_bool,                  0,                             offsetof($1, cgroup_context.memory_accounting)
 $1.MemoryMin,                    config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
+$1.DefaultMemoryMin,             config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
+$1.DefaultMemoryLow,             config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
 $1.MemoryLow,                    config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
 $1.MemoryHigh,                   config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
 $1.MemoryMax,                    config_parse_memory_limit,          0,                             offsetof($1, cgroup_context)
@@ -201,6 +206,8 @@ $1.DisableControllers,           config_parse_disable_controllers,   0,         
 $1.IPAccounting,                 config_parse_bool,                  0,                             offsetof($1, cgroup_context.ip_accounting)
 $1.IPAddressAllow,               config_parse_ip_address_access,     0,                             offsetof($1, cgroup_context.ip_address_allow)
 $1.IPAddressDeny,                config_parse_ip_address_access,     0,                             offsetof($1, cgroup_context.ip_address_deny)
+$1.IPIngressFilterPath,          config_parse_ip_filter_bpf_progs,   0,                             offsetof($1, cgroup_context.ip_filters_ingress)
+$1.IPEgressFilterPath,           config_parse_ip_filter_bpf_progs,   0,                             offsetof($1, cgroup_context.ip_filters_egress)
 $1.NetClass,                     config_parse_warn_compat,           DISABLED_LEGACY,               0'
 )m4_dnl
 Unit.Description,                config_parse_unit_string_printf,    0,                             offsetof(Unit, description)
@@ -248,6 +255,7 @@ Unit.SuccessAction,              config_parse_emergency_action,      0,         
 Unit.FailureActionExitStatus,    config_parse_exit_status,           0,                             offsetof(Unit, failure_action_exit_status)
 Unit.SuccessActionExitStatus,    config_parse_exit_status,           0,                             offsetof(Unit, success_action_exit_status)
 Unit.RebootArgument,             config_parse_unit_string_printf,    0,                             offsetof(Unit, reboot_arg)
+m4_dnl Also add any conditions to condition_definitions[] in src/analyze/analyze-condition.c.
 Unit.ConditionPathExists,        config_parse_unit_condition_path,   CONDITION_PATH_EXISTS,         offsetof(Unit, conditions)
 Unit.ConditionPathExistsGlob,    config_parse_unit_condition_path,   CONDITION_PATH_EXISTS_GLOB,    offsetof(Unit, conditions)
 Unit.ConditionPathIsDirectory,   config_parse_unit_condition_path,   CONDITION_PATH_IS_DIRECTORY,   offsetof(Unit, conditions)
@@ -297,6 +305,7 @@ Unit.AssertNull,                 config_parse_unit_condition_null,   0,         
 Unit.CollectMode,                config_parse_collect_mode,          0,                             offsetof(Unit, collect_mode)
 m4_dnl
 Service.PIDFile,                 config_parse_pid_file,              0,                             offsetof(Service, pid_file)
+Service.ExecCondition,           config_parse_exec,                  SERVICE_EXEC_CONDITION,        offsetof(Service, exec_command)
 Service.ExecStartPre,            config_parse_exec,                  SERVICE_EXEC_START_PRE,        offsetof(Service, exec_command)
 Service.ExecStart,               config_parse_exec,                  SERVICE_EXEC_START,            offsetof(Service, exec_command)
 Service.ExecStartPost,           config_parse_exec,                  SERVICE_EXEC_START_POST,       offsetof(Service, exec_command)
@@ -307,6 +316,7 @@ Service.RestartSec,              config_parse_sec,                   0,         
 Service.TimeoutSec,              config_parse_service_timeout,       0,                             0
 Service.TimeoutStartSec,         config_parse_service_timeout,       0,                             0
 Service.TimeoutStopSec,          config_parse_sec_fix_0,             0,                             offsetof(Service, timeout_stop_usec)
+Service.TimeoutAbortSec,         config_parse_service_timeout_abort, 0,                             0
 Service.RuntimeMaxSec,           config_parse_sec,                   0,                             offsetof(Service, runtime_max_usec)
 Service.WatchdogSec,             config_parse_sec,                   0,                             offsetof(Service, watchdog_usec)
 m4_dnl The following five only exist for compatibility, they moved into Unit, see above
@@ -333,6 +343,7 @@ Service.Sockets,                 config_parse_service_sockets,       0,         
 Service.BusPolicy,               config_parse_warn_compat,           DISABLED_LEGACY,               0
 Service.USBFunctionDescriptors,  config_parse_unit_path_printf,      0,                             offsetof(Service, usb_function_descriptors)
 Service.USBFunctionStrings,      config_parse_unit_path_printf,      0,                             offsetof(Service, usb_function_strings)
+Service.OOMPolicy,               config_parse_oom_policy,            0,                             offsetof(Service, oom_policy)
 EXEC_CONTEXT_CONFIG_ITEMS(Service)m4_dnl
 CGROUP_CONTEXT_CONFIG_ITEMS(Service)m4_dnl
 KILL_CONTEXT_CONFIG_ITEMS(Service)m4_dnl
@@ -354,8 +365,8 @@ Socket.ExecStartPost,            config_parse_exec,                  SOCKET_EXEC
 Socket.ExecStopPre,              config_parse_exec,                  SOCKET_EXEC_STOP_PRE,          offsetof(Socket, exec_command)
 Socket.ExecStopPost,             config_parse_exec,                  SOCKET_EXEC_STOP_POST,         offsetof(Socket, exec_command)
 Socket.TimeoutSec,               config_parse_sec_fix_0,             0,                             offsetof(Socket, timeout_usec)
-Socket.SocketUser,               config_parse_user_group,            0,                             offsetof(Socket, user)
-Socket.SocketGroup,              config_parse_user_group,            0,                             offsetof(Socket, group)
+Socket.SocketUser,               config_parse_user_group_compat,     0,                             offsetof(Socket, user)
+Socket.SocketGroup,              config_parse_user_group_compat,     0,                             offsetof(Socket, group)
 Socket.SocketMode,               config_parse_mode,                  0,                             offsetof(Socket, socket_mode)
 Socket.DirectoryMode,            config_parse_mode,                  0,                             offsetof(Socket, directory_mode)
 Socket.Accept,                   config_parse_bool,                  0,                             offsetof(Socket, accept)

@@ -14,7 +14,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  1 file changed, 24 insertions(+), 4 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index c35ef55..2e40e21 100644
+index 9e4f4fb..fc866e5 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -25,6 +25,7 @@
@@ -51,7 +51,7 @@ index c35ef55..2e40e21 100644
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -305,12 +325,12 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -307,12 +327,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -66,7 +66,7 @@ index c35ef55..2e40e21 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -355,13 +375,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -357,13 +377,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {

@@ -1,3 +1,36 @@
+systemd (243-2) experimental; urgency=medium
+
+  * Import patches from v243-stable branch (up to fab6f010ac)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 22 Sep 2019 12:46:02 +0200
+
+systemd (243-1) experimental; urgency=medium
+
+  * New upstream version 243
+  * Merge changes from unstable branch
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 05 Sep 2019 01:21:49 +0200
+
+systemd (243~rc2-1) experimental; urgency=medium
+
+  * New upstream version 243~rc2
+    - man: document that "systemd-analyze blame/critical-chain" is not useful
+      to track down job latency. (Closes: #920234)
+    - systemctl: process all units matched by a glob in the cat verb by
+      default. (Closes: #904913)
+    - units: automatically revert to /run logging on shutdown if necessary.
+      Prevents /var staying busy on shutdown due to journald.
+      (Closes: #851402)
+    - bash-completion: don't sort syslog priorities. (Closes: #913222)
+    - man: add example for setting multiple properties at once.
+      (Closes: #807464)
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * core: stop removing non-existent and duplicate lookup paths
+  * Install static-nodes-permissions.conf tmpfile in udev
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 31 Aug 2019 00:20:41 +0200
+
 systemd (242-7ubuntu2) eoan; urgency=medium
 
   [ Bryan Quigley ]

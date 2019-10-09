@@ -11,10 +11,8 @@
 #include "random-util.h"
 #include "resolved-dns-cache.h"
 #include "resolved-dns-transaction.h"
-#include "resolved-llmnr.h"
-#if ENABLE_DNS_OVER_TLS
 #include "resolved-dnstls.h"
-#endif
+#include "resolved-llmnr.h"
 #include "string-table.h"
 
 #define TRANSACTIONS_MAX 4096
@@ -268,7 +266,7 @@ static void dns_transaction_tentative(DnsTransaction *t, DnsPacket *p) {
                   t->id,
                   dns_resource_key_to_string(t->key, key_str, sizeof key_str),
                   dns_protocol_to_string(t->scope->protocol),
-                  t->scope->link ? t->scope->link->name : "*",
+                  t->scope->link ? t->scope->link->ifname : "*",
                   af_to_name_short(t->scope->family),
                   strnull(pretty));
 
@@ -333,7 +331,7 @@ void dns_transaction_complete(DnsTransaction *t, DnsTransactionState state) {
                   t->id,
                   dns_resource_key_to_string(t->key, key_str, sizeof key_str),
                   dns_protocol_to_string(t->scope->protocol),
-                  t->scope->link ? t->scope->link->name : "*",
+                  t->scope->link ? t->scope->link->ifname : "*",
                   af_to_name_short(t->scope->family),
                   st,
                   t->answer_source < 0 ? "none" : dns_transaction_source_to_string(t->answer_source),
@@ -674,7 +672,7 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
                 return;
 
         /* Caching disabled? */
-        if (!t->scope->manager->enable_cache)
+        if (t->scope->manager->enable_cache == DNS_CACHE_MODE_NO)
                 return;
 
         /* We never cache if this packet is from the local host, under
@@ -685,6 +683,7 @@ static void dns_transaction_cache_answer(DnsTransaction *t) {
                 return;
 
         dns_cache_put(&t->scope->cache,
+                      t->scope->manager->enable_cache,
                       t->key,
                       t->answer_rcode,
                       t->answer,
@@ -734,7 +733,7 @@ static int dns_transaction_dnssec_ready(DnsTransaction *t) {
                         }
 
                         /* Fall-through: NXDOMAIN/SERVFAIL is good enough for us. This is because some DNS servers
-                         * erronously return NXDOMAIN/SERVFAIL for empty non-terminals (Akamai...) or missing DS
+                         * erroneously return NXDOMAIN/SERVFAIL for empty non-terminals (Akamai...) or missing DS
                          * records (Facebook), and we need to handle that nicely, when asking for parent SOA or similar
                          * RRs to make unsigned proofs. */
 
@@ -1502,7 +1501,7 @@ static int dns_transaction_make_packet_mdns(DnsTransaction *t) {
         /*
          * For mDNS, we want to coalesce as many open queries in pending transactions into one single
          * query packet on the wire as possible. To achieve that, we iterate through all pending transactions
-         * in our current scope, and see whether their timing contraints allow them to be sent.
+         * in our current scope, and see whether their timing constraints allow them to be sent.
          */
 
         assert_se(sd_event_now(t->scope->manager->event, clock_boottime_or_monotonic(), &ts) >= 0);
@@ -1648,7 +1647,7 @@ int dns_transaction_go(DnsTransaction *t) {
                   t->id,
                   dns_resource_key_to_string(t->key, key_str, sizeof key_str),
                   dns_protocol_to_string(t->scope->protocol),
-                  t->scope->link ? t->scope->link->name : "*",
+                  t->scope->link ? t->scope->link->ifname : "*",
                   af_to_name_short(t->scope->family));
 
         if (!t->initial_jitter_scheduled &&
@@ -2026,7 +2025,7 @@ int dns_transaction_request_dnssec_keys(DnsTransaction *t) {
         if (t->answer_source != DNS_TRANSACTION_NETWORK)
                 return 0; /* We only need to validate stuff from the network */
         if (!dns_transaction_dnssec_supported(t))
-                return 0; /* If we can't do DNSSEC anyway there's no point in geting the auxiliary RRs */
+                return 0; /* If we can't do DNSSEC anyway there's no point in getting the auxiliary RRs */
 
         DNS_ANSWER_FOREACH(rr, t->answer) {
 
@@ -2066,7 +2065,7 @@ int dns_transaction_request_dnssec_keys(DnsTransaction *t) {
                          * RRs for stuff we didn't really ask for, and
                          * also to avoid request loops, where
                          * additional RRs from one transaction result
-                         * in another transaction whose additonal RRs
+                         * in another transaction whose additional RRs
                          * point back to the original transaction, and
                          * we deadlock. */
                         r = dns_name_endswith(dns_resource_key_name(t->key), rr->rrsig.signer);

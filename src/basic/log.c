@@ -87,11 +87,13 @@ static int log_open_console(void) {
         }
 
         if (console_fd < 3) {
-                console_fd = open_terminal("/dev/console", O_WRONLY|O_NOCTTY|O_CLOEXEC);
-                if (console_fd < 0)
-                        return console_fd;
+                int fd;
 
-                console_fd = fd_move_above_stdio(console_fd);
+                fd = open_terminal("/dev/console", O_WRONLY|O_NOCTTY|O_CLOEXEC);
+                if (fd < 0)
+                        return fd;
+
+                console_fd = fd_move_above_stdio(fd);
         }
 
         return 0;
@@ -336,7 +338,7 @@ static int write_to_console(
 
         char location[256], prefix[1 + DECIMAL_STR_MAX(int) + 2];
         struct iovec iovec[6] = {};
-        bool highlight;
+        const char *on = NULL, *off = NULL;
         size_t n = 0;
 
         if (console_fd < 0)
@@ -347,31 +349,36 @@ static int write_to_console(
                 iovec[n++] = IOVEC_MAKE_STRING(prefix);
         }
 
-        highlight = LOG_PRI(level) <= LOG_ERR && show_color;
+        if (show_color)
+                get_log_colors(LOG_PRI(level), &on, &off, NULL);
 
         if (show_location) {
-                (void) snprintf(location, sizeof location, "(%s:%i) ", file, line);
+                const char *lon = "", *loff = "";
+                if (show_color) {
+                        lon = ANSI_HIGHLIGHT_YELLOW4;
+                        loff = ANSI_NORMAL;
+                }
+
+                (void) snprintf(location, sizeof location, "%s%s:%i%s: ", lon, file, line, loff);
                 iovec[n++] = IOVEC_MAKE_STRING(location);
         }
 
-        if (highlight)
-                iovec[n++] = IOVEC_MAKE_STRING(ANSI_HIGHLIGHT_RED);
+        if (on)
+                iovec[n++] = IOVEC_MAKE_STRING(on);
         iovec[n++] = IOVEC_MAKE_STRING(buffer);
-        if (highlight)
-                iovec[n++] = IOVEC_MAKE_STRING(ANSI_NORMAL);
+        if (off)
+                iovec[n++] = IOVEC_MAKE_STRING(off);
         iovec[n++] = IOVEC_MAKE_STRING("\n");
 
         if (writev(console_fd, iovec, n) < 0) {
 
                 if (errno == EIO && getpid_cached() == 1) {
 
-                        /* If somebody tried to kick us from our
-                         * console tty (via vhangup() or suchlike),
-                         * try to reconnect */
+                        /* If somebody tried to kick us from our console tty (via vhangup() or suchlike), try
+                         * to reconnect. */
 
                         log_close_console();
-                        log_open_console();
-
+                        (void) log_open_console();
                         if (console_fd < 0)
                                 return 0;
 
@@ -579,7 +586,7 @@ int log_dispatch_internal(
                 level |= log_facility;
 
         if (open_when_needed)
-                log_open();
+                (void) log_open();
 
         do {
                 char *e;
@@ -622,7 +629,7 @@ int log_dispatch_internal(
                         k = write_to_kmsg(level, error, file, line, func, buffer);
                         if (k < 0) {
                                 log_close_kmsg();
-                                log_open_console();
+                                (void) log_open_console();
                         }
                 }
 
@@ -788,7 +795,7 @@ _noreturn_ void log_assert_failed_realm(
                 const char *file,
                 int line,
                 const char *func) {
-        log_open();
+        (void) log_open();
         log_assert(LOG_REALM_PLUS_LEVEL(realm, LOG_CRIT), text, file, line, func,
                    "Assertion '%s' failed at %s:%u, function %s(). Aborting.");
         abort();
@@ -800,7 +807,7 @@ _noreturn_ void log_assert_failed_unreachable_realm(
                 const char *file,
                 int line,
                 const char *func) {
-        log_open();
+        (void) log_open();
         log_assert(LOG_REALM_PLUS_LEVEL(realm, LOG_CRIT), text, file, line, func,
                    "Code should not be reached '%s' at %s:%u, function %s(). Aborting.");
         abort();
@@ -1094,9 +1101,10 @@ void log_parse_environment_realm(LogRealm realm) {
 
         const char *e;
 
-        if (get_ctty_devnr(0, NULL) < 0)
-                /* Only try to read the command line in daemons.  We assume that anything that has a controlling tty is
-                   user stuff. */
+        if (getpid_cached() == 1 || get_ctty_devnr(0, NULL) < 0)
+                /* Only try to read the command line in daemons. We assume that anything that has a
+                 * controlling tty is user stuff. For PID1 we do a special check in case it hasn't
+                 * closed the console yet. */
                 (void) proc_cmdline_parse(parse_proc_cmdline_item, NULL, PROC_CMDLINE_STRIP_RD_PREFIX);
 
         e = getenv("SYSTEMD_LOG_TARGET");
@@ -1109,11 +1117,11 @@ void log_parse_environment_realm(LogRealm realm) {
 
         e = getenv("SYSTEMD_LOG_COLOR");
         if (e && log_show_color_from_string(e) < 0)
-                log_warning("Failed to parse bool '%s'. Ignoring.", e);
+                log_warning("Failed to parse log color '%s'. Ignoring.", e);
 
         e = getenv("SYSTEMD_LOG_LOCATION");
         if (e && log_show_location_from_string(e) < 0)
-                log_warning("Failed to parse bool '%s'. Ignoring.", e);
+                log_warning("Failed to parse log location '%s'. Ignoring.", e);
 }
 
 LogTarget log_get_target(void) {
@@ -1231,18 +1239,29 @@ int log_syntax_internal(
         if (unit)
                 unit_fmt = getpid_cached() == 1 ? "UNIT=%s" : "USER_UNIT=%s";
 
-        if (config_file)
-                return log_struct_internal(
-                                LOG_REALM_PLUS_LEVEL(LOG_REALM_SYSTEMD, level),
-                                error,
-                                file, line, func,
-                                "MESSAGE_ID=" SD_MESSAGE_INVALID_CONFIGURATION_STR,
-                                "CONFIG_FILE=%s", config_file,
-                                "CONFIG_LINE=%u", config_line,
-                                LOG_MESSAGE("%s:%u: %s", config_file, config_line, buffer),
-                                unit_fmt, unit,
-                                NULL);
-        else if (unit)
+        if (config_file) {
+                if (config_line > 0)
+                        return log_struct_internal(
+                                        LOG_REALM_PLUS_LEVEL(LOG_REALM_SYSTEMD, level),
+                                        error,
+                                        file, line, func,
+                                        "MESSAGE_ID=" SD_MESSAGE_INVALID_CONFIGURATION_STR,
+                                        "CONFIG_FILE=%s", config_file,
+                                        "CONFIG_LINE=%u", config_line,
+                                        LOG_MESSAGE("%s:%u: %s", config_file, config_line, buffer),
+                                        unit_fmt, unit,
+                                        NULL);
+                else
+                        return log_struct_internal(
+                                        LOG_REALM_PLUS_LEVEL(LOG_REALM_SYSTEMD, level),
+                                        error,
+                                        file, line, func,
+                                        "MESSAGE_ID=" SD_MESSAGE_INVALID_CONFIGURATION_STR,
+                                        "CONFIG_FILE=%s", config_file,
+                                        LOG_MESSAGE("%s: %s", config_file, buffer),
+                                        unit_fmt, unit,
+                                        NULL);
+        } else if (unit)
                 return log_struct_internal(
                                 LOG_REALM_PLUS_LEVEL(LOG_REALM_SYSTEMD, level),
                                 error,
@@ -1337,5 +1356,5 @@ void log_setup_service(void) {
 
         log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
-        log_open();
+        (void) log_open();
 }

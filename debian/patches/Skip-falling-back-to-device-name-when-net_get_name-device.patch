@@ -9,14 +9,14 @@ upstream commit 6d36464065601f79a352367cf099be8907d8f9aa
  1 file changed, 2 deletions(-)
 
 diff --git a/src/libsystemd-network/network-internal.c b/src/libsystemd-network/network-internal.c
-index 2154cf7..1fb4355 100644
+index 1f2e5c7..0779bcf 100644
 --- a/src/libsystemd-network/network-internal.c
 +++ b/src/libsystemd-network/network-internal.c
-@@ -50,8 +50,6 @@ int net_get_unique_predictable_data(sd_device *device, uint64_t *result) {
-         /* net_get_name() will return one of the device names based on stable information about the
-          * device. If this is not available, we fall back to using the device name. */
-         name = net_get_name(device);
--        if (!name)
+@@ -51,8 +51,6 @@ int net_get_unique_predictable_data(sd_device *device, bool use_sysname, uint64_
+         /* net_get_name_persistent() will return one of the device names based on stable information about
+          * the device. If this is not available, we fall back to using the actual device name. */
+         name = net_get_name_persistent(device);
+-        if (!name && use_sysname)
 -                (void) sd_device_get_sysname(device, &name);
          if (!name)
                  return log_device_debug_errno(device, SYNTHETIC_ERRNO(ENODATA),

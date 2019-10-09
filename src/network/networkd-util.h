@@ -5,15 +5,17 @@
 #include "hash-funcs.h"
 #include "macro.h"
 
-typedef enum AddressFamilyBoolean {
+typedef enum AddressFamily {
         /* This is a bitmask, though it usually doesn't feel that way! */
-        ADDRESS_FAMILY_NO   = 0,
-        ADDRESS_FAMILY_IPV4 = 1 << 0,
-        ADDRESS_FAMILY_IPV6 = 1 << 1,
-        ADDRESS_FAMILY_YES  = ADDRESS_FAMILY_IPV4 | ADDRESS_FAMILY_IPV6,
-        _ADDRESS_FAMILY_BOOLEAN_MAX,
-        _ADDRESS_FAMILY_BOOLEAN_INVALID = -1,
-} AddressFamilyBoolean;
+        ADDRESS_FAMILY_NO             = 0,
+        ADDRESS_FAMILY_IPV4           = 1 << 0,
+        ADDRESS_FAMILY_IPV6           = 1 << 1,
+        ADDRESS_FAMILY_YES            = ADDRESS_FAMILY_IPV4 | ADDRESS_FAMILY_IPV6,
+        ADDRESS_FAMILY_FALLBACK_IPV4  = 1 << 2,
+        ADDRESS_FAMILY_FALLBACK       = ADDRESS_FAMILY_FALLBACK_IPV4 | ADDRESS_FAMILY_IPV6,
+        _ADDRESS_FAMILY_MAX,
+        _ADDRESS_FAMILY_INVALID = -1,
+} AddressFamily;
 
 typedef struct NetworkConfigSection {
         unsigned line;
@@ -21,11 +23,17 @@ typedef struct NetworkConfigSection {
         char filename[];
 } NetworkConfigSection;
 
-CONFIG_PARSER_PROTOTYPE(config_parse_address_family_boolean);
-CONFIG_PARSER_PROTOTYPE(config_parse_address_family_boolean_with_kernel);
+CONFIG_PARSER_PROTOTYPE(config_parse_link_local_address_family);
+CONFIG_PARSER_PROTOTYPE(config_parse_address_family_with_kernel);
 
-const char *address_family_boolean_to_string(AddressFamilyBoolean b) _const_;
-AddressFamilyBoolean address_family_boolean_from_string(const char *s) _const_;
+const char *address_family_to_string(AddressFamily b) _const_;
+AddressFamily address_family_from_string(const char *s) _pure_;
+
+const char *link_local_address_family_to_string(AddressFamily b) _const_;
+AddressFamily link_local_address_family_from_string(const char *s) _pure_;
+
+const char *routing_policy_rule_address_family_to_string(AddressFamily b) _const_;
+AddressFamily routing_policy_rule_address_family_from_string(const char *s) _pure_;
 
 int kernel_route_expiration_supported(void);
 
@@ -35,7 +43,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(NetworkConfigSection*, network_config_section_free);
 extern const struct hash_ops network_config_hash_ops;
 
 static inline bool section_is_invalid(NetworkConfigSection *section) {
-        /* If this retuns false, then it does _not_ mean the section is valid. */
+        /* If this returns false, then it does _not_ mean the section is valid. */
 
         if (!section)
                 return false;

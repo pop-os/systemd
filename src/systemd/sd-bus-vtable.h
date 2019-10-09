@@ -52,6 +52,15 @@ enum {
         _SD_BUS_VTABLE_PARAM_NAMES     = 1 << 0,
 };
 
+extern const unsigned sd_bus_object_vtable_format;
+
+/* Note: unused areas in the sd_bus_vtable[] array must be initialized to 0. The structure contains an embedded
+ * union, and the compiler is NOT required to initialize the unused areas of the union when the rest of the
+ * structure is initialized. Normally the array is defined as read-only data, in which case the linker places
+ * it in the BSS section, which is always fully initialized, so this is not a concern. But if the array is
+ * created on the stack or on the heap, care must be taken to initialize the unused areas, for examply by
+ * first memsetting the whole region to zero before filling the data in. */
+
 struct sd_bus_vtable {
         /* Please do not initialize this structure directly, use the
          * macros below instead */
@@ -62,6 +71,7 @@ struct sd_bus_vtable {
                 struct {
                         size_t element_size;
                         uint64_t features;
+                        const unsigned *vtable_format_reference;
                 } start;
                 struct {
                         const char *member;
@@ -93,7 +103,8 @@ struct sd_bus_vtable {
                 .x = {                                                  \
                     .start = {                                          \
                         .element_size = sizeof(sd_bus_vtable),          \
-                        .features = _SD_BUS_VTABLE_PARAM_NAMES          \
+                        .features = _SD_BUS_VTABLE_PARAM_NAMES,         \
+                        .vtable_format_reference = &sd_bus_object_vtable_format, \
                     },                                                  \
                 },                                                      \
         }

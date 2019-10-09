@@ -8,6 +8,7 @@
 #include "escape.h"
 #include "log.h"
 #include "path-lookup.h"
+#include "strv.h"
 
 static int environment_dirs(char ***ret) {
         _cleanup_strv_free_ char **dirs = NULL;
@@ -26,6 +27,13 @@ static int environment_dirs(char ***ret) {
         r = strv_extend_front(&dirs, c);
         if (r < 0)
                 return r;
+
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *t;
+
+                t = strv_join(dirs, "\n\t");
+                log_debug("Looking for environment.d files in (higher priority first):\n\t%s", strna(t));
+        }
 
         *ret = TAKE_PTR(dirs);
         return 0;
@@ -48,6 +56,8 @@ static int load_and_print(void) {
          * that in case of failure, a partial update is better than none. */
 
         STRV_FOREACH(i, files) {
+                log_debug("Reading %s…", *i);
+
                 r = merge_env_file(&env, NULL, *i);
                 if (r == -ENOMEM)
                         return r;

@@ -99,7 +99,7 @@ static int files_add(
 
                 /* Does this node have the executable bit set? */
                 if (flags & CONF_FILES_EXECUTABLE)
-                        /* As requested: check if the file is marked exectuable. Note that we don't check access(X_OK)
+                        /* As requested: check if the file is marked executable. Note that we don't check access(X_OK)
                          * here, as we care about whether the file is marked executable at all, and not whether it is
                          * executable for us, because if so, such errors are stuff we should log about. */
 
@@ -115,7 +115,7 @@ static int files_add(
 
                         key = p;
                 } else {
-                        p = strjoin(dirpath, "/", de->d_name);
+                        p = path_join(dirpath, de->d_name);
                         if (!p)
                                 return -ENOMEM;
 
@@ -207,7 +207,7 @@ int conf_files_insert(char ***strv, const char *root, char **dirs, const char *p
                                 _cleanup_free_ char *rdir = NULL;
                                 char *p1, *p2;
 
-                                rdir = prefix_root(root, *dir);
+                                rdir = path_join(root, *dir);
                                 if (!rdir)
                                         return -ENOMEM;
 
@@ -221,7 +221,7 @@ int conf_files_insert(char ***strv, const char *root, char **dirs, const char *p
                                 if (p2) {
                                         /* Our new entry has higher priority */
 
-                                        t = prefix_root(root, path);
+                                        t = path_join(root, path);
                                         if (!t)
                                                 return log_oom();
 
@@ -238,7 +238,7 @@ int conf_files_insert(char ***strv, const char *root, char **dirs, const char *p
         }
 
         /* The new file has lower priority than all the existing entries */
-        t = prefix_root(root, path);
+        t = path_join(root, path);
         if (!t)
                 return -ENOMEM;
 
@@ -313,7 +313,7 @@ int conf_files_list_with_replacement(
                 if (r < 0)
                         return log_error_errno(r, "Failed to extend config file list: %m");
 
-                p = prefix_root(root, replacement);
+                p = path_join(root, replacement);
                 if (!p)
                         return log_oom();
         }

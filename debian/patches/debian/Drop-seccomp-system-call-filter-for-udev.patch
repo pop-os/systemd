@@ -17,10 +17,10 @@ Closes: #903224
  1 file changed, 2 deletions(-)
 
 diff --git a/units/systemd-udevd.service.in b/units/systemd-udevd.service.in
-index e8a76cc..1bffeb1 100644
+index dbb678a..62931f0 100644
 --- a/units/systemd-udevd.service.in
 +++ b/units/systemd-udevd.service.in
-@@ -31,8 +31,6 @@ MemoryDenyWriteExecute=yes
+@@ -32,8 +32,6 @@ MemoryDenyWriteExecute=yes
  RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
  RestrictRealtime=yes
  RestrictSUIDSGID=yes

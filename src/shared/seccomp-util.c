@@ -651,6 +651,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "fork\0"
                 "getrusage\0"
                 "kill\0"
+                "pidfd_send_signal\0"
                 "prctl\0"
                 "rt_sigqueueinfo\0"
                 "rt_tgsigqueueinfo\0"
@@ -759,6 +760,7 @@ const SyscallFilterSet syscall_filter_sets[_SYSCALL_FILTER_SET_MAX] = {
                 "msync\0"
                 "sync\0"
                 "sync_file_range\0"
+                "sync_file_range2\0"
                 "syncfs\0"
         },
         [SYSCALL_FILTER_SET_SYSTEM_SERVICE] = {
@@ -952,7 +954,7 @@ int seccomp_load_syscall_filter_set(uint32_t default_action, const SyscallFilter
                         return log_debug_errno(r, "Failed to add filter set: %m");
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1007,7 +1009,7 @@ int seccomp_load_syscall_filter_set_raw(uint32_t default_action, Hashmap* set, u
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install filter set for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1193,7 +1195,7 @@ int seccomp_restrict_namespaces(unsigned long retain) {
                         continue;
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install namespace restriction rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1230,7 +1232,7 @@ int seccomp_protect_sysctl(void) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install sysctl protection rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1394,7 +1396,7 @@ int seccomp_restrict_address_families(Set *address_families, bool whitelist) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install socket family rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1471,7 +1473,7 @@ int seccomp_restrict_realtime(void) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install realtime protection rules for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1520,6 +1522,7 @@ int seccomp_memory_deny_write_execute(void) {
                 switch (arch) {
 
                 case SCMP_ARCH_X86:
+                case SCMP_ARCH_S390:
                         filter_syscall = SCMP_SYS(mmap2);
                         block_syscall = SCMP_SYS(mmap);
                         shmat_syscall = SCMP_SYS(shmat);
@@ -1544,13 +1547,14 @@ int seccomp_memory_deny_write_execute(void) {
                 case SCMP_ARCH_X86_64:
                 case SCMP_ARCH_X32:
                 case SCMP_ARCH_AARCH64:
-                        filter_syscall = SCMP_SYS(mmap); /* amd64, x32, and arm64 have only mmap */
+                case SCMP_ARCH_S390X:
+                        filter_syscall = SCMP_SYS(mmap); /* amd64, x32, s390x, and arm64 have only mmap */
                         shmat_syscall = SCMP_SYS(shmat);
                         break;
 
                 /* Please add more definitions here, if you port systemd to other architectures! */
 
-#if !defined(__i386__) && !defined(__x86_64__) && !defined(__powerpc__) && !defined(__powerpc64__) && !defined(__arm__) && !defined(__aarch64__)
+#if !defined(__i386__) && !defined(__x86_64__) && !defined(__powerpc__) && !defined(__powerpc64__) && !defined(__arm__) && !defined(__aarch64__) && !defined(__s390__) && !defined(__s390x__)
 #warning "Consider adding the right mmap() syscall definitions here!"
 #endif
                 }
@@ -1598,7 +1602,7 @@ int seccomp_memory_deny_write_execute(void) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to install MemoryDenyWriteExecute= rule for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1651,7 +1655,7 @@ int seccomp_restrict_archs(Set *archs) {
                 return r;
 
         r = seccomp_load(seccomp);
-        if (IN_SET(r, -EPERM, -EACCES))
+        if (ERRNO_IS_SECCOMP_FATAL(r))
                 return r;
         if (r < 0)
                 log_debug_errno(r, "Failed to restrict system call architectures, skipping: %m");
@@ -1753,7 +1757,7 @@ int seccomp_lock_personality(unsigned long personality) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to enable personality lock for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1794,7 +1798,7 @@ int seccomp_protect_hostname(void) {
                 }
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to apply hostname restrictions for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
@@ -1956,11 +1960,26 @@ int seccomp_restrict_suid_sgid(void) {
                         continue;
 
                 r = seccomp_load(seccomp);
-                if (IN_SET(r, -EPERM, -EACCES))
+                if (ERRNO_IS_SECCOMP_FATAL(r))
                         return r;
                 if (r < 0)
                         log_debug_errno(r, "Failed to apply suid/sgid restrictions for architecture %s, skipping: %m", seccomp_arch_to_string(arch));
         }
 
         return 0;
+}
+
+uint32_t scmp_act_kill_process(void) {
+
+        /* Returns SCMP_ACT_KILL_PROCESS if it's supported, and SCMP_ACT_KILL_THREAD otherwise. We never
+         * actually want to use SCMP_ACT_KILL_THREAD as its semantics are nuts (killing arbitrary threads of
+         * a program is just a bad idea), but on old kernels/old libseccomp it is all we have, and at least
+         * for single-threaded apps does the right thing. */
+
+#ifdef SCMP_ACT_KILL_PROCESS
+        if (seccomp_api_get() >= 3)
+                return SCMP_ACT_KILL_PROCESS;
+#endif
+
+        return SCMP_ACT_KILL; /* same as SCMP_ACT_KILL_THREAD */
 }

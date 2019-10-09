@@ -260,6 +260,8 @@ static int address_add_internal(Link *link, Set **addresses,
         r = set_put(*addresses, address);
         if (r < 0)
                 return r;
+        if (r == 0)
+                return -EEXIST;
 
         address->link = link;
 
@@ -490,7 +492,7 @@ int address_remove(
 }
 
 static int address_acquire(Link *link, Address *original, Address **ret) {
-        union in_addr_union in_addr = {};
+        union in_addr_union in_addr = IN_ADDR_NULL;
         struct in_addr broadcast = {};
         _cleanup_(address_freep) Address *na = NULL;
         int r;
@@ -665,7 +667,7 @@ int address_configure(
                 return log_link_error_errno(link, r, "Could not add address: %m");
         }
 
-        return 0;
+        return 1;
 }
 
 int config_parse_broadcast(
@@ -787,8 +789,8 @@ int config_parse_address(const char *unit,
         else
                 n->in_addr_peer = buffer;
 
-        if (n->family == AF_INET && n->broadcast.s_addr == 0)
-                n->broadcast.s_addr = n->in_addr.in.s_addr | htonl(0xfffffffflu >> n->prefixlen);
+        if (n->family == AF_INET && n->broadcast.s_addr == 0 && n->prefixlen <= 30)
+                n->broadcast.s_addr = n->in_addr.in.s_addr | htobe32(0xfffffffflu >> n->prefixlen);
 
         n = NULL;
 
@@ -971,10 +973,7 @@ int config_parse_address_scope(const char *unit,
 bool address_is_ready(const Address *a) {
         assert(a);
 
-        if (a->family == AF_INET6)
-                return !(a->flags & IFA_F_TENTATIVE);
-        else
-                return !(a->flags & (IFA_F_TENTATIVE | IFA_F_DEPRECATED));
+        return !(a->flags & IFA_F_TENTATIVE);
 }
 
 int address_section_verify(Address *address) {

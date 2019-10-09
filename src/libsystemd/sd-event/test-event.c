@@ -10,6 +10,7 @@
 #include "log.h"
 #include "macro.h"
 #include "parse-util.h"
+#include "path-util.h"
 #include "process-util.h"
 #include "rm-rf.h"
 #include "signal-util.h"
@@ -394,7 +395,7 @@ static int inotify_handler(sd_event_source *s, const struct inotify_event *ev, v
         } else if (ev->mask & IN_CREATE) {
                 unsigned i;
 
-                log_info("inotify-handler <%s>: create on %s", description, ev->name);
+                log_debug("inotify-handler <%s>: create on %s", description, ev->name);
 
                 if (!streq(ev->name, "sub")) {
                         assert_se(safe_atou(ev->name, &i) >= 0);
@@ -464,7 +465,7 @@ static void test_inotify(unsigned n_create_events) {
                 _cleanup_free_ char *z;
 
                 xsprintf(buf, "%u", i);
-                assert_se(z = strjoin(p, "/", buf));
+                assert_se(z = path_join(p, buf));
 
                 assert_se(touch(z) >= 0);
         }
@@ -482,7 +483,7 @@ static void test_inotify(unsigned n_create_events) {
 }
 
 int main(int argc, char *argv[]) {
-        test_setup_logging(LOG_DEBUG);
+        test_setup_logging(LOG_INFO);
 
         test_basic();
         test_sd_event_now();

@@ -4,7 +4,6 @@
 #include <fcntl.h>
 #include <linux/kd.h>
 #include <signal.h>
-#include <stdio_ext.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/inotify.h>
@@ -47,6 +46,7 @@
 #include "fs-util.h"
 #include "hashmap.h"
 #include "io-util.h"
+#include "install.h"
 #include "label.h"
 #include "locale-setup.h"
 #include "log.h"
@@ -90,7 +90,7 @@
 #define JOBS_IN_PROGRESS_PERIOD_USEC (USEC_PER_SEC / 3)
 #define JOBS_IN_PROGRESS_PERIOD_DIVISOR 3
 
-/* If there are more than 1K bus messages queue across our API and direct busses, then let's not add more on top until
+/* If there are more than 1K bus messages queue across our API and direct buses, then let's not add more on top until
  * the queue gets more empty. */
 #define MANAGER_BUS_BUSY_THRESHOLD 1024LU
 
@@ -232,7 +232,7 @@ static void manager_print_jobs_in_progress(Manager *m) {
                               "%sA %s job is running for %s (%s / %s)",
                               strempty(job_of_n),
                               job_type_to_string(j->type),
-                              unit_description(j->unit),
+                              unit_status_string(j->unit),
                               time, limit);
 }
 
@@ -288,7 +288,7 @@ static int manager_check_ask_password(Manager *m) {
         if (!m->ask_password_event_source) {
                 assert(m->ask_password_inotify_fd < 0);
 
-                mkdir_p_label("/run/systemd/ask-password", 0755);
+                (void) mkdir_p_label("/run/systemd/ask-password", 0755);
 
                 m->ask_password_inotify_fd = inotify_init1(IN_NONBLOCK|IN_CLOEXEC);
                 if (m->ask_password_inotify_fd < 0)
@@ -603,6 +603,8 @@ static char** sanitize_environment(char **l) {
 }
 
 int manager_default_environment(Manager *m) {
+        int r;
+
         assert(m);
 
         m->transient_environment = strv_free(m->transient_environment);
@@ -616,16 +618,29 @@ int manager_default_environment(Manager *m) {
                  * /proc/self/environ valid; it is used for tagging
                  * the init process inside containers. */
                 m->transient_environment = strv_new("PATH=" DEFAULT_PATH);
+                if (!m->transient_environment)
+                        return log_oom();
 
                 /* Import locale variables LC_*= from configuration */
                 (void) locale_setup(&m->transient_environment);
-        } else
-                /* The user manager passes its own environment
-                 * along to its children. */
-                m->transient_environment = strv_copy(environ);
+        } else {
+                _cleanup_free_ char *k = NULL;
 
-        if (!m->transient_environment)
-                return log_oom();
+                /* The user manager passes its own environment
+                 * along to its children, except for $PATH. */
+                m->transient_environment = strv_copy(environ);
+                if (!m->transient_environment)
+                        return log_oom();
+
+                k = strdup("PATH=" DEFAULT_USER_PATH);
+                if (!k)
+                        return log_oom();
+
+                r = strv_env_replace(&m->transient_environment, k);
+                if (r < 0)
+                        return log_oom();
+                TAKE_PTR(k);
+        }
 
         sanitize_environment(m->transient_environment);
 
@@ -672,6 +687,13 @@ static int manager_setup_prefix(Manager *m) {
         }
 
         return 0;
+}
+
+static void manager_free_unit_name_maps(Manager *m) {
+        m->unit_id_map = hashmap_free(m->unit_id_map);
+        m->unit_name_map = hashmap_free(m->unit_name_map);
+        m->unit_path_cache = set_free_free(m->unit_path_cache);
+        m->unit_cache_mtime =  0;
 }
 
 static int manager_setup_run_queue(Manager *m) {
@@ -735,6 +757,8 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
                 .unit_file_scope = scope,
                 .objective = _MANAGER_OBJECTIVE_INVALID,
 
+                .status_unit_format = STATUS_UNIT_FORMAT_DEFAULT,
+
                 .default_timer_accuracy_usec = USEC_PER_MINUTE,
                 .default_memory_accounting = MEMORY_ACCOUNTING_DEFAULT,
                 .default_tasks_accounting = true,
@@ -764,6 +788,8 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
                 .have_ask_password = -EINVAL, /* we don't know */
                 .first_boot = -1,
                 .test_run_flags = test_run_flags,
+
+                .default_oom_policy = OOM_STOP,
         };
 
 #if ENABLE_EFI
@@ -808,6 +834,10 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
                 return r;
 
         r = hashmap_ensure_allocated(&m->watch_bus, &string_hash_ops);
+        if (r < 0)
+                return r;
+
+        r = prioq_ensure_allocated(&m->run_queue, compare_job_priority);
         if (r < 0)
                 return r;
 
@@ -890,7 +920,7 @@ static int manager_setup_notify(Manager *m) {
 
                 fd_inc_rcvbuf(fd, NOTIFY_RCVBUF_SIZE);
 
-                m->notify_socket = strappend(m->prefix[EXEC_DIRECTORY_RUNTIME], "/systemd/notify");
+                m->notify_socket = path_join(m->prefix[EXEC_DIRECTORY_RUNTIME], "systemd/notify");
                 if (!m->notify_socket)
                         return log_oom();
 
@@ -992,11 +1022,10 @@ static int manager_setup_cgroups_agent(Manager *m) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to allocate cgroups agent event source: %m");
 
-                /* Process cgroups notifications early, but after having processed service notification messages or
-                 * SIGCHLD signals, so that a cgroup running empty is always just the last safety net of notification,
-                 * and we collected the metadata the notification and SIGCHLD stuff offers first. Also see handling of
-                 * cgroup inotify for the unified cgroup stuff. */
-                r = sd_event_source_set_priority(m->cgroups_agent_event_source, SD_EVENT_PRIORITY_NORMAL-4);
+                /* Process cgroups notifications early. Note that when the agent notification is received
+                 * we'll just enqueue the unit in the cgroup empty queue, hence pick a high priority than
+                 * that. Also see handling of cgroup inotify for the unified cgroup stuff. */
+                r = sd_event_source_set_priority(m->cgroups_agent_event_source, SD_EVENT_PRIORITY_NORMAL-9);
                 if (r < 0)
                         return log_error_errno(r, "Failed to set priority of cgroups agent event source: %m");
 
@@ -1051,7 +1080,7 @@ static int manager_setup_user_lookup_fd(Manager *m) {
                  * resolutions */
                 r = sd_event_source_set_priority(m->user_lookup_event_source, SD_EVENT_PRIORITY_NORMAL-11);
                 if (r < 0)
-                        return log_error_errno(errno, "Failed to set priority ot user lookup event source: %m");
+                        return log_error_errno(errno, "Failed to set priority of user lookup event source: %m");
 
                 (void) sd_event_source_set_description(m->user_lookup_event_source, "user-lookup");
         }
@@ -1272,7 +1301,7 @@ static void manager_clear_jobs_and_units(Manager *m) {
         manager_dispatch_cleanup_queue(m);
 
         assert(!m->load_queue);
-        assert(!m->run_queue);
+        assert(prioq_isempty(m->run_queue));
         assert(!m->dbus_unit_queue);
         assert(!m->dbus_job_queue);
         assert(!m->cleanup_queue);
@@ -1321,6 +1350,8 @@ Manager* manager_free(Manager *m) {
         hashmap_free(m->watch_pids);
         hashmap_free(m->watch_bus);
 
+        prioq_free(m->run_queue);
+
         set_free(m->startup_units);
         set_free(m->failed_units);
 
@@ -1354,7 +1385,7 @@ Manager* manager_free(Manager *m) {
         strv_free(m->client_environment);
 
         hashmap_free(m->cgroup_unit);
-        set_free_free(m->unit_path_cache);
+        manager_free_unit_name_maps(m);
 
         free(m->switch_root);
         free(m->switch_root_init);
@@ -1378,6 +1409,9 @@ static void manager_enumerate_perpetual(Manager *m) {
 
         assert(m);
 
+        if (m->test_run_flags == MANAGER_TEST_RUN_MINIMAL)
+                return;
+
         /* Let's ask every type to load all units from disk/kernel that it might know */
         for (c = 0; c < _UNIT_TYPE_MAX; c++) {
                 if (!unit_type_supported(c)) {
@@ -1394,6 +1428,9 @@ static void manager_enumerate(Manager *m) {
         UnitType c;
 
         assert(m);
+
+        if (m->test_run_flags == MANAGER_TEST_RUN_MINIMAL)
+                return;
 
         /* Let's ask every type to load all units from disk/kernel that it might know */
         for (c = 0; c < _UNIT_TYPE_MAX; c++) {
@@ -1450,56 +1487,6 @@ static void manager_catchup(Manager *m) {
 
                 unit_catchup(u);
         }
-}
-
-static void manager_build_unit_path_cache(Manager *m) {
-        char **i;
-        int r;
-
-        assert(m);
-
-        set_free_free(m->unit_path_cache);
-
-        m->unit_path_cache = set_new(&path_hash_ops);
-        if (!m->unit_path_cache) {
-                r = -ENOMEM;
-                goto fail;
-        }
-
-        /* This simply builds a list of files we know exist, so that
-         * we don't always have to go to disk */
-
-        STRV_FOREACH(i, m->lookup_paths.search_path) {
-                _cleanup_closedir_ DIR *d = NULL;
-                struct dirent *de;
-
-                d = opendir(*i);
-                if (!d) {
-                        if (errno != ENOENT)
-                                log_warning_errno(errno, "Failed to open directory %s, ignoring: %m", *i);
-                        continue;
-                }
-
-                FOREACH_DIRENT(de, d, r = -errno; goto fail) {
-                        char *p;
-
-                        p = strjoin(streq(*i, "/") ? "" : *i, "/", de->d_name);
-                        if (!p) {
-                                r = -ENOMEM;
-                                goto fail;
-                        }
-
-                        r = set_consume(m->unit_path_cache, p);
-                        if (r < 0)
-                                goto fail;
-                }
-        }
-
-        return;
-
-fail:
-        log_warning_errno(r, "Failed to build unit path cache, proceeding without: %m");
-        m->unit_path_cache = set_free_free(m->unit_path_cache);
 }
 
 static void manager_distribute_fds(Manager *m, FDSet *fds) {
@@ -1657,11 +1644,7 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
 
         manager_preset_all(m);
 
-        r = lookup_paths_reduce(&m->lookup_paths);
-        if (r < 0)
-                log_warning_errno(r, "Failed ot reduce unit file paths, ignoring: %m");
-
-        manager_build_unit_path_cache(m);
+        lookup_paths_log(&m->lookup_paths);
 
         {
                 /* This block is (optionally) done with the reloading counter bumped */
@@ -1709,7 +1692,7 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds) {
                 /* Connect to the bus if we are good for it */
                 manager_setup_bus(m);
 
-                /* Now that we are connected to all possible busses, let's deserialize who is tracking us. */
+                /* Now that we are connected to all possible buses, let's deserialize who is tracking us. */
                 r = bus_track_coldplug(m, &m->subscribed, false, m->deserialized_subscribed);
                 if (r < 0)
                         log_warning_errno(r, "Failed to deserialized tracked clients, ignoring: %m");
@@ -2088,13 +2071,15 @@ void manager_dump(Manager *m, FILE *f, const char *prefix) {
         assert(f);
 
         for (q = 0; q < _MANAGER_TIMESTAMP_MAX; q++) {
-                char buf[FORMAT_TIMESTAMP_MAX];
+                const dual_timestamp *t = m->timestamps + q;
+                char buf[CONST_MAX(FORMAT_TIMESPAN_MAX, FORMAT_TIMESTAMP_MAX)];
 
-                if (dual_timestamp_is_set(m->timestamps + q))
+                if (dual_timestamp_is_set(t))
                         fprintf(f, "%sTimestamp %s: %s\n",
                                 strempty(prefix),
                                 manager_timestamp_to_string(q),
-                                format_timestamp(buf, sizeof(buf), m->timestamps[q].realtime));
+                                timestamp_is_set(t->realtime) ? format_timestamp(buf, sizeof buf, t->realtime) :
+                                                                format_timespan(buf, sizeof buf, t->monotonic, 1));
         }
 
         manager_dump_units(m, f, prefix);
@@ -2110,11 +2095,9 @@ int manager_get_dump_string(Manager *m, char **ret) {
         assert(m);
         assert(ret);
 
-        f = open_memstream(&dump, &size);
+        f = open_memstream_unlocked(&dump, &size);
         if (!f)
                 return -errno;
-
-        (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
 
         manager_dump(m, f, NULL);
 
@@ -2156,7 +2139,7 @@ static int manager_dispatch_run_queue(sd_event_source *source, void *userdata) {
         assert(source);
         assert(m);
 
-        while ((j = m->run_queue)) {
+        while ((j = prioq_peek(m->run_queue))) {
                 assert(j->installed);
                 assert(j->in_run_queue);
 
@@ -2197,8 +2180,8 @@ static unsigned manager_dispatch_dbus_queue(Manager *m) {
                  * overly full before this call we shouldn't increase it in size too wildly in one step, and we
                  * shouldn't monopolize CPU time with generating these messages. Note the difference in counting of
                  * this "budget" and the "threshold" above: the "budget" is decreased only once per generated message,
-                 * regardless how many busses/direct connections it is enqueued on, while the "threshold" is applied to
-                 * each queued instance of bus message, i.e. if the same message is enqueued to five busses/direct
+                 * regardless how many buses/direct connections it is enqueued on, while the "threshold" is applied to
+                 * each queued instance of bus message, i.e. if the same message is enqueued to five buses/direct
                  * connections it will be counted five times. This difference in counting ("references"
                  * vs. "instances") is primarily a result of the fact that it's easier to implement it this way,
                  * however it also reflects the thinking that the "threshold" should put a limit on used queue memory,
@@ -2474,7 +2457,7 @@ static int manager_dispatch_sigchld(sd_event_source *source, void *userdata) {
         assert(source);
         assert(m);
 
-        /* First we call waitd() for a PID and do not reap the zombie. That way we can still access /proc/$PID for it
+        /* First we call waitid() for a PID and do not reap the zombie. That way we can still access /proc/$PID for it
          * while it is a zombie. */
 
         if (waitid(P_ALL, 0, &si, WEXITED|WNOHANG|WNOWAIT) < 0) {
@@ -2513,7 +2496,7 @@ static int manager_dispatch_sigchld(sd_event_source *source, void *userdata) {
                 if (array) {
                         size_t n = 0;
 
-                        /* Cound how many entries the array has */
+                        /* Count how many entries the array has */
                         while (array[n])
                                 n++;
 
@@ -2526,8 +2509,13 @@ static int manager_dispatch_sigchld(sd_event_source *source, void *userdata) {
                 /* Finally, execute them all. Note that u1, u2 and the array might contain duplicates, but
                  * that's fine, manager_invoke_sigchld_event() will ensure we only invoke the handlers once for
                  * each iteration. */
-                if (u1)
+                if (u1) {
+                        /* We check for oom condition, in case we got SIGCHLD before the oom notification.
+                         * We only do this for the cgroup the PID belonged to. */
+                        (void) unit_check_oom(u1);
+
                         manager_invoke_sigchld_event(m, u1, &si);
+                }
                 if (u2)
                         manager_invoke_sigchld_event(m, u2, &si);
                 if (array_copy)
@@ -2874,9 +2862,6 @@ int manager_loop(Manager *m) {
         assert(m);
         assert(m->objective == MANAGER_OK); /* Ensure manager_startup() has been called */
 
-        /* Release the path cache */
-        m->unit_path_cache = set_free_free(m->unit_path_cache);
-
         manager_check_finished(m);
 
         /* There might still be some zombies hanging around from before we were exec()'ed. Let's reap them. */
@@ -2887,7 +2872,7 @@ int manager_loop(Manager *m) {
         while (m->objective == MANAGER_OK) {
                 usec_t wait_usec;
 
-                if (m->runtime_watchdog > 0 && m->runtime_watchdog != USEC_INFINITY && MANAGER_IS_SYSTEM(m))
+                if (timestamp_is_set(m->runtime_watchdog) && MANAGER_IS_SYSTEM(m))
                         watchdog_ping();
 
                 if (!ratelimit_below(&rl)) {
@@ -2918,7 +2903,7 @@ int manager_loop(Manager *m) {
                         continue;
 
                 /* Sleep for half the watchdog time */
-                if (m->runtime_watchdog > 0 && m->runtime_watchdog != USEC_INFINITY && MANAGER_IS_SYSTEM(m)) {
+                if (timestamp_is_set(m->runtime_watchdog) && MANAGER_IS_SYSTEM(m)) {
                         wait_usec = m->runtime_watchdog / 2;
                         if (wait_usec <= 0)
                                 wait_usec = 1;
@@ -3548,11 +3533,10 @@ int manager_reload(Manager *m) {
         (void) manager_run_environment_generators(m);
         (void) manager_run_generators(m);
 
-        r = lookup_paths_reduce(&m->lookup_paths);
-        if (r < 0)
-                log_warning_errno(r, "Failed ot reduce unit file paths, ignoring: %m");
+        lookup_paths_log(&m->lookup_paths);
 
-        manager_build_unit_path_cache(m);
+        /* We flushed out generated files, for which we don't watch mtime, so we should flush the old map. */
+        manager_free_unit_name_maps(m);
 
         /* First, enumerate what we can from kernel and suchlike */
         manager_enumerate_perpetual(m);
@@ -4099,9 +4083,10 @@ static bool manager_get_show_status(Manager *m, StatusType type) {
 
 const char *manager_get_confirm_spawn(Manager *m) {
         static int last_errno = 0;
-        const char *vc = m->confirm_spawn;
         struct stat st;
         int r;
+
+        assert(m);
 
         /* Here's the deal: we want to test the validity of the console but don't want
          * PID1 to go through the whole console process which might block. But we also
@@ -4118,25 +4103,26 @@ const char *manager_get_confirm_spawn(Manager *m) {
          * reason the configured console is not ready, we fallback to the default
          * console. */
 
-        if (!vc || path_equal(vc, "/dev/console"))
-                return vc;
+        if (!m->confirm_spawn || path_equal(m->confirm_spawn, "/dev/console"))
+                return m->confirm_spawn;
 
-        r = stat(vc, &st);
-        if (r < 0)
+        if (stat(m->confirm_spawn, &st) < 0) {
+                r = -errno;
                 goto fail;
+        }
 
         if (!S_ISCHR(st.st_mode)) {
-                errno = ENOTTY;
+                r = -ENOTTY;
                 goto fail;
         }
 
         last_errno = 0;
-        return vc;
+        return m->confirm_spawn;
+
 fail:
-        if (last_errno != errno) {
-                last_errno = errno;
-                log_warning_errno(errno, "Failed to open %s: %m, using default console", vc);
-        }
+        if (last_errno != r)
+                last_errno = log_warning_errno(r, "Failed to open %s, using default console: %m", m->confirm_spawn);
+
         return "/dev/console";
 }
 
@@ -4715,3 +4701,11 @@ static const char *const manager_timestamp_table[_MANAGER_TIMESTAMP_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(manager_timestamp, ManagerTimestamp);
+
+static const char* const oom_policy_table[_OOM_POLICY_MAX] = {
+        [OOM_CONTINUE] = "continue",
+        [OOM_STOP] = "stop",
+        [OOM_KILL] = "kill",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(oom_policy, OOMPolicy);
