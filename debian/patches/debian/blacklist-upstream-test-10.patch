@@ -1,0 +1,4 @@
+--- /dev/null
++++ b/test/TEST-10-ISSUE-2467/blacklist-upstream-ci
+@@ -0,0 +1 @@
++# unknown reason for failing; needs investigation

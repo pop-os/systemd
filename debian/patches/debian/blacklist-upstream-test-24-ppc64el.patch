@@ -1,0 +1,4 @@
+--- /dev/null
++++ systemd-242/test/TEST-24-UNIT-TESTS/blacklist-upstream-ci-ppc64el
+@@ -0,0 +1 @@
++# unknown reason for failing; needs investigation

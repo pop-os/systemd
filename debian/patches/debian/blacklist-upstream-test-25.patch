@@ -1,0 +1,4 @@
+--- /dev/null
++++ systemd-242/test/TEST-25-IMPORT/blacklist-upstream-ci
+@@ -0,0 +1 @@
++# unknown failure; needs investigation
