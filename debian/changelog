@@ -215,8 +215,35 @@ systemd (243-2ubuntu1) UNRELEASED; urgency=medium
   * debian/tests/boot-smoke: Drop part of the delta to gain better debug info
     File: debian/tests/boot-smoke
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=06715f3af3099cae57768de99d1b84fecca5a15d
+  * Revert upstream adding LINK_STATE_INITIALIZED because it breaks netplan.io's
+    ethernets autopkgtest.
+    Files:
+    - debian/patches/Revert-network-fix-assertion-when-link-get-carrier.patch
+    - debian/patches/Revert-network-prevent-interfaces-to-be-initialized-multi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=70e93c2a05f0f7435614f8d52944d726601e319c
+  * d/e/checkout-upstream: UPSTREAM_REPO can override default systemd repo
+    File: debian/extra/checkout-upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a658380b58e5082e79476096fe7ee85358546f64
+  * debian/extra/checkout-upstream: rebase only PRs on upstream master.
+    This fixes testing arbitrary upstream commits with UPSTREAM_HEAD=<commit-id>.
+    File: debian/extra/checkout-upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7b8d2ae3cc68e7c388ce9ef7189c0451745ad6c2
+  * d/e/checkout-upstream: Add KEEP_DEBIAN_PATCHES option to keep patches.
+    The Debian patches that apply cleanly are kept when KEEP_DEBIAN_PATCHES
+    is set to give a better picture of how the tested upstream version
+    would work packaged.
+    File: debian/extra/checkout-upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a69135efeb8ee0bb92ff56523c117db2585922c4
+  * d/e/checkout-upstream: Keep all autopkgtests when KEEP_DEBIAN_TESTS is set
+    File: debian/extra/checkout-upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=50ae2b41d87a7791d609d66e3d27a3a50d814edc
+  * debian/extra/checkout-upstream: Use dots when deriving version from upstream
+    to sort higher than potential versions in Debian and also to conform native
+    package versioning practice.
+    File: debian/extra/checkout-upstream
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=11c23cb721fa402160ea81b10cf3022a3f4cba8c
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 21 Oct 2019 17:26:57 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 21 Oct 2019 18:08:51 +0200
 
 systemd (243-2) experimental; urgency=medium
 
