@@ -87,3 +87,5 @@ Revert-manager-put-bin-before-sbin-for-user-instances.patch
 Skip-falling-back-to-device-name-when-net_get_name-device.patch
 test-execute-Filter-dev-.lxc-in-exec-dynamicuser-statedir.patch
 Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
+Revert-network-fix-assertion-when-link-get-carrier.patch
+Revert-network-prevent-interfaces-to-be-initialized-multi.patch
