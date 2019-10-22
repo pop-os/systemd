@@ -1,6 +1,7 @@
 From: Balint Reczey <balint.reczey@canonical.com>
 Date: Fri, 20 Sep 2019 14:25:59 +0200
 Subject: Revert "manager: put bin before sbin for user instances"
+
 Forwarded: https://github.com/systemd/systemd/issues/13469
 
 This reverts commit db11487d1062655f17db54c4d710653f16c87313.
