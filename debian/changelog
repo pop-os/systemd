@@ -242,8 +242,19 @@ systemd (243-2ubuntu1) UNRELEASED; urgency=medium
     package versioning practice.
     File: debian/extra/checkout-upstream
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=11c23cb721fa402160ea81b10cf3022a3f4cba8c
+  * Use package's version as systemd's reported version (LP: #1849158)
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5245cbb5d168b56adc8106ccdb9b224830d55a45
+  * Fix test: expect mmap to fail in seccomp test on s390 and s390x
+    File: debian/patches/test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=04b28d6b177c2cf84c4bd262183098f47c356885
+  * udevadm trigger: do not propagate EACCES and ENODEV.
+    Propagating the errors broke udisks2 install scripts among others.
+    (LP: #1845314)
+    File: debian/patches/udevadm-trigger-do-not-propagate-EACCES-and-ENODEV.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=334e3fdc904de05105c78763c88220c1976d1946
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 21 Oct 2019 18:08:51 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 22 Oct 2019 17:27:40 +0200
 
 systemd (243-2) experimental; urgency=medium
 
