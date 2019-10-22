@@ -40,6 +40,7 @@ CONFFLAGS = \
 	-Db_pie=true \
 	-Drootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
 	-Dsplit-usr=true \
+	-Dversion-tag="$(DEB_VERSION)" \
 	-Dquotaon-path=/sbin/quotaon \
 	-Dquotacheck-path=/sbin/quotacheck \
 	-Dkmod-path=/bin/kmod \
