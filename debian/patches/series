@@ -49,6 +49,7 @@ dhcp6-read-OPTION_INFORMATION_REFRESH_TIME-option.patch
 ndisc-make-first-solicit-delayed-randomly.patch
 dhcp6-add-missing-option-length-check.patch
 dhcp6-use-unaligned_read_be32.patch
+test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
