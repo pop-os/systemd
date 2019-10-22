@@ -1,5 +1,6 @@
-systemd (243-2ubuntu1) UNRELEASED; urgency=medium
+systemd (243-2ubuntu1) focal; urgency=medium
 
+  [ Balint Reczey ]
   * Merge to Ubuntu from experimental
   * Refresh patches:
     - Dropped changes:
@@ -253,8 +254,17 @@ systemd (243-2ubuntu1) UNRELEASED; urgency=medium
     (LP: #1845314)
     File: debian/patches/udevadm-trigger-do-not-propagate-EACCES-and-ENODEV.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=334e3fdc904de05105c78763c88220c1976d1946
+  * debian/gbp.conf: Set debian-branch to ubuntu-focal
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fae20a0dd7c2b24f6f6b49edf6e8f70adf57dc44
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 22 Oct 2019 17:27:40 +0200
+  [ Dan Streetman ]
+  * d/extra/rules/73-special-net-names.rules: use $$ instead of $ in PROGRAM= value.
+    Author: Dan Streetman
+    File: debian/extra/rules/73-special-net-names.rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c5a86d7e286d14f2bc78473c3a1cc6ddc0df9158
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 22 Oct 2019 19:17:05 +0200
 
 systemd (243-2) experimental; urgency=medium
 
