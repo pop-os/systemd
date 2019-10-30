@@ -10,7 +10,7 @@ This reverts commit 0219b3524f414e23589e63c6de6a759811ef8474.
  1 file changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 60a7799..b72b00f 100644
+index 94a83e0..18f2a66 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
 @@ -2404,13 +2404,10 @@ void unit_prune_cgroup(Unit *u) {

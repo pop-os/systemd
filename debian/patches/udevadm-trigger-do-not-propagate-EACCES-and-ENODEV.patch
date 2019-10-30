@@ -9,6 +9,7 @@ error causes.
 Closes #13652.
 
 (cherry picked from commit 67acde4869a9505f9721e31fa5167c82445e0e12)
+(cherry picked from commit 20438f96c3261e55fabf44c892225efe79dd49d5)
 ---
  src/udev/udevadm-trigger.c | 6 ++++--
  1 file changed, 4 insertions(+), 2 deletions(-)

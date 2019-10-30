@@ -12,10 +12,10 @@ This reverts commit bd08ce56156751d58584a44e766ef61340cdae2d.
  2 files changed, 11 insertions(+), 15 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index b6566f9..635e674 100644
+index 860dd0a..41db04f 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -1234,7 +1234,7 @@ static int set_mtu_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
+@@ -1232,7 +1232,7 @@ static int set_mtu_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
          else
                  log_link_debug(link, "Setting MTU done.");
  
@@ -24,7 +24,7 @@ index b6566f9..635e674 100644
                  r = link_configure_after_setting_mtu(link);
                  if (r < 0)
                          link_enter_failed(link);
-@@ -2070,7 +2070,7 @@ static int link_enter_join_netdev(Link *link) {
+@@ -2068,7 +2068,7 @@ static int link_enter_join_netdev(Link *link) {
  
          assert(link);
          assert(link->network);
@@ -33,7 +33,7 @@ index b6566f9..635e674 100644
  
          link_set_state(link, LINK_STATE_CONFIGURING);
  
-@@ -2518,7 +2518,7 @@ static int link_configure(Link *link) {
+@@ -2516,7 +2516,7 @@ static int link_configure(Link *link) {
  
          assert(link);
          assert(link->network);
@@ -42,7 +42,7 @@ index b6566f9..635e674 100644
  
          if (link->iftype == ARPHRD_CAN)
                  return link_configure_can(link);
-@@ -2643,7 +2643,7 @@ static int link_configure_after_setting_mtu(Link *link) {
+@@ -2641,7 +2641,7 @@ static int link_configure_after_setting_mtu(Link *link) {
  
          assert(link);
          assert(link->network);
@@ -51,7 +51,7 @@ index b6566f9..635e674 100644
  
          if (link->setting_mtu)
                  return 0;
-@@ -2800,11 +2800,10 @@ static int link_initialized_and_synced(Link *link) {
+@@ -2798,11 +2798,10 @@ static int link_initialized_and_synced(Link *link) {
  
          /* We may get called either from the asynchronous netlink callback,
           * or directly for link_add() if running in a container. See link_add(). */
@@ -64,7 +64,7 @@ index b6566f9..635e674 100644
  
          r = link_new_bound_by_list(link);
          if (r < 0)
-@@ -2884,7 +2883,6 @@ int link_initialized(Link *link, sd_device *device) {
+@@ -2882,7 +2881,6 @@ int link_initialized(Link *link, sd_device *device) {
                  return 0;
  
          log_link_debug(link, "udev initialized link");
@@ -72,7 +72,7 @@ index b6566f9..635e674 100644
  
          link->sd_device = sd_device_ref(device);
  
-@@ -3847,7 +3845,6 @@ void link_clean(Link *link) {
+@@ -3845,7 +3843,6 @@ void link_clean(Link *link) {
  
  static const char* const link_state_table[_LINK_STATE_MAX] = {
          [LINK_STATE_PENDING] = "pending",

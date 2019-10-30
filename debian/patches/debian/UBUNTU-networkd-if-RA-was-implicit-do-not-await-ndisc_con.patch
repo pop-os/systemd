@@ -14,7 +14,7 @@ LP: #1765173
  1 file changed, 13 insertions(+), 4 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index f296e5c..a0dab46 100644
+index 10f0ce0..2aa91d9 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -257,7 +257,7 @@ static bool link_proxy_arp_enabled(Link *link) {
@@ -51,7 +51,7 @@ index f296e5c..a0dab46 100644
  static IPv6PrivacyExtensions link_ipv6_privacy_extensions(Link *link) {
          assert(link);
  
-@@ -1035,8 +1042,10 @@ void link_check_ready(Link *link) {
+@@ -1033,8 +1040,10 @@ void link_check_ready(Link *link) {
                           * an IPv4ll fallback address must be configured. */
                          return;
  

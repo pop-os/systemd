@@ -19,10 +19,10 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 4633184..6ebb4a5 100644
+index 6ee9135..6a75f96 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
-@@ -2471,8 +2471,6 @@ int main(int argc, char *argv[]) {
+@@ -2469,8 +2469,6 @@ int main(int argc, char *argv[]) {
                          kernel_timestamp = DUAL_TIMESTAMP_NULL;
                  }
  
