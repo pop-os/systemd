@@ -1,3 +1,29 @@
+systemd (243-3ubuntu1) focal; urgency=medium
+
+  [ Dan Streetman ]
+  * Fix resolved fallback to TCP (LP: #1849658)
+    Author: Dan Streetman
+    File: debian/patches/resolved-set-stream-type-during-DnsStream-creation.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f1ee30b13c9d2d34968b09ce620f3bc24a1a78c7
+  * Separate stderr and stdout of /etc/dhcp/dhclient-enter-hooks.d/resolved
+    (LP: #1849608)
+    Author: Dan Streetman
+    File: debian/extra/dhclient-enter-resolved-hook
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fec4d6d026488a1d32ad9dceef18d9ea9c8acbda
+
+  [ Balint Reczey ]
+  * Merge to Ubuntu from Debian experimental
+  * Refresh patches:
+    - Dropped changes:
+      * udevadm trigger: do not propagate EACCES and ENODEV.
+        File: debian/patches/udevadm-trigger-do-not-propagate-EACCES-and-ENODEV.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=334e3fdc904de05105c78763c88220c1976d1946
+      * Pass personality test even when i386 userland runs on amd64 kernel
+        File: debian/patches/debian/UBUNTU-test-Pass-personality-test-even-when-i386-userland-runs-o.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=42e0bfc426f19430f6768ef4922a9531a345765f
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 30 Oct 2019 15:19:33 +0100
+
 systemd (243-3) experimental; urgency=medium
 
   * Import patches from v243-stable branch (up to ef677436aa)
