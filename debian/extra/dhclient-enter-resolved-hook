@@ -61,6 +61,7 @@ EOF
               fi
 
               rm $oldstate
+              rm $newstate
           }
                 ;;
 
