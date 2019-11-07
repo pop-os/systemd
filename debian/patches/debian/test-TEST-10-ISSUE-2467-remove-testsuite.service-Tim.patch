@@ -1,0 +1,25 @@
+From 58c1a34437f2560c967318ad75d0615bd33b90b1 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Thu, 15 Aug 2019 16:06:13 -0400
+Subject: [PATCH] test/TEST-10-ISSUE-2467: remove testsuite.service
+ TimeoutStartSec
+
+This test runs under qemu, which may run on some testbeds without
+acceleration; in those cases, a 10s timeout is frequently too short.
+
+Simply removing the timeout to allow the default timeoutsec should
+be enough time for the test to finish, even on very slow testbeds.
+---
+ test/TEST-10-ISSUE-2467/test.sh | 1 -
+ 1 file changed, 1 deletion(-)
+
+--- a/test/TEST-10-ISSUE-2467/test.sh
++++ b/test/TEST-10-ISSUE-2467/test.sh
+@@ -29,7 +29,6 @@
+ StandardOutput=tty
+ StandardError=tty
+ ExecStart=/bin/sh -e -x -c 'rm -f /tmp/nonexistent; systemctl start test.socket; printf x > test.file; socat -t20 OPEN:test.file UNIX-CONNECT:/run/test.ctl; >/testok'
+-TimeoutStartSec=10s
+ EOF
+ 
+ 	cat  >$initdir/etc/systemd/system/test.socket <<'EOF'
