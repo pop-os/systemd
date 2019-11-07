@@ -1,4 +1,16 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Wed, 6 Nov 2019 09:14:41 -0500
+Subject: blacklist-upstream-test-10
+
+---
+ test/TEST-10-ISSUE-2467/blacklist-upstream-ci | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 test/TEST-10-ISSUE-2467/blacklist-upstream-ci
+
+diff --git a/test/TEST-10-ISSUE-2467/blacklist-upstream-ci b/test/TEST-10-ISSUE-2467/blacklist-upstream-ci
+new file mode 100644
+index 0000000..4692260
 --- /dev/null
 +++ b/test/TEST-10-ISSUE-2467/blacklist-upstream-ci
-@@ -0,0 +1 @@
-+# unknown reason for failing; needs investigation
+@@ -0,0 +1,1 @@
++# failure likely due to test using 10s start timeout; possibly fixed by upstream commit 58c1a34437f2560c967318ad75d0615bd33b90b1
