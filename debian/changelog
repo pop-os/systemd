@@ -1,3 +1,21 @@
+systemd (242-8) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * d/extra/rules/73-special-net-names.rules: use $$ instead of $ in PROGRAM=
+    value.
+    Fixes incorrect variable substitution.
+  * Rework and improve blacklist handling in debian/tests/upstream
+
+  [ Balint Reczey ]
+  * Various improvements to debian/extra/checkout-upstream making it more
+    straightforward to override the default behaviour
+  * Use package version as systemd's reported version (LP: #1849158)
+
+  [ Michael Biebl]
+  * debiant/tests/udev: replace deprecated ADTTMP with AUTOPKGTEST_TMP
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 08 Nov 2019 23:18:00 +0100
+
 systemd (242-7) unstable; urgency=medium
 
   * sleep: properly pass verb to sleep script
