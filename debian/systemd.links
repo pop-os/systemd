@@ -5,7 +5,6 @@
 
 /lib/systemd/system/rc-local.service /lib/systemd/system/rc.local.service
 
-/lib/systemd/system/systemd-modules-load.service /lib/systemd/system/module-init-tools.service
 /lib/systemd/system/systemd-modules-load.service /lib/systemd/system/kmod.service
 /etc/modules /etc/modules-load.d/modules.conf
 
@@ -62,14 +61,6 @@
 /dev/null /lib/systemd/system/reboot.service
 /dev/null /lib/systemd/system/rc.service
 /dev/null /lib/systemd/system/rcS.service
-
-# The motd SysV init script is no longer required to create the dynamic part of
-# /etc/motd to display the uname information as pam_exec is used for that now.
-# An explicit Breaks against older versions of login, which still use
-# /run/motd.dynamic, is not necessary, as pam_motd will silently ignore it if
-# that file is missing and simply display nothing.
-# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=735521
-/dev/null /lib/systemd/system/motd.service
 
 # We have the journal to handle kernel messages from early boot
 /dev/null /lib/systemd/system/bootlogs.service
