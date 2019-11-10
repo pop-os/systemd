@@ -1,0 +1,48 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 21 Oct 2019 15:05:58 +0200
+Subject: logind: fix emission of PropertiesChanged on seats
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+The story is the same as in 471cffcfb0e005b7c4044b3b52cc4f25d217efac:
+device_attach() → seat_send_changed() → sd_bus_emit_properties_changed_strv()
+→ emit_properties_changed_on_interface() → node_vtable_get_userdata()
+→ seat_object_find(), which returns 0 because message == NULL.
+But when we are emitting a signal, message is always NULL. Removing the
+overeager check and assert in the called function allow the signal to be
+emitted.
+
+Fixes #13769.
+
+(cherry picked from commit 8cc64c2a3640121745fdfaccc6eae896ac25a911)
+---
+ src/login/logind-dbus.c      | 1 -
+ src/login/logind-seat-dbus.c | 2 --
+ 2 files changed, 3 deletions(-)
+
+diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
+index 679eb6a..e994b1f 100644
+--- a/src/login/logind-dbus.c
++++ b/src/login/logind-dbus.c
+@@ -188,7 +188,6 @@ int manager_get_seat_from_creds(
+         int r;
+ 
+         assert(m);
+-        assert(message);
+         assert(ret);
+ 
+         if (SEAT_IS_SELF(name) || SEAT_IS_AUTO(name)) {
+diff --git a/src/login/logind-seat-dbus.c b/src/login/logind-seat-dbus.c
+index 3c58929..9958490 100644
+--- a/src/login/logind-seat-dbus.c
++++ b/src/login/logind-seat-dbus.c
+@@ -280,8 +280,6 @@ int seat_object_find(sd_bus *bus, const char *path, const char *interface, void
+                 return -ENOMEM;
+ 
+         message = sd_bus_get_current_message(bus);
+-        if (!message)
+-                return 0;
+ 
+         r = manager_get_seat_from_creds(m, message, e, error, &seat);
+         if (r == -ENXIO) {

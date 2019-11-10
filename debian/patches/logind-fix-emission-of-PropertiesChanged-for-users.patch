@@ -1,0 +1,39 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 21 Oct 2019 15:07:36 +0200
+Subject: logind: fix emission of PropertiesChanged for users
+
+The same as parent commit, but users. This is the third and last
+foo_object_find() function in logind, so I think that this particular
+family of bugs is finally squashed.
+
+(cherry picked from commit 8163b9f90079af298031dcbffee057fc344470a3)
+---
+ src/login/logind-dbus.c      | 1 -
+ src/login/logind-user-dbus.c | 2 --
+ 2 files changed, 3 deletions(-)
+
+diff --git a/src/login/logind-dbus.c b/src/login/logind-dbus.c
+index e994b1f..e32e59c 100644
+--- a/src/login/logind-dbus.c
++++ b/src/login/logind-dbus.c
+@@ -162,7 +162,6 @@ int manager_get_user_from_creds(Manager *m, sd_bus_message *message, uid_t uid,
+         User *user;
+ 
+         assert(m);
+-        assert(message);
+         assert(ret);
+ 
+         if (!uid_is_valid(uid))
+diff --git a/src/login/logind-user-dbus.c b/src/login/logind-user-dbus.c
+index beb9736..a6e2d49 100644
+--- a/src/login/logind-user-dbus.c
++++ b/src/login/logind-user-dbus.c
+@@ -244,8 +244,6 @@ int user_object_find(sd_bus *bus, const char *path, const char *interface, void
+                 sd_bus_message *message;
+ 
+                 message = sd_bus_get_current_message(bus);
+-                if (!message)
+-                        return 0;
+ 
+                 r = manager_get_user_from_creds(m, message, UID_INVALID, error, &user);
+                 if (r == -ENXIO) {

@@ -76,6 +76,9 @@ fix-build-with-compilers-with-default-stack-protector-ena.patch
 cgroup-fix-typo-in-BPF-firewall-support-warning-message.patch
 docs-fix-inadvertent-change-in-uid-range.patch
 test-Pass-personality-test-even-when-i686-userland-runs-o.patch
+logind-drop.patch
+logind-fix-emission-of-PropertiesChanged-on-seats.patch
+logind-fix-emission-of-PropertiesChanged-for-users.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

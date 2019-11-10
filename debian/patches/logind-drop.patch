@@ -1,0 +1,29 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 21 Oct 2019 09:33:19 +0200
+Subject: logind: drop {}
+
+(cherry picked from commit 4b9e5848e31cb2efb606a5292a2d2abb6ba35040)
+---
+ src/login/logind-device.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/login/logind-device.c b/src/login/logind-device.c
+index 2010854..9a62217 100644
+--- a/src/login/logind-device.c
++++ b/src/login/logind-device.c
+@@ -91,14 +91,13 @@ void device_attach(Device *d, Seat *s) {
+ 
+         if (d->master || !s->devices)
+                 LIST_PREPEND(devices, s->devices, d);
+-        else {
++        else
+                 LIST_FOREACH(devices, i, s->devices) {
+                         if (!i->devices_next || !i->master) {
+                                 LIST_INSERT_AFTER(devices, s->devices, i, d);
+                                 break;
+                         }
+                 }
+-        }
+ 
+         if (!had_master && d->master && s->started) {
+                 seat_save(s);
