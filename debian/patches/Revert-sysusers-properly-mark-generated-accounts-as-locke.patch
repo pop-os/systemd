@@ -1,0 +1,30 @@
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 21 Oct 2019 16:26:42 +0200
+Subject: Revert "sysusers: properly mark generated accounts as locked"
+
+This reverts the gist of commit 636e72bce63e7e99b76357f7d524d16f61558775.
+The comment and the tiny cleanup are left alone.
+
+We shouldn't lock the accounts because people actually need to use them, and
+if they are locked, various tools will refuse.
+See https://github.com/systemd/systemd/pull/13277#issuecomment-529964578
+and follow-up comments.
+
+(cherry picked from commit 12c829376a95ee0a734b8dbd347042062516f0a9)
+---
+ src/sysusers/sysusers.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/sysusers/sysusers.c b/src/sysusers/sysusers.c
+index 1fc1b0a..08a2df7 100644
+--- a/src/sysusers/sysusers.c
++++ b/src/sysusers/sysusers.c
+@@ -528,7 +528,7 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char
+                         .sp_max = -1,
+                         .sp_warn = -1,
+                         .sp_inact = -1,
+-                        .sp_expire = i->uid == 0 ? -1 : 1, /* lock account as a whole, unless this is root */
++                        .sp_expire = -1,
+                         .sp_flag = (unsigned long) -1, /* this appears to be what everybody does ... */
+                 };
+ 
