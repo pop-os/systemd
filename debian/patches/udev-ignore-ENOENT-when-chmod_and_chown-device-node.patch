@@ -1,0 +1,22 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 12 Nov 2019 14:57:48 +0900
+Subject: udev: ignore ENOENT when chmod_and_chown() device node
+
+(cherry picked from commit 4b613ec212bfd06fd9d9487bd37b0791fa6dff9e)
+---
+ src/udev/udev-rules.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+index efea16e..39d7af8 100644
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -2313,6 +2313,8 @@ static int apply_static_dev_perms(const char *devnode, uid_t uid, gid_t gid, mod
+                 gid = 0;
+ 
+         r = chmod_and_chown(device_node, mode, uid, gid);
++        if (r == -ENOENT)
++                return 0;
+         if (r < 0)
+                 return log_error_errno(errno, "Failed to chown '%s' %u %u: %m",
+                                                device_node, uid, gid);
