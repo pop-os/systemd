@@ -1,0 +1,28 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 10 Nov 2019 14:42:55 +0900
+Subject: udev: do not append newline when write attributes
+
+Before 25de7aa7b90c23d33ea50ada1e50c5834a414237, the content is written
+by `fprintf()` without new line. So WRITE_STRING_FILE_AVOID_NEWLINE flag
+is necessary.
+
+Fixes #13985.
+
+(cherry picked from commit a566ed2c82d81cc6416fe0da0a14f6d5fe5d83b4)
+---
+ src/udev/udev-rules.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+index 71288e9..312bdfc 100644
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -2082,7 +2082,7 @@ static int udev_rule_apply_token_to_event(
+                 (void) udev_event_apply_format(event, token->value, value, sizeof(value), false);
+ 
+                 log_rule_debug(dev, rules, "ATTR '%s' writing '%s'", buf, value);
+-                r = write_string_file(buf, value, WRITE_STRING_FILE_VERIFY_ON_FAILURE | WRITE_STRING_FILE_DISABLE_BUFFER);
++                r = write_string_file(buf, value, WRITE_STRING_FILE_VERIFY_ON_FAILURE | WRITE_STRING_FILE_DISABLE_BUFFER | WRITE_STRING_FILE_AVOID_NEWLINE);
+                 if (r < 0)
+                         log_rule_error_errno(dev, rules, r, "Failed to write ATTR{%s}, ignoring: %m", buf);
+                 break;
