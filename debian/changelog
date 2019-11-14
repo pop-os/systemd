@@ -1,3 +1,15 @@
+systemd (243-6) unstable; urgency=medium
+
+  * Revert "sysusers: properly mark generated accounts as locked"
+    We shouldn't lock the accounts because people actually need to use them, and
+    if they are locked, various tools will refuse.
+  * udev: ignore error caused by device disconnection.
+    During an add or change event, the device may be disconnected.
+    (Closes: #944586)
+  * udev: do not append newline when writing attributes
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 14 Nov 2019 14:09:49 +0100
+
 systemd (243-5) unstable; urgency=medium
 
   * Switch default hierarchy (back) to hybrid.
