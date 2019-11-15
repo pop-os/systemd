@@ -1,3 +1,9 @@
+systemd (243-7) unstable; urgency=medium
+
+  * Fix build failure on arm64 with libseccomp >= 2.4.2
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 15 Nov 2019 22:01:17 +0100
+
 systemd (243-6) unstable; urgency=medium
 
   * Revert "sysusers: properly mark generated accounts as locked"
