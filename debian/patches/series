@@ -84,6 +84,7 @@ udev-ignore-ENOENT-when-chmod_and_chown-device-node.patch
 udev-fix-error-code-in-the-log-message.patch
 udev-ignore-error-caused-by-device-disconnection.patch
 udev-do-not-append-newline-when-write-attributes.patch
+seccomp-more-comprehensive-protection-against-libseccomp-.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
