@@ -78,6 +78,7 @@ docs-fix-inadvertent-change-in-uid-range.patch
 test-Pass-personality-test-even-when-i686-userland-runs-o.patch
 test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch
 resolved-set-stream-type-during-DnsStream-creation.patch
+boot-Load-LoadOptions-cmdline-if-none-is-available.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
