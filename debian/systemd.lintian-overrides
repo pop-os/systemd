@@ -1,1 +1,2 @@
 systemd: maintainer-script-calls-systemctl
+systemd: maintainer-script-should-not-use-dpkg-maintscript-helper

@@ -28,11 +28,10 @@ if [ "$1" = "triggered" ]; then
     exit 0
 fi
 
-# Enable getty, remote-fs.target and timesyncd by default on new installs
+# Enable getty and remote-fs.target by default on new installs
 if [ -z "$2" ]; then
     systemctl enable getty@tty1.service || true
     systemctl enable remote-fs.target || true
-    systemctl enable systemd-timesyncd.service || true
 fi
 
 # Enable ondemand by default on new installs
@@ -98,8 +97,6 @@ systemd-machine-id-setup
 addgroup --quiet --system systemd-journal
 
 adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Time Synchronization" systemd-timesync
-adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Network Management" systemd-network
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Resolver" systemd-resolve
@@ -125,7 +122,6 @@ if [ -n "$2" ]; then
     # https://github.com/systemd/systemd/issues/1163
     _systemctl try-restart systemd-networkd.service || true
     _systemctl try-restart systemd-resolved.service || true
-    _systemctl try-restart systemd-timesyncd.service || true
     _systemctl try-restart systemd-journald.service || true
 fi
 
