@@ -1,3 +1,17 @@
+systemd (243-8) unstable; urgency=medium
+
+  * udevadm: ignore EROFS and return earlier.
+    Fixes failures of "udevadm trigger" in containers with a readonly /sys.
+    (Closes: #944860)
+  * udev: silence warning about PROGRAM+= or IMPORT+= rules (Closes: #944917)
+  * man: add entry about SpeedMeter= (Closes: #944597)
+  * udev: drop SystemCallArchitectures=native from systemd-udevd.service.
+    We can't really control what helper programs are run from other udev
+    rules. E.g. running i386 binaries under amd64 is a valid use case and
+    should not trigger a SIGSYS failure. (Closes: #869719)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 19 Nov 2019 09:17:12 +0100
+
 systemd (243-7) unstable; urgency=medium
 
   * Fix build failure on arm64 with libseccomp >= 2.4.2
