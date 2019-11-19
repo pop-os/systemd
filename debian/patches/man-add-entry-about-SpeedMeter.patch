@@ -1,0 +1,44 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 19 Nov 2019 00:03:35 +0900
+Subject: man: add entry about SpeedMeter=
+
+Closes #14002.
+
+(cherry picked from commit c9fdaed079524942445a1bbbb975766768ad9b04)
+---
+ man/networkd.conf.xml | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/man/networkd.conf.xml b/man/networkd.conf.xml
+index 5164554..2041ddd 100644
+--- a/man/networkd.conf.xml
++++ b/man/networkd.conf.xml
+@@ -42,6 +42,28 @@
+ 
+   <xi:include href="standard-conf.xml" xpointer="main-conf" />
+ 
++  <refsect1>
++    <title>[Network] Section Options</title>
++
++    <para>The following options are available in the <literal>[Network]</literal> section:</para>
++
++    <variablelist class='network-directives'>
++      <varlistentry>
++        <term><varname>SpeedMeter=</varname></term>
++        <listitem><para>Takes a boolean. If set to yes, then <command>systemd-networkd</command>
++        measures the traffic of each interface, and
++        <command>networkctl status <replaceable>INTERFACE</replaceable> shows the measured speed.
++        </command>Defaults to no.</para></listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><varname>SpeedMeterIntervalSec=</varname></term>
++        <listitem><para>Specifies the time interval to calculate the traffic speed of each interface.
++        If <varname>SpeedMeter=no</varname>, the value is ignored. Defaults to 10sec.</para></listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++
+   <refsect1>
+     <title>[DHCP] Section Options</title>
+ 
