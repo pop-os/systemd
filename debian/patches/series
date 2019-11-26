@@ -88,6 +88,7 @@ seccomp-more-comprehensive-protection-against-libseccomp-.patch
 udevadm-ignore-EROFS-and-return-earlier.patch
 udev-silence-warning-about-PROGRAM-or-IMPORT-rules.patch
 man-add-entry-about-SpeedMeter.patch
+resolved-fix-connection-failures-with-TLS-1.3-and-GnuTLS.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
