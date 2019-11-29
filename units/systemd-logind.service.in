@@ -41,6 +41,7 @@ ProtectControlGroups=yes
 ProtectHome=yes
 ProtectHostname=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectSystem=strict
 ReadWritePaths=/etc /run
 Restart=always
@@ -55,7 +56,7 @@ StateDirectory=systemd/linger
 SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
-WatchdogSec=3min
+@SERVICE_WATCHDOG@
 
 # Increase the default a bit in order to allow many simultaneous logins since
 # we keep one fd open per session.

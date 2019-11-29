@@ -29,6 +29,7 @@ NoNewPrivileges=yes
 ProtectControlGroups=yes
 ProtectHome=yes
 ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectSystem=strict
 Restart=on-failure
 RestartSec=0
@@ -42,8 +43,9 @@ SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
 Type=notify
+RestartKillSignal=SIGUSR2
 User=systemd-network
-WatchdogSec=3min
+@SERVICE_WATCHDOG@
 
 [Install]
 WantedBy=multi-user.target

@@ -5,8 +5,6 @@
 #include <fnmatch.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <time.h>
@@ -22,7 +20,7 @@
 #include "cgroup-util.h"
 #include "condition.h"
 #include "cpu-set-util.h"
-#include "efivars.h"
+#include "efi-loader.h"
 #include "env-file.h"
 #include "extract-word.h"
 #include "fd-util.h"

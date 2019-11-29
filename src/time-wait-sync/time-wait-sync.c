@@ -8,7 +8,6 @@
  */
 
 #include <errno.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +22,6 @@
 #include "fd-util.h"
 #include "fs-util.h"
 #include "main-func.h"
-#include "missing.h"
 #include "signal-util.h"
 #include "time-util.h"
 
@@ -225,9 +223,9 @@ static int run(int argc, char * argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create notify event source: %m");
 
-        r = inotify_add_watch(state.inotify_fd, "/run/systemd/", IN_CREATE);
+        r = inotify_add_watch_and_warn(state.inotify_fd, "/run/systemd/", IN_CREATE);
         if (r < 0)
-                return log_error_errno(errno, "Failed to watch /run/systemd/: %m");
+                return r;
 
         state.run_systemd_wd = r;
 

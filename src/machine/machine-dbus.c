@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
-#include <string.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
 
@@ -60,6 +59,34 @@ static int property_get_netif(
         assert_cc(sizeof(int) == sizeof(int32_t));
 
         return sd_bus_message_append_array(reply, 'i', m->netif, m->n_netif * sizeof(int));
+}
+
+int bus_machine_method_unregister(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Machine *m = userdata;
+        int r;
+
+        assert(message);
+        assert(m);
+
+        r = bus_verify_polkit_async(
+                        message,
+                        CAP_KILL,
+                        "org.freedesktop.machine1.manage-machines",
+                        NULL,
+                        false,
+                        UID_INVALID,
+                        &m->manager->polkit_registry,
+                        error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Will call us back */
+
+        r = machine_finalize(m);
+        if (r < 0)
+                return r;
+
+        return sd_bus_reply_method_return(message, NULL);
 }
 
 int bus_machine_method_terminate(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -846,7 +873,7 @@ int bus_machine_method_bind_mount(sd_bus_message *message, void *userdata, sd_bu
         if (laccess(p, F_OK) < 0)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_NOT_SUPPORTED, "Container does not allow propagation of mount points.");
 
-        r = chase_symlinks(src, NULL, CHASE_TRAIL_SLASH, &chased_src);
+        r = chase_symlinks(src, NULL, CHASE_TRAIL_SLASH, &chased_src, NULL);
         if (r < 0)
                 return sd_bus_error_set_errnof(error, r, "Failed to resolve source path: %m");
 

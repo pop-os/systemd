@@ -2,9 +2,8 @@
 
 #include <net/if.h>
 
-#include "missing.h"
+#include "bridge.h"
 #include "netlink-util.h"
-#include "netdev/bridge.h"
 #include "network-internal.h"
 #include "networkd-manager.h"
 #include "string-table.h"

@@ -3,11 +3,9 @@
 _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #endif
 #include <stddef.h>
+#include "all-units.h"
 #include "conf-parser.h"
 #include "load-fragment.h"
-#include "missing.h"
-
-#include "all-units.h"
 %}
 struct ConfigPerfItem;
 %null_strings
@@ -59,8 +57,8 @@ $1.SyslogFacility,               config_parse_log_facility,          0,         
 $1.SyslogLevel,                  config_parse_log_level,             0,                             offsetof($1, exec_context.syslog_priority)
 $1.SyslogLevelPrefix,            config_parse_bool,                  0,                             offsetof($1, exec_context.syslog_level_prefix)
 $1.LogLevelMax,                  config_parse_log_level,             0,                             offsetof($1, exec_context.log_level_max)
-$1.LogRateLimitIntervalSec,      config_parse_sec,                   0,                             offsetof($1, exec_context.log_rate_limit_interval_usec)
-$1.LogRateLimitBurst,            config_parse_unsigned,              0,                             offsetof($1, exec_context.log_rate_limit_burst)
+$1.LogRateLimitIntervalSec,      config_parse_sec,                   0,                             offsetof($1, exec_context.log_ratelimit_interval_usec)
+$1.LogRateLimitBurst,            config_parse_unsigned,              0,                             offsetof($1, exec_context.log_ratelimit_burst)
 $1.LogExtraFields,               config_parse_log_extra_fields,      0,                             offsetof($1, exec_context)
 $1.Capabilities,                 config_parse_warn_compat,           DISABLED_LEGACY,               offsetof($1, exec_context)
 $1.SecureBits,                   config_parse_exec_secure_bits,      0,                             offsetof($1, exec_context.secure_bits)
@@ -117,6 +115,7 @@ $1.PrivateTmp,                   config_parse_bool,                  0,         
 $1.PrivateDevices,               config_parse_bool,                  0,                             offsetof($1, exec_context.private_devices)
 $1.ProtectKernelTunables,        config_parse_bool,                  0,                             offsetof($1, exec_context.protect_kernel_tunables)
 $1.ProtectKernelModules,         config_parse_bool,                  0,                             offsetof($1, exec_context.protect_kernel_modules)
+$1.ProtectKernelLogs,            config_parse_bool,                  0,                             offsetof($1, exec_context.protect_kernel_logs)
 $1.ProtectControlGroups,         config_parse_bool,                  0,                             offsetof($1, exec_context.protect_control_groups)
 $1.NetworkNamespacePath,         config_parse_unit_path_printf,      0,                             offsetof($1, exec_context.network_namespace_path)
 $1.PrivateNetwork,               config_parse_bool,                  0,                             offsetof($1, exec_context.private_network)
@@ -161,11 +160,14 @@ m4_define(`KILL_CONTEXT_CONFIG_ITEMS',
 $1.SendSIGHUP,                   config_parse_bool,                  0,                             offsetof($1, kill_context.send_sighup)
 $1.KillMode,                     config_parse_kill_mode,             0,                             offsetof($1, kill_context.kill_mode)
 $1.KillSignal,                   config_parse_signal,                0,                             offsetof($1, kill_context.kill_signal)
+$1.RestartKillSignal,            config_parse_signal,                0,                             offsetof($1, kill_context.restart_kill_signal)
 $1.FinalKillSignal,              config_parse_signal,                0,                             offsetof($1, kill_context.final_kill_signal)
 $1.WatchdogSignal,               config_parse_signal,                0,                             offsetof($1, kill_context.watchdog_signal)'
 )m4_dnl
 m4_define(`CGROUP_CONTEXT_CONFIG_ITEMS',
 `$1.Slice,                       config_parse_unit_slice,            0,                             0
+$1.AllowedCPUs,                  config_parse_allowed_cpus,          0,                             offsetof($1, cgroup_context)
+$1.AllowedMemoryNodes,           config_parse_allowed_mems,          0,                             offsetof($1, cgroup_context)
 $1.CPUAccounting,                config_parse_bool,                  0,                             offsetof($1, cgroup_context.cpu_accounting)
 $1.CPUWeight,                    config_parse_cg_weight,             0,                             offsetof($1, cgroup_context.cpu_weight)
 $1.StartupCPUWeight,             config_parse_cg_weight,             0,                             offsetof($1, cgroup_context.startup_cpu_weight)
@@ -245,10 +247,10 @@ Unit.JobTimeoutSec,              config_parse_job_timeout_sec,       0,         
 Unit.JobRunningTimeoutSec,       config_parse_job_running_timeout_sec, 0,                           0
 Unit.JobTimeoutAction,           config_parse_emergency_action,      0,                             offsetof(Unit, job_timeout_action)
 Unit.JobTimeoutRebootArgument,   config_parse_unit_string_printf,    0,                             offsetof(Unit, job_timeout_reboot_arg)
-Unit.StartLimitIntervalSec,      config_parse_sec,                   0,                             offsetof(Unit, start_limit.interval)
+Unit.StartLimitIntervalSec,      config_parse_sec,                   0,                             offsetof(Unit, start_ratelimit.interval)
 m4_dnl The following is a legacy alias name for compatibility
-Unit.StartLimitInterval,         config_parse_sec,                   0,                             offsetof(Unit, start_limit.interval)
-Unit.StartLimitBurst,            config_parse_unsigned,              0,                             offsetof(Unit, start_limit.burst)
+Unit.StartLimitInterval,         config_parse_sec,                   0,                             offsetof(Unit, start_ratelimit.interval)
+Unit.StartLimitBurst,            config_parse_unsigned,              0,                             offsetof(Unit, start_ratelimit.burst)
 Unit.StartLimitAction,           config_parse_emergency_action,      0,                             offsetof(Unit, start_limit_action)
 Unit.FailureAction,              config_parse_emergency_action,      0,                             offsetof(Unit, failure_action)
 Unit.SuccessAction,              config_parse_emergency_action,      0,                             offsetof(Unit, success_action)
@@ -320,8 +322,8 @@ Service.TimeoutAbortSec,         config_parse_service_timeout_abort, 0,         
 Service.RuntimeMaxSec,           config_parse_sec,                   0,                             offsetof(Service, runtime_max_usec)
 Service.WatchdogSec,             config_parse_sec,                   0,                             offsetof(Service, watchdog_usec)
 m4_dnl The following five only exist for compatibility, they moved into Unit, see above
-Service.StartLimitInterval,      config_parse_sec,                   0,                             offsetof(Unit, start_limit.interval)
-Service.StartLimitBurst,         config_parse_unsigned,              0,                             offsetof(Unit, start_limit.burst)
+Service.StartLimitInterval,      config_parse_sec,                   0,                             offsetof(Unit, start_ratelimit.interval)
+Service.StartLimitBurst,         config_parse_unsigned,              0,                             offsetof(Unit, start_ratelimit.burst)
 Service.StartLimitAction,        config_parse_emergency_action,      0,                             offsetof(Unit, start_limit_action)
 Service.FailureAction,           config_parse_emergency_action,      0,                             offsetof(Unit, failure_action)
 Service.RebootArgument,          config_parse_unit_string_printf,    0,                             offsetof(Unit, reboot_arg)
@@ -468,6 +470,7 @@ CGROUP_CONTEXT_CONFIG_ITEMS(Slice)m4_dnl
 m4_dnl
 CGROUP_CONTEXT_CONFIG_ITEMS(Scope)m4_dnl
 KILL_CONTEXT_CONFIG_ITEMS(Scope)m4_dnl
+Scope.RuntimeMaxSec,             config_parse_sec,                   0,                             offsetof(Scope, runtime_max_usec)
 Scope.TimeoutStopSec,            config_parse_sec,                   0,                             offsetof(Scope, timeout_stop_usec)
 m4_dnl The [Install] section is ignored here.
 Install.Alias,                   NULL,                               0,                             0

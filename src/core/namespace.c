@@ -3,9 +3,7 @@
 #include <errno.h>
 #include <sched.h>
 #include <stdio.h>
-#include <string.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <linux/fs.h>
 
@@ -17,7 +15,6 @@
 #include "label.h"
 #include "loop-util.h"
 #include "loopback-setup.h"
-#include "missing.h"
 #include "mkdir.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
@@ -110,6 +107,12 @@ static const MountEntry protect_kernel_modules_table[] = {
         { "/lib/modules",        INACCESSIBLE, true  },
 #endif
         { "/usr/lib/modules",    INACCESSIBLE, true  },
+};
+
+/* ProtectKernelLogs= option */
+static const MountEntry protect_kernel_logs_table[] = {
+        { "/proc/kmsg",          INACCESSIBLE, true },
+        { "/dev/kmsg",           INACCESSIBLE, true },
 };
 
 /*
@@ -875,7 +878,7 @@ static int follow_symlink(
          * a time by specifying CHASE_STEP. This function returns 0 if we resolved one step, and > 0 if we reached the
          * end and already have a fully normalized name. */
 
-        r = chase_symlinks(mount_entry_path(m), root_directory, CHASE_STEP|CHASE_NONEXISTENT, &target);
+        r = chase_symlinks(mount_entry_path(m), root_directory, CHASE_STEP|CHASE_NONEXISTENT, &target, NULL);
         if (r < 0)
                 return log_debug_errno(r, "Failed to chase symlinks '%s': %m", mount_entry_path(m));
         if (r > 0) /* Reached the end, nothing more to resolve */
@@ -957,7 +960,7 @@ static int apply_mount(
                  * mount source paths are always relative to the host root, hence we pass NULL as root directory to
                  * chase_symlinks() here. */
 
-                r = chase_symlinks(mount_entry_source(m), NULL, CHASE_TRAIL_SLASH, &chased);
+                r = chase_symlinks(mount_entry_source(m), NULL, CHASE_TRAIL_SLASH, &chased, NULL);
                 if (r == -ENOENT && m->ignore) {
                         log_debug_errno(r, "Path %s does not exist, ignoring.", mount_entry_source(m));
                         return 0;
@@ -1150,8 +1153,9 @@ static size_t namespace_calculate_mounts(
                 n_temporary_filesystems +
                 ns_info->private_dev +
                 (ns_info->protect_kernel_tunables ? ELEMENTSOF(protect_kernel_tunables_table) : 0) +
-                (ns_info->protect_control_groups ? 1 : 0) +
                 (ns_info->protect_kernel_modules ? ELEMENTSOF(protect_kernel_modules_table) : 0) +
+                (ns_info->protect_kernel_logs ? ELEMENTSOF(protect_kernel_logs_table) : 0) +
+                (ns_info->protect_control_groups ? 1 : 0) +
                 protect_home_cnt + protect_system_cnt +
                 (ns_info->protect_hostname ? 2 : 0) +
                 (namespace_info_mount_apivfs(ns_info) ? ELEMENTSOF(apivfs_table) : 0);
@@ -1318,6 +1322,12 @@ int setup_namespace(
 
                 if (ns_info->protect_kernel_modules) {
                         r = append_static_mounts(&m, protect_kernel_modules_table, ELEMENTSOF(protect_kernel_modules_table), ns_info->ignore_protect_paths);
+                        if (r < 0)
+                                goto finish;
+                }
+
+                if (ns_info->protect_kernel_logs) {
+                        r = append_static_mounts(&m, protect_kernel_logs_table, ELEMENTSOF(protect_kernel_logs_table), ns_info->ignore_protect_paths);
                         if (r < 0)
                                 goto finish;
                 }

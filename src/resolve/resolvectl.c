@@ -2473,7 +2473,7 @@ static int compat_help(void) {
                "%1$s [OPTIONS...] --statistics\n"
                "%1$s [OPTIONS...] --reset-statistics\n"
                "\n"
-               "Resolve domain names, IPv4 and IPv6 addresses, DNS records, and services.\n\n"
+               "%2$sResolve domain names, IPv4 and IPv6 addresses, DNS records, and services.%3$s\n\n"
                "  -h --help                 Show this help\n"
                "     --version              Show package version\n"
                "     --no-pager             Do not pipe output into a pager\n"
@@ -2507,8 +2507,10 @@ static int compat_help(void) {
                "     --set-dnssec=MODE      Set per-interface DNSSEC mode\n"
                "     --set-nta=DOMAIN       Set per-interface DNSSEC NTA\n"
                "     --revert               Revert per-interface configuration\n"
-               "\nSee the %2$s for details.\n"
+               "\nSee the %4$s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
                , link
         );
 
@@ -2523,29 +2525,11 @@ static int native_help(void) {
         if (r < 0)
                 return log_oom();
 
-        printf("%1$s [OPTIONS...] {COMMAND} ...\n"
+        printf("%s [OPTIONS...] COMMAND ...\n"
                "\n"
-               "Send control commands to the network name resolution manager, or\n"
-               "resolve domain names, IPv4 and IPv6 addresses, DNS records, and services.\n"
-               "\n"
-               "  -h --help                    Show this help\n"
-               "     --version                 Show package version\n"
-               "     --no-pager                Do not pipe output into a pager\n"
-               "  -4                           Resolve IPv4 addresses\n"
-               "  -6                           Resolve IPv6 addresses\n"
-               "  -i --interface=INTERFACE     Look on interface\n"
-               "  -p --protocol=PROTO|help     Look via protocol\n"
-               "  -t --type=TYPE|help          Query RR with DNS type\n"
-               "  -c --class=CLASS|help        Query RR with DNS class\n"
-               "     --service-address=BOOL    Resolve address for services (default: yes)\n"
-               "     --service-txt=BOOL        Resolve TXT records for services (default: yes)\n"
-               "     --cname=BOOL              Follow CNAME redirects (default: yes)\n"
-               "     --search=BOOL             Use search domains for single-label names\n"
-               "                                                              (default: yes)\n"
-               "     --raw[=payload|packet]    Dump the answer as binary data\n"
-               "     --legend=BOOL             Print headers and additional info (default: yes)\n"
-               "\n"
-               "Commands:\n"
+               "%sSend control commands to the network name resolution manager, or%s\n"
+               "%sresolve domain names, IPv4 and IPv6 addresses, DNS records, and services.%s\n"
+               "\nCommands:\n"
                "  query HOSTNAME|ADDRESS...    Resolve domain names, IPv4 and IPv6 addresses\n"
                "  service [[NAME] TYPE] DOMAIN Resolve service (SRV)\n"
                "  openpgp EMAIL@DOMAIN...      Query OpenPGP public key\n"
@@ -2564,8 +2548,29 @@ static int native_help(void) {
                "  dnssec [LINK [MODE]]         Get/set per-interface DNSSEC mode\n"
                "  nta [LINK [DOMAIN...]]       Get/set per-interface DNSSEC NTA\n"
                "  revert LINK                  Revert per-interface configuration\n"
-               "\nSee the %2$s for details.\n"
+               "\nOptions:\n"
+               "  -h --help                    Show this help\n"
+               "     --version                 Show package version\n"
+               "     --no-pager                Do not pipe output into a pager\n"
+               "  -4                           Resolve IPv4 addresses\n"
+               "  -6                           Resolve IPv6 addresses\n"
+               "  -i --interface=INTERFACE     Look on interface\n"
+               "  -p --protocol=PROTO|help     Look via protocol\n"
+               "  -t --type=TYPE|help          Query RR with DNS type\n"
+               "  -c --class=CLASS|help        Query RR with DNS class\n"
+               "     --service-address=BOOL    Resolve address for services (default: yes)\n"
+               "     --service-txt=BOOL        Resolve TXT records for services (default: yes)\n"
+               "     --cname=BOOL              Follow CNAME redirects (default: yes)\n"
+               "     --search=BOOL             Use search domains for single-label names\n"
+               "                                                              (default: yes)\n"
+               "     --raw[=payload|packet]    Dump the answer as binary data\n"
+               "     --legend=BOOL             Print headers and additional info (default: yes)\n"
+               "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
+               , ansi_highlight()
+               , ansi_normal()
                , link
         );
 

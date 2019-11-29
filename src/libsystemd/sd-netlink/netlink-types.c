@@ -19,13 +19,19 @@
 #include <linux/if_macsec.h>
 #include <linux/if_tunnel.h>
 #include <linux/l2tp.h>
+#include <linux/nexthop.h>
+#include <linux/nl80211.h>
+#include <linux/pkt_sched.h>
 #include <linux/veth.h>
 #include <linux/wireguard.h>
 
-#include "macro.h"
-#include "missing.h"
-#include "netlink-types.h"
 #include "sd-netlink.h"
+
+#include "generic-netlink.h"
+#include "hashmap.h"
+#include "macro.h"
+#include "netlink-internal.h"
+#include "netlink-types.h"
 #include "string-table.h"
 #include "util.h"
 
@@ -716,6 +722,29 @@ static const NLTypeSystem rtnl_routing_policy_rule_type_system = {
         .types = rtnl_routing_policy_rule_types,
 };
 
+static const NLType rtnl_nexthop_types[] = {
+        [NHA_ID]                  = { .type = NETLINK_TYPE_U32 },
+        [NHA_OIF]                 = { .type = NETLINK_TYPE_U32 },
+        [NHA_GATEWAY]             = { .type = NETLINK_TYPE_IN_ADDR },
+};
+
+static const NLTypeSystem rtnl_nexthop_type_system = {
+       .count = ELEMENTSOF(rtnl_nexthop_types),
+       .types = rtnl_nexthop_types,
+};
+
+static const NLType rtnl_qdisc_types[] = {
+        [TCA_KIND]           = { .type = NETLINK_TYPE_STRING },
+        [TCA_OPTIONS]        = { .size = sizeof(struct tc_netem_qopt) },
+        [TCA_INGRESS_BLOCK]  = { .type = NETLINK_TYPE_U32 },
+        [TCA_EGRESS_BLOCK]   = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLTypeSystem rtnl_qdisc_type_system = {
+        .count = ELEMENTSOF(rtnl_qdisc_types),
+        .types = rtnl_qdisc_types,
+};
+
 static const NLType rtnl_types[] = {
         [NLMSG_DONE]       = { .type = NETLINK_TYPE_NESTED, .type_system = &empty_type_system, .size = 0 },
         [NLMSG_ERROR]      = { .type = NETLINK_TYPE_NESTED, .type_system = &empty_type_system, .size = sizeof(struct nlmsgerr) },
@@ -738,6 +767,12 @@ static const NLType rtnl_types[] = {
         [RTM_NEWRULE]      = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_routing_policy_rule_type_system, .size = sizeof(struct rtmsg) },
         [RTM_DELRULE]      = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_routing_policy_rule_type_system, .size = sizeof(struct rtmsg) },
         [RTM_GETRULE]      = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_routing_policy_rule_type_system, .size = sizeof(struct rtmsg) },
+        [RTM_NEWNEXTHOP]   = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_nexthop_type_system, .size = sizeof(struct nhmsg) },
+        [RTM_DELNEXTHOP]   = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_nexthop_type_system, .size = sizeof(struct nhmsg) },
+        [RTM_GETNEXTHOP]   = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_nexthop_type_system, .size = sizeof(struct nhmsg) },
+        [RTM_NEWQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_qdisc_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_DELQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_qdisc_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_GETQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_qdisc_type_system, .size = sizeof(struct tcmsg) },
 };
 
 const NLTypeSystem rtnl_type_system_root = {
@@ -969,24 +1004,61 @@ static const NLTypeSystem genl_macsec_device_type_system = {
         .types = genl_macsec,
 };
 
+static const NLType genl_nl80211_types[] = {
+        [NL80211_ATTR_IFINDEX] = { .type = NETLINK_TYPE_U32 },
+        [NL80211_ATTR_MAC]     = { .type = NETLINK_TYPE_ETHER_ADDR },
+        [NL80211_ATTR_SSID]    = { .type = NETLINK_TYPE_STRING },
+        [NL80211_ATTR_IFTYPE]  = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLTypeSystem genl_nl80211_type_system = {
+        .count = ELEMENTSOF(genl_nl80211_types),
+        .types = genl_nl80211_types,
+};
+
+static const NLType genl_nl80211_cmds[] = {
+        [NL80211_CMD_GET_WIPHY]     = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_SET_WIPHY]     = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_NEW_WIPHY]     = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_DEL_WIPHY]     = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_GET_INTERFACE] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_SET_INTERFACE] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_NEW_INTERFACE] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_DEL_INTERFACE] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_GET_STATION]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_SET_STATION]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_NEW_STATION]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+        [NL80211_CMD_DEL_STATION]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system },
+};
+
+static const NLTypeSystem genl_nl80211_cmds_type_system = {
+        .count = ELEMENTSOF(genl_nl80211_cmds),
+        .types = genl_nl80211_cmds,
+};
+
 static const NLType genl_families[] = {
         [SD_GENL_ID_CTRL]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_ctrl_id_ctrl_type_system },
         [SD_GENL_WIREGUARD] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_wireguard_type_system },
-        [SD_GENL_FOU]       = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_fou_cmds_type_system},
+        [SD_GENL_FOU]       = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_fou_cmds_type_system },
         [SD_GENL_L2TP]      = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_l2tp_tunnel_session_type_system },
         [SD_GENL_MACSEC]    = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_macsec_device_type_system },
+        [SD_GENL_NL80211]   = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_cmds_type_system },
 };
 
+/* Mainly used when sending message */
 const NLTypeSystem genl_family_type_system_root = {
         .count = ELEMENTSOF(genl_families),
         .types = genl_families,
 };
 
 static const NLType genl_types[] = {
-        [NLMSG_ERROR]  = { .type = NETLINK_TYPE_NESTED, .type_system = &empty_type_system, .size = sizeof(struct nlmsgerr) },
-        [GENL_ID_CTRL] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_get_family_type_system, .size = sizeof(struct genlmsghdr) },
+        [SD_GENL_ERROR]   = { .type = NETLINK_TYPE_NESTED, .type_system = &empty_type_system, .size = sizeof(struct nlmsgerr) },
+        [SD_GENL_DONE]    = { .type = NETLINK_TYPE_NESTED, .type_system = &empty_type_system },
+        [SD_GENL_ID_CTRL] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_get_family_type_system, .size = sizeof(struct genlmsghdr) },
+        [SD_GENL_NL80211] = { .type = NETLINK_TYPE_NESTED, .type_system = &genl_nl80211_type_system, .size = sizeof(struct genlmsghdr) },
 };
 
+/* Mainly used when message received */
 const NLTypeSystem genl_type_system_root = {
         .count = ELEMENTSOF(genl_types),
         .types = genl_types,
@@ -1032,6 +1104,31 @@ const NLTypeSystem *type_system_get_root(int protocol) {
                 default: /* NETLINK_ROUTE: */
                         return &rtnl_type_system_root;
         }
+}
+
+int type_system_root_get_type(sd_netlink *nl, const NLType **ret, uint16_t type) {
+        sd_genl_family family;
+        const NLType *nl_type;
+        int r;
+
+        if (!nl || nl->protocol != NETLINK_GENERIC)
+                return type_system_get_type(&rtnl_type_system_root, ret, type);
+
+        r = nlmsg_type_to_genl_family(nl, type, &family);
+        if (r < 0)
+                return r;
+
+        if (family >= genl_type_system_root.count)
+                return -EOPNOTSUPP;
+
+        nl_type = &genl_type_system_root.types[family];
+
+        if (nl_type->type == NETLINK_TYPE_UNSPEC)
+                return -EOPNOTSUPP;
+
+        *ret = nl_type;
+
+        return 0;
 }
 
 int type_system_get_type(const NLTypeSystem *type_system, const NLType **ret, uint16_t type) {

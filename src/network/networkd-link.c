@@ -6,17 +6,16 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "bond.h"
+#include "bridge.h"
 #include "bus-util.h"
 #include "dhcp-identifier.h"
 #include "dhcp-lease-internal.h"
 #include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "ipvlan.h"
 #include "missing_network.h"
-#include "netdev/bond.h"
-#include "netdev/bridge.h"
-#include "netdev/ipvlan.h"
-#include "netdev/vrf.h"
 #include "netlink-util.h"
 #include "network-internal.h"
 #include "networkd-can.h"
@@ -33,6 +32,8 @@
 #include "networkd-neighbor.h"
 #include "networkd-radv.h"
 #include "networkd-routing-policy-rule.h"
+#include "networkd-wifi.h"
+#include "qdisc.h"
 #include "set.h"
 #include "socket-util.h"
 #include "stdio-util.h"
@@ -43,6 +44,7 @@
 #include "udev-util.h"
 #include "util.h"
 #include "virt.h"
+#include "vrf.h"
 
 uint32_t link_get_vrf_table(Link *link) {
         return link->network->vrf ? VRF(link->network->vrf)->table : RT_TABLE_MAIN;
@@ -661,6 +663,25 @@ void link_dns_settings_clear(Link *link) {
         link->dnssec_negative_trust_anchors = set_free_free(link->dnssec_negative_trust_anchors);
 }
 
+static void link_free_engines(Link *link) {
+        if (!link)
+                return;
+
+        link->dhcp_server = sd_dhcp_server_unref(link->dhcp_server);
+        link->dhcp_client = sd_dhcp_client_unref(link->dhcp_client);
+        link->dhcp_lease = sd_dhcp_lease_unref(link->dhcp_lease);
+        link->dhcp_routes = set_free(link->dhcp_routes);
+
+        link->lldp = sd_lldp_unref(link->lldp);
+
+        ndisc_flush(link);
+
+        link->ipv4ll = sd_ipv4ll_unref(link->ipv4ll);
+        link->dhcp6_client = sd_dhcp6_client_unref(link->dhcp6_client);
+        link->ndisc = sd_ndisc_unref(link->ndisc);
+        link->radv = sd_radv_unref(link->radv);
+}
+
 static Link *link_free(Link *link) {
         Address *address;
 
@@ -671,6 +692,9 @@ static Link *link_free(Link *link) {
 
         link->routes = set_free_with_destructor(link->routes, route_free);
         link->routes_foreign = set_free_with_destructor(link->routes_foreign, route_free);
+
+        link->nexthops = set_free_with_destructor(link->nexthops, nexthop_free);
+        link->nexthops_foreign = set_free_with_destructor(link->nexthops_foreign, nexthop_free);
 
         link->neighbors = set_free_with_destructor(link->neighbors, neighbor_free);
         link->neighbors_foreign = set_free_with_destructor(link->neighbors_foreign, neighbor_free);
@@ -683,27 +707,14 @@ static Link *link_free(Link *link) {
                 address_free(address);
         }
 
-        sd_dhcp_server_unref(link->dhcp_server);
-        sd_dhcp_client_unref(link->dhcp_client);
-        sd_dhcp_lease_unref(link->dhcp_lease);
-        set_free(link->dhcp_routes);
-
         link_lldp_emit_stop(link);
-
+        link_free_engines(link);
         free(link->lease_file);
-
-        sd_lldp_unref(link->lldp);
         free(link->lldp_file);
-
-        ndisc_flush(link);
-
-        sd_ipv4ll_unref(link->ipv4ll);
-        sd_dhcp6_client_unref(link->dhcp6_client);
-        sd_ndisc_unref(link->ndisc);
-        sd_radv_unref(link->radv);
 
         free(link->ifname);
         free(link->kind);
+        free(link->ssid);
 
         (void) unlink(link->state_file);
         free(link->state_file);
@@ -770,8 +781,12 @@ int link_stop_clients(Link *link, bool may_keep_dhcp) {
 
         dhcp4_release_old_lease(link);
 
-        if (link->dhcp_client && (!may_keep_dhcp || !link->network ||
-                                  !FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_DHCP_ON_STOP))) {
+        bool keep_dhcp = may_keep_dhcp &&
+                         link->network &&
+                         (link->manager->restarting ||
+                          FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_DHCP_ON_STOP));
+
+        if (link->dhcp_client && !keep_dhcp) {
                 k = sd_dhcp_client_stop(link->dhcp_client);
                 if (k < 0)
                         r = log_link_warning_errno(link, k, "Could not stop DHCPv4 client: %m");
@@ -856,8 +871,6 @@ static void link_enter_configured(Link *link) {
         if (link->state != LINK_STATE_CONFIGURING)
                 return;
 
-        log_link_info(link, "Configured");
-
         link_set_state(link, LINK_STATE_CONFIGURED);
 
         (void) link_join_netdevs_after_configured(link);
@@ -899,6 +912,58 @@ static int link_request_set_routing_policy_rule(Link *link) {
         }
 
         return 0;
+}
+
+static int nexthop_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
+        int r;
+
+        assert(link);
+        assert(link->nexthop_messages > 0);
+        assert(IN_SET(link->state, LINK_STATE_CONFIGURING,
+                      LINK_STATE_FAILED, LINK_STATE_LINGER));
+
+        link->nexthop_messages--;
+
+        if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
+                return 1;
+
+        r = sd_netlink_message_get_errno(m);
+        if (r < 0 && r != -EEXIST) {
+                log_link_warning_errno(link, r, "Could not set nexthop: %m");
+                link_enter_failed(link);
+                return 1;
+        }
+
+        if (link->nexthop_messages == 0) {
+                log_link_debug(link, "Nexthop set");
+                link->static_nexthops_configured = true;
+                link_check_ready(link);
+        }
+
+        return 1;
+}
+
+int link_request_set_nexthop(Link *link) {
+        NextHop *nh;
+        int r;
+
+        LIST_FOREACH(nexthops, nh, link->network->static_nexthops) {
+                r = nexthop_configure(nh, link, nexthop_handler);
+                if (r < 0)
+                        return log_link_warning_errno(link, r, "Could not set nexthop: %m");
+                if (r > 0)
+                        link->nexthop_messages++;
+        }
+
+        if (link->nexthop_messages == 0) {
+                link->static_nexthops_configured = true;
+                link_check_ready(link);
+        } else {
+                log_link_debug(link, "Setting nexthop");
+                link_set_state(link, LINK_STATE_CONFIGURING);
+        }
+
+        return 1;
 }
 
 static int route_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) {
@@ -946,6 +1011,7 @@ int link_request_set_routes(Link *link) {
         assert(link->state != _LINK_STATE_INVALID);
 
         link->static_routes_configured = false;
+        link->static_routes_ready = false;
 
         if (!link_has_carrier(link) && !link->network->configure_without_carrier)
                 /* During configuring addresses, the link lost its carrier. As networkd is dropping
@@ -1015,12 +1081,26 @@ void link_check_ready(Link *link) {
         if (!link->static_routes_configured)
                 return;
 
+        if (!link->static_routes_ready) {
+                link->static_routes_ready = true;
+                r = link_request_set_nexthop(link);
+                if (r < 0)
+                        link_enter_failed(link);
+                return;
+        }
+
+        if (!link->static_nexthops_configured)
+                return;
+
         if (!link->routing_policy_rules_configured)
+                return;
+
+        if (!link->qdiscs_configured)
                 return;
 
         if (link_has_carrier(link) || !link->network->configure_without_carrier) {
 
-                if (link_ipv4ll_enabled(link, ADDRESS_FAMILY_IPV4) && !(link->ipv4ll_address && link->ipv4ll_route))
+                if (link_ipv4ll_enabled(link, ADDRESS_FAMILY_IPV4) && !link->ipv4ll_address)
                         return;
 
                 if (link_ipv6ll_enabled(link) &&
@@ -1030,7 +1110,7 @@ void link_check_ready(Link *link) {
                 if ((link_dhcp4_enabled(link) || link_dhcp6_enabled(link)) &&
                     !link->dhcp4_configured &&
                     !link->dhcp6_configured &&
-                    !(link_ipv4ll_enabled(link, ADDRESS_FAMILY_FALLBACK_IPV4) && link->ipv4ll_address && link->ipv4ll_route))
+                    !(link_ipv4ll_enabled(link, ADDRESS_FAMILY_FALLBACK_IPV4) && link->ipv4ll_address))
                         /* When DHCP is enabled, at least one protocol must provide an address, or
                          * an IPv4ll fallback address must be configured. */
                         return;
@@ -1132,6 +1212,8 @@ static int link_request_set_addresses(Link *link) {
         link->addresses_ready = false;
         link->neighbors_configured = false;
         link->static_routes_configured = false;
+        link->static_routes_ready = false;
+        link->static_nexthops_configured = false;
         link->routing_policy_rules_configured = false;
 
         r = link_set_bridge_fdb(link);
@@ -1915,10 +1997,8 @@ static int link_append_to_master(Link *link, NetDev *netdev) {
                 return r;
 
         r = set_put(master->slaves, link);
-        if (r < 0)
+        if (r <= 0)
                 return r;
-        if (r == 0)
-                return 0;
 
         link_ref(link);
         return 0;
@@ -2389,13 +2469,13 @@ static int link_drop_foreign_config(Link *link) {
 
         SET_FOREACH(address, link->addresses_foreign, i) {
                 /* we consider IPv6LL addresses to be managed by the kernel */
-                if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1)
+                if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1 && link_ipv6ll_enabled(link))
                         continue;
 
                 if (link_address_is_dynamic(link, address)) {
-                        if (FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_DHCP))
+                        if (link->network && FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_DHCP))
                                 continue;
-                } else if (FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_STATIC))
+                } else if (link->network && FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_STATIC))
                         continue;
 
                 if (link_is_static_address_configured(link, address)) {
@@ -2435,16 +2515,16 @@ static int link_drop_foreign_config(Link *link) {
                     in_addr_equal(AF_INET6, &route->dst, &(union in_addr_union) { .in6 = {{{ 0xff,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 }}} }))
                         continue;
 
-                if (route->protocol == RTPROT_STATIC &&
+                if (route->protocol == RTPROT_STATIC && link->network &&
                     FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_STATIC))
                         continue;
 
-                if (route->protocol == RTPROT_DHCP &&
+                if (route->protocol == RTPROT_DHCP && link->network &&
                     FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_DHCP))
                         continue;
 
                 if (link_is_static_route_configured(link, route)) {
-                        r = route_add(link, route->family, &route->dst, route->dst_prefixlen, &route->gw, route->tos, route->priority, route->table, NULL);
+                        r = route_add(link, route, NULL);
                         if (r < 0)
                                 return r;
                 } else {
@@ -2466,7 +2546,7 @@ static int link_drop_config(Link *link) {
 
         SET_FOREACH(address, link->addresses, i) {
                 /* we consider IPv6LL addresses to be managed by the kernel */
-                if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1)
+                if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1 && link_ipv6ll_enabled(link))
                         continue;
 
                 r = address_remove(address, link, NULL);
@@ -2504,12 +2584,38 @@ static int link_drop_config(Link *link) {
         return 0;
 }
 
+static int link_configure_qdiscs(Link *link) {
+        QDiscs *qdisc;
+        Iterator i;
+        int r;
+
+        link->qdiscs_configured = false;
+        link->qdisc_messages = 0;
+
+        ORDERED_HASHMAP_FOREACH(qdisc, link->network->qdiscs_by_section, i) {
+                r = qdisc_configure(link, qdisc);
+                if (r < 0)
+                        return r;
+        }
+
+        if (link->qdisc_messages == 0)
+                link->qdiscs_configured = true;
+        else
+                log_link_debug(link, "Configuring QDiscs");
+
+        return 0;
+}
+
 static int link_configure(Link *link) {
         int r;
 
         assert(link);
         assert(link->network);
         assert(link->state == LINK_STATE_INITIALIZED);
+
+        r = link_configure_qdiscs(link);
+        if (r < 0)
+                return r;
 
         if (link->iftype == ARPHRD_CAN)
                 return link_configure_can(link);
@@ -2781,6 +2887,78 @@ static int link_configure_duid(Link *link) {
         return 0;
 }
 
+int link_reconfigure(Link *link, bool force) {
+        Network *network;
+        int r;
+
+        if (IN_SET(link->state, LINK_STATE_PENDING, LINK_STATE_LINGER))
+                return 0;
+
+        r = network_get(link->manager, link->sd_device, link->ifname,
+                        &link->mac, link->wlan_iftype, link->ssid, &link->bssid, &network);
+        if (r == -ENOENT) {
+                link_enter_unmanaged(link);
+                return 0;
+        } else if (r == 0 && network->unmanaged) {
+                link_enter_unmanaged(link);
+                return 0;
+        } else if (r < 0)
+                return r;
+
+        if (link->network == network && !force)
+                return 0;
+
+        log_link_info(link, "Re-configuring with %s", network->filename);
+
+        /* Dropping old .network file */
+        r = link_stop_clients(link, false);
+        if (r < 0) {
+                link_enter_failed(link);
+                return r;
+        }
+
+        if (link_dhcp4_server_enabled(link))
+                (void) sd_dhcp_server_stop(link->dhcp_server);
+
+        r = link_drop_config(link);
+        if (r < 0)
+                return r;
+
+        if (!IN_SET(link->state, LINK_STATE_UNMANAGED, LINK_STATE_PENDING)) {
+                log_link_debug(link, "State is %s, dropping config", link_state_to_string(link->state));
+                r = link_drop_foreign_config(link);
+                if (r < 0)
+                        return r;
+        }
+
+        link_free_carrier_maps(link);
+        link_free_engines(link);
+        link->network = network_unref(link->network);
+
+        /* Then, apply new .network file */
+        r = network_apply(network, link);
+        if (r < 0)
+                return r;
+
+        r = link_new_carrier_maps(link);
+        if (r < 0)
+                return r;
+
+        link_set_state(link, LINK_STATE_INITIALIZED);
+
+        /* link_configure_duid() returns 0 if it requests product UUID. In that case,
+         * link_configure() is called later asynchronously. */
+        r = link_configure_duid(link);
+        if (r <= 0)
+                return r;
+
+        r = link_configure(link);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
 static int link_initialized_and_synced(Link *link) {
         Network *network;
         int r;
@@ -2806,8 +2984,12 @@ static int link_initialized_and_synced(Link *link) {
                 return r;
 
         if (!link->network) {
+                r = wifi_get_info(link);
+                if (r < 0)
+                        return r;
+
                 r = network_get(link->manager, link->sd_device, link->ifname,
-                                &link->mac, &network);
+                                &link->mac, link->wlan_iftype, link->ssid, &link->bssid, &network);
                 if (r == -ENOENT) {
                         link_enter_unmanaged(link);
                         return 0;
@@ -2906,7 +3088,6 @@ static int link_load(Link *link) {
                             *dhcp4_address = NULL,
                             *ipv4ll_address = NULL;
         union in_addr_union address;
-        union in_addr_union route_dst;
         const char *p;
         int r;
 
@@ -2993,14 +3174,11 @@ network_file_fail:
                 p = routes;
 
                 for (;;) {
-                        Route *route;
-                        _cleanup_free_ char *route_str = NULL;
                         _cleanup_(sd_event_source_unrefp) sd_event_source *expire = NULL;
-                        usec_t lifetime;
+                        _cleanup_(route_freep) Route *tmp = NULL;
+                        _cleanup_free_ char *route_str = NULL;
                         char *prefixlen_str;
-                        int family;
-                        unsigned char prefixlen, tos, table;
-                        uint32_t priority;
+                        Route *route;
 
                         r = extract_first_word(&p, &route_str, NULL, 0);
                         if (r < 0) {
@@ -3018,7 +3196,11 @@ network_file_fail:
 
                         *prefixlen_str++ = '\0';
 
-                        r = sscanf(prefixlen_str, "%hhu/%hhu/%"SCNu32"/%hhu/"USEC_FMT, &prefixlen, &tos, &priority, &table, &lifetime);
+                        r = route_new(&tmp);
+                        if (r < 0)
+                                return log_oom();
+
+                        r = sscanf(prefixlen_str, "%hhu/%hhu/%"SCNu32"/%"PRIu32"/"USEC_FMT, &tmp->dst_prefixlen, &tmp->tos, &tmp->priority, &tmp->table, &tmp->lifetime);
                         if (r != 5) {
                                 log_link_debug(link,
                                                "Failed to parse destination prefix length, tos, priority, table or expiration %s",
@@ -3026,24 +3208,23 @@ network_file_fail:
                                 continue;
                         }
 
-                        r = in_addr_from_string_auto(route_str, &family, &route_dst);
+                        r = in_addr_from_string_auto(route_str, &tmp->family, &tmp->dst);
                         if (r < 0) {
                                 log_link_debug_errno(link, r, "Failed to parse route destination %s: %m", route_str);
                                 continue;
                         }
 
-                        r = route_add(link, family, &route_dst, prefixlen, NULL, tos, priority, table, &route);
+                        r = route_add(link, tmp, &route);
                         if (r < 0)
                                 return log_link_error_errno(link, r, "Failed to add route: %m");
 
-                        if (lifetime != USEC_INFINITY && !kernel_route_expiration_supported()) {
-                                r = sd_event_add_time(link->manager->event, &expire, clock_boottime_or_monotonic(), lifetime,
+                        if (route->lifetime != USEC_INFINITY && !kernel_route_expiration_supported()) {
+                                r = sd_event_add_time(link->manager->event, &expire, clock_boottime_or_monotonic(), route->lifetime,
                                                       0, route_expire_handler, route);
                                 if (r < 0)
                                         log_link_warning_errno(link, r, "Could not arm route expiration handler: %m");
                         }
 
-                        route->lifetime = lifetime;
                         sd_event_source_unref(route->expire);
                         route->expire = TAKE_PTR(expire);
                 }
@@ -3116,8 +3297,8 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
                 sprintf(ifindex_str, "n%d", link->ifindex);
                 r = sd_device_new_from_device_id(&device, ifindex_str);
                 if (r < 0) {
-                        log_link_warning_errno(link, r, "Could not find device: %m");
-                        goto failed;
+                        log_link_warning_errno(link, r, "Could not find device, waiting for device initialization: %m");
+                        return 0;
                 }
 
                 r = sd_device_get_is_initialized(device);
@@ -3181,6 +3362,15 @@ static int link_carrier_gained(Link *link) {
         int r;
 
         assert(link);
+
+        r = wifi_get_info(link);
+        if (r < 0)
+                return r;
+        if (r > 0) {
+                r = link_reconfigure(link, false);
+                if (r < 0)
+                        return r;
+        }
 
         if (IN_SET(link->state, LINK_STATE_CONFIGURING, LINK_STATE_CONFIGURED)) {
                 r = link_acquire_conf(link);
@@ -3593,6 +3783,22 @@ int link_save(Link *link) {
                         const struct in_addr *addresses;
 
                         r = sd_dhcp_lease_get_ntp(link->dhcp_lease, &addresses);
+                        if (r > 0)
+                                if (serialize_in_addrs(f, addresses, r, space, in4_addr_is_non_local) > 0)
+                                        space = true;
+                }
+
+                fputc('\n', f);
+
+                fputs("SIP=", f);
+                space = false;
+                fputstrv(f, link->network->sip, NULL, &space);
+
+                if (link->network->dhcp_use_sip &&
+                    link->dhcp_lease) {
+                        const struct in_addr *addresses;
+
+                        r = sd_dhcp_lease_get_sip(link->dhcp_lease, &addresses);
                         if (r > 0)
                                 if (serialize_in_addrs(f, addresses, r, space, in4_addr_is_non_local) > 0)
                                         space = true;

@@ -59,6 +59,8 @@ option('valgrind', type : 'boolean', value : false,
        description : 'do extra operations to avoid valgrind warnings')
 option('log-trace', type : 'boolean', value : false,
        description : 'enable low level debug logging')
+option('user-path', type : 'string',
+       description : '$PATH to use for user sessions')
 
 option('utmp', type : 'boolean',
        description : 'support for utmp/wtmp log handling')
@@ -207,6 +209,8 @@ option('gshadow', type : 'boolean',
        description : 'support for shadow group')
 option('default-locale', type : 'string', value : '',
        description : 'default locale used when /etc/locale.conf does not exist')
+option('service-watchdog', type : 'string', value : '3min',
+       description : 'default watchdog setting for systemd services')
 
 option('default-dnssec', type : 'combo',
        description : 'default DNSSEC mode',

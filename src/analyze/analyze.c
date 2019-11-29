@@ -5,7 +5,6 @@
 
 #include <getopt.h>
 #include <inttypes.h>
-#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -85,6 +84,7 @@ static bool arg_man = true;
 static bool arg_generators = false;
 static const char *arg_root = NULL;
 static unsigned arg_iterations = 1;
+static usec_t arg_base_time = USEC_INFINITY;
 
 STATIC_DESTRUCTOR_REGISTER(arg_dot_from_patterns, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_dot_to_patterns, strv_freep);
@@ -1713,7 +1713,7 @@ static void kernel_syscalls_remove(Set *s, const SyscallFilterSet *set) {
                 if (syscall[0] == '@')
                         continue;
 
-                (void) set_remove(s, syscall);
+                free(set_remove(s, syscall));
         }
 }
 
@@ -1757,15 +1757,21 @@ static int dump_syscall_filters(int argc, char *argv[], void *userdata) {
                         fflush(stdout);
                         log_notice_errno(k, "# Not showing unlisted system calls, couldn't retrieve kernel system call list: %m");
                 } else if (!set_isempty(kernel)) {
-                        const char *syscall;
-                        Iterator j;
+                        _cleanup_free_ char **l = NULL;
+                        char **syscall;
 
                         printf("\n"
                                "# %sUnlisted System Calls%s (supported by the local kernel, but not included in any of the groups listed above):\n",
                                ansi_highlight(), ansi_normal());
 
-                        SET_FOREACH(syscall, kernel, j)
-                                printf("#   %s\n", syscall);
+                        l = set_get_strv(kernel);
+                        if (!l)
+                                return log_oom();
+
+                        strv_sort(l);
+
+                        STRV_FOREACH(syscall, l)
+                                printf("#   %s\n", *syscall);
                 }
         } else {
                 char **name;
@@ -2131,7 +2137,10 @@ static int test_calendar(int argc, char *argv[], void *userdata) {
         char **p;
         usec_t n;
 
-        n = now(CLOCK_REALTIME); /* We want to use the same "base" for all expressions */
+        if (arg_base_time != USEC_INFINITY)
+                n = arg_base_time;
+        else
+                n = now(CLOCK_REALTIME); /* We want to use the same "base" for all expressions */
 
         STRV_FOREACH(p, strv_skip(argv, 1)) {
                 r = test_calendar_one(n, *p);
@@ -2157,8 +2166,8 @@ static int service_watchdogs(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create bus connection: %m");
 
-        /* get ServiceWatchdogs */
         if (argc == 1) {
+                /* get ServiceWatchdogs */
                 r = sd_bus_get_property_trivial(
                                 bus,
                                 "org.freedesktop.systemd1",
@@ -2173,27 +2182,24 @@ static int service_watchdogs(int argc, char *argv[], void *userdata) {
 
                 printf("%s\n", yes_no(!!b));
 
-                return 0;
-        }
+        } else {
+                /* set ServiceWatchdogs */
+                b = parse_boolean(argv[1]);
+                if (b < 0)
+                        return log_error_errno(b, "Failed to parse service-watchdogs argument: %m");
 
-        /* set ServiceWatchdogs */
-        b = parse_boolean(argv[1]);
-        if (b < 0) {
-                log_error("Failed to parse service-watchdogs argument.");
-                return -EINVAL;
+                r = sd_bus_set_property(
+                                bus,
+                                "org.freedesktop.systemd1",
+                                "/org/freedesktop/systemd1",
+                                "org.freedesktop.systemd1.Manager",
+                                "ServiceWatchdogs",
+                                &error,
+                                "b",
+                                b);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to set service-watchdog state: %s", bus_error_message(&error, r));
         }
-
-        r = sd_bus_set_property(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "ServiceWatchdogs",
-                        &error,
-                        "b",
-                        b);
-        if (r < 0)
-                return log_error_errno(r, "Failed to set service-watchdog state: %s", bus_error_message(&error, r));
 
         return 0;
 }
@@ -2234,8 +2240,27 @@ static int help(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] {COMMAND} ...\n\n"
-               "Profile systemd, show unit dependencies, check unit files.\n\n"
+        printf("%s [OPTIONS...] COMMAND ...\n\n"
+               "%sProfile systemd, show unit dependencies, check unit files.%s\n"
+               "\nCommands:\n"
+               "  [time]                   Print time required to boot the machine\n"
+               "  blame                    Print list of running units ordered by time to init\n"
+               "  critical-chain [UNIT...] Print a tree of the time critical chain of units\n"
+               "  plot                     Output SVG graphic showing service initialization\n"
+               "  dot [UNIT...]            Output dependency graph in %s format\n"
+               "  dump                     Output state serialization of service manager\n"
+               "  cat-config               Show configuration file and drop-ins\n"
+               "  unit-files               List files and symlinks for units\n"
+               "  unit-paths               List load directories for units\n"
+               "  exit-status [STATUS...]  List exit status definitions\n"
+               "  syscall-filter [NAME...] Print list of syscalls in seccomp filter\n"
+               "  condition CONDITION...   Evaluate conditions and asserts\n"
+               "  verify FILE...           Check unit files for correctness\n"
+               "  calendar SPEC...         Validate repetitive calendar time events\n"
+               "  timestamp TIMESTAMP...   Validate a timestamp\n"
+               "  timespan SPAN...         Validate a time span\n"
+               "  security [UNIT...]       Analyze security of unit\n"
+               "\nOptions:\n"
                "  -h --help                Show this help\n"
                "     --version             Show package version\n"
                "     --no-pager            Do not pipe output into a pager\n"
@@ -2253,29 +2278,11 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --man[=BOOL]          Do [not] check for existence of man pages\n"
                "     --generators[=BOOL]   Do [not] run unit generators (requires privileges)\n"
                "     --iterations=N        Show the specified number of iterations\n"
-               "\nCommands:\n"
-               "  time                     Print time spent in the kernel\n"
-               "  blame                    Print list of running units ordered by time to init\n"
-               "  critical-chain [UNIT...] Print a tree of the time critical chain of units\n"
-               "  plot                     Output SVG graphic showing service initialization\n"
-               "  dot [UNIT...]            Output dependency graph in %s format\n"
-               "  log-level [LEVEL]        Get/set logging threshold for manager\n"
-               "  log-target [TARGET]      Get/set logging target for manager\n"
-               "  dump                     Output state serialization of service manager\n"
-               "  cat-config               Show configuration file and drop-ins\n"
-               "  unit-files               List files and symlinks for units\n"
-               "  unit-paths               List load directories for units\n"
-               "  exit-status [STATUS...]  List exit status definitions\n"
-               "  syscall-filter [NAME...] Print list of syscalls in seccomp filter\n"
-               "  condition CONDITION...   Evaluate conditions and asserts\n"
-               "  verify FILE...           Check unit files for correctness\n"
-               "  service-watchdogs [BOOL] Get/set service watchdog state\n"
-               "  calendar SPEC...         Validate repetitive calendar time events\n"
-               "  timestamp TIMESTAMP...   Validate a timestamp\n"
-               "  timespan SPAN...         Validate a time span\n"
-               "  security [UNIT...]       Analyze security of unit\n"
+               "     --base-time=TIMESTAMP Calculate calendar times relative to specified time\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
                , dot_link
                , link
         );
@@ -2302,6 +2309,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_MAN,
                 ARG_GENERATORS,
                 ARG_ITERATIONS,
+                ARG_BASE_TIME,
         };
 
         static const struct option options[] = {
@@ -2322,6 +2330,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "host",         required_argument, NULL, 'H'                  },
                 { "machine",      required_argument, NULL, 'M'                  },
                 { "iterations",   required_argument, NULL, ARG_ITERATIONS       },
+                { "base-time",    required_argument, NULL, ARG_BASE_TIME        },
                 {}
         };
 
@@ -2428,6 +2437,13 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
+                case ARG_BASE_TIME:
+                        r = parse_timestamp(optarg, &arg_base_time);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --base-time= parameter: %s", optarg);
+
+                        break;
+
                 case '?':
                         return -EINVAL;
 
@@ -2460,14 +2476,14 @@ static int run(int argc, char *argv[]) {
                 { "critical-chain",    VERB_ANY, VERB_ANY, 0,            analyze_critical_chain },
                 { "plot",              VERB_ANY, 1,        0,            analyze_plot           },
                 { "dot",               VERB_ANY, VERB_ANY, 0,            dot                    },
+                /* The following seven verbs are deprecated */
                 { "log-level",         VERB_ANY, 2,        0,            get_or_set_log_level   },
                 { "log-target",        VERB_ANY, 2,        0,            get_or_set_log_target  },
-                /* The following four verbs are deprecated aliases */
                 { "set-log-level",     2,        2,        0,            set_log_level          },
                 { "get-log-level",     VERB_ANY, 1,        0,            get_log_level          },
                 { "set-log-target",    2,        2,        0,            set_log_target         },
                 { "get-log-target",    VERB_ANY, 1,        0,            get_log_target         },
-
+                { "service-watchdogs", VERB_ANY, 2,        0,            service_watchdogs      },
                 { "dump",              VERB_ANY, 1,        0,            dump                   },
                 { "cat-config",        2,        VERB_ANY, 0,            cat_config             },
                 { "unit-files",        VERB_ANY, VERB_ANY, 0,            do_unit_files          },
@@ -2479,7 +2495,6 @@ static int run(int argc, char *argv[]) {
                 { "calendar",          2,        VERB_ANY, 0,            test_calendar          },
                 { "timestamp",         2,        VERB_ANY, 0,            test_timestamp         },
                 { "timespan",          2,        VERB_ANY, 0,            dump_timespan          },
-                { "service-watchdogs", VERB_ANY, 2,        0,            service_watchdogs      },
                 { "security",          VERB_ANY, VERB_ANY, 0,            do_security            },
                 {}
         };

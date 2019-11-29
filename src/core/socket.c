@@ -5,7 +5,6 @@
 #include <fcntl.h>
 #include <mqueue.h>
 #include <netinet/tcp.h>
-#include <signal.h>
 #include <sys/epoll.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -28,7 +27,6 @@
 #include "ip-protocol-list.h"
 #include "label.h"
 #include "log.h"
-#include "missing.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -67,7 +65,8 @@ static const UnitActiveState state_translation_table[_SOCKET_STATE_MAX] = {
         [SOCKET_STOP_POST] = UNIT_DEACTIVATING,
         [SOCKET_FINAL_SIGTERM] = UNIT_DEACTIVATING,
         [SOCKET_FINAL_SIGKILL] = UNIT_DEACTIVATING,
-        [SOCKET_FAILED] = UNIT_FAILED
+        [SOCKET_FAILED] = UNIT_FAILED,
+        [SOCKET_CLEANING] = UNIT_MAINTENANCE,
 };
 
 static int socket_dispatch_io(sd_event_source *source, int fd, uint32_t revents, void *userdata);
@@ -293,7 +292,7 @@ static int socket_add_device_dependencies(Socket *s) {
                 return 0;
 
         t = strjoina("/sys/subsystem/net/devices/", s->bind_to_device);
-        return unit_add_node_dependency(UNIT(s), t, false, UNIT_BINDS_TO, UNIT_DEPENDENCY_FILE);
+        return unit_add_node_dependency(UNIT(s), t, UNIT_BINDS_TO, UNIT_DEPENDENCY_FILE);
 }
 
 static int socket_add_default_dependencies(Socket *s) {
@@ -432,9 +431,7 @@ static const char *socket_find_symlink_target(Socket *s) {
 
 static int socket_verify(Socket *s) {
         assert(s);
-
-        if (UNIT(s)->load_state != UNIT_LOADED)
-                return 0;
+        assert(UNIT(s)->load_state == UNIT_LOADED);
 
         if (!s->ports) {
                 log_unit_error(UNIT(s), "Unit has no Listen setting (ListenStream=, ListenDatagram=, ListenFIFO=, ...). Refusing.");
@@ -513,16 +510,17 @@ static int socket_load(Unit *u) {
         if (r < 0)
                 return r;
 
-        r = unit_load_fragment_and_dropin(u);
+        r = unit_load_fragment_and_dropin(u, true);
         if (r < 0)
                 return r;
 
-        if (u->load_state == UNIT_LOADED) {
-                /* This is a new unit? Then let's add in some extras */
-                r = socket_add_extras(s);
-                if (r < 0)
-                        return r;
-        }
+        if (u->load_state != UNIT_LOADED)
+                return 0;
+
+        /* This is a new unit? Then let's add in some extras */
+        r = socket_add_extras(s);
+        if (r < 0)
+                return r;
 
         return socket_verify(s);
 }
@@ -624,6 +622,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
         fprintf(f,
                 "%sSocket State: %s\n"
                 "%sResult: %s\n"
+                "%sClean Result: %s\n"
                 "%sBindIPv6Only: %s\n"
                 "%sBacklog: %u\n"
                 "%sSocketMode: %04o\n"
@@ -642,6 +641,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
                 "%sSELinuxContextFromNet: %s\n",
                 prefix, socket_state_to_string(s->state),
                 prefix, socket_result_to_string(s->result),
+                prefix, socket_result_to_string(s->clean_result),
                 prefix, socket_address_bind_ipv6_only_to_string(s->bind_ipv6_only),
                 prefix, s->backlog,
                 prefix, s->socket_mode,
@@ -840,7 +840,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
                 exec_command_dump_list(s->exec_command[c], f, prefix2);
         }
 
-        cgroup_context_dump(&s->cgroup_context, f, prefix);
+        cgroup_context_dump(UNIT(s), f, prefix);
 }
 
 static int instance_from_socket(int fd, unsigned nr, char **instance) {
@@ -1427,7 +1427,7 @@ static int socket_determine_selinux_label(Socket *s, char **ret) {
                 if (!c)
                         goto no_label;
 
-                r = chase_symlinks(c->path, service->exec_context.root_directory, CHASE_PREFIX_ROOT, &path);
+                r = chase_symlinks(c->path, service->exec_context.root_directory, CHASE_PREFIX_ROOT, &path, NULL);
                 if (r < 0)
                         goto no_label;
 
@@ -1802,7 +1802,8 @@ static void socket_set_state(Socket *s, SocketState state) {
                     SOCKET_STOP_PRE_SIGKILL,
                     SOCKET_STOP_POST,
                     SOCKET_FINAL_SIGTERM,
-                    SOCKET_FINAL_SIGKILL)) {
+                    SOCKET_FINAL_SIGKILL,
+                    SOCKET_CLEANING)) {
 
                 s->timer_event_source = sd_event_source_unref(s->timer_event_source);
                 socket_unwatch_control_pid(s);
@@ -1820,7 +1821,8 @@ static void socket_set_state(Socket *s, SocketState state) {
                     SOCKET_RUNNING,
                     SOCKET_STOP_PRE,
                     SOCKET_STOP_PRE_SIGTERM,
-                    SOCKET_STOP_PRE_SIGKILL))
+                    SOCKET_STOP_PRE_SIGKILL,
+                    SOCKET_CLEANING))
                 socket_close_fds(s);
 
         if (state != old_state)
@@ -1850,7 +1852,8 @@ static int socket_coldplug(Unit *u) {
                    SOCKET_STOP_PRE_SIGKILL,
                    SOCKET_STOP_POST,
                    SOCKET_FINAL_SIGTERM,
-                   SOCKET_FINAL_SIGKILL)) {
+                   SOCKET_FINAL_SIGKILL,
+                   SOCKET_CLEANING)) {
 
                 r = unit_watch_pid(UNIT(s), s->control_pid, false);
                 if (r < 0)
@@ -1891,7 +1894,7 @@ static int socket_coldplug(Unit *u) {
                         return r;
         }
 
-        if (!IN_SET(s->deserialized_state, SOCKET_DEAD, SOCKET_FAILED)) {
+        if (!IN_SET(s->deserialized_state, SOCKET_DEAD, SOCKET_FAILED, SOCKET_CLEANING)) {
                 (void) unit_setup_dynamic_creds(u);
                 (void) unit_setup_exec_runtime(u);
         }
@@ -2071,6 +2074,16 @@ fail:
         socket_enter_signal(s, SOCKET_FINAL_SIGTERM, SOCKET_FAILURE_RESOURCES);
 }
 
+static int state_to_kill_operation(Socket *s, SocketState state) {
+        if (state == SOCKET_STOP_PRE_SIGTERM && unit_has_job_type(UNIT(s), JOB_RESTART))
+                return KILL_RESTART;
+
+        if (state == SOCKET_FINAL_SIGTERM)
+                return KILL_TERMINATE;
+
+        return KILL_KILL;
+}
+
 static void socket_enter_signal(Socket *s, SocketState state, SocketResult f) {
         int r;
 
@@ -2082,8 +2095,7 @@ static void socket_enter_signal(Socket *s, SocketState state, SocketResult f) {
         r = unit_kill_context(
                         UNIT(s),
                         &s->kill_context,
-                        !IN_SET(state, SOCKET_STOP_PRE_SIGTERM, SOCKET_FINAL_SIGTERM) ?
-                        KILL_KILL : KILL_TERMINATE,
+                        state_to_kill_operation(s, state),
                         -1,
                         s->control_pid,
                         false);
@@ -2455,7 +2467,8 @@ static int socket_start(Unit *u) {
                    SOCKET_STOP_PRE_SIGTERM,
                    SOCKET_STOP_POST,
                    SOCKET_FINAL_SIGTERM,
-                   SOCKET_FINAL_SIGKILL))
+                   SOCKET_FINAL_SIGKILL,
+                   SOCKET_CLEANING))
                 return -EAGAIN;
 
         /* Already on it! */
@@ -2528,6 +2541,12 @@ static int socket_stop(Unit *u) {
                    SOCKET_START_POST)) {
                 socket_enter_signal(s, SOCKET_STOP_PRE_SIGTERM, SOCKET_SUCCESS);
                 return -EAGAIN;
+        }
+
+        /* If we are currently cleaning, then abort it, brutally. */
+        if (s->state == SOCKET_CLEANING) {
+                socket_enter_signal(s, SOCKET_FINAL_SIGKILL, SOCKET_SUCCESS);
+                return 0;
         }
 
         assert(IN_SET(s->state, SOCKET_LISTENING, SOCKET_RUNNING));
@@ -3073,6 +3092,14 @@ static void socket_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                         socket_enter_dead(s, f);
                         break;
 
+                case SOCKET_CLEANING:
+
+                        if (s->clean_result == SOCKET_SUCCESS)
+                                s->clean_result = f;
+
+                        socket_enter_dead(s, SOCKET_SUCCESS);
+                        break;
+
                 default:
                         assert_not_reached("Uh, control process died at wrong time.");
                 }
@@ -3141,6 +3168,15 @@ static int socket_dispatch_timer(sd_event_source *source, usec_t usec, void *use
                 socket_enter_dead(s, SOCKET_FAILURE_TIMEOUT);
                 break;
 
+        case SOCKET_CLEANING:
+                log_unit_warning(UNIT(s), "Cleaning timed out. killing.");
+
+                if (s->clean_result == SOCKET_SUCCESS)
+                        s->clean_result = SOCKET_FAILURE_TIMEOUT;
+
+                socket_enter_signal(s, SOCKET_FINAL_SIGKILL, 0);
+                break;
+
         default:
                 assert_not_reached("Timeout at wrong time.");
         }
@@ -3197,6 +3233,7 @@ static void socket_reset_failed(Unit *u) {
                 socket_set_state(s, SOCKET_DEAD);
 
         s->result = SOCKET_SUCCESS;
+        s->clean_result = SOCKET_SUCCESS;
 }
 
 void socket_connection_unref(Socket *s) {
@@ -3291,6 +3328,56 @@ static int socket_control_pid(Unit *u) {
         return s->control_pid;
 }
 
+static int socket_clean(Unit *u, ExecCleanMask mask) {
+        _cleanup_strv_free_ char **l = NULL;
+        Socket *s = SOCKET(u);
+        int r;
+
+        assert(s);
+        assert(mask != 0);
+
+        if (s->state != SOCKET_DEAD)
+                return -EBUSY;
+
+        r = exec_context_get_clean_directories(&s->exec_context, u->manager->prefix, mask, &l);
+        if (r < 0)
+                return r;
+
+        if (strv_isempty(l))
+                return -EUNATCH;
+
+        socket_unwatch_control_pid(s);
+        s->clean_result = SOCKET_SUCCESS;
+        s->control_command = NULL;
+        s->control_command_id = _SOCKET_EXEC_COMMAND_INVALID;
+
+        r = socket_arm_timer(s, usec_add(now(CLOCK_MONOTONIC), s->exec_context.timeout_clean_usec));
+        if (r < 0)
+                goto fail;
+
+        r = unit_fork_and_watch_rm_rf(u, l, &s->control_pid);
+        if (r < 0)
+                goto fail;
+
+        socket_set_state(s, SOCKET_CLEANING);
+
+        return 0;
+
+fail:
+        log_unit_warning_errno(u, r, "Failed to initiate cleaning: %m");
+        s->clean_result = SOCKET_FAILURE_RESOURCES;
+        s->timer_event_source = sd_event_source_unref(s->timer_event_source);
+        return r;
+}
+
+static int socket_can_clean(Unit *u, ExecCleanMask *ret) {
+        Socket *s = SOCKET(u);
+
+        assert(s);
+
+        return exec_context_get_clean_mask(&s->exec_context, ret);
+}
+
 static const char* const socket_exec_command_table[_SOCKET_EXEC_COMMAND_MAX] = {
         [SOCKET_EXEC_START_PRE] = "ExecStartPre",
         [SOCKET_EXEC_START_CHOWN] = "ExecStartChown",
@@ -3343,6 +3430,8 @@ const UnitVTable socket_vtable = {
         .stop = socket_stop,
 
         .kill = socket_kill,
+        .clean = socket_clean,
+        .can_clean = socket_can_clean,
 
         .get_timeout = socket_get_timeout,
 

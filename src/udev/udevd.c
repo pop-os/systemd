@@ -8,12 +8,10 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/epoll.h>
 #include <sys/file.h>
 #include <sys/inotify.h>
@@ -21,7 +19,6 @@
 #include <sys/mount.h>
 #include <sys/prctl.h>
 #include <sys/signalfd.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -777,21 +774,7 @@ set_delaying_seqnum:
         return true;
 }
 
-static int on_exit_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
-        Manager *manager = userdata;
-
-        assert(manager);
-
-        log_error("Giving up waiting for workers to finish.");
-        sd_event_exit(manager->event, -ETIMEDOUT);
-
-        return 1;
-}
-
 static void manager_exit(Manager *manager) {
-        uint64_t usec;
-        int r;
-
         assert(manager);
 
         manager->exit = true;
@@ -811,13 +794,6 @@ static void manager_exit(Manager *manager) {
         /* discard queued events and kill workers */
         event_queue_cleanup(manager, EVENT_QUEUED);
         manager_kill_workers(manager);
-
-        assert_se(sd_event_now(manager->event, CLOCK_MONOTONIC, &usec) >= 0);
-
-        r = sd_event_add_time(manager->event, NULL, CLOCK_MONOTONIC,
-                              usec + 30 * USEC_PER_SEC, USEC_PER_SEC, on_exit_timeout, manager);
-        if (r < 0)
-                return;
 }
 
 /* reload requested, HUP signal received, rules changed, builtin changed */
@@ -1335,10 +1311,12 @@ static int on_sigchld(sd_event_source *s, const struct signalfd_siginfo *si, voi
                         device_delete_db(worker->event->dev);
                         device_tag_index(worker->event->dev, NULL, false);
 
-                        /* forward kernel event without amending it */
-                        r = device_monitor_send_device(manager->monitor, NULL, worker->event->dev_kernel);
-                        if (r < 0)
-                                log_device_error_errno(worker->event->dev_kernel, r, "Failed to send back device to kernel: %m");
+                        if (manager->monitor) {
+                                /* forward kernel event without amending it */
+                                r = device_monitor_send_device(manager->monitor, NULL, worker->event->dev_kernel);
+                                if (r < 0)
+                                        log_device_error_errno(worker->event->dev_kernel, r, "Failed to send back device to kernel: %m");
+                        }
                 }
 
                 worker_free(worker);

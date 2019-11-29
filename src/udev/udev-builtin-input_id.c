@@ -7,17 +7,15 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <linux/limits.h>
-#include <linux/input.h>
 
 #include "device-util.h"
 #include "fd-util.h"
-#include "missing.h"
+#include "missing_input.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "udev-builtin.h"

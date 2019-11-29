@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
@@ -8,8 +7,6 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -1191,6 +1188,11 @@ static int config_parse_default_instance(
         if (r < 0)
                 return r;
 
+        if (isempty(printed)) {
+                i->default_instance = mfree(i->default_instance);
+                return 0;
+        }
+
         if (!unit_instance_is_valid(printed))
                 return -EINVAL;
 
@@ -1897,7 +1899,7 @@ static int install_context_apply(
 
                 q = install_info_traverse(scope, c, paths, i, flags, NULL);
                 if (q < 0) {
-                        unit_file_changes_add(changes, n_changes, r, i->name, NULL);
+                        unit_file_changes_add(changes, n_changes, q, i->name, NULL);
                         return q;
                 }
 

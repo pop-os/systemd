@@ -105,7 +105,7 @@ static int unit_file_add_dir(
 
         /* This adds [original_root]/path to dirs, if it exists. */
 
-        r = chase_symlinks(path, original_root, 0, &chased);
+        r = chase_symlinks(path, original_root, 0, &chased, NULL);
         if (r == -ENOENT) /* Ignore -ENOENT, after all most units won't have a drop-in dir. */
                 return 0;
         if (r == -ENAMETOOLONG) {
@@ -162,6 +162,10 @@ static int unit_file_find_dirs(
                 if (r < 0)
                         return r;
         }
+
+        /* Return early for top level drop-ins. */
+        if (unit_type_from_string(name) >= 0)
+                return 0;
 
         /* Let's see if there's a "-" prefix for this unit name. If so, let's invoke ourselves for it. This will then
          * recursively do the same for all our prefixes. i.e. this means given "foo-bar-waldo.service" we'll also
@@ -226,11 +230,32 @@ int unit_file_find_dropin_paths(
                 char ***ret) {
 
         _cleanup_strv_free_ char **dirs = NULL;
+        UnitType type = _UNIT_TYPE_INVALID;
         char *name, **p;
         Iterator i;
         int r;
 
         assert(ret);
+
+        /* All the names in the unit are of the same type so just grab one. */
+        name = (char*) set_first(names);
+        if (name) {
+                type = unit_name_to_type(name);
+                if (type < 0)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                               "Failed to to derive unit type from unit name: %s",
+                                               name);
+        }
+
+        /* Special top level drop in for "<unit type>.<suffix>". Add this first as it's the most generic
+         * and should be able to be overridden by more specific drop-ins. */
+        STRV_FOREACH(p, lookup_path)
+                (void) unit_file_find_dirs(original_root,
+                                           unit_path_cache,
+                                           *p,
+                                           unit_type_to_string(type),
+                                           dir_suffix,
+                                           &dirs);
 
         SET_FOREACH(name, names, i)
                 STRV_FOREACH(p, lookup_path)

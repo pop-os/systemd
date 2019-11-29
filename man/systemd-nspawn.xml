@@ -754,7 +754,7 @@
         container, with the exception of the loopback device and those
         specified with <option>--network-interface=</option> and
         configured with <option>--network-veth</option>. If this
-        option is specified, the CAP_NET_ADMIN capability will be
+        option is specified, the <constant>CAP_NET_ADMIN</constant> capability will be
         added to the set of capabilities the container retains. The
         latter may be disabled by using <option>--drop-capability=</option>.
         If this option is not specified (or implied by one of the options
@@ -943,17 +943,27 @@
       <varlistentry>
         <term><option>--capability=</option></term>
 
-        <listitem><para>List one or more additional capabilities to grant the container.
-        Takes a comma-separated list of capability names, see
-        <citerefentry project='man-pages'><refentrytitle>capabilities</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+        <listitem><para>List one or more additional capabilities to grant the container.  Takes a
+        comma-separated list of capability names, see <citerefentry
+        project='man-pages'><refentrytitle>capabilities</refentrytitle><manvolnum>7</manvolnum></citerefentry>
         for more information. Note that the following capabilities will be granted in any way:
-        CAP_AUDIT_CONTROL, CAP_AUDIT_WRITE, CAP_CHOWN, CAP_DAC_OVERRIDE, CAP_DAC_READ_SEARCH,
-        CAP_FOWNER, CAP_FSETID, CAP_IPC_OWNER, CAP_KILL, CAP_LEASE, CAP_LINUX_IMMUTABLE,
-        CAP_MKNOD, CAP_NET_BIND_SERVICE, CAP_NET_BROADCAST, CAP_NET_RAW, CAP_SETFCAP,
-        CAP_SETGID, CAP_SETPCAP, CAP_SETUID, CAP_SYS_ADMIN, CAP_SYS_BOOT, CAP_SYS_CHROOT,
-        CAP_SYS_NICE, CAP_SYS_PTRACE, CAP_SYS_RESOURCE, CAP_SYS_TTY_CONFIG. Also CAP_NET_ADMIN
-        is retained if <option>--private-network</option> is specified.  If the special value
-        <literal>all</literal> is passed, all capabilities are retained.</para></listitem>
+        <constant>CAP_AUDIT_CONTROL</constant>, <constant>CAP_AUDIT_WRITE</constant>,
+        <constant>CAP_CHOWN</constant>, <constant>CAP_DAC_OVERRIDE</constant>,
+        <constant>CAP_DAC_READ_SEARCH</constant>, <constant>CAP_FOWNER</constant>,
+        <constant>CAP_FSETID</constant>, <constant>CAP_IPC_OWNER</constant>, <constant>CAP_KILL</constant>,
+        <constant>CAP_LEASE</constant>, <constant>CAP_LINUX_IMMUTABLE</constant>,
+        <constant>CAP_MKNOD</constant>, <constant>CAP_NET_BIND_SERVICE</constant>,
+        <constant>CAP_NET_BROADCAST</constant>, <constant>CAP_NET_RAW</constant>,
+        <constant>CAP_SETFCAP</constant>, <constant>CAP_SETGID</constant>, <constant>CAP_SETPCAP</constant>,
+        <constant>CAP_SETUID</constant>, <constant>CAP_SYS_ADMIN</constant>,
+        <constant>CAP_SYS_BOOT</constant>, <constant>CAP_SYS_CHROOT</constant>,
+        <constant>CAP_SYS_NICE</constant>, <constant>CAP_SYS_PTRACE</constant>,
+        <constant>CAP_SYS_RESOURCE</constant>, <constant>CAP_SYS_TTY_CONFIG</constant>. Also
+        <constant>CAP_NET_ADMIN</constant> is retained if <option>--private-network</option> is specified.
+        If the special value <literal>all</literal> is passed, all capabilities are retained.</para>
+
+        <para>If the special value of <literal>help</literal> is passed, the program will print known
+        capability names and exit.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -962,7 +972,10 @@
         <listitem><para>Specify one or more additional capabilities to
         drop for the container. This allows running the container with
         fewer capabilities than the default (see
-        above).</para></listitem>
+        above).</para>
+
+        <para>If the special value of <literal>help</literal> is passed, the program will print known
+        capability names and exit.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1296,30 +1309,32 @@
       <varlistentry>
         <term><option>--console=</option><replaceable>MODE</replaceable></term>
 
-        <listitem><para>Configures how to set up standard input, output and error output for the container payload, as
-        well as the <filename>/dev/console</filename> device for the container. Takes one of
-        <option>interactive</option>, <option>read-only</option>, <option>passive</option> or <option>pipe</option>. If
-        <option>interactive</option> a pseudo-TTY is allocated and made available as <filename>/dev/console</filename>
-        in the container. It is then bi-directionally connected to the standard input and output passed to
-        <command>systemd-nspawn</command>.  <option>read-only</option> is similar but only the output of the container
-        is propagated and no input from the caller is read. In <option>passive</option> mode a pseudo TTY is allocated,
-        but it is not connected anywhere. Finally, in <option>pipe</option> mode no pseudo TTY is allocated, but the
-        passed standard input, output and error output file descriptors are passed on — as they are — to the container
-        payload. In this mode <filename>/dev/console</filename> will not exist in the container. Note that in this mode
-        the container payload generally cannot be a full init system as init systems tend to require
-        <filename>/dev/console</filename> to be available. On the other hand, in this mode container invocations can be
-        used within shell pipelines. This is because intermediary pseudo TTYs do not permit independent bidirectional
-        propagation of the end-of-file (EOF) condition, which is necessary for shell pipelines to work
-        correctly.</para>
-
-        <para>Note that the <option>pipe</option> mode should be used carefully, as passing arbitrary file descriptors
-        to less trusted container payloads might open up unwanted interfaces for access by the container payload. For
-        example, if a passed file descriptor refers to a TTY of some form, APIs such as <constant>TIOCSTI</constant>
-        may be used to synthesize input that might be used for escaping the container. Hence <option>pipe</option> mode
-        should only be used if the payload is sufficiently trusted or when the standard input/output/error output file
-        descriptors are known safe, for example pipes. Defaults to <option>interactive</option> if
+        <listitem><para>Configures how to set up standard input, output and error output for the container
+        payload, as well as the <filename>/dev/console</filename> device for the container. Takes one of
+        <option>interactive</option>, <option>read-only</option>, <option>passive</option>, or
+        <option>pipe</option>. If <option>interactive</option>, a pseudo-TTY is allocated and made available
+        as <filename>/dev/console</filename> in the container. It is then bi-directionally connected to the
+        standard input and output passed to <command>systemd-nspawn</command>. <option>read-only</option> is
+        similar but only the output of the container is propagated and no input from the caller is read. If
+        <option>passive</option>, a pseudo TTY is allocated, but it is not connected anywhere. Finally, in
+        <option>pipe</option> mode no pseudo TTY is allocated, but the standard input, output and error
+        output file descriptors passed to <command>systemd-nspawn</command> are passed on — as they are — to
+        the container payload, see the following paragraph. Defaults to <option>interactive</option> if
         <command>systemd-nspawn</command> is invoked from a terminal, and <option>read-only</option>
-        otherwise.</para></listitem>
+        otherwise.</para>
+
+        <para>In <option>pipe</option> mode, <filename>/dev/console</filename> will not exist in the
+        container. This means that the container payload generally cannot be a full init system as init
+        systems tend to require <filename>/dev/console</filename> to be available. On the other hand, in this
+        mode container invocations can be used within shell pipelines. This is because intermediary pseudo
+        TTYs do not permit independent bidirectional propagation of the end-of-file (EOF) condition, which is
+        necessary for shell pipelines to work correctly. <emphasis>Note that the <option>pipe</option> mode
+        should be used carefully</emphasis>, as passing arbitrary file descriptors to less trusted container
+        payloads might open up unwanted interfaces for access by the container payload. For example, if a
+        passed file descriptor refers to a TTY of some form, APIs such as <constant>TIOCSTI</constant> may be
+        used to synthesize input that might be used for escaping the container. Hence <option>pipe</option>
+        mode should only be used if the payload is sufficiently trusted or when the standard
+        input/output/error output file descriptors are known safe, for example pipes.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1346,8 +1361,9 @@
       <ulink url="https://getfedora.org">Fedora</ulink> image and start a shell in it</title>
 
       <programlisting># machinectl pull-raw --verify=no \
-      https://download.fedoraproject.org/pub/fedora/linux/releases/&fedora_latest_version;/Cloud/x86_64/images/Fedora-Cloud-Base-&fedora_latest_version;-&fedora_cloud_release;.x86_64.raw.xz
-# systemd-nspawn -M Fedora-Cloud-Base-&fedora_latest_version;-&fedora_cloud_release;.x86_64</programlisting>
+      https://download.fedoraproject.org/pub/fedora/linux/releases/&fedora_latest_version;/Cloud/x86_64/images/Fedora-Cloud-Base-&fedora_latest_version;-&fedora_cloud_release;.x86_64.raw.xz \
+      Fedora-Cloud-Base-&fedora_latest_version;-&fedora_cloud_release;.x86-64
+# systemd-nspawn -M Fedora-Cloud-Base-&fedora_latest_version;-&fedora_cloud_release;.x86-64</programlisting>
 
       <para>This downloads an image using
       <citerefentry><refentrytitle>machinectl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
@@ -1363,7 +1379,7 @@
 # systemd-nspawn -bD /var/lib/machines/f&fedora_latest_version;</programlisting>
 
       <para>This installs a minimal Fedora distribution into the
-      directory <filename noindex='true'>/var/lib/machines/f&fedora_latest_version;</filename>
+      directory <filename index="false">/var/lib/machines/f&fedora_latest_version;</filename>
       and then boots an OS in a namespace container in it. Because the installation
       is located underneath the standard <filename>/var/lib/machines/</filename>
       directory, it is also possible to start the machine using

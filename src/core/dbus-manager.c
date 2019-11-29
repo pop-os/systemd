@@ -9,6 +9,7 @@
 #include "architecture.h"
 #include "build.h"
 #include "bus-common-errors.h"
+#include "dbus-cgroup.h"
 #include "dbus-execute.h"
 #include "dbus-job.h"
 #include "dbus-manager.h"
@@ -1471,7 +1472,7 @@ static int method_switch_root(sd_bus_message *message, void *userdata, sd_bus_er
                 if (!path_is_absolute(init))
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Path to init binary '%s' not absolute.", init);
 
-                r = chase_symlinks(init, root, CHASE_PREFIX_ROOT|CHASE_TRAIL_SLASH, &chased);
+                r = chase_symlinks(init, root, CHASE_PREFIX_ROOT|CHASE_TRAIL_SLASH, &chased, NULL);
                 if (r < 0)
                         return sd_bus_error_set_errnof(error, r, "Could not resolve init executable %s: %m", init);
 
@@ -1903,11 +1904,13 @@ static int install_error(
 
                 case -ELOOP:
                         r = sd_bus_error_setf(error, BUS_ERROR_UNIT_LINKED,
-                                              "Refusing to operate on linked unit file %s", changes[i].path);
+                                              "Refusing to operate on alias name or linked unit file: %s",
+                                              changes[i].path);
                         goto found;
 
                 case -ENOENT:
-                        r = sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_UNIT, "Unit file %s does not exist.", changes[i].path);
+                        r = sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_UNIT,
+                                              "Unit file %s does not exist.", changes[i].path);
                         goto found;
 
                 default:
@@ -2463,7 +2466,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
         SD_BUS_PROPERTY("DefaultLimitRTPRIOSoft", "t", bus_property_get_rlimit, offsetof(Manager, rlimit[RLIMIT_RTPRIO]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultLimitRTTIME", "t", bus_property_get_rlimit, offsetof(Manager, rlimit[RLIMIT_RTTIME]), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultLimitRTTIMESoft", "t", bus_property_get_rlimit, offsetof(Manager, rlimit[RLIMIT_RTTIME]), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("DefaultTasksMax", "t", NULL, offsetof(Manager, default_tasks_max), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("DefaultTasksMax", "t", bus_property_get_tasks_max, offsetof(Manager, default_tasks_max), 0),
         SD_BUS_PROPERTY("TimerSlackNSec", "t", property_get_timer_slack_nsec, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("DefaultOOMPolicy", "s", bus_property_get_oom_policy, offsetof(Manager, default_oom_policy), SD_BUS_VTABLE_PROPERTY_CONST),
 

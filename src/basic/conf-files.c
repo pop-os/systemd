@@ -1,11 +1,9 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <dirent.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "conf-files.h"
 #include "def.h"
@@ -14,7 +12,6 @@
 #include "hashmap.h"
 #include "log.h"
 #include "macro.h"
-#include "missing.h"
 #include "path-util.h"
 #include "set.h"
 #include "sort-util.h"
@@ -261,16 +258,12 @@ int conf_files_list_strv(char ***strv, const char *suffix, const char *root, uns
         return conf_files_list_strv_internal(strv, suffix, root, flags, copy);
 }
 
-int conf_files_list(char ***strv, const char *suffix, const char *root, unsigned flags, const char *dir, ...) {
+int conf_files_list(char ***strv, const char *suffix, const char *root, unsigned flags, const char *dir) {
         _cleanup_strv_free_ char **dirs = NULL;
-        va_list ap;
 
         assert(strv);
 
-        va_start(ap, dir);
-        dirs = strv_new_ap(dir, ap);
-        va_end(ap);
-
+        dirs = strv_new(dir);
         if (!dirs)
                 return -ENOMEM;
 

@@ -4,16 +4,12 @@
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <getopt.h>
-#include <glob.h>
 #include <limits.h>
 #include <linux/fs.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/file.h>
-#include <sys/stat.h>
 #include <sys/xattr.h>
 #include <sysexits.h>
 #include <time.h>
@@ -41,7 +37,6 @@
 #include "log.h"
 #include "macro.h"
 #include "main-func.h"
-#include "missing.h"
 #include "mkdir.h"
 #include "mountpoint-util.h"
 #include "pager.h"
@@ -77,7 +72,7 @@ typedef enum OperationMask {
 typedef enum ItemType {
         /* These ones take file names */
         CREATE_FILE = 'f',
-        TRUNCATE_FILE = 'F',
+        TRUNCATE_FILE = 'F', /* deprecated: use f+ */
         CREATE_DIRECTORY = 'd',
         TRUNCATE_DIRECTORY = 'D',
         CREATE_SUBVOLUME = 'v',
@@ -135,7 +130,7 @@ typedef struct Item {
 
         bool keep_first_level:1;
 
-        bool force:1;
+        bool append_or_force:1;
 
         bool allow_failure:1;
 
@@ -859,7 +854,7 @@ shortcut:
 
 static int path_open_parent_safe(const char *path) {
         _cleanup_free_ char *dn = NULL;
-        int fd;
+        int r, fd;
 
         if (path_equal(path, "/") || !path_is_normalized(path))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -870,15 +865,15 @@ static int path_open_parent_safe(const char *path) {
         if (!dn)
                 return log_oom();
 
-        fd = chase_symlinks(dn, arg_root, CHASE_OPEN|CHASE_SAFE|CHASE_WARN, NULL);
-        if (fd < 0 && fd != -ENOLINK)
-                return log_error_errno(fd, "Failed to validate path %s: %m", path);
+        r = chase_symlinks(dn, arg_root, CHASE_SAFE|CHASE_WARN, NULL, &fd);
+        if (r < 0 && r != -ENOLINK)
+                return log_error_errno(r, "Failed to validate path %s: %m", path);
 
-        return fd;
+        return r < 0 ? r : fd;
 }
 
 static int path_open_safe(const char *path) {
-        int fd;
+        int r, fd;
 
         /* path_open_safe() returns a file descriptor opened with O_PATH after
          * verifying that the path doesn't contain unsafe transitions, except
@@ -891,11 +886,11 @@ static int path_open_safe(const char *path) {
                                        "Failed to open invalid path '%s'.",
                                        path);
 
-        fd = chase_symlinks(path, arg_root, CHASE_OPEN|CHASE_SAFE|CHASE_WARN|CHASE_NOFOLLOW, NULL);
-        if (fd < 0 && fd != -ENOLINK)
-                return log_error_errno(fd, "Failed to validate path %s: %m", path);
+        r = chase_symlinks(path, arg_root, CHASE_SAFE|CHASE_WARN|CHASE_NOFOLLOW, NULL, &fd);
+        if (r < 0 && r != -ENOLINK)
+                return log_error_errno(r, "Failed to validate path %s: %m", path);
 
-        return fd;
+        return r < 0 ? r : fd;
 }
 
 static int path_set_perms(Item *i, const char *path) {
@@ -987,10 +982,10 @@ static int parse_acls_from_arg(Item *item) {
 
         assert(item);
 
-        /* If force (= modify) is set, we will not modify the acl
+        /* If append_or_force (= modify) is set, we will not modify the acl
          * afterwards, so the mask can be added now if necessary. */
 
-        r = parse_acl(item->argument, &item->acl_access, &item->acl_default, !item->force);
+        r = parse_acl(item->argument, &item->acl_access, &item->acl_default, !item->append_or_force);
         if (r < 0)
                 log_warning_errno(r, "Failed to parse ACL \"%s\": %m. Ignoring", item->argument);
 #else
@@ -1075,11 +1070,11 @@ static int fd_set_acls(Item *item, int fd, const char *path, const struct stat *
         xsprintf(procfs_path, "/proc/self/fd/%i", fd);
 
         if (item->acl_access)
-                r = path_set_acl(procfs_path, path, ACL_TYPE_ACCESS, item->acl_access, item->force);
+                r = path_set_acl(procfs_path, path, ACL_TYPE_ACCESS, item->acl_access, item->append_or_force);
 
         /* set only default acls to folders */
         if (r == 0 && item->acl_default && S_ISDIR(st->st_mode))
-                r = path_set_acl(procfs_path, path, ACL_TYPE_DEFAULT, item->acl_default, item->force);
+                r = path_set_acl(procfs_path, path, ACL_TYPE_DEFAULT, item->acl_default, item->append_or_force);
 
         if (r > 0)
                 return -r; /* already warned */
@@ -1257,7 +1252,7 @@ static int path_set_attribute(Item *item, const char *path) {
 static int write_one_file(Item *i, const char *path) {
         _cleanup_close_ int fd = -1, dir_fd = -1;
         char *bn;
-        int r;
+        int flags, r;
 
         assert(i);
         assert(path);
@@ -1272,8 +1267,10 @@ static int write_one_file(Item *i, const char *path) {
 
         bn = basename(path);
 
+        flags = O_NONBLOCK|O_CLOEXEC|O_WRONLY|O_NOCTTY;
+
         /* Follows symlinks */
-        fd = openat(dir_fd, bn, O_NONBLOCK|O_CLOEXEC|O_WRONLY|O_NOCTTY, i->mode);
+        fd = openat(dir_fd, bn, i->append_or_force ? flags|O_APPEND : flags, i->mode);
         if (fd < 0) {
                 if (errno == ENOENT) {
                         log_debug_errno(errno, "Not writing missing file \"%s\": %m", path);
@@ -1368,7 +1365,7 @@ static int truncate_file(Item *i, const char *path) {
 
         assert(i);
         assert(path);
-        assert(i->type == TRUNCATE_FILE);
+        assert(i->type == TRUNCATE_FILE || (i->type == CREATE_FILE && i->append_or_force));
 
         /* We want to operate on regular file exclusively especially since
          * O_TRUNC is unspecified if the file is neither a regular file nor a
@@ -1696,7 +1693,7 @@ static int create_device(Item *i, mode_t file_type) {
 
                 if ((st.st_mode & S_IFMT) != file_type) {
 
-                        if (i->force) {
+                        if (i->append_or_force) {
 
                                 RUN_WITH_UMASK(0000) {
                                         mac_selinux_create_file_prepare(i->path, file_type);
@@ -1757,7 +1754,7 @@ static int create_fifo(Item *i, const char *path) {
 
                 if (!S_ISFIFO(st.st_mode)) {
 
-                        if (i->force) {
+                        if (i->append_or_force) {
                                 RUN_WITH_UMASK(0000) {
                                         mac_selinux_create_file_prepare(path, S_IFIFO);
                                         r = mkfifoat_atomic(pfd, bn, i->mode);
@@ -1925,20 +1922,16 @@ static int create_item(Item *i) {
         case RECURSIVE_REMOVE_PATH:
                 return 0;
 
+        case TRUNCATE_FILE:
         case CREATE_FILE:
                 RUN_WITH_UMASK(0000)
                         (void) mkdir_parents_label(i->path, 0755);
 
-                r = create_file(i, i->path);
-                if (r < 0)
-                        return r;
-                break;
+                if ((i->type == CREATE_FILE && i->append_or_force) || i->type == TRUNCATE_FILE)
+                        r = truncate_file(i, i->path);
+                else
+                        r = create_file(i, i->path);
 
-        case TRUNCATE_FILE:
-                RUN_WITH_UMASK(0000)
-                        (void) mkdir_parents_label(i->path, 0755);
-
-                r = truncate_file(i, i->path);
                 if (r < 0)
                         return r;
                 break;
@@ -2012,7 +2005,7 @@ static int create_item(Item *i) {
                         r = readlink_malloc(i->path, &x);
                         if (r < 0 || !streq(i->argument, x)) {
 
-                                if (i->force) {
+                                if (i->append_or_force) {
                                         mac_selinux_create_file_prepare(i->path, S_IFLNK);
                                         r = symlink_atomic(i->argument, i->path);
                                         mac_selinux_create_file_clear();
@@ -2255,7 +2248,7 @@ static int process_item(Item *i, OperationMask operation) {
 
         i->done |= operation;
 
-        r = chase_symlinks(i->path, arg_root, CHASE_NO_AUTOFS|CHASE_WARN, NULL);
+        r = chase_symlinks(i->path, arg_root, CHASE_NO_AUTOFS|CHASE_WARN, NULL, NULL);
         if (r == -EREMOTE) {
                 log_notice_errno(r, "Skipping %s", i->path);
                 return 0;
@@ -2492,7 +2485,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
         ItemArray *existing;
         OrderedHashmap *h;
         int r, pos;
-        bool force = false, boot = false, allow_failure = false;
+        bool append_or_force = false, boot = false, allow_failure = false;
 
         assert(fname);
         assert(line >= 1);
@@ -2535,8 +2528,8 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
         for (pos = 1; action[pos]; pos++) {
                 if (action[pos] == '!' && !boot)
                         boot = true;
-                else if (action[pos] == '+' && !force)
-                        force = true;
+                else if (action[pos] == '+' && !append_or_force)
+                        append_or_force = true;
                 else if (action[pos] == '-' && !allow_failure)
                         allow_failure = true;
                 else {
@@ -2554,7 +2547,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
         }
 
         i.type = action[0];
-        i.force = force;
+        i.append_or_force = append_or_force;
         i.allow_failure = allow_failure;
 
         r = specifier_printf(path, specifier_table, NULL, &i.path);
@@ -2794,7 +2787,7 @@ static int parse_line(const char *fname, unsigned line, const char *buffer, bool
                 size_t n;
 
                 for (n = 0; n < existing->n_items; n++) {
-                        if (!item_compatible(existing->items + n, &i)) {
+                        if (!item_compatible(existing->items + n, &i) && !i.append_or_force) {
                                 log_notice("[%s:%u] Duplicate line for path \"%s\", ignoring.",
                                            fname, line, i.path);
                                 return 0;

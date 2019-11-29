@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <getopt.h>
-#include <string.h>
 #include <sys/prctl.h>
 #include <unistd.h>
 
@@ -73,11 +72,11 @@ static int equivalent(const char *a, const char *b) {
         _cleanup_free_ char *x = NULL, *y = NULL;
         int r;
 
-        r = chase_symlinks(a, NULL, CHASE_TRAIL_SLASH, &x);
+        r = chase_symlinks(a, NULL, CHASE_TRAIL_SLASH, &x, NULL);
         if (r < 0)
                 return r;
 
-        r = chase_symlinks(b, NULL, CHASE_TRAIL_SLASH, &y);
+        r = chase_symlinks(b, NULL, CHASE_TRAIL_SLASH, &y, NULL);
         if (r < 0)
                 return r;
 
@@ -378,7 +377,7 @@ static int should_skip_path(const char *prefix, const char *suffix) {
 
         dirname = prefix_roota(prefix, suffix);
 
-        if (chase_symlinks(dirname, NULL, 0, &target) < 0)
+        if (chase_symlinks(dirname, NULL, 0, &target, NULL) < 0)
                 return false;
 
         NULSTR_FOREACH(p, prefixes) {

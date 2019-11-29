@@ -5,7 +5,7 @@
 
 #include "conf-parser.h"
 #include "list.h"
-#include "../networkd-link.h"
+#include "networkd-link.h"
 #include "time-util.h"
 
 typedef struct netdev_join_callback netdev_join_callback;
@@ -156,7 +156,7 @@ extern const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX];
 /* For casting the various netdev kinds into a netdev */
 #define NETDEV(n) (&(n)->meta)
 
-int netdev_load(Manager *manager);
+int netdev_load(Manager *manager, bool reload);
 int netdev_load_one(Manager *manager, const char *filename);
 void netdev_drop(NetDev *netdev);
 

@@ -30,6 +30,7 @@ LICENSE:
         - except src/basic/siphash24.c which is CC0 Public Domain
         - except src/journal/lookup3.c which is Public Domain
         - except src/udev/* which is (currently still) GPLv2, GPLv2+
+        - except tools/chromiumos/* which is BSD-style
 
 REQUIREMENTS:
         Linux kernel >= 3.13
@@ -154,7 +155,7 @@ REQUIREMENTS:
         libmicrohttpd (optional)
         libpython (optional)
         libidn2 or libidn (optional)
-        gnutls >= 3.1.4 (optional, >= 3.5.3 is required to support DNS-over-TLS with gnutls)
+        gnutls >= 3.1.4 (optional, >= 3.6.0 is required to support DNS-over-TLS with gnutls)
         openssl >= 1.1.0 (optional, required to support DNS-over-TLS with openssl)
         elfutils >= 158 (optional)
         polkit (optional)

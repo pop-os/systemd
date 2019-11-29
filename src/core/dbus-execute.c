@@ -25,7 +25,6 @@
 #include "io-util.h"
 #include "ioprio.h"
 #include "journal-util.h"
-#include "missing.h"
 #include "mountpoint-util.h"
 #include "namespace.h"
 #include "parse-util.h"
@@ -764,8 +763,8 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("SyslogLevel", "i", property_get_syslog_level, offsetof(ExecContext, syslog_priority), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SyslogFacility", "i", property_get_syslog_facility, offsetof(ExecContext, syslog_priority), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("LogLevelMax", "i", bus_property_get_int, offsetof(ExecContext, log_level_max), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("LogRateLimitIntervalUSec", "t", bus_property_get_usec, offsetof(ExecContext, log_rate_limit_interval_usec), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("LogRateLimitBurst", "u", bus_property_get_unsigned, offsetof(ExecContext, log_rate_limit_burst), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("LogRateLimitIntervalUSec", "t", bus_property_get_usec, offsetof(ExecContext, log_ratelimit_interval_usec), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("LogRateLimitBurst", "u", bus_property_get_unsigned, offsetof(ExecContext, log_ratelimit_burst), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("LogExtraFields", "aay", property_get_log_extra_fields, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("SecureBits", "i", bus_property_get_int, offsetof(ExecContext, secure_bits), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("CapabilityBoundingSet", "t", NULL, offsetof(ExecContext, capability_bounding_set), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -784,6 +783,7 @@ const sd_bus_vtable bus_exec_vtable[] = {
         SD_BUS_PROPERTY("PrivateDevices", "b", bus_property_get_bool, offsetof(ExecContext, private_devices), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ProtectKernelTunables", "b", bus_property_get_bool, offsetof(ExecContext, protect_kernel_tunables), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ProtectKernelModules", "b", bus_property_get_bool, offsetof(ExecContext, protect_kernel_modules), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("ProtectKernelLogs", "b", bus_property_get_bool, offsetof(ExecContext, protect_kernel_logs), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("ProtectControlGroups", "b", bus_property_get_bool, offsetof(ExecContext, protect_control_groups), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("PrivateNetwork", "b", bus_property_get_bool, offsetof(ExecContext, private_network), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("PrivateUsers", "b", bus_property_get_bool, offsetof(ExecContext, private_users), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -1095,25 +1095,31 @@ int bus_set_transient_exec_command(
                 if (!f)
                         return -ENOMEM;
 
-                fputs("ExecStart=\n", f);
+                fprintf(f, "%s=\n", name);
 
                 LIST_FOREACH(command, c, *exec_command) {
-                        _cleanup_free_ char *a = NULL, *t = NULL, *exec_chars = NULL;
-                        const char *p;
+                        _cleanup_free_ char *a = NULL, *exec_chars = NULL;
 
-                        p = unit_escape_setting(c->path, UNIT_ESCAPE_C|UNIT_ESCAPE_SPECIFIERS, &t);
-                        if (!p)
+                        exec_chars = exec_command_flags_to_exec_chars(c->flags);
+                        if (!exec_chars)
                                 return -ENOMEM;
 
                         a = unit_concat_strv(c->argv, UNIT_ESCAPE_C|UNIT_ESCAPE_SPECIFIERS);
                         if (!a)
                                 return -ENOMEM;
 
-                        exec_chars = exec_command_flags_to_exec_chars(c->flags);
-                        if (!exec_chars)
-                                return -ENOMEM;
+                        if (streq_ptr(c->path, c->argv ? c->argv[0] : NULL))
+                                fprintf(f, "%s=%s%s\n", name, exec_chars, a);
+                        else {
+                                _cleanup_free_ char *t = NULL;
+                                const char *p;
 
-                        fprintf(f, "%s=%s@%s %s\n", name, exec_chars, p, a);
+                                p = unit_escape_setting(c->path, UNIT_ESCAPE_C|UNIT_ESCAPE_SPECIFIERS, &t);
+                                if (!p)
+                                        return -ENOMEM;
+
+                                fprintf(f, "%s=%s@%s %s\n", name, exec_chars, p, a);
+                        }
                 }
 
                 r = fflush_and_check(f);
@@ -1204,10 +1210,10 @@ int bus_exec_context_set_transient_property(
                 return bus_set_transient_log_level(u, name, &c->log_level_max, message, flags, error);
 
         if (streq(name, "LogRateLimitIntervalUSec"))
-                return bus_set_transient_usec(u, name, &c->log_rate_limit_interval_usec, message, flags, error);
+                return bus_set_transient_usec(u, name, &c->log_ratelimit_interval_usec, message, flags, error);
 
         if (streq(name, "LogRateLimitBurst"))
-                return bus_set_transient_unsigned(u, name, &c->log_rate_limit_burst, message, flags, error);
+                return bus_set_transient_unsigned(u, name, &c->log_ratelimit_burst, message, flags, error);
 
         if (streq(name, "Personality"))
                 return bus_set_transient_personality(u, name, &c->personality, message, flags, error);
@@ -1274,6 +1280,9 @@ int bus_exec_context_set_transient_property(
 
         if (streq(name, "ProtectKernelModules"))
                 return bus_set_transient_bool(u, name, &c->protect_kernel_modules, message, flags, error);
+
+        if (streq(name, "ProtectKernelLogs"))
+                return bus_set_transient_bool(u, name, &c->protect_kernel_logs, message, flags, error);
 
         if (streq(name, "ProtectControlGroups"))
                 return bus_set_transient_bool(u, name, &c->protect_control_groups, message, flags, error);

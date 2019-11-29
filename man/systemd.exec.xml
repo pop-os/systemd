@@ -356,11 +356,12 @@
         <para>Example: if a unit has the following,
         <programlisting>CapabilityBoundingSet=CAP_A CAP_B
 CapabilityBoundingSet=CAP_B CAP_C</programlisting>
-        then <constant>CAP_A</constant>, <constant>CAP_B</constant>, and <constant>CAP_C</constant> are set.
-        If the second line is prefixed with <literal>~</literal>, e.g.,
+        then <constant index='false'>CAP_A</constant>, <constant index='false'>CAP_B</constant>, and
+        <constant index='false'>CAP_C</constant> are set.  If the second line is prefixed with
+        <literal>~</literal>, e.g.,
         <programlisting>CapabilityBoundingSet=CAP_A CAP_B
 CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
-        then, only <constant>CAP_A</constant> is set.</para></listitem>
+        then, only <constant index='false'>CAP_A</constant> is set.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -402,11 +403,11 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <varname>SystemCallFilter=</varname>, <varname>SystemCallArchitectures=</varname>,
         <varname>RestrictAddressFamilies=</varname>, <varname>RestrictNamespaces=</varname>,
         <varname>PrivateDevices=</varname>, <varname>ProtectKernelTunables=</varname>,
-        <varname>ProtectKernelModules=</varname>, <varname>MemoryDenyWriteExecute=</varname>,
-        <varname>RestrictRealtime=</varname>, <varname>RestrictSUIDSGID=</varname>,
-        <varname>DynamicUser=</varname> or <varname>LockPersonality=</varname> are specified. Note that even
-        if this setting is overridden by them, <command>systemctl show</command> shows the original value of
-        this setting. Also see <ulink
+        <varname>ProtectKernelModules=</varname>, <varname>ProtectKernelLogs=</varname>,
+        <varname>MemoryDenyWriteExecute=</varname>, <varname>RestrictRealtime=</varname>,
+        <varname>RestrictSUIDSGID=</varname>, <varname>DynamicUser=</varname> or <varname>LockPersonality=</varname>
+        are specified. Note that even if this setting is overridden by them, <command>systemctl show</command> shows the
+        original value of this setting. Also see <ulink
         url="https://www.kernel.org/doc/html/latest/userspace-api/no_new_privs.html">No New Privileges
         Flag</ulink>.</para></listitem>
       </varlistentry>
@@ -994,8 +995,10 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <para>Example: if a system service unit has the following,
         <programlisting>RuntimeDirectory=foo/bar baz</programlisting>
         the service manager creates <filename>/run/foo</filename> (if it does not exist),
-        <filename>/run/foo/bar</filename>, and <filename>/run/baz</filename>. The directories
-        <filename>/run/foo/bar</filename> and <filename>/run/baz</filename> except <filename>/run/foo</filename> are
+
+        <filename index='false'>/run/foo/bar</filename>, and <filename index='false'>/run/baz</filename>. The
+        directories <filename index='false'>/run/foo/bar</filename> and
+        <filename index='false'>/run/baz</filename> except <filename index='false'>/run/foo</filename> are
         owned by the user and group specified in <varname>User=</varname> and <varname>Group=</varname>, and removed
         when the service is stopped.</para>
 
@@ -1033,6 +1036,16 @@ StateDirectory=aaa/bbb ccc</programlisting>
         stopped. Note that since the runtime directory <filename>/run</filename> is a mount point of
         <literal>tmpfs</literal>, then for system services the directories specified in
         <varname>RuntimeDirectory=</varname> are removed when the system is rebooted.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>TimeoutCleanSec=</varname></term>
+        <listitem><para>Configures a timeout on the clean-up operation requested through <command>systemctl
+        clean …</command>, see
+        <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
+        details. Takes the usual time values and defaults to <constant>infinity</constant>, i.e. by default
+        no time-out is applied. If a time-out is configured the clean operation will be aborted forcibly when
+        the time-out is reached, potentially leaving resources on disk.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1307,6 +1320,22 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         <filename>/proc/sys/kernel/modules_disabled</filename> documentation.  If turned on and if running in user
         mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
         <varname>User=</varname>), <varname>NoNewPrivileges=yes</varname> is implied.</para>
+
+        <xi:include href="system-only.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ProtectKernelLogs=</varname></term>
+
+        <listitem><para>Takes a boolean argument. If true, access to the kernel log ring buffer will be denied. It is
+        recommended to turn this on for most services that do not need to read from or write to the kernel log ring
+        buffer. Enabling this option removes <constant>CAP_SYSLOG</constant> from the capability bounding set for this
+        unit, and installs a system call filter to block the
+        <citerefentry project='man-pages'><refentrytitle>syslog</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+        system call (not to be confused with the libc API
+        <citerefentry project='man-pages'><refentrytitle>syslog</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+        for userspace logging). The kernel exposes its log buffer to userspace via <filename>/dev/kmsg</filename> and
+        <filename>/proc/kmsg</filename>. If enabled, these are made inaccessible to all the processes in the unit.</para>
 
         <xi:include href="system-only.xml" xpointer="singular"/></listitem>
       </varlistentry>
@@ -1762,8 +1791,8 @@ SystemCallErrorNumber=EPERM</programlisting>
         mappings. Specifically these are the options <varname>PrivateTmp=</varname>,
         <varname>PrivateDevices=</varname>, <varname>ProtectSystem=</varname>, <varname>ProtectHome=</varname>,
         <varname>ProtectKernelTunables=</varname>, <varname>ProtectControlGroups=</varname>,
-        <varname>ReadOnlyPaths=</varname>, <varname>InaccessiblePaths=</varname> and
-        <varname>ReadWritePaths=</varname>.</para></listitem>
+        <varname>ProtectKernelLogs=</varname>, <varname>ReadOnlyPaths=</varname>,
+        <varname>InaccessiblePaths=</varname> and <varname>ReadWritePaths=</varname>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1859,6 +1888,12 @@ SystemCallErrorNumber=EPERM</programlisting>
         variable definitions. The parser strips leading and trailing whitespace from the values of assignments, unless
         you use double quotes (").</para>
 
+        <para><ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C escapes</ulink>
+        are supported, but not
+        <ulink url="https://en.wikipedia.org/wiki/Control_character#In_ASCII">most control characters</ulink>.
+        <literal>\t</literal> and <literal>\n</literal> can be used to insert tabs and newlines within
+        <varname>EnvironmentFile=</varname>.</para>
+
         <para>The argument passed should be an absolute filename or wildcard expression, optionally prefixed with
         <literal>-</literal>, which indicates that if the file does not exist, it will not be read and no error or
         warning message is logged. This option may be specified more than once in which case all specified files are
@@ -1888,6 +1923,12 @@ SystemCallErrorNumber=EPERM</programlisting>
 
         <para>Variables set for invoked processes due to this setting are subject to being overridden by those
         configured with <varname>Environment=</varname> or <varname>EnvironmentFile=</varname>.</para>
+
+        <para><ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C escapes</ulink>
+        are supported, but not
+        <ulink url="https://en.wikipedia.org/wiki/Control_character#In_ASCII">most control characters</ulink>.
+        <literal>\t</literal> and <literal>\n</literal> can be used to insert tabs and newlines within
+        <varname>EnvironmentFile=</varname>.</para>
 
         <para>Example:
         <programlisting>PassEnvironment=VAR1 VAR2 VAR3</programlisting>
@@ -2000,7 +2041,7 @@ SystemCallErrorNumber=EPERM</programlisting>
       <varlistentry>
         <term><varname>StandardOutput=</varname></term>
 
-        <listitem><para>Controls where file descriptor 1 (STDOUT) of the executed processes is connected
+        <listitem><para>Controls where file descriptor 1 (stdout) of the executed processes is connected
         to. Takes one of <option>inherit</option>, <option>null</option>, <option>tty</option>,
         <option>journal</option>, <option>kmsg</option>, <option>journal+console</option>,
         <option>kmsg+console</option>, <option>file:<replaceable>path</replaceable></option>,
@@ -2076,7 +2117,7 @@ SystemCallErrorNumber=EPERM</programlisting>
       <varlistentry>
         <term><varname>StandardError=</varname></term>
 
-        <listitem><para>Controls where file descriptor 2 (STDERR) of the executed processes is connected to. The
+        <listitem><para>Controls where file descriptor 2 (stderr) of the executed processes is connected to. The
         available options are identical to those of <varname>StandardOutput=</varname>, with some exceptions: if set to
         <option>inherit</option> the file descriptor used for standard output is duplicated for standard error, while
         <option>fd:<replaceable>name</replaceable></option> will use a default file descriptor name of
@@ -2362,10 +2403,9 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         in the system manager. When compiled for systems with "unmerged /usr" (<filename>/bin</filename> is
         not a symlink to <filename>/usr/bin</filename>),
         <literal>:<filename>/sbin</filename>:<filename>/bin</filename></literal> is appended. In case of the
-        the user manager, each <filename>bin/</filename> and <filename>sbin/</filename> pair is switched, so
-        that programs from <filename>/usr/bin</filename> have higher priority than programs from
-        <filename>/usr/sbin</filename>, etc. It is recommended to not rely on this in any way, and have only
-        one program with a given name in <varname>$PATH</varname>.</para></listitem>
+        the user manager, a different path may be configured by the distribution. It is recommended to not
+        rely on the order of entries, and have only one program with a given name in
+        <varname>$PATH</varname>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2412,6 +2452,20 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         <varname>PAMName=</varname> with a PAM stack that includes <command>pam_systemd</command>. See below and
         <citerefentry><refentrytitle>pam_systemd</refentrytitle><manvolnum>8</manvolnum></citerefentry> for more
         information.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>$RUNTIME_DIRECTORY</varname></term>
+        <term><varname>$STATE_DIRECTORY</varname></term>
+        <term><varname>$CACHE_DIRECTORY</varname></term>
+        <term><varname>$LOGS_DIRECTORY</varname></term>
+        <term><varname>$CONFIGURATION_DIRECTORY</varname></term>
+
+        <listitem><para>Contains and absolute paths to the directories defined with
+        <varname>RuntimeDirectory=</varname>, <varname>StateDirectory=</varname>,
+        <varname>CacheDirectory=</varname>, <varname>LogsDirectory=</varname>, and
+        <varname>ConfigurationDirectory=</varname> when those settings are used.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2592,7 +2646,11 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
 
             <tbody>
               <row>
-                <entry valign="top"><literal>success</literal></entry>
+                <entry morerows="1" valign="top"><literal>success</literal></entry>
+                <entry valign="top"><literal>killed</literal></entry>
+                <entry><literal>HUP</literal>, <literal>INT</literal>, <literal>TERM</literal>, <literal>PIPE</literal></entry>
+              </row>
+              <row>
                 <entry valign="top"><literal>exited</literal></entry>
                 <entry><literal>0</literal></entry>
               </row>
@@ -2644,6 +2702,17 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
                 <entry><literal>exited</literal></entry>
                 <entry><literal>0</literal>, <literal>1</literal>, <literal>2</literal>, <literal
                 >3</literal>, …, <literal>255</literal></entry>
+              </row>
+              <row>
+                <entry valign="top"><literal>exec-condition</literal></entry>
+                <entry><literal>exited</literal></entry>
+                <entry><literal>1</literal>, <literal>2</literal>, <literal>3</literal>, <literal
+                >4</literal>, …, <literal>254</literal></entry>
+              </row>
+              <row>
+                <entry valign="top"><literal>oom-kill</literal></entry>
+                <entry valign="top"><literal>killed</literal></entry>
+                <entry><literal>TERM</literal>, <literal>KILL</literal></entry>
               </row>
               <row>
                 <entry><literal>start-limit-hit</literal></entry>

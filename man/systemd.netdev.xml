@@ -1742,8 +1742,8 @@
       <varlistentry>
         <term><varname>ARPIntervalSec=</varname></term>
         <listitem>
-          <para>Specifies the ARP link monitoring frequency in milliseconds.
-          A value of 0 disables ARP monitoring. The default value is 0.
+          <para>Specifies the ARP link monitoring frequency. A value of 0 disables ARP monitoring. The
+          default value is 0, and the default unit seconds.
           </para>
         </listitem>
       </varlistentry>
@@ -2016,6 +2016,16 @@ MTUBytes=1480
 [Tunnel]
 Local=10.65.223.238
 Remote=10.65.223.239</programlisting>
+    </example>
+
+    <example>
+      <title>/etc/systemd/network/25-ip6gre.netdev</title>
+      <programlisting>[NetDev]
+Name=ip6gre-tun
+Kind=ip6gre
+
+[Tunnel]
+Key=123</programlisting>
     </example>
 
     <example>

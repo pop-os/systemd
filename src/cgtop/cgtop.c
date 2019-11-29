@@ -1,12 +1,10 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <alloca.h>
 #include <errno.h>
 #include <getopt.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
@@ -20,6 +18,7 @@
 #include "fileio.h"
 #include "hashmap.h"
 #include "main-func.h"
+#include "missing_sched.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
@@ -898,7 +897,7 @@ static const char* counting_what(void) {
                 return "userspace processes (excl. kernel)";
 }
 
-DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(group_hash_ops, char, path_hash_func, path_compare_func, Group, group_free);
+DEFINE_PRIVATE_HASH_OPS_WITH_VALUE_DESTRUCTOR(group_hash_ops, char, path_hash_func, path_compare, Group, group_free);
 
 static int run(int argc, char *argv[]) {
         _cleanup_hashmap_free_ Hashmap *a = NULL, *b = NULL;

@@ -9,11 +9,7 @@
 #include "resolved-dns-stream.h"
 #include "resolved-dnstls.h"
 
-#if GNUTLS_VERSION_NUMBER >= 0x030600
-#define PRIORTY_STRING "NORMAL:-VERS-ALL:+VERS-TLS1.2:+VERS-TLS1.3"
-#else
-#define PRIORTY_STRING "NORMAL:-VERS-ALL:+VERS-TLS1.2"
-#endif
+#define TLS_PROTOCOL_PRIORITY "NORMAL:-VERS-ALL:+VERS-TLS1.3:+VERS-TLS1.2"
 DEFINE_TRIVIAL_CLEANUP_FUNC(gnutls_session_t, gnutls_deinit);
 
 static ssize_t dnstls_stream_writev(gnutls_transport_ptr_t p, const giovec_t *iov, int iovcnt) {
@@ -42,7 +38,7 @@ int dnstls_stream_connect_tls(DnsStream *stream, DnsServer *server) {
                 return r;
 
         /* As DNS-over-TLS is a recent protocol, older TLS versions can be disabled */
-        r = gnutls_priority_set_direct(gs, PRIORTY_STRING, NULL);
+        r = gnutls_priority_set_direct(gs, TLS_PROTOCOL_PRIORITY, NULL);
         if (r < 0)
                 return r;
 
@@ -59,8 +55,17 @@ int dnstls_stream_connect_tls(DnsStream *stream, DnsServer *server) {
                 server->dnstls_data.session_data.size = 0;
         }
 
-        if (server->manager->dns_over_tls_mode == DNS_OVER_TLS_YES)
-                gnutls_session_set_verify_cert(gs, NULL, 0);
+        if (server->manager->dns_over_tls_mode == DNS_OVER_TLS_YES) {
+                stream->dnstls_data.validation.type = GNUTLS_DT_IP_ADDRESS;
+                if (server->family == AF_INET) {
+                        stream->dnstls_data.validation.data = (unsigned char*) &server->address.in.s_addr;
+                        stream->dnstls_data.validation.size = 4;
+                } else {
+                        stream->dnstls_data.validation.data = server->address.in6.s6_addr;
+                        stream->dnstls_data.validation.size = 16;
+                }
+                gnutls_session_set_verify_cert2(gs, &stream->dnstls_data.validation, 1, 0);
+        }
 
         gnutls_handshake_set_timeout(gs, GNUTLS_DEFAULT_HANDSHAKE_TIMEOUT);
 
