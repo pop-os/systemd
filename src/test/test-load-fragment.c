@@ -3,8 +3,6 @@
 #include <fcntl.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <string.h>
-#include <sys/capability.h>
 #include <unistd.h>
 
 #include "all-units.h"
@@ -25,7 +23,6 @@
 #include "specifier.h"
 #include "string-util.h"
 #include "strv.h"
-#include "test-helper.h"
 #include "tests.h"
 #include "tmpfile-util.h"
 #include "user-util.h"
@@ -99,7 +96,7 @@ static void test_config_parse_exec(void) {
         _cleanup_(unit_freep) Unit *u = NULL;
 
         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
-        if (MANAGER_SKIP_TEST(r)) {
+        if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;
         }
@@ -149,7 +146,7 @@ static void test_config_parse_exec(void) {
 
         log_info("/* no command, whitespace only, reset */");
         r = config_parse_exec(NULL, "fake", 3, "section", 1,
-                              "LValue", 0, "    ",
+                              "LValue", 0, "",
                               &c, u);
         assert_se(r == 0);
         assert_se(c == NULL);
@@ -444,7 +441,7 @@ static void test_config_parse_log_extra_fields(void) {
         ExecContext c = {};
 
         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_MINIMAL, &m);
-        if (MANAGER_SKIP_TEST(r)) {
+        if (manager_errno_skip_test(r)) {
                 log_notice_errno(r, "Skipping test: manager_new: %m");
                 return;
         }
@@ -782,7 +779,7 @@ int main(int argc, char *argv[]) {
 
         test_setup_logging(LOG_INFO);
 
-        r = enter_cgroup_subroot();
+        r = enter_cgroup_subroot(NULL);
         if (r == -ENOMEDIUM)
                 return log_tests_skipped("cgroupfs not available");
 

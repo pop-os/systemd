@@ -38,6 +38,7 @@ enum {
         SYSCALL_FILTER_SET_MOUNT,
         SYSCALL_FILTER_SET_NETWORK_IO,
         SYSCALL_FILTER_SET_OBSOLETE,
+        SYSCALL_FILTER_SET_PKEY,
         SYSCALL_FILTER_SET_PRIVILEGED,
         SYSCALL_FILTER_SET_PROCESS,
         SYSCALL_FILTER_SET_RAW_IO,
@@ -81,6 +82,7 @@ int seccomp_parse_syscall_filter(
 int seccomp_restrict_archs(Set *archs);
 int seccomp_restrict_namespaces(unsigned long retain);
 int seccomp_protect_sysctl(void);
+int seccomp_protect_syslog(void);
 int seccomp_restrict_address_families(Set *address_families, bool whitelist);
 int seccomp_restrict_realtime(void);
 int seccomp_memory_deny_write_execute(void);

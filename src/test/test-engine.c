@@ -2,13 +2,11 @@
 
 #include <errno.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "bus-util.h"
 #include "manager.h"
 #include "rm-rf.h"
 #include "strv.h"
-#include "test-helper.h"
 #include "tests.h"
 #include "service.h"
 
@@ -23,7 +21,7 @@ int main(int argc, char *argv[]) {
 
         test_setup_logging(LOG_DEBUG);
 
-        r = enter_cgroup_subroot();
+        r = enter_cgroup_subroot(NULL);
         if (r == -ENOMEDIUM)
                 return log_tests_skipped("cgroupfs not available");
 
@@ -31,7 +29,7 @@ int main(int argc, char *argv[]) {
         assert_se(set_unit_path(get_testdata_dir()) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m);
-        if (MANAGER_SKIP_TEST(r))
+        if (manager_errno_skip_test(r))
                 return log_tests_skipped_errno(r, "manager_new");
         assert_se(r >= 0);
         assert_se(manager_startup(m, NULL, NULL) >= 0);
@@ -106,9 +104,9 @@ int main(int argc, char *argv[]) {
 
         printf("Test11: (Start/stop job ordering, execution cycle)\n");
         assert_se(manager_add_job(m, JOB_START, i, JOB_FAIL, NULL, NULL, &j) == 0);
-        assert_se(a->job && a->job->type == JOB_STOP);
-        assert_se(d->job && d->job->type == JOB_STOP);
-        assert_se(b->job && b->job->type == JOB_START);
+        assert_se(unit_has_job_type(a, JOB_STOP));
+        assert_se(unit_has_job_type(d, JOB_STOP));
+        assert_se(unit_has_job_type(b, JOB_START));
         manager_dump_jobs(m, stdout, "\t");
 
         printf("Load6:\n");

@@ -85,28 +85,6 @@ static unsigned long long int cd_media_session_last_offset;
 #define ASC(errcode)        (((errcode) >> 8) & 0xFF)
 #define ASCQ(errcode)        ((errcode) & 0xFF)
 
-static bool is_mounted(const char *device) {
-        struct stat statbuf;
-        FILE *fp;
-        int maj, min;
-        bool mounted = false;
-
-        if (stat(device, &statbuf) < 0)
-                return false;
-
-        fp = fopen("/proc/self/mountinfo", "re");
-        if (!fp)
-                return false;
-        while (fscanf(fp, "%*s %*s %i:%i %*[^\n]", &maj, &min) == 2) {
-                if (makedev(maj, min) == statbuf.st_rdev) {
-                        mounted = true;
-                        break;
-                }
-        }
-        fclose(fp);
-        return mounted;
-}
-
 static void info_scsi_cmd_err(const char *cmd, int err) {
         if (err == -1)
                 log_debug("%s failed", cmd);
@@ -849,12 +827,13 @@ int main(int argc, char *argv[]) {
                         log_open();
                         break;
                 case 'h':
-                        printf("Usage: cdrom_id [options] <device>\n"
+                        printf("Usage: %s [options] <device>\n"
                                "  -l,--lock-media    lock the media (to enable eject request events)\n"
                                "  -u,--unlock-media  unlock the media\n"
                                "  -e,--eject-media   eject the media\n"
                                "  -d,--debug         debug to stderr\n"
-                               "  -h,--help          print this help text\n\n");
+                               "  -h,--help          print this help text\n\n",
+                               program_invocation_short_name);
                         goto exit;
                 default:
                         rc = 1;
@@ -873,7 +852,7 @@ int main(int argc, char *argv[]) {
         for (cnt = 20; cnt > 0; cnt--) {
                 struct timespec duration;
 
-                fd = open(node, O_RDONLY|O_NONBLOCK|O_CLOEXEC|(is_mounted(node) ? 0 : O_EXCL));
+                fd = open(node, O_RDONLY|O_NONBLOCK|O_CLOEXEC);
                 if (fd >= 0 || errno != EBUSY)
                         break;
                 duration.tv_sec = 0;

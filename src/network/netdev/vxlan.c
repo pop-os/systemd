@@ -2,8 +2,6 @@
 
 #include <net/if.h>
 
-#include "sd-netlink.h"
-
 #include "conf-parser.h"
 #include "alloc-util.h"
 #include "extract-word.h"
@@ -11,10 +9,7 @@
 #include "string-util.h"
 #include "strv.h"
 #include "parse-util.h"
-#include "missing.h"
-
-#include "networkd-link.h"
-#include "netdev/vxlan.h"
+#include "vxlan.h"
 
 static const char* const df_table[_NETDEV_VXLAN_DF_MAX] = {
         [NETDEV_VXLAN_DF_NO] = "no",

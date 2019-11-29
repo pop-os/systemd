@@ -15,7 +15,6 @@
 #include "hexdecoct.h"
 #include "memory-util.h"
 #include "netlink-util.h"
-#include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-util.h"
 #include "parse-util.h"
@@ -900,6 +899,8 @@ static int wireguard_read_key_file(const char *filename, uint8_t dest[static WG_
                 return 0;
 
         assert(dest);
+
+        (void) warn_file_is_world_accessible(filename, NULL, NULL, 0);
 
         r = read_full_file_full(filename, READ_FULL_FILE_SECURE | READ_FULL_FILE_UNBASE64, &key, &key_len);
         if (r < 0)

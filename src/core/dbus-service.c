@@ -130,6 +130,7 @@ const sd_bus_vtable bus_service_vtable[] = {
 
         BUS_EXEC_STATUS_VTABLE("ExecMain", offsetof(Service, main_exec_status), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecCondition", offsetof(Service, exec_command[SERVICE_EXEC_CONDITION]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
+        BUS_EXEC_EX_COMMAND_LIST_VTABLE("ExecConditionEx", offsetof(Service, exec_command[SERVICE_EXEC_CONDITION]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPre", offsetof(Service, exec_command[SERVICE_EXEC_START_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_EX_COMMAND_LIST_VTABLE("ExecStartPreEx", offsetof(Service, exec_command[SERVICE_EXEC_START_PRE]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStart", offsetof(Service, exec_command[SERVICE_EXEC_START]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
@@ -137,12 +138,15 @@ const sd_bus_vtable bus_service_vtable[] = {
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStartPost", offsetof(Service, exec_command[SERVICE_EXEC_START_POST]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_EX_COMMAND_LIST_VTABLE("ExecStartPostEx", offsetof(Service, exec_command[SERVICE_EXEC_START_POST]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecReload", offsetof(Service, exec_command[SERVICE_EXEC_RELOAD]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
+        BUS_EXEC_EX_COMMAND_LIST_VTABLE("ExecReloadEx", offsetof(Service, exec_command[SERVICE_EXEC_RELOAD]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStop", offsetof(Service, exec_command[SERVICE_EXEC_STOP]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
+        BUS_EXEC_EX_COMMAND_LIST_VTABLE("ExecStopEx", offsetof(Service, exec_command[SERVICE_EXEC_STOP]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
         BUS_EXEC_COMMAND_LIST_VTABLE("ExecStopPost", offsetof(Service, exec_command[SERVICE_EXEC_STOP_POST]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
+        BUS_EXEC_EX_COMMAND_LIST_VTABLE("ExecStopPostEx", offsetof(Service, exec_command[SERVICE_EXEC_STOP_POST]), SD_BUS_VTABLE_PROPERTY_EMITS_INVALIDATION),
 
         /* The following four are obsolete, and thus marked hidden here. They moved into the Unit interface */
-        SD_BUS_PROPERTY("StartLimitInterval", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("StartLimitBurst", "u", bus_property_get_unsigned, offsetof(Unit, start_limit.burst), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("StartLimitInterval", "t", bus_property_get_usec, offsetof(Unit, start_ratelimit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("StartLimitBurst", "u", bus_property_get_unsigned, offsetof(Unit, start_ratelimit.burst), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("StartLimitAction", "s", property_get_emergency_action, offsetof(Unit, start_limit_action), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("FailureAction", "s", property_get_emergency_action, offsetof(Unit, failure_action), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("RebootArgument", "s", NULL, offsetof(Unit, reboot_arg), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
@@ -304,6 +308,13 @@ static int bus_service_set_transient_property(
 
         if (streq(name, "TimeoutStopUSec"))
                 return bus_set_transient_usec(u, name, &s->timeout_stop_usec, message, flags, error);
+
+        if (streq(name, "TimeoutAbortUSec")) {
+                r = bus_set_transient_usec(u, name, &s->timeout_abort_usec, message, flags, error);
+                if (r >= 0 && !UNIT_WRITE_FLAGS_NOOP(flags))
+                        s->timeout_abort_set = true;
+                return r;
+        }
 
         if (streq(name, "RuntimeMaxUSec"))
                 return bus_set_transient_usec(u, name, &s->runtime_max_usec, message, flags, error);

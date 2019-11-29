@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <poll.h>
-#include <sys/socket.h>
 
 #include "sd-netlink.h"
 
@@ -9,7 +8,6 @@
 #include "fd-util.h"
 #include "hashmap.h"
 #include "macro.h"
-#include "missing.h"
 #include "netlink-internal.h"
 #include "netlink-slot.h"
 #include "netlink-util.h"
@@ -79,7 +77,7 @@ int sd_netlink_new_from_netlink(sd_netlink **ret, int fd) {
         return 0;
 }
 
-static bool rtnl_pid_changed(sd_netlink *rtnl) {
+static bool rtnl_pid_changed(const sd_netlink *rtnl) {
         assert(rtnl);
 
         /* We don't support people creating an rtnl connection and
@@ -177,6 +175,9 @@ static sd_netlink *netlink_free(sd_netlink *rtnl) {
         sd_event_unref(rtnl->event);
 
         hashmap_free(rtnl->broadcast_group_refs);
+
+        hashmap_free(rtnl->genl_family_to_nlmsg_type);
+        hashmap_free(rtnl->nlmsg_type_to_genl_family);
 
         safe_close(rtnl->fd);
         return mfree(rtnl);
@@ -670,7 +671,7 @@ int sd_netlink_call(sd_netlink *rtnl,
         }
 }
 
-int sd_netlink_get_events(sd_netlink *rtnl) {
+int sd_netlink_get_events(const sd_netlink *rtnl) {
         assert_return(rtnl, -EINVAL);
         assert_return(!rtnl_pid_changed(rtnl), -ECHILD);
 
@@ -680,7 +681,7 @@ int sd_netlink_get_events(sd_netlink *rtnl) {
                 return 0;
 }
 
-int sd_netlink_get_timeout(sd_netlink *rtnl, uint64_t *timeout_usec) {
+int sd_netlink_get_timeout(const sd_netlink *rtnl, uint64_t *timeout_usec) {
         struct reply_callback *c;
 
         assert_return(rtnl, -EINVAL);
@@ -896,6 +897,13 @@ int sd_netlink_add_match(
                         if (r < 0)
                                 return r;
                         break;
+                case RTM_NEWNEXTHOP:
+                case RTM_DELNEXTHOP:
+                        r = socket_broadcast_group_ref(rtnl, RTNLGRP_NEXTHOP);
+                        if (r < 0)
+                                return r;
+                break;
+
                 default:
                         return -EOPNOTSUPP;
         }

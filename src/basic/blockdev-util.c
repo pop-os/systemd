@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <sys/stat.h>
-#include <sys/statfs.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "blockdev-util.h"
@@ -9,7 +8,7 @@
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fileio.h"
-#include "missing.h"
+#include "missing_magic.h"
 #include "parse-util.h"
 #include "stat-util.h"
 

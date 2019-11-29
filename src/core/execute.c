@@ -2,19 +2,13 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <glob.h>
-#include <grp.h>
 #include <poll.h>
-#include <signal.h>
-#include <string.h>
-#include <sys/capability.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
 #include <sys/shm.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -48,6 +42,7 @@
 #include "cap-list.h"
 #include "capability-util.h"
 #include "chown-recursive.h"
+#include "cgroup-setup.h"
 #include "cpu-set-util.h"
 #include "def.h"
 #include "env-file.h"
@@ -66,7 +61,7 @@
 #include "macro.h"
 #include "manager.h"
 #include "memory-util.h"
-#include "missing.h"
+#include "missing_fs.h"
 #include "mkdir.h"
 #include "namespace.h"
 #include "parse-util.h"
@@ -1401,6 +1396,7 @@ static bool context_has_no_new_privileges(const ExecContext *c) {
                 exec_context_restrict_namespaces_set(c) ||
                 c->protect_kernel_tunables ||
                 c->protect_kernel_modules ||
+                c->protect_kernel_logs ||
                 c->private_devices ||
                 context_has_syscall_filters(c) ||
                 !set_isempty(c->syscall_archs) ||
@@ -1547,6 +1543,19 @@ static int apply_protect_kernel_modules(const Unit *u, const ExecContext *c) {
         return seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + SYSCALL_FILTER_SET_MODULE, SCMP_ACT_ERRNO(EPERM), false);
 }
 
+static int apply_protect_kernel_logs(const Unit *u, const ExecContext *c) {
+        assert(u);
+        assert(c);
+
+        if (!c->protect_kernel_logs)
+                return 0;
+
+        if (skip_seccomp_unavailable(u, "ProtectKernelLogs="))
+                return 0;
+
+        return seccomp_protect_syslog();
+}
+
 static int apply_private_devices(const Unit *u, const ExecContext *c) {
         assert(u);
         assert(c);
@@ -1621,7 +1630,7 @@ static void do_idle_pipe_dance(int idle_pipe[static 4]) {
                         n = write(idle_pipe[3], "x", 1);
                         if (n > 0)
                                 /* Wait for systemd to react to the signal above. */
-                                fd_wait_for_event(idle_pipe[0], POLLHUP, IDLE_TIMEOUT2_USEC);
+                                (void) fd_wait_for_event(idle_pipe[0], POLLHUP, IDLE_TIMEOUT2_USEC);
                 }
 
                 idle_pipe[0] = safe_close(idle_pipe[0]);
@@ -1863,6 +1872,7 @@ static bool exec_needs_mount_namespace(
             context->protect_home != PROTECT_HOME_NO ||
             context->protect_kernel_tunables ||
             context->protect_kernel_modules ||
+            context->protect_kernel_logs ||
             context->protect_control_groups)
                 return true;
 
@@ -2449,6 +2459,40 @@ finish:
         return r;
 }
 
+static bool insist_on_sandboxing(
+                const ExecContext *context,
+                const char *root_dir,
+                const char *root_image,
+                const BindMount *bind_mounts,
+                size_t n_bind_mounts) {
+
+        size_t i;
+
+        assert(context);
+        assert(n_bind_mounts == 0 || bind_mounts);
+
+        /* Checks whether we need to insist on fs namespacing. i.e. whether we have settings configured that
+         * would alter the view on the file system beyond making things read-only or invisble, i.e. would
+         * rearrange stuff in a way we cannot ignore gracefully. */
+
+        if (context->n_temporary_filesystems > 0)
+                return true;
+
+        if (root_dir || root_image)
+                return true;
+
+        if (context->dynamic_user)
+                return true;
+
+        /* If there are any bind mounts set that don't map back onto themselves, fs namespacing becomes
+         * essential. */
+        for (i = 0; i < n_bind_mounts; i++)
+                if (!path_equal(bind_mounts[i].source, bind_mounts[i].destination))
+                        return true;
+
+        return false;
+}
+
 static int apply_mount_namespace(
                 const Unit *u,
                 const ExecCommand *command,
@@ -2498,6 +2542,7 @@ static int apply_mount_namespace(
                         .protect_control_groups = context->protect_control_groups,
                         .protect_kernel_tunables = context->protect_kernel_tunables,
                         .protect_kernel_modules = context->protect_kernel_modules,
+                        .protect_kernel_logs = context->protect_kernel_logs,
                         .protect_hostname = context->protect_hostname,
                         .mount_apivfs = context->mount_apivfs,
                         .private_mounts = context->private_mounts,
@@ -2534,28 +2579,28 @@ static int apply_mount_namespace(
                             DISSECT_IMAGE_DISCARD_ON_LOOP,
                             error_path);
 
-        bind_mount_free_many(bind_mounts, n_bind_mounts);
-
         /* If we couldn't set up the namespace this is probably due to a missing capability. setup_namespace() reports
          * that with a special, recognizable error ENOANO. In this case, silently proceed, but only if exclusively
          * sandboxing options were used, i.e. nothing such as RootDirectory= or BindMount= that would result in a
          * completely different execution environment. */
         if (r == -ENOANO) {
-                if (n_bind_mounts == 0 &&
-                    context->n_temporary_filesystems == 0 &&
-                    !root_dir && !root_image &&
-                    !context->dynamic_user) {
+                if (insist_on_sandboxing(
+                                    context,
+                                    root_dir, root_image,
+                                    bind_mounts,
+                                    n_bind_mounts)) {
+                        log_unit_debug(u, "Failed to set up namespace, and refusing to continue since the selected namespacing options alter mount environment non-trivially.\n"
+                                       "Bind mounts: %zu, temporary filesystems: %zu, root directory: %s, root image: %s, dynamic user: %s",
+                                       n_bind_mounts, context->n_temporary_filesystems, yes_no(root_dir), yes_no(root_image), yes_no(context->dynamic_user));
+
+                        r = -EOPNOTSUPP;
+                } else {
                         log_unit_debug(u, "Failed to set up namespace, assuming containerized execution and ignoring.");
-                        return 0;
+                        r = 0;
                 }
-
-                log_unit_debug(u, "Failed to set up namespace, and refusing to continue since the selected namespacing options alter mount environment non-trivially.\n"
-                               "Bind mounts: %zu, temporary filesystems: %zu, root directory: %s, root image: %s, dynamic user: %s",
-                               n_bind_mounts, context->n_temporary_filesystems, yes_no(root_dir), yes_no(root_image), yes_no(context->dynamic_user));
-
-                return -EOPNOTSUPP;
         }
 
+        bind_mount_free_many(bind_mounts, n_bind_mounts);
         return r;
 }
 
@@ -3403,8 +3448,12 @@ static int exec_child(
         if (context->protect_hostname) {
                 if (ns_type_supported(NAMESPACE_UTS)) {
                         if (unshare(CLONE_NEWUTS) < 0) {
-                                *exit_status = EXIT_NAMESPACE;
-                                return log_unit_error_errno(unit, errno, "Failed to set up UTS namespacing: %m");
+                                if (!ERRNO_IS_NOT_SUPPORTED(errno) && !ERRNO_IS_PRIVILEGE(errno)) {
+                                        *exit_status = EXIT_NAMESPACE;
+                                        return log_unit_error_errno(unit, errno, "Failed to set up UTS namespacing: %m");
+                                }
+
+                                log_unit_warning(unit, "ProtectHostname=yes is configured, but UTS namespace setup is prohibited (container manager?), ignoring namespace setup.");
                         }
                 } else
                         log_unit_warning(unit, "ProtectHostname=yes is configured, but the kernel does not support UTS namespaces, ignoring namespace setup.");
@@ -3682,6 +3731,12 @@ static int exec_child(
                 if (r < 0) {
                         *exit_status = EXIT_SECCOMP;
                         return log_unit_error_errno(unit, r, "Failed to apply module loading restrictions: %m");
+                }
+
+                r = apply_protect_kernel_logs(unit, context);
+                if (r < 0) {
+                        *exit_status = EXIT_SECCOMP;
+                        return log_unit_error_errno(unit, r, "Failed to apply kernel log restrictions: %m");
                 }
 
                 r = apply_private_devices(unit, context);
@@ -4000,8 +4055,8 @@ void exec_context_done(ExecContext *c) {
 
         exec_context_free_log_extra_fields(c);
 
-        c->log_rate_limit_interval_usec = 0;
-        c->log_rate_limit_burst = 0;
+        c->log_ratelimit_interval_usec = 0;
+        c->log_ratelimit_burst = 0;
 
         c->stdin_data = mfree(c->stdin_data);
         c->stdin_data_size = 0;
@@ -4323,6 +4378,7 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 "%sPrivateDevices: %s\n"
                 "%sProtectKernelTunables: %s\n"
                 "%sProtectKernelModules: %s\n"
+                "%sProtectKernelLogs: %s\n"
                 "%sProtectControlGroups: %s\n"
                 "%sPrivateNetwork: %s\n"
                 "%sPrivateUsers: %s\n"
@@ -4343,6 +4399,7 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 prefix, yes_no(c->private_devices),
                 prefix, yes_no(c->protect_kernel_tunables),
                 prefix, yes_no(c->protect_kernel_modules),
+                prefix, yes_no(c->protect_kernel_logs),
                 prefix, yes_no(c->protect_control_groups),
                 prefix, yes_no(c->private_network),
                 prefix, yes_no(c->private_users),
@@ -4515,16 +4572,16 @@ void exec_context_dump(const ExecContext *c, FILE* f, const char *prefix) {
                 fprintf(f, "%sLogLevelMax: %s\n", prefix, strna(t));
         }
 
-        if (c->log_rate_limit_interval_usec > 0) {
+        if (c->log_ratelimit_interval_usec > 0) {
                 char buf_timespan[FORMAT_TIMESPAN_MAX];
 
                 fprintf(f,
                         "%sLogRateLimitIntervalSec: %s\n",
-                        prefix, format_timespan(buf_timespan, sizeof(buf_timespan), c->log_rate_limit_interval_usec, USEC_PER_SEC));
+                        prefix, format_timespan(buf_timespan, sizeof(buf_timespan), c->log_ratelimit_interval_usec, USEC_PER_SEC));
         }
 
-        if (c->log_rate_limit_burst > 0)
-                fprintf(f, "%sLogRateLimitBurst: %u\n", prefix, c->log_rate_limit_burst);
+        if (c->log_ratelimit_burst > 0)
+                fprintf(f, "%sLogRateLimitBurst: %u\n", prefix, c->log_ratelimit_burst);
 
         if (c->n_log_extra_fields > 0) {
                 size_t j;

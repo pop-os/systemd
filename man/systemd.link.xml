@@ -624,6 +624,19 @@
           <para>Sets the number of combined set channels (a number between 1 and 4294967295).</para>
         </listitem>
       </varlistentry>
+      <varlistentry>
+        <term><varname>RxBufferSize=</varname></term>
+        <listitem>
+          <para>Takes a integer. Specifies the NIC receive ring buffer size. When unset, the kernel's default will be used.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>TxBufferSize=</varname></term>
+        <listitem>
+          <para>Takes a integer. Specifies the NIC transmit ring buffer size. When unset, the kernel's default will be used.</para>
+        </listitem>
+      </varlistentry>
+
     </variablelist>
   </refsect1>
 
@@ -655,7 +668,7 @@ MACAddress=00:a0:de:63:7a:e6
 Name=dmz0</programlisting>
 
       <para><varname>NamePolicy=</varname> is not set, so <varname>Name=</varname> takes effect. We use the
-      <literal>10-</literal> prefix to order this file early in the list. Note that it needs to before
+      <literal>10-</literal> prefix to order this file early in the list. Note that it needs to be before
       <literal>99-link</literal>, i.e. it needs a numerical prefix, to have any effect at all.</para>
     </example>
 
@@ -696,7 +709,7 @@ ID_NET_LINK_FILE=/usr/lib/systemd/network/99-default.link
 </programlisting>
 
      <para>In this case, the interface was already renamed, so the <option>keep</option> policy specified as
-     the first option in <filename noindex='true'>99-default.link</filename> means that the existing name is
+     the first option in <filename index="false">99-default.link</filename> means that the existing name is
      preserved. If <option>keep</option> was removed, or if were in boot before the renaming has happened,
      we might get the following instead:</para>
 

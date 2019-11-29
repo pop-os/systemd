@@ -1,15 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <alloca.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <grp.h>
-#include <pwd.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utmp.h>
@@ -20,7 +16,6 @@
 #include "fileio.h"
 #include "format-util.h"
 #include "macro.h"
-#include "missing.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "random-util.h"
@@ -410,9 +405,10 @@ char* gid_to_name(gid_t gid) {
 }
 
 int in_gid(gid_t gid) {
-        long ngroups_max;
-        gid_t *gids;
-        int r, i;
+        _cleanup_free_ gid_t *allocated = NULL;
+        gid_t local[16], *p = local;
+        int ngroups = ELEMENTSOF(local);
+        unsigned attempt = 0;
 
         if (getgid() == gid)
                 return 1;
@@ -423,20 +419,39 @@ int in_gid(gid_t gid) {
         if (!gid_is_valid(gid))
                 return -EINVAL;
 
-        ngroups_max = sysconf(_SC_NGROUPS_MAX);
-        assert(ngroups_max > 0);
+        for (;;) {
+                ngroups = getgroups(ngroups, p);
+                if (ngroups >= 0)
+                        break;
+                if (errno != EINVAL)
+                        return -errno;
 
-        gids = newa(gid_t, ngroups_max);
+                /* Give up eventually */
+                if (attempt++ > 10)
+                        return -EINVAL;
 
-        r = getgroups(ngroups_max, gids);
-        if (r < 0)
-                return -errno;
+                /* Get actual size needed, and size the array explicitly. Note that this is potentially racy
+                 * to use (in multi-threaded programs), hence let's call this in a loop. */
+                ngroups = getgroups(0, NULL);
+                if (ngroups < 0)
+                        return -errno;
+                if (ngroups == 0)
+                        return false;
 
-        for (i = 0; i < r; i++)
-                if (gids[i] == gid)
-                        return 1;
+                free(allocated);
 
-        return 0;
+                allocated = new(gid_t, ngroups);
+                if (!allocated)
+                        return -ENOMEM;
+
+                p = allocated;
+        }
+
+        for (int i = 0; i < ngroups; i++)
+                if (p[i] == gid)
+                        return true;
+
+        return false;
 }
 
 int in_group(const char *name) {

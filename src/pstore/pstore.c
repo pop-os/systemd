@@ -33,7 +33,6 @@
 #include "log.h"
 #include "macro.h"
 #include "main-func.h"
-#include "missing.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "process-util.h"
@@ -117,6 +116,7 @@ static int compare_pstore_entries(const void *_a, const void *_b) {
 
 static int move_file(PStoreEntry *pe, const char *subdir) {
         _cleanup_free_ char *ifd_path = NULL, *ofd_path = NULL;
+        _cleanup_free_ void *field = NULL;
         const char *suffix, *message;
         struct iovec iovec[2];
         int n_iovec = 0, r;
@@ -138,7 +138,6 @@ static int move_file(PStoreEntry *pe, const char *subdir) {
         iovec[n_iovec++] = IOVEC_MAKE_STRING(message);
 
         if (pe->content_size > 0) {
-                _cleanup_free_ void *field = NULL;
                 size_t field_size;
 
                 field_size = strlen("FILE=") + pe->content_size;
@@ -157,7 +156,7 @@ static int move_file(PStoreEntry *pe, const char *subdir) {
                 /* Move file from pstore to external storage */
                 r = mkdir_parents(ofd_path, 0755);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to create directoy %s: %m", ofd_path);
+                        return log_error_errno(r, "Failed to create directory %s: %m", ofd_path);
                 r = copy_file_atomic(ifd_path, ofd_path, 0600, 0, 0, COPY_REPLACE);
                 if (r < 0)
                         return log_error_errno(r, "Failed to copy_file_atomic: %s to %s", ifd_path, ofd_path);
@@ -179,8 +178,10 @@ static int write_dmesg(const char *dmesg, size_t size, const char *id) {
         ssize_t wr;
         int r;
 
-        if (isempty(dmesg) || size == 0)
+        if (size == 0)
                 return 0;
+
+        assert(dmesg);
 
         ofd_path = path_join(arg_archivedir, id, "dmesg.txt");
         if (!ofd_path)
@@ -205,7 +206,8 @@ static int write_dmesg(const char *dmesg, size_t size, const char *id) {
 static void process_dmesg_files(PStoreList *list) {
         /* Move files, reconstruct dmesg.txt */
         _cleanup_free_ char *dmesg = NULL, *dmesg_id = NULL;
-        size_t dmesg_size = 0;
+        size_t dmesg_size = 0, dmesg_allocated = 0;
+        bool dmesg_bad = false;
         PStoreEntry *pe;
 
         /* Handle each dmesg file: files processed in reverse
@@ -282,33 +284,39 @@ static void process_dmesg_files(PStoreList *list) {
                 /* Now move file from pstore to archive storage */
                 move_file(pe, pe_id);
 
+                if (dmesg_bad)
+                        continue;
+
                 /* If the current record id is NOT the same as the
                  * previous record id, then start a new dmesg.txt file */
-                if (!pe_id || !dmesg_id || !streq(pe_id, dmesg_id)) {
+                if (!streq_ptr(pe_id, dmesg_id)) {
                         /* Encountered a new dmesg group, close out old one, open new one */
-                        if (dmesg) {
-                                (void) write_dmesg(dmesg, dmesg_size, dmesg_id);
-                                dmesg = mfree(dmesg);
-                                dmesg_size = 0;
-                        }
+                        (void) write_dmesg(dmesg, dmesg_size, dmesg_id);
+                        dmesg_size = 0;
 
                         /* now point dmesg_id to storage of pe_id */
                         free_and_replace(dmesg_id, pe_id);
                 }
 
-                /* Reconstruction of dmesg is done as a useful courtesy, do not log errors */
-                dmesg = realloc(dmesg, dmesg_size + strlen(pe->dirent.d_name) + strlen(":\n") + pe->content_size + 1);
-                if (dmesg) {
-                        dmesg_size += sprintf(&dmesg[dmesg_size], "%s:\n", pe->dirent.d_name);
-                        if (pe->content) {
-                                memcpy(&dmesg[dmesg_size], pe->content, pe->content_size);
-                                dmesg_size += pe->content_size;
-                        }
+                /* Reconstruction of dmesg is done as a useful courtesy: do not fail, but don't write garbled
+                 * output either. */
+                size_t needed = strlen(pe->dirent.d_name) + strlen(":\n") + pe->content_size + 1;
+                if (!GREEDY_REALLOC(dmesg, dmesg_allocated, dmesg_size + needed)) {
+                        log_warning_errno(ENOMEM, "Failed to write dmesg file: %m");
+                        dmesg_bad = true;
+                        continue;
+                }
+
+                dmesg_size += sprintf(dmesg + dmesg_size, "%s:\n", pe->dirent.d_name);
+                if (pe->content) {
+                        memcpy(dmesg + dmesg_size, pe->content, pe->content_size);
+                        dmesg_size += pe->content_size;
                 }
 
                 pe_id = mfree(pe_id);
         }
-        if (dmesg)
+
+        if (!dmesg_bad)
                 (void) write_dmesg(dmesg, dmesg_size, dmesg_id);
 }
 
@@ -359,15 +367,18 @@ static int run(int argc, char *argv[]) {
 
         log_setup_service();
 
-        if (argc > 1)
+        if (argc == 3) {
+                arg_sourcedir = argv[1];
+                arg_archivedir = argv[2];
+        } else if (argc > 1)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "This program takes no arguments.");
+                                       "This program takes zero or two arguments.");
 
         /* Ignore all parse errors */
         (void) parse_config();
 
-        log_debug("Selected storage '%s'.", pstore_storage_to_string(arg_storage));
-        log_debug("Selected Unlink '%d'.", arg_unlink);
+        log_debug("Selected storage: %s.", pstore_storage_to_string(arg_storage));
+        log_debug("Selected unlink: %s.", yes_no(arg_unlink));
 
         if (arg_storage == PSTORE_STORAGE_NONE)
                 /* Do nothing, intentionally, leaving pstore untouched */

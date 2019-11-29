@@ -28,6 +28,7 @@ ProtectHome=yes
 ProtectHostname=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
+ProtectKernelLogs=yes
 ProtectSystem=strict
 ReadWritePaths=/etc
 RestrictAddressFamilies=AF_UNIX
@@ -37,4 +38,4 @@ RestrictSUIDSGID=yes
 SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
-WatchdogSec=3min
+@SERVICE_WATCHDOG@

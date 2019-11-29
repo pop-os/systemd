@@ -15,6 +15,7 @@
 #include "device-nodes.h"
 #include "dirent-util.h"
 #include "efivars.h"
+#include "efi-loader.h"
 #include "env-file.h"
 #include "env-util.h"
 #include "fd-util.h"
@@ -257,7 +258,7 @@ static int boot_entries_find(
         assert(entries);
         assert(n_entries);
 
-        r = conf_files_list(&files, ".conf", NULL, 0, dir, NULL);
+        r = conf_files_list(&files, ".conf", NULL, 0, dir);
         if (r < 0)
                 return log_error_errno(r, "Failed to list files in \"%s\": %m", dir);
 
@@ -475,6 +476,7 @@ static int boot_entries_find_unified(
                 _cleanup_free_ char *j = NULL, *osrelease = NULL, *cmdline = NULL;
                 _cleanup_close_ int fd = -1;
 
+                dirent_ensure_type(d, de);
                 if (!dirent_is_file(de))
                         continue;
 
@@ -876,7 +878,7 @@ static int verify_esp_blkid(
         errno = 0;
         r = blkid_probe_lookup_value(b, "PART_ENTRY_NUMBER", &v, NULL);
         if (r != 0)
-                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition number of \"%s\": m", node);
+                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "Failed to probe partition number of \"%s\": %m", node);
         r = safe_atou32(v, &part);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse PART_ENTRY_NUMBER field.");

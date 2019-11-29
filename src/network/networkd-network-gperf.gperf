@@ -4,6 +4,7 @@ _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #endif
 #include <stddef.h>
 #include "conf-parser.h"
+#include "netem.h"
 #include "network-internal.h"
 #include "networkd-conf.h"
 #include "networkd-dhcp-common.h"
@@ -12,6 +13,7 @@ _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
 #include "networkd-ipv4ll.h"
 #include "networkd-ndisc.h"
 #include "networkd-network.h"
+#include "qdisc.h"
 #include "vlan-util.h"
 %}
 struct ConfigPerfItem;
@@ -29,6 +31,9 @@ Match.MACAddress,                       config_parse_hwaddrs,                   
 Match.Path,                             config_parse_match_strv,                         0,                             offsetof(Network, match_path)
 Match.Driver,                           config_parse_match_strv,                         0,                             offsetof(Network, match_driver)
 Match.Type,                             config_parse_match_strv,                         0,                             offsetof(Network, match_type)
+Match.WLANInterfaceType,                config_parse_match_strv,                         0,                             offsetof(Network, match_wlan_iftype)
+Match.SSID,                             config_parse_match_strv,                         0,                             offsetof(Network, match_ssid)
+Match.BSSID,                            config_parse_hwaddrs,                            0,                             offsetof(Network, match_bssid)
 Match.Name,                             config_parse_match_ifnames,                      0,                             offsetof(Network, match_name)
 Match.Property,                         config_parse_match_property,                     0,                             offsetof(Network, match_property)
 Match.Host,                             config_parse_net_condition,                      CONDITION_HOST,                offsetof(Network, conditions)
@@ -141,14 +146,18 @@ Route.InitialAdvertisedReceiveWindow,   config_parse_tcp_window,                
 Route.QuickAck,                         config_parse_quickack,                           0,                             0
 Route.FastOpenNoCookie,                 config_parse_fast_open_no_cookie,                0,                             0
 Route.TTLPropagate,                     config_parse_route_ttl_propagate,                0,                             0
+NextHop.Id,                             config_parse_nexthop_id,                         0,                             0
+NextHop.Gateway,                        config_parse_nexthop_gateway,                    0,                             0
 DHCPv4.ClientIdentifier,                config_parse_dhcp_client_identifier,             0,                             offsetof(Network, dhcp_client_identifier)
 DHCPv4.UseDNS,                          config_parse_bool,                               0,                             offsetof(Network, dhcp_use_dns)
 DHCPv4.RoutesToDNS,                     config_parse_bool,                               0,                             offsetof(Network, dhcp_routes_to_dns)
 DHCPv4.UseNTP,                          config_parse_bool,                               0,                             offsetof(Network, dhcp_use_ntp)
+DHCPv4.UseSIP,                          config_parse_bool,                               0,                             offsetof(Network, dhcp_use_sip)
 DHCPv4.UseMTU,                          config_parse_bool,                               0,                             offsetof(Network, dhcp_use_mtu)
 DHCPv4.UseHostname,                     config_parse_bool,                               0,                             offsetof(Network, dhcp_use_hostname)
 DHCPv4.UseDomains,                      config_parse_dhcp_use_domains,                   0,                             offsetof(Network, dhcp_use_domains)
 DHCPv4.UseRoutes,                       config_parse_bool,                               0,                             offsetof(Network, dhcp_use_routes)
+DHCPv4.RequestOptions,                  config_parse_dhcp_request_options,               0,                             0
 DHCPv4.Anonymize,                       config_parse_bool,                               0,                             offsetof(Network, dhcp_anonymize)
 DHCPv4.SendHostname,                    config_parse_bool,                               0,                             offsetof(Network, dhcp_send_hostname)
 DHCPv4.Hostname,                        config_parse_hostname,                           0,                             offsetof(Network, dhcp_hostname)
@@ -165,10 +174,13 @@ DHCPv4.IAID,                            config_parse_iaid,                      
 DHCPv4.ListenPort,                      config_parse_uint16,                             0,                             offsetof(Network, dhcp_client_port)
 DHCPv4.SendRelease,                     config_parse_bool,                               0,                             offsetof(Network, dhcp_send_release)
 DHCPv4.BlackList,                       config_parse_dhcp_black_listed_ip_address,       0,                             0
+DHCPv4.IPServiceType,                   config_parse_ip_service_type,                    0,                             offsetof(Network, ip_service_type)
+DHCPv4.SendOption,                      config_parse_dhcp_send_option,                   0,                             offsetof(Network, dhcp_client_send_options)
 DHCPv6.UseDNS,                          config_parse_bool,                               0,                             offsetof(Network, dhcp6_use_dns)
 DHCPv6.UseNTP,                          config_parse_bool,                               0,                             offsetof(Network, dhcp6_use_ntp)
 DHCPv6.RapidCommit,                     config_parse_bool,                               0,                             offsetof(Network, rapid_commit)
 DHCPv6.ForceDHCPv6PDOtherInformation,   config_parse_bool,                               0,                             offsetof(Network, dhcp6_force_pd_other_information)
+DHCPv6.PrefixDelegationHint,            config_parse_dhcp6_pd_hint,                      0,                             0
 IPv6AcceptRA.UseAutonomousPrefix,       config_parse_bool,                               0,                             offsetof(Network, ipv6_accept_ra_use_autonomous_prefix)
 IPv6AcceptRA.UseOnLinkPrefix,           config_parse_bool,                               0,                             offsetof(Network, ipv6_accept_ra_use_onlink_prefix)
 IPv6AcceptRA.UseDNS,                    config_parse_bool,                               0,                             offsetof(Network, ipv6_accept_ra_use_dns)
@@ -181,11 +193,14 @@ DHCPServer.EmitDNS,                     config_parse_bool,                      
 DHCPServer.DNS,                         config_parse_dhcp_server_dns,                    0,                             0
 DHCPServer.EmitNTP,                     config_parse_bool,                               0,                             offsetof(Network, dhcp_server_emit_ntp)
 DHCPServer.NTP,                         config_parse_dhcp_server_ntp,                    0,                             0
+DHCPServer.EmitSIP,                     config_parse_bool,                               0,                             offsetof(Network, dhcp_server_emit_sip)
+DHCPServer.SIP,                         config_parse_dhcp_server_sip,                    0,                             0
 DHCPServer.EmitRouter,                  config_parse_bool,                               0,                             offsetof(Network, dhcp_server_emit_router)
 DHCPServer.EmitTimezone,                config_parse_bool,                               0,                             offsetof(Network, dhcp_server_emit_timezone)
 DHCPServer.Timezone,                    config_parse_timezone,                           0,                             offsetof(Network, dhcp_server_timezone)
 DHCPServer.PoolOffset,                  config_parse_uint32,                             0,                             offsetof(Network, dhcp_server_pool_offset)
 DHCPServer.PoolSize,                    config_parse_uint32,                             0,                             offsetof(Network, dhcp_server_pool_size)
+DHCPServer.SendOption,                  config_parse_dhcp_send_option,                   0,                             offsetof(Network, dhcp_server_send_options)
 Bridge.Cost,                            config_parse_uint32,                             0,                             offsetof(Network, cost)
 Bridge.UseBPDU,                         config_parse_tristate,                           0,                             offsetof(Network, use_bpdu)
 Bridge.HairPin,                         config_parse_tristate,                           0,                             offsetof(Network, hairpin)
@@ -223,10 +238,18 @@ IPv6Prefix.OnLink,                      config_parse_prefix_flags,              
 IPv6Prefix.AddressAutoconfiguration,    config_parse_prefix_flags,                       0,                             0
 IPv6Prefix.ValidLifetimeSec,            config_parse_prefix_lifetime,                    0,                             0
 IPv6Prefix.PreferredLifetimeSec,        config_parse_prefix_lifetime,                    0,                             0
+IPv6RoutePrefix.Route,                  config_parse_route_prefix,                       0,                             0
+IPv6RoutePrefix.LifetimeSec,            config_parse_route_prefix_lifetime,              0,                             0
 CAN.BitRate,                            config_parse_si_size,                            0,                             offsetof(Network, can_bitrate)
 CAN.SamplePoint,                        config_parse_permille,                           0,                             offsetof(Network, can_sample_point)
 CAN.RestartSec,                         config_parse_sec,                                0,                             offsetof(Network, can_restart_us)
 CAN.TripleSampling,                     config_parse_tristate,                           0,                             offsetof(Network, can_triple_sampling)
+TrafficControlQueueingDiscipline.Parent,                             config_parse_tc_qdiscs_parent,                     0,                             0
+TrafficControlQueueingDiscipline.NetworkEmulatorDelaySec,            config_parse_tc_network_emulator_delay,            0,                             0
+TrafficControlQueueingDiscipline.NetworkEmulatorDelayJitterSec,      config_parse_tc_network_emulator_delay,            0,                             0
+TrafficControlQueueingDiscipline.NetworkEmulatorLossRate,            config_parse_tc_network_emulator_rate,             0,                             0
+TrafficControlQueueingDiscipline.NetworkEmulatorDuplicateRate,       config_parse_tc_network_emulator_rate,             0,                             0
+TrafficControlQueueingDiscipline.NetworkEmulatorPacketLimit,         config_parse_tc_network_emulator_packet_limit,     0,                             0
 /* backwards compatibility: do not add new entries to this section */
 Network.IPv4LL,                         config_parse_ipv4ll,                             0,                             offsetof(Network, link_local)
 DHCP.ClientIdentifier,                  config_parse_dhcp_client_identifier,             0,                             offsetof(Network, dhcp_client_identifier)

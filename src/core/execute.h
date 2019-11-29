@@ -245,8 +245,8 @@ struct ExecContext {
         struct iovec* log_extra_fields;
         size_t n_log_extra_fields;
 
-        usec_t log_rate_limit_interval_usec;
-        unsigned log_rate_limit_burst;
+        usec_t log_ratelimit_interval_usec;
+        unsigned log_ratelimit_burst;
 
         int log_level_max;
 
@@ -257,6 +257,7 @@ struct ExecContext {
         bool private_mounts;
         bool protect_kernel_tunables;
         bool protect_kernel_modules;
+        bool protect_kernel_logs;
         bool protect_control_groups;
         ProtectSystem protect_system;
         ProtectHome protect_home;

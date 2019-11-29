@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "sd-daemon.h"
@@ -291,6 +290,7 @@ static int manager_enumerate_linger_users(Manager *m) {
         FOREACH_DIRENT(de, d, return -errno) {
                 int k;
 
+                dirent_ensure_type(d, de);
                 if (!dirent_is_file(de))
                         continue;
 

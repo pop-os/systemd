@@ -1,29 +1,34 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 #pragma once
 
+#include <linux/nl80211.h>
+
 #include "sd-bus.h"
 #include "sd-device.h"
 
+#include "bridge.h"
 #include "condition.h"
 #include "conf-parser.h"
 #include "hashmap.h"
-#include "netdev/bridge.h"
-#include "netdev/netdev.h"
+#include "netdev.h"
 #include "networkd-address-label.h"
 #include "networkd-address.h"
 #include "networkd-brvlan.h"
 #include "networkd-dhcp-common.h"
 #include "networkd-dhcp4.h"
+#include "networkd-dhcp-server.h"
 #include "networkd-fdb.h"
 #include "networkd-ipv6-proxy-ndp.h"
 #include "networkd-lldp-rx.h"
 #include "networkd-lldp-tx.h"
 #include "networkd-neighbor.h"
+#include "networkd-nexthop.h"
 #include "networkd-radv.h"
 #include "networkd-route.h"
 #include "networkd-routing-policy-rule.h"
 #include "networkd-util.h"
 #include "ordered-set.h"
+#include "qdisc.h"
 #include "resolve-util.h"
 
 typedef enum IPv6PrivacyExtensions {
@@ -53,6 +58,7 @@ struct Network {
 
         char *filename;
         char *name;
+        usec_t timestamp;
 
         unsigned n_ref;
 
@@ -62,6 +68,9 @@ struct Network {
         char **match_type;
         char **match_name;
         char **match_property;
+        char **match_wlan_iftype;
+        char **match_ssid;
+        Set *match_bssid;
         LIST_HEAD(Condition, conditions);
 
         char *description;
@@ -86,13 +95,15 @@ struct Network {
         unsigned dhcp_route_metric;
         uint32_t dhcp_route_table;
         uint16_t dhcp_client_port;
+        int dhcp_critical;
+        int ip_service_type;
         bool dhcp_anonymize;
         bool dhcp_send_hostname;
         bool dhcp_broadcast;
-        int dhcp_critical;
         bool dhcp_use_dns;
         bool dhcp_routes_to_dns;
         bool dhcp_use_ntp;
+        bool dhcp_use_sip;
         bool dhcp_use_mtu;
         bool dhcp_use_routes;
         bool dhcp_use_timezone;
@@ -102,19 +113,31 @@ struct Network {
         bool dhcp_send_release;
         DHCPUseDomains dhcp_use_domains;
         Set *dhcp_black_listed_ip;
+        Set *dhcp_request_options;
+        OrderedHashmap *dhcp_client_send_options;
+        OrderedHashmap *dhcp_server_send_options;
 
         /* DHCPv6 Client support*/
         bool dhcp6_use_dns;
         bool dhcp6_use_ntp;
+        uint8_t dhcp6_pd_length;
+        struct in6_addr dhcp6_pd_address;
 
         /* DHCP Server Support */
         bool dhcp_server;
+
         bool dhcp_server_emit_dns;
         struct in_addr *dhcp_server_dns;
         unsigned n_dhcp_server_dns;
+
         bool dhcp_server_emit_ntp;
         struct in_addr *dhcp_server_ntp;
         unsigned n_dhcp_server_ntp;
+
+        bool dhcp_server_emit_sip;
+        struct in_addr *dhcp_server_sip;
+        unsigned n_dhcp_server_sip;
+
         bool dhcp_server_emit_router;
         bool dhcp_server_emit_timezone;
         char *dhcp_server_timezone;
@@ -216,29 +239,36 @@ struct Network {
 
         LIST_HEAD(Address, static_addresses);
         LIST_HEAD(Route, static_routes);
+        LIST_HEAD(NextHop, static_nexthops);
         LIST_HEAD(FdbEntry, static_fdb_entries);
         LIST_HEAD(IPv6ProxyNDPAddress, ipv6_proxy_ndp_addresses);
         LIST_HEAD(Neighbor, neighbors);
         LIST_HEAD(AddressLabel, address_labels);
         LIST_HEAD(Prefix, static_prefixes);
+        LIST_HEAD(RoutePrefix, static_route_prefixes);
         LIST_HEAD(RoutingPolicyRule, rules);
 
         unsigned n_static_addresses;
         unsigned n_static_routes;
+        unsigned n_static_nexthops;
         unsigned n_static_fdb_entries;
         unsigned n_ipv6_proxy_ndp_addresses;
         unsigned n_neighbors;
         unsigned n_address_labels;
         unsigned n_static_prefixes;
+        unsigned n_static_route_prefixes;
         unsigned n_rules;
 
         Hashmap *addresses_by_section;
         Hashmap *routes_by_section;
+        Hashmap *nexthops_by_section;
         Hashmap *fdb_entries_by_section;
         Hashmap *neighbors_by_section;
         Hashmap *address_labels_by_section;
         Hashmap *prefixes_by_section;
+        Hashmap *route_prefixes_by_section;
         Hashmap *rules_by_section;
+        OrderedHashmap *qdiscs_by_section;
 
         /* All kinds of DNS configuration */
         struct in_addr_data *dns;
@@ -253,6 +283,7 @@ struct Network {
         Set *dnssec_negative_trust_anchors;
 
         char **ntp;
+        char **sip;
         char **bind_carrier;
 };
 
@@ -260,12 +291,14 @@ Network *network_ref(Network *network);
 Network *network_unref(Network *network);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Network*, network_unref);
 
-int network_load(Manager *manager);
-int network_load_one(Manager *manager, const char *filename);
+int network_load(Manager *manager, OrderedHashmap **networks);
+int network_reload(Manager *manager);
+int network_load_one(Manager *manager, OrderedHashmap **networks, const char *filename);
 int network_verify(Network *network);
 
 int network_get_by_name(Manager *manager, const char *name, Network **ret);
-int network_get(Manager *manager, sd_device *device, const char *ifname, const struct ether_addr *mac, Network **ret);
+int network_get(Manager *manager, sd_device *device, const char *ifname, const struct ether_addr *mac,
+                enum nl80211_iftype wlan_iftype, const char *ssid, const struct ether_addr *bssid, Network **ret);
 int network_apply(Network *network, Link *link);
 void network_apply_anonymize_if_set(Network *network);
 

@@ -146,7 +146,7 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
                                        _syspath);
 
         if (verify) {
-                r = chase_symlinks(_syspath, NULL, 0, &syspath);
+                r = chase_symlinks(_syspath, NULL, 0, &syspath, NULL);
                 if (r == -ENOENT)
                         return -ENODEV; /* the device does not exist (any more?) */
                 if (r < 0)
@@ -157,7 +157,7 @@ int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
                         char *p;
 
                         /* /sys is a symlink to somewhere sysfs is mounted on? In that case, we convert the path to real sysfs to "/sys". */
-                        r = chase_symlinks("/sys", NULL, 0, &real_sys);
+                        r = chase_symlinks("/sys", NULL, 0, &real_sys, NULL);
                         if (r < 0)
                                 return log_debug_errno(r, "sd-device: Failed to chase symlink /sys: %m");
 
@@ -838,8 +838,7 @@ _public_ int sd_device_get_subsystem(sd_device *device, const char **ret) {
 _public_ int sd_device_get_devtype(sd_device *device, const char **devtype) {
         int r;
 
-        assert(devtype);
-        assert(device);
+        assert_return(device, -EINVAL);
 
         r = device_read_uevent_file(device);
         if (r < 0)
@@ -848,9 +847,10 @@ _public_ int sd_device_get_devtype(sd_device *device, const char **devtype) {
         if (!device->devtype)
                 return -ENOENT;
 
-        *devtype = device->devtype;
+        if (devtype)
+                *devtype = device->devtype;
 
-        return 0;
+        return !!device->devtype;
 }
 
 _public_ int sd_device_get_parent_with_subsystem_devtype(sd_device *child, const char *subsystem, const char *devtype, sd_device **ret) {
@@ -1786,7 +1786,7 @@ _public_ int sd_device_get_sysattr_value(sd_device *device, const char *sysattr,
                 size_t size;
 
                 /* read attribute value */
-                r = read_full_file(path, &value, &size);
+                r = read_full_virtual_file(path, &value, &size);
                 if (r < 0)
                         return r;
 

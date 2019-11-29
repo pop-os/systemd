@@ -3,8 +3,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/kd.h>
-#include <signal.h>
-#include <string.h>
 #include <sys/epoll.h>
 #include <sys/inotify.h>
 #include <sys/ioctl.h>
@@ -35,6 +33,7 @@
 #include "dbus-manager.h"
 #include "dbus-unit.h"
 #include "dbus.h"
+#include "def.h"
 #include "dirent-util.h"
 #include "env-util.h"
 #include "escape.h"
@@ -53,12 +52,10 @@
 #include "macro.h"
 #include "manager.h"
 #include "memory-util.h"
-#include "missing.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
-#include "plymouth-util.h"
 #include "process-util.h"
 #include "ratelimit.h"
 #include "rlimit-util.h"
@@ -72,6 +69,7 @@
 #include "string-util.h"
 #include "strv.h"
 #include "strxcpyx.h"
+#include "sysctl-util.h"
 #include "syslog-util.h"
 #include "terminal-util.h"
 #include "time-util.h"
@@ -294,10 +292,12 @@ static int manager_check_ask_password(Manager *m) {
                 if (m->ask_password_inotify_fd < 0)
                         return log_error_errno(errno, "Failed to create inotify object: %m");
 
-                if (inotify_add_watch(m->ask_password_inotify_fd, "/run/systemd/ask-password", IN_CREATE|IN_DELETE|IN_MOVE) < 0) {
-                        log_error_errno(errno, "Failed to watch \"/run/systemd/ask-password\": %m");
+                r = inotify_add_watch_and_warn(m->ask_password_inotify_fd,
+                                               "/run/systemd/ask-password",
+                                               IN_CREATE|IN_DELETE|IN_MOVE);
+                if (r < 0) {
                         manager_close_ask_password(m);
-                        return -errno;
+                        return r;
                 }
 
                 r = sd_event_add_io(m->event, &m->ask_password_event_source,
@@ -762,7 +762,7 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
                 .default_timer_accuracy_usec = USEC_PER_MINUTE,
                 .default_memory_accounting = MEMORY_ACCOUNTING_DEFAULT,
                 .default_tasks_accounting = true,
-                .default_tasks_max = UINT64_MAX,
+                .default_tasks_max = TASKS_MAX_UNSET,
                 .default_timeout_start_usec = DEFAULT_TIMEOUT_USEC,
                 .default_timeout_stop_usec = DEFAULT_TIMEOUT_USEC,
                 .default_restart_usec = DEFAULT_RESTART_USEC,
@@ -815,7 +815,7 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
         }
 
         /* Reboot immediately if the user hits C-A-D more often than 7x per 2s */
-        RATELIMIT_INIT(m->ctrl_alt_del_ratelimit, 2 * USEC_PER_SEC, 7);
+        m->ctrl_alt_del_ratelimit = (RateLimit) { .interval = 2 * USEC_PER_SEC, .burst = 7 };
 
         r = manager_default_environment(m);
         if (r < 0)
@@ -1738,6 +1738,9 @@ int manager_add_job(
         if (mode == JOB_ISOLATE && !unit->allow_isolate)
                 return sd_bus_error_setf(error, BUS_ERROR_NO_ISOLATION, "Operation refused, unit may not be isolated.");
 
+        if (mode == JOB_TRIGGERING && type != JOB_STOP)
+                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "--job-mode=triggering is only valid for stop.");
+
         log_unit_debug(unit, "Trying to enqueue job %s/%s/%s", unit->id, job_type_to_string(type), job_mode_to_string(mode));
 
         type = job_type_collapse(type, unit);
@@ -1754,6 +1757,12 @@ int manager_add_job(
 
         if (mode == JOB_ISOLATE) {
                 r = transaction_add_isolate_jobs(tr, m);
+                if (r < 0)
+                        goto tr_abort;
+        }
+
+        if (mode == JOB_TRIGGERING) {
+                r = transaction_add_triggering_jobs(tr, unit);
                 if (r < 0)
                         goto tr_abort;
         }
@@ -2855,9 +2864,8 @@ static int manager_dispatch_jobs_in_progress(sd_event_source *source, usec_t use
 }
 
 int manager_loop(Manager *m) {
+        RateLimit rl = { .interval = 1*USEC_PER_SEC, .burst = 50000 };
         int r;
-
-        RATELIMIT_DEFINE(rl, 1*USEC_PER_SEC, 50000);
 
         assert(m);
         assert(m->objective == MANAGER_OK); /* Ensure manager_startup() has been called */
@@ -4023,6 +4031,19 @@ static bool manager_journal_is_running(Manager *m) {
                 return false;
 
         return true;
+}
+
+void disable_printk_ratelimit(void) {
+        /* Disable kernel's printk ratelimit.
+         *
+         * Logging to /dev/kmsg is most useful during early boot and shutdown, where normal logging
+         * mechanisms are not available. The semantics of this sysctl are such that any kernel command-line
+         * setting takes precedence. */
+        int r;
+
+        r = sysctl_write("kernel/printk_devkmsg", "on");
+        if (r < 0)
+                log_debug_errno(r, "Failed to set sysctl kernel.printk_devkmsg=on: %m");
 }
 
 void manager_recheck_journal(Manager *m) {

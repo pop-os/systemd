@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <netinet/tcp.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "fd-util.h"
 #include "io-util.h"
-#include "missing.h"
+#include "missing_network.h"
 #include "resolved-dns-stream.h"
 
 #define DNS_STREAM_TIMEOUT_USEC (10 * USEC_PER_SEC)
@@ -515,6 +516,7 @@ int dns_stream_new(
                 .n_ref = 1,
                 .fd = -1,
                 .protocol = protocol,
+                .type = type,
         };
 
         r = ordered_set_ensure_allocated(&s->write_queue, &dns_packet_hash_ops);

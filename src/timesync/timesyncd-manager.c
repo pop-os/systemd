@@ -6,11 +6,9 @@
 #include <netinet/ip.h>
 #include <resolv.h>
 #include <stdlib.h>
-#include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <sys/timex.h>
 #include <sys/types.h>
-#include <time.h>
 
 #include "sd-daemon.h"
 
@@ -21,7 +19,6 @@
 #include "fs-util.h"
 #include "list.h"
 #include "log.h"
-#include "missing.h"
 #include "network-util.h"
 #include "ratelimit.h"
 #include "resolve-private.h"
@@ -617,9 +614,9 @@ static int manager_receive_response(sd_event_source *source, int fd, uint32_t re
                 m->good = true;
 
                 server_address_pretty(m->current_server_address, &pretty);
-                /* "for the first time", as further successful syncs will not be logged. */
-                log_info("Synchronized to time server for the first time %s (%s).", strna(pretty), m->current_server_name->string);
-                sd_notifyf(false, "STATUS=Synchronized to time server for the first time %s (%s).", strna(pretty), m->current_server_name->string);
+                /* "Initial", as further successful syncs will not be logged. */
+                log_info("Initial synchronization to time server %s (%s).", strna(pretty), m->current_server_name->string);
+                sd_notifyf(false, "STATUS=Initial synchronization to time server %s (%s).", strna(pretty), m->current_server_name->string);
         }
 
         r = manager_arm_timer(m, m->poll_interval_usec);
@@ -1094,7 +1091,7 @@ int manager_new(Manager **ret) {
 
         m->server_socket = m->clock_watch_fd = -1;
 
-        RATELIMIT_INIT(m->ratelimit, RATELIMIT_INTERVAL_USEC, RATELIMIT_BURST);
+        m->ratelimit = (RateLimit) { RATELIMIT_INTERVAL_USEC, RATELIMIT_BURST };
 
         r = sd_event_default(&m->event);
         if (r < 0)

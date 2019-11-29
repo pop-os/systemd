@@ -9,6 +9,7 @@
 #include "sd-event.h"
 
 #include "cgroup-util.h"
+#include "cgroup.h"
 #include "fdset.h"
 #include "hashmap.h"
 #include "ip-address-access.h"
@@ -349,7 +350,7 @@ struct Manager {
         bool default_tasks_accounting;
         bool default_ip_accounting;
 
-        uint64_t default_tasks_max;
+        TasksMax default_tasks_max;
         usec_t default_timer_accuracy_usec;
 
         OOMPolicy default_oom_policy;
@@ -499,6 +500,7 @@ bool manager_unit_inactive_or_pending(Manager *m, const char *name);
 
 void manager_check_finished(Manager *m);
 
+void disable_printk_ratelimit(void);
 void manager_recheck_dbus(Manager *m);
 void manager_recheck_journal(Manager *m);
 

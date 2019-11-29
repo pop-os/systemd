@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <getopt.h>
 #include <linux/reboot.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -17,6 +16,7 @@
 
 #include "alloc-util.h"
 #include "async.h"
+#include "cgroup-setup.h"
 #include "cgroup-util.h"
 #include "def.h"
 #include "exec-util.h"
@@ -24,7 +24,6 @@
 #include "fileio.h"
 #include "killall.h"
 #include "log.h"
-#include "missing.h"
 #include "parse-util.h"
 #include "process-util.h"
 #include "reboot-util.h"

@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: LGPL-2.1+
 
 project('systemd', 'c',
-        version : '243',
+        version : '244',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu99',
                 'prefix=/usr',
                 'sysconfdir=/etc',
                 'localstatedir=/var',
+                'warning_level=2',
         ],
         meson_version : '>= 0.46',
        )
 
-libsystemd_version = '0.27.0'
-libudev_version = '1.6.15'
+libsystemd_version = '0.27.1'
+libudev_version = '1.6.16'
 
 # We need the same data in two different formats, ugh!
 # Also, for hysterical reasons, we use different variable
@@ -302,7 +303,8 @@ install_tests = get_option('install-tests')
 
 if add_languages('cpp', required : fuzzer_build)
         #  Used only for tests
-        cxx_cmd = ' '.join(meson.get_compiler('cpp').cmd_array())
+        cxx = meson.get_compiler('cpp')
+        cxx_cmd = ' '.join(cxx.cmd_array())
 else
         cxx_cmd = ''
 endif
@@ -322,8 +324,25 @@ elif want_fuzzbuzz
         fuzzing_engine = meson.get_compiler('cpp').find_library(get_option('fuzzbuzz-engine'), dirs: get_option('fuzzbuzz-engine-dir'))
 endif
 
+# Those generate many false positives, and we do not want to change the code to
+# avoid them.
+basic_disabled_warnings = [
+        '-Wno-unused-parameter',
+        '-Wno-missing-field-initializers',
+        '-Wno-unused-result',
+        '-Wno-format-signedness',
+]
+if get_option('b_ndebug') == 'true'
+        # With asserts disabled with get a bunch of warnings about variables which
+        # are used only in the asserts. This is not useful at all, so let's just silence
+        # those warnings.
+        basic_disabled_warnings += [
+                '-Wno-unused-variable',
+                '-Wno-unused-but-set-variable',
+        ]
+endif
+
 possible_cc_flags = [
-        '-Wextra',
         '-Werror=undef',
         '-Wlogical-op',
         '-Wmissing-include-dirs',
@@ -353,10 +372,6 @@ possible_cc_flags = [
         '-Wnested-externs',
 
         # negative arguments are correctly detected starting with meson 0.46.
-        '-Wno-unused-parameter',
-        '-Wno-missing-field-initializers',
-        '-Wno-unused-result',
-        '-Wno-format-signedness',
         '-Wno-error=#warnings',  # clang
         '-Wno-string-plus-int',  # clang
 
@@ -382,6 +397,7 @@ possible_cc_flags = [
 possible_link_flags = [
         '-Wl,-z,relro',
         '-Wl,-z,now',
+        '-fstack-protector',
 ]
 
 if cc.get_id() == 'clang'
@@ -400,16 +416,7 @@ if get_option('buildtype') != 'debug'
         possible_link_flags += '-Wl,--gc-sections'
 endif
 
-if get_option('b_ndebug') == 'true'
-        # With asserts disabled with get a bunch of warnings about variables which
-        # are used only in the asserts. This is not useful at all, so let's just silence
-        # those warnings.
-        possible_cc_flags += [
-                '-Wno-unused-variable',
-                '-Wno-unused-but-set-variable',
-        ]
-endif
-
+add_project_arguments(cc.get_supported_arguments(basic_disabled_warnings), language : 'c')
 add_project_arguments(cc.get_supported_arguments(possible_cc_flags), language : 'c')
 add_project_link_arguments(cc.get_supported_link_arguments(possible_link_flags), language : 'c')
 
@@ -424,6 +431,10 @@ if cc.compiles('''
    }
 ''', args: '-Werror=shadow', name : '-Werror=shadow with local shadowing')
         add_project_arguments('-Werror=shadow', language : 'c')
+endif
+
+if cxx_cmd != ''
+        add_project_arguments(cxx.get_supported_arguments(basic_disabled_warnings), language : 'cpp')
 endif
 
 cpp = ' '.join(cc.cmd_array()) + ' -E'
@@ -794,6 +805,10 @@ conf.set_quoted('SYSTEMD_DEFAULT_LOCALE', default_locale)
 
 conf.set_quoted('GETTEXT_PACKAGE', meson.project_name())
 
+service_watchdog = get_option('service-watchdog')
+watchdog_value = service_watchdog == '' ? '' : 'WatchdogSec=' + service_watchdog
+substs.set('SERVICE_WATCHDOG', watchdog_value)
+
 substs.set('SUSHELL', get_option('debug-shell'))
 substs.set('DEBUGTTY', get_option('debug-tty'))
 conf.set_quoted('DEBUGTTY', get_option('debug-tty'))
@@ -818,6 +833,16 @@ conf.set10('ENABLE_DEBUG_SIPHASH', enable_debug_siphash)
 
 conf.set10('VALGRIND', get_option('valgrind'))
 conf.set10('LOG_TRACE', get_option('log-trace'))
+
+default_user_path = get_option('user-path')
+if default_user_path != ''
+        conf.set_quoted('DEFAULT_USER_PATH', default_user_path)
+        default_user_path_display = default_user_path
+else
+        # meson 0.49 fails when ?: is used in .format()
+        default_user_path_display = '(same as system services)'
+endif
+
 
 #####################################################################
 
@@ -960,20 +985,14 @@ conf.set10('HAVE_MICROHTTPD', have)
 want_libcryptsetup = get_option('libcryptsetup')
 if want_libcryptsetup != 'false' and not skip_deps
         libcryptsetup = dependency('libcryptsetup',
-                                   version : '>= 1.6.0',
+                                   version : '>= 2.0.1',
                                    required : want_libcryptsetup == 'true')
         have = libcryptsetup.found()
-        have_sector = cc.has_member(
-                    'struct crypt_params_plain',
-                    'sector_size',
-                    prefix : '#include <libcryptsetup.h>')
 else
         have = false
-        have_sector = false
         libcryptsetup = []
 endif
 conf.set10('HAVE_LIBCRYPTSETUP', have)
-conf.set10('HAVE_LIBCRYPTSETUP_SECTOR_SIZE', have_sector)
 
 want_libcurl = get_option('libcurl')
 if want_libcurl != 'false' and not skip_deps
@@ -1200,7 +1219,7 @@ if dns_over_tls != 'false'
         if dns_over_tls == 'openssl'
                 have_gnutls = false
         else
-                have_gnutls = (conf.get('HAVE_GNUTLS') == 1 and libgnutls.version().version_compare('>= 3.5.3'))
+                have_gnutls = (conf.get('HAVE_GNUTLS') == 1 and libgnutls.version().version_compare('>= 3.6.0'))
                 if dns_over_tls == 'gnutls' and not have_gnutls
                         error('DNS-over-TLS support was requested with gnutls, but dependencies are not available')
                 endif
@@ -1469,6 +1488,9 @@ install_libsystemd_static = static_library(
                         libgcrypt],
         c_args : libsystemd_c_args + (static_libsystemd_pic ? [] : ['-fno-PIC']))
 
+#Generate autosuspend rules
+make_autosuspend_rules_py = find_program('tools/make-autosuspend-rules.py')
+
 ############################################################
 
 # binaries that have --help and are intended for use by humans,
@@ -1501,7 +1523,7 @@ subdir('src/boot/efi')
 
 subdir('src/test')
 subdir('src/fuzz')
-subdir('rules')
+subdir('rules.d')
 subdir('test')
 
 ############################################################
@@ -2702,7 +2724,7 @@ public_programs += exe
 if conf.get('ENABLE_NETWORKD') == 1
         executable('systemd-networkd',
                    systemd_networkd_sources,
-                   include_directories : includes,
+                   include_directories : network_include_dir,
                    link_with : [libnetworkd_core,
                                 libsystemd_network,
                                 libudev_static,
@@ -2908,13 +2930,14 @@ make_directive_index_py = find_program('tools/make-directive-index.py')
 make_man_index_py = find_program('tools/make-man-index.py')
 xml_helper_py = find_program('tools/xml_helper.py')
 hwdb_update_sh = find_program('tools/meson-hwdb-update.sh')
+autosuspend_update_sh = find_program('tools/meson-autosuspend-update.sh')
 
-subdir('units')
 subdir('sysctl.d')
 subdir('sysusers.d')
 subdir('tmpfiles.d')
+subdir('hwdb.d')
+subdir('units')
 subdir('presets')
-subdir('hwdb')
 subdir('network')
 subdir('man')
 subdir('shell-completion/bash')
@@ -3067,6 +3090,7 @@ run_target(
         command : [meson_check_api_docs_sh, libsystemd.full_path(), libudev.full_path()])
 
 ############################################################
+watchdog_opt = service_watchdog == '' ? 'disabled' : service_watchdog
 
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
@@ -3115,7 +3139,9 @@ status = [
         'default cgroup hierarchy:          @0@'.format(default_hierarchy),
         'default net.naming-scheme setting: @0@'.format(default_net_naming_scheme),
         'default KillUserProcesses setting: @0@'.format(kill_user_processes),
-        'default locale:                    @0@'.format(default_locale)]
+        'default locale:                    @0@'.format(default_locale),
+        'default user $PATH:                @0@'.format(default_user_path_display),
+        'systemd service watchdog:          @0@'.format(watchdog_opt)]
 
 alt_dns_servers = '\n                                            '.join(dns_servers.split(' '))
 alt_ntp_servers = '\n                                            '.join(ntp_servers.split(' '))

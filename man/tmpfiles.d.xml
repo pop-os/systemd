@@ -33,14 +33,15 @@
     <para><literallayout><filename>~/.config/user-tmpfiles.d/*.conf</filename>
 <filename>$XDG_RUNTIME_DIR/user-tmpfiles.d/*.conf</filename>
 <filename>~/.local/share/user-tmpfiles.d/*.conf</filename>
-<filename>…</filename>
+<filename index='false'>…</filename>
 <filename>/usr/share/user-tmpfiles.d/*.conf</filename>
     </literallayout></para>
 
     <programlisting>#Type Path                                     Mode User Group Age         Argument
 f     /file/to/create                          mode user group -           content
-F     /file/to/create-or-truncate              mode user group -           content
+f+    /file/to/create-or-truncate              mode user group -           content
 w     /file/to/write-to                        -    -    -     -           content
+w+    /file/to/append-to                       -    -    -     -           content
 d     /directory/to/create-and-cleanup         mode user group cleanup-age -
 D     /directory/to/create-and-remove          mode user group cleanup-age -
 e     /directory/to/cleanup                    mode user group cleanup-age -
@@ -48,10 +49,13 @@ v     /subvolume/to/create                     mode user group -           -
 v     /subvolume-or-directory/to/create        mode user group -           -
 Q     /subvolume/to/create                     mode user group -           -
 p     /fifo/to/create                          mode user group -           -
+p+    /fifo/to/[re]create                      mode user group -           -
 L     /symlink/to/create                       -    -    -     -           symlink/target/path
+L+    /symlink/to/[re]create                   -    -    -     -           symlink/target/path
 c     /dev/char-device-to-create               mode user group -           -
+c+    /dev/char-device-to-[re]create           mode user group -           -
 b     /dev/block-device-to-create              mode user group -           -
-# p+, L+, c+, b+ create target unconditionally
+b+    /dev/block-device-to-[re]create          mode user group -           -
 C     /target/to/create                        -    -    -     -           /source/to/copy
 x     /path-or-glob/to/ignore                  -    -    -     -           -
 X     /path-or-glob/to/ignore/recursively      -    -    -     -           -
@@ -64,8 +68,10 @@ T     /path-or-glob/to/set/xattrs/recursively  -    -    -     -           xattr
 h     /path-or-glob/to/set/attrs               -    -    -     -           file attrs
 H     /path-or-glob/to/set/attrs/recursively   -    -    -     -           file attrs
 a     /path-or-glob/to/set/acls                -    -    -     -           POSIX ACLs
+a+    /path-or-glob/to/append/acls             -    -    -     -           POSIX ACLs
 A     /path-or-glob/to/set/acls/recursively    -    -    -     -           POSIX ACLs
-# a+, A+ append ACLs
+A+    /path-or-glob/to/append/acls/recursively -    -    -     -           POSIX ACLs
+
 </programlisting>
   </refsynopsisdiv>
 
@@ -155,25 +161,22 @@ L     /tmp/foobar -    -    -     -   /dev/null</programlisting>
       <variablelist>
         <varlistentry>
           <term><varname>f</varname></term>
-          <listitem><para>Create a file if it does not exist yet. If the argument parameter is given and the file did
-          not exist yet, it will be written to the file. Does not follow symlinks.</para></listitem>
-        </varlistentry>
-
-        <varlistentry>
-          <term><varname>F</varname></term>
-          <listitem><para>Create or truncate a file. If the argument
-          parameter is given, it will be written to the file. Does not follow symlinks.</para>
-          </listitem>
+          <term><varname>f+</varname></term>
+          <listitem><para><varname>f</varname> will create a file if it does not exist yet. If the argument
+          parameter is given and the file did not exist yet, it will be written to the file.
+          <varname>f+</varname> will create or truncate the file. If the argument parameter is given, it will
+          be written to the file. Does not follow symlinks.</para></listitem>
         </varlistentry>
 
         <varlistentry>
           <term><varname>w</varname></term>
-          <listitem><para>Write the argument parameter to a file, if
-          the file exists.  Lines of this type accept shell-style
-          globs in place of normal path names. The argument parameter
-          will be written without a trailing newline. C-style
-          backslash escapes are interpreted. Follows
-          symlinks.</para></listitem>
+          <term><varname>w+</varname></term>
+          <listitem><para>Write the argument parameter to a file, if the file exists.
+          If suffixed with <varname>+</varname>, the line will be appended to the file.
+          If your configuration writes multiple lines to the same file, use <varname>w+</varname>.
+          Lines of this type accept shell-style globs in place of normal path names.
+          The argument parameter will be written without a trailing newline.
+          C-style backslash escapes are interpreted. Follows symlinks.</para></listitem>
         </varlistentry>
 
         <varlistentry>
@@ -651,7 +654,7 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
             <row>
               <entry><literal>%L</literal></entry>
               <entry>System or user log directory</entry>
-              <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_CONFIG_HOME</varname> with <filename noindex='true'>/log</filename> appended, and <filename>/var/log</filename> otherwise.</entry>
+              <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_CONFIG_HOME</varname> with <filename index="false">/log</filename> appended, and <filename>/var/log</filename> otherwise.</entry>
             </row>
             <row>
               <entry><literal>%m</literal></entry>

@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <blkid.h>
 #include <stdlib.h>
-#include <sys/statfs.h>
 #include <unistd.h>
 
 #include "sd-device.h"
@@ -15,14 +13,13 @@
 #include "device-util.h"
 #include "dirent-util.h"
 #include "dissect-image.h"
-#include "efivars.h"
+#include "efi-loader.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "fstab-util.h"
 #include "generator.h"
 #include "gpt.h"
-#include "missing.h"
 #include "mkdir.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"

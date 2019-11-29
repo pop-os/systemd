@@ -242,8 +242,8 @@ int link_config_get(link_config_ctx *ctx, sd_device *device, link_config **ret) 
 
         LIST_FOREACH(links, link, ctx->links) {
                 if (net_match_config(link->match_mac, link->match_path, link->match_driver,
-                                     link->match_type, link->match_name, link->match_property,
-                                     device, NULL, NULL)) {
+                                     link->match_type, link->match_name, link->match_property, NULL, NULL, NULL,
+                                     device, NULL, NULL, 0, NULL, NULL)) {
                         if (link->match_name && !strv_contains(link->match_name, "*")) {
                                 unsigned name_assign_type = NET_NAME_UNKNOWN;
 
@@ -362,8 +362,8 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
                         }
                 }
 
-                if (config->duplex !=_DUP_INVALID)
-                        log_warning_errno(r, "Could not set duplex of %s to (%s): %m", old_name, duplex_to_string(config->duplex));
+                if (config->duplex != _DUP_INVALID)
+                        log_warning_errno(r, "Could not set duplex of %s to %s: %m", old_name, duplex_to_string(config->duplex));
         }
 
         r = ethtool_set_wol(&ctx->ethtool_fd, old_name, config->wol);
@@ -379,6 +379,12 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
                 r = ethtool_set_channels(&ctx->ethtool_fd, old_name, &config->channels);
                 if (r < 0)
                         log_warning_errno(r, "Could not set channels of %s: %m", old_name);
+        }
+
+        if (config->ring.rx_pending_set || config->ring.tx_pending_set) {
+                r = ethtool_set_nic_buffer_size(&ctx->ethtool_fd, old_name, &config->ring);
+                if (r < 0)
+                        log_warning_errno(r, "Could not set ring buffer of %s: %m", old_name);
         }
 
         r = sd_device_get_ifindex(device, &ifindex);

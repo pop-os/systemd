@@ -46,7 +46,7 @@ typedef struct StatusInfo {
 } StatusInfo;
 
 static void print_status_info(const StatusInfo *i) {
-        const char *old_tz = NULL, *tz;
+        const char *old_tz = NULL, *tz, *tz_colon;
         bool have_time = false;
         char a[LINE_MAX];
         struct tm tm;
@@ -62,7 +62,8 @@ static void print_status_info(const StatusInfo *i) {
                 old_tz = strdupa(tz);
 
         /* Set the new $TZ */
-        if (setenv("TZ", isempty(i->timezone) ? "UTC" : i->timezone, true) < 0)
+        tz_colon = strjoina(":", isempty(i->timezone) ? "UTC" : i->timezone);
+        if (setenv("TZ", tz_colon, true) < 0)
                 log_warning_errno(errno, "Failed to set TZ environment variable, ignoring: %m");
         else
                 tzset();
@@ -809,8 +810,20 @@ static int help(void) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] COMMAND ...\n\n"
-               "Query or change system time and date settings.\n\n"
+        printf("%s [OPTIONS...] COMMAND ...\n"
+               "\n%sQuery or change system time and date settings.%s\n"
+               "\nCommands:\n"
+               "  status                   Show current time settings\n"
+               "  show                     Show properties of systemd-timedated\n"
+               "  set-time TIME            Set system time\n"
+               "  set-timezone ZONE        Set system time zone\n"
+               "  list-timezones           Show known time zones\n"
+               "  set-local-rtc BOOL       Control whether RTC is in local time\n"
+               "  set-ntp BOOL             Enable or disable network time synchronization\n"
+               "\nsystemd-timesyncd Commands:\n"
+               "  timesync-status          Show status of systemd-timesyncd\n"
+               "  show-timesync            Show properties of systemd-timesyncd\n"
+               "\nOptions:\n"
                "  -h --help                Show this help message\n"
                "     --version             Show package version\n"
                "     --no-pager            Do not pipe output into a pager\n"
@@ -822,21 +835,10 @@ static int help(void) {
                "  -p --property=NAME       Show only properties by this name\n"
                "  -a --all                 Show all properties, including empty ones\n"
                "     --value               When showing properties, only print the value\n"
-               "\n"
-               "Commands:\n"
-               "  status                   Show current time settings\n"
-               "  show                     Show properties of systemd-timedated\n"
-               "  set-time TIME            Set system time\n"
-               "  set-timezone ZONE        Set system time zone\n"
-               "  list-timezones           Show known time zones\n"
-               "  set-local-rtc BOOL       Control whether RTC is in local time\n"
-               "  set-ntp BOOL             Enable or disable network time synchronization\n"
-               "\n"
-               "systemd-timesyncd Commands:\n"
-               "  timesync-status          Show status of systemd-timesyncd\n"
-               "  show-timesync            Show properties of systemd-timesyncd\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
                , link
         );
 

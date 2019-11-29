@@ -3,9 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -27,7 +25,6 @@
 #include "def.h"
 #include "escape.h"
 #include "fd-util.h"
-#include "missing.h"
 #include "mountpoint-util.h"
 #include "nsflags.h"
 #include "parse-util.h"
@@ -414,7 +411,8 @@ int bus_verify_polkit_async(
                         e = sd_bus_message_get_error(q->reply);
 
                         /* Treat no PK available as access denied */
-                        if (sd_bus_error_has_name(e, SD_BUS_ERROR_SERVICE_UNKNOWN))
+                        if (sd_bus_error_has_name(e, SD_BUS_ERROR_SERVICE_UNKNOWN) ||
+                            sd_bus_error_has_name(e, SD_BUS_ERROR_NAME_HAS_NO_OWNER))
                                 return -EACCES;
 
                         /* Copy error from polkit reply */
@@ -425,7 +423,6 @@ int bus_verify_polkit_async(
                 r = sd_bus_message_enter_container(q->reply, 'r', "bba{ss}");
                 if (r >= 0)
                         r = sd_bus_message_read(q->reply, "bb", &authorized, &challenge);
-
                 if (r < 0)
                         return r;
 
@@ -1103,7 +1100,8 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, unsigne
 
         switch (type) {
 
-        case SD_BUS_TYPE_STRING: {
+        case SD_BUS_TYPE_STRING:
+        case SD_BUS_TYPE_OBJECT_PATH: {
                 const char **p = userdata;
                 const char *s;
 

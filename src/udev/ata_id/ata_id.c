@@ -162,7 +162,8 @@ static int disk_identify_command(
                         return ret;
         }
 
-        if (!(sense[0] == 0x72 && desc[0] == 0x9 && desc[1] == 0x0c)) {
+        if (!(sense[0] == 0x72 && desc[0] == 0x9 && desc[1] == 0x0c) &&
+                !(sense[0] == 0x70 && sense[12] == 0x00 && sense[13] == 0x1d)) {
                 errno = EIO;
                 return -1;
         }
@@ -424,9 +425,10 @@ int main(int argc, char *argv[]) {
                         export = 1;
                         break;
                 case 'h':
-                        printf("Usage: ata_id [--export] [--help] <device>\n"
+                        printf("Usage: %s [--export] [--help] <device>\n"
                                "  -x,--export    print values as environment keys\n"
-                               "  -h,--help      print this help text\n\n");
+                               "  -h,--help      print this help text\n\n",
+                               program_invocation_short_name);
                         return 0;
                 }
         }

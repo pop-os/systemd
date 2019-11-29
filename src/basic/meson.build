@@ -39,6 +39,8 @@ basic_sources = files('''
         device-nodes.h
         dirent-util.c
         dirent-util.h
+        efivars.c
+        efivars.h
         env-file.c
         env-file.h
         env-util.c
@@ -122,7 +124,6 @@ basic_sources = files('''
         memory-util.h
         mempool.c
         mempool.h
-        missing.h
         missing_audit.h
         missing_capability.h
         missing_drm.h
@@ -160,8 +161,6 @@ basic_sources = files('''
         parse-util.h
         path-util.c
         path-util.h
-        plymouth-util.c
-        plymouth-util.h
         prioq.c
         prioq.h
         proc-cmdline.c

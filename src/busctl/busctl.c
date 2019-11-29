@@ -342,8 +342,6 @@ static int list_bus_names(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to show table: %m");
 
-
-
         return 0;
 }
 
@@ -2230,8 +2228,25 @@ static int help(void) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] {COMMAND} ...\n\n"
-               "Introspect the bus.\n\n"
+        printf("%s [OPTIONS...] COMMAND ...\n\n"
+               "%sIntrospect the D-Bus IPC bus.%s\n"
+               "\nCommands:\n"
+               "  list                     List bus names\n"
+               "  status [SERVICE]         Show bus service, process or bus owner credentials\n"
+               "  monitor [SERVICE...]     Show bus traffic\n"
+               "  capture [SERVICE...]     Capture bus traffic as pcap\n"
+               "  tree [SERVICE...]        Show object tree of service\n"
+               "  introspect SERVICE OBJECT [INTERFACE]\n"
+               "  call SERVICE OBJECT INTERFACE METHOD [SIGNATURE [ARGUMENT...]]\n"
+               "                           Call a method\n"
+               "  emit OBJECT INTERFACE SIGNAL [SIGNATURE [ARGUMENT...]]\n"
+               "                           Emit a signal\n"
+               "  get-property SERVICE OBJECT INTERFACE PROPERTY...\n"
+               "                           Get property value\n"
+               "  set-property SERVICE OBJECT INTERFACE PROPERTY SIGNATURE ARGUMENT...\n"
+               "                           Set property value\n"
+               "  help                     Show this help\n"
+               "\nOptions:\n"
                "  -h --help                Show this help\n"
                "     --version             Show package version\n"
                "     --no-pager            Do not pipe output into a pager\n"
@@ -2261,24 +2276,10 @@ static int help(void) {
                "     --watch-bind=BOOL     Wait for bus AF_UNIX socket to be bound in the file\n"
                "                           system\n"
                "     --destination=SERVICE Destination service of a signal\n"
-               "\nCommands:\n"
-               "  list                     List bus names\n"
-               "  status [SERVICE]         Show bus service, process or bus owner credentials\n"
-               "  monitor [SERVICE...]     Show bus traffic\n"
-               "  capture [SERVICE...]     Capture bus traffic as pcap\n"
-               "  tree [SERVICE...]        Show object tree of service\n"
-               "  introspect SERVICE OBJECT [INTERFACE]\n"
-               "  call SERVICE OBJECT INTERFACE METHOD [SIGNATURE [ARGUMENT...]]\n"
-               "                           Call a method\n"
-               "  emit OBJECT INTERFACE SIGNAL [SIGNATURE [ARGUMENT...]]\n"
-               "                           Emit a signal\n"
-               "  get-property SERVICE OBJECT INTERFACE PROPERTY...\n"
-               "                           Get property value\n"
-               "  set-property SERVICE OBJECT INTERFACE PROPERTY SIGNATURE ARGUMENT...\n"
-               "                           Set property value\n"
-               "  help                     Show this help\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
                , link
         );
 

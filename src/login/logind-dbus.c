@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
-#include <pwd.h>
-#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -20,6 +18,7 @@
 #include "device-util.h"
 #include "dirent-util.h"
 #include "efivars.h"
+#include "efi-loader.h"
 #include "env-util.h"
 #include "escape.h"
 #include "fd-util.h"
@@ -162,7 +161,6 @@ int manager_get_user_from_creds(Manager *m, sd_bus_message *message, uid_t uid, 
         User *user;
 
         assert(m);
-        assert(message);
         assert(ret);
 
         if (!uid_is_valid(uid))
@@ -188,7 +186,6 @@ int manager_get_seat_from_creds(
         int r;
 
         assert(m);
-        assert(message);
         assert(ret);
 
         if (SEAT_IS_SELF(name) || SEAT_IS_AUTO(name)) {
@@ -1378,6 +1375,7 @@ static int flush_devices(Manager *m) {
                 struct dirent *de;
 
                 FOREACH_DIRENT_ALL(de, d, break) {
+                        dirent_ensure_type(d, de);
                         if (!dirent_is_file(de))
                                 continue;
 

@@ -16,6 +16,7 @@
 #include "bus-wait-for-jobs.h"
 #include "calendarspec.h"
 #include "env-util.h"
+#include "exit-status.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "main-func.h"
@@ -83,8 +84,8 @@ static int help(void) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] {COMMAND} [ARGS...]\n\n"
-               "Run the specified command in a transient scope or service.\n\n"
+        printf("%s [OPTIONS...] COMMAND [ARGUMENTS...]\n"
+               "\n%sRun the specified command in a transient scope or service.%s\n\n"
                "  -h --help                       Show this help\n"
                "     --version                    Show package version\n"
                "     --no-ask-password            Do not prompt for password\n"
@@ -92,7 +93,7 @@ static int help(void) {
                "  -H --host=[USER@]HOST           Operate on remote host\n"
                "  -M --machine=CONTAINER          Operate on local container\n"
                "     --scope                      Run this as scope rather than service\n"
-               "     --unit=UNIT                  Run under the specified unit name\n"
+               "  -u --unit=UNIT                  Run under the specified unit name\n"
                "  -p --property=NAME=VALUE        Set service or scope unit property\n"
                "     --description=TEXT           Description for unit\n"
                "     --slice=SLICE                Run in the specified slice\n"
@@ -129,6 +130,7 @@ static int help(void) {
                "     --timer-property=NAME=VALUE  Set timer unit property\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight(), ansi_normal()
                , link
         );
 
@@ -158,7 +160,6 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_USER,
                 ARG_SYSTEM,
                 ARG_SCOPE,
-                ARG_UNIT,
                 ARG_DESCRIPTION,
                 ARG_SLICE,
                 ARG_SEND_SIGHUP,
@@ -190,7 +191,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "user",              no_argument,       NULL, ARG_USER              },
                 { "system",            no_argument,       NULL, ARG_SYSTEM            },
                 { "scope",             no_argument,       NULL, ARG_SCOPE             },
-                { "unit",              required_argument, NULL, ARG_UNIT              },
+                { "unit",              required_argument, NULL, 'u'                   },
                 { "description",       required_argument, NULL, ARG_DESCRIPTION       },
                 { "slice",             required_argument, NULL, ARG_SLICE             },
                 { "remain-after-exit", no_argument,       NULL, 'r'                   },
@@ -234,7 +235,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "+hrH:M:E:p:tPqGdS", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "+hrH:M:E:p:tPqGdSu:", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -260,7 +261,7 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_scope = true;
                         break;
 
-                case ARG_UNIT:
+                case 'u':
                         arg_unit = optarg;
                         break;
 
@@ -642,7 +643,9 @@ static int transient_cgroup_set_properties(sd_bus_message *m) {
         if (!isempty(arg_slice)) {
                 _cleanup_free_ char *slice = NULL;
 
-                r = unit_name_mangle_with_suffix(arg_slice, arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN, ".slice", &slice);
+                r = unit_name_mangle_with_suffix(arg_slice, "as slice",
+                                                 arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN,
+                                                 ".slice", &slice);
                 if (r < 0)
                         return log_error_errno(r, "Failed to mangle name '%s': %m", arg_slice);
 
@@ -1113,7 +1116,9 @@ static int start_transient_service(
         }
 
         if (arg_unit) {
-                r = unit_name_mangle_with_suffix(arg_unit, arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN, ".service", &service);
+                r = unit_name_mangle_with_suffix(arg_unit, "as unit",
+                                                 arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN,
+                                                 ".service", &service);
                 if (r < 0)
                         return log_error_errno(r, "Failed to mangle unit name: %m");
         } else {
@@ -1253,7 +1258,7 @@ static int start_transient_service(
 
                 if (arg_wait && !arg_quiet) {
 
-                        /* Explicitly destroy the PTY forwarder, so that the PTY device is usable again, in its
+                        /* Explicitly destroy the PTY forwarder, so that the PTY device is usable again, with its
                          * original settings (i.e. proper line breaks), so that we can show the summary in a pretty
                          * way. */
                         c.forward = pty_forward_free(c.forward);
@@ -1262,43 +1267,52 @@ static int start_transient_service(
                                 log_info("Finished with result: %s", strna(c.result));
 
                         if (c.exit_code == CLD_EXITED)
-                                log_info("Main processes terminated with: code=%s/status=%i", sigchld_code_to_string(c.exit_code), c.exit_status);
+                                log_info("Main processes terminated with: code=%s/status=%i",
+                                         sigchld_code_to_string(c.exit_code), c.exit_status);
                         else if (c.exit_code > 0)
-                                log_info("Main processes terminated with: code=%s/status=%s", sigchld_code_to_string(c.exit_code), signal_to_string(c.exit_status));
+                                log_info("Main processes terminated with: code=%s/status=%s",
+                                         sigchld_code_to_string(c.exit_code), signal_to_string(c.exit_status));
 
                         if (timestamp_is_set(c.inactive_enter_usec) &&
                             timestamp_is_set(c.inactive_exit_usec) &&
                             c.inactive_enter_usec > c.inactive_exit_usec) {
                                 char ts[FORMAT_TIMESPAN_MAX];
-                                log_info("Service runtime: %s", format_timespan(ts, sizeof(ts), c.inactive_enter_usec - c.inactive_exit_usec, USEC_PER_MSEC));
+                                log_info("Service runtime: %s",
+                                         format_timespan(ts, sizeof ts, c.inactive_enter_usec - c.inactive_exit_usec, USEC_PER_MSEC));
                         }
 
                         if (c.cpu_usage_nsec != NSEC_INFINITY) {
                                 char ts[FORMAT_TIMESPAN_MAX];
-                                log_info("CPU time consumed: %s", format_timespan(ts, sizeof(ts), (c.cpu_usage_nsec + NSEC_PER_USEC - 1) / NSEC_PER_USEC, USEC_PER_MSEC));
+                                log_info("CPU time consumed: %s",
+                                         format_timespan(ts, sizeof ts, (c.cpu_usage_nsec + NSEC_PER_USEC - 1) / NSEC_PER_USEC, USEC_PER_MSEC));
                         }
 
                         if (c.ip_ingress_bytes != UINT64_MAX) {
                                 char bytes[FORMAT_BYTES_MAX];
-                                log_info("IP traffic received: %s", format_bytes(bytes, sizeof(bytes), c.ip_ingress_bytes));
+                                log_info("IP traffic received: %s", format_bytes(bytes, sizeof bytes, c.ip_ingress_bytes));
                         }
                         if (c.ip_egress_bytes != UINT64_MAX) {
                                 char bytes[FORMAT_BYTES_MAX];
-                                log_info("IP traffic sent: %s", format_bytes(bytes, sizeof(bytes), c.ip_egress_bytes));
+                                log_info("IP traffic sent: %s", format_bytes(bytes, sizeof bytes, c.ip_egress_bytes));
                         }
                         if (c.io_read_bytes != UINT64_MAX) {
                                 char bytes[FORMAT_BYTES_MAX];
-                                log_info("IO bytes read: %s", format_bytes(bytes, sizeof(bytes), c.io_read_bytes));
+                                log_info("IO bytes read: %s", format_bytes(bytes, sizeof bytes, c.io_read_bytes));
                         }
                         if (c.io_write_bytes != UINT64_MAX) {
                                 char bytes[FORMAT_BYTES_MAX];
-                                log_info("IO bytes written: %s", format_bytes(bytes, sizeof(bytes), c.io_write_bytes));
+                                log_info("IO bytes written: %s", format_bytes(bytes, sizeof bytes, c.io_write_bytes));
                         }
                 }
 
-                /* Try to propagate the service's return value */
-                if (c.result && STR_IN_SET(c.result, "success", "exit-code") && c.exit_code == CLD_EXITED)
+                /* Try to propagate the service's return value. But if the service defines
+                 * e.g. SuccessExitStatus, honour this, and return 0 to mean "success". */
+                if (streq_ptr(c.result, "success"))
+                        *retval = 0;
+                else if (streq_ptr(c.result, "exit-code") && c.exit_status > 0)
                         *retval = c.exit_status;
+                else if (streq_ptr(c.result, "signal"))
+                        *retval = EXIT_EXCEPTION;
                 else
                         *retval = EXIT_FAILURE;
         }
@@ -1356,7 +1370,9 @@ static int start_transient_scope(sd_bus *bus) {
                 return log_oom();
 
         if (arg_unit) {
-                r = unit_name_mangle_with_suffix(arg_unit, arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN, ".scope", &scope);
+                r = unit_name_mangle_with_suffix(arg_unit, "as unit",
+                                                 arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN,
+                                                 ".scope", &scope);
                 if (r < 0)
                         return log_error_errno(r, "Failed to mangle scope name: %m");
         } else {
@@ -1531,11 +1547,15 @@ static int start_transient_trigger(
                         break;
 
                 default:
-                        r = unit_name_mangle_with_suffix(arg_unit, arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN, ".service", &service);
+                        r = unit_name_mangle_with_suffix(arg_unit, "as unit",
+                                                         arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN,
+                                                         ".service", &service);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to mangle unit name: %m");
 
-                        r = unit_name_mangle_with_suffix(arg_unit, arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN, suffix, &trigger);
+                        r = unit_name_mangle_with_suffix(arg_unit, "as trigger",
+                                                         arg_quiet ? 0 : UNIT_NAME_MANGLE_WARN,
+                                                         suffix, &trigger);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to mangle unit name: %m");
 

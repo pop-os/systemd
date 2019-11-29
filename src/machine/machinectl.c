@@ -4,11 +4,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <locale.h>
 #include <math.h>
 #include <net/if.h>
 #include <netinet/in.h>
-#include <string.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -48,6 +46,7 @@
 #include "sigbus.h"
 #include "signal-util.h"
 #include "sort-util.h"
+#include "spawn-ask-password-agent.h"
 #include "spawn-polkit-agent.h"
 #include "stdio-util.h"
 #include "string-table.h"
@@ -1724,6 +1723,7 @@ static int start_machine(int argc, char *argv[], void *userdata) {
         assert(bus);
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
+        ask_password_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         r = bus_wait_for_jobs_new(bus, &w);
         if (r < 0)
@@ -2690,38 +2690,10 @@ static int help(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] {COMMAND} ...\n\n"
-               "Send control commands to or query the virtual machine and container\n"
-               "registration manager.\n\n"
-               "  -h --help                   Show this help\n"
-               "     --version                Show package version\n"
-               "     --no-pager               Do not pipe output into a pager\n"
-               "     --no-legend              Do not show the headers and footers\n"
-               "     --no-ask-password        Do not ask for system passwords\n"
-               "  -H --host=[USER@]HOST       Operate on remote host\n"
-               "  -M --machine=CONTAINER      Operate on local container\n"
-               "  -p --property=NAME          Show only properties by this name\n"
-               "  -q --quiet                  Suppress output\n"
-               "  -a --all                    Show all properties, including empty ones\n"
-               "     --value                  When showing properties, only print the value\n"
-               "  -l --full                   Do not ellipsize output\n"
-               "     --kill-who=WHO           Who to send signal to\n"
-               "  -s --signal=SIGNAL          Which signal to send\n"
-               "     --uid=USER               Specify user ID to invoke shell as\n"
-               "  -E --setenv=VAR=VALUE       Add an environment variable for shell\n"
-               "     --read-only              Create read-only bind mount\n"
-               "     --mkdir                  Create directory before bind mounting, if missing\n"
-               "  -n --lines=INTEGER          Number of journal entries to show\n"
-               "     --max-addresses=INTEGER  Number of internet addresses to show at most\n"
-               "  -o --output=STRING          Change journal output mode (short, short-precise,\n"
-               "                               short-iso, short-iso-precise, short-full,\n"
-               "                               short-monotonic, short-unix, verbose, export,\n"
-               "                               json, json-pretty, json-sse, json-seq, cat,\n"
-               "                               with-unit)\n"
-               "     --verify=MODE            Verification mode for downloaded images (no,\n"
-               "                              checksum, signature)\n"
-               "     --force                  Download image even if already exists\n\n"
-               "Machine Commands:\n"
+        printf("%s [OPTIONS...] COMMAND ...\n\n"
+               "%sSend control commands to or query the virtual machine and container%s\n"
+               "%sregistration manager.%s\n"
+               "\nMachine Commands:\n"
                "  list                        List running VMs and containers\n"
                "  status NAME...              Show VM/container details\n"
                "  show [NAME...]              Show properties of one or more VMs/containers\n"
@@ -2760,8 +2732,41 @@ static int help(int argc, char *argv[], void *userdata) {
                "  export-raw NAME [FILE]      Export a RAW container or VM image locally\n"
                "  list-transfers              Show list of downloads in progress\n"
                "  cancel-transfer             Cancel a download\n"
+               "\nOptions:\n"
+               "  -h --help                   Show this help\n"
+               "     --version                Show package version\n"
+               "     --no-pager               Do not pipe output into a pager\n"
+               "     --no-legend              Do not show the headers and footers\n"
+               "     --no-ask-password        Do not ask for system passwords\n"
+               "  -H --host=[USER@]HOST       Operate on remote host\n"
+               "  -M --machine=CONTAINER      Operate on local container\n"
+               "  -p --property=NAME          Show only properties by this name\n"
+               "  -q --quiet                  Suppress output\n"
+               "  -a --all                    Show all properties, including empty ones\n"
+               "     --value                  When showing properties, only print the value\n"
+               "  -l --full                   Do not ellipsize output\n"
+               "     --kill-who=WHO           Who to send signal to\n"
+               "  -s --signal=SIGNAL          Which signal to send\n"
+               "     --uid=USER               Specify user ID to invoke shell as\n"
+               "  -E --setenv=VAR=VALUE       Add an environment variable for shell\n"
+               "     --read-only              Create read-only bind mount\n"
+               "     --mkdir                  Create directory before bind mounting, if missing\n"
+               "  -n --lines=INTEGER          Number of journal entries to show\n"
+               "     --max-addresses=INTEGER  Number of internet addresses to show at most\n"
+               "  -o --output=STRING          Change journal output mode (short, short-precise,\n"
+               "                               short-iso, short-iso-precise, short-full,\n"
+               "                               short-monotonic, short-unix, verbose, export,\n"
+               "                               json, json-pretty, json-sse, json-seq, cat,\n"
+               "                               with-unit)\n"
+               "     --verify=MODE            Verification mode for downloaded images (no,\n"
+               "                              checksum, signature)\n"
+               "     --force                  Download image even if already exists\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
+               , ansi_highlight()
+               , ansi_normal()
                , link
         );
 
