@@ -1,8 +1,13 @@
-systemd (244-1) UNRELEASED; urgency=medium
+systemd (244-1) experimental; urgency=medium
 
   * New upstream version 244
+    - udev: do not propagate error when executing PROGRAM and IMPORT{program}
+      (Closes: #944675)
+    - sd-event: don't invalidate source type on disconnect
+      (Closes: #945332)
+  * Rebase patches
 
- -- Michael Biebl <biebl@debian.org>  Fri, 29 Nov 2019 21:57:26 +0100
+ -- Michael Biebl <biebl@debian.org>  Sat, 30 Nov 2019 16:39:57 +0100
 
 systemd (243-9) unstable; urgency=medium
 
