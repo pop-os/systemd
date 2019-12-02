@@ -1,3 +1,9 @@
+systemd (244-3) unstable; urgency=medium
+
+  * Update udev-udeb to use 73-usb-net-by-mac.link
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 02 Dec 2019 23:44:52 +0100
+
 systemd (244-2) unstable; urgency=medium
 
   * Add lintian override for udev.
