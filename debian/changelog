@@ -1,3 +1,26 @@
+systemd (244-2) unstable; urgency=medium
+
+  * Add lintian override for udev.
+    60-autosuspend-chromiumos.rules triggers a udev-rule-missing-subsystem
+    warning. This is a false positive, as SUBSYSTEM is tested at the
+    beginning of the rules file.
+  * Add lintian override for systemd-container
+    systemd-nspawn@.service triggers a
+    systemd-service-file-refers-to-unusual-wantedby-target warning but
+    nspawn containers are supposed to be started via machines.target.
+  * Make it easier to override MAC based name policy for USB network adapters.
+    Replace 73-usb-net-by-mac.rules with 73-usb-net-by-mac.link. The .link
+    file provides the same functionality but makes it easier to set a custom
+    name for USB network adapters via the systemd.link mechanism.
+    Thanks to Benjamin Poirier (Closes: #941636)
+  * Move libpam-systemd Recommends from systemd to systemd-sysv.
+    libpam-systemd is only really useful if systemd is PID 1 and the systemd
+    package should be installable without affecting another installed init
+    system. (Closes: #926316)
+  * Upload to unstable
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 02 Dec 2019 17:57:55 +0100
+
 systemd (244-1) experimental; urgency=medium
 
   * New upstream version 244
