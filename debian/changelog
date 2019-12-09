@@ -1,3 +1,11 @@
+systemd (243-3ubuntu2) focal; urgency=medium
+
+  * fix issues with muliplexed shmat calls (LP: #1853852)
+    - d/p/lp-1853852-*: add upstream backports
+    - drop d/p/test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch
+
+ -- Christian Ehrhardt <christian.ehrhardt@canonical.com>  Mon, 09 Dec 2019 12:57:07 +0100
+
 systemd (243-3ubuntu1) focal; urgency=medium
 
   [ Dan Streetman ]
