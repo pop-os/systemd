@@ -13,6 +13,16 @@
 #include "log.h"
 #include "time-util.h"
 
+typedef enum DHCPRawOption {
+        DHCP_RAW_OPTION_DATA_UINT8,
+        DHCP_RAW_OPTION_DATA_UINT16,
+        DHCP_RAW_OPTION_DATA_UINT32,
+        DHCP_RAW_OPTION_DATA_STRING,
+        DHCP_RAW_OPTION_DATA_IPV4ADDRESS,
+        _DHCP_RAW_OPTION_DATA_MAX,
+        _DHCP_RAW_OPTION_DATA_INVALID,
+} DHCPRawOption;
+
 typedef struct DHCPClientId {
         size_t length;
         void *data;
@@ -45,8 +55,10 @@ struct sd_dhcp_server {
 
         char *timezone;
 
-        struct in_addr *ntp, *dns;
-        unsigned n_ntp, n_dns;
+        struct in_addr *ntp, *dns, *sip;
+        unsigned n_ntp, n_dns, n_sip;
+
+        OrderedHashmap *raw_option;
 
         bool emit_router;
 

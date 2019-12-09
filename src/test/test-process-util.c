@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <sched.h>
+#include <fcntl.h>
 #include <sys/mount.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
@@ -17,14 +17,14 @@
 #include "fd-util.h"
 #include "log.h"
 #include "macro.h"
-#include "missing.h"
+#include "missing_sched.h"
+#include "missing_syscall.h"
 #include "parse-util.h"
 #include "process-util.h"
 #include "signal-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "terminal-util.h"
-#include "test-helper.h"
 #include "tests.h"
 #include "util.h"
 #include "virt.h"

@@ -17,11 +17,49 @@ Janitorial Clean-ups:
 * rework mount.c and swap.c to follow proper state enumeration/deserialization
   semantics, like we do for device.c now
 
+Before v244:
+
+* revisit SystemdOptions EFI variable. Find a better, systematic name and use
+  it for the env var, the bootctl verb and the EFI variable itself, clear up
+  semantics.
+
 Features:
+
+* socket units: allow creating a udev monitor socket with ListenDevices= or so,
+  with matches, then actviate app thorugh that passing socket oveer
+
+* move discoverable partitions spec into markdown and our tree
+
+* sd-event: add native support for P_ALL waitid() watching, then move PID 1 to
+  it fo reaping assigned but unknown children. This needs to some special care
+  to operate somewhat sensibly in light of priorities: P_ALL will return
+  arbitrary processes, regardless of the priority we want to watch them with,
+  hence on each event loop iteration check all processes which we shall watch
+  with higher prio explicitly, and then watch the entire rest with P_ALL.
+
+* tweak sd-event's child watching: keep a prioq of children to watch and use
+  waitid() only on the children with the highest priority until one is waitable
+  and ignore all lower-prio ones from that point on
+
+* sd-event: drop stack allocated epoll_event buffer in sd_event_wait()
+
+* maybe introduce xattrs that can be set on the root dir of the root fs
+  partition that declare the volatility mode to use the image in. Previously I
+  thought marking this via GPT partition flags but that's not ideal since
+  that's outside of the LUKS encryption/verity verification, and we probably
+  shouldn't operate in a volatile mode unless we got told so from a trusted
+  source.
+
+* look for /var/tmp automatically via gpt auto discovery
+
+* figure out automatic partition discovery when combining writable root dir
+  with immutable /usr
 
 * coredump: maybe when coredumping read a new xattr from /proc/$PID/exe that
   may be used to mark a whole binary as non-coredumpable. Would fix:
   https://bugs.freedesktop.org/show_bug.cgi?id=69447
+
+* teach parse_timestamp() timezones like the calendar spec already knows it
 
 * beef up hibernation to optionally do swapon/swapoff immediately before/after
   the hibernation
@@ -155,10 +193,6 @@ Features:
 * sd-boot: optionally, show boot menu when previous default boot item has
   non-zero "tries done" count
 
-* maybe set a special xattr on cgroups that have delegate=yes set, to make it
-  easy to mark cut points, then use this information in "systemd-cgls" to show
-  them (e.g. color delegated subtrees in a different color)
-
 * introduce an option (or replacement) for "systemctl show" that outputs all
   properties as JSON, similar to busctl's new JSON output. In contrast to that
   it should skip the variant type string though.
@@ -256,9 +290,6 @@ Features:
 * show invocation ID in systemd-run output
 
 * bypass SIGTERM state in unit files if KillSignal is SIGKILL
-
-* tree-wide: ensure we always block the signals we hook into with
-  sd_event_add_signal() first
 
 * add proper dbus APIs for the various sd_notify() commands, such as MAINPID=1
   and so on, which would mean we could report errors and such.
@@ -482,8 +513,6 @@ Features:
   in or lingering is on (so that containers don't bother with it until PAM is used). also exit-on-idle
 
 * cache sd_event_now() result from before the first iteration...
-
-* add systemctl stop --job-mode=triggering that follows TRIGGERED_BY deps and adds them to the same transaction
 
 * PID1: find a way how we can reload unit file configuration for
   specific units only, without reloading the whole of systemd
@@ -943,7 +972,6 @@ Features:
 
 * tmpfiles:
   - apply "x" on "D" too (see patch from William Douglas)
-  - replace F with f+.
   - instead of ignoring unknown fields, reject them.
   - creating new directories/subvolumes/fifos/device nodes
     should not follow symlinks. None of the other adjustment or creation
@@ -1107,6 +1135,9 @@ External:
   - <command> <verb> -<TAB> should complete options, but currently does not
   - systemctl add-wants,add-requires
 
+* systemctl status should know about 'systemd-analyze calendar ... --iterations='
+* If timer has just OnInactiveSec=..., it should fire after a specified time
+  after being started.
 
 Regularly:
 

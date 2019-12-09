@@ -1,3 +1,5 @@
+![systemd logo](http://brand.systemd.io/assets/page-logo.png)
+
 # systemd - System and Service Manager
 
 <a href="https://in.waw.pl/systemd-github-state/systemd-systemd-issues.svg"><img align="right" src="https://in.waw.pl/systemd-github-state/systemd-systemd-issues-small.svg" alt="Count of open issues over time"></a>

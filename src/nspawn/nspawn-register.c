@@ -209,7 +209,7 @@ int register_machine(
         return 0;
 }
 
-int terminate_machine(
+int unregister_machine(
                 sd_bus *bus,
                 const char *machine_name) {
 
@@ -223,13 +223,13 @@ int terminate_machine(
                         "org.freedesktop.machine1",
                         "/org/freedesktop/machine1",
                         "org.freedesktop.machine1.Manager",
-                        "TerminateMachine",
+                        "UnregisterMachine",
                         &error,
                         NULL,
                         "s",
                         machine_name);
         if (r < 0)
-                log_debug("Failed to terminate machine: %s", bus_error_message(&error, r));
+                log_debug("Failed to unregister machine: %s", bus_error_message(&error, r));
 
         return 0;
 }
@@ -258,7 +258,7 @@ int allocate_scope(
         if (r < 0)
                 return log_error_errno(r, "Could not watch job: %m");
 
-        r = unit_name_mangle_with_suffix(machine_name, 0, ".scope", &scope);
+        r = unit_name_mangle_with_suffix(machine_name, "as machine name", 0, ".scope", &scope);
         if (r < 0)
                 return log_error_errno(r, "Failed to mangle scope name: %m");
 
@@ -350,7 +350,7 @@ int terminate_scope(
         _cleanup_free_ char *scope = NULL;
         int r;
 
-        r = unit_name_mangle_with_suffix(machine_name, 0, ".scope", &scope);
+        r = unit_name_mangle_with_suffix(machine_name, "to terminate", 0, ".scope", &scope);
         if (r < 0)
                 return log_error_errno(r, "Failed to mangle scope name: %m");
 

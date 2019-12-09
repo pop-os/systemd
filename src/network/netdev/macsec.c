@@ -11,13 +11,11 @@
 #include "hexdecoct.h"
 #include "macsec.h"
 #include "memory-util.h"
-#include "missing.h"
 #include "netlink-util.h"
 #include "network-internal.h"
 #include "networkd-address.h"
 #include "networkd-manager.h"
 #include "path-util.h"
-#include "sd-netlink.h"
 #include "socket-util.h"
 #include "string-table.h"
 #include "string-util.h"
@@ -980,6 +978,8 @@ static int macsec_read_key_file(NetDev *netdev, SecurityAssociation *sa) {
 
         if (!sa->key_file)
                 return 0;
+
+        (void) warn_file_is_world_accessible(sa->key_file, NULL, NULL, 0);
 
         r = read_full_file_full(sa->key_file, READ_FULL_FILE_SECURE | READ_FULL_FILE_UNHEX, (char **) &key, &key_len);
         if (r < 0)

@@ -18,6 +18,7 @@ typedef struct UnitRef UnitRef;
 typedef enum KillOperation {
         KILL_TERMINATE,
         KILL_TERMINATE_AND_LOG,
+        KILL_RESTART,
         KILL_KILL,
         KILL_WATCHDOG,
         _KILL_OPERATION_MAX,
@@ -227,7 +228,7 @@ typedef struct Unit {
         int load_error;
 
         /* Put a ratelimit on unit starting */
-        RateLimit start_limit;
+        RateLimit start_ratelimit;
         EmergencyAction start_limit_action;
 
         /* What to do on failure or success */
@@ -365,8 +366,8 @@ typedef struct Unit {
         bool exported_invocation_id:1;
         bool exported_log_level_max:1;
         bool exported_log_extra_fields:1;
-        bool exported_log_rate_limit_interval:1;
-        bool exported_log_rate_limit_burst:1;
+        bool exported_log_ratelimit_interval:1;
+        bool exported_log_ratelimit_burst:1;
 
         /* Whether we warned about clamping the CPU quota period */
         bool warned_clamping_cpu_quota_period:1;
@@ -669,8 +670,7 @@ int unit_merge_by_name(Unit *u, const char *other);
 
 Unit *unit_follow_merge(Unit *u) _pure_;
 
-int unit_load_fragment_and_dropin(Unit *u);
-int unit_load_fragment_and_dropin_optional(Unit *u);
+int unit_load_fragment_and_dropin(Unit *u, bool fragment_required);
 int unit_load(Unit *unit);
 
 int unit_set_slice(Unit *u, Unit *slice);
@@ -733,7 +733,7 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs);
 int unit_deserialize(Unit *u, FILE *f, FDSet *fds);
 int unit_deserialize_skip(FILE *f);
 
-int unit_add_node_dependency(Unit *u, const char *what, bool wants, UnitDependency d, UnitDependencyMask mask);
+int unit_add_node_dependency(Unit *u, const char *what, UnitDependency d, UnitDependencyMask mask);
 
 int unit_coldplug(Unit *u);
 void unit_catchup(Unit *u);
@@ -825,6 +825,7 @@ bool unit_shall_confirm_spawn(Unit *u);
 int unit_set_exec_params(Unit *s, ExecParameters *p);
 
 int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret);
+int unit_fork_and_watch_rm_rf(Unit *u, char **paths, pid_t *ret_pid);
 
 void unit_remove_dependencies(Unit *u, UnitDependencyMask mask);
 
@@ -840,6 +841,10 @@ bool unit_needs_console(Unit *u);
 const char *unit_label_path(Unit *u);
 
 int unit_pid_attachable(Unit *unit, pid_t pid, sd_bus_error *error);
+
+static inline bool unit_has_job_type(Unit *u, JobType type) {
+        return u && u->job && u->job->type == type;
+}
 
 /* unit_log_skip is for cases like ExecCondition= where a unit is considered "done"
  * after some execution, rather than succeeded or failed. */

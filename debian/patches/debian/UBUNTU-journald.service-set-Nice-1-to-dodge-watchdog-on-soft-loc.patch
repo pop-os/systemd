@@ -9,7 +9,7 @@ LP: #1696970
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
-index 089bc38..00268fa 100644
+index 303d5a4..6467377 100644
 --- a/units/systemd-journald.service.in
 +++ b/units/systemd-journald.service.in
 @@ -27,6 +27,7 @@ MemoryDenyWriteExecute=yes

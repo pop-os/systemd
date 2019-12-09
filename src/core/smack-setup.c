@@ -5,12 +5,10 @@
         Nathaniel Chen <nathaniel.chen@intel.com>
 ***/
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -84,6 +82,7 @@ static int write_access2_rules(const char *srcdir) {
         FOREACH_DIRENT(entry, dir, return 0) {
                 _cleanup_fclose_ FILE *policy = NULL;
 
+                dirent_ensure_type(dir, entry);
                 if (!dirent_is_file(entry))
                         continue;
 
@@ -150,6 +149,7 @@ static int write_cipso2_rules(const char *srcdir) {
         FOREACH_DIRENT(entry, dir, return 0) {
                 _cleanup_fclose_ FILE *policy = NULL;
 
+                dirent_ensure_type(dir, entry);
                 if (!dirent_is_file(entry))
                         continue;
 

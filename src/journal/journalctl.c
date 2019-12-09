@@ -5,13 +5,11 @@
 #include <fnmatch.h>
 #include <getopt.h>
 #include <linux/fs.h>
-#include <locale.h>
 #include <poll.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -316,7 +314,7 @@ static int help(void) {
                 return log_oom();
 
         printf("%s [OPTIONS...] [MATCHES...]\n\n"
-               "Query the journal.\n\n"
+               "%sQuery the journal.%s\n\n"
                "Options:\n"
                "     --system                Show the system journal\n"
                "     --user                  Show the user journal for the current user\n"
@@ -383,6 +381,7 @@ static int help(void) {
                "     --setup-keys            Generate a new FSS key pair\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight(), ansi_normal()
                , link
         );
 
@@ -844,7 +843,7 @@ static int parse_argv(int argc, char *argv[]) {
 #else
                 case 'g':
                 case ARG_CASE_SENSITIVE:
-                        return log_error("Compiled without pattern matching support");
+                        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Compiled without pattern matching support");
 #endif
 
                 case 'S':
@@ -1086,7 +1085,7 @@ static int add_matches(sd_journal *j, char **args) {
                         _cleanup_free_ char *p = NULL, *t = NULL, *t2 = NULL, *interpreter = NULL;
                         struct stat st;
 
-                        r = chase_symlinks(*i, NULL, CHASE_TRAIL_SLASH, &p);
+                        r = chase_symlinks(*i, NULL, CHASE_TRAIL_SLASH, &p, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Couldn't canonicalize path: %m");
 
@@ -2049,7 +2048,7 @@ int main(int argc, char *argv[]) {
         switch (arg_action) {
 
         case ACTION_NEW_ID128:
-                r = id128_print_new(true);
+                r = id128_print_new(ID128_PRINT_PRETTY);
                 goto finish;
 
         case ACTION_SETUP_KEYS:
@@ -2241,9 +2240,6 @@ int main(int argc, char *argv[]) {
 
                 HASHMAP_FOREACH(d, j->directories_by_path, i) {
                         int q;
-
-                        if (d->is_root)
-                                continue;
 
                         q = journal_directory_vacuum(d->path, arg_vacuum_size, arg_vacuum_n_files, arg_vacuum_time, NULL, !arg_quiet);
                         if (q < 0) {
@@ -2672,7 +2668,6 @@ int main(int argc, char *argv[]) {
         }
 
 finish:
-        fflush(stdout);
         pager_close();
 
         strv_free(arg_file);

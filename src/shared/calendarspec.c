@@ -1,15 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
-#include <alloca.h>
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
-#include <time.h>
 
 #include "alloc-util.h"
 #include "calendarspec.h"
@@ -1146,14 +1143,9 @@ static int find_matching_component(const CalendarSpec *spec, const CalendarCompo
         return r;
 }
 
-static bool tm_out_of_bounds(const struct tm *tm, bool utc) {
+static int tm_within_bounds(struct tm *tm, bool utc) {
         struct tm t;
         assert(tm);
-
-        t = *tm;
-
-        if (mktime_or_timegm(&t, utc) < 0)
-                return true;
 
         /*
          * Set an upper bound on the year so impossible dates like "*-02-31"
@@ -1161,16 +1153,22 @@ static bool tm_out_of_bounds(const struct tm *tm, bool utc) {
          * since 1900, so adjust it accordingly.
          */
         if (tm->tm_year + 1900 > MAX_YEAR)
-                return true;
+                return -ERANGE;
+
+        t = *tm;
+        if (mktime_or_timegm(&t, utc) < 0)
+                return negative_errno();
 
         /* Did any normalization take place? If so, it was out of bounds before */
-        return
-                t.tm_year != tm->tm_year ||
-                t.tm_mon != tm->tm_mon ||
-                t.tm_mday != tm->tm_mday ||
-                t.tm_hour != tm->tm_hour ||
-                t.tm_min != tm->tm_min ||
-                t.tm_sec != tm->tm_sec;
+        bool good = t.tm_year == tm->tm_year &&
+                    t.tm_mon  == tm->tm_mon  &&
+                    t.tm_mday == tm->tm_mday &&
+                    t.tm_hour == tm->tm_hour &&
+                    t.tm_min  == tm->tm_min  &&
+                    t.tm_sec  == tm->tm_sec;
+        if (!good)
+                *tm = t;
+        return good;
 }
 
 static bool matches_weekday(int weekdays_bits, const struct tm *tm, bool utc) {
@@ -1217,7 +1215,7 @@ static int find_next(const CalendarSpec *spec, struct tm *tm, usec_t *usec) {
                 }
                 if (r < 0)
                         return r;
-                if (tm_out_of_bounds(&c, spec->utc))
+                if (tm_within_bounds(&c, spec->utc) <= 0)
                         return -ENOENT;
 
                 c.tm_mon += 1;
@@ -1228,23 +1226,27 @@ static int find_next(const CalendarSpec *spec, struct tm *tm, usec_t *usec) {
                         c.tm_mday = 1;
                         c.tm_hour = c.tm_min = c.tm_sec = tm_usec = 0;
                 }
-                if (r < 0 || tm_out_of_bounds(&c, spec->utc)) {
+                if (r < 0 || (r = tm_within_bounds(&c, spec->utc)) < 0) {
                         c.tm_year++;
                         c.tm_mon = 0;
                         c.tm_mday = 1;
                         c.tm_hour = c.tm_min = c.tm_sec = tm_usec = 0;
                         continue;
                 }
+                if (r == 0)
+                        continue;
 
                 r = find_matching_component(spec, spec->day, &c, &c.tm_mday);
                 if (r > 0)
                         c.tm_hour = c.tm_min = c.tm_sec = tm_usec = 0;
-                if (r < 0 || tm_out_of_bounds(&c, spec->utc)) {
+                if (r < 0 || (r = tm_within_bounds(&c, spec->utc)) < 0) {
                         c.tm_mon++;
                         c.tm_mday = 1;
                         c.tm_hour = c.tm_min = c.tm_sec = tm_usec = 0;
                         continue;
                 }
+                if (r == 0)
+                        continue;
 
                 if (!matches_weekday(spec->weekdays_bits, &c, spec->utc)) {
                         c.tm_mday++;
@@ -1255,31 +1257,40 @@ static int find_next(const CalendarSpec *spec, struct tm *tm, usec_t *usec) {
                 r = find_matching_component(spec, spec->hour, &c, &c.tm_hour);
                 if (r > 0)
                         c.tm_min = c.tm_sec = tm_usec = 0;
-                if (r < 0 || tm_out_of_bounds(&c, spec->utc)) {
+                if (r < 0 || (r = tm_within_bounds(&c, spec->utc)) < 0) {
                         c.tm_mday++;
                         c.tm_hour = c.tm_min = c.tm_sec = tm_usec = 0;
                         continue;
                 }
+                if (r == 0)
+                        /* The next hour we set might be missing if there
+                         * are time zone changes. Let's try again starting at
+                         * normalized time. */
+                        continue;
 
                 r = find_matching_component(spec, spec->minute, &c, &c.tm_min);
                 if (r > 0)
                         c.tm_sec = tm_usec = 0;
-                if (r < 0 || tm_out_of_bounds(&c, spec->utc)) {
+                if (r < 0 || (r = tm_within_bounds(&c, spec->utc)) < 0) {
                         c.tm_hour++;
                         c.tm_min = c.tm_sec = tm_usec = 0;
                         continue;
                 }
+                if (r == 0)
+                        continue;
 
                 c.tm_sec = c.tm_sec * USEC_PER_SEC + tm_usec;
                 r = find_matching_component(spec, spec->microsecond, &c, &c.tm_sec);
                 tm_usec = c.tm_sec % USEC_PER_SEC;
                 c.tm_sec /= USEC_PER_SEC;
 
-                if (r < 0 || tm_out_of_bounds(&c, spec->utc)) {
+                if (r < 0 || (r = tm_within_bounds(&c, spec->utc)) < 0) {
                         c.tm_min++;
                         c.tm_sec = tm_usec = 0;
                         continue;
                 }
+                if (r == 0)
+                        continue;
 
                 *tm = c;
                 *usec = tm_usec;
@@ -1341,7 +1352,12 @@ int calendar_spec_next_usec(const CalendarSpec *spec, usec_t usec, usec_t *ret_n
                 return r;
         }
         if (r == 0) {
-                if (setenv("TZ", spec->timezone, 1) != 0) {
+                char *colon_tz;
+
+                /* tzset(3) says $TZ should be prefixed with ":" if we reference timezone files */
+                colon_tz = strjoina(":", spec->timezone);
+
+                if (setenv("TZ", colon_tz, 1) != 0) {
                         shared->return_value = negative_errno();
                         _exit(EXIT_FAILURE);
                 }

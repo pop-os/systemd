@@ -3,7 +3,6 @@
 #include <errno.h>
 #include <getopt.h>
 #include <locale.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
@@ -185,7 +184,7 @@ static int list_sessions(int argc, char *argv[], void *userdata) {
 
                 r = table_add_many(table,
                                    TABLE_STRING, id,
-                                   TABLE_UINT32, uid,
+                                   TABLE_UID, (uid_t) uid,
                                    TABLE_STRING, user,
                                    TABLE_STRING, seat,
                                    TABLE_STRING, strna(tty));
@@ -244,7 +243,7 @@ static int list_users(int argc, char *argv[], void *userdata) {
                         break;
 
                 r = table_add_many(table,
-                                   TABLE_UINT32, uid,
+                                   TABLE_UID, (uid_t) uid,
                                    TABLE_STRING, user);
                 if (r < 0)
                         return log_error_errno(r, "Failed to add row to table: %m");
@@ -1280,8 +1279,35 @@ static int help(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] {COMMAND} ...\n\n"
-               "Send control commands to or query the login manager.\n\n"
+        printf("%s [OPTIONS...] COMMAND ...\n\n"
+               "%sSend control commands to or query the login manager.%s\n"
+               "\nSession Commands:\n"
+               "  list-sessions            List sessions\n"
+               "  session-status [ID...]   Show session status\n"
+               "  show-session [ID...]     Show properties of sessions or the manager\n"
+               "  activate [ID]            Activate a session\n"
+               "  lock-session [ID...]     Screen lock one or more sessions\n"
+               "  unlock-session [ID...]   Screen unlock one or more sessions\n"
+               "  lock-sessions            Screen lock all current sessions\n"
+               "  unlock-sessions          Screen unlock all current sessions\n"
+               "  terminate-session ID...  Terminate one or more sessions\n"
+               "  kill-session ID...       Send signal to processes of a session\n"
+               "\nUser Commands:\n"
+               "  list-users               List users\n"
+               "  user-status [USER...]    Show user status\n"
+               "  show-user [USER...]      Show properties of users or the manager\n"
+               "  enable-linger [USER...]  Enable linger state of one or more users\n"
+               "  disable-linger [USER...] Disable linger state of one or more users\n"
+               "  terminate-user USER...   Terminate all sessions of one or more users\n"
+               "  kill-user USER...        Send signal to processes of a user\n"
+               "\nSeat Commands:\n"
+               "  list-seats               List seats\n"
+               "  seat-status [NAME...]    Show seat status\n"
+               "  show-seat [NAME...]      Show properties of seats or the manager\n"
+               "  attach NAME DEVICE...    Attach one or more devices to a seat\n"
+               "  flush-devices            Flush all device associations\n"
+               "  terminate-seat NAME...   Terminate all sessions on one or more seats\n"
+               "\nOptions:\n"
                "  -h --help                Show this help\n"
                "     --version             Show package version\n"
                "     --no-pager            Do not pipe output into a pager\n"
@@ -1301,34 +1327,10 @@ static int help(int argc, char *argv[], void *userdata) {
                "                             short-monotonic, short-unix, verbose, export,\n"
                "                             json, json-pretty, json-sse, json-seq, cat,\n"
                "                             with-unit)\n"
-               "Session Commands:\n"
-               "  list-sessions            List sessions\n"
-               "  session-status [ID...]   Show session status\n"
-               "  show-session [ID...]     Show properties of sessions or the manager\n"
-               "  activate [ID]            Activate a session\n"
-               "  lock-session [ID...]     Screen lock one or more sessions\n"
-               "  unlock-session [ID...]   Screen unlock one or more sessions\n"
-               "  lock-sessions            Screen lock all current sessions\n"
-               "  unlock-sessions          Screen unlock all current sessions\n"
-               "  terminate-session ID...  Terminate one or more sessions\n"
-               "  kill-session ID...       Send signal to processes of a session\n\n"
-               "User Commands:\n"
-               "  list-users               List users\n"
-               "  user-status [USER...]    Show user status\n"
-               "  show-user [USER...]      Show properties of users or the manager\n"
-               "  enable-linger [USER...]  Enable linger state of one or more users\n"
-               "  disable-linger [USER...] Disable linger state of one or more users\n"
-               "  terminate-user USER...   Terminate all sessions of one or more users\n"
-               "  kill-user USER...        Send signal to processes of a user\n\n"
-               "Seat Commands:\n"
-               "  list-seats               List seats\n"
-               "  seat-status [NAME...]    Show seat status\n"
-               "  show-seat [NAME...]      Show properties of seats or the manager\n"
-               "  attach NAME DEVICE...    Attach one or more devices to a seat\n"
-               "  flush-devices            Flush all device associations\n"
-               "  terminate-seat NAME...   Terminate all sessions on one or more seats\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
+               , ansi_highlight()
+               , ansi_normal()
                , link
         );
 

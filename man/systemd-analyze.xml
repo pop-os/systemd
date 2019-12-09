@@ -42,25 +42,6 @@
     <cmdsynopsis>
       <command>systemd-analyze</command>
       <arg choice="opt" rep="repeat">OPTIONS</arg>
-      <arg choice="plain">log-level</arg>
-      <arg choice="opt"><replaceable>LEVEL</replaceable></arg>
-    </cmdsynopsis>
-    <cmdsynopsis>
-      <command>systemd-analyze</command>
-      <arg choice="opt" rep="repeat">OPTIONS</arg>
-      <arg choice="plain">log-target</arg>
-      <arg choice="opt"><replaceable>TARGET</replaceable></arg>
-    </cmdsynopsis>
-    <cmdsynopsis>
-      <command>systemd-analyze</command>
-      <arg choice="opt" rep="repeat">OPTIONS</arg>
-      <arg choice="plain">service-watchdogs</arg>
-      <arg choice="opt"><replaceable>BOOL</replaceable></arg>
-    </cmdsynopsis>
-
-    <cmdsynopsis>
-      <command>systemd-analyze</command>
-      <arg choice="opt" rep="repeat">OPTIONS</arg>
       <arg choice="plain">dump</arg>
     </cmdsynopsis>
 
@@ -242,37 +223,6 @@ multi-user.target @47.820s
     </refsect2>
 
     <refsect2>
-      <title><command>systemd-analyze log-level [<replaceable>LEVEL</replaceable>]</command></title>
-
-      <para><command>systemd-analyze log-level</command> prints the current log level of the
-      <command>systemd</command> daemon.  If an optional argument <replaceable>LEVEL</replaceable> is
-      provided, then the command changes the current log level of the <command>systemd</command> daemon to
-      <replaceable>LEVEL</replaceable> (accepts the same values as <option>--log-level=</option> described in
-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>).</para>
-    </refsect2>
-
-    <refsect2>
-      <title><command>systemd-analyze log-target [<replaceable>TARGET</replaceable>]</command></title>
-
-      <para><command>systemd-analyze log-target</command> prints the current log target of the
-      <command>systemd</command> daemon.  If an optional argument <replaceable>TARGET</replaceable> is
-      provided, then the command changes the current log target of the <command>systemd</command> daemon to
-      <replaceable>TARGET</replaceable> (accepts the same values as <option>--log-target=</option>, described
-      in <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>).</para>
-    </refsect2>
-
-    <refsect2>
-      <title><command>systemd-analyze service-watchdogs [yes|no]</command></title>
-
-      <para><command>systemd-analyze service-watchdogs</command> prints the current state of service runtime
-      watchdogs of the <command>systemd</command> daemon. If an optional boolean argument is provided, then
-      globally enables or disables the service runtime watchdogs (<option>WatchdogSec=</option>) and
-      emergency actions (e.g.  <option>OnFailure=</option> or <option>StartLimitAction=</option>); see
-      <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
-      The hardware watchdog is not affected by this setting.</para>
-    </refsect2>
-
-    <refsect2>
       <title><command>systemd-analyze dump</command></title>
 
       <para>This command outputs a (usually very long) human-readable serialization of the complete server
@@ -398,8 +348,8 @@ DATAERR 65     BSD
     <refsect2>
       <title><command>systemd-analyze condition <replaceable>CONDITION</replaceable>...</command></title>
 
-      <para>This command will evaluate <varname noindex='true'>Condition*=...</varname> and
-      <varname noindex='true'>Assert*=...</varname> assignments, and print their values, and
+      <para>This command will evaluate <varname index="false">Condition*=...</varname> and
+      <varname index="false">Assert*=...</varname> assignments, and print their values, and
       the resulting value of the combined condition set. See
       <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
       for a list of available conditions and asserts.</para>
@@ -652,7 +602,7 @@ Service b@0.service not loaded, b.socket cannot be started.
       policy is not validated too.</para>
 
       <example>
-      <title>Analyze <filename noindex="true">systemd-logind.service</filename></title>
+      <title>Analyze <filename index="false">systemd-logind.service</filename></title>
 
       <programlisting>$ systemd-analyze security --no-pager systemd-logind.service
   NAME                DESCRIPTION                              EXPOSURE
@@ -776,6 +726,13 @@ Service b@0.service not loaded, b.socket cannot be started.
 
         <listitem><para>When used with the <command>calendar</command> command, show the specified number of
         iterations the specified calendar expression will elapse next. Defaults to 1.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--base-time=<replaceable>TIMESTAMP</replaceable></option></term>
+
+        <listitem><para>When used with the <command>calendar</command> command, show next iterations relative
+        to the specified point in time. If not specified defaults to the current time.</para></listitem>
       </varlistentry>
 
       <xi:include href="user-system-options.xml" xpointer="host" />

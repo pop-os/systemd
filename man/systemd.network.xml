@@ -154,6 +154,36 @@
           </listitem>
         </varlistentry>
         <varlistentry>
+          <term><varname>WLANInterfaceType=</varname></term>
+          <listitem>
+            <para>A whitespace-separated list of wireless network type. Supported values are
+            <literal>ad-hoc</literal>, <literal>station</literal>, <literal>ap</literal>,
+            <literal>ap-vlan</literal>, <literal>wds</literal>, <literal>monitor</literal>,
+            <literal>mesh-point</literal>, <literal>p2p-client</literal>, <literal>p2p-go</literal>,
+            <literal>p2p-device</literal>, <literal>ocb</literal>, and <literal>nan</literal>. If the
+            list is prefixed with a "!", the test is inverted.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>SSID=</varname></term>
+          <listitem>
+            <para>A whitespace-separated list of shell-style globs matching the SSID of the currently
+            connected wireless LAN. If the list is prefixed with a "!", the test is inverted.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>BSSID=</varname></term>
+          <listitem>
+            <para>A whitespace-separated list of hardware address of the currently connected wireless
+            LAN. Use full colon-, hyphen- or dot-delimited hexadecimal. See the example in
+            <varname>MACAddress=</varname>. This option may appear more than one, in which case the
+            lists are merged. If the empty string is assigned to this option, the list of BSSID defined
+            prior to this is reset.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
           <term><varname>Host=</varname></term>
           <listitem>
             <para>Matches against the hostname or machine ID of the host. See
@@ -876,8 +906,8 @@
           lease expires. This is contrary to the DHCP specification, but may be the best choice if,
           e.g., the root filesystem relies on this connection. The setting <literal>dhcp</literal>
           implies <literal>dhcp-on-stop</literal>, and <literal>yes</literal> implies
-          <literal>dhcp</literal> and <literal>static</literal>. Defaults to
-          <literal>dhcp-on-stop</literal>.</para>
+          <literal>dhcp</literal> and <literal>static</literal>. Defaults to <literal>no</literal>.
+          </para>
         </listitem>
       </varlistentry>
 
@@ -1150,6 +1180,29 @@
           </listitem>
         </varlistentry>
       </variablelist>
+    </refsect1>
+
+    <refsect1>
+      <title>[NextHop] Section Options</title>
+      <para>The <literal>[NextHop]</literal> section accepts the
+      following keys. Specify several <literal>[NextHop]</literal>
+      sections to configure several nexthop. Nexthop is used to manipulate entries in the kernel's nexthop
+      tables.</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>Gateway=</varname></term>
+          <listitem>
+            <para>As in the <literal>[Network]</literal> section. This is mandatory.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>Id=</varname></term>
+          <listitem>
+            <para>The id of the nexthop (an unsigned integer). If unspecified or '0' then automatically chosen by kernel.</para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
   </refsect1>
 
   <refsect1>
@@ -1210,9 +1263,12 @@
         <varlistentry>
           <term><varname>Scope=</varname></term>
           <listitem>
-            <para>The scope of the route, which can be <literal>global</literal>,
-            <literal>link</literal> or <literal>host</literal>. Defaults to
-            <literal>global</literal>.</para>
+            <para>The scope of the route, which can be <literal>global</literal>, <literal>site</literal>,
+            <literal>link</literal>, <literal>host</literal>, or <literal>nowhere</literal>. For IPv4 route,
+            defaults to <literal>host</literal> if <varname>Type=</varname> is <literal>local</literal>
+            or <literal>nat</literal>, and <literal>link</literal> if <varname>Type=</varname> is
+            <literal>broadcast</literal>, <literal>multicast</literal>, or <literal>anycast</literal>.
+            In other cases, defaults to <literal>global</literal>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1224,10 +1280,14 @@
           </listitem>
         </varlistentry>
         <varlistentry>
-          <term><varname>Table=<replaceable>num</replaceable></varname></term>
+          <term><varname>Table=</varname></term>
           <listitem>
-          <para>The table identifier for the route (a number between 1 and 4294967295, or 0 to unset).
-          The table can be retrieved using <command>ip route show table <replaceable>num</replaceable></command>.
+            <para>The table identifier for the route. Takes <literal>default</literal>,
+            <literal>main</literal>, <literal>local</literal> or a number between 1 and 4294967295.
+            The table can be retrieved using <command>ip route show table <replaceable>num</replaceable></command>.
+            If unset and <varname>Type=</varname> is <literal>local</literal>, <literal>broadcast</literal>,
+            <literal>anycast</literal>, or <literal>nat</literal>, then <literal>local</literal> is used.
+            In other cases, defaults to <literal>main</literal>.
           </para>
           </listitem>
         </varlistentry>
@@ -1309,7 +1369,14 @@
           <para>Note that if IPv6 is enabled on the interface, and the MTU is chosen
           below 1280 (the minimum MTU for IPv6) it will automatically be increased to this value.</para>
         </listitem>
-      </varlistentry>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>IPServiceType=</varname></term>
+          <listitem>
+            <para>Takes string; <literal>CS6</literal> or <literal>CS4</literal>. Used to set IP
+            service type to CS6 (network control) or CS4 (Realtime). Defaults to CS6.</para>
+          </listitem>
+        </varlistentry>
       </variablelist>
   </refsect1>
 
@@ -1346,6 +1413,14 @@
             <para>When true (the default), the NTP servers received
             from the DHCP server will be used by systemd-timesyncd
             and take precedence over any statically configured ones.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>UseSIP=</varname></term>
+          <listitem>
+            <para>When true (the default), the SIP servers received
+            from the DHCP server will be saved at the state files and can be
+            read via <function>sd_network_link_get_sip_servers()</function> function.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1553,17 +1628,38 @@
           <term><varname>SendRelease=</varname></term>
           <listitem>
             <para>When true, the DHCPv4 client sends a DHCP release packet when it stops.
-            Defaults to false.</para>
+            Defaults to true.</para>
           </listitem>
         </varlistentry>
 
         <varlistentry>
-          <term><varname>BlackList=</varname></term>
+        <term><varname>BlackList=</varname></term>
+        <listitem>
+          <para>A whitespace-separated list of IPv4 addresses. DHCP offers from servers in the list are rejected.</para>
+        </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>RequestOptions=</varname></term>
           <listitem>
-            <para>A whitespace-separated list of IPv4 addresses. DHCP offers from servers in the list are rejected.</para>
+            <para>A whitespace-separated list of integers in the range 1–254.</para>
           </listitem>
         </varlistentry>
 
+        <varlistentry>
+          <term><varname>SendOption=</varname></term>
+          <listitem>
+            <para>Send an arbitrary option in the DHCPv4 request. Takes a DHCP option number, data type
+            and data separated with a colon
+            (<literal><replaceable>option</replaceable>:<replaceable>type</replaceable>:<replaceable>value</replaceable></literal>).
+            The option number must be an interger in the range 1..254. The type takes one of <literal>uint8</literal>,
+            <literal>uint16</literal>, <literal>uint32</literal>, <literal>ipv4address</literal>, or
+            <literal>string</literal>. Special characters in the data string may be escaped using
+            <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
+            escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
+            then all options specified earlier are cleared. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
        </variablelist>
    </refsect1>
 
@@ -1610,6 +1706,14 @@
           </listitem>
         </varlistentry>
 
+        <varlistentry>
+          <term><varname>PrefixDelegationHint=</varname></term>
+          <listitem>
+            <para>Takes an IPv6 address with prefix length as <varname>Address=</varname> in
+            the "[Network]" section. Specifies the DHCPv6 client for the requesting router to include
+            a prefix-hint in the DHCPv6 solicitation. Prefix ranges 1-128. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
       </variablelist>
   </refsect1>
 
@@ -1770,6 +1874,19 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>EmitSIP=</varname></term>
+        <term><varname>SIP=</varname></term>
+
+        <listitem><para>Similar to the <varname>EmitDNS=</varname> and
+        <varname>DNS=</varname> settings described above, these
+        settings configure whether and what SIP server information
+        shall be emitted as part of the DHCP lease. The same syntax,
+        propagation semantics and defaults apply as for
+        <varname>EmitDNS=</varname> and
+        <varname>DNS=</varname>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>EmitRouter=</varname></term>
 
         <listitem><para>Similar to the <varname>EmitDNS=</varname>
@@ -1791,6 +1908,20 @@
         timezone is set, the system timezone of the local host is
         propagated, as determined by the
         <filename>/etc/localtime</filename> symlink.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>SendOption=</varname></term>
+        <listitem>
+          <para>Send a raw option with value via DHCPv4 server. Takes a DHCP option number, data type
+          and data (<literal><replaceable>option</replaceable>:<replaceable>type</replaceable>:<replaceable>value</replaceable></literal>).
+          The option number is an integer in the range 1..254. The type takes one of <literal>uint8</literal>,
+          <literal>uint16</literal>, <literal>uint32</literal>, <literal>ipv4address</literal>, or
+          <literal>string</literal>. Special characters in the data string may be escaped using
+          <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
+          escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
+          then all options specified earlier are cleared. Defaults to unset.</para>
+        </listitem>
       </varlistentry>
 
     </variablelist>
@@ -1886,7 +2017,7 @@
     </variablelist>
     </refsect1>
 
-      <refsect1>
+    <refsect1>
     <title>[IPv6Prefix] Section Options</title>
     <para>One or more <literal>[IPv6Prefix]</literal> sections contain the IPv6
     prefixes that are announced via Router Advertisements. See
@@ -1926,6 +2057,37 @@
         seconds. <varname>PreferredLifetimeSec=</varname> defaults to 604800
         seconds (one week) and <varname>ValidLifetimeSec=</varname> defaults
         to 2592000 seconds (30 days).</para></listitem>
+      </varlistentry>
+
+    </variablelist>
+    </refsect1>
+
+    <refsect1>
+    <title>[IPv6RoutePrefix] Section Options</title>
+    <para>One or more <literal>[IPv6RoutePrefix]</literal> sections contain the IPv6
+    prefix routes that are announced via Router Advertisements. See
+    <ulink url="https://tools.ietf.org/html/rfc4191">RFC 4191</ulink>
+    for further details.</para>
+
+    <variablelist class='network-directives'>
+
+      <varlistentry>
+        <term><varname>Route=</varname></term>
+
+        <listitem><para>The IPv6 route that is to be distributed to hosts.
+        Similarly to configuring static IPv6 routes, the setting is
+        configured as an IPv6 prefix routes and its prefix route length,
+        separated by a<literal>/</literal> character. Use multiple
+        <literal>[IPv6PrefixRoutes]</literal> sections to configure multiple IPv6
+        prefix routes.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>LifetimeSec=</varname></term>
+
+        <listitem><para>Lifetime for the route prefix measured in
+        seconds. <varname>LifetimeSec=</varname> defaults to 604800 seconds (one week).
+        </para></listitem>
       </varlistentry>
 
     </variablelist>
@@ -2149,6 +2311,64 @@
           </listitem>
         </varlistentry>
       </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[TrafficControlQueueingDiscipline] Section Options</title>
+    <para>The <literal>[TrafficControlQueueingDiscipline]</literal> section manages the Traffic control. It can be used
+    to configure the kernel packet scheduler and simulate packet delay and loss for UDP or TCP applications,
+    or limit the bandwidth usage of a particular service to simulate internet connections.</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>Parent=</varname></term>
+        <listitem>
+          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>
+          or <literal>clsact</literal>. Defaults to <literal>root</literal>.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>NetworkEmulatorDelaySec=</varname></term>
+        <listitem>
+          <para>Specifies the fixed amount of delay to be added to all packets going out of the
+          interface. Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>NetworkEmulatorDelayJitterSec=</varname></term>
+        <listitem>
+          <para>Specifies the chosen delay to be added to the packets outgoing to the network
+          interface. Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>NetworkEmulatorPacketLimit=</varname></term>
+        <listitem>
+          <para>Specifies the maximum number of packets the qdisc may hold queued at a time.
+          An unsigned integer ranges 0 to 4294967294. Defaults to 1000.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>NetworkEmulatorLossRate=</varname></term>
+        <listitem>
+          <para>Specifies an independent loss probability to be added to the packets outgoing from the
+          network interface. Takes a percentage value, suffixed with "%". Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>NetworkEmulatorDuplicateRate=</varname></term>
+        <listitem>
+          <para>Specifies that the chosen percent of packets is duplicated before queuing them.
+          Takes a percentage value, suffixed with "%". Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+
+    </variablelist>
   </refsect1>
 
   <refsect1>

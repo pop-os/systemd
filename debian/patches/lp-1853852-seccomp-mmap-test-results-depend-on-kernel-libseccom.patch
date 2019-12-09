@@ -1,4 +1,3 @@
-From 49219b5c2a654ee6639887aa21a78b41da0576f1 Mon Sep 17 00:00:00 2001
 From: Christian Ehrhardt <christian.ehrhardt@canonical.com>
 Date: Wed, 4 Dec 2019 11:44:32 +0100
 Subject: [PATCH] seccomp: mmap test results depend on kernel/libseccomp/glibc
@@ -20,13 +19,12 @@ Signed-off-by: Christian Ehrhardt <christian.ehrhardt@canonical.com>
 Origin: upstream, https://github.com/systemd/systemd/commit/49219b5c2a654ee6639887aa21a78b41da0576f1
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1853852
 Last-Update: 2019-12-09
-
 ---
  src/test/test-seccomp.c | 7 ++++---
  1 file changed, 4 insertions(+), 3 deletions(-)
 
 diff --git a/src/test/test-seccomp.c b/src/test/test-seccomp.c
-index 7323e79f7b..69b1c788aa 100644
+index 7323e79..69b1c78 100644
 --- a/src/test/test-seccomp.c
 +++ b/src/test/test-seccomp.c
 @@ -535,10 +535,11 @@ static void test_memory_deny_write_execute_mmap(void) {
@@ -44,6 +42,3 @@ index 7323e79f7b..69b1c788aa 100644
  
                  p = mmap(NULL, page_size(), PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
                  assert_se(p != MAP_FAILED);
--- 
-2.24.0
-

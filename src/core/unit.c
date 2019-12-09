@@ -2,9 +2,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/prctl.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "sd-id128.h"
@@ -15,6 +13,7 @@
 #include "bpf-firewall.h"
 #include "bus-common-errors.h"
 #include "bus-util.h"
+#include "cgroup-setup.h"
 #include "cgroup-util.h"
 #include "dbus-unit.h"
 #include "dbus.h"
@@ -33,11 +32,12 @@
 #include "load-fragment.h"
 #include "log.h"
 #include "macro.h"
-#include "missing.h"
+#include "missing_audit.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "rm-rf.h"
 #include "serialize.h"
 #include "set.h"
 #include "signal-util.h"
@@ -122,8 +122,8 @@ Unit *unit_new(Manager *m, size_t size) {
 
         u->last_section_private = -1;
 
-        RATELIMIT_INIT(u->start_limit, m->default_start_limit_interval, m->default_start_limit_burst);
-        RATELIMIT_INIT(u->auto_stop_ratelimit, 10 * USEC_PER_SEC, 16);
+        u->start_ratelimit = (RateLimit) { m->default_start_limit_interval, m->default_start_limit_burst };
+        u->auto_stop_ratelimit = (RateLimit) { 10 * USEC_PER_SEC, 16 };
 
         for (CGroupIOAccountingMetric i = 0; i < _CGROUP_IO_ACCOUNTING_METRIC_MAX; i++)
                 u->io_accounting_last[i] = UINT64_MAX;
@@ -1359,7 +1359,7 @@ void unit_dump(Unit *u, FILE *f, const char *prefix) {
 }
 
 /* Common implementation for multiple backends */
-int unit_load_fragment_and_dropin(Unit *u) {
+int unit_load_fragment_and_dropin(Unit *u, bool fragment_required) {
         int r;
 
         assert(u);
@@ -1369,34 +1369,17 @@ int unit_load_fragment_and_dropin(Unit *u) {
         if (r < 0)
                 return r;
 
-        if (u->load_state == UNIT_STUB)
-                return -ENOENT;
+        if (u->load_state == UNIT_STUB) {
+                if (fragment_required)
+                        return -ENOENT;
+
+                u->load_state = UNIT_LOADED;
+        }
 
         /* Load drop-in directory data. If u is an alias, we might be reloading the
          * target unit needlessly. But we cannot be sure which drops-ins have already
          * been loaded and which not, at least without doing complicated book-keeping,
          * so let's always reread all drop-ins. */
-        return unit_load_dropin(unit_follow_merge(u));
-}
-
-/* Common implementation for multiple backends */
-int unit_load_fragment_and_dropin_optional(Unit *u) {
-        int r;
-
-        assert(u);
-
-        /* Same as unit_load_fragment_and_dropin(), but whether
-         * something can be loaded or not doesn't matter. */
-
-        /* Load a .service/.socket/.slice/… file */
-        r = unit_load_fragment(u);
-        if (r < 0)
-                return r;
-
-        if (u->load_state == UNIT_STUB)
-                u->load_state = UNIT_LOADED;
-
-        /* Load drop-in directory data */
         return unit_load_dropin(unit_follow_merge(u));
 }
 
@@ -1557,16 +1540,11 @@ int unit_load(Unit *u) {
                 u->fragment_mtime = now(CLOCK_REALTIME);
         }
 
-        if (UNIT_VTABLE(u)->load) {
-                r = UNIT_VTABLE(u)->load(u);
-                if (r < 0)
-                        goto fail;
-        }
-
-        if (u->load_state == UNIT_STUB) {
-                r = -ENOENT;
+        r = UNIT_VTABLE(u)->load(u);
+        if (r < 0)
                 goto fail;
-        }
+
+        assert(u->load_state != UNIT_STUB);
 
         if (u->load_state == UNIT_LOADED) {
                 unit_add_to_target_deps_queue(u);
@@ -1678,7 +1656,7 @@ int unit_test_start_limit(Unit *u) {
 
         assert(u);
 
-        if (ratelimit_below(&u->start_limit)) {
+        if (ratelimit_below(&u->start_ratelimit)) {
                 u->start_limit_hit = false;
                 return 0;
         }
@@ -2788,7 +2766,7 @@ int unit_enqueue_rewatch_pids(Unit *u) {
 
                 r = sd_event_source_set_priority(s, SD_EVENT_PRIORITY_IDLE);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to adjust priority of event source for tidying watched PIDs: m");
+                        return log_error_errno(r, "Failed to adjust priority of event source for tidying watched PIDs: %m");
 
                 (void) sd_event_source_set_description(s, "tidy-watch-pids");
 
@@ -3415,8 +3393,8 @@ int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs) {
         (void) serialize_bool(f, "exported-invocation-id", u->exported_invocation_id);
         (void) serialize_bool(f, "exported-log-level-max", u->exported_log_level_max);
         (void) serialize_bool(f, "exported-log-extra-fields", u->exported_log_extra_fields);
-        (void) serialize_bool(f, "exported-log-rate-limit-interval", u->exported_log_rate_limit_interval);
-        (void) serialize_bool(f, "exported-log-rate-limit-burst", u->exported_log_rate_limit_burst);
+        (void) serialize_bool(f, "exported-log-rate-limit-interval", u->exported_log_ratelimit_interval);
+        (void) serialize_bool(f, "exported-log-rate-limit-burst", u->exported_log_ratelimit_burst);
 
         (void) serialize_item_format(f, "cpu-usage-base", "%" PRIu64, u->cpu_usage_base);
         if (u->cpu_usage_last != NSEC_INFINITY)
@@ -3635,7 +3613,7 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                         if (r < 0)
                                 log_unit_debug(u, "Failed to parse exported log rate limit interval %s, ignoring.", v);
                         else
-                                u->exported_log_rate_limit_interval = r;
+                                u->exported_log_ratelimit_interval = r;
 
                         continue;
 
@@ -3645,7 +3623,7 @@ int unit_deserialize(Unit *u, FILE *f, FDSet *fds) {
                         if (r < 0)
                                 log_unit_debug(u, "Failed to parse exported log rate limit burst %s, ignoring.", v);
                         else
-                                u->exported_log_rate_limit_burst = r;
+                                u->exported_log_ratelimit_burst = r;
 
                         continue;
 
@@ -3852,7 +3830,7 @@ int unit_deserialize_skip(FILE *f) {
         }
 }
 
-int unit_add_node_dependency(Unit *u, const char *what, bool wants, UnitDependency dep, UnitDependencyMask mask) {
+int unit_add_node_dependency(Unit *u, const char *what, UnitDependency dep, UnitDependencyMask mask) {
         Unit *device;
         _cleanup_free_ char *e = NULL;
         int r;
@@ -3882,24 +3860,15 @@ int unit_add_node_dependency(Unit *u, const char *what, bool wants, UnitDependen
         if (dep == UNIT_REQUIRES && device_shall_be_bound_by(device, u))
                 dep = UNIT_BINDS_TO;
 
-        r = unit_add_two_dependencies(u, UNIT_AFTER,
-                                      MANAGER_IS_SYSTEM(u->manager) ? dep : UNIT_WANTS,
-                                      device, true, mask);
-        if (r < 0)
-                return r;
-
-        if (wants) {
-                r = unit_add_dependency(device, UNIT_WANTS, u, false, mask);
-                if (r < 0)
-                        return r;
-        }
-
-        return 0;
+        return unit_add_two_dependencies(u, UNIT_AFTER,
+                                         MANAGER_IS_SYSTEM(u->manager) ? dep : UNIT_WANTS,
+                                         device, true, mask);
 }
 
 int unit_coldplug(Unit *u) {
         int r = 0, q;
         char **i;
+        Job *uj;
 
         assert(u);
 
@@ -3922,8 +3891,9 @@ int unit_coldplug(Unit *u) {
                         r = q;
         }
 
-        if (u->job) {
-                q = job_coldplug(u->job);
+        uj = u->job ?: u->nop_job;
+        if (uj) {
+                q = job_coldplug(uj);
                 if (q < 0 && r >= 0)
                         r = q;
         }
@@ -3997,7 +3967,7 @@ void unit_reset_failed(Unit *u) {
         if (UNIT_VTABLE(u)->reset_failed)
                 UNIT_VTABLE(u)->reset_failed(u);
 
-        RATELIMIT_RESET(u->start_limit);
+        ratelimit_reset(&u->start_ratelimit);
         u->start_limit_hit = false;
 }
 
@@ -4019,7 +3989,7 @@ bool unit_stop_pending(Unit *u) {
          * different from unit_inactive_or_pending() which checks both
          * the current state and for a queued job. */
 
-        return u->job && u->job->type == JOB_STOP;
+        return unit_has_job_type(u, JOB_STOP);
 }
 
 bool unit_inactive_or_pending(Unit *u) {
@@ -4054,12 +4024,7 @@ bool unit_active_or_pending(Unit *u) {
 bool unit_will_restart_default(Unit *u) {
         assert(u);
 
-        if (!u->job)
-                return false;
-        if (u->job->type == JOB_START)
-                return true;
-
-        return false;
+        return unit_has_job_type(u, JOB_START);
 }
 
 bool unit_will_restart(Unit *u) {
@@ -4304,6 +4269,9 @@ int unit_patch_contexts(Unit *u) {
                 if (ec->protect_kernel_modules)
                         ec->capability_bounding_set &= ~(UINT64_C(1) << CAP_SYS_MODULE);
 
+                if (ec->protect_kernel_logs)
+                        ec->capability_bounding_set &= ~(UINT64_C(1) << CAP_SYSLOG);
+
                 if (ec->dynamic_user) {
                         if (!ec->user) {
                                 r = user_from_unit_name(u, &ec->user);
@@ -4338,11 +4306,11 @@ int unit_patch_contexts(Unit *u) {
         if (cc && ec) {
 
                 if (ec->private_devices &&
-                    cc->device_policy == CGROUP_AUTO)
-                        cc->device_policy = CGROUP_CLOSED;
+                    cc->device_policy == CGROUP_DEVICE_POLICY_AUTO)
+                        cc->device_policy = CGROUP_DEVICE_POLICY_CLOSED;
 
                 if (ec->root_image &&
-                    (cc->device_policy != CGROUP_AUTO || cc->device_allow)) {
+                    (cc->device_policy != CGROUP_DEVICE_POLICY_AUTO || cc->device_allow)) {
 
                         /* When RootImage= is specified, the following devices are touched. */
                         r = cgroup_add_device_allow(cc, "/dev/loop-control", "rw");
@@ -4688,19 +4656,26 @@ static int log_kill(pid_t pid, int sig, void *userdata) {
         return 1;
 }
 
-static int operation_to_signal(KillContext *c, KillOperation k) {
+static int operation_to_signal(const KillContext *c, KillOperation k, bool *noteworthy) {
         assert(c);
 
         switch (k) {
 
         case KILL_TERMINATE:
         case KILL_TERMINATE_AND_LOG:
+                *noteworthy = false;
                 return c->kill_signal;
 
+        case KILL_RESTART:
+                *noteworthy = false;
+                return restart_kill_signal(c);
+
         case KILL_KILL:
+                *noteworthy = true;
                 return c->final_kill_signal;
 
         case KILL_WATCHDOG:
+                *noteworthy = true;
                 return c->watchdog_signal;
 
         default:
@@ -4729,15 +4704,15 @@ int unit_kill_context(
         if (c->kill_mode == KILL_NONE)
                 return 0;
 
-        sig = operation_to_signal(c, k);
+        bool noteworthy;
+        sig = operation_to_signal(c, k, &noteworthy);
+        if (noteworthy)
+                log_func = log_kill;
 
         send_sighup =
                 c->send_sighup &&
                 IN_SET(k, KILL_TERMINATE, KILL_TERMINATE_AND_LOG) &&
                 sig != SIGHUP;
-
-        if (k != KILL_TERMINATE || IN_SET(sig, SIGKILL, SIGABRT))
-                log_func = log_kill;
 
         if (main_pid > 0) {
                 if (log_func)
@@ -4990,7 +4965,7 @@ int unit_fail_if_noncanonical(Unit *u, const char* where) {
         assert(u);
         assert(where);
 
-        r = chase_symlinks(where, NULL, CHASE_NONEXISTENT, &canonical_where);
+        r = chase_symlinks(where, NULL, CHASE_NONEXISTENT, &canonical_where, NULL);
         if (r < 0) {
                 log_unit_debug_errno(u, r, "Failed to check %s for symlinks, ignoring: %m", where);
                 return 0;
@@ -5296,6 +5271,39 @@ int unit_fork_helper_process(Unit *u, const char *name, pid_t *ret) {
         return 0;
 }
 
+int unit_fork_and_watch_rm_rf(Unit *u, char **paths, pid_t *ret_pid) {
+        pid_t pid;
+        int r;
+
+        assert(u);
+        assert(ret_pid);
+
+        r = unit_fork_helper_process(u, "(sd-rmrf)", &pid);
+        if (r < 0)
+                return r;
+        if (r == 0) {
+                int ret = EXIT_SUCCESS;
+                char **i;
+
+                STRV_FOREACH(i, paths) {
+                        r = rm_rf(*i, REMOVE_ROOT|REMOVE_PHYSICAL|REMOVE_MISSING_OK);
+                        if (r < 0) {
+                                log_error_errno(r, "Failed to remove '%s': %m", *i);
+                                ret = EXIT_FAILURE;
+                        }
+                }
+
+                _exit(ret);
+        }
+
+        r = unit_watch_pid(u, pid, true);
+        if (r < 0)
+                return r;
+
+        *ret_pid = pid;
+        return 0;
+}
+
 static void unit_update_dependency_mask(Unit *u, UnitDependency d, Unit *other, UnitDependencyInfo di) {
         assert(u);
         assert(d >= 0);
@@ -5468,7 +5476,7 @@ fail:
         return r;
 }
 
-static int unit_export_log_rate_limit_interval(Unit *u, const ExecContext *c) {
+static int unit_export_log_ratelimit_interval(Unit *u, const ExecContext *c) {
         _cleanup_free_ char *buf = NULL;
         const char *p;
         int r;
@@ -5476,26 +5484,26 @@ static int unit_export_log_rate_limit_interval(Unit *u, const ExecContext *c) {
         assert(u);
         assert(c);
 
-        if (u->exported_log_rate_limit_interval)
+        if (u->exported_log_ratelimit_interval)
                 return 0;
 
-        if (c->log_rate_limit_interval_usec == 0)
+        if (c->log_ratelimit_interval_usec == 0)
                 return 0;
 
         p = strjoina("/run/systemd/units/log-rate-limit-interval:", u->id);
 
-        if (asprintf(&buf, "%" PRIu64, c->log_rate_limit_interval_usec) < 0)
+        if (asprintf(&buf, "%" PRIu64, c->log_ratelimit_interval_usec) < 0)
                 return log_oom();
 
         r = symlink_atomic(buf, p);
         if (r < 0)
                 return log_unit_debug_errno(u, r, "Failed to create log rate limit interval symlink %s: %m", p);
 
-        u->exported_log_rate_limit_interval = true;
+        u->exported_log_ratelimit_interval = true;
         return 0;
 }
 
-static int unit_export_log_rate_limit_burst(Unit *u, const ExecContext *c) {
+static int unit_export_log_ratelimit_burst(Unit *u, const ExecContext *c) {
         _cleanup_free_ char *buf = NULL;
         const char *p;
         int r;
@@ -5503,22 +5511,22 @@ static int unit_export_log_rate_limit_burst(Unit *u, const ExecContext *c) {
         assert(u);
         assert(c);
 
-        if (u->exported_log_rate_limit_burst)
+        if (u->exported_log_ratelimit_burst)
                 return 0;
 
-        if (c->log_rate_limit_burst == 0)
+        if (c->log_ratelimit_burst == 0)
                 return 0;
 
         p = strjoina("/run/systemd/units/log-rate-limit-burst:", u->id);
 
-        if (asprintf(&buf, "%u", c->log_rate_limit_burst) < 0)
+        if (asprintf(&buf, "%u", c->log_ratelimit_burst) < 0)
                 return log_oom();
 
         r = symlink_atomic(buf, p);
         if (r < 0)
                 return log_unit_debug_errno(u, r, "Failed to create log rate limit burst symlink %s: %m", p);
 
-        u->exported_log_rate_limit_burst = true;
+        u->exported_log_ratelimit_burst = true;
         return 0;
 }
 
@@ -5555,8 +5563,8 @@ void unit_export_state_files(Unit *u) {
         if (c) {
                 (void) unit_export_log_level_max(u, c);
                 (void) unit_export_log_extra_fields(u, c);
-                (void) unit_export_log_rate_limit_interval(u, c);
-                (void) unit_export_log_rate_limit_burst(u, c);
+                (void) unit_export_log_ratelimit_interval(u, c);
+                (void) unit_export_log_ratelimit_burst(u, c);
         }
 }
 
@@ -5594,18 +5602,18 @@ void unit_unlink_state_files(Unit *u) {
                 u->exported_log_extra_fields = false;
         }
 
-        if (u->exported_log_rate_limit_interval) {
+        if (u->exported_log_ratelimit_interval) {
                 p = strjoina("/run/systemd/units/log-rate-limit-interval:", u->id);
                 (void) unlink(p);
 
-                u->exported_log_rate_limit_interval = false;
+                u->exported_log_ratelimit_interval = false;
         }
 
-        if (u->exported_log_rate_limit_burst) {
+        if (u->exported_log_ratelimit_burst) {
                 p = strjoina("/run/systemd/units/log-rate-limit-burst:", u->id);
                 (void) unlink(p);
 
-                u->exported_log_rate_limit_burst = false;
+                u->exported_log_ratelimit_burst = false;
         }
 }
 

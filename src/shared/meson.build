@@ -33,6 +33,8 @@ shared_sources = files('''
         bus-wait-for-units.h
         calendarspec.c
         calendarspec.h
+        cgroup-setup.c
+        cgroup-setup.h
         cgroup-show.c
         cgroup-show.h
         clean-ipc.c
@@ -58,8 +60,8 @@ shared_sources = files('''
         dns-domain.h
         dropin.c
         dropin.h
-        efivars.c
-        efivars.h
+        efi-loader.c
+        efi-loader.h
         enable-mempool.c
         env-file-label.c
         env-file-label.h
@@ -187,6 +189,8 @@ shared_sources = files('''
         watchdog.h
         web-util.c
         web-util.h
+        wifi-util.c
+        wifi-util.h
         xml.c
         xml.h
 '''.split())
@@ -261,20 +265,20 @@ shared_sources += shared_generated_gperf_headers
 libshared_name = 'systemd-shared-@0@'.format(meson.project_version())
 
 libshared_deps = [threads,
-                  librt,
-                  libcap,
                   libacl,
+                  libblkid,
+                  libcap,
                   libcryptsetup,
                   libgcrypt,
+                  libidn,
                   libiptc,
                   libkmod,
+                  liblz4,
                   libmount,
+                  librt,
                   libseccomp,
                   libselinux,
-                  libidn,
-                  libxz,
-                  liblz4,
-                  libblkid]
+                  libxz]
 
 libshared_sym_path = '@0@/libshared.sym'.format(meson.current_source_dir())
 

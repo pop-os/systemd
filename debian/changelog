@@ -1,3 +1,102 @@
+systemd (244-3) unstable; urgency=medium
+
+  * Update udev-udeb to use 73-usb-net-by-mac.link
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 02 Dec 2019 23:44:52 +0100
+
+systemd (244-2) unstable; urgency=medium
+
+  * Add lintian override for udev.
+    60-autosuspend-chromiumos.rules triggers a udev-rule-missing-subsystem
+    warning. This is a false positive, as SUBSYSTEM is tested at the
+    beginning of the rules file.
+  * Add lintian override for systemd-container
+    systemd-nspawn@.service triggers a
+    systemd-service-file-refers-to-unusual-wantedby-target warning but
+    nspawn containers are supposed to be started via machines.target.
+  * Make it easier to override MAC based name policy for USB network adapters.
+    Replace 73-usb-net-by-mac.rules with 73-usb-net-by-mac.link. The .link
+    file provides the same functionality but makes it easier to set a custom
+    name for USB network adapters via the systemd.link mechanism.
+    Thanks to Benjamin Poirier (Closes: #941636)
+  * Move libpam-systemd Recommends from systemd to systemd-sysv.
+    libpam-systemd is only really useful if systemd is PID 1 and the systemd
+    package should be installable without affecting another installed init
+    system. (Closes: #926316)
+  * Upload to unstable
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 02 Dec 2019 17:57:55 +0100
+
+systemd (244-1) experimental; urgency=medium
+
+  * New upstream version 244
+    - udev: do not propagate error when executing PROGRAM and IMPORT{program}
+      (Closes: #944675)
+    - sd-event: don't invalidate source type on disconnect
+      (Closes: #945332)
+  * Rebase patches
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 30 Nov 2019 16:39:57 +0100
+
+systemd (243-9) unstable; urgency=medium
+
+  [ Daniel Kahn Gillmor ]
+  * resolved: fix connection failures with TLS 1.3 and GnuTLS (Closes: #945507)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 29 Nov 2019 21:33:19 +0100
+
+systemd (243-8) unstable; urgency=medium
+
+  * udevadm: ignore EROFS and return earlier.
+    Fixes failures of "udevadm trigger" in containers with a readonly /sys.
+    (Closes: #944860)
+  * udev: silence warning about PROGRAM+= or IMPORT+= rules (Closes: #944917)
+  * man: add entry about SpeedMeter= (Closes: #944597)
+  * udev: drop SystemCallArchitectures=native from systemd-udevd.service.
+    We can't really control what helper programs are run from other udev
+    rules. E.g. running i386 binaries under amd64 is a valid use case and
+    should not trigger a SIGSYS failure. (Closes: #869719)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 19 Nov 2019 09:17:12 +0100
+
+systemd (243-7) unstable; urgency=medium
+
+  * Fix build failure on arm64 with libseccomp >= 2.4.2
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 15 Nov 2019 22:01:17 +0100
+
+systemd (243-6) unstable; urgency=medium
+
+  * Revert "sysusers: properly mark generated accounts as locked"
+    We shouldn't lock the accounts because people actually need to use them, and
+    if they are locked, various tools will refuse.
+  * udev: ignore error caused by device disconnection.
+    During an add or change event, the device may be disconnected.
+    (Closes: #944586)
+  * udev: do not append newline when writing attributes
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 14 Nov 2019 14:09:49 +0100
+
+systemd (243-5) unstable; urgency=medium
+
+  * Switch default hierarchy (back) to hybrid.
+    Since v243, the new upstream default is unified, but this still causes
+    regressions in important packages, like LXC or Docker, so switch the
+    default back to hybrid for now.
+  * Drop masks for SysV init scripts that have been dropped
+  * Drop masks for SysV init scripts provided by initscripts and bootlogd
+  * logind: fix emission of PropertiesChanged signal for users and seats
+  * Bump Standards Version to 4.4.1
+  * Upload to unstable
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 11 Nov 2019 00:58:41 +0100
+
+systemd (243-4) experimental; urgency=medium
+
+   * Merge changes from unstable branch
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 09 Nov 2019 01:15:08 +0100
+
 systemd (243-3ubuntu2) UNRELEASED; urgency=medium
 
   [ Dan Streetman ]
@@ -369,6 +468,24 @@ systemd (243~rc2-1) experimental; urgency=medium
   * Install static-nodes-permissions.conf tmpfile in udev
 
  -- Michael Biebl <biebl@debian.org>  Sat, 31 Aug 2019 00:20:41 +0200
+
+systemd (242-8) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * d/extra/rules/73-special-net-names.rules: use $$ instead of $ in PROGRAM=
+    value.
+    Fixes incorrect variable substitution.
+  * Rework and improve blacklist handling in debian/tests/upstream
+
+  [ Balint Reczey ]
+  * Various improvements to debian/extra/checkout-upstream making it more
+    straightforward to override the default behaviour
+  * Use package version as systemd's reported version (LP: #1849158)
+
+  [ Michael Biebl]
+  * debiant/tests/udev: replace deprecated ADTTMP with AUTOPKGTEST_TMP
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 08 Nov 2019 23:18:00 +0100
 
 systemd (242-7ubuntu2) eoan; urgency=medium
 

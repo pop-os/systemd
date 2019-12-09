@@ -91,7 +91,7 @@
       <variablelist>
 
         <varlistentry>
-          <term><option>CPU</option></term>
+          <term>CPU</term>
           <listitem>
             <para><varname>CPUWeight=</varname> and <varname>StartupCPUWeight=</varname> replace
             <varname>CPUShares=</varname> and <varname>StartupCPUShares=</varname>, respectively.</para>
@@ -101,7 +101,7 @@
         </varlistentry>
 
         <varlistentry>
-          <term><option>Memory</option></term>
+          <term>Memory</term>
           <listitem>
             <para><varname>MemoryMax=</varname> replaces <varname>MemoryLimit=</varname>. <varname>MemoryLow=</varname>
             and <varname>MemoryHigh=</varname> are effective only on unified hierarchy.</para>
@@ -109,10 +109,11 @@
         </varlistentry>
 
         <varlistentry>
-          <term><option>IO</option></term>
+          <term>IO</term>
           <listitem>
-            <para><varname>IO</varname> prefixed settings are a superset of and replace <varname>BlockIO</varname>
-            prefixed ones. On unified hierarchy, IO resource control also applies to buffered writes.</para>
+            <para><literal>IO</literal>-prefixed settings are a superset of and replace
+            <literal>BlockIO</literal>-prefixed ones. On unified hierarchy, IO resource control also applies
+            to buffered writes.</para>
           </listitem>
         </varlistentry>
 
@@ -215,6 +216,36 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>AllowedCPUs=</varname></term>
+
+        <listitem>
+          <para>Restrict processes to be executed on specific CPUs. Takes a list of CPU indices or ranges separated by either
+          whitespace or commas. CPU ranges are specified by the lower and upper CPU indices separated by a dash.</para>
+
+          <para>Setting <varname>AllowedCPUs=</varname> doesn't guarantee that all of the CPUs will be used by the processes
+          as it may be limited by parent units. The effective configuration is reported as <varname>EffectiveCPUs=</varname>.</para>
+
+          <para>This setting is supported only with the unified control group hierarchy.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>AllowedMemoryNodes=</varname></term>
+
+        <listitem>
+          <para>Restrict processes to be executed on specific memory NUMA nodes. Takes a list of memory NUMA nodes indices
+          or ranges separated by either whitespace or commas. Memory NUMA nodes ranges are specified by the lower and upper
+          CPU indices separated by a dash.</para>
+
+          <para>Setting <varname>AllowedMemoryNodes=</varname> doesn't guarantee that all of the memory NUMA nodes will
+          be used by the processes as it may be limited by parent units. The effective configuration is reported as
+          <varname>EffectiveMemoryNodes=</varname>.</para>
+
+          <para>This setting is supported only with the unified control group hierarchy.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>MemoryAccounting=</varname></term>
 
         <listitem>
@@ -239,7 +270,9 @@
           <para>Takes a memory size in bytes. If the value is suffixed with K, M, G or T, the specified memory size is
           parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. Alternatively, a
           percentage value may be specified, which is taken relative to the installed physical memory on the
-          system. This controls the <literal>memory.min</literal> control group attribute. For details about this
+          system. If assigned the special value <literal>infinity</literal>, all available memory is protected, which may be
+          useful in order to always inherit all of the protection afforded by ancestors.
+          This controls the <literal>memory.min</literal> control group attribute. For details about this
           control group attribute, see <ulink
           url="https://www.kernel.org/doc/Documentation/cgroup-v2.txt">cgroup-v2.txt</ulink>.</para>
 
@@ -263,7 +296,9 @@
           <para>Takes a memory size in bytes. If the value is suffixed with K, M, G or T, the specified memory size is
           parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. Alternatively, a
           percentage value may be specified, which is taken relative to the installed physical memory on the
-          system. This controls the <literal>memory.low</literal> control group attribute. For details about this
+          system. If assigned the special value <literal>infinity</literal>, all available memory is protected, which may be
+          useful in order to always inherit all of the protection afforded by ancestors.
+          This controls the <literal>memory.low</literal> control group attribute. For details about this
           control group attribute, see <ulink
           url="https://www.kernel.org/doc/Documentation/cgroup-v2.txt">cgroup-v2.txt</ulink>.</para>
 
@@ -280,7 +315,7 @@
         <term><varname>MemoryHigh=<replaceable>bytes</replaceable></varname></term>
 
         <listitem>
-          <para>Specify the high limit on memory usage of the executed processes in this unit. Memory usage may go
+          <para>Specify the throttling limit on memory usage of the executed processes in this unit. Memory usage may go
           above the limit if unavoidable, but the processes are heavily slowed down and memory is taken away
           aggressively in such cases. This is the main mechanism to control memory usage of a unit.</para>
 
@@ -288,7 +323,7 @@
           parsed as Kilobytes, Megabytes, Gigabytes, or Terabytes (with the base 1024), respectively. Alternatively, a
           percentage value may be specified, which is taken relative to the installed physical memory on the
           system. If assigned the
-          special value <literal>infinity</literal>, no memory limit is applied. This controls the
+          special value <literal>infinity</literal>, no memory throttling is applied. This controls the
           <literal>memory.high</literal> control group attribute. For details about this control group attribute, see
           <ulink url="https://www.kernel.org/doc/Documentation/cgroup-v2.txt">cgroup-v2.txt</ulink>.</para>
 

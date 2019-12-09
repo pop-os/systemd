@@ -4,9 +4,25 @@
 #include <stdbool.h>
 
 #include "cgroup-util.h"
+#include "cpu-set-util.h"
 #include "ip-address-access.h"
 #include "list.h"
 #include "time-util.h"
+
+typedef struct TasksMax {
+        /* If scale == 0, just use value; otherwise, value / scale.
+         * See tasks_max_resolve(). */
+        uint64_t value;
+        uint64_t scale;
+} TasksMax;
+
+#define TASKS_MAX_UNSET ((TasksMax) { .value = UINT64_MAX, .scale = 0 })
+
+static inline bool tasks_max_isset(const TasksMax *tasks_max) {
+        return tasks_max->value != UINT64_MAX || tasks_max->scale != 0;
+}
+
+uint64_t tasks_max_resolve(const TasksMax *tasks_max);
 
 typedef struct CGroupContext CGroupContext;
 typedef struct CGroupDeviceAllow CGroupDeviceAllow;
@@ -17,16 +33,15 @@ typedef struct CGroupBlockIODeviceWeight CGroupBlockIODeviceWeight;
 typedef struct CGroupBlockIODeviceBandwidth CGroupBlockIODeviceBandwidth;
 
 typedef enum CGroupDevicePolicy {
-
-        /* When devices listed, will allow those, plus built-in ones,
-        if none are listed will allow everything. */
-        CGROUP_AUTO,
+        /* When devices listed, will allow those, plus built-in ones, if none are listed will allow
+         * everything. */
+        CGROUP_DEVICE_POLICY_AUTO,
 
         /* Everything forbidden, except built-in ones and listed ones. */
-        CGROUP_CLOSED,
+        CGROUP_DEVICE_POLICY_CLOSED,
 
         /* Everything forbidden, except for the listed devices */
-        CGROUP_STRICT,
+        CGROUP_DEVICE_POLICY_STRICT,
 
         _CGROUP_DEVICE_POLICY_MAX,
         _CGROUP_DEVICE_POLICY_INVALID = -1
@@ -92,6 +107,9 @@ struct CGroupContext {
         usec_t cpu_quota_per_sec_usec;
         usec_t cpu_quota_period_usec;
 
+        CPUSet cpuset_cpus;
+        CPUSet cpuset_mems;
+
         uint64_t io_weight;
         uint64_t startup_io_weight;
         LIST_HEAD(CGroupIODeviceWeight, io_device_weights);
@@ -132,7 +150,7 @@ struct CGroupContext {
         LIST_HEAD(CGroupDeviceAllow, device_allow);
 
         /* Common */
-        uint64_t tasks_max;
+        TasksMax tasks_max;
 };
 
 /* Used when querying IP accounting data */
@@ -162,7 +180,7 @@ usec_t cgroup_cpu_adjust_period(usec_t period, usec_t quota, usec_t resolution, 
 
 void cgroup_context_init(CGroupContext *c);
 void cgroup_context_done(CGroupContext *c);
-void cgroup_context_dump(CGroupContext *c, FILE* f, const char *prefix);
+void cgroup_context_dump(Unit *u, FILE* f, const char *prefix);
 
 void cgroup_context_free_device_allow(CGroupContext *c, CGroupDeviceAllow *a);
 void cgroup_context_free_io_device_weight(CGroupContext *c, CGroupIODeviceWeight *w);
@@ -254,3 +272,5 @@ CGroupDevicePolicy cgroup_device_policy_from_string(const char *s) _pure_;
 bool unit_cgroup_delegate(Unit *u);
 
 int compare_job_priority(const void *a, const void *b);
+
+int unit_get_cpuset(Unit *u, CPUSet *cpus, const char *name);

@@ -26,6 +26,7 @@ ProtectHome=yes
 ProtectHostname=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
+ProtectKernelLogs=yes
 ProtectSystem=strict
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes
@@ -33,7 +34,7 @@ RestrictRealtime=yes
 RestrictSUIDSGID=yes
 SystemCallArchitectures=native
 User=systemd-journal-remote
-WatchdogSec=3min
+@SERVICE_WATCHDOG@
 
 # If there are many split up journal files we need a lot of fds to access them
 # all in parallel.

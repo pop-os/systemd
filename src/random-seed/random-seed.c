@@ -3,7 +3,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/random.h>
-#include <string.h>
 #include <sys/ioctl.h>
 #if USE_SYS_RANDOM_H
 #  include <sys/random.h>
@@ -20,7 +19,7 @@
 #include "io-util.h"
 #include "log.h"
 #include "main-func.h"
-#include "missing.h"
+#include "missing_syscall.h"
 #include "mkdir.h"
 #include "parse-util.h"
 #include "random-util.h"

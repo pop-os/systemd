@@ -18,7 +18,7 @@ create_container() {
     # create autopkgtest LXC image; this sometimes fails with "Unable to fetch
     # GPG key from keyserver", so retry a few times
     for retry in $(seq 5); do
-        sudo lxc-create -n $CONTAINER -t download -- -d $DISTRO -r $RELEASE -a $ARCH && break
+        sudo lxc-create -n $CONTAINER -t download -- -d $DISTRO -r $RELEASE -a $ARCH --keyserver hkp://keyserver.ubuntu.com:80 && break
         sleep $((retry*retry))
     done
 
@@ -36,6 +36,8 @@ apt-get -q --allow-releaseinfo-change update
 apt-get -y dist-upgrade
 apt-get install -y eatmydata
 apt-get purge --auto-remove -y unattended-upgrades
+systemctl unmask systemd-networkd
+systemctl enable systemd-networkd
 EOF
     sudo lxc-stop -n $CONTAINER
 }

@@ -17,9 +17,7 @@
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <stdarg.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <linux/pci_regs.h>
 
@@ -119,7 +117,7 @@ static int get_virtfn_info(sd_device *dev, struct netnames *names, struct virtfn
 
         /* Check if this is a virtual function. */
         physfn_link_file = strjoina(syspath, "/physfn");
-        r = chase_symlinks(physfn_link_file, NULL, 0, &physfn_pci_syspath);
+        r = chase_symlinks(physfn_link_file, NULL, 0, &physfn_pci_syspath, NULL);
         if (r < 0)
                 return r;
 
@@ -143,7 +141,7 @@ static int get_virtfn_info(sd_device *dev, struct netnames *names, struct virtfn
                 if (!virtfn_link_file)
                         return -ENOMEM;
 
-                if (chase_symlinks(virtfn_link_file, NULL, 0, &virtfn_pci_syspath) < 0)
+                if (chase_symlinks(virtfn_link_file, NULL, 0, &virtfn_pci_syspath, NULL) < 0)
                         continue;
 
                 if (streq(syspath, virtfn_pci_syspath)) {

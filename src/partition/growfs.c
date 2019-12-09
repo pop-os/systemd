@@ -7,7 +7,6 @@
 #include <linux/magic.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/vfs.h>
 
@@ -19,7 +18,7 @@
 #include "fd-util.h"
 #include "format-util.h"
 #include "log.h"
-#include "missing.h"
+#include "missing_fs.h"
 #include "mountpoint-util.h"
 #include "parse-util.h"
 #include "path-util.h"

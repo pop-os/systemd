@@ -3,6 +3,7 @@
 #include <ctype.h>
 
 #include "alloc-util.h"
+#include "architecture.h"
 #include "conf-files.h"
 #include "def.h"
 #include "device-util.h"
@@ -28,6 +29,7 @@
 #include "udev-event.h"
 #include "udev-rules.h"
 #include "user-util.h"
+#include "virt.h"
 
 #define RULES_DIRS (const char* const*) CONF_PATHS_STRV("udev/rules.d")
 
@@ -43,10 +45,12 @@ typedef enum {
 } UdevRuleOperatorType;
 
 typedef enum {
-        MATCH_TYPE_EMPTY,     /* empty string */
-        MATCH_TYPE_PLAIN,     /* no special characters */
-        MATCH_TYPE_GLOB,      /* shell globs ?,*,[] */
-        MATCH_TYPE_SUBSYSTEM, /* "subsystem", "bus", or "class" */
+        MATCH_TYPE_EMPTY,            /* empty string */
+        MATCH_TYPE_PLAIN,            /* no special characters */
+        MATCH_TYPE_PLAIN_WITH_EMPTY, /* no special characters with empty string, e.g., "|foo" */
+        MATCH_TYPE_GLOB,             /* shell globs ?,*,[] */
+        MATCH_TYPE_GLOB_WITH_EMPTY,  /* shell globs ?,*,[] with empty string, e.g., "|foo*" */
+        MATCH_TYPE_SUBSYSTEM,        /* "subsystem", "bus", or "class" */
         _MATCH_TYPE_MAX,
         _MATCH_TYPE_INVALID = -1
 } UdevRuleMatchType;
@@ -67,6 +71,7 @@ typedef enum {
         TK_M_DEVLINK,                       /* strv, sd_device_get_devlink_first(), sd_device_get_devlink_next() */
         TK_M_NAME,                          /* string, name of network interface */
         TK_M_ENV,                           /* string, device property, takes key through attribute */
+        TK_M_CONST,                         /* string, system-specific hard-coded constant */
         TK_M_TAG,                           /* strv, sd_device_get_tag_first(), sd_device_get_tag_next() */
         TK_M_SUBSYSTEM,                     /* string, sd_device_get_subsystem() */
         TK_M_DRIVER,                        /* string, sd_device_get_driver() */
@@ -431,35 +436,30 @@ static int rule_line_add_token(UdevRuleLine *rule_line, UdevRuleTokenType type, 
 
                 if (type < TK_M_TEST || type == TK_M_RESULT) {
                         /* Convert value string to nulstr. */
-                        len = strlen(value);
-                        if (len > 1 && (value[len - 1] == '|' || strstr(value, "||"))) {
-                                /* In this case, just replacing '|' -> '\0' does not work... */
-                                _cleanup_free_ char *tmp = NULL;
-                                char *i, *j;
-                                bool v = true;
+                        bool bar = true, empty = false;
+                        char *a, *b;
 
-                                tmp = strdup(value);
-                                if (!tmp)
-                                        return log_oom();
+                        for (a = b = value; *a != '\0'; a++) {
+                                if (*a != '|') {
+                                        *b++ = *a;
+                                        bar = false;
+                                } else {
+                                        if (bar)
+                                                empty = true;
+                                        else
+                                                *b++ = '\0';
+                                        bar = true;
+                                }
+                        }
+                        *b = '\0';
+                        if (bar)
+                                empty = true;
 
-                                for (i = tmp, j = value; *i != '\0'; i++)
-                                        if (*i == '|')
-                                                v = true;
-                                        else {
-                                                if (v) {
-                                                        *j++ = '\0';
-                                                        v = false;
-                                                }
-                                                *j++ = *i;
-                                        }
-                                j[0] = j[1] = '\0';
-                        } else {
-                                /* Simple conversion. */
-                                char *i;
-
-                                for (i = value; *i != '\0'; i++)
-                                        if (*i == '|')
-                                                *i = '\0';
+                        if (empty) {
+                                if (match_type == MATCH_TYPE_GLOB)
+                                        match_type = MATCH_TYPE_GLOB_WITH_EMPTY;
+                                if (match_type == MATCH_TYPE_PLAIN)
+                                        match_type = MATCH_TYPE_PLAIN_WITH_EMPTY;
                         }
                 }
         }
@@ -498,6 +498,9 @@ static int rule_line_add_token(UdevRuleLine *rule_line, UdevRuleTokenType type, 
                         TK_A_OWNER, TK_A_GROUP, TK_A_MODE,
                         TK_A_OWNER_ID, TK_A_GROUP_ID, TK_A_MODE_ID))
                 SET_FLAG(rule_line->type, LINE_HAS_DEVLINK, true);
+
+        else if (token->type == TK_A_OPTIONS_STATIC_NODE)
+                SET_FLAG(rule_line->type, LINE_HAS_STATIC_NODE, true);
 
         else if (token->type >= _TK_A_MIN ||
                  IN_SET(token->type, TK_M_PROGRAM,
@@ -618,6 +621,12 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
                         r = rule_line_add_token(rule_line, TK_A_ENV, op, value, attr);
                 } else
                         r = rule_line_add_token(rule_line, TK_M_ENV, op, value, attr);
+        } else if (streq(key, "CONST")) {
+                if (isempty(attr) || !STR_IN_SET(attr, "arch", "virt"))
+                        return log_token_invalid_attr(rules, key);
+                if (!is_match)
+                        return log_token_invalid_op(rules, key);
+                r = rule_line_add_token(rule_line, TK_M_CONST, op, value, attr);
         } else if (streq(key, "TAG")) {
                 if (attr)
                         return log_token_invalid_attr(rules, key);
@@ -742,10 +751,7 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
                 if (op == OP_REMOVE)
                         return log_token_invalid_op(rules, key);
                 if (!is_match) {
-                        if (op == OP_ASSIGN)
-                                log_token_debug(rules, "Operator '=' is specified to %s key, assuming '=='.", key);
-                        else
-                                log_token_warning(rules, "%s key takes '==' or '!=' operator, assuming '==', but please fix it.", key);
+                        log_token_debug(rules, "%s key takes '==' or '!=' operator, assuming '=='.", key);
                         op = OP_MATCH;
                 }
 
@@ -757,10 +763,7 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
                 if (op == OP_REMOVE)
                         return log_token_invalid_op(rules, key);
                 if (!is_match) {
-                        if (op == OP_ASSIGN)
-                                log_token_debug(rules, "Operator '=' is specified to %s key, assuming '=='.", key);
-                        else
-                                log_token_warning(rules, "%s key takes '==' or '!=' operator, assuming '==', but please fix it.", key);
+                        log_token_debug(rules, "%s key takes '==' or '!=' operator, assuming '=='.", key);
                         op = OP_MATCH;
                 }
 
@@ -1325,7 +1328,17 @@ static bool token_match_string(UdevRuleToken *token, const char *str) {
                 match = isempty(str);
                 break;
         case MATCH_TYPE_SUBSYSTEM:
-                value = "subsystem\0class\0bus\0";
+                NULSTR_FOREACH(i, "subsystem\0class\0bus\0")
+                        if (streq(i, str)) {
+                                match = true;
+                                break;
+                        }
+                break;
+        case MATCH_TYPE_PLAIN_WITH_EMPTY:
+                if (isempty(str)) {
+                        match = true;
+                        break;
+                }
                 _fallthrough_;
         case MATCH_TYPE_PLAIN:
                 NULSTR_FOREACH(i, value)
@@ -1334,6 +1347,12 @@ static bool token_match_string(UdevRuleToken *token, const char *str) {
                                 break;
                         }
                 break;
+        case MATCH_TYPE_GLOB_WITH_EMPTY:
+                if (isempty(str)) {
+                        match = true;
+                        break;
+                }
+                _fallthrough_;
         case MATCH_TYPE_GLOB:
                 NULSTR_FOREACH(i, value)
                         if ((fnmatch(i, str, 0) == 0)) {
@@ -1558,6 +1577,17 @@ static int udev_rule_apply_token_to_event(
                         val = hashmap_get(properties_list, token->data);
 
                 return token_match_string(token, val);
+        case TK_M_CONST: {
+                const char *k = token->data;
+
+                if (streq(k, "arch"))
+                        val = architecture_to_string(uname_architecture());
+                else if (streq(k, "virt"))
+                        val = virtualization_to_string(detect_virtualization());
+                else
+                        assert_not_reached("Invalid CONST key");
+                return token_match_string(token, val);
+        }
         case TK_M_TAG:
         case TK_M_PARENTS_TAG:
                 FOREACH_DEVICE_TAG(dev, val)
@@ -1635,10 +1665,13 @@ static int udev_rule_apply_token_to_event(
                 log_rule_debug(dev, rules, "Running PROGRAM '%s'", buf);
 
                 r = udev_event_spawn(event, timeout_usec, true, buf, result, sizeof(result));
-                if (r < 0)
-                        return log_rule_error_errno(dev, rules, r, "Failed to execute '%s': %m", buf);
-                if (r > 0)
+                if (r != 0) {
+                        if (r < 0)
+                                log_rule_warning_errno(dev, rules, r, "Failed to execute '%s', ignoring: %m", buf);
+                        else /* returned value is positive when program fails */
+                                log_rule_debug(dev, rules, "Command \"%s\" returned %d (error), ignoring", buf, r);
                         return token->op == OP_NOMATCH;
+                }
 
                 delete_trailing_chars(result, "\n");
                 count = util_replace_chars(result, UDEV_ALLOWED_CHARS_INPUT);
@@ -1702,10 +1735,11 @@ static int udev_rule_apply_token_to_event(
                 log_rule_debug(dev, rules, "Importing properties from results of '%s'", buf);
 
                 r = udev_event_spawn(event, timeout_usec, true, buf, result, sizeof result);
-                if (r < 0)
-                        return log_rule_error_errno(dev, rules, r, "Failed to execute '%s': %m", buf);
-                if (r > 0) {
-                        log_rule_debug(dev, rules, "Command \"%s\" returned %d (error), ignoring", buf, r);
+                if (r != 0) {
+                        if (r < 0)
+                                log_rule_warning_errno(dev, rules, r, "Failed to execute '%s', ignoring: %m", buf);
+                        else /* returned value is positive when program fails */
+                                log_rule_debug(dev, rules, "Command \"%s\" returned %d (error), ignoring", buf, r);
                         return token->op == OP_NOMATCH;
                 }
 
@@ -2066,7 +2100,7 @@ static int udev_rule_apply_token_to_event(
                 (void) udev_event_apply_format(event, token->value, value, sizeof(value), false);
 
                 log_rule_debug(dev, rules, "ATTR '%s' writing '%s'", buf, value);
-                r = write_string_file(buf, value, WRITE_STRING_FILE_VERIFY_ON_FAILURE | WRITE_STRING_FILE_DISABLE_BUFFER);
+                r = write_string_file(buf, value, WRITE_STRING_FILE_VERIFY_ON_FAILURE | WRITE_STRING_FILE_DISABLE_BUFFER | WRITE_STRING_FILE_AVOID_NEWLINE);
                 if (r < 0)
                         log_rule_error_errno(dev, rules, r, "Failed to write ATTR{%s}, ignoring: %m", buf);
                 break;
@@ -2297,11 +2331,12 @@ static int apply_static_dev_perms(const char *devnode, uid_t uid, gid_t gid, mod
                 gid = 0;
 
         r = chmod_and_chown(device_node, mode, uid, gid);
+        if (r == -ENOENT)
+                return 0;
         if (r < 0)
-                return log_error_errno(errno, "Failed to chown '%s' %u %u: %m",
-                                               device_node, uid, gid);
+                return log_error_errno(r, "Failed to chown '%s' %u %u: %m", device_node, uid, gid);
         else
-                log_debug("chown '%s' %u:%u", device_node, uid, gid);
+                log_debug("chown '%s' %u:%u with mode %#o", device_node, uid, gid, mode);
 
         (void) utimensat(AT_FDCWD, device_node, NULL, 0);
         return 0;
@@ -2309,7 +2344,7 @@ static int apply_static_dev_perms(const char *devnode, uid_t uid, gid_t gid, mod
 
 static int udev_rule_line_apply_static_dev_perms(UdevRuleLine *rule_line) {
         UdevRuleToken *token;
-        _cleanup_free_ char **tags = NULL;
+        _cleanup_strv_free_ char **tags = NULL;
         uid_t uid = UID_INVALID;
         gid_t gid = GID_INVALID;
         mode_t mode = MODE_INVALID;

@@ -829,8 +829,8 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("LoadError", "(ss)", property_get_load_error, 0, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Transient", "b", bus_property_get_bool, offsetof(Unit, transient), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("Perpetual", "b", bus_property_get_bool, offsetof(Unit, perpetual), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("StartLimitIntervalUSec", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST),
-        SD_BUS_PROPERTY("StartLimitBurst", "u", bus_property_get_unsigned, offsetof(Unit, start_limit.burst), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("StartLimitIntervalUSec", "t", bus_property_get_usec, offsetof(Unit, start_ratelimit.interval), SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("StartLimitBurst", "u", bus_property_get_unsigned, offsetof(Unit, start_ratelimit.burst), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("StartLimitAction", "s", property_get_emergency_action, offsetof(Unit, start_limit_action), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("FailureAction", "s", property_get_emergency_action, offsetof(Unit, failure_action), SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("FailureActionExitStatus", "i", bus_property_get_int, offsetof(Unit, failure_action_exit_status), SD_BUS_VTABLE_PROPERTY_CONST),
@@ -862,8 +862,8 @@ const sd_bus_vtable bus_unit_vtable[] = {
         SD_BUS_PROPERTY("RequiredByOverridable", "as", property_get_empty_strv, 0, SD_BUS_VTABLE_HIDDEN),
         SD_BUS_PROPERTY("RequisiteOfOverridable", "as", property_get_empty_strv, 0, SD_BUS_VTABLE_HIDDEN),
         /* Obsolete alias names */
-        SD_BUS_PROPERTY("StartLimitInterval", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
-        SD_BUS_PROPERTY("StartLimitIntervalSec", "t", bus_property_get_usec, offsetof(Unit, start_limit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("StartLimitInterval", "t", bus_property_get_usec, offsetof(Unit, start_ratelimit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
+        SD_BUS_PROPERTY("StartLimitIntervalSec", "t", bus_property_get_usec, offsetof(Unit, start_ratelimit.interval), SD_BUS_VTABLE_PROPERTY_CONST|SD_BUS_VTABLE_HIDDEN),
         SD_BUS_VTABLE_END
 };
 
@@ -955,6 +955,52 @@ static int property_get_cpu_usage(
                 log_unit_warning_errno(u, r, "Failed to get cpuacct.usage attribute: %m");
 
         return sd_bus_message_append(reply, "t", ns);
+}
+
+static int property_get_cpuset_cpus(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Unit *u = userdata;
+        _cleanup_(cpu_set_reset) CPUSet cpus = {};
+        _cleanup_free_ uint8_t *array = NULL;
+        size_t allocated;
+
+        assert(bus);
+        assert(reply);
+        assert(u);
+
+        (void) unit_get_cpuset(u, &cpus, "cpuset.cpus.effective");
+        (void) cpu_set_to_dbus(&cpus, &array, &allocated);
+        return sd_bus_message_append_array(reply, 'y', array, allocated);
+}
+
+static int property_get_cpuset_mems(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Unit *u = userdata;
+        _cleanup_(cpu_set_reset) CPUSet mems = {};
+        _cleanup_free_ uint8_t *array = NULL;
+        size_t allocated;
+
+        assert(bus);
+        assert(reply);
+        assert(u);
+
+        (void) unit_get_cpuset(u, &mems, "cpuset.mems.effective");
+        (void) cpu_set_to_dbus(&mems, &array, &allocated);
+        return sd_bus_message_append_array(reply, 'y', array, allocated);
 }
 
 static int property_get_cgroup(
@@ -1306,6 +1352,8 @@ const sd_bus_vtable bus_unit_cgroup_vtable[] = {
         SD_BUS_PROPERTY("ControlGroup", "s", property_get_cgroup, 0, 0),
         SD_BUS_PROPERTY("MemoryCurrent", "t", property_get_current_memory, 0, 0),
         SD_BUS_PROPERTY("CPUUsageNSec", "t", property_get_cpu_usage, 0, 0),
+        SD_BUS_PROPERTY("EffectiveCPUs", "ay", property_get_cpuset_cpus, 0, 0),
+        SD_BUS_PROPERTY("EffectiveMemoryNodes", "ay", property_get_cpuset_mems, 0, 0),
         SD_BUS_PROPERTY("TasksCurrent", "t", property_get_current_tasks, 0, 0),
         SD_BUS_PROPERTY("IPIngressBytes", "t", property_get_ip_counter, 0, 0),
         SD_BUS_PROPERTY("IPIngressPackets", "t", property_get_ip_counter, 0, 0),
@@ -1825,10 +1873,10 @@ static int bus_unit_set_transient_property(
                 return bus_set_transient_string(u, name, &u->job_timeout_reboot_arg, message, flags, error);
 
         if (streq(name, "StartLimitIntervalUSec"))
-                return bus_set_transient_usec(u, name, &u->start_limit.interval, message, flags, error);
+                return bus_set_transient_usec(u, name, &u->start_ratelimit.interval, message, flags, error);
 
         if (streq(name, "StartLimitBurst"))
-                return bus_set_transient_unsigned(u, name, &u->start_limit.burst, message, flags, error);
+                return bus_set_transient_unsigned(u, name, &u->start_ratelimit.burst, message, flags, error);
 
         if (streq(name, "StartLimitAction"))
                 return bus_set_transient_emergency_action(u, name, &u->start_limit_action, message, flags, error);

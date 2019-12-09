@@ -1,11 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <fcntl.h>
-#include <linux/magic.h>
-#if HAVE_ACL
-#include <sys/acl.h>
-#endif
-#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/vfs.h>
 #include <unistd.h>
@@ -14,7 +9,7 @@
 #include "dirent-util.h"
 #include "fd-util.h"
 #include "fs-util.h"
-#include "missing.h"
+#include "missing_magic.h"
 #include "nspawn-def.h"
 #include "nspawn-patch-uid.h"
 #include "stat-util.h"

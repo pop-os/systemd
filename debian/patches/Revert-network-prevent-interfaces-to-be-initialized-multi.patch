@@ -12,10 +12,10 @@ This reverts commit bd08ce56156751d58584a44e766ef61340cdae2d.
  2 files changed, 11 insertions(+), 15 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 860dd0a..41db04f 100644
+index 65b6086..b8ff6a5 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -1232,7 +1232,7 @@ static int set_mtu_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
+@@ -1316,7 +1316,7 @@ static int set_mtu_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
          else
                  log_link_debug(link, "Setting MTU done.");
  
@@ -24,7 +24,7 @@ index 860dd0a..41db04f 100644
                  r = link_configure_after_setting_mtu(link);
                  if (r < 0)
                          link_enter_failed(link);
-@@ -2068,7 +2068,7 @@ static int link_enter_join_netdev(Link *link) {
+@@ -2150,7 +2150,7 @@ static int link_enter_join_netdev(Link *link) {
  
          assert(link);
          assert(link->network);
@@ -33,16 +33,16 @@ index 860dd0a..41db04f 100644
  
          link_set_state(link, LINK_STATE_CONFIGURING);
  
-@@ -2516,7 +2516,7 @@ static int link_configure(Link *link) {
+@@ -2620,7 +2620,7 @@ static int link_configure(Link *link) {
  
          assert(link);
          assert(link->network);
 -        assert(link->state == LINK_STATE_INITIALIZED);
 +        assert(link->state == LINK_STATE_PENDING);
  
-         if (link->iftype == ARPHRD_CAN)
-                 return link_configure_can(link);
-@@ -2641,7 +2641,7 @@ static int link_configure_after_setting_mtu(Link *link) {
+         r = link_configure_qdiscs(link);
+         if (r < 0)
+@@ -2749,7 +2749,7 @@ static int link_configure_after_setting_mtu(Link *link) {
  
          assert(link);
          assert(link->network);
@@ -51,7 +51,7 @@ index 860dd0a..41db04f 100644
  
          if (link->setting_mtu)
                  return 0;
-@@ -2798,11 +2798,10 @@ static int link_initialized_and_synced(Link *link) {
+@@ -2978,11 +2978,10 @@ static int link_initialized_and_synced(Link *link) {
  
          /* We may get called either from the asynchronous netlink callback,
           * or directly for link_add() if running in a container. See link_add(). */
@@ -64,7 +64,7 @@ index 860dd0a..41db04f 100644
  
          r = link_new_bound_by_list(link);
          if (r < 0)
-@@ -2882,7 +2881,6 @@ int link_initialized(Link *link, sd_device *device) {
+@@ -3066,7 +3065,6 @@ int link_initialized(Link *link, sd_device *device) {
                  return 0;
  
          log_link_debug(link, "udev initialized link");
@@ -72,7 +72,7 @@ index 860dd0a..41db04f 100644
  
          link->sd_device = sd_device_ref(device);
  
-@@ -3845,7 +3843,6 @@ void link_clean(Link *link) {
+@@ -4053,7 +4051,6 @@ void link_clean(Link *link) {
  
  static const char* const link_state_table[_LINK_STATE_MAX] = {
          [LINK_STATE_PENDING] = "pending",
@@ -81,10 +81,10 @@ index 860dd0a..41db04f 100644
          [LINK_STATE_CONFIGURED] = "configured",
          [LINK_STATE_UNMANAGED] = "unmanaged",
 diff --git a/src/network/networkd-link.h b/src/network/networkd-link.h
-index 3eff6fb..91ff103 100644
+index c8b8241..172077f 100644
 --- a/src/network/networkd-link.h
 +++ b/src/network/networkd-link.h
-@@ -23,13 +23,12 @@
+@@ -24,13 +24,12 @@
  #include "set.h"
  
  typedef enum LinkState {

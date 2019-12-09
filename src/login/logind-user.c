@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <errno.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -850,7 +849,6 @@ int config_parse_compat_user_tasks_max(
         assert(filename);
         assert(lvalue);
         assert(rvalue);
-        assert(data);
 
         log_syntax(unit, LOG_NOTICE, filename, line, 0,
                    "Support for option %s= has been removed.",

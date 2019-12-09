@@ -5,7 +5,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -14,7 +13,7 @@
 #include "fs-util.h"
 #include "log.h"
 #include "macro.h"
-#include "missing.h"
+#include "missing_socket.h"
 #include "mkdir.h"
 #include "selinux-util.h"
 #include "socket-util.h"
