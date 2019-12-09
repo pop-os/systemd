@@ -1,10 +1,41 @@
-systemd (243-3ubuntu2) focal; urgency=medium
+systemd (243-3ubuntu2) UNRELEASED; urgency=medium
 
-  * fix issues with muliplexed shmat calls (LP: #1853852)
-    - d/p/lp-1853852-*: add upstream backports
-    - drop d/p/test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch
+  [ Dan Streetman ]
+  * Remove tempfile used by dhclient-enter-resolved-hook
+    File: debian/extra/dhclient-enter-resolved-hook
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=00a0d3997f7f9664df5cc2d7f96622e8c641f3e5
 
- -- Christian Ehrhardt <christian.ehrhardt@canonical.com>  Mon, 09 Dec 2019 12:57:07 +0100
+  [ Mario Limonciello ]
+  * Mark USB devices for automatic suspend that are safe to do so.
+    Backport the following commits from systemd master (which will be part
+    of 244 release)
+    - b61d777abeecd8b6c76035e11899aae210633534
+    - 13cd6f0b982f1aca52ba989b1e86d04ff8276873
+    - f10bb2ce032d939e0fce26ef76fe2c38e3e1af77
+    - 0490b44031f0406ad053e150349666605b22ab15
+    File: debian/patches/rules-Add-automatic-suspend-udev-rules.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c654d5bf873f151fa9a2bd653b3900ae54314efb
+
+  [ Dimitri John Ledkov ]
+  * bootctl: uc20: Load LoadOptions cmdline if none is otherwise available.
+    File: debian/patches/boot-Load-LoadOptions-cmdline-if-none-is-available.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7e9666f7fb757fb6b5df07edbc38466e97c05aa4
+
+  [ Christian Ehrhardt ]
+  * drop d/p/test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch.
+    File: debian/patches/test-expect-mmap-to-fail-in-seccomp-test-on-s390-and-s390.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2edd57973b9342d46d5d4095d80dfe0969cd08e4
+  * d/p/lp-1853852-*: fix issues with muliplexed shmat calls (LP: #1853852)
+    Author: Christian Ehrhardt
+    Files:
+    - debian/patches/lp-1853852-seccomp-fix-multiplexed-system-calls.patch
+    - debian/patches/lp-1853852-seccomp-mmap-test-results-depend-on-kernel-libseccom.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=382271662c60c339b0a404c7a1772fe5670516ef
+  * changelog: fix issues with muliplexed shmat calls (LP: #1853852)
+    File: debian/changelog
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7048d92d071e70e5b17989ae2e03c996c843df78
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 09 Dec 2019 15:37:29 +0100
 
 systemd (243-3ubuntu1) focal; urgency=medium
 
