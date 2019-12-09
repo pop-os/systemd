@@ -118,3 +118,5 @@ Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
 Revert-network-fix-assertion-when-link-get-carrier.patch
 Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 rules-Add-automatic-suspend-udev-rules.patch
+lp-1853852-seccomp-fix-multiplexed-system-calls.patch
+lp-1853852-seccomp-mmap-test-results-depend-on-kernel-libseccom.patch
