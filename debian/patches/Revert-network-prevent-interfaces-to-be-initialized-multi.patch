@@ -7,12 +7,12 @@ The change broke netplan.io's ethernets autopkgtest.
 
 This reverts commit bd08ce56156751d58584a44e766ef61340cdae2d.
 ---
- src/network/networkd-link.c | 13 +++++--------
+ src/network/networkd-link.c | 15 ++++++---------
  src/network/networkd-link.h | 13 ++++++-------
- 2 files changed, 11 insertions(+), 15 deletions(-)
+ 2 files changed, 12 insertions(+), 16 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 65b6086..b8ff6a5 100644
+index 65b6086..b41ac2a 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -1316,7 +1316,7 @@ static int set_mtu_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
@@ -51,6 +51,15 @@ index 65b6086..b8ff6a5 100644
  
          if (link->setting_mtu)
                  return 0;
+@@ -2953,7 +2953,7 @@ int link_reconfigure(Link *link, bool force) {
+         if (r < 0)
+                 return r;
+ 
+-        link_set_state(link, LINK_STATE_INITIALIZED);
++        link_set_state(link, LINK_STATE_PENDING);
+ 
+         /* link_configure_duid() returns 0 if it requests product UUID. In that case,
+          * link_configure() is called later asynchronously. */
 @@ -2978,11 +2978,10 @@ static int link_initialized_and_synced(Link *link) {
  
          /* We may get called either from the asynchronous netlink callback,
