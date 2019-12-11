@@ -39,3 +39,4 @@ Revert-network-fix-assertion-when-link-get-carrier.patch
 Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 lp-1853852-seccomp-fix-multiplexed-system-calls.patch
 lp-1853852-seccomp-mmap-test-results-depend-on-kernel-libseccom.patch
+debian/UBUNTU-resolved-default-no-negative-caching.patch
