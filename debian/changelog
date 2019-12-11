@@ -1,3 +1,26 @@
+systemd (244-3ubuntu1) UNRELEASED; urgency=medium
+
+  [ Dimitri John Ledkov ]
+  * config: tpm-pcrindex=12, on Ubuntu only.
+    In Ubuntu, we are trying to integrate measured boot with either bootctl or
+    grub, or sometimes both using chainloading. In those cases we may want to seal
+    against grub's PCRs, bootctl stub PCRs, or both at the same time. To achieve
+    that, we wouldn't like to decouple grub's & bootctl's PCR and make the latter
+    one use PCR #12.
+    Author: Dimitri John Ledkov
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f8c22d44a619ce8fa17eb0cd7c7e2c601cdbbeb
+
+  [ Balint Reczey ]
+  * Update patch with LINK_STATE_INITIALIZED
+    File: debian/patches/Revert-network-prevent-interfaces-to-be-initialized-multi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4443c4a7b6ad1b17d7c1bfa76c25878b4b8e29f2
+  * debian/rules: Set -Duser-path instead of patching the source for the same result
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=67d2ac5d806b55b0d178fca7e0af08cd9d12580c
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 11 Dec 2019 19:39:31 +0100
+
 systemd (244-3) unstable; urgency=medium
 
   * Update udev-udeb to use 73-usb-net-by-mac.link
