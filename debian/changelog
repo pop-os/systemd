@@ -192,6 +192,9 @@ systemd (244-3ubuntu1) UNRELEASED; urgency=medium
   * debian/rules: Set -Duser-path instead of patching the source for the same result
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=67d2ac5d806b55b0d178fca7e0af08cd9d12580c
+  * systemd-resolved: Default to Cache=no-negative
+    File: debian/patches/debian/UBUNTU-resolved-default-no-negative-caching.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b42658843a9496d6b6bb68ac159f2a9f0a8ba9db
 
   [ Dan Streetman ]
   * Remove tempfile used by dhclient-enter-resolved-hook
@@ -223,7 +226,7 @@ systemd (244-3ubuntu1) UNRELEASED; urgency=medium
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f8c22d44a619ce8fa17eb0cd7c7e2c601cdbbeb
 
- -- Balint Reczey <rbalint@ubuntu.com>  Wed, 11 Dec 2019 19:39:31 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 11 Dec 2019 22:05:16 +0100
 
 systemd (244-3) unstable; urgency=medium
 
