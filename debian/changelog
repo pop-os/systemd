@@ -4,9 +4,6 @@ systemd (244-3ubuntu1) UNRELEASED; urgency=medium
   * Merge to Ubuntu from Debian unstable
   * Refresh patches:
     - Dropped changes:
-      * core: Revert strict mount namespacing/sandboxing, until LXD allows the needed mounts.
-        File: debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
-        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=030919ba5e4931d6ee576d0259fae67fe4ed9770
       * d/t/control: mark udev test skippable.
         File: debian/tests/control
         https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c3419bd2a30a78d05cca9c38e50c9726de7e7632
@@ -64,6 +61,9 @@ systemd (244-3ubuntu1) UNRELEASED; urgency=medium
       * libnss-resolve: do not disable and stop systemd-resolved
         File: debian/libnss-resolve.postrm
         https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=95577d14e84e19b614b83b2e24985d89e8c2dac0
+      * core: Revert strict mount namespacing/sandboxing, until LXD allows the needed mounts.
+        File: debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=030919ba5e4931d6ee576d0259fae67fe4ed9770
       * Add "AssumedApparmorLabel=unconfined" to timedate1 dbus service file
         File: debian/patches/debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
         https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5ad0879e10bbe3d641f940260b93c7eb2cf4624c
@@ -226,7 +226,7 @@ systemd (244-3ubuntu1) UNRELEASED; urgency=medium
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f8c22d44a619ce8fa17eb0cd7c7e2c601cdbbeb
 
- -- Balint Reczey <rbalint@ubuntu.com>  Wed, 11 Dec 2019 22:05:16 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 12 Dec 2019 13:03:05 +0100
 
 systemd (244-3) unstable; urgency=medium
 
