@@ -1,4 +1,4 @@
-systemd (244-3ubuntu1) UNRELEASED; urgency=medium
+systemd (244-3ubuntu1) focal; urgency=medium
 
   [ Balint Reczey ]
   * Merge to Ubuntu from Debian unstable
@@ -226,7 +226,7 @@ systemd (244-3ubuntu1) UNRELEASED; urgency=medium
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f8c22d44a619ce8fa17eb0cd7c7e2c601cdbbeb
 
- -- Balint Reczey <rbalint@ubuntu.com>  Thu, 12 Dec 2019 13:03:05 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 13 Dec 2019 19:05:14 +0100
 
 systemd (244-3) unstable; urgency=medium
 
