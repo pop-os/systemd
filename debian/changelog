@@ -15,8 +15,12 @@ systemd (244.1-0ubuntu1) UNRELEASED; urgency=medium
     boot-and-services autopkgtest fail. (LP: #1856729)
     File: debian/patches/pstore-Don-t-start-systemd-pstore.service-in-containers.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=28b5a03769cbed9d3170ebac38508b867530a2d6
+  * Revert: network: do not drop foreign config if interface is in initialized state.
+    This fixes FTBFS with the other network-related reverts.
+    File: debian/patches/Revert-network-do-not-drop-foreign-config-if-interface-is.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=22a9fa3bb03ba2a629926af39ea7df81fe33c9b8
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 17 Dec 2019 20:38:45 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 17 Dec 2019 21:41:20 +0100
 
 systemd (244-3ubuntu1) focal; urgency=medium
 
