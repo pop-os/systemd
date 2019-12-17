@@ -1,3 +1,18 @@
+systemd (244.1-0ubuntu1) UNRELEASED; urgency=medium
+
+  * New upstream version 244.1
+    - network: set ipv6 mtu after link-up or device mtu change (LP: #1671951)
+    - & other changes
+  * Refresh patches.
+    - Dropped changes:
+      * d/p/lp-1853852-*: fix issues with muliplexed shmat calls (LP: #1853852)
+        Files:
+        - debian/patches/lp-1853852-seccomp-fix-multiplexed-system-calls.patch
+        - debian/patches/lp-1853852-seccomp-mmap-test-results-depend-on-kernel-libseccom.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=382271662c60c339b0a404c7a1772fe5670516ef
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 17 Dec 2019 20:27:26 +0100
+
 systemd (244-3ubuntu1) focal; urgency=medium
 
   [ Balint Reczey ]
