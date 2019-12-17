@@ -10,8 +10,13 @@ systemd (244.1-0ubuntu1) UNRELEASED; urgency=medium
         - debian/patches/lp-1853852-seccomp-fix-multiplexed-system-calls.patch
         - debian/patches/lp-1853852-seccomp-mmap-test-results-depend-on-kernel-libseccom.patch
         https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=382271662c60c339b0a404c7a1772fe5670516ef
+  * pstore: Don't start systemd-pstore.service in containers.
+    Usually it is not useful and can also fail making
+    boot-and-services autopkgtest fail. (LP: #1856729)
+    File: debian/patches/pstore-Don-t-start-systemd-pstore.service-in-containers.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=28b5a03769cbed9d3170ebac38508b867530a2d6
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 17 Dec 2019 20:27:26 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 17 Dec 2019 20:38:45 +0100
 
 systemd (244-3ubuntu1) focal; urgency=medium
 
