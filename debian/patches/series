@@ -40,3 +40,4 @@ Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
 Revert-network-fix-assertion-when-link-get-carrier.patch
 Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
+Revert-network-do-not-drop-foreign-config-if-interface-is.patch
