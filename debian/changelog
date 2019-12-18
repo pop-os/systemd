@@ -1,4 +1,4 @@
-systemd (244.1-0ubuntu1) UNRELEASED; urgency=medium
+systemd (244.1-0ubuntu1) focal; urgency=medium
 
   * New upstream version 244.1
     - network: set ipv6 mtu after link-up or device mtu change (LP: #1671951)
@@ -20,7 +20,7 @@ systemd (244.1-0ubuntu1) UNRELEASED; urgency=medium
     File: debian/patches/Revert-network-do-not-drop-foreign-config-if-interface-is.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=22a9fa3bb03ba2a629926af39ea7df81fe33c9b8
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 17 Dec 2019 21:41:20 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 18 Dec 2019 21:40:27 +0100
 
 systemd (244-3ubuntu1) focal; urgency=medium
 
