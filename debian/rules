@@ -24,10 +24,8 @@ endif
 # fail on missing files and symbols changes on distro builds, but not if we
 # build/test upstream master
 ifeq ($(TEST_UPSTREAM),)
-    DH_MISSING = --fail-missing
     GENSYMBOLS_LEVEL = 4
 else
-    DH_MISSING = --list-missing
     GENSYMBOLS_LEVEL = 1
 endif
 
@@ -271,7 +269,13 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 endif
 
 override_dh_missing:
-	dh_missing --sourcedir debian/install/deb $(DH_MISSING)
+ifeq ($(TEST_UPSTREAM),)
+	dh_missing --sourcedir debian/install/deb --fail-missing
+else
+        # build/test upstream master, install all the missing things into systemd package
+	-dh_missing --sourcedir debian/install/deb --list-missing 2>&1 | sed -n 's|dh_missing: \(.*\) exists in debian/install/deb but is not installed to anywhere|\1|p' | xargs --verbose -L1 dh_install --sourcedir debian/install/deb -psystemd
+endif
+
 
 override_dh_installinit:
 	dh_installinit --no-start
