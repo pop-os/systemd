@@ -22,6 +22,13 @@ systemd (244.1-0ubuntu1) focal; urgency=medium
 
  -- Balint Reczey <rbalint@ubuntu.com>  Wed, 18 Dec 2019 21:40:27 +0100
 
+systemd (244-3ubuntu2) focal; urgency=medium
+
+  * d/p/debian/UBUNTU-Support-system-image-read-only-etc.patch:
+    - re-add missing bits for timedated.c (LP: #1778936)
+
+ -- Michael Vogt <michael.vogt@ubuntu.com>  Wed, 08 Jan 2020 16:15:05 +0100
+
 systemd (244-3ubuntu1) focal; urgency=medium
 
   [ Balint Reczey ]
