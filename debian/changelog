@@ -22,6 +22,15 @@ systemd (244.1-0ubuntu1) focal; urgency=medium
 
  -- Balint Reczey <rbalint@ubuntu.com>  Wed, 18 Dec 2019 21:40:27 +0100
 
+systemd (244-3ubuntu3) focal; urgency=medium
+
+  * shutdown: cherry-pick PR#14409 to fix detach of loopback devices
+    for Ubuntu Core 20
+    File: debian/patches/shutdown-modernizations-pr-14409.patch
+    https://github.com/systemd/systemd/pull/14409.diff
+
+ -- Michael Vogt <michael.vogt@ubuntu.com>  Fri, 10 Jan 2020 10:08:42 +0100
+
 systemd (244-3ubuntu2) focal; urgency=medium
 
   * d/p/debian/UBUNTU-Support-system-image-read-only-etc.patch:

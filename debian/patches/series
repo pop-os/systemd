@@ -42,3 +42,4 @@ Revert-network-fix-assertion-when-link-get-carrier.patch
 Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
 Revert-network-do-not-drop-foreign-config-if-interface-is.patch
+shutdown-modernizations-pr-14409.patch
