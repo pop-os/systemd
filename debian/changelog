@@ -22,6 +22,19 @@ systemd (244.1-0ubuntu1) focal; urgency=medium
 
  -- Balint Reczey <rbalint@ubuntu.com>  Wed, 18 Dec 2019 21:40:27 +0100
 
+systemd (244-3ubuntu4) focal; urgency=medium
+
+  * d/p/lp1671951-network-set-ipv6-mtu-after-link-up-or-device-mtu-cha.patch:
+    set ipv6 mtu at correct time (LP: #1671951)
+  * d/p/0001-network-rename-linux_configure_after_setting_mtu-to-linux.patch,
+    d/p/0002-network-add-link-setting_genmode-flag.patch,
+    d/p/0003-network-if-ipv6ll-is-disabled-enumerate-tentative-ipv6-ad.patch,
+    d/p/0004-network-drop-foreign-config-after-addr_gen_mode-has-been-.patch:
+    - drop foreign config and raise interface after setting genmode
+      (LP: #1845909)
+
+ -- Dan Streetman <ddstreet@canonical.com>  Tue, 14 Jan 2020 14:01:15 -0500
+
 systemd (244-3ubuntu3) focal; urgency=medium
 
   * shutdown: cherry-pick PR#14409 to fix detach of loopback devices

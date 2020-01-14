@@ -1,0 +1,75 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Mon, 6 Jan 2020 16:35:28 -0500
+Subject: network: drop foreign config after addr_gen_mode has been set
+Bug: https://github.com/systemd/systemd/issues/13882
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1845909
+Origin: upstream, https://github.com/systemd/systemd/pull/13927
+
+Interfaces may come up at any time, even during our initialization of
+them, for various reasons; e.g. the kernel will raise VLAN when its
+parent is raised; or we will raise an interface if configured with
+BindCarrier and its associated interfaces come up.
+
+When LinkLocalAddressing has been disabled for ipv6, we disable
+addr_gen_mode in the kernel, so it will not automatically create a
+ipv6ll address when the interface is raised.  However, we currently
+drop all foreign addresses before disabling addr_gen_mode.
+
+If the link has been up for a long time, then its kernel-created ipv6ll
+address will be correctly dropped.  If the link is down, and stays
+down until we raise it after finishing configuration, the addr_gen_mode
+setting will be disabled when the interface is raised and the kernel
+will not create any ipv6ll address.
+
+However, if the interface is raised after dropping foreign config,
+but before we have disabled addr_gen_mode, the kernel will create a
+ipv6ll tentative address that will eventually finish DAD and become a
+working ipv6ll address, even though we have been configured to disable
+ipv6ll.
+
+Moving our call to drop foreign addresses to after we have successfully
+set addr_gen_mode closes this window; after we disable addr_gen_mode,
+we can safely remove foreign ipv6ll addresses (including tentative ones)
+and be sure that the kernel will not create any more.
+
+Fixes: #13882.
+---
+ src/network/networkd-link.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 6529412..b8f74d7 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -2704,15 +2704,6 @@ static int link_configure(Link *link) {
+         if (link->iftype == ARPHRD_CAN)
+                 return link_configure_can(link);
+ 
+-        /* Drop foreign config, but ignore loopback or critical devices.
+-         * We do not want to remove loopback address or addresses used for root NFS. */
+-        if (!(link->flags & IFF_LOOPBACK) &&
+-            link->network->keep_configuration != KEEP_CONFIGURATION_YES) {
+-                r = link_drop_foreign_config(link);
+-                if (r < 0)
+-                        return r;
+-        }
+-
+         /* If IPv6 configured that is static IPv6 address and IPv6LL autoconfiguration is enabled
+          * for this interface, then enable IPv6 */
+         (void) link_update_ipv6_sysctl(link);
+@@ -2837,6 +2828,15 @@ static int link_configure_continue(Link *link) {
+         if (link->setting_mtu || link->setting_genmode)
+                 return 0;
+ 
++        /* Drop foreign config, but ignore loopback or critical devices.
++         * We do not want to remove loopback address or addresses used for root NFS. */
++        if (!(link->flags & IFF_LOOPBACK) &&
++            link->network->keep_configuration != KEEP_CONFIGURATION_YES) {
++                r = link_drop_foreign_config(link);
++                if (r < 0)
++                        return r;
++        }
++
+         /* The kernel resets ipv6 mtu after changing device mtu;
+          * we must set this here, after we've set device mtu */
+         r = link_set_ipv6_mtu(link);

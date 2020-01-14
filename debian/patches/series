@@ -43,3 +43,8 @@ Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
 Revert-network-do-not-drop-foreign-config-if-interface-is.patch
 shutdown-modernizations-pr-14409.patch
+lp1671951-network-set-ipv6-mtu-after-link-up-or-device-mtu-cha.patch
+lp1845909/0001-network-rename-linux_configure_after_setting_mtu-to-linux.patch
+lp1845909/0002-network-add-link-setting_genmode-flag.patch
+lp1845909/0003-network-if-ipv6ll-is-disabled-enumerate-tentative-ipv6-ad.patch
+lp1845909/0004-network-drop-foreign-config-after-addr_gen_mode-has-been-.patch

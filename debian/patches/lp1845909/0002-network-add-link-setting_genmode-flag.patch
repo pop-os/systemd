@@ -1,0 +1,83 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Thu, 19 Dec 2019 13:17:45 -0500
+Subject: network: add link->setting_genmode flag
+Bug: https://github.com/systemd/systemd/issues/13882
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1845909
+Origin: upstream, https://github.com/systemd/systemd/pull/13927
+
+Similar to the link->setting_mtu flag, this delays continued configuration
+until after the genmode has been successfully set; this is important
+because we do not want networkd to raise the interface before the genmode
+has been set, as if we're disabling the genmode, raising the interface
+before we have successfully disabled the genmode will result in the kernel
+creating a ipv6ll address, even though we don't want that.
+---
+ src/network/networkd-link.c | 15 +++++++++++++--
+ src/network/networkd-link.h |  1 +
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 4d0d74c..bcabbdc 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -1586,12 +1586,22 @@ static int link_address_genmode_handler(sd_netlink *rtnl, sd_netlink_message *m,
+ 
+         assert(link);
+ 
++        link->setting_genmode = false;
++
+         if (IN_SET(link->state, LINK_STATE_FAILED, LINK_STATE_LINGER))
+                 return 1;
+ 
+         r = sd_netlink_message_get_errno(m);
+         if (r < 0)
+                 log_link_warning_errno(link, r, "Could not set address genmode for interface, ignoring: %m");
++        else
++                log_link_debug(link, "Setting address genmode done.");
++
++        if (link->state == LINK_STATE_PENDING) {
++                r = link_configure_continue(link);
++                if (r < 0)
++                        link_enter_failed(link);
++        }
+ 
+         return 1;
+ }
+@@ -1606,7 +1616,7 @@ static int link_configure_addrgen_mode(Link *link) {
+         assert(link->manager);
+         assert(link->manager->rtnl);
+ 
+-        if (!socket_ipv6_is_supported())
++        if (!socket_ipv6_is_supported() || link->setting_genmode)
+                 return 0;
+ 
+         log_link_debug(link, "Setting address genmode for link");
+@@ -1650,6 +1660,7 @@ static int link_configure_addrgen_mode(Link *link) {
+                 return log_link_error_errno(link, r, "Could not send rtnetlink message: %m");
+ 
+         link_ref(link);
++        link->setting_genmode = true;
+ 
+         return 0;
+ }
+@@ -2773,7 +2784,7 @@ static int link_configure_continue(Link *link) {
+         assert(link->network);
+         assert(link->state == LINK_STATE_PENDING);
+ 
+-        if (link->setting_mtu)
++        if (link->setting_mtu || link->setting_genmode)
+                 return 0;
+ 
+         /* The kernel resets ipv6 mtu after changing device mtu;
+diff --git a/src/network/networkd-link.h b/src/network/networkd-link.h
+index 6492344..3f07a2c 100644
+--- a/src/network/networkd-link.h
++++ b/src/network/networkd-link.h
+@@ -115,6 +115,7 @@ typedef struct Link {
+         bool routing_policy_rules_configured:1;
+         bool qdiscs_configured:1;
+         bool setting_mtu:1;
++        bool setting_genmode:1;
+         bool ipv6_mtu_set:1;
+ 
+         LIST_HEAD(Address, pool_addresses);

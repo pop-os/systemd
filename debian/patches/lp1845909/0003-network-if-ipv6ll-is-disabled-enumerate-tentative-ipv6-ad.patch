@@ -1,0 +1,90 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Sat, 4 Jan 2020 18:41:18 -0500
+Subject: network: if ipv6ll is disabled,
+ enumerate tentative ipv6 addrs before dropping foreign addrs
+Bug: https://github.com/systemd/systemd/issues/13882
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1845909
+Origin: upstream, https://github.com/systemd/systemd/pull/13927
+
+The kernel will create an ipv6ll tentative address immediately when an
+interface is raised if addr_gen_mode is not disabled; and, the kernel does
+not notify netlink listeners about any tentative addresses.  So it's
+possible for an interface to contain tentative ipv6 link-local address(es)
+that networkd doesn't know about when all foreign addresses are dropped.
+
+In this case, networkd is later notified about the new ipv6ll address(es)
+after they finish DAD and are no longer tentative; but since that's after
+networkd has already dropped foreign addresses, they are incorrectly left
+on the interface.
+---
+ src/network/networkd-link.c | 50 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index bcabbdc..6529412 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -2494,6 +2494,48 @@ static bool link_address_is_dynamic(Link *link, Address *address) {
+         return false;
+ }
+ 
++static int link_enumerate_ipv6_tentative_addresses(Link *link) {
++        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL, *reply = NULL;
++        sd_netlink_message *addr;
++        int r;
++
++        assert(link);
++        assert(link->manager);
++        assert(link->manager->rtnl);
++
++        r = sd_rtnl_message_new_addr(link->manager->rtnl, &req, RTM_GETADDR, 0, AF_INET6);
++        if (r < 0)
++                return r;
++
++        r = sd_netlink_call(link->manager->rtnl, req, 0, &reply);
++        if (r < 0)
++                return r;
++
++        for (addr = reply; addr; addr = sd_netlink_message_next(addr)) {
++                unsigned char flags;
++                int ifindex;
++
++                r = sd_rtnl_message_addr_get_ifindex(addr, &ifindex);
++                if (r < 0) {
++                        log_link_warning_errno(link, r, "rtnl: invalid ifindex, ignoring: %m");
++                        continue;
++                } else if (link->ifindex != ifindex)
++                        continue;
++
++                r = sd_rtnl_message_addr_get_flags(addr, &flags);
++                if (r < 0) {
++                        log_link_warning_errno(link, r, "rtnl: received address message with invalid flags, ignoring: %m");
++                        continue;
++                } else if (!(flags & IFA_F_TENTATIVE))
++                        continue;
++
++                log_link_debug(link, "Found tentative ipv6 link-local address");
++                (void) manager_rtnl_process_address(link->manager->rtnl, addr, link->manager);
++        }
++
++        return 0;
++}
++
+ static int link_drop_foreign_config(Link *link) {
+         Address *address;
+         Neighbor *neighbor;
+@@ -2501,6 +2543,14 @@ static int link_drop_foreign_config(Link *link) {
+         Iterator i;
+         int r;
+ 
++        /* The kernel doesn't notify us about tentative addresses;
++         * so if ipv6ll is disabled, we need to enumerate them now so we can drop them below */
++        if (!link_ipv6ll_enabled(link)) {
++                r = link_enumerate_ipv6_tentative_addresses(link);
++                if (r < 0)
++                        return r;
++        }
++
+         SET_FOREACH(address, link->addresses_foreign, i) {
+                 /* we consider IPv6LL addresses to be managed by the kernel */
+                 if (address->family == AF_INET6 && in_addr_is_link_local(AF_INET6, &address->in_addr) == 1 && link_ipv6ll_enabled(link))
