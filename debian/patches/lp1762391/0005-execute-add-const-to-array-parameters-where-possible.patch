@@ -1,0 +1,32 @@
+From 5b8d1f6b7757781eb55ac15a1e079dcb7bc6792a Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 15 Jan 2020 17:08:25 +0100
+Subject: [PATCH] execute: add const to array parameters, where possible
+Bug: https://github.com/systemd/systemd/issues/14567
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762391
+Origin: upstream, https://github.com/systemd/systemd/pull/14581
+
+---
+ src/core/execute.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -1125,7 +1125,7 @@ static int setup_pam(
+                 gid_t gid,
+                 const char *tty,
+                 char ***env,
+-                int fds[], size_t n_fds) {
++                const int fds[], size_t n_fds) {
+ 
+ #if HAVE_PAM
+ 
+@@ -2805,7 +2805,7 @@ static int close_remaining_fds(
+                 int user_lookup_fd,
+                 int socket_fd,
+                 int exec_fd,
+-                int *fds, size_t n_fds) {
++                const int *fds, size_t n_fds) {
+ 
+         size_t n_dont_close = 0;
+         int dont_close[n_fds + 12];

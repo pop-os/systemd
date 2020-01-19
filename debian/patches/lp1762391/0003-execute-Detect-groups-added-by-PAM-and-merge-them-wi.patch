@@ -1,0 +1,61 @@
+From afb11bf1b8433f642062384964b6c3efe8b226b1 Mon Sep 17 00:00:00 2001
+From: Dariusz Gadomski <dgadomski@gmail.com>
+Date: Wed, 8 Jan 2020 16:24:45 +0100
+Subject: [PATCH 3/3] execute: Detect groups added by PAM and merge them with
+ supplementary groups
+Bug: https://github.com/systemd/systemd/issues/11198
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762391
+Origin: upstream, https://github.com/systemd/systemd/pull/11199
+
+---
+ src/core/execute.c | 25 ++++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -3017,6 +3017,8 @@ static int exec_child(
+         size_t n_fds;
+         ExecDirectoryType dt;
+         int secure_bits;
++        _cleanup_free_ gid_t *gids_after_pam = NULL;
++        int ngids_after_pam = 0;
+ 
+         assert(unit);
+         assert(command);
+@@ -3436,6 +3438,12 @@ static int exec_child(
+                                 *exit_status = EXIT_PAM;
+                                 return log_unit_error_errno(unit, r, "Failed to set up PAM session: %m");
+                         }
++
++                        ngids_after_pam = getgroups_alloc(&gids_after_pam);
++                        if (ngids_after_pam < 0) {
++                                *exit_status = EXIT_MEMORY;
++                                return log_unit_error_errno(unit, ngids_after_pam, "Failed to obtain groups after setting up PAM: %m");
++                        }
+                 }
+         }
+ 
+@@ -3489,7 +3497,22 @@ static int exec_child(
+ 
+         /* Drop groups as early as possbile */
+         if (needs_setuid) {
+-                r = enforce_groups(gid, supplementary_gids, ngids);
++                _cleanup_free_ gid_t *gids_to_enforce = NULL;
++                int ngids_to_enforce = 0;
++
++                ngids_to_enforce = merge_gid_lists(supplementary_gids,
++                                                   ngids,
++                                                   gids_after_pam,
++                                                   ngids_after_pam,
++                                                   &gids_to_enforce);
++                if (ngids_to_enforce < 0) {
++                        *exit_status = EXIT_MEMORY;
++                        return log_unit_error_errno(unit,
++                                                    ngids_to_enforce,
++                                                    "Failed to merge group lists. Group membership might be incorrect: %m");
++                }
++
++                r = enforce_groups(gid, gids_to_enforce, ngids_to_enforce);
+                 if (r < 0) {
+                         *exit_status = EXIT_GROUP;
+                         return log_unit_error_errno(unit, r, "Changing group credentials failed: %m");

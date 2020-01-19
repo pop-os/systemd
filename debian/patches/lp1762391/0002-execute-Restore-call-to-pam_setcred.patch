@@ -1,0 +1,36 @@
+From 3bb39ea936a51a6a63a8b65a135521df098c32c4 Mon Sep 17 00:00:00 2001
+From: Dariusz Gadomski <dgadomski@gmail.com>
+Date: Wed, 8 Jan 2020 16:24:11 +0100
+Subject: [PATCH 2/3] execute: Restore call to pam_setcred
+Bug: https://github.com/systemd/systemd/issues/11198
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762391
+Origin: upstream, https://github.com/systemd/systemd/pull/11199
+
+---
+ src/core/execute.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -1193,6 +1193,10 @@ static int setup_pam(
+         if (pam_code != PAM_SUCCESS)
+                 goto fail;
+ 
++        pam_code = pam_setcred(handle, PAM_ESTABLISH_CRED | flags);
++        if (pam_code != PAM_SUCCESS)
++                goto fail;
++
+         pam_code = pam_open_session(handle, flags);
+         if (pam_code != PAM_SUCCESS)
+                 goto fail;
+@@ -1277,6 +1281,10 @@ static int setup_pam(
+                         }
+                 }
+ 
++                pam_code = pam_setcred(handle, PAM_DELETE_CRED | flags);
++                if (pam_code != PAM_SUCCESS)
++                        goto child_finish;
++
+                 /* If our parent died we'll end the session */
+                 if (getppid() != parent_pid) {
+                         pam_code = pam_close_session(handle, flags);

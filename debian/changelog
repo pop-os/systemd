@@ -22,6 +22,22 @@ systemd (244.1-0ubuntu1) focal; urgency=medium
 
  -- Balint Reczey <rbalint@ubuntu.com>  Wed, 18 Dec 2019 21:40:27 +0100
 
+systemd (244-3ubuntu5) focal; urgency=medium
+
+  [ Dariusz Gadomski ]
+  * d/p/lp1762391/0001-user-util-Add-helper-functions-for-gid-lists-operati.patch,
+    d/p/lp1762391/0002-execute-Restore-call-to-pam_setcred.patch,
+    d/p/lp1762391/0003-execute-Detect-groups-added-by-PAM-and-merge-them-wi.patch,
+    d/p/lp1762391/0004-test-Add-tests-for-gid-list-ops.patch,
+    d/p/lp1762391/0005-execute-add-const-to-array-parameters-where-possible.patch,
+    d/p/lp1762391/0006-execute-allow-pam_setcred-to-fail-ignore-errors.patch:
+    - Restore call to pam_setcred (LP: #1762391)
+
+  [ Dan Streetman ]
+  * d/t/storage: without scsi_debug, skip test (LP: #1847816)
+
+ -- Dan Streetman <ddstreet@canonical.com>  Sun, 19 Jan 2020 09:59:58 -0500
+
 systemd (244-3ubuntu4) focal; urgency=medium
 
   * d/p/lp1671951-network-set-ipv6-mtu-after-link-up-or-device-mtu-cha.patch:

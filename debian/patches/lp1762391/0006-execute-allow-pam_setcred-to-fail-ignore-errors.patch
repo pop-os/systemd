@@ -1,0 +1,25 @@
+From 46d7c6afbf92e74fb96b6df2858d858ec77db991 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 15 Jan 2020 17:09:36 +0100
+Subject: [PATCH] execute: allow pam_setcred() to fail, ignore errors
+Bug: https://github.com/systemd/systemd/issues/14567
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762391
+Origin: upstream, https://github.com/systemd/systemd/pull/14581
+
+Fixes: #14567
+Alternative-To: #14569
+---
+ src/core/execute.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -1195,7 +1195,7 @@ static int setup_pam(
+ 
+         pam_code = pam_setcred(handle, PAM_ESTABLISH_CRED | flags);
+         if (pam_code != PAM_SUCCESS)
+-                goto fail;
++                log_debug("pam_setcred() failed, ignoring: %s", pam_strerror(handle, pam_code));
+ 
+         pam_code = pam_open_session(handle, flags);
+         if (pam_code != PAM_SUCCESS)
