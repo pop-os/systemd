@@ -1,9 +1,6 @@
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Mon, 6 Jan 2020 16:35:28 -0500
 Subject: network: drop foreign config after addr_gen_mode has been set
-Bug: https://github.com/systemd/systemd/issues/13882
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1845909
-Origin: upstream, https://github.com/systemd/systemd/pull/13927
 
 Interfaces may come up at any time, even during our initialization of
 them, for various reasons; e.g. the kernel will raise VLAN when its
@@ -38,7 +35,7 @@ Fixes: #13882.
  1 file changed, 9 insertions(+), 9 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 6529412..b8f74d7 100644
+index 5eacdbd..ad68c7c 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -2704,15 +2704,6 @@ static int link_configure(Link *link) {

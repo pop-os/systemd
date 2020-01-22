@@ -11,12 +11,13 @@ Forwarded: OMGno, this is a rather nasty hack until we fix system-image to get a
 Bug-Ubuntu: https://launchpad.net/bugs/1227520
 ---
  src/hostname/hostnamed.c | 28 ++++++++++++++++++++++++----
- 1 file changed, 24 insertions(+), 4 deletions(-)
+ src/timedate/timedated.c | 31 +++++++++++++++++++++++++------
+ 2 files changed, 49 insertions(+), 10 deletions(-)
 
-Index: systemd-244/src/hostname/hostnamed.c
-===================================================================
---- systemd-244.orig/src/hostname/hostnamed.c
-+++ systemd-244/src/hostname/hostnamed.c
+diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
+index deecd9b..aaed960 100644
+--- a/src/hostname/hostnamed.c
++++ b/src/hostname/hostnamed.c
 @@ -24,6 +24,7 @@
  #include "os-util.h"
  #include "parse-util.h"
@@ -51,7 +52,7 @@ Index: systemd-244/src/hostname/hostnamed.c
  static int context_read_data(Context *c) {
          int r;
          struct utsname u;
-@@ -306,12 +326,12 @@ static int context_write_data_static_hos
+@@ -306,12 +326,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -66,7 +67,7 @@ Index: systemd-244/src/hostname/hostnamed.c
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -356,13 +376,13 @@ static int context_write_data_machine_in
+@@ -356,13 +376,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
@@ -82,11 +83,11 @@ Index: systemd-244/src/hostname/hostnamed.c
  }
  
  static int property_get_icon_name(
-Index: systemd-244/src/timedate/timedated.c
-===================================================================
---- systemd-244.orig/src/timedate/timedated.c
-+++ systemd-244/src/timedate/timedated.c
-@@ -275,6 +275,25 @@ static int context_read_data(Context *c)
+diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
+index 5141a90..6cea5a9 100644
+--- a/src/timedate/timedated.c
++++ b/src/timedate/timedated.c
+@@ -275,6 +275,25 @@ static int context_read_data(Context *c) {
          return 0;
  }
  
@@ -112,7 +113,7 @@ Index: systemd-244/src/timedate/timedated.c
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          const char *source;
-@@ -292,10 +311,10 @@ static int context_write_data_timezone(C
+@@ -292,10 +311,10 @@ static int context_write_data_timezone(Context *c) {
  
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
@@ -125,7 +126,7 @@ Index: systemd-244/src/timedate/timedated.c
                                  r = -errno;
  
                          return r;
-@@ -310,12 +329,12 @@ static int context_write_data_timezone(C
+@@ -310,12 +329,12 @@ static int context_write_data_timezone(Context *c) {
                  source = p;
          }
  
@@ -141,7 +142,7 @@ Index: systemd-244/src/timedate/timedated.c
                  if (r < 0)
                          return r;
          }
-@@ -381,7 +400,7 @@ static int context_write_data_local_rtc(
+@@ -381,7 +400,7 @@ static int context_write_data_local_rtc(Context *c) {
                  *(char*) mempcpy(stpcpy(stpcpy(mempcpy(w, s, a), prepend), c->local_rtc ? "LOCAL" : "UTC"), e, b) = 0;
  
                  if (streq(w, NULL_ADJTIME_UTC)) {

@@ -1,17 +1,13 @@
-From c6cecb744b53561efd329309af7d02a3f9979ed1 Mon Sep 17 00:00:00 2001
 From: Dariusz Gadomski <dgadomski@gmail.com>
 Date: Wed, 8 Jan 2020 16:25:15 +0100
 Subject: [PATCH] test: Add tests for gid list ops
-Bug: https://github.com/systemd/systemd/issues/11198
-Bug-Ubuntu: https://bugs.launchpad.net/bugs/1762391
-Origin: upstream, https://github.com/systemd/systemd/pull/11199
 
 ---
  src/test/test-user-util.c | 39 +++++++++++++++++++++++++++++++++++----
  1 file changed, 35 insertions(+), 4 deletions(-)
 
 diff --git a/src/test/test-user-util.c b/src/test/test-user-util.c
-index 47baacb518..fde8336bf9 100644
+index 47baacb..fde8336 100644
 --- a/src/test/test-user-util.c
 +++ b/src/test/test-user-util.c
 @@ -4,6 +4,7 @@
@@ -76,6 +72,3 @@ index 47baacb518..fde8336bf9 100644
  
          return 0;
  }
--- 
-2.20.1
-

@@ -2,9 +2,6 @@ From: Dan Streetman <ddstreet@canonical.com>
 Date: Thu, 19 Dec 2019 13:14:42 -0500
 Subject: network: rename linux_configure_after_setting_mtu() to
  linux_configure_continue()
-Bug: https://github.com/systemd/systemd/issues/13882
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1845909
-Origin: upstream, https://github.com/systemd/systemd/pull/13927
 
 This is a simple rename to make the function name more generic;
 the next commit expands its usage to more than only the mtu handler.
@@ -13,7 +10,7 @@ the next commit expands its usage to more than only the mtu handler.
  1 file changed, 16 insertions(+), 4 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 56869ee..4d0d74c 100644
+index 4195b98..dfee160 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -1296,7 +1296,7 @@ static int link_set_proxy_arp(Link *link) {

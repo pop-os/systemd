@@ -2,9 +2,6 @@ From: Dan Streetman <ddstreet@canonical.com>
 Date: Sat, 4 Jan 2020 18:41:18 -0500
 Subject: network: if ipv6ll is disabled,
  enumerate tentative ipv6 addrs before dropping foreign addrs
-Bug: https://github.com/systemd/systemd/issues/13882
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1845909
-Origin: upstream, https://github.com/systemd/systemd/pull/13927
 
 The kernel will create an ipv6ll tentative address immediately when an
 interface is raised if addr_gen_mode is not disabled; and, the kernel does
@@ -21,7 +18,7 @@ on the interface.
  1 file changed, 50 insertions(+)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index bcabbdc..6529412 100644
+index 037092e..5eacdbd 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -2494,6 +2494,48 @@ static bool link_address_is_dynamic(Link *link, Address *address) {

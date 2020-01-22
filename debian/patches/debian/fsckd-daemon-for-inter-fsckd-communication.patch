@@ -999,7 +999,7 @@ index 042081c..bea6c16 100644
  
  [Service]
 diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 3322083..bfa565b 100644
+index 33220835..bfa565b 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
 @@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)
