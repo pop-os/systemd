@@ -113,3 +113,9 @@ lp2002445/sd-device-make-device_set_syspath-clear-sysname-and-sysnu.patch
 lp2002445/udev-restore-syspath-and-properties-on-failure.patch
 lp2002445/sd-device-introduce-device_get_property_int.patch
 lp2002445/core-device-ignore-failed-uevents.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+hp-dev-one.patch
