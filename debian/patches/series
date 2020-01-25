@@ -68,3 +68,5 @@ lp1867375/0006-test-verify-RoutesToDNS-is-independent-of-UseGateway.patch
 lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
 lp1873607/0001-core-some-minor-clean-ups-modernizations.patch
 lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch
+# Pop patches
+cryptswap-mount-fix.patch
