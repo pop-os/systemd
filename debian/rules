@@ -232,10 +232,7 @@ override_dh_install:
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
-ifneq (, $(TEST_UPSTREAM))
-        # build/test upstream master, install all the missing things into systemd package
-	-dh_missing --sourcedir debian/install/deb --list-missing 2>&1 | sed -n 's|dh_missing: \(.*\) exists in debian/install/deb but is not installed to anywhere|\1|p' | xargs --verbose -L1 dh_install --sourcedir debian/install/deb -psystemd
-endif
+
 	dh_install --remaining-packages --sourcedir=debian/install/deb
 
 	# we don't want /tmp to be a tmpfs by default
@@ -272,7 +269,13 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 endif
 
 override_dh_missing:
+ifeq ($(TEST_UPSTREAM),)
 	dh_missing --sourcedir debian/install/deb --fail-missing
+else
+        # build/test upstream master, install all the missing things into systemd package
+	-dh_missing --sourcedir debian/install/deb --list-missing 2>&1 | sed -n 's|dh_missing: \(.*\) exists in debian/install/deb but is not installed to anywhere|\1|p' | xargs --verbose -L1 dh_install --sourcedir debian/install/deb -psystemd
+endif
+
 
 override_dh_installinit:
 	dh_installinit --no-start
