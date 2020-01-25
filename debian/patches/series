@@ -31,3 +31,15 @@ lp2067922-cgroup-util-allow-cg_read_pid-to-skip-unmapped-zero-pids.patch
 lp2055239-core-dbus-manager-mark-unit-file-state-as-outdated-only-i.patch
 lp2077779-udev-Handle-PTP-device-symlink-properly-on-udev-action-ch.patch
 lp2081192-core-exec-invoke-Fix-missing-arguments-for-PR_SET_MEMORY_.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+timesyncd-disable.patch
+systemd-resolvconf.patch
+system76-micmute.patch
+pang13.patch
+pang14.patch
+disable-90-loaderentry.patch
+basic-add-PID_FS_MAGIC.patch
