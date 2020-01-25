@@ -1,3 +1,14 @@
+systemd (244.1-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 244.1
+
+  [ Balint Reczey ]
+  * debian/watch: Switch to watch tags at github.com/systemd/systemd-stable.
+    Upstream point releases appear there.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 25 Jan 2020 16:49:32 +0100
+
 systemd (244-3) unstable; urgency=medium
 
   * Update udev-udeb to use 73-usb-net-by-mac.link
