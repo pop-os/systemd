@@ -1,0 +1,15 @@
+Index: systemd/hwdb.d/60-keyboard.hwdb
+===================================================================
+--- systemd.orig/hwdb.d/60-keyboard.hwdb	2024-12-09 13:52:22.291032531 -0700
++++ systemd/hwdb.d/60-keyboard.hwdb	2024-12-09 13:52:59.617730068 -0700
+@@ -1706,6 +1706,10 @@
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnSystem76*:pnPangolin*:pvrpang14*
+  KEYBOARD_KEY_76=f21                                    # Touchpad toggle
+ 
++# Pangolin 15
++evdev:atkbd:dmi:bvn*:bvr*:bd*:svnSystem76*:pnPangolin*:pvrpang15*
++ KEYBOARD_KEY_76=f21                                    # Touchpad toggle
++
+ ###########################################################
+ # T-bao
+ ###########################################################
