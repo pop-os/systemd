@@ -13,3 +13,13 @@ test-follow-usr-bin-sleep-symlink-when-checking-coredumps.patch
 meson.build-build-with-Wl-z-gcs-report-none-on-arm64.patch
 test-skip-TEST-50-DISSECT.dissect.patch
 lp2125405-basic-validate-timezones-in-get_timezones.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+timesyncd-disable.patch
+systemd-resolvconf.patch
+pang13.patch
+pang14.patch
+disable-90-loaderentry.patch
