@@ -1,0 +1,27 @@
+Index: systemd/src/kernel-install/meson.build
+===================================================================
+--- systemd.orig/src/kernel-install/meson.build
++++ systemd/src/kernel-install/meson.build
+@@ -20,14 +20,14 @@ ukify_install = custom_target(
+         install_mode : 'rwxr-xr-x',
+         install_dir : kernelinstalldir)
+ 
+-loaderentry_install = custom_target(
+-        '90-loaderentry.install',
+-        input : '90-loaderentry.install.in',
+-        output : '90-loaderentry.install',
+-        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
+-        install : want_kernel_install,
+-        install_mode : 'rwxr-xr-x',
+-        install_dir : kernelinstalldir)
++# loaderentry_install = custom_target(
++#         '90-loaderentry.install',
++#         input : '90-loaderentry.install.in',
++#         output : '90-loaderentry.install',
++#         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
++#         install : want_kernel_install,
++#         install_mode : 'rwxr-xr-x',
++#         install_dir : kernelinstalldir)
+ 
+ uki_copy_install = files('90-uki-copy.install')
+ 

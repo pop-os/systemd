@@ -78,7 +78,7 @@ Build-Depends: debhelper-compat (= 13),
                fdisk <!nocheck>,
 
 Package: systemd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Priority: important
 Recommends: default-dbus-system-bus | dbus-system-bus,
@@ -129,7 +129,7 @@ Description: system and service manager
  boot with init=/lib/systemd/systemd or install systemd-sysv in addition.
 
 Package: systemd-sysv
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Priority: important
 Conflicts: sysvinit-core,
@@ -154,7 +154,7 @@ Description: system and service manager - SysV compatibility symlinks
 
 Package: systemd-container
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -170,7 +170,7 @@ Description: systemd container/nspawn tools
 
 Package: systemd-journal-remote
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -183,7 +183,7 @@ Description: tools for sending and receiving remote journal logs
 
 Package: systemd-coredump
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -198,7 +198,7 @@ Description: tools for storing and retrieving coredumps
   * coredumpctl
 
 Package: systemd-timesyncd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Priority: standard
 Depends: ${shlibs:Depends},
@@ -212,7 +212,7 @@ Description: minimalistic service to synchronize local time with NTP servers
  synchronize the local system clock with a remote Network Time Protocol server.
 
 Package: systemd-tests
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd (= ${binary:Version}),
@@ -223,7 +223,7 @@ Description: tests for systemd
  for autopkgtest and not meant to be installed on regular user systems.
 
 Package: libpam-systemd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Priority: standard
 Pre-Depends: ${misc:Pre-Depends}
@@ -245,7 +245,7 @@ Description: system and service manager - PAM module
  Packages that depend on logind functionality need to depend on libpam-systemd.
 
 Package: libnss-myhostname
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -264,7 +264,7 @@ Description: nss module providing fallback resolution for the current hostname
  Installing this package automatically adds myhostname to /etc/nsswitch.conf.
 
 Package: libnss-mymachines
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -279,7 +279,7 @@ Description: nss module to resolve hostnames for local container instances
  Installing this package automatically adds mymachines to /etc/nsswitch.conf.
 
 Package: libnss-resolve
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -293,7 +293,7 @@ Description: nss module to resolve names via systemd-resolved
  Installing this package automatically adds resolve to /etc/nsswitch.conf.
 
 Package: libnss-systemd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Priority: standard
 Pre-Depends: ${misc:Pre-Depends}
@@ -310,7 +310,7 @@ Description: nss module providing dynamic user and group name resolution
  Installing this package automatically adds the module to /etc/nsswitch.conf.
 
 Package: libsystemd0
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: libs
 Depends: ${shlibs:Depends},
@@ -320,7 +320,7 @@ Description: systemd utility library
  the system journal, the system service manager, D-Bus and more.
 
 Package: libsystemd-dev
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: libdevel
 Depends: ${misc:Depends},
@@ -333,7 +333,7 @@ Description: systemd utility library - development files
  use libsystemd.
 
 Package: libsystemd-shared
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: libs
 Pre-Depends: ${misc:Pre-Depends}
@@ -346,7 +346,7 @@ Description: systemd shared private library
 
 Package: udev
 Priority: important
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -366,7 +366,7 @@ Description: /dev/ and hotplug management daemon
 
 Package: libudev1
 Section: libs
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -377,7 +377,7 @@ Description: libudev shared library
 
 Package: libudev-dev
 Section: libdevel
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
@@ -393,7 +393,7 @@ Package: udev-udeb
 Build-Profiles: <!noudeb>
 Package-Type: udeb
 Section: debian-installer
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          util-linux-udeb
@@ -407,7 +407,7 @@ Package: libudev1-udeb
 Build-Profiles: <!noudeb>
 Package-Type: udeb
 Section: debian-installer
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends}
 Description: libudev shared library
@@ -416,7 +416,7 @@ Description: libudev shared library
  This is a minimal version, only for use in the installation system.
 
 Package: systemd-standalone-sysusers
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Conflicts: systemd-sysusers,
            systemd (<< 249.3-3)
 Replaces: systemd-sysusers,
@@ -430,7 +430,7 @@ Description: standalone sysusers binary for use in non-systemd systems
  non-systemd systems.
 
 Package: systemd-standalone-tmpfiles
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Conflicts: systemd-tmpfiles,
            systemd (<< 249.3-3)
 Replaces: systemd-tmpfiles,
@@ -444,7 +444,7 @@ Description: standalone tmpfiles binary for use in non-systemd systems
  non-systemd systems.
 
 Package: systemd-oomd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends},
 Breaks: systemd (<< 250.2-2~)
@@ -456,7 +456,7 @@ Description: userspace out-of-memory (OOM) killer
 
 Package: systemd-userdbd
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          libnss-systemd (= ${binary:Version}),
@@ -470,7 +470,7 @@ Description: dynamic user/group manager
 
 Package: systemd-homed
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Pre-Depends: ${misc:Pre-Depends},
              init-system-helpers (>= 1.64~),
 Depends: ${shlibs:Depends},
@@ -536,7 +536,7 @@ Description: tool to build Unified Kernel Images
 Package: systemd-resolved
 Multi-Arch: foreign
 Priority: important
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
