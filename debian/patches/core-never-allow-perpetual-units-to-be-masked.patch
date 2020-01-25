@@ -1,0 +1,25 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 17 Jan 2020 15:02:13 +0100
+Subject: core: never allow perpetual units to be masked
+
+Fixes: #14550
+(cherry picked from commit 88414eed6f45f738ae765d9f72d67c6dc5a51950)
+---
+ src/core/load-fragment.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index 1679e04..9534566 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -4702,7 +4702,9 @@ int unit_load_fragment(Unit *u) {
+                         return r;
+ 
+                 if (null_or_empty(&st)) {
+-                        u->load_state = UNIT_MASKED;
++                        /* Unit file is masked */
++
++                        u->load_state = u->perpetual ? UNIT_LOADED : UNIT_MASKED; /* don't allow perpetual units to ever be masked */
+                         u->fragment_mtime = 0;
+                 } else {
+                         u->load_state = UNIT_LOADED;

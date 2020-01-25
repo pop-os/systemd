@@ -1,3 +1,5 @@
+core-never-allow-perpetual-units-to-be-masked.patch
+mount-make-checks-on-perpetual-mount-units-more-lax.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
