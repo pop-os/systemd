@@ -29,3 +29,14 @@ lp2067907/mountpoint-util-Deal-with-kernel-API-breakage-in-norecove.patch
 lp2067907/shared-mountpoint-util-for-old-kernels-assume-norecovery-.patch
 lp2067922-cgroup-util-allow-cg_read_pid-to-skip-unmapped-zero-pids.patch
 lp2055239-core-dbus-manager-mark-unit-file-state-as-outdated-only-i.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+timesyncd-disable.patch
+systemd-resolvconf.patch
+system76-micmute.patch
+pang13.patch
+pang14.patch
+disable-90-loaderentry.patch
