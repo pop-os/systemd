@@ -61,7 +61,7 @@ usr/bin/varlinkctl
 usr/lib/environment.d/99-environment.conf
 usr/lib/kernel/install.conf
 usr/lib/kernel/install.d/50-depmod.install
-usr/lib/kernel/install.d/90-loaderentry.install
+# usr/lib/kernel/install.d/90-loaderentry.install
 usr/lib/kernel/install.d/90-uki-copy.install
 usr/lib/modprobe.d/systemd.conf
 [!i386] <!stage1> usr/lib/pcrlock.d/
