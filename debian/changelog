@@ -1,13 +1,23 @@
-systemd (244.1-1) UNRELEASED; urgency=medium
+systemd (244.1-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 244.1
+    - network: fix segfault in parsing SendOption= (Closes: #946475)
+  * core: don't allow perpetual units to be masked (Closes: #948710)
 
   [ Balint Reczey ]
   * debian/watch: Switch to watch tags at github.com/systemd/systemd-stable.
     Upstream point releases appear there.
 
- -- Michael Biebl <biebl@debian.org>  Sat, 25 Jan 2020 16:49:32 +0100
+  [ Helmut Grohne ]
+  * Add basic support for the noinsttest build profile
+  * Annotate dbus build dependency with <!noinsttest>
+    The dbus library is needed for building tests. As such it must be
+    present unless we disable both build time and installed tests.
+    Previously, building with the nocheck profile worked, but it didn't
+    reproduce a regular build.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 25 Jan 2020 18:53:23 +0100
 
 systemd (244-3) unstable; urgency=medium
 
