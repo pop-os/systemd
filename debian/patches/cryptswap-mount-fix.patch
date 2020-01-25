@@ -1,0 +1,14 @@
+Index: systemd/src/cryptsetup/cryptsetup-generator.c
+===================================================================
+--- systemd.orig/src/cryptsetup/cryptsetup-generator.c	2026-11-13 17:06:53.629830566 +0100
++++ systemd/src/cryptsetup/cryptsetup-generator.c	2026-11-13 17:07:15.277456786 +0100
+@@ -544,6 +544,9 @@
+                 fprintf(f,
+                         "ExecStartPost=" SYSTEMD_MAKEFS_PATH " swap '/dev/mapper/%s'\n",
+                         name_escaped);
++                fprintf(f,
++                        "ExecStartPost=/bin/udevadm trigger '/dev/mapper/%s'\n",
++                        name_escaped);
+ 
+         r = fflush_and_check(f);
+         if (r < 0)

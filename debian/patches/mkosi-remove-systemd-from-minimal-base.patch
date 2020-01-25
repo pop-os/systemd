@@ -6,10 +6,10 @@ Subject: mkosi: remove systemd from minimal-base
  mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf | 4 ++++
  1 file changed, 4 insertions(+)
 
-diff --git a/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf b/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
-index b9fd7bc..ea34cf2 100644
---- a/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
-+++ b/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
+Index: systemd/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf
+===================================================================
+--- systemd.orig/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf	2026-11-13 17:02:55.176947816 +0100
++++ systemd/mkosi/mkosi.images/minimal-base/mkosi.conf.d/ubuntu/mkosi.conf	2026-11-13 17:02:55.174369356 +0100
 @@ -2,3 +2,7 @@
  
  [Match]

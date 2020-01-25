@@ -3,3 +3,10 @@ lp2158686-meson-add-build-option-for-var-log-mode.patch
 mkosi-explicitly-add-mount-package-to-initrd-image.patch
 test-run-more-tests-in-VMs.patch
 mkosi-remove-systemd-from-minimal-base.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+#systemd-boot-id-compat.patch
+system76-usb.patch
+timesyncd-disable.patch
+disable-90-loaderentry.patch
