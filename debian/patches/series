@@ -57,3 +57,17 @@ lp2125405-basic-validate-timezones-in-get_timezones.patch
 ukify-fix-insertion-of-padding-in-merged-sections.patch
 test-skip-testcase_multipath_basic_failover.patch
 core-downgrade-a-log-message-from-warning-to-debug.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+timesyncd-disable.patch
+systemd-resolvconf.patch
+system76-micmute.patch
+pang13.patch
+pang14.patch
+pang15.patch
+disable-90-loaderentry.patch
+basic-add-PID_FS_MAGIC.patch
+bcachefs-super-magic.patch

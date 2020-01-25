@@ -1,0 +1,23 @@
+Index: systemd/src/boot/efi/boot.c
+===================================================================
+--- systemd.orig/src/boot/efi/boot.c
++++ systemd/src/boot/efi/boot.c
+@@ -1725,8 +1725,17 @@ static size_t config_find_entry(Config *
+                 return IDX_INVALID;
+ 
+         for (size_t i = 0; i < config->n_entries; i++)
+-                if (efi_fnmatch(pattern, config->entries[i]->id))
++                if (efi_fnmatch(pattern, config->entries[i]->id)) {
+                         return i;
++                } else if (endswith_no_case(config->entries[i]->id, u".conf")) {
++                    // Check for match using id minus ".conf"
++                    char16_t *trimmed = xstrdup16(config->entries[i]->id);
++                    size_t len = strlen16(trimmed);
++                    trimmed[len - 5] = 0;
++                    bool matches = efi_fnmatch(pattern, trimmed);
++                    free(trimmed);
++                    if (matches) return i;
++                }
+ 
+         return IDX_INVALID;
+ }
