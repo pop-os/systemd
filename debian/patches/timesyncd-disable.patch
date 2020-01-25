@@ -1,0 +1,145 @@
+Disable systemd-timesyncd because Chrony is used instead.
+(Leave empty packaging in place for apt transition.)
+Index: systemd/debian/control
+===================================================================
+--- systemd.orig/debian/control
++++ systemd/debian/control
+@@ -106,6 +106,7 @@ Depends: ${shlibs:Depends},
+          libsystemd0 (= ${binary:Version}),
+          systemd-dev (>= ${source:Version}),
+          mount,
++         chrony [!i386],
+ Replaces: systemd-repart (<< 250.2-3~)
+ Conflicts: consolekit,
+            libpam-ck-connector,
+@@ -204,9 +205,6 @@ Priority: standard
+ Depends: ${shlibs:Depends},
+          ${misc:Depends},
+          systemd
+-Conflicts: time-daemon
+-Replaces: time-daemon
+-Provides: time-daemon
+ Description: minimalistic service to synchronize local time with NTP servers
+  The package contains the systemd-timesyncd system service that may be used to
+  synchronize the local system clock with a remote Network Time Protocol server.
+Index: systemd/debian/rules
+===================================================================
+--- systemd.orig/debian/rules
++++ systemd/debian/rules
+@@ -106,7 +106,8 @@ CONFFLAGS = \
+ 	-Dnss-systemd=true \
+ 	-Dresolve=true \
+ 	-Dstatus-unit-format-default=combined \
+-	-Dstandalone-binaries=true
++	-Dstandalone-binaries=true \
++	-Dtimesyncd=false
+ 
+ ifeq ($(filter nocheck,$(DEB_BUILD_PROFILES))$(filter noinsttest,$(DEB_BUILD_PROFILES)),nochecknoinsttest)
+ CONFFLAGS += -Dtests=false
+Index: systemd/debian/systemd-timesyncd.install
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.install
++++ /dev/null
+@@ -1,8 +0,0 @@
+-etc/systemd/timesyncd.conf
+-usr/lib/systemd/ntp-units.d/80-systemd-timesync.list
+-usr/lib/systemd/systemd-timesyncd
+-usr/lib/systemd/system/systemd-timesyncd.service
+-usr/lib/sysusers.d/systemd-timesync.conf
+-usr/share/dbus-1/system.d/org.freedesktop.timesync1.conf
+-usr/share/dbus-1/system-services/org.freedesktop.timesync1.service
+-../extra/dhclient-exit-hooks.d/ etc/dhcp/
+Index: systemd/debian/systemd-timesyncd.postinst
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.postinst
++++ /dev/null
+@@ -1,26 +0,0 @@
+-#!/bin/sh
+-
+-set -e
+-
+-_adopt_conffile() {
+-    conffile=$1
+-    pkg=$2
+-
+-    [ -f ${conffile}.dpkg-bak ] || return 0
+-
+-    md5sum="$(md5sum ${conffile} | sed -e 's/ .*//')"
+-    old_md5sum="$(dpkg-query -W -f='${Conffiles}' $pkg | \
+-                        sed -n -e "\' ${conffile} ' { s/ obsolete$//; s/.* //; p }")"
+-    # On new installs, if the policy file was preserved on systemd upgrade
+-    # by dpkg-maintscript helper, copy it back if the new file has not been modified yet
+-    if [ "$md5sum" = "$old_md5sum" ]; then
+-        mv ${conffile}.dpkg-bak ${conffile}
+-    fi
+-}
+-
+-if [ "$1" = configure ] && [ -z "$2" ]; then
+-    _adopt_conffile /etc/dhcp/dhclient-exit-hooks.d/timesyncd systemd-timesyncd
+-    _adopt_conffile /etc/systemd/timesyncd.conf systemd-timesyncd
+-fi
+-
+-#DEBHELPER#
+Index: systemd/debian/systemd-timesyncd.postrm
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.postrm
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#!/bin/sh
+-
+-set -e
+-
+-case "$1" in
+-    purge)
+-        rm -rf /var/lib/systemd/timesync/
+-    ;;
+-esac
+-
+-#DEBHELPER#
+Index: systemd/debian/systemd.install
+===================================================================
+--- systemd.orig/debian/systemd.install
++++ systemd/debian/systemd.install
+@@ -147,7 +147,6 @@ usr/lib/systemd/systemd-sysctl
+ usr/lib/systemd/systemd-sysroot-fstab-check
+ <!stage1> usr/lib/systemd/systemd-sysupdate
+ usr/lib/systemd/systemd-timedated
+-usr/lib/systemd/systemd-time-wait-sync
+ [amd64 arm64 armhf riscv64] <!stage1> usr/lib/systemd/systemd-tpm2-setup
+ usr/lib/systemd/systemd-update-done
+ usr/lib/systemd/systemd-update-utmp
+@@ -395,7 +394,6 @@ usr/lib/systemd/system/systemd-sysext.so
+ <!stage1> usr/lib/systemd/system/systemd-sysupdate.timer
+ usr/lib/systemd/system/systemd-sysusers.service
+ usr/lib/systemd/system/systemd-timedated.service
+-usr/lib/systemd/system/systemd-time-wait-sync.service
+ usr/lib/systemd/system/systemd-tmpfiles-clean.service
+ usr/lib/systemd/system/systemd-tmpfiles-clean.timer
+ usr/lib/systemd/system/systemd-tmpfiles-setup-dev-early.service
+@@ -518,7 +516,6 @@ usr/share/polkit-1/actions/org.freedeskt
+ usr/share/polkit-1/actions/org.freedesktop.network1.policy
+ usr/share/polkit-1/actions/org.freedesktop.systemd1.policy
+ usr/share/polkit-1/actions/org.freedesktop.timedate1.policy
+-usr/share/polkit-1/actions/org.freedesktop.timesync1.policy
+ usr/share/polkit-1/rules.d/systemd-networkd.rules
+ usr/share/systemd/kbd-model-map
+ usr/share/systemd/language-fallback-map
+Index: systemd/debian/systemd-timesyncd.manpages
+===================================================================
+--- systemd.orig/debian/systemd-timesyncd.manpages
++++ /dev/null
+@@ -1 +0,0 @@
+-usr/share/man/man*/*timesyncd*
+Index: systemd/debian/systemd.manpages
+===================================================================
+--- systemd.orig/debian/systemd.manpages
++++ systemd/debian/systemd.manpages
+@@ -264,8 +264,6 @@ debian/tmp/usr/share/man/man8/systemd-sy
+ debian/tmp/usr/share/man/man8/systemd-sysv-generator.8
+ debian/tmp/usr/share/man/man8/systemd-timedated.8
+ debian/tmp/usr/share/man/man8/systemd-timedated.service.8
+-debian/tmp/usr/share/man/man8/systemd-time-wait-sync.8
+-debian/tmp/usr/share/man/man8/systemd-time-wait-sync.service.8
+ debian/tmp/usr/share/man/man8/systemd-tmpfiles.8
+ debian/tmp/usr/share/man/man8/systemd-tmpfiles-clean.service.8
+ debian/tmp/usr/share/man/man8/systemd-tmpfiles-clean.timer.8

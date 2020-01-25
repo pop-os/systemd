@@ -68,3 +68,17 @@ lp2134334/0001-net-id-depending-on-new-udev-prop,-include-exclude-PCI-domain-fro
 lp2134334/0002-hwdb-disable-inclusion-of-the-PCI-domain-in-MANA-network-interface-naming.patch
 lp2134334/0003-udev-rules.d-import-hwdb-before-calling-net_id-builtin.patch
 lp2141296-timer-don-t-run-service-immediately-after-restart-of-timer.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+timesyncd-disable.patch
+systemd-resolvconf.patch
+system76-micmute.patch
+pang13.patch
+pang14.patch
+pang15.patch
+disable-90-loaderentry.patch
+basic-add-PID_FS_MAGIC.patch
+bcachefs-super-magic.patch
