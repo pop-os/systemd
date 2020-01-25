@@ -160,3 +160,16 @@ GHSA-3jgj-3phh-hx5j/resolve-enforce-the-search-domain-limit-earlier.patch
 GHSA-3jgj-3phh-hx5j/resolve-limit-the-number-NTAs-to-something-sensible.patch
 GHSA-3jgj-3phh-hx5j/basic-strv-add-optimizable-version-of-strv_push-consume-e.patch
 lp2145709-resolved-dont-treat-conn-reset-as-packet-loss.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+hp-dev-one.patch
+timesyncd-disable.patch
+pang12.patch
+systemd-resolvconf.patch
+system76-micmute.patch
+pang13.patch
+pang14.patch
+pang15.patch
