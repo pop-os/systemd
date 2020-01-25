@@ -1,0 +1,30 @@
+Provide an optional resolvconf package with a symlink to resolvectl.
+
+This allows removing resolvconf while maintaining compatibility with
+scripts and programs that utilize it.
+
+Index: systemd/debian/control
+===================================================================
+--- systemd.orig/debian/control
++++ systemd/debian/control
+@@ -462,3 +462,14 @@
+  systemd-repart is a configuration-driven system partitioning tool. It follows
+  the Discoverable Partitions Specification and provides support for encryption
+  and dm-verity among other things.
++
++Package: systemd-resolvconf
++Section: admin
++Architecture: amd64 arm64 i386
++Priority: optional
++Depends: ${shlibs:Depends},
++         ${misc:Depends},
++         systemd
++Conflicts: resolvconf
++Provides: resolvconf
++Description: Symlinks the resolvconf command to resolvectl for compatibility.
+Index: systemd/debian/systemd-resolvconf.links
+===================================================================
+--- /dev/null
++++ systemd/debian/systemd-resolvconf.links
+@@ -0,0 +1 @@
++/usr/bin/resolvectl /usr/sbin/resolvconf
