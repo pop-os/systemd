@@ -1,5 +1,7 @@
 #! /usr/bin/make -f
 
+export CCACHE_DISABLE=1
+
 #export DH_VERBOSE = 1
 #export DEB_BUILD_OPTIONS = nostrip
 

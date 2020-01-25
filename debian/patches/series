@@ -130,3 +130,16 @@ lp2077779-udev-Handle-PTP-device-symlink-properly-on-udev-action-ch.patch
 lp2003250/network-skip-to-reassign-master-ifindex-if-already-set.patch
 lp2003250/network-do-not-bring-down-a-bonding-port-interface-when-i.patch
 networkd-test-skip-test_resolved_domain_restricted_dns.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
+hp-dev-one.patch
+timesyncd-disable.patch
+pang12.patch
+systemd-resolvconf.patch
+system76-micmute.patch
+pang13.patch
+pang14.patch
+pang15.patch
