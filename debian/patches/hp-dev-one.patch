@@ -1,0 +1,16 @@
+Index: systemd/hwdb.d/60-keyboard.hwdb
+===================================================================
+--- systemd.orig/hwdb.d/60-keyboard.hwdb
++++ systemd/hwdb.d/60-keyboard.hwdb
+@@ -698,6 +698,11 @@ evdev:name:gpio-keys:phys:gpio-keys/inpu
+ evdev:name:gpio-keys:phys:gpio-keys/input0:ev:23:dmi:*:svnHewlett-Packard:pnHPStream7Tablet:*
+  KEYBOARD_KEY_0=unknown
+ 
++# HP Dev One
++evdev:atkbd:dmi:*:rvnHP:rn8A78:*
++ KEYBOARD_KEY_81=f20                                    # Fn+F8; Microphone mute button
++ KEYBOARD_KEY_f9=prog1                                  # Fn+F12; Programmable hotkey
++
+ ##########################################################
+ # Huawei
+ ##########################################################

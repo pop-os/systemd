@@ -62,7 +62,7 @@ Build-Depends: debhelper-compat (= 13),
                zstd <!nocheck>,
 
 Package: systemd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Section: admin
 Priority: important
@@ -102,7 +102,7 @@ Description: system and service manager
  boot with init=/lib/systemd/systemd or install systemd-sysv in addition.
 
 Package: systemd-sysv
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Section: admin
 Priority: important
@@ -134,7 +134,7 @@ Description: system and service manager - SysV links
 
 Package: systemd-container
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Section: admin
 Priority: optional
@@ -152,7 +152,7 @@ Description: systemd container/nspawn tools
 
 Package: systemd-journal-remote
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Section: admin
 Priority: optional
@@ -170,7 +170,7 @@ Description: tools for sending and receiving remote journal logs
 
 Package: systemd-coredump
 Build-Profiles: <!stage1>
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Section: admin
 Priority: optional
@@ -187,7 +187,7 @@ Description: tools for storing and retrieving coredumps
   * coredumpctl
 
 Package: systemd-timesyncd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Section: admin
 Priority: optional
@@ -205,7 +205,7 @@ Description: minimalistic service to synchronize local time with NTP servers
  synchronize the local system clock with a remote Network Time Protocol server.
 
 Package: systemd-tests
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Section: admin
 Priority: optional
 Depends: ${shlibs:Depends},
@@ -218,7 +218,7 @@ Description: tests for systemd
  for autopkgtest and not meant to be installed on regular user systems.
 
 Package: libpam-systemd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: admin
 Priority: standard
@@ -239,7 +239,7 @@ Description: system and service manager - PAM module
  Packages that depend on logind functionality need to depend on libpam-systemd.
 
 Package: libnss-myhostname
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: admin
 Priority: optional
@@ -260,7 +260,7 @@ Description: nss module providing fallback resolution for the current hostname
  Installing this package automatically adds myhostname to /etc/nsswitch.conf.
 
 Package: libnss-mymachines
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: admin
 Priority: optional
@@ -277,7 +277,7 @@ Description: nss module to resolve hostnames for local container instances
  Installing this package automatically adds mymachines to /etc/nsswitch.conf.
 
 Package: libnss-resolve
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: admin
 Priority: optional
@@ -293,7 +293,7 @@ Description: nss module to resolve names via systemd-resolved
  Installing this package automatically adds resolve to /etc/nsswitch.conf.
 
 Package: libnss-systemd
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: admin
 Priority: standard
@@ -311,7 +311,7 @@ Description: nss module providing dynamic user and group name resolution
  Installing this package automatically adds the module to /etc/nsswitch.conf.
 
 Package: libsystemd0
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: libs
 Priority: optional
@@ -322,7 +322,7 @@ Description: systemd utility library
  The libsystemd0 library provides interfaces to various systemd components.
 
 Package: libsystemd-dev
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Section: libdevel
 Priority: optional
@@ -337,7 +337,7 @@ Description: systemd utility library - development files
 Package: udev
 Section: admin
 Priority: important
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: foreign
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -357,7 +357,7 @@ Description: /dev/ and hotplug management daemon
 Package: libudev1
 Section: libs
 Priority: optional
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -368,7 +368,7 @@ Description: libudev shared library
 Package: libudev-dev
 Section: libdevel
 Priority: optional
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
@@ -383,7 +383,7 @@ Build-Profiles: <!noudeb>
 Package-Type: udeb
 Section: debian-installer
 Priority: optional
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          util-linux-udeb
@@ -398,7 +398,7 @@ Build-Profiles: <!noudeb>
 Package-Type: udeb
 Section: debian-installer
 Priority: optional
-Architecture: linux-any
+Architecture: amd64 arm64 i386
 Depends: ${shlibs:Depends},
          ${misc:Depends}
 Description: libudev shared library
