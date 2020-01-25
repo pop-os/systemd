@@ -1,0 +1,22 @@
+Provide an optional resolvconf package with a symlink to resolvectl.
+
+This allows removing resolvconf while maintaining compatibility with
+scripts and programs that utilize it.
+
+Index: systemd/debian/control
+===================================================================
+--- systemd.orig/debian/control
++++ systemd/debian/control
+@@ -569,3 +569,12 @@
+  are different from the libsystemd's and libudev's pkg-config files, which can
+  still be found in the respective dev packages, but instead provide data such as
+  the installation directories for units, and more.
++
++Package: systemd-resolvconf
++Section: admin
++Architecture: amd64 arm64 i386 armhf
++Priority: optional
++Depends: ${shlibs:Depends},
++         ${misc:Depends},
++         systemd-resolved
++Description: Empty transitional package (can be safely removed).

@@ -1,0 +1,25 @@
+Index: systemd/src/basic/filesystems-gperf.gperf
+===================================================================
+--- systemd.orig/src/basic/filesystems-gperf.gperf
++++ systemd/src/basic/filesystems-gperf.gperf
+@@ -28,6 +28,7 @@ afs,             {AFS_FS_MAGIC, AFS_SUPE
+ anon_inodefs,    {ANON_INODE_FS_MAGIC}
+ autofs,          {AUTOFS_SUPER_MAGIC}
+ balloon-kvm,     {BALLOON_KVM_MAGIC}
++bcachefs,        {BCACHEFS_SUPER_MAGIC}
+ bdev,            {BDEVFS_MAGIC}
+ binder,          {BINDERFS_SUPER_MAGIC}
+ binfmt_misc,     {BINFMTFS_MAGIC}
+Index: systemd/src/basic/missing_magic.h
+===================================================================
+--- systemd.orig/src/basic/missing_magic.h
++++ systemd/src/basic/missing_magic.h
+@@ -197,3 +197,8 @@
+ #ifndef PID_FS_MAGIC
+ #define PID_FS_MAGIC 0x50494446
+ #endif
++
++/* Added in Linux commit e2f48c48090dea172c0c571101041de64634dae5. Remove when next sync'd */
++#ifndef BCACHEFS_SUPER_MAGIC
++#define BCACHEFS_SUPER_MAGIC 0xca451a4e
++#endif
