@@ -1,0 +1,12 @@
+Index: systemd/hwdb.d/60-keyboard.hwdb
+===================================================================
+--- systemd.orig/hwdb.d/60-keyboard.hwdb	2023-06-07 12:14:21.230851013 -0600
++++ systemd/hwdb.d/60-keyboard.hwdb	2023-06-07 12:14:38.066575034 -0600
+@@ -1690,6 +1690,7 @@
+ ###########################################################
+ 
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnSystem76*:pn*:*
++ KEYBOARD_KEY_81=f20                                    # Mic mute
+  KEYBOARD_KEY_f7=f21                                    # Touchpad toggle
+  KEYBOARD_KEY_f8=f21                                    # Touchpad toggle
+ 
