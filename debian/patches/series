@@ -62,3 +62,8 @@ udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
 udev-allow-onboard-index-up-to-65535.patch
 lp1940635.patch
 Merge-pull-request-20705-from-yuwata-test-oomd-util.patch
+
+# Pop patches
+cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
+system76-usb.patch
