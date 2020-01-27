@@ -132,8 +132,7 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
          dbus
-Recommends: btrfs-progs,
-            libnss-mymachines,
+Recommends: libnss-mymachines,
 Description: systemd container/nspawn tools
  This package provides systemd's tools for nspawn and container/VM management:
   * systemd-nspawn
