@@ -18,8 +18,8 @@ case "$1" in
 
         rm -rf /var/lib/systemd/backlight/
         rm -rf /var/lib/systemd/rfkill/
+        rm -rf /var/lib/systemd/timesync/
 
-        rm -f /var/lib/systemd/clock
         rm -f /var/lib/systemd/random-seed
     ;;
 esac
