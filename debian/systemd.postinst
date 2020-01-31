@@ -15,7 +15,7 @@ _update_catalog() {
 # Update Message Catalogs database and reload in response to dpkg triggers
 if [ "$1" = "triggered" ]; then
     shift
-    for trigger in "$@"; do
+    for trigger in $@; do
         case $trigger in
             /usr/lib/systemd/catalog)
                 _update_catalog
