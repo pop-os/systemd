@@ -1,3 +1,24 @@
+systemd (244.1-2) unstable; urgency=medium
+
+  * Report status of libpam-systemd and libnss-systemd in systemd reportbug
+    template.
+    Since the libpam-systemd Recommends was moved from systemd to
+    systemd-sysv we no longer get this information automatically, so request
+    it explicitly.
+  * Drop btrfs-progs Recommends from systemd-container.
+    Upstream has dropped the logic of setting up /var/lib/machines as btrfs
+    loopback mount so this Recommends is no longer necessary.
+  * Fix processing of dpkg triggers in systemd.
+    We need to use $@ instead of "$@" so we can iterate through the
+    individual trigger names which are passed as a space separated list in
+    the second argument.
+  * Fix cleanup of timesyncd state directory
+  * Enable persistent journal.
+    Create /var/log/journal on upgrades and new installs. This enables
+    persistent journal in auto mode. (Closes: #717388)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 01 Feb 2020 02:59:12 +0100
+
 systemd (244.1-1) unstable; urgency=medium
 
   [ Michael Biebl ]
