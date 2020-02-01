@@ -92,6 +92,12 @@ systemd-machine-id-setup
 # Setup system users and groups
 addgroup --quiet --system systemd-journal
 
+# Enable persistent journal, in auto-mode, by default on new installs and upgrades
+if dpkg --compare-versions "$2" lt "244.1-2~"; then
+    mkdir -p /var/log/journal
+    systemd-tmpfiles --create --prefix /var/log/journal
+fi
+
 # We need to stop running services before we call adduser
 RESTART=""
 if dpkg --compare-versions "$2" lt-nl "239-6"; then
