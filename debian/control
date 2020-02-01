@@ -90,7 +90,7 @@ Description: system and service manager
  drop-in replacement for sysvinit.
  .
  Installing the systemd package will not switch your init system unless you
- boot with init=/bin/systemd or install systemd-sysv in addition.
+ boot with init=/lib/systemd/systemd or install systemd-sysv in addition.
 
 Package: systemd-sysv
 Architecture: linux-any
