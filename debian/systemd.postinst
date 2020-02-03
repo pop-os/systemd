@@ -95,7 +95,13 @@ addgroup --quiet --system systemd-journal
 # Enable persistent journal, in auto-mode, by default on new installs and upgrades
 if dpkg --compare-versions "$2" lt "244.1-2~"; then
     mkdir -p /var/log/journal
-    systemd-tmpfiles --create --prefix /var/log/journal
+    # Applying ACLs requires a mounted /proc and systemd-tmpfiles will fail if /proc is not
+    # available. Skip systemd-tmpfiles in this case. This should be fine, as this typically
+    # means we are inside a chroot and systemd is not currently active. The permissions will
+    # be applied on the next boot.
+    if mountpoint -q /proc; then
+        systemd-tmpfiles --create --prefix /var/log/journal
+    fi
 fi
 
 # We need to stop running services before we call adduser
