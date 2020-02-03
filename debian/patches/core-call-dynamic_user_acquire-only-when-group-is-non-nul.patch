@@ -1,0 +1,47 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 3 Feb 2020 20:18:02 +0900
+Subject: core: call dynamic_user_acquire() only when 'group' is non-null
+
+When unit is reloaded, and the reloaded unit has bad-setting, then
+unit_patch_contexts() is not called and exec_context::user and group
+may not be configured.
+
+A minimum reproducer for the case is:
+- step 1.
+$ sudo systemctl edit --full hoge.service
+[Service]
+oneshot
+ExecStart=sleep 1h
+
+- step 2.
+$ sudo systemctl start hoge.service
+
+- step 3.
+$ sudo systemctl edit --full hoge.service
+[Service]
+Type=oneshot
+ExecStart=@bindir@/sleep 1h
+DynamicUser=yes
+
+Then pid1 crashed.
+
+Fixes #14733.
+
+(cherry picked from commit 50152bb1c5c311e97e9eeec3b09044925b6e3663)
+---
+ src/core/dynamic-user.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/dynamic-user.c b/src/core/dynamic-user.c
+index 7537340..4dfa29d 100644
+--- a/src/core/dynamic-user.c
++++ b/src/core/dynamic-user.c
+@@ -770,7 +770,7 @@ int dynamic_creds_acquire(DynamicCreds *creds, Manager *m, const char *user, con
+ 
+                 if (creds->user && (!group || streq_ptr(user, group)))
+                         creds->group = dynamic_user_ref(creds->user);
+-                else {
++                else if (group) {
+                         r = dynamic_user_acquire(m, group, &creds->group);
+                         if (r < 0) {
+                                 if (acquired)
