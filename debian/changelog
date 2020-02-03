@@ -1,3 +1,26 @@
+systemd (244.1-3) unstable; urgency=medium
+
+  * Update documentation regarding network interface naming.
+    Document that 73-usb-net-by-mac.link needs to be masked together with
+    99-default.link if one wants to disable the systemd naming scheme and keep
+    the kernel-provided names. (Closes: #946196)
+  * Update debian/rules clean target to remove all Python bytecode
+  * Update systemd package description.
+    Recommend init=/lib/systemd/systemd instead of init=/bin/systemd.
+    The latter is just a compat symlink which might go away eventually.
+  * shared/dropin: fix assert for invalid drop-in.
+    Fixes an assertion when running systemctl cat on inexistent
+    unit templates. (Closes: #950489)
+  * core: call dynamic_user_acquire() only when 'group' is non-null.
+    Fixes an assertion in systemd which could happen if a unit is reloaded
+    and the unit is in bad-setting state. (Closes: #950409)
+  * Don't fail upgrade if /proc is not mounted.
+    Applying ACLs on /var/log/journal via systemd-tmpfiles requires a
+    mounted /proc. Skip this step if /proc is not available, e.g. in a
+    chroot. (Closes: #950533)
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 04 Feb 2020 00:11:55 +0100
+
 systemd (244.1-2) unstable; urgency=medium
 
   * Report status of libpam-systemd and libnss-systemd in systemd reportbug
