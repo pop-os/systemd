@@ -1,3 +1,22 @@
+systemd (244.1-0ubuntu3) focal; urgency=medium
+
+  * SECURITY UPDATE: heap use-after-free with async polkit queries
+    - debian/patches/CVE-2020-1712-1.patch: on async pk requests,
+      re-validate action/details in src/shared/bus-util.c.
+    - debian/patches/CVE-2020-1712-2.patch: introduce API for re-enqueuing
+      incoming messages in src/libsystemd/libsystemd.sym,
+      src/libsystemd/sd-bus/sd-bus.c, src/systemd/sd-bus.h.
+    - debian/patches/CVE-2020-1712-3.patch: when authorizing via PK
+      re-resolve callback/userdata instead of caching it in
+      src/shared/bus-util.c.
+    - debian/patches/CVE-2020-1712-4.patch: fix typo in function name in
+      src/libsystemd/libsystemd.sym, src/libsystemd/sd-bus/sd-bus.c,
+      src/systemd/sd-bus.h, src/shared/bus-util.c.
+    - debian/libsystemd0.symbols: added new symbols.
+    - CVE-2020-1712
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Wed, 05 Feb 2020 12:56:57 -0500
+
 systemd (244.1-0ubuntu2) focal; urgency=medium
 
   [ Dimitri John Ledkov ]

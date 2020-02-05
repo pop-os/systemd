@@ -54,3 +54,7 @@ lp1762391/0004-test-Add-tests-for-gid-list-ops.patch
 lp1762391/0005-execute-add-const-to-array-parameters-where-possible.patch
 lp1762391/0006-execute-allow-pam_setcred-to-fail-ignore-errors.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
+CVE-2020-1712-1.patch
+CVE-2020-1712-2.patch
+CVE-2020-1712-3.patch
+CVE-2020-1712-4.patch
