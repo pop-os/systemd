@@ -25,6 +25,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_240@LIBSYSTEMD_240 240
  LIBSYSTEMD_241@LIBSYSTEMD_241 241
  LIBSYSTEMD_243@LIBSYSTEMD_243 243
+ LIBSYSTEMD_245@LIBSYSTEMD_245 244.1-0ubuntu3
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -96,6 +97,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_emit_properties_changed@LIBSYSTEMD_221 221
  sd_bus_emit_properties_changed_strv@LIBSYSTEMD_221 221
  sd_bus_emit_signal@LIBSYSTEMD_221 221
+ sd_bus_enqueue_for_read@LIBSYSTEMD_245 244.1-0ubuntu3
  sd_bus_error_add_map@LIBSYSTEMD_221 221
  sd_bus_error_copy@LIBSYSTEMD_221 221
  sd_bus_error_free@LIBSYSTEMD_221 221
