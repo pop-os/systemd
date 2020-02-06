@@ -1,5 +1,9 @@
 pstore-Don-t-start-systemd-pstore.service-in-containers.patch
 shutdown-do-not-detach-autoclear-loopback-devices.patch
+core-never-allow-perpetual-units-to-be-masked.patch
+mount-make-checks-on-perpetual-mount-units-more-lax.patch
+shared-dropin-fix-assert-for-invalid-drop-in.patch
+core-call-dynamic_user_acquire-only-when-group-is-non-nul.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
