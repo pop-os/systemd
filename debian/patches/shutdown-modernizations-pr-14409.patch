@@ -6,11 +6,11 @@ This is needed to fix the shutdown of Ubuntu Core 20 devices.
 
 Taken from https://github.com/systemd/systemd/pull/14409
 ---
- src/shutdown/umount.c | 152 +++++++++++++++++++++++++++++---------------------
- 1 file changed, 89 insertions(+), 63 deletions(-)
+ src/shutdown/umount.c | 114 ++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 69 insertions(+), 45 deletions(-)
 
 diff --git a/src/shutdown/umount.c b/src/shutdown/umount.c
-index 6767dbe..7c28ac0 100644
+index 47924c5..7c28ac0 100644
 --- a/src/shutdown/umount.c
 +++ b/src/shutdown/umount.c
 @@ -253,8 +253,10 @@ static int loopback_list_get(MountPoint **head) {
@@ -162,26 +162,7 @@ index 6767dbe..7c28ac0 100644
                  if (nonunmountable_path(m->path))
                          continue;
  
-@@ -530,13 +563,14 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
- 
-         LIST_FOREACH_SAFE(mount_point, m, n, *head) {
-                 log_info("Deactivating swap %s.", m->path);
--                if (swapoff(m->path) == 0) {
--                        *changed = true;
--                        mount_point_free(head, m);
--                } else {
-+                if (swapoff(m->path) < 0) {
-                         log_warning_errno(errno, "Could not deactivate swap %s: %m", m->path);
-                         n_failed++;
-+                        continue;
-                 }
-+
-+                *changed = true;
-+                mount_point_free(head, m);
-         }
- 
-         return n_failed;
-@@ -544,37 +578,31 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
+@@ -545,22 +578,16 @@ static int swap_points_list_off(MountPoint **head, bool *changed) {
  
  static int loopback_points_list_detach(MountPoint **head, bool *changed, int umount_log_level) {
          MountPoint *m, *n;
@@ -208,29 +189,7 @@ index 6767dbe..7c28ac0 100644
                          n_failed++;
                          continue;
                  }
- 
-                 log_info("Detaching loopback %s.", m->path);
-                 r = delete_loopback(m->path);
--                if (r >= 0) {
--                        if (r > 0)
--                                *changed = true;
--
--                        mount_point_free(head, m);
--                } else {
--                        log_full_errno(umount_log_level, errno, "Could not detach loopback %s: %m", m->path);
-+                if (r < 0) {
-+                        log_full_errno(umount_log_level, r, "Could not detach loopback %s: %m", m->path);
-                         n_failed++;
-+                        continue;
-                 }
-+                if (r > 0)
-+                        *changed = true;
-+
-+                mount_point_free(head, m);
-         }
- 
-         return n_failed;
-@@ -583,39 +611,37 @@ static int loopback_points_list_detach(MountPoint **head, bool *changed, int umo
+@@ -584,17 +611,14 @@ static int loopback_points_list_detach(MountPoint **head, bool *changed, int umo
  static int dm_points_list_detach(MountPoint **head, bool *changed, int umount_log_level) {
          MountPoint *m, *n;
          int n_failed = 0, r;
@@ -250,33 +209,3 @@ index 6767dbe..7c28ac0 100644
                  if (major(rootdev) != 0 && rootdev == m->devnum) {
                          n_failed ++;
                          continue;
-                 }
- 
--                log_info("Detaching DM %u:%u.", major(m->devnum), minor(m->devnum));
-+                log_info("Detaching DM %s (%u:%u).", m->path, major(m->devnum), minor(m->devnum));
-                 r = delete_dm(m->devnum);
--                if (r >= 0) {
--                        *changed = true;
--                        mount_point_free(head, m);
--                } else {
--                        log_full_errno(umount_log_level, errno, "Could not detach DM %s: %m", m->path);
-+                if (r < 0) {
-+                        log_full_errno(umount_log_level, r, "Could not detach DM %s: %m", m->path);
-                         n_failed++;
-+                        continue;
-                 }
-+
-+                *changed = true;
-+                mount_point_free(head, m);
-         }
- 
-         return n_failed;
- }
- 
- static int umount_all_once(bool *changed, int umount_log_level) {
--        int r;
-         _cleanup_(mount_points_list_free) LIST_HEAD(MountPoint, mp_list_head);
-+        int r;
- 
-         assert(changed);
- 

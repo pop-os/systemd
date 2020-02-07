@@ -1,9 +1,6 @@
+core-call-dynamic_user_acquire-only-when-group-is-non-nul.patch
 pstore-Don-t-start-systemd-pstore.service-in-containers.patch
 shutdown-do-not-detach-autoclear-loopback-devices.patch
-core-never-allow-perpetual-units-to-be-masked.patch
-mount-make-checks-on-perpetual-mount-units-more-lax.patch
-shared-dropin-fix-assert-for-invalid-drop-in.patch
-core-call-dynamic_user_acquire-only-when-group-is-non-nul.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -58,8 +55,3 @@ lp1762391/0004-test-Add-tests-for-gid-list-ops.patch
 lp1762391/0005-execute-add-const-to-array-parameters-where-possible.patch
 lp1762391/0006-execute-allow-pam_setcred-to-fail-ignore-errors.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
-CVE-2020-1712-1.patch
-CVE-2020-1712-2.patch
-CVE-2020-1712-3.patch
-CVE-2020-1712-4.patch
-test-Synchronize-journal-before-reading-from-it.patch

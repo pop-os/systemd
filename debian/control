@@ -8,7 +8,7 @@ Uploaders: Michael Biebl <biebl@debian.org>,
            Sjoerd Simons <sjoerd@debian.org>,
            Martin Pitt <mpitt@debian.org>,
            Felipe Sateler <fsateler@debian.org>
-Standards-Version: 4.4.1
+Standards-Version: 4.5.0
 Rules-Requires-Root: no
 Vcs-Git: https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd
 Vcs-Browser:  https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd

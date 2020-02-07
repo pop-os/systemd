@@ -239,7 +239,7 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 21d6968..b8dff8c 100644
+index 1bdb9c7..9490b83 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -2385,6 +2385,14 @@ executable('systemd-makefs',
@@ -966,7 +966,7 @@ index 0000000..6578f69
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index 6a3a0d0..ba3eb5d 100644
+index 476991e..43874ad 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -84,6 +84,7 @@ units = [
