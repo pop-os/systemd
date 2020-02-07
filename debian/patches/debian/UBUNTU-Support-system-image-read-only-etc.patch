@@ -15,7 +15,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  2 files changed, 49 insertions(+), 10 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index deecd9b..aaed960 100644
+index 21f6471..5990b7f 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -24,6 +24,7 @@
@@ -84,7 +84,7 @@ index deecd9b..aaed960 100644
  
  static int property_get_icon_name(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 5141a90..6cea5a9 100644
+index 0ed4511..9dfe454 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -275,6 +275,25 @@ static int context_read_data(Context *c) {

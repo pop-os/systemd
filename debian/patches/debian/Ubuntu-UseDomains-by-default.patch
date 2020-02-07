@@ -23,7 +23,7 @@ Users may override this setting in the .network files by specifying
  2 files changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index a26e08c..1108076 100644
+index 8254d7c..21aa54c 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
 @@ -351,7 +351,7 @@
@@ -35,7 +35,7 @@ index a26e08c..1108076 100644
              See option <option>UseDomains=</option> below.</para>
  
              <para>See the <literal>[DHCPv4]</literal> or <literal>[DHCPv6]</literal> section below for
-@@ -1491,7 +1491,7 @@
+@@ -1489,7 +1489,7 @@
              the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name received from
              the DHCP server will be used for routing DNS queries only, but not for searching, similar to the effect of
              the <option>Domains=</option> setting when the argument is prefixed with <literal>~</literal>. Defaults to
@@ -44,7 +44,7 @@ index a26e08c..1108076 100644
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-@@ -1743,7 +1743,7 @@
+@@ -1741,7 +1741,7 @@
              the effect of the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name
              received via IPv6 RA will be used for routing DNS queries only, but not for searching, similar to the
              effect of the <option>Domains=</option> setting when the argument is prefixed with
