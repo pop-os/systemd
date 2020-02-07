@@ -1,3 +1,13 @@
+systemd (244.2-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 244.2
+
+  [ Balint Reczey ]
+  * Remove empty /var/log/journal/ on purge
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 07 Feb 2020 17:37:48 +0100
+
 systemd (244.1-3) unstable; urgency=medium
 
   * Update documentation regarding network interface naming.
