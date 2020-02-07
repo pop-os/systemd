@@ -1,6 +1,3 @@
-core-never-allow-perpetual-units-to-be-masked.patch
-mount-make-checks-on-perpetual-mount-units-more-lax.patch
-shared-dropin-fix-assert-for-invalid-drop-in.patch
 core-call-dynamic_user_acquire-only-when-group-is-non-nul.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
