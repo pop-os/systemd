@@ -1,12 +1,16 @@
-systemd (244.2-1) UNRELEASED; urgency=medium
+systemd (244.2-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 244.2
+    - polkit: when authorizing via PolicyKit re-resolve callback/userdata
+      instead of caching it (CVE-2020-1712, Closes: #950732)
+  * Rebase patches
+  * Bump Standards-Version to 4.5.0
 
   [ Balint Reczey ]
   * Remove empty /var/log/journal/ on purge
 
- -- Michael Biebl <biebl@debian.org>  Fri, 07 Feb 2020 17:37:48 +0100
+ -- Michael Biebl <biebl@debian.org>  Fri, 07 Feb 2020 19:24:20 +0100
 
 systemd (244.1-3) unstable; urgency=medium
 
