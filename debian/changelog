@@ -1,4 +1,4 @@
-systemd (244.2-1ubuntu1) UNRELEASED; urgency=medium
+systemd (244.2-1ubuntu1) focal; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
   * Refresh patches:
@@ -213,8 +213,11 @@ systemd (244.2-1ubuntu1) UNRELEASED; urgency=medium
       * d/t/control: run udev tests only with isolation-machine.
         File: debian/tests/control
         https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4b4c9bf44f4b8d7f75a4204aff697f549c8aad7
+  * Keep sd_bus_enqueue_for_read() public
+    File: debian/patches/Export-sd_bus_enqueue_for_read.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1eb313b0e2d0a13bb891125b611ef2dc47e483b5
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 11 Feb 2020 17:36:18 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 11 Feb 2020 19:21:08 +0100
 
 systemd (244.2-1) unstable; urgency=medium
 
