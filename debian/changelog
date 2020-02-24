@@ -1,3 +1,12 @@
+systemd (244.3-1ubuntu1) focal; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+  * Refresh patches:
+    - Dropped changes: none
+    - Remaining changes: all
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 24 Feb 2020 20:29:44 +0100
+
 systemd (244.3-1) unstable; urgency=medium
 
   * New upstream version 244.3
