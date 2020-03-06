@@ -1,3 +1,10 @@
+systemd (245-1) UNRELEASED; urgency=medium
+
+  * New upstream version 245
+  * Refresh patches
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 06 Mar 2020 17:56:43 +0100
+
 systemd (244.3-1) unstable; urgency=medium
 
   * New upstream version 244.3
