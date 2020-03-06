@@ -406,7 +406,7 @@ static int bus_print_property(const char *name, const char *expected_value, sd_b
                                 if (r < 0)
                                         return r;
 
-                                result = s;
+                                result = strempty(s);
                         }
 
                         bus_print_property_value(name, expected_value, value, result);
@@ -772,7 +772,7 @@ static int map_basic(sd_bus *bus, const char *member, sd_bus_message *m, unsigne
                 if (r < 0)
                         return r;
 
-                return strv_free_and_replace(*p, l);
+                return strv_extend_strv(p, l, false);
         }
 
         case SD_BUS_TYPE_BOOLEAN: {

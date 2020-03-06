@@ -36,6 +36,7 @@
 #include "signal-util.h"
 #include "smack-util.h"
 #include "socket.h"
+#include "socket-netlink.h"
 #include "special.h"
 #include "string-table.h"
 #include "string-util.h"
@@ -3422,6 +3423,8 @@ const UnitVTable socket_vtable = {
         .private_section = "Socket",
 
         .can_transient = true,
+        .can_trigger = true,
+        .can_fail = true,
 
         .init = socket_init,
         .done = socket_done,
