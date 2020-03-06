@@ -33,7 +33,6 @@ debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
 debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
 debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch
-debian/UBUNTU-bump-selftest-timeouts.patch
 debian/UBUNTU-units-disable-journald-watchdog.patch
 debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
 resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
@@ -44,16 +43,6 @@ Revert-network-fix-assertion-when-link-get-carrier.patch
 Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
 Revert-network-do-not-drop-foreign-config-if-interface-is.patch
-shutdown-modernizations-pr-14409.patch
-lp1845909/0001-network-rename-linux_configure_after_setting_mtu-to-linux.patch
 lp1845909/0002-network-add-link-setting_genmode-flag.patch
-lp1845909/0003-network-if-ipv6ll-is-disabled-enumerate-tentative-ipv6-ad.patch
-lp1845909/0004-network-drop-foreign-config-after-addr_gen_mode-has-been-.patch
-lp1762391/0001-user-util-Add-helper-functions-for-gid-lists-operati.patch
-lp1762391/0002-execute-Restore-call-to-pam_setcred.patch
-lp1762391/0003-execute-Detect-groups-added-by-PAM-and-merge-them-wi.patch
-lp1762391/0004-test-Add-tests-for-gid-list-ops.patch
-lp1762391/0005-execute-add-const-to-array-parameters-where-possible.patch
-lp1762391/0006-execute-allow-pam_setcred-to-fail-ignore-errors.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
-Export-sd_bus_enqueue_for_read.patch
+network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
