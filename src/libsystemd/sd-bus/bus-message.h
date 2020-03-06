@@ -85,6 +85,7 @@ struct sd_bus_message {
         bool free_header:1;
         bool free_fds:1;
         bool poisoned:1;
+        bool sensitive:1;
 
         /* The first and last bytes of the message */
         struct bus_header *header;
@@ -225,4 +226,3 @@ void bus_message_set_sender_local(sd_bus *bus, sd_bus_message *m);
 
 sd_bus_message* bus_message_ref_queued(sd_bus_message *m, sd_bus *bus);
 sd_bus_message* bus_message_unref_queued(sd_bus_message *m, sd_bus *bus);
-int sd_bus_enqueue_for_read(sd_bus *bus, sd_bus_message *m);

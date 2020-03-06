@@ -651,30 +651,31 @@ static int lookup_block_device(const char *p, dev_t *ret) {
         r = device_path_parse_major_minor(p, &mode, &rdev);
         if (r == -ENODEV) { /* not a parsable device node, need to go to disk */
                 struct stat st;
+
                 if (stat(p, &st) < 0)
                         return log_warning_errno(errno, "Couldn't stat device '%s': %m", p);
-                rdev = (dev_t)st.st_rdev;
-                dev = (dev_t)st.st_dev;
+
                 mode = st.st_mode;
+                rdev = st.st_rdev;
+                dev = st.st_dev;
         } else if (r < 0)
                 return log_warning_errno(r, "Failed to parse major/minor from path '%s': %m", p);
 
-        if (S_ISCHR(mode)) {
-                log_warning("Device node '%s' is a character device, but block device needed.", p);
-                return -ENOTBLK;
-        } else if (S_ISBLK(mode))
+        if (S_ISCHR(mode))
+                return log_warning_errno(SYNTHETIC_ERRNO(ENOTBLK),
+                                         "Device node '%s' is a character device, but block device needed.", p);
+        if (S_ISBLK(mode))
                 *ret = rdev;
         else if (major(dev) != 0)
                 *ret = dev; /* If this is not a device node then use the block device this file is stored on */
         else {
                 /* If this is btrfs, getting the backing block device is a bit harder */
                 r = btrfs_get_block_device(p, ret);
-                if (r < 0 && r != -ENOTTY)
+                if (r == -ENOTTY)
+                        return log_warning_errno(SYNTHETIC_ERRNO(ENODEV),
+                                                 "'%s' is not a block device node, and file system block device cannot be determined or is not local.", p);
+                if (r < 0)
                         return log_warning_errno(r, "Failed to determine block device backing btrfs file system '%s': %m", p);
-                if (r == -ENOTTY) {
-                        log_warning("'%s' is not a block device node, and file system block device cannot be determined or is not local.", p);
-                        return -ENODEV;
-                }
         }
 
         /* If this is a LUKS device, try to get the originating block device */
@@ -1526,10 +1527,9 @@ CGroupMask unit_get_members_mask(Unit *u) {
                 Unit *member;
                 Iterator i;
 
-                HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i) {
+                HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i)
                         if (UNIT_DEREF(member->slice) == u)
                                 u->cgroup_members_mask |= unit_get_subtree_mask(member); /* note that this calls ourselves again, for the children */
-                }
         }
 
         u->cgroup_members_mask_valid = true;
@@ -2337,13 +2337,13 @@ static void unit_add_siblings_to_cgroup_realize_queue(Unit *u) {
         /* This adds the siblings of the specified unit and the siblings of all parent units to the cgroup
          * queue. (But neither the specified unit itself nor the parents.)
          *
-         * Propagation of realization "side-ways" (i.e. towards siblings) is in relevant on cgroup-v1 where
-         * scheduling become very weird if two units that own processes reside in the same slice, but one is
-         * realized in the "cpu" hierarchy and once is not (for example because one has CPUWeight= set and
-         * the other does not), because that means processes need to be scheduled against groups. Let's avoid
-         * this asymmetry by always ensuring that units below a slice that are realized at all are hence
-         * always realized in *all* their hierarchies, and it is sufficient for a unit's sibling to be
-         * realized for a unit to be realized too. */
+         * Propagation of realization "side-ways" (i.e. towards siblings) is relevant on cgroup-v1 where
+         * scheduling becomes very weird if two units that own processes reside in the same slice, but one is
+         * realized in the "cpu" hierarchy and one is not (for example because one has CPUWeight= set and the
+         * other does not), because that means individual processes need to be scheduled against whole
+         * cgroups. Let's avoid this asymmetry by always ensuring that units below a slice that are realized
+         * at all are always realized in *all* their hierarchies, and it is sufficient for a unit's sibling
+         * to be realized for the unit itself to be realized too. */
 
         while ((slice = UNIT_DEREF(u->slice))) {
                 Iterator i;
@@ -3527,10 +3527,9 @@ void unit_invalidate_cgroup_bpf(Unit *u) {
                 Iterator i;
                 void *v;
 
-                HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i) {
+                HASHMAP_FOREACH_KEY(v, member, u->dependencies[UNIT_BEFORE], i)
                         if (UNIT_DEREF(member->slice) == u)
                                 unit_invalidate_cgroup_bpf(member);
-                }
         }
 }
 
@@ -3622,8 +3621,8 @@ int unit_get_cpuset(Unit *u, CPUSet *cpus, const char *name) {
                 return r;
         if (r == 0)
                 return -ENODATA;
-        if (r > 0)
-                r = cg_get_attribute("cpuset", u->cgroup_path, name, &v);
+
+        r = cg_get_attribute("cpuset", u->cgroup_path, name, &v);
         if (r == -ENOENT)
                 return -ENODATA;
         if (r < 0)

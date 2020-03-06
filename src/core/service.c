@@ -4075,24 +4075,17 @@ static int service_get_timeout(Unit *u, usec_t *timeout) {
         return 1;
 }
 
-static void service_bus_name_owner_change(
-                Unit *u,
-                const char *old_owner,
-                const char *new_owner) {
+static void service_bus_name_owner_change(Unit *u, const char *new_owner) {
 
         Service *s = SERVICE(u);
         int r;
 
         assert(s);
 
-        assert(old_owner || new_owner);
-
-        if (old_owner && new_owner)
-                log_unit_debug(u, "D-Bus name %s changed owner from %s to %s", s->bus_name, old_owner, new_owner);
-        else if (old_owner)
-                log_unit_debug(u, "D-Bus name %s no longer registered by %s", s->bus_name, old_owner);
+        if (new_owner)
+                log_unit_debug(u, "D-Bus name %s now owned by %s", s->bus_name, new_owner);
         else
-                log_unit_debug(u, "D-Bus name %s now registered by %s", s->bus_name, new_owner);
+                log_unit_debug(u, "D-Bus name %s now not owned by anyone.", s->bus_name);
 
         s->bus_name_good = !!new_owner;
 
@@ -4315,6 +4308,18 @@ static int service_can_clean(Unit *u, ExecCleanMask *ret) {
         return exec_context_get_clean_mask(&s->exec_context, ret);
 }
 
+static const char *service_finished_job(Unit *u, JobType t, JobResult result) {
+        if (t == JOB_START && result == JOB_DONE) {
+                Service *s = SERVICE(u);
+
+                if (s->type == SERVICE_ONESHOT)
+                        return "Finished %s.";
+        }
+
+        /* Fall back to generic */
+        return NULL;
+}
+
 static const char* const service_restart_table[_SERVICE_RESTART_MAX] = {
         [SERVICE_RESTART_NO] = "no",
         [SERVICE_RESTART_ON_SUCCESS] = "on-success",
@@ -4404,6 +4409,7 @@ const UnitVTable service_vtable = {
 
         .can_transient = true,
         .can_delegate = true,
+        .can_fail = true,
 
         .init = service_init,
         .done = service_done,
@@ -4461,7 +4467,6 @@ const UnitVTable service_vtable = {
                         [1] = "Stopping %s...",
                 },
                 .finished_start_job = {
-                        [JOB_DONE]       = "Started %s.",
                         [JOB_FAILED]     = "Failed to start %s.",
                         [JOB_SKIPPED]    = "Skipped %s.",
                 },
@@ -4469,5 +4474,6 @@ const UnitVTable service_vtable = {
                         [JOB_DONE]       = "Stopped %s.",
                         [JOB_FAILED]     = "Stopped (with error) %s.",
                 },
+                .finished_job = service_finished_job,
         },
 };
