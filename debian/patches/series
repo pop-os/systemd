@@ -1,4 +1,6 @@
 analyze-fix-table-time-output.patch
+execute-Fix-migration-from-DynamicUser-yes-to-no.patch
+test-add-a-test-case-for-migrating-DynamicUser-yes-to-no.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
