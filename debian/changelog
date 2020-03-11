@@ -1,9 +1,21 @@
-systemd (245-1) UNRELEASED; urgency=medium
+systemd (245-1) unstable; urgency=medium
 
+  [ Balint Reczey ]
   * New upstream version 245
   * Refresh patches
+  * Update symbols
 
- -- Balint Reczey <rbalint@ubuntu.com>  Fri, 06 Mar 2020 17:56:43 +0100
+  [ Michael Biebl ]
+  * Disable repart, userdb, homed, fdisk, pwquality, p11kit feature.
+    Those are new features which drag in new dependencies and need further
+    review first.
+  * analyze: Fix table time output
+  * execute: Fix migration from DynamicUser=yes to no
+  * Drop manual clean up of /var/lib/private/systemd/timesync.
+    This is now done properly by systemd itself when a service switches from
+    DynamicUser=yes to no.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 11 Mar 2020 13:33:37 +0100
 
 systemd (244.3-1) unstable; urgency=medium
 
