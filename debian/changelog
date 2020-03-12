@@ -1,3 +1,12 @@
+systemd (245-2) unstable; urgency=medium
+
+  * Revert "job: Don't mark as redundant if deps are relevant"
+    This change negatively affects plymouth which was no longer properly
+    stopped after the system has completed booting. The running plymouth
+    daemon can trigger a VT switch (to tty1). (Closes: #953670)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Mar 2020 13:55:26 +0100
+
 systemd (245-1) unstable; urgency=medium
 
   [ Balint Reczey ]
