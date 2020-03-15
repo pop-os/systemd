@@ -1,3 +1,216 @@
+systemd (245-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+  * Refresh patches
+    - Dropped changes:
+      * Keep sd_bus_enqueue_for_read() public
+      * Improve autopkgtest success rate, by bumping up timeouts
+      * d/p/lp1762391/0001-user-util-Add-helper-functions-for-gid-lists-operati.patch,
+        d/p/lp1762391/0002-execute-Restore-call-to-pam_setcred.patch,
+        d/p/lp1762391/0003-execute-Detect-groups-added-by-PAM-and-merge-them-wi.patch,
+        d/p/lp1762391/0004-test-Add-tests-for-gid-list-ops.patch,
+        d/p/lp1762391/0005-execute-add-const-to-array-parameters-where-possible.patch,
+        d/p/lp1762391/0006-execute-allow-pam_setcred-to-fail-ignore-errors.patch:
+        - Restore call to pam_setcred (LP: #1762391)
+      * d/p/0001-network-rename-linux_configure_after_setting_mtu-to-linux.patch,
+        d/p/0002-network-add-link-setting_genmode-flag.patch,
+        d/p/0003-network-if-ipv6ll-is-disabled-enumerate-tentative-ipv6-ad.patch,
+        d/p/0004-network-drop-foreign-config-after-addr_gen_mode-has-been-.patch:
+        - drop foreign config and raise interface after setting genmode
+      * pstore: Don't start systemd-pstore.service in containers.
+      * shutdown: do not detach autoclear loopback devices
+      * shutdown: cherry-pick PR#14409 to fix detach of loopback devices
+        for Ubuntu Core 20
+    - Remaining changes:
+      * Specify Ubuntu's Vcs-Git
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fd832930ef280c9a4a9dda2440d5a46a6fdb6232
+      * Enable EFI/bootctl on armhf.
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=043122f7d8a1487bfd357e815a6ece1ceea6e7d1
+      * Recommend networkd-dispatcher
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d1e3b2c7e4757119da0d550b0b3c0a6626a176dc
+      * Add conflicts with upstart and systemd-shim
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=83ed7496afc7c27be026014d109855f7d0ad1176
+      * debian/control: strengthen dependencies.
+        File: debian/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d1ecf0c372f5212129c85ae60fddf26b2271a1fe
+      * debian/rules: Set -Duser-path instead of patching the source for the same result
+        File: debian/rules
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=67d2ac5d806b55b0d178fca7e0af08cd9d12580c
+      * config: tpm-pcrindex=12, on Ubuntu only.
+        File: debian/rules
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f8c22d44a619ce8fa17eb0cd7c7e2c601cdbbeb
+      * Ubuntu/extra: ship dhclient-enter hook.
+        Files:
+        - debian/extra/dhclient-enter-resolved-hook
+        - debian/rules
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f3398a213f80b02bf3db0c1ce9e22d69f6d56764
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=258893bae8cbb12670e4807636fe8f7e9fb5407a
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0725c1169ddde4f41cacba7af3e546704e2206be
+      * udev-udeb: ship modprobe.d snippet to force scsi_mod.scan=sync in d-i.
+        Files:
+        - debian/extra/modprobe.d-udeb/scsi-mod-scan-sync.conf
+        - debian/udev-udeb.install
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=eb6d8a2b9504917abb7aa2c4035fdbb7b98227f7
+      * debian/extra/start-udev: Set scsi_mod scan=sync even if it's builtin to the kernel (we previously only set it in modprobe.d)
+        Files:
+        - debian/extra/start-udev
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6b72628f8de991e2c67ac4289fc74daf3abe7d14
+      * debian/extra/units/systemd-resolved.service.d/resolvconf.conf:
+        drop resolvconf.conf drop-in, resolved integration moved to resolvconf package.
+      * debian/extra/wrap_cl.py: add changelog formatter
+        Files:
+        - debian/extra/wrap_cl.py
+        - debian/gbp.conf
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=26e69bceab9cec8df64cdca18cd71e7c0874f8b3
+      * debian/gbp.conf: Set tag format to ubuntu/*
+      * debian/gbp.conf: Change debian-branch to ubuntu-focal
+      * libnss-resolve: do not disable and stop systemd-resolved
+        File: debian/libnss-resolve.postrm
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=95577d14e84e19b614b83b2e24985d89e8c2dac0
+      * core: Revert strict mount namespacing/sandboxing, until LXD allows the needed mounts.
+        File: debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=030919ba5e4931d6ee576d0259fae67fe4ed9770
+      * Revert upstream adding LINK_STATE_INITIALIZED because it breaks netplan.io's
+        ethernets autopkgtest.
+        Files:
+        - debian/patches/Revert-network-do-not-drop-foreign-config-if-interface-is.patch
+        - debian/patches/Revert-network-fix-assertion-when-link-get-carrier.patch
+        - debian/patches/Revert-network-prevent-interfaces-to-be-initialized-multi.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=22a9fa3bb03ba2a629926af39ea7df81fe33c9b8
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=70e93c2a05f0f7435614f8d52944d726601e319c
+      * Revert upstream commit breaking IPv4 DHCP in LXC containers in 244.1
+        (LP: #1857123)
+        File: debian/patches/Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=39c12f8e736afd1b7bdeb13ff6bccaea85020873
+      * Skip falling back to device name when net_get_name(device) fails.
+        File: debian/patches/Skip-falling-back-to-device-name-when-net_get_name-device.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c79fe0e2dc29834e0cd236ade6e4e44a6ffb74fa
+      * Add "AssumedApparmorLabel=unconfined" to timedate1 dbus service file
+        File: debian/patches/debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5ad0879e10bbe3d641f940260b93c7eb2cf4624c
+      * Re-add support for /etc/writable for core18
+        File: debian/patches/debian/UBUNTU-Support-system-image-read-only-etc.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a5b5fca66c1127068e4ce0cc9ab497814211f4f7
+      * core: set /run size to 10%, like initramfs-tools does.
+        File: debian/patches/debian/UBUNTU-core-set-run-size-to-10-like-initramfs-tools-does.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1fac2568fe716dc1a41bada78293dc6327a6df0d
+      * Ship systemd sysctl settings.
+        Files:
+        - debian/patches/debian/UBUNTU-drop-kernel.-settings-from-sysctl-defaults-shipped.patch
+        - debian/rules
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7cd041a6d0ef459e4b2a82d8ea5fa1ce05184dfb
+      * journald.service: set Nice=-1 to dodge watchdog on soft lockups.
+        File: debian/patches/debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e0a9aeffac556492bf517ce2d23313ff7a277926
+      * networkd: if RA was implicit, do not await ndisc_configured.
+        File: debian/patches/debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2f749ff528d1b788aa4ca778e954c16b213ee629
+      * networkd: [Route] PreferredSource not working in *.network files.
+        Files:
+        - debian/patches/debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4e2ee0b2ac1be2ae78952890a56a2d5398df518
+      * systemd-resolved: Default to Cache=no-negative
+        File: debian/patches/debian/UBUNTU-resolved-default-no-negative-caching.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b42658843a9496d6b6bb68ac159f2a9f0a8ba9db
+      * Disable LLMNR and MulticastDNS by default
+        Files:
+        - debian/patches/debian/UBUNTU-resolved-disable-global-LLMNR-and-MulticastDNS.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4ec428e83696a5cd0405b677a35e97681867629
+      * test-sleep: skip test_fiemap upon inapproriate ioctl for device.
+        File: debian/patches/debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6ebb5b9f6b77760a5470e8a780d69875b1db76f7
+      * test/test-functions: launch qemu-system with -vga none.
+        File: debian/patches/debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=90af1fa893cce5ed49999d16da0b793da6523394
+      * units: conditionalize more units to not start in containers.
+        Files:
+        - debian/patches/debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3689afa1a782de8c19a757459b6360de1195ad55
+      * units: Disable journald Watchdog
+        File: debian/patches/debian/UBUNTU-units-disable-journald-watchdog.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=64d2b4f1d0d057073fba585f19823332e2a6eed5
+      * wait-online: do not wait, if no links are managed (neither configured, or failed).
+        File: debian/patches/debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=31f04c3fc769dacb3cf2a78240a1710a99a865b8
+      * Set UseDomains to true, by default, on Ubuntu.
+        File: debian/patches/debian/Ubuntu-UseDomains-by-default.patch
+      * Ignore failures to set Nice priority on services in containers.
+        File: debian/patches/debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5b8e457f8d883fc6f55d33d46b3474926a495d29
+      * units: set ConditionVirtualization=!private-users on journald audit socket.
+        File: debian/patches/debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03ed18a9940731bbf794ad320fabf337488835c6
+      * Workaround captive portals not responding to EDNS0 queries (DVE-2018-0001).
+        File: debian/patches/resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=87d3fe81b7281687ecf3c0b9a8356e90cc714d0b
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2974114ed9b89ea922a23893e8eff70d5cac77fe
+      * Disable dh_installinit generation of tmpfiles for the systemd package.
+        Files:
+        - debian/rules
+        - debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1fd144cbe31cc7a9383cc76f21f4b84c22a9dd1b
+      * Enable systemd-resolved by default
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=05adfa0902115f51c1196ad623165a75bb8b4313
+      * Create /etc/resolv.conf at postinst, pointing at the stub resolver.
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ef4adf46bbbe2d22508b70b889d23da53b85039d
+      * Always setup /etc/resolv.conf on new installations.
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=20bc8a37fa3c9620bed21a56a4eabd71db71d861
+      * Disable systemd-networkd-wait-online by default.
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=694473d812b50d2fefd6494d494ca02b91bc8785
+      * postinst: drop empty/stock /etc/rc.local
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e7d071a26a79558771303b0b87f007e650eaebbe
+      * systemd.postinst: enable persistent journal
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f94f18d9dbc085b6a9ff33c141a6e542142f85b5
+      * debian/systemd.postinst: Skip daemon-reexec and try-restarts during shutdown
+        File: debian/systemd.postinst
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=51daab96ae79483b5e5fb62e1e0477c87ee11fd1
+      * Drop systemd.prerm safety check.
+        File: debian/systemd.prerm
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0244c4d56556317f14eecc2f51871969ef02ba7b
+      * boot-and-services: stderr is ok, for status command on the c1 container.
+        File: debian/tests/boot-and-services
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=da14d34e7cc33c44ad67e64c9fd092f8cc1675f9
+      * adt: boot-and-services: assert any kernel syslog messages.
+        File: debian/tests/boot-and-services
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=29dc34f7a6e5dc505f6212c17c42e4420b47ed16
+      * Wait for systemctl is-system-running state.
+        File: debian/tests/boot-smoke
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=776998f1f55c445b6e385cab69a4219c42d00838
+      * debian/tests: Enforce udev upgrade.
+        Files:
+        - debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f350b43ccc1aa31c745b4ccebbb4084d5cea41ff
+      * Only test that gdm3 comes up on amd64. Stalls on other arches.
+        File: debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=97cb13685dfb353045c449ec5d6d1df60f661079
+      * debian/tests/systemd-fsckd: update assertions expectations for v237
+        File: debian/tests/systemd-fsckd
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d5becd9a416b55dcdb7b9a7aba60c4e3d304e6a6
+      * Skip systemd-fsckd on arm64, because of broken/lack of clean shutdown.
+        File: debian/tests/systemd-fsckd
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bf5b501ac934497dbef5f64908ff37643dc7288e
+      * debian/tests: blacklist upstream test-24-unit-tests on ppc64le.
+        File: debian/tests/upstream
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8062b9a2712c390010d2948eaf764a1b52e68715
+      * debian/test/boot-and-services: Skip AppArmor tests in arm containers.
+        File: debian/tests/boot-and-services
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9d3b35df77aa939365563a4edaee54ebb7f559a3
+      * d/t/control: run udev tests only with isolation-machine.
+        File: debian/tests/control
+        https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b4b4c9bf44f4b8d7f75a4204aff697f549c8aad7
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Sun, 15 Mar 2020 17:13:36 +0100
+
 systemd (245-2) unstable; urgency=medium
 
   * Revert "job: Don't mark as redundant if deps are relevant"
