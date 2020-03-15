@@ -39,8 +39,15 @@
 #include "udev-util.h"
 #include "virt.h"
 
-/* use 8 MB for receive socket kernel queue. */
-#define RCVBUF_SIZE    (8*1024*1024)
+/* use 128 MB for receive socket kernel queue. */
+#define RCVBUF_SIZE    (128*1024*1024)
+
+static int log_message_warning_errno(sd_netlink_message *m, int err, const char *msg) {
+        const char *err_msg = NULL;
+
+        (void) sd_netlink_message_read_string(m, NLMSGERR_ATTR_MSG, &err_msg);
+        return log_warning_errno(err, "%s: %s%s%m", msg, strempty(err_msg), err_msg ? " " : "");
+}
 
 static int setup_default_address_pool(Manager *m) {
         AddressPool *p;
@@ -284,7 +291,7 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
         if (sd_netlink_message_is_error(message)) {
                 r = sd_netlink_message_get_errno(message);
                 if (r < 0)
-                        log_warning_errno(r, "rtnl: failed to receive route message, ignoring: %m");
+                        log_message_warning_errno(message, r, "rtnl: failed to receive route message, ignoring");
 
                 return 0;
         }
@@ -324,14 +331,17 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
                 return log_oom();
 
         r = sd_rtnl_message_route_get_family(message, &tmp->family);
-        if (r < 0 || !IN_SET(tmp->family, AF_INET, AF_INET6)) {
-                log_link_warning(link, "rtnl: received route message with invalid family, ignoring");
+        if (r < 0) {
+                log_link_warning(link, "rtnl: received route message without family, ignoring");
+                return 0;
+        } else if (!IN_SET(tmp->family, AF_INET, AF_INET6)) {
+                log_link_debug(link, "rtnl: received route message with invalid family '%i', ignoring", tmp->family);
                 return 0;
         }
 
         r = sd_rtnl_message_route_get_protocol(message, &tmp->protocol);
         if (r < 0) {
-                log_warning_errno(r, "rtnl: received route message with invalid route protocol: %m");
+                log_warning_errno(r, "rtnl: received route message without route protocol: %m");
                 return 0;
         }
 
@@ -577,7 +587,7 @@ int manager_rtnl_process_neighbor(sd_netlink *rtnl, sd_netlink_message *message,
         if (sd_netlink_message_is_error(message)) {
                 r = sd_netlink_message_get_errno(message);
                 if (r < 0)
-                        log_warning_errno(r, "rtnl: failed to receive neighbor message, ignoring: %m");
+                        log_message_warning_errno(message, r, "rtnl: failed to receive neighbor message, ignoring");
 
                 return 0;
         }
@@ -619,8 +629,11 @@ int manager_rtnl_process_neighbor(sd_netlink *rtnl, sd_netlink_message *message,
         }
 
         r = sd_rtnl_message_neigh_get_family(message, &family);
-        if (r < 0 || !IN_SET(family, AF_INET, AF_INET6)) {
-                log_link_warning(link, "rtnl: received neighbor message with invalid family, ignoring.");
+        if (r < 0) {
+                log_link_warning(link, "rtnl: received neighbor message without family, ignoring.");
+                return 0;
+        } else if (!IN_SET(family, AF_INET, AF_INET6)) {
+                log_link_debug(link, "rtnl: received neighbor message with invalid family '%i', ignoring.", family);
                 return 0;
         }
 
@@ -715,7 +728,7 @@ int manager_rtnl_process_address(sd_netlink *rtnl, sd_netlink_message *message, 
         if (sd_netlink_message_is_error(message)) {
                 r = sd_netlink_message_get_errno(message);
                 if (r < 0)
-                        log_warning_errno(r, "rtnl: failed to receive address message, ignoring: %m");
+                        log_message_warning_errno(message, r, "rtnl: failed to receive address message, ignoring");
 
                 return 0;
         }
@@ -748,8 +761,11 @@ int manager_rtnl_process_address(sd_netlink *rtnl, sd_netlink_message *message, 
         }
 
         r = sd_rtnl_message_addr_get_family(message, &family);
-        if (r < 0 || !IN_SET(family, AF_INET, AF_INET6)) {
-                log_link_warning(link, "rtnl: received address message with invalid family, ignoring.");
+        if (r < 0) {
+                log_link_warning(link, "rtnl: received address message without family, ignoring.");
+                return 0;
+        } else if (!IN_SET(family, AF_INET, AF_INET6)) {
+                log_link_debug(link, "rtnl: received address message with invalid family '%i', ignoring.", family);
                 return 0;
         }
 
@@ -868,7 +884,7 @@ static int manager_rtnl_process_link(sd_netlink *rtnl, sd_netlink_message *messa
         if (sd_netlink_message_is_error(message)) {
                 r = sd_netlink_message_get_errno(message);
                 if (r < 0)
-                        log_warning_errno(r, "rtnl: Could not receive link message, ignoring: %m");
+                        log_message_warning_errno(message, r, "rtnl: Could not receive link message, ignoring");
 
                 return 0;
         }
@@ -946,6 +962,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
         _cleanup_free_ char *from = NULL, *to = NULL;
         RoutingPolicyRule *rule = NULL;
         const char *iif = NULL, *oif = NULL;
+        uint32_t suppress_prefixlen;
         Manager *m = userdata;
         unsigned flags;
         uint16_t type;
@@ -958,7 +975,7 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
         if (sd_netlink_message_is_error(message)) {
                 r = sd_netlink_message_get_errno(message);
                 if (r < 0)
-                        log_warning_errno(r, "rtnl: failed to receive rule message, ignoring: %m");
+                        log_message_warning_errno(message, r, "rtnl: failed to receive rule message, ignoring");
 
                 return 0;
         }
@@ -1122,6 +1139,20 @@ int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, voi
                 return 0;
         }
 
+        r = sd_netlink_message_read(message, FRA_UID_RANGE, sizeof(tmp->uid_range), &tmp->uid_range);
+        if (r < 0 && r != -ENODATA) {
+                log_warning_errno(r, "rtnl: could not get FRA_UID_RANGE attribute, ignoring: %m");
+                return 0;
+        }
+
+        r = sd_netlink_message_read_u32(message, FRA_SUPPRESS_PREFIXLEN, &suppress_prefixlen);
+        if (r < 0 && r != -ENODATA) {
+                log_warning_errno(r, "rtnl: could not get FRA_SUPPRESS_PREFIXLEN attribute, ignoring: %m");
+                return 0;
+        }
+        if (r >= 0)
+                tmp->suppress_prefixlen = (int) suppress_prefixlen;
+
         (void) routing_policy_rule_get(m, tmp, &rule);
 
         if (DEBUG_LOGGING) {
@@ -1171,7 +1202,7 @@ int manager_rtnl_process_nexthop(sd_netlink *rtnl, sd_netlink_message *message, 
         if (sd_netlink_message_is_error(message)) {
                 r = sd_netlink_message_get_errno(message);
                 if (r < 0)
-                        log_warning_errno(r, "rtnl: failed to receive rule message, ignoring: %m");
+                        log_message_warning_errno(message, r, "rtnl: failed to receive rule message, ignoring");
 
                 return 0;
         }

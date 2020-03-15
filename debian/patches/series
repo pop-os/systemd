@@ -1,7 +1,6 @@
-core-call-dynamic_user_acquire-only-when-group-is-non-nul.patch
-pstore-Don-t-start-systemd-pstore.service-in-containers.patch
-shutdown-do-not-detach-autoclear-loopback-devices.patch
-core-reload-SELinux-label-cache-on-daemon-reload.patch
+analyze-fix-table-time-output.patch
+execute-Fix-migration-from-DynamicUser-yes-to-no.patch
+test-add-a-test-case-for-migrating-DynamicUser-yes-to-no.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -20,6 +19,7 @@ debian/Drop-seccomp-system-call-filter-for-udev.patch
 debian/blacklist-upstream-test-25.patch
 debian/blacklist-upstream-test-24-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
+debian/Revert-job-Don-t-mark-as-redundant-if-deps-are-relevant.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch

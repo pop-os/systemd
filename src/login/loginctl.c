@@ -189,7 +189,7 @@ static int list_sessions(int argc, char *argv[], void *userdata) {
                                    TABLE_STRING, seat,
                                    TABLE_STRING, strna(tty));
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add row to table: %m");
+                        return table_log_add_error(r);
         }
 
         r = sd_bus_message_exit_container(reply);
@@ -246,7 +246,7 @@ static int list_users(int argc, char *argv[], void *userdata) {
                                    TABLE_UID, (uid_t) uid,
                                    TABLE_STRING, user);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add row to table: %m");
+                        return table_log_add_error(r);
         }
 
         r = sd_bus_message_exit_container(reply);
@@ -298,7 +298,7 @@ static int list_seats(int argc, char *argv[], void *userdata) {
 
                 r = table_add_cell(table, NULL, TABLE_STRING, seat);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to add row to table: %m");
+                        return table_log_add_error(r);
         }
 
         r = sd_bus_message_exit_container(reply);
@@ -576,6 +576,7 @@ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_li
                         show_journal_by_unit(
                                         stdout,
                                         i.scope,
+                                        NULL,
                                         arg_output,
                                         0,
                                         i.timestamp.monotonic,
@@ -660,6 +661,7 @@ static int print_user_status_info(sd_bus *bus, const char *path, bool *new_line)
                 show_journal_by_unit(
                                 stdout,
                                 i.slice,
+                                NULL,
                                 arg_output,
                                 0,
                                 i.timestamp.monotonic,

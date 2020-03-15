@@ -1,0 +1,21 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 6 Mar 2020 17:34:55 +0900
+Subject: test: add a test case for migrating DynamicUser=yes to no
+
+(cherry picked from commit abaaa79b22f48dac0b45737fcef730fc3471384c)
+---
+ src/test/test-execute.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 92a0516..4e0fd7d 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -561,6 +561,7 @@ static void test_exec_dynamicuser(Manager *m) {
+ 
+         test(__func__, m, "exec-dynamicuser-statedir-migrate-step1.service", 0, CLD_EXITED);
+         test(__func__, m, "exec-dynamicuser-statedir-migrate-step2.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
++        test(__func__, m, "exec-dynamicuser-statedir-migrate-step1.service", 0, CLD_EXITED);
+ 
+         (void) rm_rf("/var/lib/test-dynamicuser-migrate", REMOVE_ROOT|REMOVE_PHYSICAL);
+         (void) rm_rf("/var/lib/test-dynamicuser-migrate2", REMOVE_ROOT|REMOVE_PHYSICAL);

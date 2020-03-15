@@ -1,3 +1,31 @@
+systemd (245-2) unstable; urgency=medium
+
+  * Revert "job: Don't mark as redundant if deps are relevant"
+    This change negatively affects plymouth which was no longer properly
+    stopped after the system has completed booting. The running plymouth
+    daemon can trigger a VT switch (to tty1). (Closes: #953670)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Mar 2020 13:55:26 +0100
+
+systemd (245-1) unstable; urgency=medium
+
+  [ Balint Reczey ]
+  * New upstream version 245
+  * Refresh patches
+  * Update symbols
+
+  [ Michael Biebl ]
+  * Disable repart, userdb, homed, fdisk, pwquality, p11kit feature.
+    Those are new features which drag in new dependencies and need further
+    review first.
+  * analyze: Fix table time output
+  * execute: Fix migration from DynamicUser=yes to no
+  * Drop manual clean up of /var/lib/private/systemd/timesync.
+    This is now done properly by systemd itself when a service switches from
+    DynamicUser=yes to no.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 11 Mar 2020 13:33:37 +0100
+
 systemd (244.3-1ubuntu1) focal; urgency=medium
 
   * Merge to Ubuntu from Debian unstable

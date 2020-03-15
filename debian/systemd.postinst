@@ -145,14 +145,6 @@ adduser --quiet --system --group --no-create-home --home /run/systemd \
 adduser --quiet --system --group --no-create-home --home /run/systemd \
     --gecos "systemd Resolver" systemd-resolve
 
-# Remove old state directory of systemd-timesyncd
-if dpkg --compare-versions "$2" lt-nl "240-3~"; then
-    if [ -L /var/lib/systemd/timesync ] ; then
-        rm /var/lib/systemd/timesync
-        rm -rf /var/lib/private/systemd/timesync
-    fi
-fi
-
 # Initial update of the Message Catalogs database
 _update_catalog
 
