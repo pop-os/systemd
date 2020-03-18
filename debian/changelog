@@ -1,3 +1,9 @@
+systemd (245.2-1) UNRELEASED; urgency=medium
+
+  * New upstream version 245.2
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 18 Mar 2020 23:03:45 +0100
+
 systemd (245-2) unstable; urgency=medium
 
   * Revert "job: Don't mark as redundant if deps are relevant"
