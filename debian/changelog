@@ -1,3 +1,14 @@
+systemd (245.2-1) unstable; urgency=medium
+
+  * New upstream version 245.2
+  * Rebase patches
+  * Enable seccomp support on riscv64 (Closes: #954077)
+  * Drop migration code for the switch from DynamicUser=yes to no.
+    This code is no longer needed as it only affected systems between 239-1
+    and 239-5, i.e. it never affected a stable release.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 18 Mar 2020 23:32:08 +0100
+
 systemd (245-2ubuntu1) UNRELEASED; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
