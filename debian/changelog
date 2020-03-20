@@ -1,6 +1,9 @@
-systemd (245.2-1ubuntu1) UNRELEASED; urgency=medium
+systemd (245.2-1ubuntu1) focal; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
+    - Notable changes in 245 missing from NEWS
+      * Modprobing is split out to a separate service unit, modprobe@.service
+      * New mount for for tracefs, under /sys/kernel/tracing
   * Refresh patches
     - Dropped changes:
       * Keep sd_bus_enqueue_for_read() public
