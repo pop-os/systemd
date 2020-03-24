@@ -1,3 +1,12 @@
+systemd (245.2-1ubuntu2) focal; urgency=medium
+
+  * units: Don't mount tracefs in LXC.
+    This fixes autopkgtest in LXC.
+    File: debian/patches/units-Don-t-mount-tracefs-in-LXC.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cedcc2ceb7e788b2b0cbb97c7fbbd596d6c010a3
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 24 Mar 2020 13:09:27 +0100
+
 systemd (245.2-1ubuntu1) focal; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
