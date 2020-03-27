@@ -310,9 +310,7 @@ override_dh_auto_test:
 ifeq (, $(filter nocheck, $(DEB_BUILD_OPTIONS)))
 	echo "01234567890123456789012345678901" > build-deb/machine-id
 	# some tests hang under fakeroot, so disable fakeroot
-	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id meson test -C build-deb $(TEST_TIMEOUT_MULTIPLIER) || ( \
-		cat build-deb/meson-logs/testlog.txt; \
-		exit 1)
+	env -u LD_PRELOAD SYSTEMD_MACHINE_ID_PATH=$(CURDIR)/build-deb/machine-id meson test -C build-deb --print-errorlogs $(TEST_TIMEOUT_MULTIPLIER)
 endif
 
 %:
