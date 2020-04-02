@@ -40,6 +40,11 @@ if [ -e /lib/systemd/system/ondemand.service ] && [ -z "$2" ]; then
     systemctl enable ondemand.service || true
 fi
 
+# Enable systemd-pstore by default on new installs and upgrades, see #952767
+if dpkg --compare-versions "$2" lt-nl "245.4-1~"; then
+    systemctl enable systemd-pstore.service || true
+fi
+
 # Do a one-time migration of the local time setting
 if [ -z "$2" ]; then
     if [ -f /etc/default/rcS ]; then
