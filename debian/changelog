@@ -1,3 +1,18 @@
+systemd (245.4-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 245.4
+
+  [ Dan Streetman ]
+  * d/t/logind: use grep -s when checking /sys/power/state.
+    Some kernels in Ubuntu (e.g. linux-kvm) do not enable CONFIG_PM, which
+    results in stderr output when the logind test tries to grep the power
+    state file, causing the test to fail.  The test already handles skipping
+    the test if suspend isn't supported, so just use -s to suppress grep
+    from printing to stderr if the file doesn't exist.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 02 Apr 2020 09:11:37 +0200
+
 systemd (245.2-1) unstable; urgency=medium
 
   * New upstream version 245.2
