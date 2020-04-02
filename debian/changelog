@@ -1,7 +1,15 @@
-systemd (245.4-1) UNRELEASED; urgency=medium
+systemd (245.4-1) unstable; urgency=medium
 
   [ Michael Biebl ]
   * New upstream version 245.4
+    - Allow names starting with a digit (Closes: #954174)
+    - Recognize davfs as network file system (Closes: #954755)
+  * Enable systemd-pstore.service by default on new installs and upgrades
+    (Closes: #952767)
+  * Revert "Enable seccomp support on riscv64"
+    This requires further changes to the source code and a newer, not yet
+    officially released, libseccomp. Since this complicates backports revert
+    this change for the time being.
 
   [ Dan Streetman ]
   * d/t/logind: use grep -s when checking /sys/power/state.
@@ -11,7 +19,7 @@ systemd (245.4-1) UNRELEASED; urgency=medium
     the test if suspend isn't supported, so just use -s to suppress grep
     from printing to stderr if the file doesn't exist.
 
- -- Michael Biebl <biebl@debian.org>  Thu, 02 Apr 2020 09:11:37 +0200
+ -- Michael Biebl <biebl@debian.org>  Thu, 02 Apr 2020 11:58:18 +0200
 
 systemd (245.2-1) unstable; urgency=medium
 
