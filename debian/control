@@ -184,6 +184,7 @@ Section: admin
 Priority: optional
 Depends: ${shlibs:Depends},
          ${misc:Depends},
+         adduser,
          systemd
 Breaks: systemd (<< 245.4-2~),
 Conflicts: time-daemon,

@@ -2,12 +2,6 @@
 
 set -e
 
-_systemctl() {
-    if [ -d /run/systemd/system ]; then
-        systemctl "$@"
-    fi
-}
-
 _adopt_conffile() {
     conffile=$1
     pkg=$2
