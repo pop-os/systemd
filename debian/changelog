@@ -1,3 +1,14 @@
+systemd (245.4-2) unstable; urgency=medium
+
+  [ Balint Reczey ]
+  * Ship systemd-timesyncd in a separate package.
+    The new systemd-timesyncd package conflicting with other NTP-related
+    packages resolves the problems arising when running systemd-timesyncd
+    and other NTP servers on the same system.
+    (LP: #1849156, Closes: #805927, #947936)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 04 Apr 2020 08:59:50 +0200
+
 systemd (245.4-1) unstable; urgency=medium
 
   [ Michael Biebl ]
