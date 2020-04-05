@@ -1,3 +1,9 @@
+systemd (245.2-1ubuntu3) focal; urgency=medium
+
+  * Add riscv64 seccomp support.
+
+ -- William Grant <wgrant@ubuntu.com>  Sun, 05 Apr 2020 17:33:43 +1000
+
 systemd (245.2-1ubuntu2) focal; urgency=medium
 
   * units: Don't mount tracefs in LXC.
