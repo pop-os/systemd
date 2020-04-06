@@ -1,3 +1,37 @@
+systemd (245.4-2) unstable; urgency=medium
+
+  [ Balint Reczey ]
+  * Ship systemd-timesyncd in a separate package.
+    The new systemd-timesyncd package conflicting with other NTP-related
+    packages resolves the problems arising when running systemd-timesyncd
+    and other NTP servers on the same system.
+    (LP: #1849156, Closes: #805927, #947936)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 04 Apr 2020 08:59:50 +0200
+
+systemd (245.4-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 245.4
+    - Allow names starting with a digit (Closes: #954174)
+    - Recognize davfs as network file system (Closes: #954755)
+  * Enable systemd-pstore.service by default on new installs and upgrades
+    (Closes: #952767)
+  * Revert "Enable seccomp support on riscv64"
+    This requires further changes to the source code and a newer, not yet
+    officially released, libseccomp. Since this complicates backports revert
+    this change for the time being.
+
+  [ Dan Streetman ]
+  * d/t/logind: use grep -s when checking /sys/power/state.
+    Some kernels in Ubuntu (e.g. linux-kvm) do not enable CONFIG_PM, which
+    results in stderr output when the logind test tries to grep the power
+    state file, causing the test to fail.  The test already handles skipping
+    the test if suspend isn't supported, so just use -s to suppress grep
+    from printing to stderr if the file doesn't exist.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 02 Apr 2020 11:58:18 +0200
+
 systemd (245.2-1ubuntu3) focal; urgency=medium
 
   * Add riscv64 seccomp support.
