@@ -1,6 +1,6 @@
-systemd (245.4-2ubuntu1) UNRELEASED; urgency=medium
+systemd (245.4-2ubuntu1) focal; urgency=medium
 
-    [ Balint Reczey ]
+  [ Balint Reczey ]
   * Merge to Ubuntu from Debian unstable
   * Refresh patches
     - Dropped changes:
@@ -204,8 +204,12 @@ systemd (245.4-2ubuntu1) UNRELEASED; urgency=medium
     Files:
     - debian/patches/network-attach-sd-event-in-link_load-when-creating-link-d.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3408963020c6c0cf180130eabfd96e758d1a9c1f
+  * d/rules: in dh_auto_test, include meson param --print-errorlogs.
+    Also, don't cat testlog.txt; it's noisy and not very helpful.
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ca8ed6fb7fa0f2a63557f705b1fdc97ab7ba5ace
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 06 Apr 2020 15:17:37 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 07 Apr 2020 14:21:08 +0200
 
 systemd (245.4-2) unstable; urgency=medium
 
