@@ -196,6 +196,9 @@ systemd (245.4-2ubuntu1) focal; urgency=medium
   * network: do not re-attach sd-event object (LP: #1870410)
     File: debian/patches/network-do-not-re-attach-sd-event-object.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b10aee06d30b98395d20344195d3e671e25498ab
+  * Enable seccomp support on riscv64 again.
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a1ffd64333784a10dd0eeb87f5198462b85c6f9a
 
   [ Dan Streetman ]
   * network: attach sd-event in link_load() when creating link dhcp_client or ipv4ll
@@ -209,7 +212,7 @@ systemd (245.4-2ubuntu1) focal; urgency=medium
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ca8ed6fb7fa0f2a63557f705b1fdc97ab7ba5ace
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 07 Apr 2020 14:21:08 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 08 Apr 2020 10:21:18 +0200
 
 systemd (245.4-2) unstable; urgency=medium
 
