@@ -70,3 +70,4 @@ lp1873607/0001-core-some-minor-clean-ups-modernizations.patch
 lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch
 # Pop patches
 cryptswap-mount-fix.patch
+systemd-boot-id-compat.patch
