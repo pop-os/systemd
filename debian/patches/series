@@ -1,4 +1,9 @@
 pid1-by-default-make-user-units-inherit-their-umask-from-.patch
+userdbctl-drop-redundant-user-name-validity-check.patch
+user-util-rework-how-we-validate-user-names.patch
+docs-add-a-longer-document-explaining-our-rules-on-user-g.patch
+docs-hook-up-the-new-USER_NAMES-document-everywhere.patch
+catalog-add-entry-for-SD_MESSAGE_UNSAFE_USER_NAME.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
