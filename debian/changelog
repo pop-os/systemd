@@ -1,3 +1,11 @@
+systemd (245.4-4ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+  - Dropped changes:
+    * d/rules: in dh_auto_test, include meson param --print-errorlogs.
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 14 Apr 2020 00:05:30 +0200
+
 systemd (245.4-4) unstable; urgency=medium
 
   * Drop Conflicts: virtualbox-guest-utils from systemd-timesyncd.
