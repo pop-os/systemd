@@ -1,3 +1,16 @@
+systemd (245.4-4) unstable; urgency=medium
+
+  * Drop Conflicts: virtualbox-guest-utils from systemd-timesyncd.
+    Otherwise this could lead to virtualbox-guest-utils being uninstalled on
+    upgrades which is not intended. (Closes: #956436)
+  * pid1: automatically generate systemd-remount-fs.service deps, plus enable
+    systemd-pstore from sysinit.target
+  * Fix systemd-pstore.service enablement symlink on upgrades.
+    It is now started via sysinit.target. Also clean up the symlink on
+    purge.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 13 Apr 2020 11:34:31 +0200
+
 systemd (245.4-3) unstable; urgency=medium
 
   [ Dan Streetman ]
