@@ -4,6 +4,11 @@ user-util-rework-how-we-validate-user-names.patch
 docs-add-a-longer-document-explaining-our-rules-on-user-g.patch
 docs-hook-up-the-new-USER_NAMES-document-everywhere.patch
 catalog-add-entry-for-SD_MESSAGE_UNSAFE_USER_NAME.patch
+units-pull-in-systemd-pstore.service-from-sysinit.target.patch
+core-automatically-add-dependency-on-systemd-remount-fs.s.patch
+units-drop-dependency-on-systemd-remount-fs.service-from-.patch
+units-drop-systemd-remount-fs.service-dependency-from-mor.patch
+units-make-sure-systemd-pstore-stops-at-shutdown.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
