@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu1) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu1) focal; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
   - Dropped changes:
