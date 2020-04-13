@@ -1,3 +1,14 @@
+pid1-by-default-make-user-units-inherit-their-umask-from-.patch
+userdbctl-drop-redundant-user-name-validity-check.patch
+user-util-rework-how-we-validate-user-names.patch
+docs-add-a-longer-document-explaining-our-rules-on-user-g.patch
+docs-hook-up-the-new-USER_NAMES-document-everywhere.patch
+catalog-add-entry-for-SD_MESSAGE_UNSAFE_USER_NAME.patch
+units-pull-in-systemd-pstore.service-from-sysinit.target.patch
+core-automatically-add-dependency-on-systemd-remount-fs.s.patch
+units-drop-dependency-on-systemd-remount-fs.service-from-.patch
+units-drop-systemd-remount-fs.service-dependency-from-mor.patch
+units-make-sure-systemd-pstore-stops-at-shutdown.patch
 network-do-not-re-attach-sd-event-object.patch
 network-attach-sd-event-in-link_load-when-creating-link-d.patch
 debian/Use-Debian-specific-config-files.patch

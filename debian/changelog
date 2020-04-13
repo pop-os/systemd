@@ -1,3 +1,39 @@
+systemd (245.4-4) unstable; urgency=medium
+
+  * Drop Conflicts: virtualbox-guest-utils from systemd-timesyncd.
+    Otherwise this could lead to virtualbox-guest-utils being uninstalled on
+    upgrades which is not intended. (Closes: #956436)
+  * pid1: automatically generate systemd-remount-fs.service deps, plus enable
+    systemd-pstore from sysinit.target
+  * Fix systemd-pstore.service enablement symlink on upgrades.
+    It is now started via sysinit.target. Also clean up the symlink on
+    purge.
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 13 Apr 2020 11:34:31 +0200
+
+systemd (245.4-3) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * d/rules: in dh_auto_test, include meson param --print-errorlogs.
+    Also, don't cat testlog.txt; it's noisy and not very helpful.
+    Upstream request:
+    https://github.com/systemd/systemd/pull/14338#issuecomment-603432989
+
+  [ Michael Biebl ]
+  * pid1: by default make user units inherit their umask from the user manager
+    (Closes: #945000)
+  * user-util: rework how we validate user names.
+    This reworks the user validation infrastructure. There are now two
+    modes. In regular mode we are strict and test against a strict set of
+    valid chars. And in "relaxed" mode we just filter out some really
+    obvious, dangerous stuff. i.e. strict is whitelisting what is OK, but
+    "relaxed" is blacklisting what is really not OK.
+    The idea is that we use strict mode whenever we allocate a new user,
+    while "relaxed" mode is used when we process users registered elsewhere.
+    (Closes: #955541)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 10 Apr 2020 11:55:15 +0200
+
 systemd (245.4-2ubuntu1) focal; urgency=medium
 
   [ Balint Reczey ]
