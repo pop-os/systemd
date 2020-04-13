@@ -40,7 +40,7 @@ if [ -e /lib/systemd/system/ondemand.service ] && [ -z "$2" ]; then
 fi
 
 # Enable systemd-pstore by default on new installs and upgrades, see #952767
-if dpkg --compare-versions "$2" lt-nl "245.4-1~"; then
+if dpkg --compare-versions "$2" lt "245.4-4~"; then
     systemctl enable systemd-pstore.service || true
 fi
 
@@ -142,6 +142,12 @@ if dpkg --compare-versions "$2" lt-nl "239-12~"; then
     if getent group nobody >/dev/null; then
         delgroup --system nobody || true
     fi
+fi
+
+if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
+    # systemd-pstore.service is now enabled via sysinit.target
+    rm -f /etc/systemd/system/systemd-remount-fs.service.wants/systemd-pstore.service
+    rmdir --ignore-fail-on-non-empty /etc/systemd/system/systemd-remount-fs.service.wants 2> /dev/null || true
 fi
 
 #DEBHELPER#
