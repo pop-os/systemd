@@ -187,9 +187,7 @@ Depends: ${shlibs:Depends},
          adduser,
          systemd
 Breaks: systemd (<< 245.4-2~),
-Conflicts: time-daemon,
-           virtualbox-guest-utils,
-           virtualbox-guest-utils-hwe
+Conflicts: time-daemon
 Replaces: time-daemon,
           systemd (<< 245.4-2~),
 Provides: time-daemon
