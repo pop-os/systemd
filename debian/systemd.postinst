@@ -145,4 +145,9 @@ if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
     rmdir --ignore-fail-on-non-empty /etc/systemd/system/systemd-remount-fs.service.wants 2> /dev/null || true
 fi
 
+if dpkg --compare-versions "$2" lt-nl "245.4-5~"; then
+    # Clean up removed ondemand service
+    rm -f /etc/systemd/system/multi-user.target.wants/ondemand.service
+fi
+
 #DEBHELPER#
