@@ -274,7 +274,6 @@ ifeq ($(DEB_VENDOR),Ubuntu)
 	install -D --mode=644 debian/extra/systemd.py debian/systemd/usr/share/apport/package-hooks/systemd.py
 	install --mode=644 debian/extra/rules-ubuntu/*.rules debian/udev/lib/udev/rules.d/
 	cp -a debian/extra/units-ubuntu/* debian/systemd/lib/systemd/system/
-	install --mode=755 debian/extra/set-cpufreq debian/systemd/lib/systemd/
 endif
 
 override_dh_missing:
