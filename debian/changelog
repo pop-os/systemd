@@ -1,3 +1,21 @@
+systemd (245.5-1) UNRELEASED; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 245.5
+
+  [ Dan Streetman ]
+  * Follow symlinks when finding link files to copy into initramfs.
+    If the /{etc,lib}/systemd/network directory itself is a symlink, the find
+    command will not actually find any of the files in the dir it links to.
+    Use the find -L param to follow symlinks.
+    (LP: #1868892)
+  * Remove Ubuntu-specific ondemand.service.
+    New processors handle scaling/throttling in internal firmware
+    (e.g. intel_pstate), and do not require OS config.
+    Additionally, nobody else does this, not even Debian.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 18 Apr 2020 20:25:09 +0200
+
 systemd (245.4-4) unstable; urgency=medium
 
   * Drop Conflicts: virtualbox-guest-utils from systemd-timesyncd.
