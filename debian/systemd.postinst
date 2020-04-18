@@ -103,6 +103,7 @@ if dpkg --compare-versions "$2" lt "244.1-2~"; then
     # /proc is not available. Skip systemd-tmpfiles in this case. This should
     # be fine, as this typically means we are inside a chroot and systemd is
     # not currently active. The permissions will be applied on the next boot.
+    # https://github.com/systemd/systemd/issues/14745
     if mountpoint -q /proc; then
         systemd-tmpfiles --create --prefix /var/log/journal
     fi
