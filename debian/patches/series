@@ -11,6 +11,7 @@ units-drop-systemd-remount-fs.service-dependency-from-mor.patch
 units-make-sure-systemd-pstore-stops-at-shutdown.patch
 network-do-not-re-attach-sd-event-object.patch
 network-attach-sd-event-in-link_load-when-creating-link-d.patch
+shared-Don-t-try-calling-NULL-callback-in-bus_wait_for_un.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
