@@ -1,3 +1,18 @@
+systemd (245.4-4ubuntu3) focal; urgency=medium
+
+  * dhcp: Allow setting request options again
+    link_configure() may be called multiple times on a link causing request options
+    set multiple times. (LP: #1870410)
+    File: debian/patches/dhcp-Allow-setting-request-options-again.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4c48893eb04b01a2ec62d2d2823a79a9f5cb2b80
+  * Don't try calling NULL callback in bus_wait_for_units_clear.
+    This fixes a crash most frequently occurring in the Unity session
+    (LP: #1870930)
+    File: debian/patches/shared-Don-t-try-calling-NULL-callback-in-bus_wait_for_un.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b2ec1a3367cef401f8de745fecc9c385f020be78
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 22 Apr 2020 11:04:26 +0200
+
 systemd (245.4-4ubuntu1) focal; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
