@@ -30,10 +30,10 @@ Fixes #6077.
  4 files changed, 35 insertions(+), 4 deletions(-)
 
 diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
-index 79a2c74..dfb8520 100644
+index fd1755e..2b57ce0 100644
 --- a/man/systemd.exec.xml
 +++ b/man/systemd.exec.xml
-@@ -652,8 +652,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
+@@ -655,8 +655,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
          <term><varname>UMask=</varname></term>
  
          <listitem><para>Controls the file mode creation mask. Takes an access mode in octal notation. See
@@ -90,7 +90,7 @@ index 4160af4..ca98252 100644
  int wait_for_terminate(pid_t pid, siginfo_t *status);
  
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 2816bce..912dc2d 100644
+index 97e1b00..842939c 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
 @@ -187,8 +187,16 @@ static void unit_init(Unit *u) {

@@ -60,11 +60,6 @@ if [ -z "$2" ]; then
     ln -snf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf || true
 fi
 
-# Enable ondemand by default on new installs
-if [ -e /lib/systemd/system/ondemand.service ] && [ -z "$2" ]; then
-    systemctl enable ondemand.service || true
-fi
-
 # Enable systemd-pstore by default on new installs and upgrades, see #952767
 if dpkg --compare-versions "$2" lt "245.4-4~"; then
     systemctl enable systemd-pstore.service || true
@@ -185,6 +180,11 @@ if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
     # systemd-pstore.service is now enabled via sysinit.target
     rm -f /etc/systemd/system/systemd-remount-fs.service.wants/systemd-pstore.service
     rmdir --ignore-fail-on-non-empty /etc/systemd/system/systemd-remount-fs.service.wants 2> /dev/null || true
+fi
+
+if dpkg --compare-versions "$2" lt-nl "245.4-5~"; then
+    # Clean up removed ondemand service
+    rm -f /etc/systemd/system/multi-user.target.wants/ondemand.service
 fi
 
 #DEBHELPER#
