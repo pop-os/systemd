@@ -1,0 +1,82 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Mon, 27 Apr 2020 06:38:40 -0400
+Subject: network: Change IgnoreCarrierLoss default to value of
+ ConfigureWithoutCarrier
+
+It doesn't make much sense to have ConfigureWithoutCarrier set, but not
+IgnoreCarrierLoss; all the configuration added during initial interface
+bring-up will be lost at the first carrier up/down.
+
+Forwarded: https://github.com/systemd/systemd/pull/15619
+---
+ man/systemd.network.xml                  | 5 +++--
+ src/network/networkd-network-gperf.gperf | 2 +-
+ src/network/networkd-network.c           | 5 +++++
+ src/network/networkd-network.h           | 2 +-
+ 4 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/man/systemd.network.xml b/man/systemd.network.xml
+index 97f96f9..652f183 100644
+--- a/man/systemd.network.xml
++++ b/man/systemd.network.xml
+@@ -815,8 +815,9 @@
+       <varlistentry>
+         <term><varname>IgnoreCarrierLoss=</varname></term>
+         <listitem>
+-          <para>A boolean. Allows networkd to retain both the static and dynamic configuration of the
+-          interface even if its carrier is lost. Defaults to false.
++          <para>Takes a boolean. Allows networkd to retain both the static and dynamic configuration
++          of the interface even if its carrier is lost. When unset, the value specified with
++          <option>ConfigureWithoutCarrier=</option> is used.
+           </para>
+         </listitem>
+       </varlistentry>
+diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
+index d3dda3d..2fc7881 100644
+--- a/src/network/networkd-network-gperf.gperf
++++ b/src/network/networkd-network-gperf.gperf
+@@ -98,7 +98,7 @@ Network.ProxyARP,                            config_parse_tristate,
+ Network.IPv6ProxyNDPAddress,                 config_parse_ipv6_proxy_ndp_address,                      0,                             0
+ Network.BindCarrier,                         config_parse_strv,                                        0,                             offsetof(Network, bind_carrier)
+ Network.ConfigureWithoutCarrier,             config_parse_bool,                                        0,                             offsetof(Network, configure_without_carrier)
+-Network.IgnoreCarrierLoss,                   config_parse_bool,                                        0,                             offsetof(Network, ignore_carrier_loss)
++Network.IgnoreCarrierLoss,                   config_parse_tristate,                                    0,                             offsetof(Network, ignore_carrier_loss)
+ Network.KeepConfiguration,                   config_parse_keep_configuration,                          0,                             offsetof(Network, keep_configuration)
+ Address.Address,                             config_parse_address,                                     0,                             0
+ Address.Peer,                                config_parse_address,                                     0,                             0
+diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
+index 0604ada..c6dc3ea 100644
+--- a/src/network/networkd-network.c
++++ b/src/network/networkd-network.c
+@@ -265,6 +265,9 @@ int network_verify(Network *network) {
+                 network->dhcp_use_mtu = false;
+         }
+ 
++        if (network->ignore_carrier_loss < 0)
++                network->ignore_carrier_loss = network->configure_without_carrier;
++
+         if (network->dhcp_critical >= 0) {
+                 if (network->keep_configuration >= 0)
+                         log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
+@@ -455,6 +458,8 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+                 .ipv6_accept_ra_route_table = RT_TABLE_MAIN,
+                 .ipv6_accept_ra_route_table_set = false,
+ 
++                .configure_without_carrier = false,
++                .ignore_carrier_loss = -1,
+                 .keep_configuration = _KEEP_CONFIGURATION_INVALID,
+ 
+                 .can_triple_sampling = -1,
+diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
+index 0d46dbb..086f74c 100644
+--- a/src/network/networkd-network.h
++++ b/src/network/networkd-network.h
+@@ -231,7 +231,7 @@ struct Network {
+         int allmulticast;
+         bool unmanaged;
+         bool configure_without_carrier;
+-        bool ignore_carrier_loss;
++        int ignore_carrier_loss;
+         KeepConfiguration keep_configuration;
+         uint32_t iaid;
+         DUID duid;
