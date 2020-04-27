@@ -5,6 +5,14 @@ core-automatically-add-dependency-on-systemd-remount-fs.s.patch
 units-drop-dependency-on-systemd-remount-fs.service-from-.patch
 units-drop-systemd-remount-fs.service-dependency-from-mor.patch
 units-make-sure-systemd-pstore-stops-at-shutdown.patch
+network-add-a-flag-to-ignore-gateway-provided-by-DHCP-ser.patch
+test-network-add-a-test-case-for-DHCPv4.UseGateway-no.patch
+userdb-when-doing-client-side-NSS-look-ups-optionally-avo.patch
+basic-add-_cleanup_-wrappers-for-pthread_mutex_-lock-unlo.patch
+nss-systemd-use-_cleanup_-for-pthread_mutex_-lock-unlock.patch
+nss-systemd-don-t-synthesize-root-nobody-when-iterating.patch
+core-make-sure-we-don-t-get-confused-when-setting-TERM-fo.patch
+core-make-sure-to-restore-the-control-command-id-too.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
