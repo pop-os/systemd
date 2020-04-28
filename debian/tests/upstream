@@ -39,7 +39,7 @@ for t in test/TEST*; do
     echo "========== START: $testname =========="
     rm -rf /var/tmp/systemd-test.*
     if ! make -C $t clean setup run; then
-        for j in /var/tmp/systemd-test.*/journal/*; do
+        for j in /var/tmp/systemd-test.*/journal/* /var/tmp/systemd-test.*/system.journal; do
             [ -e "$j" ] || continue
             # keep the entire journal in artifacts, in case one needs the debug messages
             cp -r "$j" "$AUTOPKGTEST_ARTIFACTS/${testname}-$(basename $j)"
