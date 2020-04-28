@@ -108,6 +108,7 @@ Depends: systemd-tests,
   acl,
   iputils-ping,
   dbus-user-session,
+  zstd,
 Restrictions: needs-root, allow-stderr, isolation-container, breaks-testbed
 
 Tests: upstream
@@ -146,6 +147,7 @@ Depends: libsystemd-dev,
   busybox-static,
   plymouth,
   e2fsprogs,
+  zstd,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
