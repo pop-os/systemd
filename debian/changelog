@@ -1,3 +1,20 @@
+systemd (245.5-2) unstable; urgency=medium
+
+  * Cherry-pick various fixes from upstream master
+    - network: add a flag to ignore gateway provided by DHCP server
+    - userdb: when doing client-side NSS look-ups optionally avoid shadow
+      look-ups
+    - nss-systemd: don't synthesize root/nobody when iterating
+    - core: make sure we don't get confused when setting TERM for a tty fd
+    - core: make sure to restore the control command id, too
+  * Install 60-block.rules in udev-udeb and initramfs-tools.
+    The block device rules were split out from 60-persistent-storage.rules
+    into its own rules file in v220. Those rules ensure that change events
+    are emitted and the udev db is updated after metadata changes.
+    Thanks to Pascal Hambourg (Closes: #958397)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 27 Apr 2020 17:38:44 +0200
+
 systemd (245.5-1ubuntu1) groovy; urgency=medium
 
   * Merge to Ubuntu from Debian unstable

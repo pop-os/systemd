@@ -11,10 +11,10 @@ Fixes #15126.
  2 files changed, 8 insertions(+), 8 deletions(-)
 
 diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
-index 13e3e32..226c73c 100644
+index 3f65804..6419037 100644
 --- a/src/network/networkd-dhcp4.c
 +++ b/src/network/networkd-dhcp4.c
-@@ -1334,11 +1334,11 @@ int dhcp4_configure(Link *link) {
+@@ -1337,11 +1337,11 @@ int dhcp4_configure(Link *link) {
                          return log_oom();
                  if (r < 0)
                          return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to create DHCP4 client: %m");
