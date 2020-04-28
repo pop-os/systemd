@@ -1,3 +1,10 @@
+systemd (245.5-2ubuntu1) groovy; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes: none
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 28 Apr 2020 13:20:31 +0200
+
 systemd (245.5-2) unstable; urgency=medium
 
   * Cherry-pick various fixes from upstream master
