@@ -44,7 +44,8 @@ for t in test/TEST*; do
             # keep the entire journal in artifacts, in case one needs the debug messages
             cp -r "$j" "$AUTOPKGTEST_ARTIFACTS/${testname}-$(basename $j)"
             echo "---- $j ----"
-            journalctl --priority=warning --directory=$j
+            [ -d "$j" ] && journalctl --priority=warning --directory=$j
+            [ -f "$j" ] && journalctl --priority=warning --file=$j
         done
         FAILED="$FAILED $testname"
     fi
