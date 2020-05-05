@@ -68,3 +68,4 @@ network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
 riscv64-seccomp.patch
 dhcp-Allow-setting-request-options-again.patch
 lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
+test-Skip-test-boot-timestamps-on-permission-denied.patch
