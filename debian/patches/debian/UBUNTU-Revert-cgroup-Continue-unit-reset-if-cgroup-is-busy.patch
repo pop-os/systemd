@@ -5,6 +5,7 @@ Subject: Revert "cgroup: Continue unit reset if cgroup is busy"
 LP: #1844879
 
 This reverts commit 0219b3524f414e23589e63c6de6a759811ef8474.
+Forwarded: https://github.com/systemd/systemd/issues/13629
 ---
  src/core/cgroup.c | 11 ++++-------
  1 file changed, 4 insertions(+), 7 deletions(-)
