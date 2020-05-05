@@ -120,6 +120,15 @@ Depends: systemd-tests,
   dbus-user-session,
 Restrictions: needs-root, allow-stderr, isolation-container, breaks-testbed
 
+Tests: tests-in-lxd
+Depends: systemd-tests,
+  udev,
+  libpam-systemd,
+  autopkgtest,
+  lsb-release,
+  lxd
+Restrictions: needs-root, allow-stderr, isolation-machine, breaks-testbed, skip-not-installable, skippable
+
 Tests: upstream
 Depends: libsystemd-dev,
   tree,

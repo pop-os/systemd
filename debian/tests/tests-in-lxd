@@ -1,0 +1,40 @@
+#!/bin/sh
+
+# run root-unittests in lxd
+
+set -eu
+
+lxd init --auto
+
+IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
+
+autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || exit 77 # LP: #1878225
+
+# push local apt configuration to match pinning
+lxc launch $IMAGE systemd-lxc
+lxc file push -r /etc/apt systemd-lxc/etc/
+lxc exec systemd-lxc -- sed -i 's|/tmp/autopkgtest.[^/]*/|/root/|' /etc/apt/sources.list.d/autopkgtest.list || true
+
+cd /tmp/autopkgtest.*/build.*/src
+
+# push potential locally built packages
+if [ -d ../../binaries ]; then
+    lxc file push -r ../../binaries systemd-lxc/root/
+fi
+
+# fix failing systemd-remount-fs.service LP: #1877078
+lxc file delete systemd-lxc/etc/fstab
+lxc exec  systemd-lxc touch /etc/fstab
+
+lxc stop systemd-lxc
+lxc publish systemd-lxc --alias $IMAGE
+
+for t in root-unittests boot-and-services; do
+    autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
+done
+
+# also check tests in privileged containers
+lxc profile set default security.privileged "true"
+for t in root-unittests boot-and-services; do
+    autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
+done
