@@ -8,6 +8,8 @@ for t in /usr/lib/systemd/tests/test-*; do
     tname=$(basename $t)
     # test-udev needs special prep and has its own test
     [ "$tname" != test-udev ] || continue
+    # test-execute fails in LXC LP: #1878051
+    [ "$tname" != test-execute ] || ! systemd-detect-virt -c -q || continue
     echo "====== $tname ======="
     # exit code 77 means "skip"
     rc=0
