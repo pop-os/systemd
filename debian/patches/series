@@ -7,6 +7,10 @@ units-drop-systemd-remount-fs.service-dependency-from-mor.patch
 units-make-sure-systemd-pstore-stops-at-shutdown.patch
 network-add-a-flag-to-ignore-gateway-provided-by-DHCP-ser.patch
 test-network-add-a-test-case-for-DHCPv4.UseGateway-no.patch
+network-change-UseGateway-default-to-UseRoutes-setting.patch
+test-modify-add-tests-for-UseRoutes-and-UseGateway-config.patch
+network-honor-SetDNSRoutes-even-if-UseGateway-False.patch
+test-verify-RoutesToDNS-is-independent-of-UseGateway.patch
 userdb-when-doing-client-side-NSS-look-ups-optionally-avo.patch
 basic-add-_cleanup_-wrappers-for-pthread_mutex_-lock-unlo.patch
 nss-systemd-use-_cleanup_-for-pthread_mutex_-lock-unlock.patch
