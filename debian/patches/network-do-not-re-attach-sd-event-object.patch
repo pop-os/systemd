@@ -14,7 +14,7 @@ diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
 index 3f65804..6419037 100644
 --- a/src/network/networkd-dhcp4.c
 +++ b/src/network/networkd-dhcp4.c
-@@ -1337,11 +1337,11 @@ int dhcp4_configure(Link *link) {
+@@ -1336,11 +1336,11 @@ int dhcp4_configure(Link *link) {
                          return log_oom();
                  if (r < 0)
                          return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to create DHCP4 client: %m");
