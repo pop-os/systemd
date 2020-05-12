@@ -1,3 +1,46 @@
+systemd (245.5-2ubuntu2) groovy; urgency=medium
+
+  [ Dan Streetman ]
+  * network: Change IgnoreCarrierLoss default to value of ConfigureWithoutCarrier.
+    This fixes bridges with static IP configuration. (LP: #1860926)
+    File: debian/patches/lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=59d655136ca05d830d46e5cd90e6b549406cd670
+  * Cherry-pick fix from upstream master to adjust UseGateway= default
+    - network: change UseGateway= default to UseRoutes= setting
+    - network: honor SetDNSRoutes= even if UseGateway=False (LP: #1867375)
+    Files:
+    - debian/patches/network-change-UseGateway-default-to-UseRoutes-setting.patch
+    - debian/patches/network-honor-SetDNSRoutes-even-if-UseGateway-False.patch
+    - debian/patches/test-modify-add-tests-for-UseRoutes-and-UseGateway-config.patch
+    - debian/patches/test-verify-RoutesToDNS-is-independent-of-UseGateway.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4ddb639d6bb0ca07368348bc588c21c41f08a5e7
+  * refresh quilt patches
+
+  [ Balint Reczey ]
+  * Rename a few patches which are expected to stay longer in Ubuntu
+    Files:
+    - debian/patches/Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
+    - debian/patches/Revert-namespace-be-more-careful-when-handling-namespacin.patch
+    - debian/patches/resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
+    - debian/patches/debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
+    - debian/patches/debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch
+    - debian/patches/debian/UBUNTU-resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=41e97add3900c761fafc58c7a2b024f7b618d313
+  * test: Skip test-boot-timestamps on permission denied.
+    This fixes root-unittests in unprivileged LXD containers
+    File: debian/patches/test-Skip-test-boot-timestamps-on-permission-denied.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b98a63c04e9e82b0f57617e21233aa103b069785
+  * tests: Skip test-execute in containers
+    File: debian/tests/root-unittests
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2d6f282bf20866f711c6ae509228b0c513218ca9
+  * Run some tests in LXD, too
+    Files:
+    - debian/tests/control
+    - debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bf0bb5176284d9ec1b348b84e70f961ee12e3cac
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 12 May 2020 16:59:54 +0200
+
 systemd (245.5-2ubuntu1) groovy; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
