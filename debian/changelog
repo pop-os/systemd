@@ -1,3 +1,35 @@
+systemd (245.5-3) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Bump priority of libnss-systemd to standard
+  * logind: avoid shadow lookups when doing userdb client side
+  * Disable DNSSEC support by default in resolved.
+    The upstream default, DNSSEC=allow-downgrade can lead to compatibility
+    issues with certain network access points. Previously, DNSSEC support
+    was only turned off when built for a stable Debian release, but it is
+    safer and more consistent to just generally change the default to
+    DNSSEC=no. (Closes: #959996)
+  * Bump debhelper compatibility level to 13.
+    Use the debhelper-compat package to declare the compatibility level and
+    drop debian/compat.
+  * Convert to dh_installsystemd and disable dh_installsystemduser
+  * Drop custom initramfs update code.
+    Now handled by dh_installinitramfs which is enabled by default in compat
+    level 12 and above.
+
+  [ Dan Streetman ]
+  * Cherry-pick fix from upstream master to adjust UseGateway= default
+    - network: change UseGateway= default to UseRoutes= setting
+    - network: honor SetDNSRoutes= even if UseGateway=False
+    (LP: #1867375)
+
+  [ Topi Miettinen ]
+  * Delete empty lines at end of file.
+    Upstream commit hooks don't allow empty lines and of course they serve no
+    purpose.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 17 May 2020 19:28:49 +0200
+
 systemd (245.5-2) unstable; urgency=medium
 
   * Cherry-pick various fixes from upstream master
