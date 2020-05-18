@@ -1,3 +1,18 @@
+systemd (245.5-3ubuntu1) UNRELEASED; urgency=medium
+
+  [ Dan Streetman ]
+  * Hotadd only offline memory and CPUs (LP: #1876018)
+    Author: Dan Streetman
+    File: debian/extra/rules-ubuntu/40-vm-hotadd.rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dc68569fb46b04791202a40326003799becae859
+
+  [ Balint Reczey ]
+  * Merge to Ubuntu from Debian unstable
+  - Dropped changes:
+    * Cherry-pick fix from upstream master to adjust UseGateway= default
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 18 May 2020 13:20:33 +0200
+
 systemd (245.5-3) unstable; urgency=medium
 
   [ Michael Biebl ]
