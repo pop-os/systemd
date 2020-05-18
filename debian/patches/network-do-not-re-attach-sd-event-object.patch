@@ -11,7 +11,7 @@ Fixes #15126.
  2 files changed, 8 insertions(+), 8 deletions(-)
 
 diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
-index 3f65804..6419037 100644
+index f2b9def..a44026e 100644
 --- a/src/network/networkd-dhcp4.c
 +++ b/src/network/networkd-dhcp4.c
 @@ -1336,11 +1336,11 @@ int dhcp4_configure(Link *link) {

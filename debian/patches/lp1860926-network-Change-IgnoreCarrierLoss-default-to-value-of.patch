@@ -16,7 +16,7 @@ Forwarded: https://github.com/systemd/systemd/pull/15619
  4 files changed, 10 insertions(+), 4 deletions(-)
 
 diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index 97f96f9..652f183 100644
+index a283802..27e03d2 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
 @@ -815,8 +815,9 @@
@@ -32,10 +32,10 @@ index 97f96f9..652f183 100644
          </listitem>
        </varlistentry>
 diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
-index d3dda3d..2fc7881 100644
+index 1a07ae9..8a8bbf2 100644
 --- a/src/network/networkd-network-gperf.gperf
 +++ b/src/network/networkd-network-gperf.gperf
-@@ -98,7 +98,7 @@ Network.ProxyARP,
+@@ -98,7 +98,7 @@ Network.ProxyARP,                            config_parse_tristate,
  Network.IPv6ProxyNDPAddress,                 config_parse_ipv6_proxy_ndp_address,                      0,                             0
  Network.BindCarrier,                         config_parse_strv,                                        0,                             offsetof(Network, bind_carrier)
  Network.ConfigureWithoutCarrier,             config_parse_bool,                                        0,                             offsetof(Network, configure_without_carrier)
@@ -45,7 +45,7 @@ index d3dda3d..2fc7881 100644
  Address.Address,                             config_parse_address,                                     0,                             0
  Address.Peer,                                config_parse_address,                                     0,                             0
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 0604ada..c6dc3ea 100644
+index 5809c45..f297bae 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
 @@ -268,6 +268,9 @@ int network_verify(Network *network) {
@@ -58,7 +58,7 @@ index 0604ada..c6dc3ea 100644
          if (network->dhcp_critical >= 0) {
                  if (network->keep_configuration >= 0)
                          log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
-@@ -458,6 +461,8 @@ int network_load_one(Manager *manager, O
+@@ -458,6 +461,8 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .ipv6_accept_ra_route_table = RT_TABLE_MAIN,
                  .ipv6_accept_ra_route_table_set = false,
  
@@ -68,7 +68,7 @@ index 0604ada..c6dc3ea 100644
  
                  .can_triple_sampling = -1,
 diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
-index 0d46dbb..086f74c 100644
+index 6231618..92a1d24 100644
 --- a/src/network/networkd-network.h
 +++ b/src/network/networkd-network.h
 @@ -231,7 +231,7 @@ struct Network {

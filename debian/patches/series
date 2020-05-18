@@ -12,6 +12,7 @@ test-modify-add-tests-for-UseRoutes-and-UseGateway-config.patch
 network-honor-SetDNSRoutes-even-if-UseGateway-False.patch
 test-verify-RoutesToDNS-is-independent-of-UseGateway.patch
 userdb-when-doing-client-side-NSS-look-ups-optionally-avo.patch
+logind-avoid-shadow-lookups-when-doing-userdb-client-side.patch
 basic-add-_cleanup_-wrappers-for-pthread_mutex_-lock-unlo.patch
 nss-systemd-use-_cleanup_-for-pthread_mutex_-lock-unlock.patch
 nss-systemd-don-t-synthesize-root-nobody-when-iterating.patch
