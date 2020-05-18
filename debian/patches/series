@@ -70,3 +70,11 @@ riscv64-seccomp.patch
 dhcp-Allow-setting-request-options-again.patch
 lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
 test-Skip-test-boot-timestamps-on-permission-denied.patch
+lp1875708/socket-util-introduce-type-safe-dereferencing-wrapper-CMS.patch
+lp1875708/journald-Increase-stdout-buffer-size-sooner-when-almost-f.patch
+lp1875708/journald-use-log_warning_errno-where-appropriate.patch
+lp1875708/journald-rework-end-of-line-marker-handling-to-use-a-fiel.patch
+lp1875708/journald-use-the-fact-that-client_context_release-returns.patch
+lp1875708/journald-rework-pid-change-handling.patch
+lp1875708/test-Add-a-test-case-for-15654.patch
+lp1875708/man-document-the-new-_LINE_BREAK-type.patch
