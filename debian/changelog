@@ -1,8 +1,7 @@
-systemd (245.5-3ubuntu1) UNRELEASED; urgency=medium
+systemd (245.5-3ubuntu1) groovy; urgency=medium
 
   [ Dan Streetman ]
   * Hotadd only offline memory and CPUs (LP: #1876018)
-    Author: Dan Streetman
     File: debian/extra/rules-ubuntu/40-vm-hotadd.rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dc68569fb46b04791202a40326003799becae859
 
@@ -10,8 +9,26 @@ systemd (245.5-3ubuntu1) UNRELEASED; urgency=medium
   * Merge to Ubuntu from Debian unstable
   - Dropped changes:
     * Cherry-pick fix from upstream master to adjust UseGateway= default
+  * journald: stream pid change newline fix (LP: #1875708)
+    Files:
+    - debian/patches/debian/fsckd-daemon-for-inter-fsckd-communication.patch
+    - debian/patches/lp1875708/journald-Increase-stdout-buffer-size-sooner-when-almost-f.patch
+    - debian/patches/lp1875708/journald-rework-end-of-line-marker-handling-to-use-a-fiel.patch
+    - debian/patches/lp1875708/journald-rework-pid-change-handling.patch
+    - debian/patches/lp1875708/journald-use-log_warning_errno-where-appropriate.patch
+    - debian/patches/lp1875708/journald-use-the-fact-that-client_context_release-returns.patch
+    - debian/patches/lp1875708/man-document-the-new-_LINE_BREAK-type.patch
+    - debian/patches/lp1875708/socket-util-introduce-type-safe-dereferencing-wrapper-CMS.patch
+    - debian/patches/lp1875708/test-Add-a-test-case-for-15654.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=95302fbe53202bdac33f86031aa56026444a92d3
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 18 May 2020 13:20:33 +0200
+  [ Dimitri John Ledkov ]
+  * meson: initialize time-epoch to reproducible builds compatible value
+    (LP: #1878969)
+    File: debian/patches/meson-initialize-time-epoch-to-reproducible-builds-compat.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6785dfd98f81dfe3e3d5273511ec33b196ddb0c3
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 19 May 2020 19:43:50 +0200
 
 systemd (245.5-3) unstable; urgency=medium
 
