@@ -124,14 +124,17 @@ class ServicesTest(unittest.TestCase):
     def test_tmp_mount(self):
         # check if we want to mount /tmp in fstab
         want_tmp_mount = False
-        with open('/etc/fstab') as f:
-            for l in f:
-                try:
-                    if not l.startswith('#') and l.split()[1] in ('/tmp', '/tmp/'):
-                        want_tmp_mount = True
-                        break
-                except IndexError:
-                    pass
+        try:
+            with open('/etc/fstab') as f:
+                for l in f:
+                    try:
+                        if not l.startswith('#') and l.split()[1] in ('/tmp', '/tmp/'):
+                            want_tmp_mount = True
+                            break
+                    except IndexError:
+                        pass
+        except FileNotFoundError:
+            pass
 
         # ensure that we actually do/don't have a /tmp mount
         (status, status_out) = subprocess.getstatusoutput('systemctl status tmp.mount')
