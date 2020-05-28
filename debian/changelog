@@ -1,3 +1,26 @@
+systemd (245.4-4ubuntu3.1) focal; urgency=medium
+
+  * d/p/lp1867375/0001-network-add-a-flag-to-ignore-gateway-provided-by-DHC.patch,
+    d/p/lp1867375/0002-test-network-add-a-test-case-for-DHCPv4.UseGateway-n.patch,
+    d/p/lp1867375/0003-network-change-UseGateway-default-to-UseRoutes-setti.patch,
+    d/p/lp1867375/0004-test-modify-add-tests-for-UseRoutes-and-UseGateway-c.patch,
+    d/p/lp1867375/0005-network-honor-SetDNSRoutes-even-if-UseGateway-False.patch,
+    d/p/lp1867375/0006-test-verify-RoutesToDNS-is-independent-of-UseGateway.patch:
+    - Add UseGateway= parameter and default to value of UseRoutes, to restore
+      backwards compatibility with old UseRoutes= behavior (LP: #1867375)
+  * d/p/lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch:
+    - default ignore_carrier_loss to value of configure_without_carrier,
+      so carrier drop during configuration doesn't break networking
+      (LP: #1860926)
+   * d/e/initramfs-tools/hooks/udev:
+     - Follow symlinks when finding link files to copy into initramfs
+       (LP: #1868892)
+   * d/p/lp1873607/0001-core-some-minor-clean-ups-modernizations.patch,
+     d/p/lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch:
+     - Avoid segfault during serialization (LP: #1873607)
+
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 07 May 2020 09:21:22 -0400
+
 systemd (245.4-4ubuntu3) focal; urgency=medium
 
   * dhcp: Allow setting request options again

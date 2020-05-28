@@ -59,3 +59,12 @@ Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
 network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
 riscv64-seccomp.patch
 dhcp-Allow-setting-request-options-again.patch
+lp1867375/0001-network-add-a-flag-to-ignore-gateway-provided-by-DHC.patch
+lp1867375/0002-test-network-add-a-test-case-for-DHCPv4.UseGateway-n.patch
+lp1867375/0003-network-change-UseGateway-default-to-UseRoutes-setti.patch
+lp1867375/0004-test-modify-add-tests-for-UseRoutes-and-UseGateway-c.patch
+lp1867375/0005-network-honor-SetDNSRoutes-even-if-UseGateway-False.patch
+lp1867375/0006-test-verify-RoutesToDNS-is-independent-of-UseGateway.patch
+lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
+lp1873607/0001-core-some-minor-clean-ups-modernizations.patch
+lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch
