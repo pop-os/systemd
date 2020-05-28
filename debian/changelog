@@ -1,3 +1,9 @@
+systemd (245.4-4ubuntu3.1pop0) focal; urgency=medium
+
+  * Patches for Pop
+
+ -- Jeremy Soller <jeremy@system76.com>  Thu, 28 May 2020 13:54:10 -0600
+
 systemd (245.4-4ubuntu3.1) focal; urgency=medium
 
   * d/p/lp1867375/0001-network-add-a-flag-to-ignore-gateway-provided-by-DHC.patch,
