@@ -14,7 +14,7 @@ Closes: #953670
  3 files changed, 12 insertions(+), 50 deletions(-)
 
 diff --git a/src/core/job.c b/src/core/job.c
-index 9fe3035..8610496 100644
+index bcfdb9d..4f9336f 100644
 --- a/src/core/job.c
 +++ b/src/core/job.c
 @@ -383,62 +383,25 @@ JobType job_type_lookup_merge(JobType a, JobType b) {

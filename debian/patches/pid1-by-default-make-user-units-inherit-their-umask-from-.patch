@@ -30,7 +30,7 @@ Fixes #6077.
  4 files changed, 35 insertions(+), 4 deletions(-)
 
 diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
-index fd1755e..2b57ce0 100644
+index e693af4..8ae9f98 100644
 --- a/man/systemd.exec.xml
 +++ b/man/systemd.exec.xml
 @@ -655,8 +655,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
@@ -90,7 +90,7 @@ index 4160af4..ca98252 100644
  int wait_for_terminate(pid_t pid, siginfo_t *status);
  
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 97e1b00..842939c 100644
+index c306183..8758580 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
 @@ -187,8 +187,16 @@ static void unit_init(Unit *u) {
