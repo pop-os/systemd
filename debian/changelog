@@ -1,3 +1,26 @@
+systemd (245.6-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+  - Dropped changes:
+    * Don't try calling NULL callback in bus_wait_for_units_clear.
+    * test: Skip test-boot-timestamps on permission denied.
+    * From journald: stream pid change newline fix
+      - debian/patches/lp1875708/journald-Increase-stdout-buffer-size-sooner-when-almost-f.patch
+    * meson: initialize time-epoch to reproducible builds compatible value
+  * dhclient-exit-hooks.d/timesyncd: Act only when systemd-timesyncd is enabled
+    (LP: #1873031)
+    File: debian/extra/dhclient-exit-hooks.d/timesyncd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7d5a31fb7523d1ecef0d2932df5efa3b99322919
+  * debian/udev.postinst: Allow kvm to be an already present non-system group
+    (LP: #1880541)
+    File: debian/udev.postinst
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8b5c31828d4323ddb719326b1316c179b7cdbdef
+  * Cherry-pick reversion detecting WSL by the presence of "microsoft" in osrelease
+    File: debian/patches/Revert-detect-virt-also-detect-microsoft-as-WSL.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e13f4452698b84ecb0ca6b7950b5f0c42c02c2cf
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 09 Jun 2020 20:19:54 +0200
+
 systemd (245.6-1) unstable; urgency=medium
 
   [ Michael Biebl ]
