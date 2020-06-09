@@ -12,7 +12,7 @@ LP: #1870410
  2 files changed, 13 insertions(+), 11 deletions(-)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index 4122d08..54a5dcc 100644
+index b735915..db1d7ff 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
 @@ -188,8 +188,10 @@ int sd_dhcp_client_set_request_option(sd_dhcp_client *client, uint8_t option) {

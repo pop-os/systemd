@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index fc216d2..60f8284 100644
+index c09115e..7de95a3 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2595,6 +2595,14 @@ executable('systemd-makefs',
+@@ -2603,6 +2603,14 @@ executable('systemd-makefs',
             install : true,
             install_dir : rootlibexecdir)
  

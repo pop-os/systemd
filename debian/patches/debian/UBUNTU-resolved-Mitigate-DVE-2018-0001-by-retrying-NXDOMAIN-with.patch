@@ -20,7 +20,7 @@ Bug-DNS: https://github.com/dns-violations/dns-violations/blob/master/2018/DVE-2
  1 file changed, 33 insertions(+), 5 deletions(-)
 
 diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
-index fb54d16..3a2722f 100644
+index 5898308..7704a51 100644
 --- a/src/resolve/resolved-dns-transaction.c
 +++ b/src/resolve/resolved-dns-transaction.c
 @@ -376,12 +376,12 @@ static int dns_transaction_pick_server(DnsTransaction *t) {

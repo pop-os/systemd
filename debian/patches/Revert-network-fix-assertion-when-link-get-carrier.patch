@@ -8,7 +8,7 @@ This reverts commit b9ea3d2e47b3741f3f46ba9c5e19640136933b71.
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index ce5ea89..8d22a1b 100644
+index dfb918b..87651fd 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -3569,7 +3569,7 @@ int link_ipv6ll_gained(Link *link, const struct in6_addr *address) {

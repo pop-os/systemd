@@ -9,7 +9,7 @@ other error code, instead of not supported. Skip the test for both error codes.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/test/test-sleep.c b/src/test/test-sleep.c
-index 014b1aa..753e3d2 100644
+index 2e63aac..85b6890 100644
 --- a/src/test/test-sleep.c
 +++ b/src/test/test-sleep.c
 @@ -53,7 +53,7 @@ static int test_fiemap(const char *path) {

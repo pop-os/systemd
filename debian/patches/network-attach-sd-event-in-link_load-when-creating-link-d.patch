@@ -21,7 +21,7 @@ ens2: Failed
  1 file changed, 8 insertions(+)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 99d4b29..b281e05 100644
+index 05aaf45..6c3079d 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -3446,6 +3446,10 @@ network_file_fail:
