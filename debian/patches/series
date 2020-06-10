@@ -69,3 +69,4 @@ lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
 lp1873607/0001-core-some-minor-clean-ups-modernizations.patch
 lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch
 hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch
+lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
