@@ -1,5 +1,6 @@
-systemd (245.6-1ubuntu1) UNRELEASED; urgency=medium
+systemd (245.6-1ubuntu1) groovy; urgency=medium
 
+  [ Balint Reczey ]
   * Merge to Ubuntu from Debian unstable
   - Dropped changes:
     * Don't try calling NULL callback in bus_wait_for_units_clear.
@@ -15,11 +16,17 @@ systemd (245.6-1ubuntu1) UNRELEASED; urgency=medium
     (LP: #1880541)
     File: debian/udev.postinst
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8b5c31828d4323ddb719326b1316c179b7cdbdef
-  * Cherry-pick reversion detecting WSL by the presence of "microsoft" in osrelease
+  * Cherry-pick reversion of detecting WSL by the presence of "microsoft" in osrelease
     File: debian/patches/Revert-detect-virt-also-detect-microsoft-as-WSL.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e13f4452698b84ecb0ca6b7950b5f0c42c02c2cf
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 09 Jun 2020 20:19:54 +0200
+  [ Ryan Harper ]
+  * Skip over by-uuid/by-label symlinks for bcache backing and cache devices
+    (LP: #1861941)
+    File: debian/patches/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4b9a0e888ca40eaed561ec48aece23218fab18ff
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 11 Jun 2020 12:54:02 +0200
 
 systemd (245.6-1) unstable; urgency=medium
 
