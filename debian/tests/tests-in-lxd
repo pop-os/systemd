@@ -8,7 +8,11 @@ lxd init --auto
 
 IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
 
-autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || exit 77 # LP: #1878225
+autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
+    (lxc launch ubuntu-daily:$(lsb_release -cs) systemd-lxc
+     sleep 60
+     lxc exec systemd-lxc systemctl is-system-running || (lxc exec systemd-lxc -- systemctl list-units --failed ; lxc exec systemd-lxc systemctl list-jobs ; lxc exec systemd-lxc -- journalctl -a)
+     exit 77) # LP: #1878225
 
 # push local apt configuration to match pinning
 lxc launch $IMAGE systemd-lxc
