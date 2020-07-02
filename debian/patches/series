@@ -70,3 +70,10 @@ lp1873607/0001-core-some-minor-clean-ups-modernizations.patch
 lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch
 hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
+lp1838329/0001-blockdev-propagate-one-more-unexpected-error.patch
+lp1838329/0002-makefs-log-about-OOM-condition.patch
+lp1838329/0003-dissect-use-log_debug_errno-where-appropriate.patch
+lp1838329/0004-blockdev-add-helper-for-locking-whole-block-device.patch
+lp1838329/0005-makefs-lock-device-while-we-operate.patch
+lp1838329/0006-makefs-normalize-logging-a-bit.patch
+lp1838329/0007-cryptsetup-generator-use-systemd-makefs-for-implemen.patch
