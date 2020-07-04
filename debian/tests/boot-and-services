@@ -87,7 +87,7 @@ class ServicesTest(unittest.TestCase):
         else:
             out = subprocess.check_output(['nmcli', 'nm'])
         self.assertIn(b'enabled', out)
-        self.active_unit('network-manager')
+        self.active_unit('NetworkManager')
 
     def test_cron(self):
         out = subprocess.check_output(['ps', 'u', '-C', 'cron'])
