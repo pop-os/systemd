@@ -1,3 +1,27 @@
+systemd (245.6-2) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * 40-vm-hotadd.rules: check offline before onlining memory/cpus.
+    The kernel will return EINVAL if the memory or cpu is already online,
+    which is harmless, but adds a confusing error to the log. Avoid the error
+    message by only onlining if the memory or cpu is currently offline.
+    (LP: #1876018)
+
+  [ Michael Biebl ]
+  * d/t/boot-and-services: use canonical name for NetworkManager service
+  * Fix build with libmicrohttpd 0.9.71.
+    The return type of callbacks was changed from int to an enum.
+
+  [ Youfu Zhang ]
+  * fsckd: avoid useless CR displayed on console (LP: #1692353)
+
+  [ Balint Reczey ]
+  * dhclient-exit-hooks.d/timesyncd: Act only when systemd-timesyncd is available.
+    Otherwise the hook script might trigger an error if the
+    systemd-timesyncd package is uninstalled but not purged. (LP: #1873031)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 05 Jul 2020 11:44:39 +0200
+
 systemd (245.6-1) unstable; urgency=medium
 
   [ Michael Biebl ]
