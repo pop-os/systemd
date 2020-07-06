@@ -46,13 +46,13 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  man/systemd-fsckd.service.xml      | 162 +++++++++
  meson.build                        |   8 +
  po/POTFILES.in                     |   1 +
- src/fsckd/fsckd.c                  | 694 +++++++++++++++++++++++++++++++++++++
+ src/fsckd/fsckd.c                  | 699 +++++++++++++++++++++++++++++++++++++
  units/meson.build                  |   2 +
  units/systemd-fsck-root.service.in |   2 +
  units/systemd-fsck@.service.in     |   3 +-
  units/systemd-fsckd.service.in     |  17 +
  units/systemd-fsckd.socket         |  15 +
- 10 files changed, 904 insertions(+), 1 deletion(-)
+ 10 files changed, 909 insertions(+), 1 deletion(-)
  create mode 100644 man/systemd-fsckd.service.xml
  create mode 100644 src/fsckd/fsckd.c
  create mode 100644 units/systemd-fsckd.service.in
@@ -268,10 +268,10 @@ index 0346a19..5ea2444 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..a4f4ebd
+index 0000000..4af8e45
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
-@@ -0,0 +1,694 @@
+@@ -0,0 +1,699 @@
 +/*-*- Mode: C; c-basic-offset: 8; indent-tabs-mode: nil -*-*/
 +
 +/***
@@ -396,6 +396,11 @@ index 0000000..a4f4ebd
 +
 +        if (!m->show_status_console)
 +                return 0;
++
++        /* Nothing to display, and nothing to clear: return now. */
++        if (message == NULL && m->clear == 0) {
++                return 0;
++        }
 +
 +        /* Reduce the SAK window by opening and closing console on every request */
 +        console = fopen("/dev/console", "we");
