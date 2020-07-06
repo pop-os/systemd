@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.2) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.2) focal; urgency=medium
 
    [ Dan Streetman ]
    * Hotadd only offline memory and CPUs (LP: #1876018)
@@ -36,13 +36,7 @@ systemd (245.4-4ubuntu3.2) UNRELEASED; urgency=medium
      - debian/patches/lp1875708/test-Add-a-test-case-for-15654.patch
      https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2dc19f7ae4aad7277e9d89849182453ff1d046dc
 
-   [ Ryan Harper ]
-   * Skip over by-uuid/by-label symlinks for bcache backing and cache devices
-     (LP: #1861941)
-     File: debian/patches/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
-     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3c228b1d9c5d83d7f0f7b7d8f2053a81de57f33c
-
- -- Dan Streetman <ddstreet@canonical.com>  Thu, 02 Jul 2020 14:04:19 -0400
+ -- Dan Streetman <ddstreet@canonical.com>  Mon, 06 Jul 2020 17:38:31 -0400
 
 systemd (245.4-4ubuntu3.1) focal; urgency=medium
 
