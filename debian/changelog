@@ -1,3 +1,21 @@
+systemd (245.6-2ubuntu1) groovy; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes:
+      * dhclient-exit-hooks.d/timesyncd: Act only when systemd-timesyncd is enabled
+  * hwdb: Mask rfkill event from intel-hid on HP platforms (LP: #1883846)
+    File: debian/patches/hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c705323d61b9cd4e36ceb92e236cd6e9ba4c1b1a
+  * debian/tests/tests-in-lxd: Show debugging info about reason of skipping test
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1c835ca2d4f6d09977525d781d224a87ba7cde24
+  * debian/tests/tests-in-lxd: Drop workaround removing fstab from the container
+    (LP: #1886430)
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f13213af98fa4c27c5f7e58c511b9691bb56065a
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 06 Jul 2020 16:30:25 +0200
+
 systemd (245.6-2) unstable; urgency=medium
 
   [ Dan Streetman ]
