@@ -1,3 +1,26 @@
+systemd (245.6-3) unstable; urgency=medium
+
+  [ Dan Streetman ]
+  * d/t/upstream: capture new merged 'system.journal' from tests.
+    https://github.com/systemd/systemd/pull/15281
+  * d/t/upstream: use --directory or --file param for journalctl.
+    Properly tell journalctl if the journal to parse is a dir or file.
+  * d/t/storage: check for ext2 or ext4 fs when using crypttab 'tmp' option.
+    https://github.com/systemd/systemd/pull/15853
+
+  [ Martin Pitt ]
+  * debian/tests/localed-locale: Fix for environments without en_US.UTF-8.
+    Unconditionally back up/restore locale configuration files and generate
+    en_US.UTF-8. Previously the test failed in environments which have some
+    locale other than en_US.UTF-8 in /etc/default/locale.
+    Also fix the assertion of /etc/locale.conf not being present after
+    localectl. This only applies to Debian/Ubuntu tests, not upstream ones.
+
+  [ Dimitri John Ledkov ]
+  * Enable EFI/bootctl on armhf.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 14 Jul 2020 18:16:57 +0200
+
 systemd (245.6-2) unstable; urgency=medium
 
   [ Dan Streetman ]
