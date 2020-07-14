@@ -1,4 +1,4 @@
-systemd (245.6-2ubuntu2) UNRELEASED; urgency=medium
+systemd (245.6-2ubuntu2) groovy; urgency=medium
 
   [ Balint Reczey ]
   * debian/tests/tests-in-lxd: Work around snapd.seeded.service hanging
@@ -21,7 +21,7 @@ systemd (245.6-2ubuntu2) UNRELEASED; urgency=medium
     - debian/patches/lp1838329/0007-cryptsetup-generator-use-systemd-makefs-for-implemen.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=652a148cf1d3ecfa93cfee288c152c90caee3ac6
 
- -- Balint Reczey <rbalint@ubuntu.com>  Sun, 12 Jul 2020 17:19:39 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 14 Jul 2020 18:37:58 +0200
 
 systemd (245.6-2ubuntu1) groovy; urgency=medium
 
