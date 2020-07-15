@@ -1,3 +1,11 @@
+systemd (245.6-3ubuntu1) groovy; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes:
+      * Enable EFI/bootctl on armhf.
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 15 Jul 2020 16:38:45 +0200
+
 systemd (245.6-3) unstable; urgency=medium
 
   [ Dan Streetman ]
