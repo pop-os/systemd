@@ -22,6 +22,7 @@ network-attach-sd-event-in-link_load-when-creating-link-d.patch
 Revert-detect-virt-also-detect-microsoft-as-WSL.patch
 hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch
 Fix-build-with-httpd-0.9.71.patch
+basic-cap-list-parse-print-numerical-capabilities.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
