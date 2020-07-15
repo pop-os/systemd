@@ -1,3 +1,13 @@
+systemd (245.6-3ubuntu2) groovy; urgency=medium
+
+  * basic/cap-list: Print unknown capabilities in hexadecimal.
+    This fixes autopkgtest running on 5.8 kernels
+    (when systemd was built on an earlier one) (LP: #1885755)
+    File: debian/patches/basic-cap-list-parse-print-numerical-capabilities.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ef46ec8289df815d42c9a3fdbf9fb347226d6be4
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 15 Jul 2020 19:21:02 +0200
+
 systemd (245.6-3ubuntu1) groovy; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
