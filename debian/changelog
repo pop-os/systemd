@@ -1,3 +1,9 @@
+systemd (245.6-3ubuntu3) groovy; urgency=medium
+
+  * Rebuild against libselinux 3.0
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 16 Jul 2020 16:54:53 +0200
+
 systemd (245.6-3ubuntu2) groovy; urgency=medium
 
   * basic/cap-list: Print unknown capabilities in hexadecimal.
