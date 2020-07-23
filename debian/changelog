@@ -1,3 +1,13 @@
+systemd (245.4-4ubuntu3.3) focal; urgency=medium
+
+  * d/p/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch:
+    Reworded and reintroduced patch to fully explain delta is NOT a fix to
+    LP: #1861941 if the bcache-tools patch exists, but should be kept anyway
+    as the change makes sense for a better experience to end user.
+    (LP: #1861941)
+
+ -- Rafael David Tinoco <rafaeldtinoco@ubuntu.com>  Thu, 23 Jul 2020 20:02:06 +0000
+
 systemd (245.4-4ubuntu3.2) focal; urgency=medium
 
    [ Dan Streetman ]
