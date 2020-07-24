@@ -1,12 +1,19 @@
-systemd (245.4-4ubuntu3.3) focal; urgency=medium
+systemd (245.4-4ubuntu3.3) UNRELEASED; urgency=medium
 
+  [ Rafael David Tinoco ]
   * d/p/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch:
     Reworded and reintroduced patch to fully explain delta is NOT a fix to
     LP: #1861941 if the bcache-tools patch exists, but should be kept anyway
     as the change makes sense for a better experience to end user.
     (LP: #1861941)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f8f64b3b58a04a83b1c426818b9affc41e0bff6c
 
- -- Rafael David Tinoco <rafaeldtinoco@ubuntu.com>  Thu, 23 Jul 2020 20:02:06 +0000
+  [ Dan Streetman ]
+  * d/p/lp1882596-man-fix-some-manvolnum.patch:
+    - fix some man section references (LP: #1882596)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3959ec95eff78d38ec4409807f151572afe83fe9
+
+ -- Dan Streetman <ddstreet@canonical.com>  Fri, 24 Jul 2020 15:42:19 -0400
 
 systemd (245.4-4ubuntu3.2) focal; urgency=medium
 
