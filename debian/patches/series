@@ -17,7 +17,6 @@ basic-add-_cleanup_-wrappers-for-pthread_mutex_-lock-unlo.patch
 nss-systemd-use-_cleanup_-for-pthread_mutex_-lock-unlock.patch
 nss-systemd-don-t-synthesize-root-nobody-when-iterating.patch
 core-make-sure-to-restore-the-control-command-id-too.patch
-Fix-build-with-httpd-0.9.71.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -36,4 +35,3 @@ debian/Drop-seccomp-system-call-filter-for-udev.patch
 debian/blacklist-upstream-test-25.patch
 debian/blacklist-upstream-test-24-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
-debian/Revert-job-Don-t-mark-as-redundant-if-deps-are-relevant.patch

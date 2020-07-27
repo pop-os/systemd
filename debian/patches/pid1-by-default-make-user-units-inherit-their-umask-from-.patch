@@ -30,7 +30,7 @@ Fixes #6077.
  4 files changed, 35 insertions(+), 4 deletions(-)
 
 diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
-index e693af4..8ae9f98 100644
+index f7995e6..764c6ac 100644
 --- a/man/systemd.exec.xml
 +++ b/man/systemd.exec.xml
 @@ -655,8 +655,13 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
@@ -50,7 +50,7 @@ index e693af4..8ae9f98 100644
  
        <varlistentry>
 diff --git a/src/basic/process-util.c b/src/basic/process-util.c
-index 5de366f..b84515f 100644
+index 0a1dac7..728d38b 100644
 --- a/src/basic/process-util.c
 +++ b/src/basic/process-util.c
 @@ -628,6 +628,23 @@ int get_process_ppid(pid_t pid, pid_t *_ppid) {
@@ -78,7 +78,7 @@ index 5de366f..b84515f 100644
          siginfo_t dummy;
  
 diff --git a/src/basic/process-util.h b/src/basic/process-util.h
-index 4160af4..ca98252 100644
+index 5116d79..e0b5224 100644
 --- a/src/basic/process-util.h
 +++ b/src/basic/process-util.h
 @@ -45,6 +45,7 @@ int get_process_cwd(pid_t pid, char **cwd);
@@ -90,7 +90,7 @@ index 4160af4..ca98252 100644
  int wait_for_terminate(pid_t pid, siginfo_t *status);
  
 diff --git a/src/core/unit.c b/src/core/unit.c
-index c306183..8758580 100644
+index 92c37fc..2ddd0b3 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
 @@ -187,8 +187,16 @@ static void unit_init(Unit *u) {

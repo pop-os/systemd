@@ -57,7 +57,7 @@ index 13e3e32..3f65804 100644
  
          r = sd_dhcp_lease_get_router(lease, &router);
 diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
-index fb726c8..d3dda3d 100644
+index 920ac41..f3c7377 100644
 --- a/src/network/networkd-network-gperf.gperf
 +++ b/src/network/networkd-network-gperf.gperf
 @@ -162,6 +162,7 @@ DHCPv4.UseMTU,                               config_parse_bool,
@@ -69,10 +69,10 @@ index fb726c8..d3dda3d 100644
  DHCPv4.Anonymize,                            config_parse_bool,                                        0,                             offsetof(Network, dhcp_anonymize)
  DHCPv4.SendHostname,                         config_parse_bool,                                        0,                             offsetof(Network, dhcp_send_hostname)
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 2e716b2..c643419 100644
+index 255aaed..6b0d74c 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -383,6 +383,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -384,6 +384,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .dhcp_use_dns = true,
                  .dhcp_use_hostname = true,
                  .dhcp_use_routes = true,
@@ -81,7 +81,7 @@ index 2e716b2..c643419 100644
                  .dhcp_send_hostname = true,
                  .dhcp_send_release = true,
 diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
-index 266e40c..0d46dbb 100644
+index 4738a18..a2b9cd9 100644
 --- a/src/network/networkd-network.h
 +++ b/src/network/networkd-network.h
 @@ -110,6 +110,7 @@ struct Network {

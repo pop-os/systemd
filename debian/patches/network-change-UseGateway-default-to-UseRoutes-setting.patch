@@ -34,7 +34,7 @@ index 120347d..5175704 100644
          </varlistentry>
          <varlistentry>
 diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
-index d3dda3d..1a07ae9 100644
+index f3c7377..41fe9da 100644
 --- a/src/network/networkd-network-gperf.gperf
 +++ b/src/network/networkd-network-gperf.gperf
 @@ -162,7 +162,7 @@ DHCPv4.UseMTU,                               config_parse_bool,
@@ -47,7 +47,7 @@ index d3dda3d..1a07ae9 100644
  DHCPv4.Anonymize,                            config_parse_bool,                                        0,                             offsetof(Network, dhcp_anonymize)
  DHCPv4.SendHostname,                         config_parse_bool,                                        0,                             offsetof(Network, dhcp_send_hostname)
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index c643419..093d298 100644
+index 6b0d74c..5d2612e 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
 @@ -265,6 +265,9 @@ int network_verify(Network *network) {
@@ -60,7 +60,7 @@ index c643419..093d298 100644
          if (network->dhcp_critical >= 0) {
                  if (network->keep_configuration >= 0)
                          log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
-@@ -383,7 +386,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -384,7 +387,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .dhcp_use_dns = true,
                  .dhcp_use_hostname = true,
                  .dhcp_use_routes = true,
@@ -70,7 +70,7 @@ index c643419..093d298 100644
                  .dhcp_send_hostname = true,
                  .dhcp_send_release = true,
 diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
-index 0d46dbb..6231618 100644
+index a2b9cd9..fcba7e1 100644
 --- a/src/network/networkd-network.h
 +++ b/src/network/networkd-network.h
 @@ -110,7 +110,7 @@ struct Network {
