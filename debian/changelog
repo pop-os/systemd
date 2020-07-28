@@ -1,3 +1,14 @@
+systemd (245.7-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes:
+      * basic/cap-list: Print unknown capabilities in hexadecimal
+      * hwdb: Mask rfkill event from intel-hid on HP platforms
+      * networkd: if RA was implicit, do not await ndisc_configured
+        (upstream's #15469 fixed the delay differently)
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 28 Jul 2020 14:17:05 +0200
+
 systemd (245.7-1) unstable; urgency=medium
 
   [ Michael Biebl ]
