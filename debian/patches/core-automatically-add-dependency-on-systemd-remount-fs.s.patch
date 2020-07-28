@@ -19,7 +19,7 @@ systemd-pstore.service.
  1 file changed, 10 insertions(+)
 
 diff --git a/src/core/unit.c b/src/core/unit.c
-index 8758580..0e0166e 100644
+index 2ddd0b3..5967d4a 100644
 --- a/src/core/unit.c
 +++ b/src/core/unit.c
 @@ -1046,6 +1046,16 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {

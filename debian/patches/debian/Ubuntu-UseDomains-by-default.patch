@@ -54,10 +54,10 @@ index 5175704..a283802 100644
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all host names, in particular of single-label names. It is generally safer to use the supplied domain
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 093d298..5809c45 100644
+index 5d2612e..b3f62c0 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -390,6 +390,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -391,6 +391,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  /* NOTE: this var might be overwritten by network_apply_anonymize_if_set */
                  .dhcp_send_hostname = true,
                  .dhcp_send_release = true,
@@ -65,7 +65,7 @@ index 093d298..5809c45 100644
                  /* To enable/disable RFC7844 Anonymity Profiles */
                  .dhcp_anonymize = false,
                  .dhcp_route_metric = DHCP_ROUTE_METRIC,
-@@ -451,6 +452,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -452,6 +453,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .multicast = -1,
                  .allmulticast = -1,
                  .ipv6_accept_ra_use_dns = true,

@@ -32,7 +32,7 @@ index a283802..27e03d2 100644
          </listitem>
        </varlistentry>
 diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
-index 1a07ae9..8a8bbf2 100644
+index 41fe9da..414c0ba 100644
 --- a/src/network/networkd-network-gperf.gperf
 +++ b/src/network/networkd-network-gperf.gperf
 @@ -98,7 +98,7 @@ Network.ProxyARP,                            config_parse_tristate,
@@ -45,7 +45,7 @@ index 1a07ae9..8a8bbf2 100644
  Address.Address,                             config_parse_address,                                     0,                             0
  Address.Peer,                                config_parse_address,                                     0,                             0
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 5809c45..f297bae 100644
+index b3f62c0..4eb3d65 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
 @@ -268,6 +268,9 @@ int network_verify(Network *network) {
@@ -58,7 +58,7 @@ index 5809c45..f297bae 100644
          if (network->dhcp_critical >= 0) {
                  if (network->keep_configuration >= 0)
                          log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
-@@ -458,6 +461,8 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -459,6 +462,8 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .ipv6_accept_ra_route_table = RT_TABLE_MAIN,
                  .ipv6_accept_ra_route_table_set = false,
  
@@ -68,7 +68,7 @@ index 5809c45..f297bae 100644
  
                  .can_triple_sampling = -1,
 diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
-index 6231618..92a1d24 100644
+index fcba7e1..feea814 100644
 --- a/src/network/networkd-network.h
 +++ b/src/network/networkd-network.h
 @@ -231,7 +231,7 @@ struct Network {

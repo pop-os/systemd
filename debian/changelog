@@ -1,3 +1,19 @@
+systemd (245.7-1) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 245.7
+    - resolve: enable RES_TRUSTAD towards the 127.0.0.53 stub resolver
+      (Closes: #965371)
+    - basic/cap-list: parse/print numerical capabilities
+      (Closes: #964926)
+  * Rebase patches
+
+  [ Dan Streetman ]
+  * Add libzstd-dev and zstd as build and test deps.
+    https://github.com/systemd/systemd/pull/15422
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 27 Jul 2020 23:24:47 +0200
+
 systemd (245.6-3ubuntu3) groovy; urgency=medium
 
   * Rebuild against libselinux 3.0

@@ -12,7 +12,7 @@ LP: #1857123
  1 file changed, 6 insertions(+), 6 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 37e7270..981bb5f 100644
+index 0a703ce..534b649 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -37,7 +37,6 @@
@@ -31,7 +31,7 @@ index 37e7270..981bb5f 100644
  #include "vrf.h"
  
  uint32_t link_get_vrf_table(Link *link) {
-@@ -3512,8 +3512,8 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
+@@ -3502,8 +3502,8 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
          if (r < 0)
                  return r;
  
@@ -42,7 +42,7 @@ index 37e7270..981bb5f 100644
                  sprintf(ifindex_str, "n%d", link->ifindex);
                  r = sd_device_new_from_device_id(&device, ifindex_str);
                  if (r < 0) {
-@@ -3523,7 +3523,7 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
+@@ -3513,7 +3513,7 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
  
                  r = sd_device_get_is_initialized(device);
                  if (r < 0) {
@@ -51,7 +51,7 @@ index 37e7270..981bb5f 100644
                          goto failed;
                  }
                  if (r == 0) {
-@@ -3534,11 +3534,11 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
+@@ -3524,11 +3524,11 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
  
                  r = device_is_renaming(device);
                  if (r < 0) {

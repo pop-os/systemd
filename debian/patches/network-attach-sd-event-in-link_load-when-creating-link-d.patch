@@ -21,10 +21,10 @@ ens2: Failed
  1 file changed, 8 insertions(+)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 05aaf45..6c3079d 100644
+index bc7bf25..560abf5 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -3446,6 +3446,10 @@ network_file_fail:
+@@ -3445,6 +3445,10 @@ network_file_fail:
                  if (r < 0)
                          return log_link_error_errno(link, r, "Failed to create DHCPv4 client: %m");
  
@@ -35,7 +35,7 @@ index 05aaf45..6c3079d 100644
                  r = sd_dhcp_client_set_request_address(link->dhcp_client, &address.in);
                  if (r < 0)
                          return log_link_error_errno(link, r, "Failed to set initial DHCPv4 address %s: %m", dhcp4_address);
-@@ -3464,6 +3468,10 @@ dhcp4_address_fail:
+@@ -3463,6 +3467,10 @@ dhcp4_address_fail:
                  if (r < 0)
                          return log_link_error_errno(link, r, "Failed to create IPv4LL client: %m");
  

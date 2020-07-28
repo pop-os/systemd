@@ -20,9 +20,6 @@ core-make-sure-to-restore-the-control-command-id-too.patch
 network-do-not-re-attach-sd-event-object.patch
 network-attach-sd-event-in-link_load-when-creating-link-d.patch
 Revert-detect-virt-also-detect-microsoft-as-WSL.patch
-hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch
-Fix-build-with-httpd-0.9.71.patch
-basic-cap-list-parse-print-numerical-capabilities.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -41,7 +38,6 @@ debian/Drop-seccomp-system-call-filter-for-udev.patch
 debian/blacklist-upstream-test-25.patch
 debian/blacklist-upstream-test-24-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
-debian/Revert-job-Don-t-mark-as-redundant-if-deps-are-relevant.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
@@ -51,7 +47,6 @@ debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
 debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
 debian/UBUNTU-journald.service-set-Nice-1-to-dodge-watchdog-on-soft-loc.patch
-debian/UBUNTU-networkd-if-RA-was-implicit-do-not-await-ndisc_con.patch
 debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
 debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch

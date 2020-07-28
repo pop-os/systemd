@@ -116,10 +116,10 @@ index ad90062..7fdbe34 100644
                  if (r < 0)
                          goto terminate;
 diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
-index 51d0c2a..5254a67 100644
+index eaf2d79..d2cc86b 100644
 --- a/src/nspawn/nspawn.c
 +++ b/src/nspawn/nspawn.c
-@@ -3696,8 +3696,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
+@@ -3701,8 +3701,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
                  .msg_control = &control,
                  .msg_controllen = sizeof(control),
          };
@@ -129,7 +129,7 @@ index 51d0c2a..5254a67 100644
          ssize_t n;
          pid_t inner_child_pid;
          _cleanup_strv_free_ char **tags = NULL;
-@@ -3719,15 +3718,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
+@@ -3724,15 +3723,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
  
          cmsg_close_all(&msghdr);
  

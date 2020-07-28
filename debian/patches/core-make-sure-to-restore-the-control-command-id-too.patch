@@ -9,7 +9,7 @@ Fixes: #15356
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/service.c b/src/core/service.c
-index 9a26271..40760b6 100644
+index db8cf37..3036bd3 100644
 --- a/src/core/service.c
 +++ b/src/core/service.c
 @@ -2826,9 +2826,10 @@ static int service_deserialize_exec_command(Unit *u, const char *key, const char

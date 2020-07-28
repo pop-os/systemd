@@ -1,16 +1,18 @@
-From ac83e5aeca7ca4eff3de6ef6d9a55b71b6eb10b1 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 18 May 2020 18:31:04 +0200
 Subject: [PATCH 4/7] blockdev: add helper for locking whole block device
+
+From ac83e5aeca7ca4eff3de6ef6d9a55b71b6eb10b1 Mon Sep 17 00:00:00 2001
 Bug: https://github.com/systemd/systemd/issues/10179
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1838329
 Origin: upstream, https://github.com/systemd/systemd/pull/15836
-
 ---
  src/basic/blockdev-util.c | 27 +++++++++++++++++++++++++++
  src/basic/blockdev-util.h |  2 ++
  2 files changed, 29 insertions(+)
 
+diff --git a/src/basic/blockdev-util.c b/src/basic/blockdev-util.c
+index 19ffb47..db89c67 100644
 --- a/src/basic/blockdev-util.c
 +++ b/src/basic/blockdev-util.c
 @@ -1,5 +1,6 @@
@@ -20,7 +22,7 @@ Origin: upstream, https://github.com/systemd/systemd/pull/15836
  #include <unistd.h>
  
  #include "alloc-util.h"
-@@ -189,3 +190,29 @@ int get_block_device_harder(const char *
+@@ -189,3 +190,29 @@ int get_block_device_harder(const char *path, dev_t *ret) {
  
          return 1;
  }
@@ -50,9 +52,11 @@ Origin: upstream, https://github.com/systemd/systemd/pull/15836
 +
 +        return TAKE_FD(lock_fd);
 +}
+diff --git a/src/basic/blockdev-util.h b/src/basic/blockdev-util.h
+index 6d8a796..1e7588f 100644
 --- a/src/basic/blockdev-util.h
 +++ b/src/basic/blockdev-util.h
-@@ -18,3 +18,5 @@ int block_get_originating(dev_t d, dev_t
+@@ -18,3 +18,5 @@ int block_get_originating(dev_t d, dev_t *ret);
  int get_block_device(const char *path, dev_t *dev);
  
  int get_block_device_harder(const char *path, dev_t *dev);

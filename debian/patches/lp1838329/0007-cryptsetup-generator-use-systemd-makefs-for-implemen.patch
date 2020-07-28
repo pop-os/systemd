@@ -1,8 +1,9 @@
-From db2c56b0dd28f271dd3fe53691b21484f72586e4 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 18 May 2020 18:37:02 +0200
 Subject: [PATCH 7/7] cryptsetup-generator: use systemd-makefs for
  implementation of "swap" and "tmp" options
+
+From db2c56b0dd28f271dd3fe53691b21484f72586e4 Mon Sep 17 00:00:00 2001
 Bug: https://github.com/systemd/systemd/issues/10179
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1838329
 Origin: upstream, https://github.com/systemd/systemd/pull/15836
@@ -22,7 +23,7 @@ Replaces: #13162
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/cryptsetup/cryptsetup-generator.c b/src/cryptsetup/cryptsetup-generator.c
-index 20c752d88d..5724f88d0a 100644
+index 1deab76..4eec9cd 100644
 --- a/src/cryptsetup/cryptsetup-generator.c
 +++ b/src/cryptsetup/cryptsetup-generator.c
 @@ -367,12 +367,12 @@ static int create_disk(
@@ -40,6 +41,3 @@ index 20c752d88d..5724f88d0a 100644
                          name_escaped);
  
          if (keydev)
--- 
-2.25.1
-

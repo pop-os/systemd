@@ -1,17 +1,17 @@
-From a5a8fe2e8dbb9bc1981064d273b626d4aa187152 Mon Sep 17 00:00:00 2001
 From: Lennart Poettering <lennart@poettering.net>
 Date: Mon, 18 May 2020 18:32:17 +0200
 Subject: [PATCH 6/7] makefs: normalize logging a bit
+
+From a5a8fe2e8dbb9bc1981064d273b626d4aa187152 Mon Sep 17 00:00:00 2001
 Bug: https://github.com/systemd/systemd/issues/10179
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1838329
 Origin: upstream, https://github.com/systemd/systemd/pull/15836
-
 ---
  src/partition/makefs.c | 11 ++++-------
  1 file changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/src/partition/makefs.c b/src/partition/makefs.c
-index 128aa41044..97f50c9033 100644
+index 128aa41..97f50c9 100644
 --- a/src/partition/makefs.c
 +++ b/src/partition/makefs.c
 @@ -76,15 +76,12 @@ static int run(int argc, char *argv[]) {
@@ -34,6 +34,3 @@ index 128aa41044..97f50c9033 100644
                  return 0;
          }
  
--- 
-2.25.1
-
