@@ -1,8 +1,48 @@
-systemd (245.4-4ubuntu3.1pop0) focal; urgency=medium
+systemd (245.4-4ubuntu3.2pop1) focal; urgency=medium
 
-  * Patches for Pop
+  * Upstream update
 
- -- Jeremy Soller <jeremy@system76.com>  Thu, 28 May 2020 13:54:10 -0600
+ -- Michael Aaron Murphy <michael@system76.com>  Wed, 29 Jul 2020 06:52:00 -0600
+
+systemd (245.4-4ubuntu3.2) focal; urgency=medium
+
+   [ Dan Streetman ]
+   * Hotadd only offline memory and CPUs (LP: #1876018)
+     File: debian/extra/rules-ubuntu/40-vm-hotadd.rules
+     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=72d815471596056b7727be5b10f87513ff1d5757
+   * Lock swap blockdevice while calling mkswap (LP: #1838329)
+     Files:
+     - d/p/lp1838329/0001-blockdev-propagate-one-more-unexpected-error.patch
+     - d/p/lp1838329/0002-makefs-log-about-OOM-condition.patch
+     - d/p/lp1838329/0003-dissect-use-log_debug_errno-where-appropriate.patch
+     - d/p/lp1838329/0004-blockdev-add-helper-for-locking-whole-block-device.patch
+     - d/p/lp1838329/0005-makefs-lock-device-while-we-operate.patch
+     - d/p/lp1838329/0006-makefs-normalize-logging-a-bit.patch
+     - d/p/lp1838329/0007-cryptsetup-generator-use-systemd-makefs-for-implemen.patch
+     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c81b75c4297cbb04554488b070b6f79996b8cceb
+
+   [ Balint Reczey ]
+   * debian/udev.postinst: Allow kvm to be an already present non-system group
+     (LP: #1880541)
+     File: debian/udev.postinst
+     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8b5c31828d4323ddb719326b1316c179b7cdbdef
+   * d/p/hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch:
+     hwdb: Mask rfkill event from intel-hid on HP platforms
+     (LP: #1883846)
+     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=164c016b466210c7d6d05963fd753eccf4679844
+   * journald: stream pid change newline fix (LP: #1875708)
+     Files:
+     - debian/patches/lp1875708/journald-Increase-stdout-buffer-size-sooner-when-almost-f.patch
+     - debian/patches/lp1875708/journald-rework-end-of-line-marker-handling-to-use-a-fiel.patch
+     - debian/patches/lp1875708/journald-rework-pid-change-handling.patch
+     - debian/patches/lp1875708/journald-use-log_warning_errno-where-appropriate.patch
+     - debian/patches/lp1875708/journald-use-the-fact-that-client_context_release-returns.patch
+     - debian/patches/lp1875708/man-document-the-new-_LINE_BREAK-type.patch
+     - debian/patches/lp1875708/socket-util-introduce-type-safe-dereferencing-wrapper-CMS.patch
+     - debian/patches/lp1875708/test-Add-a-test-case-for-15654.patch
+     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=2dc19f7ae4aad7277e9d89849182453ff1d046dc
+
+ -- Dan Streetman <ddstreet@canonical.com>  Mon, 06 Jul 2020 17:38:31 -0400
 
 systemd (245.4-4ubuntu3.1) focal; urgency=medium
 

@@ -68,6 +68,22 @@ lp1867375/0006-test-verify-RoutesToDNS-is-independent-of-UseGateway.patch
 lp1860926-network-Change-IgnoreCarrierLoss-default-to-value-of.patch
 lp1873607/0001-core-some-minor-clean-ups-modernizations.patch
 lp1873607/0002-core-make-sure-to-restore-the-control-command-id-too.patch
+hwdb-Mask-rfkill-event-from-intel-hid-on-HP-platforms.patch
+lp1838329/0001-blockdev-propagate-one-more-unexpected-error.patch
+lp1838329/0002-makefs-log-about-OOM-condition.patch
+lp1838329/0003-dissect-use-log_debug_errno-where-appropriate.patch
+lp1838329/0004-blockdev-add-helper-for-locking-whole-block-device.patch
+lp1838329/0005-makefs-lock-device-while-we-operate.patch
+lp1838329/0006-makefs-normalize-logging-a-bit.patch
+lp1838329/0007-cryptsetup-generator-use-systemd-makefs-for-implemen.patch
+lp1875708/socket-util-introduce-type-safe-dereferencing-wrapper-CMS.patch
+lp1875708/journald-Increase-stdout-buffer-size-sooner-when-almost-f.patch
+lp1875708/journald-use-log_warning_errno-where-appropriate.patch
+lp1875708/journald-rework-end-of-line-marker-handling-to-use-a-fiel.patch
+lp1875708/journald-use-the-fact-that-client_context_release-returns.patch
+lp1875708/journald-rework-pid-change-handling.patch
+lp1875708/test-Add-a-test-case-for-15654.patch
+lp1875708/man-document-the-new-_LINE_BREAK-type.patch
+
 # Pop patches
-cryptswap-mount-fix.patch
 systemd-boot-id-compat.patch
