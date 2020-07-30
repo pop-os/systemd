@@ -17,20 +17,38 @@ shared_sources = files('''
         bitmap.c
         bitmap.h
         blkid-util.h
+        bond-util.c
+        bond-util.h
         boot-timestamps.c
         boot-timestamps.h
         bootspec.c
         bootspec.h
         bpf-program.c
         bpf-program.h
+        bridge-util.c
+        bridge-util.h
+        bus-get-properties.c
+        bus-get-properties.h
+        bus-locator.c
+        bus-locator.h
+        bus-log-control-api.c
+        bus-log-control-api.h
+        bus-map-properties.c
+        bus-map-properties.h
+        bus-message-util.c
+        bus-message-util.h
+        bus-object.c
+        bus-object.h
+        bus-polkit.c
+        bus-polkit.h
+        bus-print-properties.c
+        bus-print-properties.h
         bus-unit-procs.c
         bus-unit-procs.h
         bus-unit-util.c
         bus-unit-util.h
         bus-util.c
         bus-util.h
-        bus-polkit.c
-        bus-polkit.h
         bus-wait-for-jobs.c
         bus-wait-for-jobs.h
         bus-wait-for-units.c
@@ -51,6 +69,8 @@ shared_sources = files('''
         condition.h
         conf-parser.c
         conf-parser.h
+        coredump-util.c
+        coredump-util.h
         cpu-set-util.c
         cpu-set-util.h
         crypt-util.c
@@ -89,6 +109,8 @@ shared_sources = files('''
         fstab-util.h
         generator.c
         generator.h
+        geneve-util.c
+        geneve-util.h
         gpt.c
         gpt.h
         group-record-nss.c
@@ -108,6 +130,8 @@ shared_sources = files('''
         install-printf.h
         install.c
         install.h
+        ipvlan-util.c
+        ipvlan-util.h
         ip-protocol-list.c
         ip-protocol-list.h
         journal-importer.c
@@ -139,6 +163,8 @@ shared_sources = files('''
         machine-image.h
         machine-pool.c
         machine-pool.h
+        macvlan-util.c
+        macvlan-util.h
         main-func.h
         module-util.h
         mount-util.c
@@ -158,8 +184,6 @@ shared_sources = files('''
         output-mode.h
         pager.c
         pager.h
-        path-lookup.c
-        path-lookup.h
         pe-header.h
         pkcs11-util.c
         pkcs11-util.h
@@ -178,6 +202,8 @@ shared_sources = files('''
         securebits-util.h
         serialize.c
         serialize.h
+        service-util.c
+        service-util.h
         sleep-config.c
         sleep-config.h
         socket-netlink.c
@@ -323,6 +349,7 @@ libshared_deps = [threads,
                   librt,
                   libseccomp,
                   libselinux,
+                  libzstd,
                   libxz]
 
 libshared_sym_path = '@0@/libshared.sym'.format(meson.current_source_dir())

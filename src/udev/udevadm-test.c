@@ -123,7 +123,7 @@ int test_main(int argc, char *argv[], void *userdata) {
 
         udev_builtin_init();
 
-        r = udev_rules_new(&rules, arg_resolve_name_timing);
+        r = udev_rules_load(&rules, arg_resolve_name_timing);
         if (r < 0) {
                 log_error_errno(r, "Failed to read udev rules: %m");
                 goto out;
@@ -143,7 +143,7 @@ int test_main(int argc, char *argv[], void *userdata) {
         assert_se(sigfillset(&mask) >= 0);
         assert_se(sigprocmask(SIG_SETMASK, &mask, &sigmask_orig) >= 0);
 
-        udev_event_execute_rules(event, 60 * USEC_PER_SEC, NULL, rules);
+        udev_event_execute_rules(event, 60 * USEC_PER_SEC, SIGKILL, NULL, rules);
 
         FOREACH_DEVICE_PROPERTY(dev, key, value)
                 printf("%s=%s\n", key, value);

@@ -36,7 +36,7 @@
 
     <para>These files configure various parameters of the systemd login manager,
     <citerefentry><refentrytitle>systemd-logind.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>. See
-    <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>7</manvolnum></citerefentry>
     for a general description of the syntax.</para>
   </refsect1>
 
@@ -46,7 +46,7 @@
     <title>Options</title>
 
     <para>All options are configured in the
-    <literal>[Login]</literal> section:</para>
+    [Login] section:</para>
 
     <variablelist class='config-directives'>
 
@@ -277,7 +277,7 @@
       <varlistentry>
         <term><varname>HoldoffTimeoutSec=</varname></term>
 
-        <listitem><para>Specifies the timeout after system startup or
+        <listitem><para>Specifies a period of time after system startup or
         system resume in which systemd will hold off on reacting to
         lid events. This is required for the system to properly
         detect any hotplugged devices so systemd can ignore lid events
@@ -302,6 +302,19 @@
         Note that this size is a safety limit only. As each runtime
         directory is a tmpfs file system, it will only consume as much
         memory as is needed.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RuntimeDirectoryInodesMax=</varname></term>
+
+        <listitem><para>Sets the limit on number of inodes for the
+        <varname>$XDG_RUNTIME_DIR</varname> runtime directory for each
+        user who logs in. Takes a number, optionally suffixed with the
+        usual K, G, M, and T suffixes, to the base 1024 (IEC).
+        Defaults to <varname>RuntimeDirectorySize=</varname> divided
+        by 4096. Note that this size is a safety limit only.
+        As each runtime directory is a tmpfs file system, it will
+        only consume as much memory as is needed.</para></listitem>
       </varlistentry>
 
       <varlistentry>

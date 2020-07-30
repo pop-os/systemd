@@ -48,13 +48,11 @@ int fopen_temporary(const char *path, FILE **ret_f, char **ret_temp_path) {
         /* This assumes that returned FILE object is short-lived and used within the same single-threaded
          * context and never shared externally, hence locking is not necessary. */
 
-        r = fdopen_unlocked(fd, "w", &f);
+        r = take_fdopen_unlocked(&fd, "w", &f);
         if (r < 0) {
                 (void) unlink(t);
                 return r;
         }
-
-        TAKE_FD(fd);
 
         if (ret_f)
                 *ret_f = TAKE_PTR(f);
@@ -80,18 +78,16 @@ int mkostemp_safe(char *pattern) {
 }
 
 int fmkostemp_safe(char *pattern, const char *mode, FILE **ret_f) {
-        int fd;
+        _cleanup_close_ int fd = -1;
         FILE *f;
 
         fd = mkostemp_safe(pattern);
         if (fd < 0)
                 return fd;
 
-        f = fdopen(fd, mode);
-        if (!f) {
-                safe_close(fd);
+        f = take_fdopen(&fd, mode);
+        if (!f)
                 return -errno;
-        }
 
         *ret_f = f;
         return 0;
@@ -261,7 +257,7 @@ int open_tmpfile_linkable(const char *target, int flags, char **ret_path) {
         assert((flags & O_EXCL) == 0);
 
         /* Creates a temporary file, that shall be renamed to "target" later. If possible, this uses O_TMPFILE – in
-         * which case "ret_path" will be returned as NULL. If not possible a the tempoary path name used is returned in
+         * which case "ret_path" will be returned as NULL. If not possible the temporary path name used is returned in
          * "ret_path". Use link_tmpfile() below to rename the result after writing the file in full. */
 
         fd = open_parent(target, O_TMPFILE|flags, 0640);

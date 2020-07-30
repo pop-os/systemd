@@ -66,7 +66,7 @@ extern const struct hash_ops route_hash_ops;
 
 int route_new(Route **ret);
 void route_free(Route *route);
-int route_configure(Route *route, Link *link, link_netlink_message_handler_t callback);
+int route_configure(Route *route, Link *link, link_netlink_message_handler_t callback, Route **ret);
 int route_remove(Route *route, Link *link, link_netlink_message_handler_t callback);
 
 int route_get(Link *link, Route *in, Route **ret);
@@ -100,13 +100,10 @@ CONFIG_PARSER_PROTOTYPE(config_parse_destination);
 CONFIG_PARSER_PROTOTYPE(config_parse_route_priority);
 CONFIG_PARSER_PROTOTYPE(config_parse_route_scope);
 CONFIG_PARSER_PROTOTYPE(config_parse_route_table);
-CONFIG_PARSER_PROTOTYPE(config_parse_gateway_onlink);
+CONFIG_PARSER_PROTOTYPE(config_parse_route_boolean);
 CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_route_preference);
 CONFIG_PARSER_PROTOTYPE(config_parse_route_protocol);
 CONFIG_PARSER_PROTOTYPE(config_parse_route_type);
 CONFIG_PARSER_PROTOTYPE(config_parse_tcp_window);
-CONFIG_PARSER_PROTOTYPE(config_parse_quickack);
-CONFIG_PARSER_PROTOTYPE(config_parse_fast_open_no_cookie);
-CONFIG_PARSER_PROTOTYPE(config_parse_route_ttl_propagate);
 CONFIG_PARSER_PROTOTYPE(config_parse_route_mtu);
 CONFIG_PARSER_PROTOTYPE(config_parse_multipath_route);

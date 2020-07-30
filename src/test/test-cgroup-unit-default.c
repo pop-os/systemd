@@ -22,7 +22,9 @@ static int test_default_memory_low(void) {
         if (r == -ENOMEDIUM)
                 return log_tests_skipped("cgroupfs not available");
 
-        assert_se(set_unit_path(get_testdata_dir()) >= 0);
+        _cleanup_free_ char *unit_dir = NULL;
+        assert_se(get_testdata_dir("units", &unit_dir) >= 0);
+        assert_se(set_unit_path(unit_dir) >= 0);
         assert_se(runtime_dir = setup_fake_runtime_dir());
         r = manager_new(UNIT_FILE_USER, MANAGER_TEST_RUN_BASIC, &m);
         if (IN_SET(r, -EPERM, -EACCES)) {
@@ -70,7 +72,7 @@ static int test_default_memory_low(void) {
          *
          * 3. dml-discard.slice sets DefaultMemoryLow= with no rvalue. As such,
          *    dml-discard-empty.service should end up with a value of 0.
-         *    dml-discard-explicit-ml.service sets MemoryLow=70, and as such should have that override the
+         *    dml-discard-set-ml.service sets MemoryLow=15, and as such should have that override the
          *    reset DefaultMemoryLow value. dml-discard.slice should still have an eventual memory.low of 50.
          *
          *                           ┌───────────┐

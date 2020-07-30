@@ -14,11 +14,18 @@
 #include "stdio-util.h"
 #include "user-util.h"
 
-int mkdir_safe_internal(const char *path, mode_t mode, uid_t uid, gid_t gid, MkdirFlags flags, mkdir_func_t _mkdir) {
+int mkdir_safe_internal(
+                const char *path,
+                mode_t mode,
+                uid_t uid, gid_t gid,
+                MkdirFlags flags,
+                mkdir_func_t _mkdir) {
+
         struct stat st;
         int r;
 
-        assert(_mkdir != mkdir);
+        assert(path);
+        assert(_mkdir && _mkdir != mkdir);
 
         if (_mkdir(path, mode) >= 0) {
                 r = chmod_and_chown(path, mode, uid, gid);
@@ -44,19 +51,16 @@ int mkdir_safe_internal(const char *path, mode_t mode, uid_t uid, gid_t gid, Mkd
                         return -errno;
         }
 
-        if (!S_ISDIR(st.st_mode)) {
-                log_full(flags & MKDIR_WARN_MODE ? LOG_WARNING : LOG_DEBUG,
-                         "Path \"%s\" already exists and is not a directory, refusing.", path);
-                return -ENOTDIR;
-        }
+        if (!S_ISDIR(st.st_mode))
+                return log_full_errno(flags & MKDIR_WARN_MODE ? LOG_WARNING : LOG_DEBUG, SYNTHETIC_ERRNO(ENOTDIR),
+                                      "Path \"%s\" already exists and is not a directory, refusing.", path);
         if ((st.st_mode & 0007) > (mode & 0007) ||
             (st.st_mode & 0070) > (mode & 0070) ||
-            (st.st_mode & 0700) > (mode & 0700)) {
-                log_full(flags & MKDIR_WARN_MODE ? LOG_WARNING : LOG_DEBUG,
-                         "Directory \"%s\" already exists, but has mode %04o that is too permissive (%04o was requested), refusing.",
-                         path, st.st_mode & 0777, mode);
-                return -EEXIST;
-        }
+            (st.st_mode & 0700) > (mode & 0700))
+                return log_full_errno(flags & MKDIR_WARN_MODE ? LOG_WARNING : LOG_DEBUG, SYNTHETIC_ERRNO(EEXIST),
+                                      "Directory \"%s\" already exists, but has mode %04o that is too permissive (%04o was requested), refusing.",
+                                      path, st.st_mode & 0777, mode);
+
         if ((uid != UID_INVALID && st.st_uid != uid) ||
             (gid != GID_INVALID && st.st_gid != gid)) {
                 char u[DECIMAL_STR_MAX(uid_t)] = "-", g[DECIMAL_STR_MAX(gid_t)] = "-";
@@ -65,10 +69,9 @@ int mkdir_safe_internal(const char *path, mode_t mode, uid_t uid, gid_t gid, Mkd
                         xsprintf(u, UID_FMT, uid);
                 if (gid != UID_INVALID)
                         xsprintf(g, GID_FMT, gid);
-                log_full(flags & MKDIR_WARN_MODE ? LOG_WARNING : LOG_DEBUG,
-                         "Directory \"%s\" already exists, but is owned by "UID_FMT":"GID_FMT" (%s:%s was requested), refusing.",
-                         path, st.st_uid, st.st_gid, u, g);
-                return -EEXIST;
+                return log_full_errno(flags & MKDIR_WARN_MODE ? LOG_WARNING : LOG_DEBUG, SYNTHETIC_ERRNO(EEXIST),
+                                      "Directory \"%s\" already exists, but is owned by "UID_FMT":"GID_FMT" (%s:%s was requested), refusing.",
+                                      path, st.st_uid, st.st_gid, u, g);
         }
 
         return 0;
@@ -90,7 +93,7 @@ int mkdir_safe(const char *path, mode_t mode, uid_t uid, gid_t gid, MkdirFlags f
         return mkdir_safe_internal(path, mode, uid, gid, flags, mkdir_errno_wrapper);
 }
 
-int mkdir_parents_internal(const char *prefix, const char *path, mode_t mode, mkdir_func_t _mkdir) {
+int mkdir_parents_internal(const char *prefix, const char *path, mode_t mode, uid_t uid, gid_t gid, MkdirFlags flags, mkdir_func_t _mkdir) {
         const char *p, *e;
         int r;
 
@@ -133,34 +136,54 @@ int mkdir_parents_internal(const char *prefix, const char *path, mode_t mode, mk
                 if (prefix && path_startswith(prefix, t))
                         continue;
 
-                r = _mkdir(t, mode);
-                if (r < 0 && r != -EEXIST)
-                        return r;
+                if (!uid_is_valid(uid) && !gid_is_valid(gid) && flags == 0) {
+                        r = _mkdir(t, mode);
+                        if (r < 0 && r != -EEXIST)
+                                return r;
+                } else {
+                        r = mkdir_safe_internal(t, mode, uid, gid, flags, _mkdir);
+                        if (r < 0 && r != -EEXIST)
+                                return r;
+                }
         }
 }
 
 int mkdir_parents(const char *path, mode_t mode) {
-        return mkdir_parents_internal(NULL, path, mode, mkdir_errno_wrapper);
+        return mkdir_parents_internal(NULL, path, mode, UID_INVALID, UID_INVALID, 0, mkdir_errno_wrapper);
 }
 
-int mkdir_p_internal(const char *prefix, const char *path, mode_t mode, mkdir_func_t _mkdir) {
+int mkdir_parents_safe(const char *prefix, const char *path, mode_t mode, uid_t uid, gid_t gid, MkdirFlags flags) {
+        return mkdir_parents_internal(prefix, path, mode, uid, gid, flags, mkdir_errno_wrapper);
+}
+
+int mkdir_p_internal(const char *prefix, const char *path, mode_t mode, uid_t uid, gid_t gid, MkdirFlags flags, mkdir_func_t _mkdir) {
         int r;
 
         /* Like mkdir -p */
 
         assert(_mkdir != mkdir);
 
-        r = mkdir_parents_internal(prefix, path, mode, _mkdir);
+        r = mkdir_parents_internal(prefix, path, mode, uid, gid, flags, _mkdir);
         if (r < 0)
                 return r;
 
-        r = _mkdir(path, mode);
-        if (r < 0 && (r != -EEXIST || is_dir(path, true) <= 0))
-                return r;
+        if (!uid_is_valid(uid) && !gid_is_valid(gid) && flags == 0) {
+                r = _mkdir(path, mode);
+                if (r < 0 && (r != -EEXIST || is_dir(path, true) <= 0))
+                        return r;
+        } else {
+                r = mkdir_safe_internal(path, mode, uid, gid, flags, _mkdir);
+                if (r < 0 && r != -EEXIST)
+                        return r;
+        }
 
         return 0;
 }
 
 int mkdir_p(const char *path, mode_t mode) {
-        return mkdir_p_internal(NULL, path, mode, mkdir_errno_wrapper);
+        return mkdir_p_internal(NULL, path, mode, UID_INVALID, UID_INVALID, 0, mkdir_errno_wrapper);
+}
+
+int mkdir_p_safe(const char *prefix, const char *path, mode_t mode, uid_t uid, gid_t gid, MkdirFlags flags) {
+        return mkdir_p_internal(prefix, path, mode, uid, gid, flags, mkdir_errno_wrapper);
 }

@@ -45,7 +45,9 @@
 
 #define JOURNAL_FILES_RECHECK_USEC (2 * USEC_PER_SEC)
 
-#define REPLACE_VAR_MAX 256
+/* The maximum size of variable values we'll expand in catalog entries. We bind this to PATH_MAX for now, as
+ * we want to be able to show all officially valid paths at least */
+#define REPLACE_VAR_MAX PATH_MAX
 
 #define DEFAULT_DATA_THRESHOLD (64*1024)
 
@@ -115,28 +117,24 @@ static void detach_location(sd_journal *j) {
                 journal_file_reset_location(f);
 }
 
-static void reset_location(sd_journal *j) {
-        assert(j);
-
-        detach_location(j);
-        zero(j->current_location);
-}
-
 static void init_location(Location *l, LocationType type, JournalFile *f, Object *o) {
         assert(l);
         assert(IN_SET(type, LOCATION_DISCRETE, LOCATION_SEEK));
         assert(f);
-        assert(o->object.type == OBJECT_ENTRY);
 
-        l->type = type;
-        l->seqnum = le64toh(o->entry.seqnum);
-        l->seqnum_id = f->header->seqnum_id;
-        l->realtime = le64toh(o->entry.realtime);
-        l->monotonic = le64toh(o->entry.monotonic);
-        l->boot_id = o->entry.boot_id;
-        l->xor_hash = le64toh(o->entry.xor_hash);
-
-        l->seqnum_set = l->realtime_set = l->monotonic_set = l->xor_hash_set = true;
+        *l = (Location) {
+                .type = type,
+                .seqnum = le64toh(o->entry.seqnum),
+                .seqnum_id = f->header->seqnum_id,
+                .realtime = le64toh(o->entry.realtime),
+                .monotonic = le64toh(o->entry.monotonic),
+                .boot_id = o->entry.boot_id,
+                .xor_hash = le64toh(o->entry.xor_hash),
+                .seqnum_set = true,
+                .realtime_set = true,
+                .monotonic_set = true,
+                .xor_hash_set = true,
+        };
 }
 
 static void set_location(sd_journal *j, JournalFile *f, Object *o) {
@@ -242,7 +240,7 @@ static void match_free_if_empty(Match *m) {
 
 _public_ int sd_journal_add_match(sd_journal *j, const void *data, size_t size) {
         Match *l3, *l4, *add_here = NULL, *m;
-        le64_t le_hash;
+        uint64_t hash;
 
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
@@ -281,7 +279,9 @@ _public_ int sd_journal_add_match(sd_journal *j, const void *data, size_t size) 
         assert(j->level1->type == MATCH_OR_TERM);
         assert(j->level2->type == MATCH_AND_TERM);
 
-        le_hash = htole64(hash64(data, size));
+        /* Old-style Jenkins (unkeyed) hashing only here. We do not cover new-style siphash (keyed) hashing
+         * here, since it's different for each file, and thus can't be pre-calculated in the Match object. */
+        hash = jenkins_hash64(data, size);
 
         LIST_FOREACH(matches, l3, j->level2->matches) {
                 assert(l3->type == MATCH_OR_TERM);
@@ -291,7 +291,7 @@ _public_ int sd_journal_add_match(sd_journal *j, const void *data, size_t size) 
 
                         /* Exactly the same match already? Then ignore
                          * this addition */
-                        if (l4->le_hash == le_hash &&
+                        if (l4->hash == hash &&
                             l4->size == size &&
                             memcmp(l4->data, data, size) == 0)
                                 return 0;
@@ -317,7 +317,7 @@ _public_ int sd_journal_add_match(sd_journal *j, const void *data, size_t size) 
         if (!m)
                 goto fail;
 
-        m->le_hash = le_hash;
+        m->hash = hash;
         m->size = size;
         m->data = memdup(data, size);
         if (!m->data)
@@ -503,9 +503,16 @@ static int next_for_match(
         assert(f);
 
         if (m->type == MATCH_DISCRETE) {
-                uint64_t dp;
+                uint64_t dp, hash;
 
-                r = journal_file_find_data_object_with_hash(f, m->data, m->size, le64toh(m->le_hash), NULL, &dp);
+                /* If the keyed hash logic is used, we need to calculate the hash fresh per file. Otherwise
+                 * we can use what we pre-calculated. */
+                if (JOURNAL_HEADER_KEYED_HASH(f->header))
+                        hash = journal_file_hash_data(f, m->data, m->size);
+                else
+                        hash = m->hash;
+
+                r = journal_file_find_data_object_with_hash(f, m->data, m->size, hash, NULL, &dp);
                 if (r <= 0)
                         return r;
 
@@ -592,9 +599,14 @@ static int find_location_for_match(
         assert(f);
 
         if (m->type == MATCH_DISCRETE) {
-                uint64_t dp;
+                uint64_t dp, hash;
 
-                r = journal_file_find_data_object_with_hash(f, m->data, m->size, le64toh(m->le_hash), NULL, &dp);
+                if (JOURNAL_HEADER_KEYED_HASH(f->header))
+                        hash = journal_file_hash_data(f, m->data, m->size);
+                else
+                        hash = m->hash;
+
+                r = journal_file_find_data_object_with_hash(f, m->data, m->size, hash, NULL, &dp);
                 if (r <= 0)
                         return r;
 
@@ -1014,9 +1026,10 @@ _public_ int sd_journal_seek_cursor(sd_journal *j, const char *cursor) {
             !realtime_set)
                 return -EINVAL;
 
-        reset_location(j);
-
-        j->current_location.type = LOCATION_SEEK;
+        detach_location(j);
+        j->current_location = (Location) {
+                .type = LOCATION_SEEK,
+        };
 
         if (realtime_set) {
                 j->current_location.realtime = (uint64_t) realtime;
@@ -1129,11 +1142,14 @@ _public_ int sd_journal_seek_monotonic_usec(sd_journal *j, sd_id128_t boot_id, u
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
 
-        reset_location(j);
-        j->current_location.type = LOCATION_SEEK;
-        j->current_location.boot_id = boot_id;
-        j->current_location.monotonic = usec;
-        j->current_location.monotonic_set = true;
+        detach_location(j);
+
+        j->current_location = (Location) {
+                .type = LOCATION_SEEK,
+                .boot_id = boot_id,
+                .monotonic = usec,
+                .monotonic_set = true,
+        };
 
         return 0;
 }
@@ -1142,10 +1158,13 @@ _public_ int sd_journal_seek_realtime_usec(sd_journal *j, uint64_t usec) {
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
 
-        reset_location(j);
-        j->current_location.type = LOCATION_SEEK;
-        j->current_location.realtime = usec;
-        j->current_location.realtime_set = true;
+        detach_location(j);
+
+        j->current_location = (Location) {
+                .type = LOCATION_SEEK,
+                .realtime = usec,
+                .realtime_set = true,
+        };
 
         return 0;
 }
@@ -1154,8 +1173,11 @@ _public_ int sd_journal_seek_head(sd_journal *j) {
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
 
-        reset_location(j);
-        j->current_location.type = LOCATION_HEAD;
+        detach_location(j);
+
+        j->current_location = (Location) {
+                .type = LOCATION_HEAD,
+        };
 
         return 0;
 }
@@ -1164,8 +1186,11 @@ _public_ int sd_journal_seek_tail(sd_journal *j) {
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
 
-        reset_location(j);
-        j->current_location.type = LOCATION_TAIL;
+        detach_location(j);
+
+        j->current_location = (Location) {
+                .type = LOCATION_TAIL,
+        };
 
         return 0;
 }
@@ -1719,7 +1744,7 @@ static int add_root_directory(sd_journal *j, const char *p, bool missing_ok) {
                         goto fail;
                 }
         } else {
-                int dfd;
+                _cleanup_close_ int dfd = -1;
 
                 /* If there's no path specified, then we use the top-level fd itself. We duplicate the fd here, since
                  * opendir() will take possession of the fd, and close it, which we don't want. */
@@ -1732,10 +1757,9 @@ static int add_root_directory(sd_journal *j, const char *p, bool missing_ok) {
                         goto fail;
                 }
 
-                d = fdopendir(dfd);
+                d = take_fdopendir(&dfd);
                 if (!d) {
                         r = -errno;
-                        safe_close(dfd);
                         goto fail;
                 }
 
@@ -2303,7 +2327,7 @@ _public_ int sd_journal_get_data(sd_journal *j, const char *field, const void **
 
                 compression = o->object.flags & OBJECT_COMPRESSION_MASK;
                 if (compression) {
-#if HAVE_XZ || HAVE_LZ4
+#if HAVE_COMPRESSION
                         r = decompress_startswith(compression,
                                                   o->data.payload, l,
                                                   &f->compress_buffer, &f->compress_buffer_size,
@@ -2358,7 +2382,10 @@ static int return_data(sd_journal *j, JournalFile *f, Object *o, const void **da
         uint64_t l;
         int compression;
 
-        l = le64toh(o->object.size) - offsetof(Object, data.payload);
+        l = le64toh(READ_NOW(o->object.size));
+        if (l < offsetof(Object, data.payload))
+                return -EBADMSG;
+        l -= offsetof(Object, data.payload);
         t = (size_t) l;
 
         /* We can't read objects larger than 4G on a 32bit machine */
@@ -2367,7 +2394,7 @@ static int return_data(sd_journal *j, JournalFile *f, Object *o, const void **da
 
         compression = o->object.flags & OBJECT_COMPRESSION_MASK;
         if (compression) {
-#if HAVE_XZ || HAVE_LZ4
+#if HAVE_COMPRESSION
                 size_t rsize;
                 int r;
 
@@ -2433,6 +2460,19 @@ _public_ int sd_journal_enumerate_data(sd_journal *j, const void **data, size_t 
         j->current_field++;
 
         return 1;
+}
+
+_public_ int sd_journal_enumerate_available_data(sd_journal *j, const void **data, size_t *size) {
+        for (;;) {
+                int r;
+
+                r = sd_journal_enumerate_data(j, data, size);
+                if (r >= 0)
+                        return r;
+                if (!JOURNAL_ERRNO_IS_UNAVAILABLE_FIELD(r))
+                        return r;
+                j->current_field++; /* Try with the next field */
+        }
 }
 
 _public_ void sd_journal_restart_data(sd_journal *j) {
@@ -2972,6 +3012,20 @@ _public_ int sd_journal_enumerate_unique(sd_journal *j, const void **data, size_
                         return r;
 
                 return 1;
+        }
+}
+
+_public_ int sd_journal_enumerate_available_unique(sd_journal *j, const void **data, size_t *size) {
+        for (;;) {
+                int r;
+
+                r = sd_journal_enumerate_unique(j, data, size);
+                if (r >= 0)
+                        return r;
+                if (!JOURNAL_ERRNO_IS_UNAVAILABLE_FIELD(r))
+                        return r;
+                /* Try with the next field. sd_journal_enumerate_unique() modifies state, so on the next try
+                 * we will access the next field. */
         }
 }
 

@@ -292,7 +292,7 @@ int home_save_record(Home *h) {
 
         fn = strjoina("/var/lib/systemd/home/", h->user_name, ".identity");
 
-        r = write_string_file(fn, text, WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MODE_0600);
+        r = write_string_file(fn, text, WRITE_STRING_FILE_ATOMIC|WRITE_STRING_FILE_CREATE|WRITE_STRING_FILE_MODE_0600|WRITE_STRING_FILE_SYNC);
         if (r < 0)
                 return r;
 
@@ -360,11 +360,9 @@ static int home_parse_worker_stdout(int _fd, UserRecord **ret) {
         if (lseek(fd, SEEK_SET, 0) == (off_t) -1)
                 return log_error_errno(errno, "Failed to seek to beginning of memfd: %m");
 
-        f = fdopen(fd, "r");
+        f = take_fdopen(&fd, "r");
         if (!f)
                 return log_error_errno(errno, "Failed to reopen memfd: %m");
-
-        TAKE_FD(fd);
 
         if (DEBUG_LOGGING) {
                 _cleanup_free_ char *text = NULL;
@@ -438,9 +436,9 @@ static int convert_worker_errno(Home *h, int e, sd_bus_error *error) {
         switch (e) {
 
         case -EMSGSIZE:
-                return sd_bus_error_setf(error, BUS_ERROR_BAD_HOME_SIZE, "File systems of this type cannot be shrinked");
+                return sd_bus_error_setf(error, BUS_ERROR_BAD_HOME_SIZE, "File systems of this type cannot be shrunk");
         case -ETXTBSY:
-                return sd_bus_error_setf(error, BUS_ERROR_BAD_HOME_SIZE, "File systems of this type can only be shrinked offline");
+                return sd_bus_error_setf(error, BUS_ERROR_BAD_HOME_SIZE, "File systems of this type can only be shrunk offline");
         case -ERANGE:
                 return sd_bus_error_setf(error, BUS_ERROR_BAD_HOME_SIZE, "File system size too small");
         case -ENOLINK:
@@ -459,6 +457,10 @@ static int convert_worker_errno(Home *h, int e, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_TOKEN_PIN_NEEDED, "PIN for security token required.");
         case -ERFKILL:
                 return sd_bus_error_setf(error, BUS_ERROR_TOKEN_PROTECTED_AUTHENTICATION_PATH_NEEDED, "Security token requires protected authentication path.");
+        case -EMEDIUMTYPE:
+                return sd_bus_error_setf(error, BUS_ERROR_TOKEN_USER_PRESENCE_NEEDED, "Security token requires user presence.");
+        case -ENOSTR:
+                return sd_bus_error_setf(error, BUS_ERROR_TOKEN_ACTION_TIMEOUT, "Token action timeout. (User was supposed to verify presence or similar, by interacting with the token, and didn't do that in time.)");
         case -EOWNERDEAD:
                 return sd_bus_error_setf(error, BUS_ERROR_TOKEN_PIN_LOCKED, "PIN of security token locked.");
         case -ENOLCK:
@@ -473,6 +475,8 @@ static int convert_worker_errno(Home *h, int e, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_NOT_ACTIVE, "Home %s is currently not active", h->user_name);
         case -ENOSPC:
                 return sd_bus_error_setf(error, BUS_ERROR_NO_DISK_SPACE, "Not enough disk space for home %s", h->user_name);
+        case -EKEYREVOKED:
+                return sd_bus_error_setf(error, BUS_ERROR_HOME_CANT_AUTHENTICATE, "Home %s has no password or other authentication mechanism defined.", h->user_name);
         }
 
         return 0;
@@ -1004,12 +1008,26 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
         if (r < 0)
                 return r;
         if (r == 0) {
+                const char *homework;
+
                 /* Child */
 
                 if (setenv("NOTIFY_SOCKET", "/run/systemd/home/notify", 1) < 0) {
                         log_error_errno(errno, "Failed to set $NOTIFY_SOCKET: %m");
                         _exit(EXIT_FAILURE);
                 }
+
+                if (h->manager->default_storage >= 0)
+                        if (setenv("SYSTEMD_HOME_DEFAULT_STORAGE", user_storage_to_string(h->manager->default_storage), 1) < 0) {
+                                log_error_errno(errno, "Failed to set $SYSTEMD_HOME_DEFAULT_STORAGE: %m");
+                                _exit(EXIT_FAILURE);
+                        }
+
+                if (h->manager->default_file_system_type)
+                        if (setenv("SYSTEMD_HOME_DEFAULT_FILE_SYSTEM_TYPE", h->manager->default_file_system_type, 1) < 0) {
+                                log_error_errno(errno, "Failed to set $SYSTEMD_HOME_DEFAULT_FILE_SYSTEM_TYPE: %m");
+                                _exit(EXIT_FAILURE);
+                        }
 
                 r = rearrange_stdio(stdin_fd, stdout_fd, STDERR_FILENO);
                 if (r < 0) {
@@ -1019,7 +1037,11 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
 
                 stdin_fd = stdout_fd = -1; /* have been invalidated by rearrange_stdio() */
 
-                execl(SYSTEMD_HOMEWORK_PATH, SYSTEMD_HOMEWORK_PATH, verb, NULL);
+                /* Allow overriding the homework path via an environment variable, to make debugging
+                 * easier. */
+                homework = getenv("SYSTEMD_HOMEWORK_PATH") ?: SYSTEMD_HOMEWORK_PATH;
+
+                execl(homework, homework, verb, NULL);
                 log_error_errno(errno, "Failed to invoke " SYSTEMD_HOMEWORK_PATH ": %m");
                 _exit(EXIT_FAILURE);
         }
@@ -1339,7 +1361,13 @@ static int user_record_extend_with_binding(UserRecord *hr, UserRecord *with_bind
         return 0;
 }
 
-static int home_update_internal(Home *h, const char *verb, UserRecord *hr, UserRecord *secret, sd_bus_error *error) {
+static int home_update_internal(
+                Home *h,
+                const char *verb,
+                UserRecord *hr,
+                UserRecord *secret,
+                sd_bus_error *error) {
+
         _cleanup_(user_record_unrefp) UserRecord *new_hr = NULL, *saved_secret = NULL, *signed_hr = NULL;
         int r, c;
 
@@ -1523,7 +1551,7 @@ static int home_may_change_password(
 
         r = user_record_test_password_change_required(h->record);
         if (IN_SET(r, -EKEYREVOKED, -EOWNERDEAD, -EKEYEXPIRED))
-                return 0; /* expired in some form, but chaning is allowed */
+                return 0; /* expired in some form, but changing is allowed */
         if (IN_SET(r, -EKEYREJECTED, -EROFS))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "Expiration settings of account %s do not allow changing of password.", h->user_name);
         if (r < 0)
@@ -1750,7 +1778,7 @@ void home_process_notify(Home *h, char **l) {
 
         r = safe_atoi(e, &error);
         if (r < 0) {
-                log_debug_errno(r, "Failed to parse receieved error number, ignoring: %s", e);
+                log_debug_errno(r, "Failed to parse received error number, ignoring: %s", e);
                 return;
         }
         if (error <= 0) {
@@ -2348,7 +2376,7 @@ static int home_dispatch_release(Home *h, Operation *o) {
                 case HOME_UNFIXATED:
                 case HOME_ABSENT:
                 case HOME_INACTIVE:
-                        r = 0; /* done */
+                        r = 1; /* done */
                         break;
 
                 case HOME_LOCKED:
@@ -2368,7 +2396,7 @@ static int home_dispatch_release(Home *h, Operation *o) {
 
         assert(!h->current_operation);
 
-        if (r <= 0) /* failure or completed */
+        if (r != 0) /* failure or completed */
                 operation_result(o, r, &error);
         else /* ongoing */
                 h->current_operation = operation_ref(o);
@@ -2390,12 +2418,12 @@ static int home_dispatch_lock_all(Home *h, Operation *o) {
         case HOME_ABSENT:
         case HOME_INACTIVE:
                 log_info("Home %s is not active, no locking necessary.", h->user_name);
-                r = 0; /* done */
+                r = 1; /* done */
                 break;
 
         case HOME_LOCKED:
                 log_info("Home %s is already locked.", h->user_name);
-                r = 0; /* done */
+                r = 1; /* done */
                 break;
 
         case HOME_ACTIVE:

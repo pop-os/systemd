@@ -121,6 +121,7 @@ struct Socket {
         bool broadcast;
         bool pass_cred;
         bool pass_sec;
+        bool pass_pktinfo;
 
         /* Only for INET6 sockets: issue IPV6_V6ONLY sockopt */
         SocketAddressBindIPv6Only bind_ipv6_only;
@@ -165,7 +166,7 @@ void socket_connection_unref(Socket *s);
 
 void socket_free_ports(Socket *s);
 
-int socket_instantiate_service(Socket *s);
+int socket_load_service_unit(Socket *s, int cfd, Unit **ret);
 
 char *socket_fdname(Socket *s);
 

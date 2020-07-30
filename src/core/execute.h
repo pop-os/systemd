@@ -14,6 +14,7 @@ typedef struct Manager Manager;
 #include <sys/capability.h>
 
 #include "cgroup-util.h"
+#include "coredump-util.h"
 #include "cpu-set-util.h"
 #include "exec-util.h"
 #include "fdset.h"
@@ -51,8 +52,6 @@ typedef enum ExecOutput {
         EXEC_OUTPUT_INHERIT,
         EXEC_OUTPUT_NULL,
         EXEC_OUTPUT_TTY,
-        EXEC_OUTPUT_SYSLOG,
-        EXEC_OUTPUT_SYSLOG_AND_CONSOLE,
         EXEC_OUTPUT_KMSG,
         EXEC_OUTPUT_KMSG_AND_CONSOLE,
         EXEC_OUTPUT_JOURNAL,
@@ -156,11 +155,14 @@ struct ExecContext {
         char **unset_environment;
 
         struct rlimit *rlimit[_RLIMIT_MAX];
-        char *working_directory, *root_directory, *root_image;
+        char *working_directory, *root_directory, *root_image, *root_verity, *root_hash_path, *root_hash_sig_path;
+        void *root_hash, *root_hash_sig;
+        size_t root_hash_size, root_hash_sig_size;
         bool working_directory_missing_ok:1;
         bool working_directory_home:1;
 
         bool oom_score_adjust_set:1;
+        bool coredump_filter_set:1;
         bool nice_set:1;
         bool ioprio_set:1;
         bool cpu_sched_set:1;
@@ -179,6 +181,7 @@ struct ExecContext {
         int ioprio;
         int cpu_sched_policy;
         int cpu_sched_priority;
+        uint64_t coredump_filter;
 
         CPUSet cpu_set;
         NUMAPolicy numa_policy;
@@ -284,9 +287,9 @@ struct ExecContext {
         Hashmap *syscall_filter;
         Set *syscall_archs;
         int syscall_errno;
-        bool syscall_whitelist:1;
+        bool syscall_allow_list:1;
 
-        bool address_families_whitelist:1;
+        bool address_families_allow_list:1;
         Set *address_families;
 
         char *network_namespace_path;
@@ -402,7 +405,7 @@ ExecRuntime *exec_runtime_unref(ExecRuntime *r, bool destroy);
 
 int exec_runtime_serialize(const Manager *m, FILE *f, FDSet *fds);
 int exec_runtime_deserialize_compat(Unit *u, const char *key, const char *value, FDSet *fds);
-void exec_runtime_deserialize_one(Manager *m, const char *value, FDSet *fds);
+int exec_runtime_deserialize_one(Manager *m, const char *value, FDSet *fds);
 void exec_runtime_vacuum(Manager *m);
 
 void exec_params_clear(ExecParameters *p);

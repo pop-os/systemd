@@ -2,14 +2,17 @@
 
 #include "sd-dhcp-server.h"
 
+#include "fd-util.h"
+#include "fileio.h"
 #include "networkd-dhcp-server.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-network.h"
 #include "parse-util.h"
-#include "strv.h"
+#include "socket-netlink.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "strv.h"
 
 static Address* link_find_dhcp_server_address(Link *link) {
         Address *address;
@@ -18,68 +21,116 @@ static Address* link_find_dhcp_server_address(Link *link) {
         assert(link->network);
 
         /* The first statically configured address if there is any */
-        LIST_FOREACH(addresses, address, link->network->static_addresses) {
-
-                if (address->family != AF_INET)
-                        continue;
-
-                if (in_addr_is_null(address->family, &address->in_addr))
-                        continue;
-
-                return address;
-        }
+        LIST_FOREACH(addresses, address, link->network->static_addresses)
+                if (address->family == AF_INET &&
+                    !in_addr_is_null(address->family, &address->in_addr))
+                        return address;
 
         /* If that didn't work, find a suitable address we got from the pool */
-        LIST_FOREACH(addresses, address, link->pool_addresses) {
-                if (address->family != AF_INET)
-                        continue;
-
-                return address;
-        }
+        LIST_FOREACH(addresses, address, link->pool_addresses)
+                if (address->family == AF_INET)
+                        return address;
 
         return NULL;
 }
 
-static int link_push_uplink_dns_to_dhcp_server(Link *link, sd_dhcp_server *s) {
+static int link_push_uplink_to_dhcp_server(
+                Link *link,
+                sd_dhcp_lease_server_type what,
+                sd_dhcp_server *s) {
+
         _cleanup_free_ struct in_addr *addresses = NULL;
         size_t n_addresses = 0, n_allocated = 0;
-        unsigned i;
+        bool use_dhcp_lease_data = true;
 
-        log_link_debug(link, "Copying DNS server information from link");
+        assert(link);
 
         if (!link->network)
                 return 0;
+        assert(link->network);
 
-        for (i = 0; i < link->network->n_dns; i++) {
-                struct in_addr ia;
+        log_link_debug(link, "Copying %s from link", dhcp_lease_server_type_to_string(what));
 
-                /* Only look for IPv4 addresses */
-                if (link->network->dns[i].family != AF_INET)
-                        continue;
+        switch (what) {
 
-                ia = link->network->dns[i].address.in;
+        case SD_DHCP_LEASE_DNS:
+                /* For DNS we have a special case. We the data configured explicitly locally along with the
+                 * data from the DHCP lease. */
 
-                /* Never propagate obviously borked data */
-                if (in4_addr_is_null(&ia) || in4_addr_is_localhost(&ia))
-                        continue;
+                for (unsigned i = 0; i < link->network->n_dns; i++) {
+                        struct in_addr ia;
 
-                if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + 1))
-                        return log_oom();
+                        /* Only look for IPv4 addresses */
+                        if (link->network->dns[i]->family != AF_INET)
+                                continue;
 
-                addresses[n_addresses++] = ia;
+                        ia = link->network->dns[i]->address.in;
+
+                        /* Never propagate obviously borked data */
+                        if (in4_addr_is_null(&ia) || in4_addr_is_localhost(&ia))
+                                continue;
+
+                        if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + 1))
+                                return log_oom();
+
+                        addresses[n_addresses++] = ia;
+                }
+
+                use_dhcp_lease_data = link->network->dhcp_use_dns;
+                break;
+
+        case SD_DHCP_LEASE_NTP: {
+                char **i;
+
+                /* For NTP things are similar, but for NTP hostnames can be configured too, which we cannot
+                 * propagate via DHCP. Hence let's only propagate those which are IP addresses. */
+
+                STRV_FOREACH(i, link->network->ntp) {
+                        union in_addr_union ia;
+
+                        if (in_addr_from_string(AF_INET, *i, &ia) < 0)
+                                continue;
+
+                        /* Never propagate obviously borked data */
+                        if (in4_addr_is_null(&ia.in) || in4_addr_is_localhost(&ia.in))
+                                continue;
+
+                        if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + 1))
+                                return log_oom();
+
+                        addresses[n_addresses++] = ia.in;
+                }
+
+                use_dhcp_lease_data = link->network->dhcp_use_ntp;
+                break;
         }
 
-        if (link->network->dhcp_use_dns && link->dhcp_lease) {
-                const struct in_addr *da = NULL;
-                int j, n;
+        case SD_DHCP_LEASE_SIP:
 
-                n = sd_dhcp_lease_get_dns(link->dhcp_lease, &da);
+                /* For SIP we don't allow explicit, local configuration, but there's control whether to use the data */
+                use_dhcp_lease_data = link->network->dhcp_use_sip;
+                break;
+
+        case SD_DHCP_LEASE_POP3:
+        case SD_DHCP_LEASE_SMTP:
+        case SD_DHCP_LEASE_LPR:
+                /* For the other server types we currently do not allow local configuration of server data,
+                 * since there are typically no local consumers of the data. */
+                break;
+
+        default:
+                assert_not_reached("Unexpected server type");
+        }
+
+        if (use_dhcp_lease_data && link->dhcp_lease) {
+                const struct in_addr *da;
+
+                int n = sd_dhcp_lease_get_servers(link->dhcp_lease, what, &da);
                 if (n > 0) {
-
                         if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + n))
                                 return log_oom();
 
-                        for (j = 0; j < n; j++)
+                        for (int j = 0; j < n; j++)
                                 if (in4_addr_is_non_local(&da[j]))
                                         addresses[n_addresses++] = da[j];
                 }
@@ -88,105 +139,88 @@ static int link_push_uplink_dns_to_dhcp_server(Link *link, sd_dhcp_server *s) {
         if (n_addresses <= 0)
                 return 0;
 
-        return sd_dhcp_server_set_dns(s, addresses, n_addresses);
+        return sd_dhcp_server_set_servers(s, what, addresses, n_addresses);
 }
 
-static int link_push_uplink_ntp_to_dhcp_server(Link *link, sd_dhcp_server *s) {
-        _cleanup_free_ struct in_addr *addresses = NULL;
-        size_t n_addresses = 0, n_allocated = 0;
-        char **a;
+static int dhcp4_server_parse_dns_server_string_and_warn(Link *l, const char *string, struct in_addr **addresses, size_t *n_allocated, size_t *n_addresses) {
+        for (;;) {
+                _cleanup_free_ char *word = NULL, *server_name = NULL;
+                union in_addr_union address;
+                int family, r, ifindex = 0;
 
-        if (!link->network)
-                return 0;
+                r = extract_first_word(&string, &word, NULL, 0);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
 
-        log_link_debug(link, "Copying NTP server information from link");
-
-        STRV_FOREACH(a, link->network->ntp) {
-                union in_addr_union ia;
+                r = in_addr_ifindex_name_from_string_auto(word, &family, &address, &ifindex, &server_name);
+                if (r < 0) {
+                        log_warning_errno(r, "Failed to parse DNS server address '%s', ignoring: %m", word);
+                        continue;
+                }
 
                 /* Only look for IPv4 addresses */
-                if (in_addr_from_string(AF_INET, *a, &ia) <= 0)
+                if (family != AF_INET)
                         continue;
 
                 /* Never propagate obviously borked data */
-                if (in4_addr_is_null(&ia.in) || in4_addr_is_localhost(&ia.in))
+                if (in4_addr_is_null(&address.in) || in4_addr_is_localhost(&address.in))
                         continue;
 
-                if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + 1))
+                if (!GREEDY_REALLOC(*addresses, *n_allocated, *n_addresses + 1))
                         return log_oom();
 
-                addresses[n_addresses++] = ia.in;
+                (*addresses)[(*n_addresses)++] = address.in;
         }
 
-        if (link->network->dhcp_use_ntp && link->dhcp_lease) {
-                const struct in_addr *da = NULL;
-                int j, n;
-
-                n = sd_dhcp_lease_get_ntp(link->dhcp_lease, &da);
-                if (n > 0) {
-
-                        if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + n))
-                                return log_oom();
-
-                        for (j = 0; j < n; j++)
-                                if (in4_addr_is_non_local(&da[j]))
-                                        addresses[n_addresses++] = da[j];
-                }
-        }
-
-        if (n_addresses <= 0)
-                return 0;
-
-        return sd_dhcp_server_set_ntp(s, addresses, n_addresses);
+        return 0;
 }
 
-static int link_push_uplink_sip_to_dhcp_server(Link *link, sd_dhcp_server *s) {
+static int dhcp4_server_set_dns_from_resolve_conf(Link *link) {
         _cleanup_free_ struct in_addr *addresses = NULL;
         size_t n_addresses = 0, n_allocated = 0;
-        char **a;
+        _cleanup_fclose_ FILE *f = NULL;
+        int n = 0, r;
 
-        if (!link->network)
-                return 0;
+        f = fopen(PRIVATE_UPLINK_RESOLV_CONF, "re");
+        if (!f) {
+                if (errno == ENOENT)
+                        return 0;
 
-        log_link_debug(link, "Copying SIP server information from link");
-
-        STRV_FOREACH(a, link->network->sip) {
-                union in_addr_union ia;
-
-                /* Only look for IPv4 addresses */
-                if (in_addr_from_string(AF_INET, *a, &ia) <= 0)
-                        continue;
-
-                /* Never propagate obviously borked data */
-                if (in4_addr_is_null(&ia.in) || in4_addr_is_localhost(&ia.in))
-                        continue;
-
-                if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + 1))
-                        return log_oom();
-
-                addresses[n_addresses++] = ia.in;
+                return log_warning_errno(errno, "Failed to open " PRIVATE_UPLINK_RESOLV_CONF ": %m");
         }
 
-        if (link->network->dhcp_use_sip && link->dhcp_lease) {
-                const struct in_addr *da = NULL;
-                int j, n;
+        for (;;) {
+                _cleanup_free_ char *line = NULL;
+                const char *a;
+                char *l;
 
-                n = sd_dhcp_lease_get_sip(link->dhcp_lease, &da);
-                if (n > 0) {
+                r = read_line(f, LONG_LINE_MAX, &line);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to read " PRIVATE_UPLINK_RESOLV_CONF ": %m");
+                if (r == 0)
+                        break;
 
-                        if (!GREEDY_REALLOC(addresses, n_allocated, n_addresses + n))
-                                return log_oom();
+                n++;
 
-                        for (j = 0; j < n; j++)
-                                if (in4_addr_is_non_local(&da[j]))
-                                        addresses[n_addresses++] = da[j];
-                }
+                l = strstrip(line);
+                if (IN_SET(*l, '#', ';', 0))
+                        continue;
+
+                a = first_word(l, "nameserver");
+                if (!a)
+                        continue;
+
+                r = dhcp4_server_parse_dns_server_string_and_warn(link, a, &addresses, &n_allocated, &n_addresses);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to parse DNS server address '%s', ignoring.", a);
         }
 
         if (n_addresses <= 0)
                 return 0;
 
-        return sd_dhcp_server_set_sip(s, addresses, n_addresses);
+        return sd_dhcp_server_set_dns(link->dhcp_server, addresses, n_addresses);
 }
 
 int dhcp4_server_configure(Link *link) {
@@ -228,57 +262,41 @@ int dhcp4_server_configure(Link *link) {
                         return log_link_error_errno(link, r, "Failed to set default lease time for DHCPv4 server instance: %m");
         }
 
-        if (link->network->dhcp_server_emit_dns) {
-                if (link->network->n_dhcp_server_dns > 0)
-                        r = sd_dhcp_server_set_dns(link->dhcp_server, link->network->dhcp_server_dns, link->network->n_dhcp_server_dns);
-                else {
-                        uplink = manager_find_uplink(link->manager, link);
-                        acquired_uplink = true;
+        for (sd_dhcp_lease_server_type type = 0; type < _SD_DHCP_LEASE_SERVER_TYPE_MAX; type ++) {
 
-                        if (!uplink) {
-                                log_link_debug(link, "Not emitting DNS server information on link, couldn't find suitable uplink.");
-                                r = 0;
-                        } else
-                                r = link_push_uplink_dns_to_dhcp_server(uplink, link->dhcp_server);
-                }
-                if (r < 0)
-                        log_link_warning_errno(link, r, "Failed to set DNS server for DHCP server, ignoring: %m");
-        }
+                if (!link->network->dhcp_server_emit[type].emit)
+                        continue;
 
-        if (link->network->dhcp_server_emit_ntp) {
-                if (link->network->n_dhcp_server_ntp > 0)
-                        r = sd_dhcp_server_set_ntp(link->dhcp_server, link->network->dhcp_server_ntp, link->network->n_dhcp_server_ntp);
+                if (link->network->dhcp_server_emit[type].n_addresses > 0)
+                        /* Explicitly specified servers to emit */
+                        r = sd_dhcp_server_set_servers(
+                                        link->dhcp_server,
+                                        type,
+                                        link->network->dhcp_server_emit[type].addresses,
+                                        link->network->dhcp_server_emit[type].n_addresses);
                 else {
-                        if (!acquired_uplink)
+                        /* Emission is requested, but nothing explicitly configured. Let's find a suitable upling */
+                        if (!acquired_uplink) {
                                 uplink = manager_find_uplink(link->manager, link);
+                                acquired_uplink = true;
+                        }
 
-                        if (!uplink) {
-                                log_link_debug(link, "Not emitting NTP server information on link, couldn't find suitable uplink.");
-                                r = 0;
-                        } else
-                                r = link_push_uplink_ntp_to_dhcp_server(uplink, link->dhcp_server);
-
+                        if (uplink && uplink->network)
+                                r = link_push_uplink_to_dhcp_server(uplink, type, link->dhcp_server);
+                        else if (type == SD_DHCP_LEASE_DNS)
+                                r = dhcp4_server_set_dns_from_resolve_conf(link);
+                        else {
+                                log_link_debug(link,
+                                               "Not emitting %s on link, couldn't find suitable uplink.",
+                                               dhcp_lease_server_type_to_string(type));
+                                continue;
+                        }
                 }
+
                 if (r < 0)
-                        log_link_warning_errno(link, r, "Failed to set NTP server for DHCP server, ignoring: %m");
-        }
-
-        if (link->network->dhcp_server_emit_sip) {
-                if (link->network->n_dhcp_server_sip > 0)
-                        r = sd_dhcp_server_set_sip(link->dhcp_server, link->network->dhcp_server_sip, link->network->n_dhcp_server_sip);
-                else {
-                        if (!acquired_uplink)
-                                uplink = manager_find_uplink(link->manager, link);
-
-                        if (!uplink) {
-                                log_link_debug(link, "Not emitting sip server information on link, couldn't find suitable uplink.");
-                                r = 0;
-                        } else
-                                r = link_push_uplink_sip_to_dhcp_server(uplink, link->dhcp_server);
-
-                }
-                if (r < 0)
-                        log_link_warning_errno(link, r, "Failed to set SIP server for DHCP server, ignoring: %m");
+                        log_link_warning_errno(link, r,
+                                               "Failed to set %s for DHCP server, ignoring: %m",
+                                               dhcp_lease_server_type_to_string(type));
         }
 
         r = sd_dhcp_server_set_emit_router(link->dhcp_server, link->network->dhcp_server_emit_router);
@@ -312,6 +330,14 @@ int dhcp4_server_configure(Link *link) {
                         return log_link_error_errno(link, r, "Failed to set DHCPv4 option: %m");
         }
 
+        ORDERED_HASHMAP_FOREACH(p, link->network->dhcp_server_send_vendor_options, i) {
+                r = sd_dhcp_server_add_vendor_option(link->dhcp_server, p);
+                if (r == -EEXIST)
+                        continue;
+                if (r < 0)
+                        return log_link_error_errno(link, r, "Failed to set DHCPv4 option: %m");
+        }
+
         if (!sd_dhcp_server_is_running(link->dhcp_server)) {
                 r = sd_dhcp_server_start(link->dhcp_server);
                 if (r < 0)
@@ -321,7 +347,7 @@ int dhcp4_server_configure(Link *link) {
         return 0;
 }
 
-int config_parse_dhcp_server_dns(
+int config_parse_dhcp_server_emit(
                 const char *unit,
                 const char *filename,
                 unsigned line,
@@ -333,78 +359,21 @@ int config_parse_dhcp_server_dns(
                 void *data,
                 void *userdata) {
 
-        Network *n = data;
-        const char *p = rvalue;
-        int r;
+        NetworkDHCPServerEmitAddress *emit = data;
 
-        assert(filename);
-        assert(lvalue);
+        assert(emit);
         assert(rvalue);
 
-        for (;;) {
+        for (const char *p = rvalue;;) {
                 _cleanup_free_ char *w = NULL;
                 union in_addr_union a;
-                struct in_addr *m;
+                int r;
 
                 r = extract_first_word(&p, &w, NULL, 0);
                 if (r == -ENOMEM)
                         return log_oom();
                 if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
-                                   "Failed to extract word, ignoring: %s", rvalue);
-                        return 0;
-                }
-                if (r == 0)
-                        break;
-
-                r = in_addr_from_string(AF_INET, w, &a);
-                if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
-                                   "Failed to parse DNS server address '%s', ignoring assignment: %m", w);
-                        continue;
-                }
-
-                m = reallocarray(n->dhcp_server_dns, n->n_dhcp_server_dns + 1, sizeof(struct in_addr));
-                if (!m)
-                        return log_oom();
-
-                m[n->n_dhcp_server_dns++] = a.in;
-                n->dhcp_server_dns = m;
-        }
-
-        return 0;
-}
-
-int config_parse_dhcp_server_ntp(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        Network *n = data;
-        const char *p = rvalue;
-        int r;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-
-        for (;;) {
-                _cleanup_free_ char *w = NULL;
-                union in_addr_union a;
-                struct in_addr *m;
-
-                r = extract_first_word(&p, &w, NULL, 0);
-                if (r == -ENOMEM)
-                        return log_oom();
-                if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to extract word, ignoring: %s", rvalue);
                         return 0;
                 }
@@ -413,68 +382,16 @@ int config_parse_dhcp_server_ntp(
 
                 r = in_addr_from_string(AF_INET, w, &a);
                 if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
-                                   "Failed to parse NTP server address '%s', ignoring: %m", w);
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Failed to parse %s= address '%s', ignoring: %m", lvalue, w);
                         continue;
                 }
 
-                m = reallocarray(n->dhcp_server_ntp, n->n_dhcp_server_ntp + 1, sizeof(struct in_addr));
+                struct in_addr *m = reallocarray(emit->addresses, emit->n_addresses + 1, sizeof(struct in_addr));
                 if (!m)
                         return log_oom();
 
-                m[n->n_dhcp_server_ntp++] = a.in;
-                n->dhcp_server_ntp = m;
-        }
-}
-
-int config_parse_dhcp_server_sip(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        Network *n = data;
-        const char *p = rvalue;
-        int r;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-
-        for (;;) {
-                _cleanup_free_ char *w = NULL;
-                union in_addr_union a;
-                struct in_addr *m;
-
-                r = extract_first_word(&p, &w, NULL, 0);
-                if (r == -ENOMEM)
-                        return log_oom();
-                if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
-                                   "Failed to extract word, ignoring: %s", rvalue);
-                        return 0;
-                }
-                if (r == 0)
-                        return 0;
-
-                r = in_addr_from_string(AF_INET, w, &a);
-                if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
-                                   "Failed to parse SIP server address '%s', ignoring: %m", w);
-                        continue;
-                }
-
-                m = reallocarray(n->dhcp_server_sip, n->n_dhcp_server_sip + 1, sizeof(struct in_addr));
-                if (!m)
-                        return log_oom();
-
-                m[n->n_dhcp_server_sip++] = a.in;
-                n->dhcp_server_sip = m;
+                emit->addresses = m;
+                emit->addresses[emit->n_addresses++] = a.in;
         }
 }

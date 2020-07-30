@@ -58,8 +58,8 @@ int umount_recursive(const char *prefix, int flags) {
                         if (!path_startswith(path, prefix))
                                 continue;
 
-                        if (umount2(path, flags) < 0) {
-                                r = log_debug_errno(errno, "Failed to umount %s: %m", path);
+                        if (umount2(path, flags | UMOUNT_NOFOLLOW) < 0) {
+                                log_debug_errno(errno, "Failed to umount %s, ignoring: %m", path);
                                 continue;
                         }
 
@@ -70,7 +70,6 @@ int umount_recursive(const char *prefix, int flags) {
 
                         break;
                 }
-
         } while (again);
 
         return n;
@@ -136,7 +135,7 @@ int bind_remount_recursive_with_mountinfo(
                 const char *prefix,
                 unsigned long new_flags,
                 unsigned long flags_mask,
-                char **blacklist,
+                char **deny_list,
                 FILE *proc_self_mountinfo) {
 
         _cleanup_set_free_free_ Set *done = NULL;
@@ -151,11 +150,11 @@ int bind_remount_recursive_with_mountinfo(
          * operation). If it isn't we first make it one. Afterwards we apply MS_BIND|MS_RDONLY (or remove MS_RDONLY) to
          * all submounts we can access, too. When mounts are stacked on the same mount point we only care for each
          * individual "top-level" mount on each point, as we cannot influence/access the underlying mounts anyway. We
-         * do not have any effect on future submounts that might get propagated, they migt be writable. This includes
+         * do not have any effect on future submounts that might get propagated, they might be writable. This includes
          * future submounts that have been triggered via autofs.
          *
-         * If the "blacklist" parameter is specified it may contain a list of subtrees to exclude from the
-         * remount operation. Note that we'll ignore the blacklist for the top-level path. */
+         * If the "deny_list" parameter is specified it may contain a list of subtrees to exclude from the
+         * remount operation. Note that we'll ignore the deny list for the top-level path. */
 
         simplified = strdup(prefix);
         if (!simplified)
@@ -203,13 +202,13 @@ int bind_remount_recursive_with_mountinfo(
                         if (!path_startswith(path, simplified))
                                 continue;
 
-                        /* Ignore this mount if it is blacklisted, but only if it isn't the top-level mount
+                        /* Ignore this mount if it is deny-listed, but only if it isn't the top-level mount
                          * we shall operate on. */
                         if (!path_equal(path, simplified)) {
-                                bool blacklisted = false;
+                                bool deny_listed = false;
                                 char **i;
 
-                                STRV_FOREACH(i, blacklist) {
+                                STRV_FOREACH(i, deny_list) {
                                         if (path_equal(*i, simplified))
                                                 continue;
 
@@ -217,13 +216,13 @@ int bind_remount_recursive_with_mountinfo(
                                                 continue;
 
                                         if (path_startswith(path, *i)) {
-                                                blacklisted = true;
-                                                log_debug("Not remounting %s blacklisted by %s, called for %s",
+                                                deny_listed = true;
+                                                log_debug("Not remounting %s deny-listed by %s, called for %s",
                                                           path, *i, simplified);
                                                 break;
                                         }
                                 }
-                                if (blacklisted)
+                                if (deny_listed)
                                         continue;
                         }
 
@@ -239,7 +238,7 @@ int bind_remount_recursive_with_mountinfo(
                         }
 
                         if (!set_contains(done, path)) {
-                                r = set_put_strdup(todo, path);
+                                r = set_put_strdup(&todo, path);
                                 if (r < 0)
                                         return r;
                         }
@@ -266,7 +265,7 @@ int bind_remount_recursive_with_mountinfo(
 
                         log_debug("Made top-level directory %s a mount point.", prefix);
 
-                        r = set_put_strdup(done, simplified);
+                        r = set_put_strdup(&done, simplified);
                         if (r < 0)
                                 return r;
                 }
@@ -314,7 +313,7 @@ int bind_remount_recursive(
                 const char *prefix,
                 unsigned long new_flags,
                 unsigned long flags_mask,
-                char **blacklist) {
+                char **deny_list) {
 
         _cleanup_fclose_ FILE *proc_self_mountinfo = NULL;
         int r;
@@ -323,7 +322,7 @@ int bind_remount_recursive(
         if (r < 0)
                 return r;
 
-        return bind_remount_recursive_with_mountinfo(prefix, new_flags, flags_mask, blacklist, proc_self_mountinfo);
+        return bind_remount_recursive_with_mountinfo(prefix, new_flags, flags_mask, deny_list, proc_self_mountinfo);
 }
 
 int bind_remount_one_with_mountinfo(
@@ -397,71 +396,73 @@ int repeat_unmount(const char *path, int flags) {
         }
 }
 
-int mode_to_inaccessible_node(const char *runtime_dir, mode_t mode, char **dest) {
-        /* This function maps a node type to a corresponding inaccessible file node. These nodes are created during
-         * early boot by PID 1. In some cases we lacked the privs to create the character and block devices (maybe
-         * because we run in an userns environment, or miss CAP_SYS_MKNOD, or run with a devices policy that excludes
-         * device nodes with major and minor of 0), but that's fine, in that case we use an AF_UNIX file node instead,
-         * which is not the same, but close enough for most uses. And most importantly, the kernel allows bind mounts
-         * from socket nodes to any non-directory file nodes, and that's the most important thing that matters. */
+int mode_to_inaccessible_node(
+                const char *runtime_dir,
+                mode_t mode,
+                char **ret) {
+
+        /* This function maps a node type to a corresponding inaccessible file node. These nodes are created
+         * during early boot by PID 1. In some cases we lacked the privs to create the character and block
+         * devices (maybe because we run in an userns environment, or miss CAP_SYS_MKNOD, or run with a
+         * devices policy that excludes device nodes with major and minor of 0), but that's fine, in that
+         * case we use an AF_UNIX file node instead, which is not the same, but close enough for most
+         * uses. And most importantly, the kernel allows bind mounts from socket nodes to any non-directory
+         * file nodes, and that's the most important thing that matters.
+         *
+         * Note that the runtime directory argument shall be the top-level runtime directory, i.e. /run/ if
+         * we operate in system context and $XDG_RUNTIME_DIR if we operate in user context. */
+
         _cleanup_free_ char *d = NULL;
         const char *node = NULL;
-        char *tmp;
+        bool fallback = false;
 
-        assert(dest);
+        assert(ret);
+
+        if (!runtime_dir)
+                runtime_dir = "/run";
 
         switch(mode & S_IFMT) {
                 case S_IFREG:
-                        node = "/inaccessible/reg";
+                        node = "/systemd/inaccessible/reg";
                         break;
 
                 case S_IFDIR:
-                        node = "/inaccessible/dir";
+                        node = "/systemd/inaccessible/dir";
                         break;
 
                 case S_IFCHR:
-                        d = path_join(runtime_dir, "/inaccessible/chr");
-                        if (!d)
-                                return log_oom();
-
-                        if (access(d, F_OK) == 0) {
-                                *dest = TAKE_PTR(d);
-                                return 0;
-                        }
-
-                        node = "/inaccessible/sock";
+                        node = "/systemd/inaccessible/chr";
+                        fallback = true;
                         break;
 
                 case S_IFBLK:
-                        d = path_join(runtime_dir, "/inaccessible/blk");
-                        if (!d)
-                                return log_oom();
-
-                        if (access(d, F_OK) == 0) {
-                                *dest = TAKE_PTR(d);
-                                return 0;
-                        }
-
-                        node = "/inaccessible/sock";
+                        node = "/systemd/inaccessible/blk";
+                        fallback = true;
                         break;
 
                 case S_IFIFO:
-                        node = "/inaccessible/fifo";
+                        node = "/systemd/inaccessible/fifo";
                         break;
 
                 case S_IFSOCK:
-                        node = "/inaccessible/sock";
+                        node = "/systemd/inaccessible/sock";
                         break;
         }
-
         if (!node)
                 return -EINVAL;
 
-        tmp = path_join(runtime_dir, node);
-        if (!tmp)
-                return log_oom();
+        d = path_join(runtime_dir, node);
+        if (!d)
+                return -ENOMEM;
 
-        *dest = tmp;
+        if (fallback && access(d, F_OK) < 0) {
+                free(d);
+                d = path_join(runtime_dir, "/systemd/inaccessible/sock");
+                if (!d)
+                        return -ENOMEM;
+        }
+
+        *ret = TAKE_PTR(d);
         return 0;
 }
 

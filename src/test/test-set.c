@@ -3,6 +3,8 @@
 #include "set.h"
 #include "strv.h"
 
+const bool mempool_use_allowed = VALGRIND;
+
 static void test_set_steal_first(void) {
         _cleanup_set_free_ Set *m = NULL;
         int seen[3] = {};
@@ -86,11 +88,78 @@ static void test_set_put(void) {
         assert_se(strv_length(t) == 3);
 }
 
+static void test_set_put_strdup(void) {
+        _cleanup_set_free_ Set *m = NULL;
+
+        assert_se(set_put_strdup(&m, "aaa") == 1);
+        assert_se(set_put_strdup(&m, "aaa") == 0);
+        assert_se(set_put_strdup(&m, "bbb") == 1);
+        assert_se(set_put_strdup(&m, "bbb") == 0);
+        assert_se(set_put_strdup(&m, "aaa") == 0);
+        assert_se(set_size(m) == 2);
+}
+
+static void test_set_put_strdupv(void) {
+        _cleanup_set_free_ Set *m = NULL;
+
+        assert_se(set_put_strdupv(&m, STRV_MAKE("aaa", "aaa", "bbb", "bbb", "aaa")) == 2);
+        assert_se(set_put_strdupv(&m, STRV_MAKE("aaa", "aaa", "bbb", "bbb", "ccc")) == 1);
+        assert_se(set_size(m) == 3);
+}
+
+static void test_set_ensure_allocated(void) {
+        _cleanup_set_free_ Set *m = NULL;
+
+        assert_se(set_ensure_allocated(&m, &string_hash_ops) == 1);
+        assert_se(set_ensure_allocated(&m, &string_hash_ops) == 0);
+        assert_se(set_ensure_allocated(&m, NULL) == 0);
+        assert_se(set_size(m) == 0);
+}
+
+static void test_set_ensure_put(void) {
+        _cleanup_set_free_ Set *m = NULL;
+
+        assert_se(set_ensure_put(&m, &string_hash_ops, "a") == 1);
+        assert_se(set_ensure_put(&m, &string_hash_ops, "a") == 0);
+        assert_se(set_ensure_put(&m, NULL, "a") == 0);
+        assert_se(set_ensure_put(&m, &string_hash_ops, "b") == 1);
+        assert_se(set_ensure_put(&m, &string_hash_ops, "b") == 0);
+        assert_se(set_ensure_put(&m, &string_hash_ops, "a") == 0);
+        assert_se(set_size(m) == 2);
+}
+
+static void test_set_ensure_consume(void) {
+        _cleanup_set_free_ Set *m = NULL;
+        char *s, *t;
+
+        assert_se(s = strdup("a"));
+        assert_se(set_ensure_consume(&m, &string_hash_ops_free, s) == 1);
+
+        assert_se(t = strdup("a"));
+        assert_se(set_ensure_consume(&m, &string_hash_ops_free, t) == 0);
+
+        assert_se(t = strdup("a"));
+        assert_se(set_ensure_consume(&m, &string_hash_ops_free, t) == 0);
+
+        assert_se(t = strdup("b"));
+        assert_se(set_ensure_consume(&m, &string_hash_ops_free, t) == 1);
+
+        assert_se(t = strdup("b"));
+        assert_se(set_ensure_consume(&m, &string_hash_ops_free, t) == 0);
+
+        assert_se(set_size(m) == 2);
+}
+
 int main(int argc, const char *argv[]) {
         test_set_steal_first();
         test_set_free_with_destructor();
         test_set_free_with_hash_ops();
         test_set_put();
+        test_set_put_strdup();
+        test_set_put_strdupv();
+        test_set_ensure_allocated();
+        test_set_ensure_put();
+        test_set_ensure_consume();
 
         return 0;
 }

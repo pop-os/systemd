@@ -161,6 +161,20 @@ _SD_BEGIN_DECLARATIONS;
 #define SD_MESSAGE_UNSAFE_USER_NAME       SD_ID128_MAKE(b6,1f,da,c6,12,e9,4b,91,82,28,5b,99,88,43,06,1f)
 #define SD_MESSAGE_UNSAFE_USER_NAME_STR   SD_ID128_MAKE_STR(b6,1f,da,c6,12,e9,4b,91,82,28,5b,99,88,43,06,1f)
 
+#define SD_MESSAGE_MOUNT_POINT_PATH_NOT_SUITABLE \
+                                          SD_ID128_MAKE(1b,3b,b9,40,37,f0,4b,bf,81,02,8e,13,5a,12,d2,93)
+#define SD_MESSAGE_MOUNT_POINT_PATH_NOT_SUITABLE_STR \
+                                          SD_ID128_MAKE_STR(1b,3b,b9,40,37,f0,4b,bf,81,02,8e,13,5a,12,d2,93)
+
+#define SD_MESSAGE_NOBODY_USER_UNSUITABLE SD_ID128_MAKE(b4,80,32,5f,9c,39,4a,7b,80,2c,23,1e,51,a2,75,2c)
+#define SD_MESSAGE_NOBODY_USER_UNSUITABLE_STR \
+                                          SD_ID128_MAKE_STR(b4,80,32,5f,9c,39,4a,7b,80,2c,23,1e,51,a2,75,2c)
+
+#define SD_MESSAGE_SYSTEMD_UDEV_SETTLE_DEPRECATED \
+                                          SD_ID128_MAKE(1c,04,54,c1,bd,22,41,e0,ac,6f,ef,b4,bc,63,14,33)
+#define SD_MESSAGE_SYSTEMD_UDEV_SETTLE_DEPRECATED_STR \
+                                          SD_ID128_MAKE_STR(1c,04,54,c1,bd,22,41,e0,ac,6f,ef,b4,bc,63,14,33)
+
 _SD_END_DECLARATIONS;
 
 #endif

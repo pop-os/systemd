@@ -10,8 +10,8 @@ typedef struct DnsQuery DnsQuery;
 
 #include "resolved-dns-answer.h"
 #include "resolved-dns-question.h"
-#include "resolved-dns-stream.h"
 #include "resolved-dns-search-domain.h"
+#include "resolved-dns-transaction.h"
 
 struct DnsQueryCandidate {
         DnsQuery *query;
@@ -102,6 +102,8 @@ enum {
 };
 
 DnsQueryCandidate* dns_query_candidate_free(DnsQueryCandidate *c);
+DEFINE_TRIVIAL_CLEANUP_FUNC(DnsQueryCandidate*, dns_query_candidate_free);
+
 void dns_query_candidate_notify(DnsQueryCandidate *c);
 
 int dns_query_new(Manager *m, DnsQuery **q, DnsQuestion *question_utf8, DnsQuestion *question_idna, int family, uint64_t flags);

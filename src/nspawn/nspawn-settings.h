@@ -38,10 +38,18 @@ typedef enum UserNamespaceMode {
 
 typedef enum ResolvConfMode {
         RESOLV_CONF_OFF,
-        RESOLV_CONF_COPY_HOST,
-        RESOLV_CONF_COPY_STATIC,
+        RESOLV_CONF_COPY_HOST,     /* /etc/resolv.conf */
+        RESOLV_CONF_COPY_STATIC,   /* /usr/lib/systemd/resolv.conf */
+        RESOLV_CONF_COPY_UPLINK,   /* /run/systemd/resolve/resolv.conf */
+        RESOLV_CONF_COPY_STUB,     /* /run/systemd/resolve/stub-resolv.conf */
+        RESOLV_CONF_REPLACE_HOST,
+        RESOLV_CONF_REPLACE_STATIC,
+        RESOLV_CONF_REPLACE_UPLINK,
+        RESOLV_CONF_REPLACE_STUB,
         RESOLV_CONF_BIND_HOST,
         RESOLV_CONF_BIND_STATIC,
+        RESOLV_CONF_BIND_UPLINK,
+        RESOLV_CONF_BIND_STUB,
         RESOLV_CONF_DELETE,
         RESOLV_CONF_AUTO,
         _RESOLV_CONF_MODE_MAX,
@@ -157,8 +165,8 @@ typedef struct Settings {
         UserNamespaceMode userns_mode;
         uid_t uid_shift, uid_range;
         bool notify_ready;
-        char **syscall_whitelist;
-        char **syscall_blacklist;
+        char **syscall_allow_list;
+        char **syscall_deny_list;
         struct rlimit *rlimit[_RLIMIT_MAX];
         char *hostname;
         int no_new_privileges;
@@ -226,7 +234,6 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Settings*, settings_free);
 const struct ConfigPerfItem* nspawn_gperf_lookup(const char *key, GPERF_LEN_TYPE length);
 
 CONFIG_PARSER_PROTOTYPE(config_parse_capability);
-CONFIG_PARSER_PROTOTYPE(config_parse_id128);
 CONFIG_PARSER_PROTOTYPE(config_parse_expose_port);
 CONFIG_PARSER_PROTOTYPE(config_parse_volatile_mode);
 CONFIG_PARSER_PROTOTYPE(config_parse_pivot_root);

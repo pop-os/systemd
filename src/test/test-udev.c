@@ -17,6 +17,7 @@
 #include "log.h"
 #include "main-func.h"
 #include "mkdir.h"
+#include "namespace-util.h"
 #include "selinux-util.h"
 #include "signal-util.h"
 #include "string-util.h"
@@ -36,15 +37,13 @@ static int fake_filesystems(void) {
                 { "test/run",       "/etc/udev/rules.d",       "Failed to mount empty /etc/udev/rules.d",          true },
                 { "test/run",       UDEVLIBEXECDIR "/rules.d", "Failed to mount empty " UDEVLIBEXECDIR "/rules.d", true },
         };
-        unsigned i;
+        int r;
 
-        if (unshare(CLONE_NEWNS) < 0)
-                return log_error_errno(errno, "Failed to call unshare(): %m");
+        r = detach_mount_namespace();
+        if (r < 0)
+                return log_error_errno(r, "Failed to detach mount namespace: %m");
 
-        if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL) < 0)
-                return log_error_errno(errno, "Failed to mount / as private: %m");
-
-        for (i = 0; i < ELEMENTSOF(fakefss); i++)
+        for (size_t i = 0; i < ELEMENTSOF(fakefss); i++)
                 if (mount(fakefss[i].src, fakefss[i].target, NULL, MS_BIND, NULL) < 0) {
                         log_full_errno(fakefss[i].ignore_mount_error ? LOG_DEBUG : LOG_ERR, errno, "%s: %m", fakefss[i].error);
                         if (!fakefss[i].ignore_mount_error)
@@ -82,12 +81,15 @@ static int run(int argc, char *argv[]) {
         }
 
         log_debug("version %s", GIT_VERSION);
-        mac_selinux_init();
+
+        r = mac_selinux_init();
+        if (r < 0)
+                return r;
 
         action = argv[1];
         devpath = argv[2];
 
-        assert_se(udev_rules_new(&rules, RESOLVE_NAME_EARLY) == 0);
+        assert_se(udev_rules_load(&rules, RESOLVE_NAME_EARLY) == 0);
 
         const char *syspath = strjoina("/sys", devpath);
         r = device_new_from_synthetic_event(&dev, syspath, action);
@@ -122,8 +124,8 @@ static int run(int argc, char *argv[]) {
                 }
         }
 
-        udev_event_execute_rules(event, 3 * USEC_PER_SEC, NULL, rules);
-        udev_event_execute_run(event, 3 * USEC_PER_SEC);
+        udev_event_execute_rules(event, 3 * USEC_PER_SEC, SIGKILL, NULL, rules);
+        udev_event_execute_run(event, 3 * USEC_PER_SEC, SIGKILL);
 
         return 0;
 }

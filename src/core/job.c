@@ -263,6 +263,10 @@ int job_install_deserialized(Job *j) {
                 return log_unit_debug_errno(j->unit, SYNTHETIC_ERRNO(EEXIST),
                                             "Unit already has a job installed. Not installing deserialized job.");
 
+        r = hashmap_ensure_allocated(&j->manager->jobs, NULL);
+        if (r < 0)
+                return r;
+
         r = hashmap_put(j->manager->jobs, UINT32_TO_PTR(j->id), j);
         if (r == -EEXIST)
                 return log_unit_debug_errno(j->unit, r, "Job ID %" PRIu32 " already used, cannot deserialize job.", j->id);
@@ -986,9 +990,10 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
 
         j->result = result;
 
-        log_unit_debug(u, "Job %" PRIu32 " %s/%s finished, result=%s", j->id, u->id, job_type_to_string(t), job_result_to_string(result));
+        log_unit_debug(u, "Job %" PRIu32 " %s/%s finished, result=%s",
+                       j->id, u->id, job_type_to_string(t), job_result_to_string(result));
 
-        /* If this job did nothing to respective unit we don't log the status message */
+        /* If this job did nothing to the respective unit we don't log the status message */
         if (!already)
                 job_emit_done_status_message(u, j->id, t, result);
 
@@ -1025,7 +1030,7 @@ int job_finish_and_invalidate(Job *j, JobResult result, bool recursive, bool alr
          * aren't active. This is when the verify-active job merges with a
          * satisfying job type, and then loses it's invalidation effect, as the
          * result there is JOB_DONE for the start job we merged into, while we
-         * should be failing the depending job if the said unit isn't infact
+         * should be failing the depending job if the said unit isn't in fact
          * active. Oneshots are an example of this, where going directly from
          * activating to inactive is success.
          *

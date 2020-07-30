@@ -254,6 +254,21 @@ bool locale_is_valid(const char *name) {
         return true;
 }
 
+int locale_is_installed(const char *name) {
+        if (!locale_is_valid(name))
+                return false;
+
+        if (STR_IN_SET(name, "C", "POSIX")) /* These ones are always OK */
+                return true;
+
+        _cleanup_(freelocalep) locale_t loc =
+                newlocale(LC_ALL_MASK, name, 0);
+        if (loc == (locale_t) 0)
+                return errno == ENOMEM ? -ENOMEM : false;
+
+        return true;
+}
+
 void init_gettext(void) {
         setlocale(LC_ALL, "");
         textdomain(GETTEXT_PACKAGE);
@@ -305,7 +320,7 @@ out:
         return (bool) cached_answer;
 }
 
-static bool emoji_enabled(void) {
+bool emoji_enabled(void) {
         static int cached_emoji_enabled = -1;
 
         if (cached_emoji_enabled < 0) {
@@ -350,6 +365,7 @@ const char *special_glyph(SpecialGlyph code) {
                         [SPECIAL_GLYPH_SIGMA]                   = "S",
                         [SPECIAL_GLYPH_ARROW]                   = "->",
                         [SPECIAL_GLYPH_ELLIPSIS]                = "...",
+                        [SPECIAL_GLYPH_EXTERNAL_LINK]           = "[LNK]",
                         [SPECIAL_GLYPH_ECSTATIC_SMILEY]         = ":-]",
                         [SPECIAL_GLYPH_HAPPY_SMILEY]            = ":-}",
                         [SPECIAL_GLYPH_SLIGHTLY_HAPPY_SMILEY]   = ":-)",
@@ -357,6 +373,8 @@ const char *special_glyph(SpecialGlyph code) {
                         [SPECIAL_GLYPH_SLIGHTLY_UNHAPPY_SMILEY] = ":-(",
                         [SPECIAL_GLYPH_UNHAPPY_SMILEY]          = ":-{",
                         [SPECIAL_GLYPH_DEPRESSED_SMILEY]        = ":-[",
+                        [SPECIAL_GLYPH_LOCK_AND_KEY]            = "o-,",
+                        [SPECIAL_GLYPH_TOUCH]                   = "O=",    /* Yeah, not very convincing, can you do it better? */
                 },
 
                 /* UTF-8 */
@@ -384,6 +402,9 @@ const char *special_glyph(SpecialGlyph code) {
                         /* Single glyph in Unicode, three in ASCII */
                         [SPECIAL_GLYPH_ELLIPSIS]                = "\342\200\246",             /* … (actually called: HORIZONTAL ELLIPSIS) */
 
+                        /* Three glyphs in Unicode, five in ASCII */
+                        [SPECIAL_GLYPH_EXTERNAL_LINK]           = "[\360\237\241\225]",       /* 🡕 (actually called: NORTH EAST SANS-SERIF ARROW, enclosed in []) */
+
                         /* These smileys are a single glyph in Unicode, and three in ASCII */
                         [SPECIAL_GLYPH_ECSTATIC_SMILEY]         = "\360\237\230\207",         /* 😇 (actually called: SMILING FACE WITH HALO) */
                         [SPECIAL_GLYPH_HAPPY_SMILEY]            = "\360\237\230\200",         /* 😀 (actually called: GRINNING FACE) */
@@ -392,12 +413,18 @@ const char *special_glyph(SpecialGlyph code) {
                         [SPECIAL_GLYPH_SLIGHTLY_UNHAPPY_SMILEY] = "\360\237\231\201",         /* 🙁 (actually called: SLIGHTLY FROWNING FACE) */
                         [SPECIAL_GLYPH_UNHAPPY_SMILEY]          = "\360\237\230\250",         /* 😨 (actually called: FEARFUL FACE) */
                         [SPECIAL_GLYPH_DEPRESSED_SMILEY]        = "\360\237\244\242",         /* 🤢 (actually called: NAUSEATED FACE) */
+
+                        /* This emoji is a single character cell glyph in Unicode, and three in ASCII */
+                        [SPECIAL_GLYPH_LOCK_AND_KEY]            = "\360\237\224\220",         /* 🔐 (actually called: CLOSED LOCK WITH KEY) */
+
+                        /* This emoji is a single character cell glyph in Unicode, and two in ASCII */
+                        [SPECIAL_GLYPH_TOUCH]                   = "\360\237\221\206",         /* 👆 (actually called: BACKHAND INDEX POINTING UP */
                 },
         };
 
         assert(code < _SPECIAL_GLYPH_MAX);
 
-        return draw_table[code >= _SPECIAL_GLYPH_FIRST_SMILEY ? emoji_enabled() : is_locale_utf8()][code];
+        return draw_table[code >= _SPECIAL_GLYPH_FIRST_EMOJI ? emoji_enabled() : is_locale_utf8()][code];
 }
 
 void locale_variables_free(char *l[_VARIABLE_LC_MAX]) {

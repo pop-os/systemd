@@ -205,38 +205,25 @@ static int socket_arm_timer(Socket *s, usec_t usec) {
         return 0;
 }
 
-int socket_instantiate_service(Socket *s) {
-        _cleanup_free_ char *prefix = NULL, *name = NULL;
+static int socket_instantiate_service(Socket *s, int cfd) {
+        Unit *service;
         int r;
-        Unit *u;
 
         assert(s);
+        assert(cfd >= 0);
 
-        /* This fills in s->service if it isn't filled in yet. For
-         * Accept=yes sockets we create the next connection service
-         * here. For Accept=no this is mostly a NOP since the service
-         * is figured out at load time anyway. */
+        /* This fills in s->service if it isn't filled in yet. For Accept=yes sockets we create the next
+         * connection service here. For Accept=no this is mostly a NOP since the service is figured out at
+         * load time anyway. */
 
-        if (UNIT_DEREF(s->service))
-                return 0;
-
-        if (!s->accept)
-                return 0;
-
-        r = unit_name_to_prefix(UNIT(s)->id, &prefix);
+        r = socket_load_service_unit(s, cfd, &service);
         if (r < 0)
                 return r;
 
-        if (asprintf(&name, "%s@%u.service", prefix, s->n_accepted) < 0)
-                return -ENOMEM;
+        unit_ref_set(&s->service, UNIT(s), service);
 
-        r = manager_load_unit(UNIT(s)->manager, name, NULL, NULL, &u);
-        if (r < 0)
-                return r;
-
-        unit_ref_set(&s->service, UNIT(s), u);
-
-        return unit_add_two_dependencies(UNIT(s), UNIT_BEFORE, UNIT_TRIGGERS, u, false, UNIT_DEPENDENCY_IMPLICIT);
+        return unit_add_two_dependencies(UNIT(s), UNIT_BEFORE, UNIT_TRIGGERS, service,
+                                         false, UNIT_DEPENDENCY_IMPLICIT);
 }
 
 static bool have_non_accept_socket(Socket *s) {
@@ -635,6 +622,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
                 "%sBroadcast: %s\n"
                 "%sPassCredentials: %s\n"
                 "%sPassSecurity: %s\n"
+                "%sPassPacketInfo: %s\n"
                 "%sTCPCongestion: %s\n"
                 "%sRemoveOnStop: %s\n"
                 "%sWritable: %s\n"
@@ -654,6 +642,7 @@ static void socket_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, yes_no(s->broadcast),
                 prefix, yes_no(s->pass_cred),
                 prefix, yes_no(s->pass_sec),
+                prefix, yes_no(s->pass_pktinfo),
                 prefix, strna(s->tcp_congestion),
                 prefix, yes_no(s->remove_on_stop),
                 prefix, yes_no(s->writable),
@@ -1070,6 +1059,12 @@ static void socket_apply_socket_options(Socket *s, int fd) {
                         log_unit_warning_errno(UNIT(s), r, "SO_PASSSEC failed: %m");
         }
 
+        if (s->pass_pktinfo) {
+                r = socket_pass_pktinfo(fd, true);
+                if (r < 0)
+                        log_unit_warning_errno(UNIT(s), r, "Failed to enable packet info socket option: %m");
+        }
+
         if (s->priority >= 0) {
                 r = setsockopt_int(fd, SOL_SOCKET, SO_PRIORITY, s->priority);
                 if (r < 0)
@@ -1398,37 +1393,81 @@ clear:
         return r;
 }
 
+int socket_load_service_unit(Socket *s, int cfd, Unit **ret) {
+        /* Figure out what the unit that will be used to handle the connections on the socket looks like.
+         *
+         * If cfd < 0, then we don't have a connection yet. In case of Accept=yes sockets, use a fake
+         * instance name.
+         */
+
+        if (UNIT_ISSET(s->service)) {
+                *ret = UNIT_DEREF(s->service);
+                return 0;
+        }
+
+        if (!s->accept)
+                return -ENODATA;
+
+        /* Build the instance name and load the unit */
+        _cleanup_free_ char *prefix = NULL, *instance = NULL, *name = NULL;
+        int r;
+
+        r = unit_name_to_prefix(UNIT(s)->id, &prefix);
+        if (r < 0)
+                return r;
+
+        if (cfd >= 0) {
+                r = instance_from_socket(cfd, s->n_accepted, &instance);
+                if (r == -ENOTCONN)
+                        /* ENOTCONN is legitimate if TCP RST was received.
+                         * This connection is over, but the socket unit lives on. */
+                        return log_unit_debug_errno(UNIT(s), r,
+                                                    "Got ENOTCONN on incoming socket, assuming aborted connection attempt, ignoring.");
+                if (r < 0)
+                        return r;
+        }
+
+        /* For accepting sockets, we don't know how the instance will be called until we get a connection and
+         * can figure out what the peer name is. So let's use "internal" as the instance to make it clear
+         * that this is not an actual peer name. We use "unknown" when we cannot figure out the peer. */
+        r = unit_name_build(prefix, instance ?: "internal", ".service", &name);
+        if (r < 0)
+                return r;
+
+        return manager_load_unit(UNIT(s)->manager, name, NULL, NULL, ret);
+}
+
 static int socket_determine_selinux_label(Socket *s, char **ret) {
-        Service *service;
-        ExecCommand *c;
-        _cleanup_free_ char *path = NULL;
         int r;
 
         assert(s);
         assert(ret);
 
         if (s->selinux_context_from_net) {
-                /* If this is requested, get label from the network label */
+                /* If this is requested, get the label from the network label */
 
                 r = mac_selinux_get_our_label(ret);
                 if (r == -EOPNOTSUPP)
                         goto no_label;
 
         } else {
-                /* Otherwise, get it from the executable we are about to start */
-                r = socket_instantiate_service(s);
+                /* Otherwise, get it from the executable we are about to start. */
+
+                Unit *service;
+                ExecCommand *c;
+                _cleanup_free_ char *path = NULL;
+
+                r = socket_load_service_unit(s, -1, &service);
+                if (r == -ENODATA)
+                        goto no_label;
                 if (r < 0)
                         return r;
 
-                if (!UNIT_ISSET(s->service))
-                        goto no_label;
-
-                service = SERVICE(UNIT_DEREF(s->service));
-                c = service->exec_command[SERVICE_EXEC_START];
+                c = SERVICE(service)->exec_command[SERVICE_EXEC_START];
                 if (!c)
                         goto no_label;
 
-                r = chase_symlinks(c->path, service->exec_context.root_directory, CHASE_PREFIX_ROOT, &path, NULL);
+                r = chase_symlinks(c->path, SERVICE(service)->exec_context.root_directory, CHASE_PREFIX_ROOT, &path, NULL);
                 if (r < 0)
                         goto no_label;
 
@@ -1614,8 +1653,8 @@ static int socket_open_fds(Socket *_s) {
                 case SOCKET_SOCKET:
 
                         if (!know_label) {
-                                /* Figure out label, if we don't it know yet. We do it once, for the first socket where
-                                 * we need this and remember it for the rest. */
+                                /* Figure out the label, if we don't it know yet. We do it once for the first
+                                 * socket where we need this and remember it for the rest. */
 
                                 r = socket_determine_selinux_label(s, &label);
                                 if (r < 0)
@@ -2035,6 +2074,8 @@ static void socket_enter_dead(Socket *s, SocketResult f) {
         else
                 unit_log_failure(UNIT(s), socket_result_to_string(s->result));
 
+        unit_warn_leftover_processes(UNIT(s), unit_log_leftover_process_stop);
+
         socket_set_state(s, s->result != SOCKET_SUCCESS ? SOCKET_FAILED : SOCKET_DEAD);
 
         s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
@@ -2237,7 +2278,7 @@ static void socket_enter_start_pre(Socket *s) {
 
         socket_unwatch_control_pid(s);
 
-        unit_warn_leftover_processes(UNIT(s));
+        unit_warn_leftover_processes(UNIT(s), unit_log_leftover_process_start);
 
         s->control_command_id = SOCKET_EXEC_START_PRE;
         s->control_command = s->exec_command[SOCKET_EXEC_START_PRE];
@@ -2330,7 +2371,6 @@ static void socket_enter_running(Socket *s, int cfd) {
 
                 socket_set_state(s, SOCKET_RUNNING);
         } else {
-                _cleanup_free_ char *prefix = NULL, *instance = NULL, *name = NULL;
                 _cleanup_(socket_peer_unrefp) SocketPeer *p = NULL;
                 Service *service;
 
@@ -2342,9 +2382,9 @@ static void socket_enter_running(Socket *s, int cfd) {
 
                 if (s->max_connections_per_source > 0) {
                         r = socket_acquire_peer(s, cfd, &p);
-                        if (r < 0) {
+                        if (r < 0)
                                 goto refuse;
-                        } else if (r > 0 && p->n_ref > s->max_connections_per_source) {
+                        if (r > 0 && p->n_ref > s->max_connections_per_source) {
                                 _cleanup_free_ char *t = NULL;
 
                                 (void) sockaddr_pretty(&p->peer.sa, p->peer_salen, true, false, &t);
@@ -2356,30 +2396,7 @@ static void socket_enter_running(Socket *s, int cfd) {
                         }
                 }
 
-                r = socket_instantiate_service(s);
-                if (r < 0)
-                        goto fail;
-
-                r = instance_from_socket(cfd, s->n_accepted, &instance);
-                if (r < 0) {
-                        if (r != -ENOTCONN)
-                                goto fail;
-
-                        /* ENOTCONN is legitimate if TCP RST was received.
-                         * This connection is over, but the socket unit lives on. */
-                        log_unit_debug(UNIT(s), "Got ENOTCONN on incoming socket, assuming aborted connection attempt, ignoring.");
-                        goto refuse;
-                }
-
-                r = unit_name_to_prefix(UNIT(s)->id, &prefix);
-                if (r < 0)
-                        goto fail;
-
-                r = unit_name_build(prefix, instance, ".service", &name);
-                if (r < 0)
-                        goto fail;
-
-                r = unit_add_name(UNIT_DEREF(s->service), name);
+                r = socket_instantiate_service(s, cfd);
                 if (r < 0)
                         goto fail;
 
@@ -2387,21 +2404,20 @@ static void socket_enter_running(Socket *s, int cfd) {
                 unit_ref_unset(&s->service);
 
                 s->n_accepted++;
-                unit_choose_id(UNIT(service), name);
 
                 r = service_set_socket_fd(service, cfd, s, s->selinux_context_from_net);
                 if (r < 0)
                         goto fail;
 
-                cfd = -1; /* We passed ownership of the fd to the service now. Forget it here. */
+                TAKE_FD(cfd); /* We passed ownership of the fd to the service now. Forget it here. */
                 s->n_connections++;
 
                 service->peer = TAKE_PTR(p); /* Pass ownership of the peer reference */
 
                 r = manager_add_job(UNIT(s)->manager, JOB_START, UNIT(service), JOB_REPLACE, NULL, &error, NULL);
                 if (r < 0) {
-                        /* We failed to activate the new service, but it still exists. Let's make sure the service
-                         * closes and forgets the connection fd again, immediately. */
+                        /* We failed to activate the new service, but it still exists. Let's make sure the
+                         * service closes and forgets the connection fd again, immediately. */
                         service_close_socket_fd(service);
                         goto fail;
                 }
@@ -3462,7 +3478,6 @@ const UnitVTable socket_vtable = {
 
         .control_pid = socket_control_pid,
 
-        .bus_vtable = bus_socket_vtable,
         .bus_set_property = bus_socket_set_property,
         .bus_commit_properties = bus_socket_commit_properties,
 

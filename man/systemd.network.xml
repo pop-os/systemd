@@ -31,7 +31,7 @@
     <para>A plain ini-style text file that encodes network configuration for matching network interfaces,
     used by
     <citerefentry><refentrytitle>systemd-networkd</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
-    See <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    See <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>7</manvolnum></citerefentry>
     for a general description of the syntax.</para>
 
     <para>The main network file must have the extension <filename>.network</filename>; other
@@ -72,21 +72,16 @@
   <refsect1>
     <title>[Match] Section Options</title>
 
-      <para>The network file contains a <literal>[Match]</literal>
-      section, which determines if a given network file may be applied
-      to a given device; and a <literal>[Network]</literal> section
-      specifying how the device should be configured. The first (in
-      lexical order) of the network files that matches a given device
-      is applied, all later files are ignored, even if they match as
-      well.</para>
+      <para>The network file contains a [Match] section, which determines if a given network file may be
+      applied to a given device; and a [Network] section specifying how the device should be configured. The
+      first (in lexical order) of the network files that matches a given device is applied, all later files
+      are ignored, even if they match as well.</para>
 
-      <para>A network file is said to match a network interface if all matches specified by the
-      <literal>[Match]</literal> section are satisfied. When a network file does not contain valid
-      settings in <literal>[Match]</literal> section, then the file will match all interfaces and
-      <command>systemd-networkd</command> warns about that. Hint: to avoid the warning and to make it
-      clear that all interfaces shall be matched, add the following:
-      <programlisting>Name=*</programlisting>
-      The following keys are accepted:</para>
+      <para>A network file is said to match a network interface if all matches specified by the [Match]
+      section are satisfied. When a network file does not contain valid settings in [Match] section, then the
+      file will match all interfaces and <command>systemd-networkd</command> warns about that. Hint: to avoid
+      the warning and to make it clear that all interfaces shall be matched, add the following:
+      <programlisting>Name=*</programlisting> The following keys are accepted:</para>
 
       <variablelist class='network-directives'>
         <xi:include href="systemd.link.xml" xpointer="mac-address" />
@@ -132,9 +127,8 @@
           <listitem>
             <para>A whitespace-separated list of hardware address of the currently connected wireless
             LAN. Use full colon-, hyphen- or dot-delimited hexadecimal. See the example in
-            <varname>MACAddress=</varname>. This option may appear more than one, in which case the
-            lists are merged. If the empty string is assigned to this option, the list of BSSID defined
-            prior to this is reset.</para>
+            <varname>MACAddress=</varname>. This option may appear more than once, in which case the
+            lists are merged. If the empty string is assigned to this option, the list is reset.</para>
           </listitem>
         </varlistentry>
 
@@ -150,7 +144,7 @@
   <refsect1>
     <title>[Link] Section Options</title>
 
-    <para> The <literal>[Link]</literal> section accepts the following keys:</para>
+    <para> The [Link] section accepts the following keys:</para>
 
     <variablelist class='network-directives'>
       <varlistentry>
@@ -206,6 +200,15 @@
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term><varname>Group=</varname></term>
+        <listitem>
+          <para>Link groups are similar to port ranges found in managed switches.
+          When network interfaces are added to a numbered group, operations on
+          all the interfaces from that group can be performed at once. An unsigned
+          integer in the range 0—4294967294. Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term><varname>RequiredForOnline=</varname></term>
         <listitem>
           <para>Takes a boolean or a minimum operational state and an optional maximum operational state.
@@ -229,9 +232,95 @@
   </refsect1>
 
   <refsect1>
+      <title>[SR-IOV] Section Options</title>
+      <para>The [SR-IOV] section accepts the following keys. Specify several [SR-IOV] sections to configure
+      several SR-IOVs. SR-IOV provides the ability to partition a single physical PCI resource into virtual
+      PCI functions which can then be injected into a VM. In the case of network VFs, SR-IOV improves
+      north-south network performance (that is, traffic with endpoints outside the host machine) by allowing
+      traffic to bypass the host machine’s network stack.</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>VirtualFunction=</varname></term>
+          <listitem>
+            <para>Specifies a Virtual Function (VF), lightweight PCIe function designed solely to move data
+            in and out. Takes an unsigned integer in the range 0..2147483646. This option is compulsory.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>VLANId=</varname></term>
+          <listitem>
+            <para>Specifies VLAN ID of the virtual function. Takes an unsigned integer in the range 1..4095.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>QualityOfService=</varname></term>
+          <listitem>
+            <para>Specifies quality of service of the virtual function. Takes an unsigned integer in the range 1..4294967294.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>VLANProtocol=</varname></term>
+          <listitem>
+            <para>Specifies VLAN protocol of the virtual function. Takes <literal>802.1Q</literal> or
+            <literal>802.1ad</literal>.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>MACSpoofCheck=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Controls the MAC spoof checking. When unset, the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>QueryReceiveSideScaling=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Toggle the ability of querying the receive side scaling (RSS)
+            configuration of the virtual function (VF). The VF RSS information like RSS hash key may be
+            considered sensitive on some devices where this information is shared between VF and the
+            physical function (PF). When unset, the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>Trust=</varname></term>
+          <listitem>
+            <para>Takes a boolean. Allows to set trust mode of the virtual function (VF). When set, VF
+            users can set a specific feature which may impact security and/or performance. When unset,
+            the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>LinkState=</varname></term>
+          <listitem>
+            <para>Allows to set the link state of the virtual function (VF). Takes a boolean or a
+            special value <literal>auto</literal>. Setting to <literal>auto</literal> means a
+            reflection of the physical function (PF) link state, <literal>yes</literal> lets the VF to
+            communicate with other VFs on this host even if the PF link state is down,
+            <literal>no</literal> causes the hardware to drop any packets sent by the VF. When unset,
+            the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>MACAddress=</varname></term>
+          <listitem>
+            <para>Specifies the MAC address for the virtual function.</para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>[Network] Section Options</title>
 
-      <para>The <literal>[Network]</literal> section accepts the following keys:</para>
+      <para>The [Network] section accepts the following keys:</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
@@ -260,16 +349,15 @@
             specified through DHCP is not used for name resolution.
             See option <option>UseDomains=</option> below.</para>
 
-            <para>See the <literal>[DHCPv4]</literal> or <literal>[DHCPv6]</literal> section below for
-            further configuration options for the DHCP client support.</para>
+            <para>See the [DHCPv4] or [DHCPv6] sections below for further configuration options for the DHCP
+            client support.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>DHCPServer=</varname></term>
           <listitem>
             <para>Takes a boolean. If set to <literal>yes</literal>, DHCPv4 server will be started. Defaults
-            to <literal>no</literal>. Further settings for the DHCP
-            server may be set in the <literal>[DHCPServer]</literal>
+            to <literal>no</literal>. Further settings for the DHCP server may be set in the [DHCPServer]
             section described below.</para>
           </listitem>
         </varlistentry>
@@ -287,6 +375,16 @@
             <literal>DHCP=ipv4</literal>. If <varname>Bridge=</varname> is set, defaults to
             <literal>no</literal>, and if not, defaults to <literal>ipv6</literal>.
             </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>IPv6LinkLocalAddressGenerationMode=</varname></term>
+          <listitem>
+            <para>Specifies how IPv6 link local address is generated. Takes one of <literal>eui64</literal>,
+            <literal>none</literal>, <literal>stable-privacy</literal> and <literal>random</literal>.
+            When unset, the kernel's default will be used. Note that if <varname>LinkLocalAdressing=</varname>
+            not configured as <literal>ipv6</literal> then <varname>IPv6LinkLocalAddressGenerationMode=</varname>
+            is ignored.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -389,10 +487,8 @@
         <varlistentry>
           <term><varname>DNSSEC=</varname></term>
           <listitem>
-            <para>Takes a boolean. or
-            <literal>allow-downgrade</literal>. When true, enables
-            <ulink
-            url="https://tools.ietf.org/html/rfc4033">DNSSEC</ulink>
+            <para>Takes a boolean or <literal>allow-downgrade</literal>. When true, enables
+            <ulink url="https://tools.ietf.org/html/rfc4033">DNSSEC</ulink>
             DNS validation support on the link. When set to
             <literal>allow-downgrade</literal>, compatibility with
             non-DNSSEC capable networks is increased, by automatically
@@ -441,7 +537,7 @@
             <literal>nearest-bridge</literal>, <literal>non-tpmr-bridge</literal> and
             <literal>customer-bridge</literal>.  Defaults to false, which turns off LLDP packet emission. If not false,
             a short LLDP packet with information about the local system is sent out in regular intervals on the
-            link. The LLDP packet will contain information about the local host name, the local machine ID (as stored
+            link. The LLDP packet will contain information about the local hostname, the local machine ID (as stored
             in <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry>) and the
             local interface name, as well as the pretty hostname of the system (as set in
             <citerefentry><refentrytitle>machine-info</refentrytitle><manvolnum>5</manvolnum></citerefentry>). LLDP
@@ -459,6 +555,7 @@
             reception.</para>
           </listitem>
         </varlistentry>
+
         <varlistentry>
           <term><varname>BindCarrier=</varname></term>
           <listitem>
@@ -509,7 +606,15 @@
             <para>A DNS server address, which must be in the format
             described in
             <citerefentry project='man-pages'><refentrytitle>inet_pton</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
-            This option may be specified more than once. This setting is read by
+            This option may be specified more than once. Each address can optionally take a port number
+            separated with <literal>:</literal>, a network interface name or index separated with
+            <literal>%</literal>, and a Server Name Indication (SNI) separated with <literal>#</literal>.
+            When IPv6 address is specified with a port number, then the address must be in the square
+            brackets. That is, the acceptable full formats are
+            <literal>111.222.333.444:9953%ifname#example.com</literal> for IPv4 and
+            <literal>[1111:2222::3333]:9953%ifname#example.com</literal> for IPv6. This setting can be
+            specified multiple times. If an empty string is assigned, then the all previous assignments
+            are cleared. This setting is read by
             <citerefentry><refentrytitle>systemd-resolved.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
           </listitem>
         </varlistentry>
@@ -520,12 +625,12 @@
             this link. Each item in the list should be a domain name, optionally prefixed with a tilde
             (<literal>~</literal>). The domains with the prefix are called "routing-only domains". The
             domains without the prefix are called "search domains" and are first used as search suffixes for
-            extending single-label host names (host names containing no dots) to become fully qualified
-            domain names (FQDNs). If a single-label host name is resolved on this interface, each of the
+            extending single-label hostnames (hostnames containing no dots) to become fully qualified
+            domain names (FQDNs). If a single-label hostname is resolved on this interface, each of the
             specified search domains are appended to it in turn, converting it into a fully qualified domain
             name, until one of them may be successfully resolved.</para>
 
-            <para>Both "search" and "routing-only" domains are used for routing of DNS queries: look-ups for host names
+            <para>Both "search" and "routing-only" domains are used for routing of DNS queries: look-ups for hostnames
             ending in those domains (hence also single label names, if any "search domains" are listed), are routed to
             the DNS servers configured for this interface. The domain routing logic is particularly useful on
             multi-homed hosts with DNS servers serving particular private DNS zones on each interface.</para>
@@ -558,7 +663,7 @@
         <varlistentry>
           <term><varname>NTP=</varname></term>
           <listitem>
-            <para>An NTP server address. This option may be specified more than once. This setting is read by
+            <para>An NTP server address (either an IP address, or a hostname). This option may be specified more than once. This setting is read by
             <citerefentry><refentrytitle>systemd-timesyncd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
           </listitem>
         </varlistentry>
@@ -621,10 +726,10 @@
           trigger the start of the DHCPv6 client if the relevant flags are set in the RA data, or if no
           routers are found on the link. The default is to disable RA reception for bridge devices or when IP
           forwarding is enabled, and to enable it otherwise. Cannot be enabled on bond devices and when link
-          local adressing is disabled.</para>
+          local addressing is disabled.</para>
 
-          <para>Further settings for the IPv6 RA support may be configured in the
-          <literal>[IPv6AcceptRA]</literal> section, see below.</para>
+          <para>Further settings for the IPv6 RA support may be configured in the [IPv6AcceptRA] section, see
+          below.</para>
 
           <para>Also see <ulink
           url="https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt">ip-sysctl.txt</ulink> in the kernel
@@ -653,10 +758,17 @@
         </para></listitem>
         </varlistentry>
         <varlistentry>
+          <term><varname>IPv4AcceptLocal=</varname></term>
+          <listitem><para>Takes a boolean. Accept packets with local source addresses. In combination
+          with suitable routing, this can be used to direct packets between two local interfaces over
+          the wire and have them accepted properly. When unset, the kernel's default will be used.
+          </para></listitem>
+        </varlistentry>
+        <varlistentry>
           <term><varname>IPv4ProxyARP=</varname></term>
           <listitem><para>Takes a boolean. Configures proxy ARP for IPv4. Proxy ARP is the technique in which one host,
           usually a router, answers ARP requests intended for another machine. By "faking" its identity,
-          the router accepts responsibility for routing packets to the "real" destination. (see <ulink
+          the router accepts responsibility for routing packets to the "real" destination. See <ulink
           url="https://tools.ietf.org/html/rfc1027">RFC 1027</ulink>.
           When unset, the kernel's default will be used.
         </para></listitem>
@@ -687,18 +799,15 @@
         </varlistentry>
         <varlistentry>
           <term><varname>IPv6PrefixDelegation=</varname></term>
-          <listitem><para>Whether to enable or disable Router Advertisement sending on a link.
-          Allowed values are <literal>static</literal> which distributes prefixes as defined in
-          the <literal>[IPv6PrefixDelegation]</literal> and any <literal>[IPv6Prefix]</literal>
-          sections, <literal>dhcpv6</literal> which requests prefixes using a DHCPv6 client
-          configured for another link and any values configured in the
-          <literal>[IPv6PrefixDelegation]</literal> section while ignoring all static prefix
-          configuration sections, <literal>yes</literal> which uses both static configuration
-          and DHCPv6, and <literal>false</literal> which turns off IPv6 prefix delegation
-          altogether. Defaults to <literal>false</literal>. See the
-          <literal>[IPv6PrefixDelegation]</literal> and the <literal>[IPv6Prefix]</literal>
-          sections for more configuration options.
-          </para></listitem>
+          <listitem><para>Whether to enable or disable Router Advertisement sending on a link.  Allowed
+          values are <literal>static</literal> which distributes prefixes as defined in the
+          [IPv6PrefixDelegation] and any [IPv6Prefix] sections, <literal>dhcpv6</literal> which requests
+          prefixes using a DHCPv6 client configured for another link and any values configured in the
+          [IPv6PrefixDelegation] section while ignoring all static prefix configuration sections,
+          <literal>yes</literal> which uses both static configuration and DHCPv6, and
+          <literal>false</literal> which turns off IPv6 prefix delegation altogether. Defaults to
+          <literal>false</literal>. See the [IPv6PrefixDelegation] and the [IPv6Prefix] sections for more
+          configuration options.</para></listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>IPv6MTUBytes=</varname></term>
@@ -808,15 +917,17 @@
         <term><varname>ConfigureWithoutCarrier=</varname></term>
         <listitem>
           <para>Takes a boolean. Allows networkd to configure a specific link even if it has no carrier.
-          Defaults to false.
+          Defaults to false. If <option>IgnoreCarrierLoss=</option> is not explicitly set, it will
+          default to this value.
           </para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>IgnoreCarrierLoss=</varname></term>
         <listitem>
-          <para>A boolean. Allows networkd to retain both the static and dynamic configuration of the
-          interface even if its carrier is lost. Defaults to false.
+          <para>Takes a boolean. Allows networkd to retain both the static and dynamic configuration
+          of the interface even if its carrier is lost. When unset, the value specified with
+          <option>ConfigureWithoutCarrier=</option> is used.
           </para>
         </listitem>
       </varlistentry>
@@ -852,16 +963,15 @@
   <refsect1>
     <title>[Address] Section Options</title>
 
-      <para>An <literal>[Address]</literal> section accepts the
-      following keys. Specify several <literal>[Address]</literal>
+      <para>An [Address] section accepts the following keys. Specify several [Address]
       sections to configure several addresses.</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>Address=</varname></term>
           <listitem>
-            <para>As in the <literal>[Network]</literal> section. This key is mandatory. Each
-            <literal>[Address]</literal> section can contain one <varname>Address=</varname> setting.</para>
+            <para>As in the [Network] section. This key is mandatory. Each [Address] section can contain one
+            <varname>Address=</varname> setting.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -905,7 +1015,7 @@
           <term><varname>Scope=</varname></term>
           <listitem>
             <para>The scope of the address, which can be <literal>global</literal>,
-            <literal>link</literal> or <literal>host</literal> or an unsigned integer ranges 0 to 255.
+            <literal>link</literal> or <literal>host</literal> or an unsigned integer in the range 0—255.
             Defaults to <literal>global</literal>.</para>
           </listitem>
         </varlistentry>
@@ -967,12 +1077,10 @@
 
   <refsect1>
     <title>[Neighbor] Section Options</title>
-      <para>A <literal>[Neighbor]</literal> section accepts the
-      following keys. The neighbor section adds a permanent, static
-      entry to the neighbor table (IPv6) or ARP table (IPv4) for
-      the given hardware address on the links matched for the network.
-      Specify several <literal>[Neighbor]</literal> sections to configure
-      several static neighbors.</para>
+      <para>A [Neighbor] section accepts the following keys. The neighbor section adds a permanent, static
+      entry to the neighbor table (IPv6) or ARP table (IPv4) for the given hardware address on the links
+      matched for the network. Specify several [Neighbor] sections to configure several static neighbors.
+      </para>
 
       <variablelist class='network-directives'>
         <varlistentry>
@@ -993,18 +1101,17 @@
     <refsect1>
     <title>[IPv6AddressLabel] Section Options</title>
 
-      <para>An <literal>[IPv6AddressLabel]</literal> section accepts the
-      following keys. Specify several <literal>[IPv6AddressLabel]</literal>
-      sections to configure several address labels. IPv6 address labels are
-      used for address selection. See <ulink url="https://tools.ietf.org/html/rfc3484">RFC 3484</ulink>.
-      Precedence is managed by userspace, and only the label itself is stored in the kernel</para>
+      <para>An [IPv6AddressLabel] section accepts the following keys. Specify several [IPv6AddressLabel]
+      sections to configure several address labels. IPv6 address labels are used for address selection. See
+      <ulink url="https://tools.ietf.org/html/rfc3484">RFC 3484</ulink>. Precedence is managed by userspace,
+      and only the label itself is stored in the kernel</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>Label=</varname></term>
           <listitem>
-            <para> The label for the prefix (an unsigned integer) ranges 0 to 4294967294.
-            0xffffffff is reserved. This key is mandatory.</para>
+            <para>The label for the prefix, an unsigned integer in the range 0–4294967294.
+            0xffffffff is reserved. This setting is mandatory.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1020,15 +1127,14 @@
  <refsect1>
     <title>[RoutingPolicyRule] Section Options</title>
 
-      <para>An <literal>[RoutingPolicyRule]</literal> section accepts the
-      following keys. Specify several <literal>[RoutingPolicyRule]</literal>
+      <para>An [RoutingPolicyRule] section accepts the following keys. Specify several [RoutingPolicyRule]
       sections to configure several rules.</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>TypeOfService=</varname></term>
           <listitem>
-            <para>Specifies the type of service to match a number between 0 to 255.</para>
+            <para>Takes a number between 0 and 255 that specifies the type of service to match.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1135,16 +1241,15 @@
 
     <refsect1>
       <title>[NextHop] Section Options</title>
-      <para>The <literal>[NextHop]</literal> section accepts the
-      following keys. Specify several <literal>[NextHop]</literal>
-      sections to configure several nexthop. Nexthop is used to manipulate entries in the kernel's nexthop
-      tables.</para>
+      <para>The [NextHop] section is used to manipulate entries in the kernel's "nexthop" tables.  The
+      [NextHop] section accepts the following keys. Specify several [NextHop] sections to configure several
+      hops.</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>Gateway=</varname></term>
           <listitem>
-            <para>As in the <literal>[Network]</literal> section. This is mandatory.</para>
+            <para>As in the [Network] section. This is mandatory.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1158,9 +1263,8 @@
 
   <refsect1>
     <title>[Route] Section Options</title>
-      <para>The <literal>[Route]</literal> section accepts the
-      following keys. Specify several <literal>[Route]</literal>
-      sections to configure several routes.</para>
+      <para>The [Route] section accepts the following keys. Specify several [Route] sections to configure
+      several routes.</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
@@ -1207,10 +1311,10 @@
           <term><varname>IPv6Preference=</varname></term>
           <listitem>
             <para>Specifies the route preference as defined in <ulink
-            url="https://tools.ietf.org/html/rfc4191">RFC4191</ulink> for Router Discovery messages.
-            Which can be one of <literal>low</literal> the route has a lowest priority,
-            <literal>medium</literal> the route has a default priority or
-            <literal>high</literal> the route has a highest priority.</para>
+            url="https://tools.ietf.org/html/rfc4191">RFC 4191</ulink> for Router Discovery messages.  Which
+            can be one of <literal>low</literal> the route has a lowest priority, <literal>medium</literal>
+            the route has a default priority or <literal>high</literal> the route has a highest priority.
+            </para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1345,8 +1449,7 @@
 
   <refsect1>
     <title>[DHCPv4] Section Options</title>
-      <para>The <literal>[DHCPv4]</literal> section configures the
-      DHCPv4 client, if it is enabled with the
+      <para>The [DHCPv4] section configures the DHCPv4 client, if it is enabled with the
       <varname>DHCP=</varname> setting described above:</para>
 
       <variablelist class='network-directives'>
@@ -1373,19 +1476,19 @@
         <varlistentry>
           <term><varname>UseNTP=</varname></term>
           <listitem>
-            <para>When true (the default), the NTP servers received
-            from the DHCP server will be used by systemd-timesyncd
-            and take precedence over any statically configured ones.</para>
+            <para>When true (the default), the NTP servers received from the DHCP server will be used by
+            <filename>systemd-timesyncd.service</filename> and take precedence over any statically configured
+            ones.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>UseSIP=</varname></term>
           <listitem>
-            <para>When true (the default), the SIP servers received
-            from the DHCP server will be saved at the state files and can be
-            read via <function>sd_network_link_get_sip_servers()</function> function.</para>
+            <para>When true (the default), the SIP servers received from the DHCP server will be collected
+            and made available to client programs.</para>
           </listitem>
         </varlistentry>
+
         <varlistentry>
           <term><varname>UseMTU=</varname></term>
           <listitem>
@@ -1429,6 +1532,18 @@
             sent even if this is set to true.</para>
           </listitem>
         </varlistentry>
+
+        <varlistentry>
+          <term><varname>MUDURL=</varname></term>
+          <listitem>
+            <para>When configured, the Manufacturer Usage Descriptions (MUD) URL will be sent to the
+            DHCPv4 server. Takes an URL of length up to 255 characters. A superficial verification that
+            the string is a valid URL will be performed. DHCPv4 clients are intended to have at most one
+            MUD URL associated with them. See
+            <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink>.</para>
+          </listitem>
+        </varlistentry>
+
         <varlistentry>
           <term><varname>UseHostname=</varname></term>
           <listitem>
@@ -1456,7 +1571,7 @@
             false.</para>
 
             <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
-            of all host names, in particular of single-label names. It is generally safer to use the supplied domain
+            of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
             only as routing domain, rather than as search domain, in order to not have it affect local resolution of
             single-label names.</para>
 
@@ -1474,7 +1589,14 @@
               "link" scope will be used. For anything else, scope defaults to "global".</para>
           </listitem>
         </varlistentry>
-
+        <varlistentry>
+          <term><varname>UseGateway=</varname></term>
+          <listitem>
+            <para>When true, the gateway will be requested from the DHCP server and added to the routing table with a
+            metric of 1024, and a scope of "link".  When unset, the value specified with <option>UseRoutes=</option>
+            is used.</para>
+          </listitem>
+        </varlistentry>
         <varlistentry>
           <term><varname>UseTimezone=</varname></term>
 
@@ -1562,8 +1684,7 @@
         <varlistentry>
           <term><varname>RouteMetric=</varname></term>
           <listitem>
-            <para>Set the routing metric for routes specified by the
-            DHCP server.</para>
+            <para>Set the routing metric for routes specified by the DHCP server. Defaults to 1024.</para>
           </listitem>
         </varlistentry>
 
@@ -1573,8 +1694,8 @@
             <para>The table identifier for DHCP routes (a number between 1 and 4294967295, or 0 to unset).
             The table can be retrieved using <command>ip route show table <replaceable>num</replaceable></command>.
             </para>
-            <para>When used in combination with <varname>VRF=</varname> the
-            VRF's routing table is used unless this parameter is specified.
+            <para>When used in combination with <varname>VRF=</varname>, the
+            VRF's routing table is used when this parameter is not specified.
             </para>
           </listitem>
         </varlistentry>
@@ -1593,6 +1714,15 @@
           </listitem>
         </varlistentry>
 
+         <varlistentry>
+          <term><varname>FallbackLeaseLifetimeSec=</varname></term>
+          <listitem>
+            <para>Allows to set DHCPv4 lease lifetime when DHCPv4 server does not send the lease lifetime.
+            Takes one of <literal>forever</literal> or <literal>infinity</literal> means that the address
+            never expires. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
+
         <varlistentry>
           <term><varname>SendRelease=</varname></term>
           <listitem>
@@ -1604,32 +1734,57 @@
         <varlistentry>
           <term><varname>SendDecline=</varname></term>
           <listitem>
-            <para>A boolen. When <literal>true</literal>, DHCPv4 clients receives IP address from DHCP server.
-            After new IP is received, DHCPv4 performs IPv4 Duplicate Address Detection. If duplicate use of IP is detected
-            the DHCPv4 client rejects the IP by sending a DHCPDECLINE packet DHCP clients try to obtain an IP address again.
-            See <ulink url="https://tools.ietf.org/html/rfc5227">RFC 5224</ulink>.
-            Defaults to <literal>unset</literal>.</para>
+            <para>A boolean. When <literal>true</literal>, the DHCPv4 client receives the IP address from the
+            DHCP server.  After a new IP is received, the DHCPv4 client performs IPv4 Duplicate Address
+            Detection. If duplicate use is detected, the DHCPv4 client rejects the IP by sending a
+            DHCPDECLINE packet and tries to obtain an IP address again. See <ulink
+            url="https://tools.ietf.org/html/rfc5227">RFC 5224</ulink>. Defaults to
+            <literal>unset</literal>.</para>
           </listitem>
         </varlistentry>
 
         <varlistentry>
-        <term><varname>BlackList=</varname></term>
+        <term><varname>DenyList=</varname></term>
         <listitem>
-          <para>A whitespace-separated list of IPv4 addresses. DHCP offers from servers in the list are rejected.</para>
+          <para>A whitespace-separated list of IPv4 addresses. DHCP offers from servers in the list are rejected. Note that
+          if <varname>AllowList=</varname> is configured then <varname>DenyList=</varname> is ignored.</para>
+        </listitem>
+        </varlistentry>
+
+        <varlistentry>
+        <term><varname>AllowList=</varname></term>
+        <listitem>
+          <para>A whitespace-separated list of IPv4 addresses. DHCP offers from servers in the list are accepted.</para>
         </listitem>
         </varlistentry>
 
         <varlistentry>
           <term><varname>RequestOptions=</varname></term>
           <listitem>
-            <para>A whitespace-separated list of integers in the range 1–254.</para>
+            <para>When configured, allows to set arbitrary request options in the DHCPv4 request options list and will be
+            sent to the DHCPV4 server. A whitespace-separated list of integers in the range 1..254. Defaults to unset.</para>
           </listitem>
         </varlistentry>
 
         <varlistentry>
           <term><varname>SendOption=</varname></term>
           <listitem>
-            <para>Send an arbitrary option in the DHCPv4 request. Takes a DHCP option number, data type
+            <para>Send an arbitrary raw option in the DHCPv4 request. Takes a DHCP option number, data type
+            and data separated with a colon
+            (<literal><replaceable>option</replaceable>:<replaceable>type</replaceable>:<replaceable>value</replaceable></literal>).
+            The option number must be an integer in the range 1..254. The type takes one of <literal>uint8</literal>,
+            <literal>uint16</literal>, <literal>uint32</literal>, <literal>ipv4address</literal>, or
+            <literal>string</literal>. Special characters in the data string may be escaped using
+            <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
+            escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
+            then all options specified earlier are cleared. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>SendVendorOption=</varname></term>
+          <listitem>
+            <para>Send an arbitrary vendor option in the DHCPv4 request. Takes a DHCP option number, data type
             and data separated with a colon
             (<literal><replaceable>option</replaceable>:<replaceable>type</replaceable>:<replaceable>value</replaceable></literal>).
             The option number must be an integer in the range 1..254. The type takes one of <literal>uint8</literal>,
@@ -1645,7 +1800,7 @@
 
   <refsect1>
     <title>[DHCPv6] Section Options</title>
-      <para>The <literal>[DHCPv6]</literal> section configures the DHCPv6 client, if it is enabled with the
+      <para>The [DHCPv6] section configures the DHCPv6 client, if it is enabled with the
       <varname>DHCP=</varname> setting described above, or invoked by the IPv6 Router Advertisement:</para>
 
       <variablelist class='network-directives'>
@@ -1653,7 +1808,14 @@
           <term><varname>UseDNS=</varname></term>
           <term><varname>UseNTP=</varname></term>
           <listitem>
-            <para>As in the <literal>[DHCPv4]</literal> section.</para>
+            <para>As in the [DHCPv4] section.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>RouteMetric=</varname></term>
+          <listitem>
+            <para>Set the routing metric for routes specified by the DHCP server. Defaults to 1024.</para>
           </listitem>
         </varlistentry>
 
@@ -1663,10 +1825,45 @@
             <para>Takes a boolean. The DHCPv6 client can obtain configuration parameters from a DHCPv6 server through
             a rapid two-message exchange (solicit and reply). When the rapid commit option is enabled by both
             the DHCPv6 client and the DHCPv6 server, the two-message exchange is used, rather than the default
-            four-method exchange (solicit, advertise, request, and reply). The two-message exchange provides
+            four-message exchange (solicit, advertise, request, and reply). The two-message exchange provides
             faster client configuration and is beneficial in environments in which networks are under a heavy load.
             See <ulink url="https://tools.ietf.org/html/rfc3315#section-17.2.1">RFC 3315</ulink> for details.
             Defaults to true.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>MUDURL=</varname></term>
+          <listitem>
+            <para>When configured, the Manufacturer Usage Descriptions (MUD) URL will be sent to the DHCPV6 server.
+            Takes an URL of length up to 255 characters. A superficial verification that the string is a valid URL
+            will be performed. DHCPv6 clients are intended to have at most one MUD URL associated with them. See
+            <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink>.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>RequestOptions=</varname></term>
+          <listitem>
+            <para>When configured, allows to set arbitrary request options in the DHCPv6 request options list and will
+            sent to the DHCPV6 server. A whitespace-separated list of integers in the range 1..254. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>SendVendorOption=</varname></term>
+          <listitem>
+            <para>Send an arbitrary vendor option in the DHCPv6 request. Takes an enterprise identifier, DHCP
+            option number, data type, and data separated with a colon (<literal><replaceable>enterprise
+            identifier</replaceable>:<replaceable>option</replaceable>:<replaceable>type</replaceable>:
+            <replaceable>value</replaceable></literal>). Enterprise identifier is an unsigned integer in the
+            range 1–4294967294. The option number must be an integer in the range 1–254. Data type takes one
+            of <literal>uint8</literal>, <literal>uint16</literal>, <literal>uint32</literal>,
+            <literal>ipv4address</literal>, <literal>ipv6address</literal>, or
+            <literal>string</literal>. Special characters in the data string may be escaped using <ulink
+            url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
+            escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
+            then all options specified earlier are cleared. Defaults to unset.</para>
           </listitem>
         </varlistentry>
 
@@ -1689,19 +1886,103 @@
         <varlistentry>
           <term><varname>PrefixDelegationHint=</varname></term>
           <listitem>
-            <para>Takes an IPv6 address with prefix length as <varname>Address=</varname> in
-            the "[Network]" section. Specifies the DHCPv6 client for the requesting router to include
-            a prefix-hint in the DHCPv6 solicitation. Prefix ranges 1-128. Defaults to unset.</para>
+            <para>Takes an IPv6 address with prefix length in the same format as the
+            <varname>Address=</varname> in the [Network] section. The DHCPv6 client will include a prefix
+            hint in the DHCPv6 solicitation sent to the server. The prefix length must be in the range
+            1–128. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>WithoutRA=</varname></term>
+          <listitem>
+            <para>Allows DHCPv6 client to start without router advertisements's managed or other address
+            configuration flag. Takes one of <literal>solicit</literal> or
+            <literal>information-request</literal>. Defaults to unset.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>SendOption=</varname></term>
+          <listitem>
+            <para>As in the [DHCPv4] section, however because DHCPv6 uses 16-bit fields to store
+            option numbers, the option number is an integer in the range 1..65536.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>UserClass=</varname></term>
+          <listitem>
+            <para>A DHCPv6 client can use User Class option to identify the type or category of user or applications
+            it represents. The information contained in this option is a string that represents the user class of which
+            the client is a member. Each class sets an identifying string of information to be used by the DHCP
+            service to classify clients. Special characters in the data string may be escaped using
+            <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
+            escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
+            then all options specified earlier are cleared. Takes a whitespace-separated list of strings. Note that
+            currently NUL bytes are not allowed.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>VendorClass=</varname></term>
+          <listitem>
+            <para>A DHCPv6 client can use VendorClass option to identify the vendor that
+            manufactured the hardware on which the client is running. The information
+            contained in the data area of this option is contained in one or more opaque
+            fields that identify details of the hardware configuration. Takes a
+            whitespace-separated list of strings.</para>
           </listitem>
         </varlistentry>
       </variablelist>
   </refsect1>
 
   <refsect1>
+    <title>[DHCPv6PrefixDelegation] Section Options</title>
+    <para>The [DHCPv6PrefixDelegation] section configures delegated prefix assigned by DHCPv6 server.
+    The settings in this section are used only when <varname>IPv6PrefixDelegation=</varname> setting is
+    enabled, or set to <literal>dhcp6</literal>.</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>SubnetId=</varname></term>
+        <listitem>
+          <para>Configure a specific subnet ID on the interface from a (previously) received prefix
+          delegation. You can either set "auto" (the default) or a specific subnet ID (as defined in
+          <ulink url="https://tools.ietf.org/html/rfc4291#section-2.5.4">RFC 4291</ulink>, section
+          2.5.4), in which case the allowed value is hexadecimal, from 0 to 0x7fffffffffffffff
+          inclusive. This option is only effective when used together with
+          <varname>IPv6PrefixDelegation=</varname> and the corresponding configuration on the upstream
+          interface.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Assign=</varname></term>
+        <listitem>
+          <para>Takes a boolean. Specifies whether to add an address from the delegated prefixes which
+          are received from the WAN interface by the <varname>IPv6PrefixDelegation=</varname>. When
+          true (on LAN interfce), the EUI-64 algorithm will be used to form an interface identifier
+          from the delegated prefixes. Defaults to true.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Token=</varname></term>
+        <listitem>
+          <para>Specifies an optional address generation mode for <varname>Assign=</varname>. Takes an
+          IPv6 address. When set, the lower bits of the supplied address are combined with the upper
+          bits of a delegatad prefix received from the WAN interface by the
+          <varname>IPv6PrefixDelegation=</varname> prefixes to form a complete address.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>[IPv6AcceptRA] Section Options</title>
-      <para>The <literal>[IPv6AcceptRA]</literal> section configures the IPv6 Router Advertisement
-      (RA) client, if it is enabled with the <varname>IPv6AcceptRA=</varname> setting described
-      above:</para>
+      <para>The [IPv6AcceptRA] section configures the IPv6 Router Advertisement (RA) client, if it is enabled
+      with the <varname>IPv6AcceptRA=</varname> setting described above:</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
@@ -1726,7 +2007,7 @@
             <literal>~</literal>. Defaults to false.</para>
 
             <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
-            of all host names, in particular of single-label names. It is generally safer to use the supplied domain
+            of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
             only as routing domain, rather than as search domain, in order to not have it affect local resolution of
             single-label names.</para>
 
@@ -1762,19 +2043,26 @@
         </varlistentry>
 
         <varlistentry>
-          <term><varname>BlackList=</varname></term>
+          <term><varname>DenyList=</varname></term>
           <listitem>
             <para>A whitespace-separated list of IPv6 prefixes. IPv6 prefixes supplied via router advertisements in the list are ignored.</para>
           </listitem>
         </varlistentry>
 
+        <varlistentry>
+          <term><varname>DHCPv6Client=</varname></term>
+          <listitem>
+            <para>Takes a boolean, or the special value <literal>always</literal>. When true (the default), the DHCPv6 client will be started when the
+            RA has the managed or other information flag. If set to <literal>always</literal>, the DHCPv6 client will be started even if there is no
+            managed or other information flag in the RA.</para>
+          </listitem>
+        </varlistentry>
       </variablelist>
   </refsect1>
 
   <refsect1>
     <title>[DHCPServer] Section Options</title>
-    <para>The <literal>[DHCPServer]</literal> section contains
-    settings for the DHCP server, if enabled via the
+    <para>The [DHCPServer] section contains settings for the DHCP server, if enabled via the
     <varname>DHCPServer=</varname> option described above:</para>
 
     <variablelist class='network-directives'>
@@ -1818,52 +2106,37 @@
         <term><varname>EmitDNS=</varname></term>
         <term><varname>DNS=</varname></term>
 
-        <listitem><para>Takes a boolean. Configures whether the DHCP leases handed out
-        to clients shall contain DNS server information. Defaults to <literal>yes</literal>.
-        The DNS servers to pass to clients may be configured with the
-        <varname>DNS=</varname> option, which takes a list of IPv4
-        addresses. If the <varname>EmitDNS=</varname> option is
-        enabled but no servers configured, the servers are
-        automatically propagated from an "uplink" interface that has
-        appropriate servers set. The "uplink" interface is determined
-        by the default route of the system with the highest
-        priority. Note that this information is acquired at the time
-        the lease is handed out, and does not take uplink interfaces
-        into account that acquire DNS or NTP server information at a
-        later point. DNS server propagation does not take
-        <filename>/etc/resolv.conf</filename> into account. Also, note
-        that the leases are not refreshed if the uplink network
-        configuration changes. To ensure clients regularly acquire the
-        most current uplink DNS server information, it is thus
-        advisable to shorten the DHCP lease time via
-        <varname>MaxLeaseTimeSec=</varname> described
+        <listitem><para><varname>EmitDNS=</varname> takes a boolean. Configures whether the DHCP leases
+        handed out to clients shall contain DNS server information. Defaults to <literal>yes</literal>.  The
+        DNS servers to pass to clients may be configured with the <varname>DNS=</varname> option, which takes
+        a list of IPv4 addresses. If the <varname>EmitDNS=</varname> option is enabled but no servers
+        configured, the servers are automatically propagated from an "uplink" interface that has appropriate
+        servers set. The "uplink" interface is determined by the default route of the system with the highest
+        priority. Note that this information is acquired at the time the lease is handed out, and does not
+        take uplink interfaces into account that acquire DNS server information at a later point. If no
+        suitable uplinkg interface is found the DNS server data from <filename>/etc/resolv.conf</filename> is
+        used. Also, note that the leases are not refreshed if the uplink network configuration changes. To
+        ensure clients regularly acquire the most current uplink DNS server information, it is thus advisable
+        to shorten the DHCP lease time via <varname>MaxLeaseTimeSec=</varname> described
         above.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>EmitNTP=</varname></term>
         <term><varname>NTP=</varname></term>
-
-        <listitem><para>Similar to the <varname>EmitDNS=</varname> and
-        <varname>DNS=</varname> settings described above, these
-        settings configure whether and what NTP server information
-        shall be emitted as part of the DHCP lease. The same syntax,
-        propagation semantics and defaults apply as for
-        <varname>EmitDNS=</varname> and
-        <varname>DNS=</varname>.</para></listitem>
-      </varlistentry>
-
-      <varlistentry>
         <term><varname>EmitSIP=</varname></term>
         <term><varname>SIP=</varname></term>
+        <term><varname>EmitPOP3=</varname></term>
+        <term><varname>POP3=</varname></term>
+        <term><varname>EmitSMTP=</varname></term>
+        <term><varname>SMTP=</varname></term>
+        <term><varname>EmitLPR=</varname></term>
+        <term><varname>LPR=</varname></term>
 
-        <listitem><para>Similar to the <varname>EmitDNS=</varname> and
-        <varname>DNS=</varname> settings described above, these
-        settings configure whether and what SIP server information
-        shall be emitted as part of the DHCP lease. The same syntax,
-        propagation semantics and defaults apply as for
-        <varname>EmitDNS=</varname> and
-        <varname>DNS=</varname>.</para></listitem>
+        <listitem><para>Similar to the <varname>EmitDNS=</varname> and <varname>DNS=</varname> settings
+        described above, these settings configure whether and what server information for the indicate
+        protocol shall be emitted as part of the DHCP lease. The same syntax, propagation semantics and
+        defaults apply as for <varname>EmitDNS=</varname> and <varname>DNS=</varname>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1896,6 +2169,20 @@
           <para>Send a raw option with value via DHCPv4 server. Takes a DHCP option number, data type
           and data (<literal><replaceable>option</replaceable>:<replaceable>type</replaceable>:<replaceable>value</replaceable></literal>).
           The option number is an integer in the range 1..254. The type takes one of <literal>uint8</literal>,
+          <literal>uint16</literal>, <literal>uint32</literal>, <literal>ipv4address</literal>, <literal>ipv6address</literal>, or
+          <literal>string</literal>. Special characters in the data string may be escaped using
+          <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
+          escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
+          then all options specified earlier are cleared. Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>SendVendorOption=</varname></term>
+        <listitem>
+          <para>Send a vendor option with value via DHCPv4 server. Takes a DHCP option number, data type
+          and data (<literal><replaceable>option</replaceable>:<replaceable>type</replaceable>:<replaceable>value</replaceable></literal>).
+          The option number is an integer in the range 1..254. The type takes one of <literal>uint8</literal>,
           <literal>uint16</literal>, <literal>uint32</literal>, <literal>ipv4address</literal>, or
           <literal>string</literal>. Special characters in the data string may be escaped using
           <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
@@ -1909,11 +2196,9 @@
 
   <refsect1>
     <title>[IPv6PrefixDelegation] Section Options</title>
-    <para>The <literal>[IPv6PrefixDelegation]</literal> section contains
-    settings for sending IPv6 Router Advertisements and whether to act as
-    a router, if enabled via the <varname>IPv6PrefixDelegation=</varname>
-    option described above. IPv6 network prefixes are defined with one or
-    more <literal>[IPv6Prefix]</literal> sections.</para>
+    <para>The [IPv6PrefixDelegation] section contains settings for sending IPv6 Router Advertisements and
+    whether to act as a router, if enabled via the <varname>IPv6PrefixDelegation=</varname> option described
+    above. IPv6 network prefixes are defined with one or more [IPv6Prefix] sections.</para>
 
     <variablelist class='network-directives'>
 
@@ -1957,32 +2242,26 @@
         <term><varname>EmitDNS=</varname></term>
         <term><varname>DNS=</varname></term>
 
-        <listitem><para><varname>DNS=</varname> specifies a list of recursive DNS server IPv6 addresses
-        that are distributed via Router Advertisement messages when <varname>EmitDNS=</varname> is
-        true. <varname>DNS=</varname> also takes special value <literal>_link_local</literal>; in that
-        case the IPv6 link local address is distributed. If <varname>DNS=</varname> is empty, DNS
-        servers are read from the <literal>[Network]</literal> section. If the
-        <literal>[Network]</literal> section does not contain any DNS servers either, DNS servers from
-        the uplink with the highest priority default route are used. When <varname>EmitDNS=</varname>
-        is false, no DNS server information is sent in Router Advertisement messages.
-        <varname>EmitDNS=</varname> defaults to true.
-        </para></listitem>
+        <listitem><para><varname>DNS=</varname> specifies a list of recursive DNS server IPv6 addresses that
+        are distributed via Router Advertisement messages when <varname>EmitDNS=</varname> is
+        true. <varname>DNS=</varname> also takes special value <literal>_link_local</literal>; in that case
+        the IPv6 link local address is distributed. If <varname>DNS=</varname> is empty, DNS servers are read
+        from the [Network] section. If the [Network] section does not contain any DNS servers either, DNS
+        servers from the uplink with the highest priority default route are used. When
+        <varname>EmitDNS=</varname> is false, no DNS server information is sent in Router Advertisement
+        messages. <varname>EmitDNS=</varname> defaults to true.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>EmitDomains=</varname></term>
         <term><varname>Domains=</varname></term>
 
-        <listitem><para>A list of DNS search domains distributed via Router
-        Advertisement messages when <varname>EmitDomains=</varname> is true. If
-        <varname>Domains=</varname> is empty, DNS search domains are read from the
-        <literal>[Network]</literal> section. If the <literal>[Network]</literal>
-        section does not contain any DNS search domains either, DNS search
-        domains from the uplink with the highest priority default route are
-        used. When <varname>EmitDomains=</varname> is false, no DNS search domain
-        information is sent in Router Advertisement messages.
-        <varname>EmitDomains=</varname> defaults to true.
-        </para></listitem>
+        <listitem><para>A list of DNS search domains distributed via Router Advertisement messages when
+        <varname>EmitDomains=</varname> is true. If <varname>Domains=</varname> is empty, DNS search domains
+        are read from the [Network] section. If the [Network] section does not contain any DNS search domains
+        either, DNS search domains from the uplink with the highest priority default route are used. When
+        <varname>EmitDomains=</varname> is false, no DNS search domain information is sent in Router
+        Advertisement messages. <varname>EmitDomains=</varname> defaults to true.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1998,10 +2277,9 @@
 
     <refsect1>
     <title>[IPv6Prefix] Section Options</title>
-    <para>One or more <literal>[IPv6Prefix]</literal> sections contain the IPv6
-    prefixes that are announced via Router Advertisements. See
-    <ulink url="https://tools.ietf.org/html/rfc4861">RFC 4861</ulink>
-    for further details.</para>
+    <para>One or more [IPv6Prefix] sections contain the IPv6 prefixes that are announced via Router
+    Advertisements. See <ulink url="https://tools.ietf.org/html/rfc4861">RFC 4861</ulink> for further
+    details.</para>
 
     <variablelist class='network-directives'>
 
@@ -2019,13 +2297,11 @@
       <varlistentry>
         <term><varname>Prefix=</varname></term>
 
-        <listitem><para>The IPv6 prefix that is to be distributed to hosts.
-        Similarly to configuring static IPv6 addresses, the setting is
-        configured as an IPv6 prefix and its prefix length, separated by a
-        <literal>/</literal> character. Use multiple
-        <literal>[IPv6Prefix]</literal> sections to configure multiple IPv6
-        prefixes since prefix lifetimes, address autoconfiguration and onlink
-        status may differ from one prefix to another.</para></listitem>
+        <listitem><para>The IPv6 prefix that is to be distributed to hosts.  Similarly to configuring static
+        IPv6 addresses, the setting is configured as an IPv6 prefix and its prefix length, separated by a
+        <literal>/</literal> character. Use multiple [IPv6Prefix] sections to configure multiple IPv6
+        prefixes since prefix lifetimes, address autoconfiguration and onlink status may differ from one
+        prefix to another.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2038,12 +2314,17 @@
         to 2592000 seconds (30 days).</para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><varname>Assign=</varname></term>
+        <listitem><para>Takes a boolean. When true, adds an address from the prefix. Default to false.
+        </para></listitem>
+      </varlistentry>
     </variablelist>
     </refsect1>
 
     <refsect1>
     <title>[IPv6RoutePrefix] Section Options</title>
-    <para>One or more <literal>[IPv6RoutePrefix]</literal> sections contain the IPv6
+    <para>One or more [IPv6RoutePrefix] sections contain the IPv6
     prefix routes that are announced via Router Advertisements. See
     <ulink url="https://tools.ietf.org/html/rfc4191">RFC 4191</ulink>
     for further details.</para>
@@ -2053,12 +2334,10 @@
       <varlistentry>
         <term><varname>Route=</varname></term>
 
-        <listitem><para>The IPv6 route that is to be distributed to hosts.
-        Similarly to configuring static IPv6 routes, the setting is
-        configured as an IPv6 prefix routes and its prefix route length,
-        separated by a<literal>/</literal> character. Use multiple
-        <literal>[IPv6PrefixRoutes]</literal> sections to configure multiple IPv6
-        prefix routes.</para></listitem>
+        <listitem><para>The IPv6 route that is to be distributed to hosts.  Similarly to configuring static
+        IPv6 routes, the setting is configured as an IPv6 prefix routes and its prefix route length,
+        separated by a <literal>/</literal> character. Use multiple [IPv6PrefixRoutes] sections to configure
+        multiple IPv6 prefix routes.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2074,8 +2353,7 @@
 
     <refsect1>
     <title>[Bridge] Section Options</title>
-      <para>The <literal>[Bridge]</literal> section accepts the
-      following keys.</para>
+      <para>The [Bridge] section accepts the following keys:</para>
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>UnicastFlood=</varname></term>
@@ -2123,10 +2401,9 @@
         <varlistentry>
           <term><varname>HairPin=</varname></term>
           <listitem>
-            <para>Takes a boolean. Configures whether traffic may be sent back
-            out of the port on which it was received. When this flag is false, and the bridge
-            will not forward traffic back out of the receiving port.
-            When unset, the kernel's default will be used.</para>
+            <para>Takes a boolean. Configures whether traffic may be sent back out of the port on which it
+            was received. When this flag is false, then the bridge will not forward traffic back out of the
+            receiving port. When unset, the kernel's default will be used.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -2202,17 +2479,14 @@
   </refsect1>
   <refsect1>
     <title>[BridgeFDB] Section Options</title>
-      <para>The <literal>[BridgeFDB]</literal> section manages the
-      forwarding database table of a port and accepts the following
-      keys. Specify several <literal>[BridgeFDB]</literal> sections to
-      configure several static MAC table entries.</para>
+      <para>The [BridgeFDB] section manages the forwarding database table of a port and accepts the following
+      keys. Specify several [BridgeFDB] sections to configure several static MAC table entries.</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>MACAddress=</varname></term>
           <listitem>
-            <para>As in the <literal>[Network]</literal> section. This
-            key is mandatory.</para>
+            <para>As in the [Network] section. This key is mandatory.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -2254,15 +2528,37 @@
   </refsect1>
 
   <refsect1>
+    <title>[LLDP] Section Options</title>
+      <para>The [LLDP] section manages the Link Layer Discovery Protocol (LLDP) and accepts the following
+      keys.</para>
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>MUDURL=</varname></term>
+          <listitem>
+            <para>Controls support for Ethernet LLDP packet's Manufacturer Usage Description (MUD). MUD is an embedded software
+            standard defined by the IETF that allows IoT Device makers to advertise device specifications, including the intended
+            communication patterns for their device when it connects to the network. The network can then use this intent to author
+            a context-specific access policy, so the device functions only within those parameters. Takes an URL of length up to 255
+            characters. A superficial verification that the string is a valid URL
+            will be performed. See
+            <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink> for details. The MUD URL received
+            from the LLDP packets will be saved at the state files and can be read via
+            <function>sd_lldp_neighbor_get_mud_url()</function> function.</para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>[CAN] Section Options</title>
-      <para>The <literal>[CAN]</literal> section manages the Controller Area Network (CAN bus) and accepts the
-      following keys.</para>
+      <para>The [CAN] section manages the Controller Area Network (CAN bus) and accepts the
+      following keys:</para>
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>BitRate=</varname></term>
           <listitem>
             <para>The bitrate of CAN device in bits per second. The usual SI prefixes (K, M) with the base of 1000 can
-            be used here.</para>
+            be used here. Takes a number in the range 1..4294967295.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -2270,6 +2566,29 @@
           <listitem>
             <para>Optional sample point in percent with one decimal (e.g. <literal>75%</literal>,
             <literal>87.5%</literal>) or permille (e.g. <literal>875‰</literal>).</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>DataBitRate=</varname></term>
+          <term><varname>DataSamplePoint=</varname></term>
+          <listitem>
+            <para>The bitrate and sample point for the data phase, if CAN-FD is used. These settings are
+            analogous to the <varname>BitRate=</varname> and <varname>SamplePoint=</varname> keys.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>FDMode=</varname></term>
+          <listitem>
+            <para>Takes a boolean. When <literal>yes</literal>, CAN-FD mode is enabled for the interface.
+            Note, that a bitrate and optional sample point should also be set for the CAN-FD data phase using
+            the <varname>DataBitRate=</varname> and <varname>DataSamplePoint=</varname> keys.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>FDNonISO=</varname></term>
+          <listitem>
+            <para>Takes a boolean. When <literal>yes</literal>, non-ISO CAN-FD mode is enabled for the
+            interface. When unset, the kernel's default will be used.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -2283,10 +2602,27 @@
           </listitem>
         </varlistentry>
         <varlistentry>
+          <term><varname>Termination=</varname></term>
+          <listitem>
+            <para>Takes a boolean. When <literal>yes</literal>, the termination resistor will be selected for
+            the bias network. When unset, the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
           <term><varname>TripleSampling=</varname></term>
           <listitem>
             <para>Takes a boolean. When <literal>yes</literal>, three samples (instead of one) are used to determine
             the value of a received bit by majority rule. When unset, the kernel's default will be used.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>ListenOnly=</varname></term>
+          <listitem>
+            <para>Takes a boolean. When <literal>yes</literal>, listen-only mode is enabled. When the
+            interface is in listen-only mode, the interface neither transmit CAN frames nor send ACK
+            bit. Listen-only mode is important to debug CAN networks without interfering with the
+            communication or acknowledge the CAN frame. When unset, the kernel's default will be used.
+            </para>
           </listitem>
         </varlistentry>
       </variablelist>
@@ -2294,7 +2630,7 @@
 
   <refsect1>
     <title>[QDisc] Section Options</title>
-    <para>The <literal>[QDisc]</literal> section manages the traffic control queueing discipline (qdisc).</para>
+    <para>The [QDisc] section manages the traffic control queueing discipline (qdisc).</para>
 
     <variablelist class='network-directives'>
       <varlistentry>
@@ -2305,39 +2641,20 @@
         </listitem>
       </varlistentry>
 
-      <varlistentry>
-        <term><varname>Handle=</varname></term>
-        <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
     </variablelist>
   </refsect1>
 
   <refsect1>
     <title>[NetworkEmulator] Section Options</title>
-    <para>The <literal>[NetworkEmulator]</literal> section manages the queueing discipline (qdisc) of
-    the network emulator. It can be used to configure the kernel packet scheduler and simulate packet
-    delay and loss for UDP or TCP applications, or limit the bandwidth usage of a particular service to
-    simulate internet connections.</para>
+    <para>The [NetworkEmulator] section manages the queueing discipline (qdisc) of the network emulator. It
+    can be used to configure the kernel packet scheduler and simulate packet delay and loss for UDP or TCP
+    applications, or limit the bandwidth usage of a particular service to simulate internet connections.
+    </para>
 
     <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>Parent=</varname></term>
-        <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>Handle=</varname></term>
-        <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>DelaySec=</varname></term>
@@ -2359,7 +2676,7 @@
         <term><varname>PacketLimit=</varname></term>
         <listitem>
           <para>Specifies the maximum number of packets the qdisc may hold queued at a time.
-          An unsigned integer ranges 0 to 4294967294. Defaults to 1000.</para>
+          An unsigned integer in the range 0–4294967294. Defaults to 1000.</para>
         </listitem>
       </varlistentry>
 
@@ -2383,25 +2700,12 @@
 
   <refsect1>
     <title>[TokenBucketFilter] Section Options</title>
-    <para>The <literal>[TokenBucketFilter]</literal> section manages the queueing discipline (qdisc) of
-    token bucket filter (tbf).</para>
+    <para>The [TokenBucketFilter] section manages the queueing discipline (qdisc) of token bucket filter
+    (tbf).</para>
 
     <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>Parent=</varname></term>
-        <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>Handle=</varname></term>
-        <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>LatencySec=</varname></term>
@@ -2412,20 +2716,20 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>LimitSize=</varname></term>
+        <term><varname>LimitBytes=</varname></term>
         <listitem>
           <para>Takes the number of bytes that can be queued waiting for tokens to become available.
           When the size is suffixed with K, M, or G, it is parsed as Kilobytes, Megabytes, or Gigabytes,
-          respectively, to the base of 1000. Defaults to unset.</para>
+          respectively, to the base of 1024. Defaults to unset.</para>
         </listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><varname>Burst=</varname></term>
+        <term><varname>BurstBytes=</varname></term>
         <listitem>
           <para>Specifies the size of the bucket. This is the maximum amount of bytes that tokens
           can be available for instantaneous transfer. When the size is suffixed with K, M, or G, it is
-          parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1000. Defaults to
+          parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024. Defaults to
           unset.</para>
         </listitem>
       </varlistentry>
@@ -2444,7 +2748,7 @@
         <listitem>
           <para>The Minimum Packet Unit (MPU) determines the minimal token usage (specified in bytes)
           for a packet. When suffixed with K, M, or G, the specified size is parsed as Kilobytes,
-          Megabytes, or Gigabytes, respectively, to the base of 1000. Defaults to zero.</para>
+          Megabytes, or Gigabytes, respectively, to the base of 1024. Defaults to zero.</para>
         </listitem>
       </varlistentry>
 
@@ -2461,7 +2765,7 @@
         <term><varname>MTUBytes=</varname></term>
         <listitem>
           <para>Specifies the size of the peakrate bucket. When suffixed with K, M, or G, the specified
-          size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1000.
+          size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024.
           Defaults to unset.</para>
         </listitem>
       </varlistentry>
@@ -2469,26 +2773,52 @@
   </refsect1>
 
   <refsect1>
-    <title>[StochasticFairnessQueueing] Section Options</title>
-    <para>The <literal>[StochasticFairnessQueueing]</literal> section manages the queueing discipline
-    (qdisc) of stochastic fairness queueing (sfq).</para>
+    <title>[PIE] Section Options</title>
+    <para>The [PIE] section manages the queueing discipline (qdisc) of Proportional Integral
+    controller-Enhanced (PIE).</para>
 
     <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>Parent=</varname></term>
-        <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
-        <term><varname>Handle=</varname></term>
+        <term><varname>PacketLimit=</varname></term>
         <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
+          <para>Specifies the hard limit on the queue size in number of packets. When this limit is reached, incoming packets are
+          dropped. An unsigned integer in the range 1–4294967294. Defaults to unset and kernel's default is used.</para>
         </listitem>
       </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[StochasticFairBlue] Section Options</title>
+    <para>The [StochasticFairBlue] section manages the queueing discipline (qdisc) of stochastic fair blue
+    (sfb).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>PacketLimit=</varname></term>
+        <listitem>
+          <para>Specifies the hard limit on the queue size in number of packets. When this limit is reached,
+          incoming packets are dropped. An unsigned integer in the range 0–4294967294. Defaults to unset and
+          kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[StochasticFairnessQueueing] Section Options</title>
+    <para>The [StochasticFairnessQueueing] section manages the queueing discipline (qdisc) of stochastic
+    fairness queueing (sfq).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>PerturbPeriodSec=</varname></term>
@@ -2500,32 +2830,119 @@
   </refsect1>
 
   <refsect1>
-    <title>[ControlledDelay] Section Options</title>
-    <para>The <literal>[ControlledDelay]</literal> section manages the queueing discipline (qdisc) of
-    controlled delay (CoDel).</para>
+    <title>[BFIFO] Section Options</title>
+    <para>The [BFIFO] section manages the queueing discipline (qdisc) of Byte limited Packet First In First
+    Out (bfifo).</para>
 
     <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>Parent=</varname></term>
-        <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
-        <term><varname>Handle=</varname></term>
+        <term><varname>LimitBytes=</varname></term>
         <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
+          <para>Specifies the hard limit on the FIFO size in bytes. The size limit (a buffer size) to prevent
+          it from overflowing in case it is unable to dequeue packets as quickly as it receives them. When
+          this limit is reached, incoming packets are dropped. When suffixed with K, M, or G, the specified
+          size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024. Defaults
+          to unset and kernel's default is used.</para>
         </listitem>
       </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[PFIFO] Section Options</title>
+    <para>The [PFIFO] section manages the queueing discipline (qdisc) of Packet First In First Out
+    (pfifo).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>PacketLimit=</varname></term>
         <listitem>
-          <para>Specifies the hard limit on the queue size in number of packets. When this limit is reached, incoming packets are
-          dropped. An unsigned integer ranges 0 to 4294967294. Defaults to unset and kernel's default is used.</para>
+          <para>Specifies the hard limit on the FIFO size in number of packets. The size limit (a buffer
+          size) to prevent it from overflowing in case it is unable to dequeue packets as quickly as it
+          receives them. When this limit is reached, incoming packets are dropped. An unsigned integer in the
+          range 0–4294967294. Defaults to unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[PFIFOHeadDrop] Section Options</title>
+    <para>The [PFIFOHeadDrop] section manages the queueing discipline (qdisc) of Packet First In First Out
+    Head Drop (pfifo_head_drop).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>PacketLimit=</varname></term>
+        <listitem>
+          <para>As in [PFIFO] section.</para></listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+     <title>[PFIFOFast] Section Options</title>
+     <para>The [PFIFOFast] section manages the queueing discipline (qdisc) of Packet First In First Out Fast
+     (pfifo_fast).</para>
+
+     <variablelist class='network-directives'>
+       <xi:include href="tc.xml" xpointer="qdisc-parent" />
+       <xi:include href="tc.xml" xpointer="qdisc-handle" />
+     </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[CAKE] Section Options</title>
+    <para>The [CAKE] section manages the queueing discipline (qdisc) of Common Applications Kept Enhanced
+    (CAKE).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>OverheadBytes=</varname></term>
+        <listitem>
+          <para>Specifies that bytes to be addeded to the size of each packet. Bytes may be negative. Takes
+          an integer in the range from -64 to 256. Defaults to unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Bandwidth=</varname></term>
+        <listitem>
+          <para>Specifies the shaper bandwidth. When suffixed with K, M, or G, the specified size is
+          parsed as Kilobits, Megabits, or Gigabits, respectively, to the base of 1000. Defaults to
+          unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[ControlledDelay] Section Options</title>
+    <para>The [ControlledDelay] section manages the queueing discipline (qdisc) of
+    controlled delay (CoDel).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>PacketLimit=</varname></term>
+        <listitem>
+          <para>Specifies the hard limit on the queue size in number of packets. When this limit is reached,
+          incoming packets are dropped. An unsigned integer in the range 0–4294967294. Defaults to unset and
+          kernel's default is used.</para>
         </listitem>
       </varlistentry>
 
@@ -2564,26 +2981,131 @@
   </refsect1>
 
   <refsect1>
-    <title>[FairQueueingControlledDelay] Section Options</title>
-    <para>The <literal>[FairQueueingControlledDelay]</literal> section manages the queueing discipline
-    (qdisc) of fair queuing controlled delay (FQ-CoDel).</para>
+    <title>[DeficitRoundRobinScheduler] Section Options</title>
+    <para>The [DeficitRoundRobinScheduler] section manages the queueing discipline (qdisc) of Deficit Round
+    Robin Scheduler (DRR).</para>
 
     <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[DeficitRoundRobinSchedulerClass] Section Options</title>
+    <para>The [DeficitRoundRobinSchedulerClass] section manages the traffic control class of Deficit Round
+    Robin Scheduler (DRR).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="tclass-parent" />
+      <xi:include href="tc.xml" xpointer="tclass-classid" />
+
       <varlistentry>
-        <term><varname>Parent=</varname></term>
+        <term><varname>QuantumBytes=</varname></term>
         <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
+          <para>Specifies the amount of bytes a flow is allowed to dequeue before the scheduler moves
+          to the next class. When suffixed with K, M, or G, the specified size is parsed as Kilobytes,
+          Megabytes, or Gigabytes, respectively, to the base of 1024. Defaults to the MTU of the
+          interface.</para>
+        </listitem>
+      </varlistentry>
+
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[EnhancedTransmissionSelection] Section Options</title>
+    <para>The [EnhancedTransmissionSelection] section manages the queueing discipline (qdisc) of Enhanced
+    Transmission Selection (ETS).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>Bands=</varname></term>
+        <listitem>
+          <para>Specifies the number of bands. An unsigned integer in the range 1–16. This value has to be at
+          least large enough to cover the strict bands specified through the <varname>StrictBands=</varname>
+          and bandwidth-sharing bands specified in <varname>QuantumBytes=</varname>.</para>
         </listitem>
       </varlistentry>
 
       <varlistentry>
-        <term><varname>Handle=</varname></term>
+        <term><varname>StrictBands=</varname></term>
         <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
+          <para>Specifies the number of bands that should be created in strict mode. An unsigned integer in
+          the range 1–16.</para>
         </listitem>
       </varlistentry>
+
+      <varlistentry>
+        <term><varname>QuantumBytes=</varname></term>
+        <listitem>
+          <para>Specifies the white-space separated list of quantum used in band-sharing bands. When
+          suffixed with K, M, or G, the specified size is parsed as Kilobytes, Megabytes, or Gigabytes,
+          respectively, to the base of 1024. This setting can be specified multiple times. If an empty
+          string is assigned, then the all previous assignments are cleared.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>PriorityMap=</varname></term>
+        <listitem>
+          <para>The priority map maps the priority of a packet to a band. The argument is a white-space
+          separated list of numbers. The first number indicates which band the packets with priority
+          0 should be put to, the second is for priority 1, and so on. There can be up to 16 numbers in
+          the list. If there are fewer, the default band that traffic with one of the unmentioned
+          priorities goes to is the last one. Each band number must be 0..255. This setting can be
+          specified multiple times. If an empty string is assigned, then the all previous assignments
+          are cleared.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[GenericRandomEarlyDetection] Section Options</title>
+    <para>The [GenericRandomEarlyDetection] section manages the queueing discipline (qdisc) of Generic Random
+    Early Detection (GRED).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>VirtualQueues=</varname></term>
+        <listitem>
+          <para>Specifies the number of virtual queues. Takes a integer in the range 1-16. Defaults to unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DefaultVirtualQueue=</varname></term>
+        <listitem>
+          <para>Specifies the number of default virtual queue. This must be less than <varname>VirtualQueue=</varname>.
+          Defaults to unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>GenericRIO=</varname></term>
+        <listitem>
+          <para>Takes a boolean. It turns on the RIO-like buffering scheme. Defaults to
+          unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[FairQueueingControlledDelay] Section Options</title>
+    <para>The [FairQueueingControlledDelay] section manages the queueing discipline (qdisc) of fair queuing
+    controlled delay (FQ-CoDel).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>PacketLimit=</varname></term>
@@ -2594,7 +3116,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>MemoryLimit=</varname></term>
+        <term><varname>MemoryLimitBytes=</varname></term>
         <listitem>
           <para>Specifies the limit on the total number of bytes that can be queued in this FQ-CoDel instance.
           When suffixed with K, M, or G, the specified size is parsed as Kilobytes, Megabytes, or Gigabytes,
@@ -2627,9 +3149,9 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>Quantum=</varname></term>
+        <term><varname>QuantumBytes=</varname></term>
         <listitem>
-          <para>Specifies the number of bytes used as 'deficit' in the fair queuing algorithmtimespan.
+          <para>Specifies the number of bytes used as the "deficit" in the fair queuing algorithm timespan.
           When suffixed with K, M, or G, the specified size is parsed as Kilobytes, Megabytes, or Gigabytes,
           respectively, to the base of 1024. Defaults to unset and kernel's default is used.</para>
         </listitem>
@@ -2655,25 +3177,12 @@
 
   <refsect1>
     <title>[FairQueueing] Section Options</title>
-    <para>The <literal>[FairQueueing]</literal> section manages the queueing discipline
-    (qdisc) of fair queue traffic policing (FQ).</para>
+    <para>The [FairQueueing] section manages the queueing discipline (qdisc) of fair queue traffic policing
+    (FQ).</para>
 
     <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>Parent=</varname></term>
-        <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>Handle=</varname></term>
-        <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>PacketLimit=</varname></term>
@@ -2692,7 +3201,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>Quantum=</varname></term>
+        <term><varname>QuantumBytes=</varname></term>
         <listitem>
           <para>Specifies the credit per dequeue RR round, i.e. the amount of bytes a flow is allowed
           to dequeue at once. When suffixed with K, M, or G, the specified size is parsed as Kilobytes,
@@ -2702,7 +3211,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><varname>InitialQuantum=</varname></term>
+        <term><varname>InitialQuantumBytes=</varname></term>
         <listitem>
           <para>Specifies the initial sending rate credit, i.e. the amount of bytes a new flow is
           allowed to dequeue initially. When suffixed with K, M, or G, the specified size is parsed as
@@ -2757,25 +3266,12 @@
 
   <refsect1>
     <title>[TrivialLinkEqualizer] Section Options</title>
-    <para>The <literal>[TrivialLinkEqualizer]</literal> section manages the queueing discipline (qdisc) of
-    trivial link equalizer (teql).</para>
+    <para>The [TrivialLinkEqualizer] section manages the queueing discipline (qdisc) of trivial link
+    equalizer (teql).</para>
 
     <variablelist class='network-directives'>
-      <varlistentry>
-        <term><varname>Parent=</varname></term>
-        <listitem>
-          <para>Specifies the parent Queueing Discipline (qdisc). Takes one of <literal>root</literal>,
-          <literal>clsact</literal> or <literal>ingress</literal>. Defaults to <literal>root</literal>.</para>
-        </listitem>
-      </varlistentry>
-
-      <varlistentry>
-        <term><varname>Handle=</varname></term>
-        <listitem>
-          <para>Specifies the major number of unique identifier of the qdisc, known as the handle.
-          Takes a number in hexadecimal ranges 1 to ffff. Defaults to unset.</para>
-        </listitem>
-      </varlistentry>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
 
       <varlistentry>
         <term><varname>Id=</varname></term>
@@ -2790,10 +3286,178 @@
   </refsect1>
 
   <refsect1>
+    <title>[HierarchyTokenBucket] Section Options</title>
+    <para>The [HierarchyTokenBucket] section manages the queueing discipline (qdisc) of hierarchy token
+    bucket (htb).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>DefaultClass=</varname></term>
+        <listitem>
+          <para>Takes the minor id in hexadecimal of the default class. Unclassified traffic gets sent
+          to the class. Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RateToQuantum=</varname></term>
+        <listitem>
+          <para>Takes an unsigned integer. The DRR quantums are calculated by dividing the value
+          configured in <varname>Rate=</varname> by <varname>RateToQuantum=</varname>.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[HierarchyTokenBucketClass] Section Options</title>
+    <para>The [HierarchyTokenBucketClass] section manages the traffic control class of hierarchy token bucket
+    (htb).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="tclass-parent" />
+      <xi:include href="tc.xml" xpointer="tclass-classid" />
+
+      <varlistentry>
+        <term><varname>Priority=</varname></term>
+        <listitem>
+          <para>Specifies the priority of the class. In the round-robin process, classes with the lowest
+          priority field are tried for packets first.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>QuantumBytes=</varname></term>
+        <listitem>
+          <para>Specifies how many bytes to serve from leaf at once. When suffixed with K, M, or G, the
+          specified size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of
+          1024.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MTUBytes=</varname></term>
+        <listitem>
+          <para>Specifies the maximum packet size we create. When suffixed with K, M, or G, the specified
+          size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>OverheadBytes=</varname></term>
+        <listitem>
+          <para>Takes an unsigned integer which specifies per-packet size overhead used in rate
+          computations. When suffixed with K, M, or G, the specified size is parsed as Kilobytes,
+          Megabytes, or Gigabytes, respectively, to the base of 1024.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Rate=</varname></term>
+        <listitem>
+          <para>Specifies the maximum rate this class and all its children are guaranteed. When suffixed
+          with K, M, or G, the specified size is parsed as Kilobits, Megabits, or Gigabits, respectively,
+          to the base of 1000. This setting is mandatory.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>CeilRate=</varname></term>
+        <listitem>
+          <para>Specifies the maximum rate at which a class can send, if its parent has bandwidth to spare.
+          When suffixed with K, M, or G, the specified size is parsed as Kilobits, Megabits, or Gigabits,
+          respectively, to the base of 1000. When unset, the value specified with <varname>Rate=</varname>
+          is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>BufferBytes=</varname></term>
+        <listitem>
+          <para>Specifies the maximum bytes burst which can be accumulated during idle period. When suffixed
+          with K, M, or G, the specified size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively,
+          to the base of 1024.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>CeilBufferBytes=</varname></term>
+        <listitem>
+          <para>Specifies the maximum bytes burst for ceil which can be accumulated during idle period.
+          When suffixed with K, M, or G, the specified size is parsed as Kilobytes, Megabytes, or Gigabytes,
+          respectively, to the base of 1024.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[HeavyHitterFilter] Section Options</title>
+    <para>The [HeavyHitterFilter] section manages the queueing discipline (qdisc) of Heavy Hitter Filter
+    (hhf).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>PacketLimit=</varname></term>
+        <listitem>
+          <para>Specifies the hard limit on the queue size in number of packets. When this limit is reached,
+          incoming packets are dropped. An unsigned integer in the range 0–4294967294. Defaults to unset and
+          kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[QuickFairQueueing] Section Options</title>
+    <para>The [QuickFairQueueing] section manages the queueing discipline (qdisc) of Quick Fair Queueing
+    (QFQ).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[QuickFairQueueingClass] Section Options</title>
+    <para>The [QuickFairQueueingClass] section manages the traffic control class of Quick Fair Queueing
+    (qfq).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="tclass-parent" />
+      <xi:include href="tc.xml" xpointer="tclass-classid" />
+
+      <varlistentry>
+        <term><varname>Weight=</varname></term>
+        <listitem>
+          <para>Specifies the weight of the class. Takes an integer in the range 1..1023. Defaults to
+          unset in which case the kernel default is used.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>MaxPacketBytes=</varname></term>
+        <listitem>
+          <para>Specifies the maximum packet size in bytes for the class. When suffixed with K, M, or G, the specified
+          size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024. When unset,
+          the kernel default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>[BridgeVLAN] Section Options</title>
-      <para>The <literal>[BridgeVLAN]</literal> section manages the VLAN ID configuration of a bridge port and accepts
-      the following keys. Specify several <literal>[BridgeVLAN]</literal> sections to configure several VLAN entries.
-      The <varname>VLANFiltering=</varname> option has to be enabled, see <literal>[Bridge]</literal> section in
+      <para>The [BridgeVLAN] section manages the VLAN ID configuration of a bridge port and accepts the
+      following keys. Specify several [BridgeVLAN] sections to configure several VLAN entries. The
+      <varname>VLANFiltering=</varname> option has to be enabled, see the [Bridge] section in
       <citerefentry><refentrytitle>systemd.netdev</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para>
 
       <variablelist class='network-directives'>
@@ -2869,7 +3533,10 @@ DHCP=ipv6</programlisting>
 Name=enp2s0
 
 [Network]
-IPv6PrefixDelegation=dhcpv6</programlisting>
+IPv6PrefixDelegation=dhcpv6
+
+[DHCPv6]
+AssignAcquiredDelegatedPrefixAddress=yes</programlisting>
 
       <para>This will enable IPv6 PD on the interface enp1s0 as an upstream interface where the
       DHCPv6 client is running and enp2s0 as a downstream interface where the prefix is delegated to.</para>

@@ -43,7 +43,7 @@ struct match_callback {
 
         unsigned last_iteration;
 
-        /* Don't dispatch this slot with with messages that arrived in any iteration before or at the this
+        /* Don't dispatch this slot with messages that arrived in any iteration before or at the this
          * one. We use this to ensure that matches don't apply "retroactively" and thus can confuse the
          * caller: matches will only match incoming messages from the moment on the match was installed. */
         uint64_t after;
@@ -354,6 +354,7 @@ bool interface_name_is_valid(const char *p) _pure_;
 bool service_name_is_valid(const char *p) _pure_;
 bool member_name_is_valid(const char *p) _pure_;
 bool object_path_is_valid(const char *p) _pure_;
+
 char *object_path_startswith(const char *a, const char *b) _pure_;
 
 bool namespace_complex_pattern(const char *pattern, const char *value) _pure_;

@@ -780,6 +780,7 @@ static void mount_dump(Unit *u, FILE *f, const char *prefix) {
                 "%sSloppyOptions: %s\n"
                 "%sLazyUnmount: %s\n"
                 "%sForceUnmount: %s\n"
+                "%sReadWriteOnly: %s\n"
                 "%sTimeoutSec: %s\n",
                 prefix, mount_state_to_string(m->state),
                 prefix, mount_result_to_string(m->result),
@@ -795,6 +796,7 @@ static void mount_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, yes_no(m->sloppy_options),
                 prefix, yes_no(m->lazy_unmount),
                 prefix, yes_no(m->force_unmount),
+                prefix, yes_no(m->read_write_only),
                 prefix, format_timespan(buf, sizeof(buf), m->timeout_usec, USEC_PER_SEC));
 
         if (m->control_pid > 0)
@@ -861,6 +863,8 @@ static void mount_enter_dead(Mount *m, MountResult f) {
                 m->result = f;
 
         unit_log_result(UNIT(m), m->result == MOUNT_SUCCESS, mount_result_to_string(m->result));
+        unit_warn_leftover_processes(UNIT(m), unit_log_leftover_process_stop);
+
         mount_set_state(m, m->result != MOUNT_SUCCESS ? MOUNT_FAILED : MOUNT_DEAD);
 
         m->exec_runtime = exec_runtime_unref(m->exec_runtime, true);
@@ -1006,15 +1010,18 @@ static void mount_enter_mounting(Mount *m) {
         (void) mkdir_p_label(m->where, m->directory_mode);
 
         unit_warn_if_dir_nonempty(UNIT(m), m->where);
-        unit_warn_leftover_processes(UNIT(m));
+        unit_warn_leftover_processes(UNIT(m), unit_log_leftover_process_start);
 
         m->control_command_id = MOUNT_EXEC_MOUNT;
         m->control_command = m->exec_command + MOUNT_EXEC_MOUNT;
 
         /* Create the source directory for bind-mounts if needed */
         p = get_mount_parameters_fragment(m);
-        if (p && mount_is_bind(p))
-                (void) mkdir_p_label(p->what, m->directory_mode);
+        if (p && mount_is_bind(p)) {
+                r = mkdir_p_label(p->what, m->directory_mode);
+                if (r < 0)
+                        log_unit_error_errno(UNIT(m), r, "Failed to make bind mount source '%s': %m", p->what);
+        }
 
         if (p) {
                 _cleanup_free_ char *opts = NULL;
@@ -1026,6 +1033,8 @@ static void mount_enter_mounting(Mount *m) {
                 r = exec_command_set(m->control_command, MOUNT_PATH, p->what, m->where, NULL);
                 if (r >= 0 && m->sloppy_options)
                         r = exec_command_append(m->control_command, "-s", NULL);
+                if (r >= 0 && m->read_write_only)
+                        r = exec_command_append(m->control_command, "-w", NULL);
                 if (r >= 0 && p->fstype)
                         r = exec_command_append(m->control_command, "-t", p->fstype, NULL);
                 if (r >= 0 && !isempty(opts))
@@ -1086,6 +1095,8 @@ static void mount_enter_remounting(Mount *m) {
                                      "-o", o, NULL);
                 if (r >= 0 && m->sloppy_options)
                         r = exec_command_append(m->control_command, "-s", NULL);
+                if (r >= 0 && m->read_write_only)
+                        r = exec_command_append(m->control_command, "-w", NULL);
                 if (r >= 0 && p->fstype)
                         r = exec_command_append(m->control_command, "-t", p->fstype, NULL);
         } else
@@ -1666,9 +1677,30 @@ static int mount_setup_unit(
         if (!is_path(where))
                 return 0;
 
+        /* Mount unit names have to be (like all other unit names) short enough to fit into file names. This
+         * means there's a good chance that overly long mount point paths after mangling them to look like a
+         * unit name would result in unit names we don't actually consider valid. This should be OK however
+         * as such long mount point paths should not happen on regular systems — and if they appear
+         * nonetheless they are generally synthesized by software, and thus managed by that other
+         * software. Having such long names just means you cannot use systemd to manage those specific mount
+         * points, which should be an OK restriction to make. After all we don't have to be able to manage
+         * all mount points in the world — as long as we don't choke on them when we encounter them. */
         r = unit_name_from_path(where, ".mount", &e);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate unit name from path '%s': %m", where);
+        if (r < 0) {
+                static RateLimit rate_limit = { /* Let's log about this at warning level at most once every
+                                                 * 5s. Given that we generate this whenever we read the file
+                                                 * otherwise we probably shouldn't flood the logs with
+                                                 * this */
+                        .interval = 5 * USEC_PER_SEC,
+                        .burst = 1,
+                };
+
+                return log_struct_errno(
+                                ratelimit_below(&rate_limit) ? LOG_WARNING : LOG_DEBUG, r,
+                                "MESSAGE_ID=" SD_MESSAGE_MOUNT_POINT_PATH_NOT_SUITABLE_STR,
+                                "MOUNT_POINT=%s", where,
+                                LOG_MESSAGE("Failed to generate valid unit name from path '%s', ignoring mount point: %m", where));
+        }
 
         u = manager_get_unit(m, e);
         if (u)
@@ -1678,7 +1710,7 @@ static int mount_setup_unit(
                  * by the sysadmin having called mount(8) directly. */
                 r = mount_setup_new_unit(m, e, what, where, options, fstype, &flags, &u);
         if (r < 0)
-                return log_warning_errno(r, "Failed to set up mount unit: %m");
+                return log_warning_errno(r, "Failed to set up mount unit for '%s': %m", where);
 
         /* If the mount changed properties or state, let's notify our clients */
         if (flags & (MOUNT_PROC_JUST_CHANGED|MOUNT_PROC_JUST_MOUNTED))
@@ -1906,7 +1938,7 @@ static int mount_process_proc_self_mountinfo(Manager *m) {
 
                                 /* Remember that this device might just have disappeared */
                                 if (set_ensure_allocated(&gone, &path_hash_ops) < 0 ||
-                                    set_put_strdup(gone, mount->parameters_proc_self_mountinfo.what) < 0)
+                                    set_put_strdup(&gone, mount->parameters_proc_self_mountinfo.what) < 0)
                                         log_oom(); /* we don't care too much about OOM here... */
                         }
 
@@ -1961,7 +1993,7 @@ static int mount_process_proc_self_mountinfo(Manager *m) {
                         /* Track devices currently used */
 
                         if (set_ensure_allocated(&around, &path_hash_ops) < 0 ||
-                            set_put_strdup(around, mount->parameters_proc_self_mountinfo.what) < 0)
+                            set_put_strdup(&around, mount->parameters_proc_self_mountinfo.what) < 0)
                                 log_oom();
                 }
 
@@ -2138,7 +2170,6 @@ const UnitVTable mount_vtable = {
 
         .control_pid = mount_control_pid,
 
-        .bus_vtable = bus_mount_vtable,
         .bus_set_property = bus_mount_set_property,
         .bus_commit_properties = bus_mount_commit_properties,
 

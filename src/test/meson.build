@@ -301,6 +301,12 @@ tests += [
          [],
          []],
 
+        [['src/test/test-offline-passwd.c',
+          'src/shared/offline-passwd.c',
+          'src/shared/offline-passwd.h'],
+         [],
+         []],
+
         [['src/test/test-escape.c'],
          [],
          []],
@@ -470,7 +476,7 @@ tests += [
          '', 'timeout=90'],
 
         [['src/test/test-set.c'],
-         [],
+         [libbasic],
          []],
 
         [['src/test/test-ordered-set.c'],
@@ -588,14 +594,17 @@ tests += [
          [],
          []],
 
+        [['src/test/test-coredump-util.c'],
+         [],
+         []],
+
         [['src/test/test-daemon.c'],
          [],
          []],
 
         [['src/test/test-cgroup.c'],
          [],
-         [],
-         '', 'manual'],
+         []],
 
         [['src/test/test-cgroup-cpu.c'],
          [libcore,
@@ -662,7 +671,8 @@ tests += [
           libseccomp,
           libselinux,
           libmount,
-          libblkid]],
+          libblkid],
+         '', 'timeout=120'],
 
         [['src/test/test-execute.c'],
          [libcore,
@@ -779,6 +789,10 @@ tests += [
          [],
          []],
 
+        [['src/test/test-sd-path.c'],
+         [],
+         []],
+
         [['src/test/test-local-addresses.c'],
          [],
          []],
@@ -886,12 +900,14 @@ tests += [
          [libjournal_core,
           libshared],
          [liblz4,
+          libzstd,
           libxz]],
 
         [['src/journal/test-compress-benchmark.c'],
          [libjournal_core,
           libshared],
          [liblz4,
+          libzstd,
           libxz],
          '', 'timeout=90'],
 
@@ -1023,10 +1039,7 @@ tests += [
 
 ]
 
-# test-bus-vtable-cc.cc is a symlink and symlinks get lost in containers on FuzzBuzz.
-# The issue has been reported to the developers of FuzzBuzz and hopefully will be fixed soon.
-# In the meantime, let's just skip the symlink there.
-if cxx_cmd != '' and not want_fuzzbuzz
+if cxx_cmd != ''
         tests += [
                 [['src/libsystemd/sd-bus/test-bus-vtable-cc.cc'],
                  [],
@@ -1136,4 +1149,14 @@ tests += [
          [liblogind_core,
           libshared],
          [threads]],
+]
+
+############################################################
+
+tests += [
+        [['src/test/test-xdg-autostart.c',
+          'src/xdg-autostart-generator/xdg-autostart-service.c',
+          'src/xdg-autostart-generator/xdg-autostart-service.h',],
+         [],
+         []],
 ]

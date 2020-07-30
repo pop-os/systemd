@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: LGPL-2.1+
 
 # This is a settings file for OS image generation using mkosi (https://github.com/systemd/mkosi).
-# Simply invoke "mkosi" in the project directory to build an OS image.
+# Symlink this file to mkosi.default in the project root directory and invoke "mkosi" to build an OS image.
 
 [Distribution]
 Distribution=fedora
-Release=31
+Release=32
 
 [Output]
 Format=gpt_ext4
@@ -31,7 +31,6 @@ BuildPackages=
         gnu-efi-devel
         gnutls-devel
         gperf
-        hostname
         iptables-devel
         kmod-devel
         libacl-devel
@@ -48,6 +47,7 @@ BuildPackages=
         libselinux-devel
         libxkbcommon-devel
         libxslt
+        libzstd-devel
         lz4
         lz4-devel
         m4
@@ -63,16 +63,13 @@ BuildPackages=
         tree
         valgrind-devel
         xz-devel
+        zstd
 
 Packages=
-        coreutils
-        cryptsetup-libs
-        kmod-libs
-        e2fsprogs
-        libidn2
-        libseccomp
+        # libzstd can be dropped once the Fedora RPM gets a dependency on it
+        libzstd
+        # procps-ng provides a set of useful utilies (ps, free, etc)
         procps-ng
-        util-linux
 
 BuildDirectory=mkosi.builddir
 Cache=mkosi.cache

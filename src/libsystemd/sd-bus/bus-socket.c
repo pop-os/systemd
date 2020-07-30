@@ -136,11 +136,10 @@ static int bus_socket_write_auth(sd_bus *b) {
         if (b->prefer_writev)
                 k = writev(b->output_fd, b->auth_iovec + b->auth_index, ELEMENTSOF(b->auth_iovec) - b->auth_index);
         else {
-                struct msghdr mh;
-                zero(mh);
-
-                mh.msg_iov = b->auth_iovec + b->auth_index;
-                mh.msg_iovlen = ELEMENTSOF(b->auth_iovec) - b->auth_index;
+                struct msghdr mh = {
+                        .msg_iov = b->auth_iovec + b->auth_index,
+                        .msg_iovlen = ELEMENTSOF(b->auth_iovec) - b->auth_index,
+                };
 
                 k = sendmsg(b->output_fd, &mh, MSG_DONTWAIT|MSG_NOSIGNAL);
                 if (k < 0 && errno == ENOTSOCK) {
@@ -519,10 +518,7 @@ static int bus_socket_read_auth(sd_bus *b) {
         ssize_t k;
         int r;
         void *p;
-        union {
-                struct cmsghdr cmsghdr;
-                uint8_t buf[CMSG_SPACE(sizeof(int) * BUS_FDS_MAX)];
-        } control;
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int) * BUS_FDS_MAX)) control;
         bool handle_cmsg = false;
 
         assert(b);
@@ -551,11 +547,12 @@ static int bus_socket_read_auth(sd_bus *b) {
         if (b->prefer_readv)
                 k = readv(b->input_fd, &iov, 1);
         else {
-                zero(mh);
-                mh.msg_iov = &iov;
-                mh.msg_iovlen = 1;
-                mh.msg_control = &control;
-                mh.msg_controllen = sizeof(control);
+                mh = (struct msghdr) {
+                        .msg_iov = &iov,
+                        .msg_iovlen = 1,
+                        .msg_control = &control,
+                        .msg_controllen = sizeof(control),
+                };
 
                 k = recvmsg_safe(b->input_fd, &mh, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
                 if (k == -ENOTSOCK) {
@@ -1169,10 +1166,7 @@ int bus_socket_read_message(sd_bus *bus) {
         size_t need;
         int r;
         void *b;
-        union {
-                struct cmsghdr cmsghdr;
-                uint8_t buf[CMSG_SPACE(sizeof(int) * BUS_FDS_MAX)];
-        } control;
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int) * BUS_FDS_MAX)) control;
         bool handle_cmsg = false;
 
         assert(bus);
@@ -1196,11 +1190,12 @@ int bus_socket_read_message(sd_bus *bus) {
         if (bus->prefer_readv)
                 k = readv(bus->input_fd, &iov, 1);
         else {
-                zero(mh);
-                mh.msg_iov = &iov;
-                mh.msg_iovlen = 1;
-                mh.msg_control = &control;
-                mh.msg_controllen = sizeof(control);
+                mh = (struct msghdr) {
+                        .msg_iov = &iov,
+                        .msg_iovlen = 1,
+                        .msg_control = &control,
+                        .msg_controllen = sizeof(control),
+                };
 
                 k = recvmsg_safe(bus->input_fd, &mh, MSG_DONTWAIT|MSG_CMSG_CLOEXEC);
                 if (k == -ENOTSOCK) {
@@ -1267,21 +1262,15 @@ int bus_socket_read_message(sd_bus *bus) {
 }
 
 int bus_socket_process_opening(sd_bus *b) {
-        int error = 0;
+        int error = 0, events, r;
         socklen_t slen = sizeof(error);
-        struct pollfd p = {
-                .fd = b->output_fd,
-                .events = POLLOUT,
-        };
-        int r;
 
         assert(b->state == BUS_OPENING);
 
-        r = poll(&p, 1, 0);
-        if (r < 0)
-                return -errno;
-
-        if (!(p.revents & (POLLOUT|POLLERR|POLLHUP)))
+        events = fd_wait_for_event(b->output_fd, POLLOUT, 0);
+        if (events < 0)
+                return events;
+        if (!(events & (POLLOUT|POLLERR|POLLHUP)))
                 return 0;
 
         r = getsockopt(b->output_fd, SOL_SOCKET, SO_ERROR, &error, &slen);
@@ -1289,7 +1278,7 @@ int bus_socket_process_opening(sd_bus *b) {
                 b->last_connect_error = errno;
         else if (error != 0)
                 b->last_connect_error = error;
-        else if (p.revents & (POLLERR|POLLHUP))
+        else if (events & (POLLERR|POLLHUP))
                 b->last_connect_error = ECONNREFUSED;
         else
                 return bus_socket_start_auth(b);

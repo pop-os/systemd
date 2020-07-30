@@ -126,6 +126,12 @@ static int netdev_bridge_post_create(NetDev *netdev, Link *link, sd_netlink_mess
                         return log_netdev_error_errno(netdev, r, "Could not append IFLA_BR_VLAN_FILTERING attribute: %m");
         }
 
+        if (b->vlan_protocol >= 0) {
+                r = sd_netlink_message_append_u16(req, IFLA_BR_VLAN_PROTOCOL, b->vlan_protocol);
+                if (r < 0)
+                        return log_netdev_error_errno(netdev, r, "Could not append IFLA_BR_VLAN_PROTOCOL attribute: %m");
+        }
+
         if (b->stp >= 0) {
                 r = sd_netlink_message_append_u32(req, IFLA_BR_STP_STATE, b->stp);
                 if (r < 0)
@@ -212,7 +218,7 @@ int link_set_bridge(Link *link) {
                         return log_link_error_errno(link, r, "Could not append IFLA_BRPORT_FAST_LEAVE attribute: %m");
         }
 
-        if (link->network->allow_port_to_be_root >=  0) {
+        if (link->network->allow_port_to_be_root >= 0) {
                 r = sd_netlink_message_append_u8(req, IFLA_BRPORT_PROTECT, link->network->allow_port_to_be_root);
                 if (r < 0)
                         return log_link_error_errno(link, r, "Could not append IFLA_BRPORT_PROTECT attribute: %m");
@@ -320,13 +326,13 @@ int config_parse_bridge_igmp_version(
 
         r = safe_atou8(rvalue, &u);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r,
+                log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to parse bridge's multicast IGMP version number '%s', ignoring assignment: %m",
                            rvalue);
                 return 0;
         }
         if (!IN_SET(u, 2, 3)) {
-                log_syntax(unit, LOG_ERR, filename, line, 0,
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "Invalid bridge's multicast IGMP version number '%s', ignoring assignment.", rvalue);
                 return 0;
         }
@@ -346,6 +352,7 @@ static void bridge_init(NetDev *n) {
         b->mcast_querier = -1;
         b->mcast_snooping = -1;
         b->vlan_filtering = -1;
+        b->vlan_protocol = -1;
         b->stp = -1;
         b->default_pvid = VLANID_INVALID;
         b->forward_delay = USEC_INFINITY;

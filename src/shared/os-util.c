@@ -3,6 +3,7 @@
 #include "alloc-util.h"
 #include "env-file.h"
 #include "fd-util.h"
+#include "fileio.h"
 #include "fs-util.h"
 #include "macro.h"
 #include "os-util.h"
@@ -76,10 +77,9 @@ int fopen_os_release(const char *root, char **ret_path, FILE **ret_file) {
         if (r < 0)
                 return r;
 
-        f = fdopen(fd, "r");
+        f = take_fdopen(&fd, "r");
         if (!f)
                 return -errno;
-        fd = -1;
 
         *ret_file = f;
 
@@ -116,4 +116,34 @@ int load_os_release_pairs(const char *root, char ***ret) {
                 return r;
 
         return load_env_file_pairs(f, p, ret);
+}
+
+int load_os_release_pairs_with_prefix(const char *root, const char *prefix, char ***ret) {
+        _cleanup_strv_free_ char **os_release_pairs = NULL, **os_release_pairs_prefixed = NULL;
+        char **p, **q;
+        int r;
+
+        r = load_os_release_pairs(root, &os_release_pairs);
+        if (r < 0)
+                return r;
+
+        STRV_FOREACH_PAIR(p, q, os_release_pairs) {
+                char *line;
+
+                /* We strictly return only the four main ID fields and ignore the rest */
+                if (!STR_IN_SET(*p, "ID", "VERSION_ID", "BUILD_ID", "VARIANT_ID"))
+                        continue;
+
+                ascii_strlower(*p);
+                line = strjoin(prefix, *p, "=", *q);
+                if (!line)
+                        return -ENOMEM;
+                r = strv_consume(&os_release_pairs_prefixed, line);
+                if (r < 0)
+                        return r;
+        }
+
+        *ret = TAKE_PTR(os_release_pairs_prefixed);
+
+        return 0;
 }

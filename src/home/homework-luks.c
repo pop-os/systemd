@@ -8,6 +8,7 @@
 
 #include "blkid-util.h"
 #include "blockdev-util.h"
+#include "btrfs-util.h"
 #include "chattr-util.h"
 #include "dm-util.h"
 #include "errno-util.h"
@@ -15,6 +16,7 @@
 #include "fileio.h"
 #include "fs-util.h"
 #include "fsck-util.h"
+#include "home-util.h"
 #include "homework-luks.h"
 #include "homework-mount.h"
 #include "id128-util.h"
@@ -37,12 +39,6 @@
  * but actually doesn't accept uneven numbers in many cases. To avoid any confusion around this we'll
  * strictly round disk sizes down to the next 1K boundary.*/
 #define DISK_SIZE_ROUND_DOWN(x) ((x) & ~UINT64_C(1023))
-
-static bool supported_fstype(const char *fstype) {
-        /* Limit the set of supported file systems a bit, as protection against little tested kernel file
-         * systems. Also, we only support the resize ioctls for these file systems. */
-        return STR_IN_SET(fstype, "ext4", "btrfs", "xfs");
-}
 
 static int probe_file_system_by_fd(
                 int fd,
@@ -220,7 +216,7 @@ static int luks_setup(
                 const char *cipher_mode,
                 uint64_t volume_key_size,
                 char **passwords,
-                char **pkcs11_decrypted_passwords,
+                const PasswordCache *cache,
                 bool discard,
                 struct crypt_device **ret,
                 sd_id128_t *ret_found_uuid,
@@ -231,6 +227,7 @@ static int luks_setup(
         _cleanup_(erase_and_freep) void *vk = NULL;
         sd_id128_t p;
         size_t vks;
+        char **list;
         int r;
 
         assert(node);
@@ -282,12 +279,14 @@ static int luks_setup(
         if (!vk)
                 return log_oom();
 
-        r = luks_try_passwords(cd, pkcs11_decrypted_passwords, vk, &vks);
-        if (r == -ENOKEY) {
-                r = luks_try_passwords(cd, passwords, vk, &vks);
-                if (r == -ENOKEY)
-                        return log_error_errno(r, "No valid password for LUKS superblock.");
+        r = -ENOKEY;
+        FOREACH_POINTER(list, cache->pkcs11_passwords, cache->fido2_passwords, passwords) {
+                r = luks_try_passwords(cd, list, vk, &vks);
+                if (r != -ENOKEY)
+                        break;
         }
+        if (r == -ENOKEY)
+                return log_error_errno(r, "No valid password for LUKS superblock.");
         if (r < 0)
                 return log_error_errno(r, "Failed to unlocks LUKS superblock: %m");
 
@@ -316,7 +315,7 @@ static int luks_setup(
 static int luks_open(
                 const char *dm_name,
                 char **passwords,
-                char **pkcs11_decrypted_passwords,
+                PasswordCache *cache,
                 struct crypt_device **ret,
                 sd_id128_t *ret_found_uuid,
                 void **ret_volume_key,
@@ -325,6 +324,7 @@ static int luks_open(
         _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         _cleanup_(erase_and_freep) void *vk = NULL;
         sd_id128_t p;
+        char **list;
         size_t vks;
         int r;
 
@@ -365,12 +365,14 @@ static int luks_open(
         if (!vk)
                 return log_oom();
 
-        r = luks_try_passwords(cd, pkcs11_decrypted_passwords, vk, &vks);
-        if (r == -ENOKEY) {
-                r = luks_try_passwords(cd, passwords, vk, &vks);
-                if (r == -ENOKEY)
-                        return log_error_errno(r, "No valid password for LUKS superblock.");
+        r = -ENOKEY;
+        FOREACH_POINTER(list, cache->pkcs11_passwords, cache->fido2_passwords, passwords) {
+                r = luks_try_passwords(cd, list, vk, &vks);
+                if (r != -ENOKEY)
+                        break;
         }
+        if (r == -ENOKEY)
+                return log_error_errno(r, "No valid password for LUKS superblock.");
         if (r < 0)
                 return log_error_errno(r, "Failed to unlocks LUKS superblock: %m");
 
@@ -626,7 +628,7 @@ static int luks_validate_home_record(
                 struct crypt_device *cd,
                 UserRecord *h,
                 const void *volume_key,
-                char ***pkcs11_decrypted_passwords,
+                PasswordCache *cache,
                 UserRecord **ret_luks_home_record) {
 
         int r, token;
@@ -731,9 +733,10 @@ static int luks_validate_home_record(
                 if (!user_record_compatible(h, lhr))
                         return log_error_errno(SYNTHETIC_ERRNO(EREMCHG), "LUKS home record not compatible with host record, refusing.");
 
-                r = user_record_authenticate(lhr, h, pkcs11_decrypted_passwords);
+                r = user_record_authenticate(lhr, h, cache, /* strict_verify= */ true);
                 if (r < 0)
                         return r;
+                assert(r > 0); /* Insist that a password was verified */
 
                 *ret_luks_home_record = TAKE_PTR(lhr);
                 return 0;
@@ -892,19 +895,19 @@ int home_store_header_identity_luks(
         return 1;
 }
 
-static int run_fitrim(int root_fd) {
+int run_fitrim(int root_fd) {
         char buf[FORMAT_BYTES_MAX];
         struct fstrim_range range = {
                 .len = UINT64_MAX,
         };
 
         /* If discarding is on, discard everything right after mounting, so that the discard setting takes
-         * effect on activation. */
+         * effect on activation. (Also, optionally, trim on logout) */
 
         assert(root_fd >= 0);
 
         if (ioctl(root_fd, FITRIM, &range) < 0) {
-                if (IN_SET(errno, ENOTTY, EOPNOTSUPP, EBADF)) {
+                if (ERRNO_IS_NOT_SUPPORTED(errno) || errno == EBADF) {
                         log_debug_errno(errno, "File system does not support FITRIM, not trimming.");
                         return 0;
                 }
@@ -917,14 +920,31 @@ static int run_fitrim(int root_fd) {
         return 1;
 }
 
-static int run_fallocate(int backing_fd, const struct stat *st) {
+int run_fitrim_by_path(const char *root_path) {
+        _cleanup_close_ int root_fd = -1;
+
+        root_fd = open(root_path, O_RDONLY|O_DIRECTORY|O_CLOEXEC);
+        if (root_fd < 0)
+                return log_error_errno(errno, "Failed to open file system '%s' for trimming: %m", root_path);
+
+        return run_fitrim(root_fd);
+}
+
+int run_fallocate(int backing_fd, const struct stat *st) {
         char buf[FORMAT_BYTES_MAX];
+        struct stat stbuf;
 
         assert(backing_fd >= 0);
-        assert(st);
 
         /* If discarding is off, let's allocate the whole image before mounting, so that the setting takes
          * effect on activation */
+
+        if (!st) {
+                if (fstat(backing_fd, &stbuf) < 0)
+                        return log_error_errno(errno, "Failed to fstat(): %m");
+
+                st = &stbuf;
+        }
 
         if (!S_ISREG(st->st_mode))
                 return 0;
@@ -954,11 +974,21 @@ static int run_fallocate(int backing_fd, const struct stat *st) {
         return 1;
 }
 
+int run_fallocate_by_path(const char *backing_path) {
+        _cleanup_close_ int backing_fd = -1;
+
+        backing_fd = open(backing_path, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
+        if (backing_fd < 0)
+                return log_error_errno(errno, "Failed to open '%s' for fallocate(): %m", backing_path);
+
+        return run_fallocate(backing_fd, NULL);
+}
+
 int home_prepare_luks(
                 UserRecord *h,
                 bool already_activated,
                 const char *force_image_path,
-                char ***pkcs11_decrypted_passwords,
+                PasswordCache *cache,
                 HomeSetup *setup,
                 UserRecord **ret_luks_home) {
 
@@ -986,7 +1016,7 @@ int home_prepare_luks(
 
                 r = luks_open(setup->dm_name,
                               h->password,
-                              pkcs11_decrypted_passwords ? *pkcs11_decrypted_passwords : NULL,
+                              cache,
                               &cd,
                               &found_luks_uuid,
                               &volume_key,
@@ -994,7 +1024,7 @@ int home_prepare_luks(
                 if (r < 0)
                         return r;
 
-                r = luks_validate_home_record(cd, h, volume_key, pkcs11_decrypted_passwords, &luks_home);
+                r = luks_validate_home_record(cd, h, volume_key, cache, &luks_home);
                 if (r < 0)
                         return r;
 
@@ -1109,8 +1139,8 @@ int home_prepare_luks(
                                h->luks_cipher_mode,
                                h->luks_volume_key_size,
                                h->password,
-                               pkcs11_decrypted_passwords ? *pkcs11_decrypted_passwords : NULL,
-                               user_record_luks_discard(h),
+                               cache,
+                               user_record_luks_discard(h) || user_record_luks_offline_discard(h),
                                &cd,
                                &found_luks_uuid,
                                &volume_key,
@@ -1120,7 +1150,7 @@ int home_prepare_luks(
 
                 dm_activated = true;
 
-                r = luks_validate_home_record(cd, h, volume_key, pkcs11_decrypted_passwords, &luks_home);
+                r = luks_validate_home_record(cd, h, volume_key, cache, &luks_home);
                 if (r < 0)
                         goto fail;
 
@@ -1132,7 +1162,7 @@ int home_prepare_luks(
                 if (r < 0)
                         goto fail;
 
-                r = home_unshare_and_mount(setup->dm_node, fstype, user_record_luks_discard(h));
+                r = home_unshare_and_mount(setup->dm_node, fstype, user_record_luks_discard(h), user_record_mount_flags(h));
                 if (r < 0)
                         goto fail;
 
@@ -1146,6 +1176,9 @@ int home_prepare_luks(
 
                 if (user_record_luks_discard(h))
                         (void) run_fitrim(root_fd);
+
+                setup->image_fd = TAKE_FD(fd);
+                setup->do_offline_fallocate = !(setup->do_offline_fitrim = user_record_luks_offline_discard(h));
         }
 
         setup->loop = TAKE_PTR(loop);
@@ -1191,7 +1224,7 @@ static void print_size_summary(uint64_t host_size, uint64_t encrypted_size, stru
 
 int home_activate_luks(
                 UserRecord *h,
-                char ***pkcs11_decrypted_passwords,
+                PasswordCache *cache,
                 UserRecord **ret_home) {
 
         _cleanup_(user_record_unrefp) UserRecord *new_home = NULL, *luks_home_record = NULL;
@@ -1223,7 +1256,7 @@ int home_activate_luks(
                         h,
                         false,
                         NULL,
-                        pkcs11_decrypted_passwords,
+                        cache,
                         &setup,
                         &luks_home_record);
         if (r < 0)
@@ -1241,7 +1274,7 @@ int home_activate_luks(
                         h,
                         &setup,
                         luks_home_record,
-                        pkcs11_decrypted_passwords,
+                        cache,
                         &sfs,
                         &new_home);
         if (r < 0)
@@ -1258,14 +1291,16 @@ int home_activate_luks(
                 return r;
 
         setup.undo_mount = false;
+        setup.do_offline_fitrim = false;
 
         loop_device_relinquish(setup.loop);
 
-        r = dm_deferred_remove(setup.dm_name);
+        r = crypt_deactivate_by_name(NULL, setup.dm_name, CRYPT_DEACTIVATE_DEFERRED);
         if (r < 0)
                 log_warning_errno(r, "Failed to relinquish DM device, ignoring: %m");
 
         setup.undo_dm = false;
+        setup.do_offline_fallocate = false;
 
         log_info("Everything completed.");
 
@@ -1278,6 +1313,7 @@ int home_activate_luks(
 int home_deactivate_luks(UserRecord *h) {
         _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         _cleanup_free_ char *dm_name = NULL, *dm_node = NULL;
+        bool we_detached;
         int r;
 
         /* Note that the DM device and loopback device are set to auto-detach, hence strictly speaking we
@@ -1292,23 +1328,45 @@ int home_deactivate_luks(UserRecord *h) {
 
         r = crypt_init_by_name(&cd, dm_name);
         if (IN_SET(r, -ENODEV, -EINVAL, -ENOENT)) {
-                log_debug_errno(r, "LUKS device %s is already detached.", dm_name);
-                return false;
+                log_debug_errno(r, "LUKS device %s has already been detached.", dm_name);
+                we_detached = false;
         } else if (r < 0)
                 return log_error_errno(r, "Failed to initialize cryptsetup context for %s: %m", dm_name);
+        else {
+                log_info("Discovered used LUKS device %s.", dm_node);
 
-        log_info("Discovered used LUKS device %s.", dm_node);
+                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
 
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+                r = crypt_deactivate(cd, dm_name);
+                if (IN_SET(r, -ENODEV, -EINVAL, -ENOENT)) {
+                        log_debug_errno(r, "LUKS device %s is already detached.", dm_node);
+                        we_detached = false;
+                } else if (r < 0)
+                        return log_info_errno(r, "LUKS device %s couldn't be deactivated: %m", dm_node);
+                else {
+                        log_info("LUKS device detaching completed.");
+                        we_detached = true;
+                }
+        }
 
-        r = crypt_deactivate(cd, dm_name);
-        if (IN_SET(r, -ENODEV, -EINVAL, -ENOENT))
-                log_debug_errno(r, "LUKS device %s is already detached.", dm_node);
-        else if (r < 0)
-                return log_info_errno(r, "LUKS device %s couldn't be deactivated: %m", dm_node);
+        if (user_record_luks_offline_discard(h))
+                log_debug("Not allocating on logout.");
+        else
+                (void) run_fallocate_by_path(user_record_image_path(h));
 
-        log_info("LUKS device detaching completed.");
-        return true;
+        return we_detached;
+}
+
+int home_trim_luks(UserRecord *h) {
+        assert(h);
+
+        if (!user_record_luks_offline_discard(h)) {
+                log_debug("Not trimming on logout.");
+                return 0;
+        }
+
+        (void) run_fitrim_by_path(user_record_home_directory(h));
+        return 0;
 }
 
 static int run_mkfs(
@@ -1412,7 +1470,7 @@ static int luks_format(
                 const char *dm_name,
                 sd_id128_t uuid,
                 const char *label,
-                char **pkcs11_decrypted_passwords,
+                const PasswordCache *cache,
                 char **effective_passwords,
                 bool discard,
                 UserRecord *hr,
@@ -1481,7 +1539,8 @@ static int luks_format(
 
         STRV_FOREACH(pp, effective_passwords) {
 
-                if (strv_contains(pkcs11_decrypted_passwords, *pp)) {
+                if (strv_contains(cache->pkcs11_passwords, *pp) ||
+                    strv_contains(cache->fido2_passwords, *pp)) {
                         log_debug("Using minimal PBKDF for slot %i", slot);
                         r = crypt_set_pbkdf_type(cd, &minimal_pbkdf);
                 } else {
@@ -1666,7 +1725,7 @@ static int wait_for_devlink(const char *path) {
         usec_t until;
         int r;
 
-        /* let's wait for a device link to show up in /dev, with a time-out. This is good to do since we
+        /* let's wait for a device link to show up in /dev, with a timeout. This is good to do since we
          * return a /dev/disk/by-uuid/… link to our callers and they likely want to access it right-away,
          * hence let's wait until udev has caught up with our changes, and wait for the symlink to be
          * created. */
@@ -1765,9 +1824,48 @@ static int calculate_disk_size(UserRecord *h, const char *parent_dir, uint64_t *
         return 0;
 }
 
+static int home_truncate(
+                UserRecord *h,
+                int fd,
+                const char *path,
+                uint64_t size) {
+
+        bool trunc;
+        int r;
+
+        assert(h);
+        assert(fd >= 0);
+        assert(path);
+
+        trunc = user_record_luks_discard(h);
+        if (!trunc) {
+                r = fallocate(fd, 0, 0, size);
+                if (r < 0 && ERRNO_IS_NOT_SUPPORTED(errno)) {
+                        /* Some file systems do not support fallocate(), let's gracefully degrade
+                         * (ZFS, reiserfs, …) and fall back to truncation */
+                        log_notice_errno(errno, "Backing file system does not support fallocate(), falling back to ftruncate(), i.e. implicitly using non-discard mode.");
+                        trunc = true;
+                }
+        }
+
+        if (trunc)
+                r = ftruncate(fd, size);
+
+        if (r < 0) {
+                if (ERRNO_IS_DISK_SPACE(errno)) {
+                        log_error_errno(errno, "Not enough disk space to allocate home.");
+                        return -ENOSPC; /* make recognizable */
+                }
+
+                return log_error_errno(errno, "Failed to truncate home image %s: %m", path);
+        }
+
+        return 0;
+}
+
 int home_create_luks(
                 UserRecord *h,
-                char **pkcs11_decrypted_passwords,
+                PasswordCache *cache,
                 char **effective_passwords,
                 UserRecord **ret_home) {
 
@@ -1878,7 +1976,9 @@ int home_create_luks(
                 if (asprintf(&disk_uuid_path, "/dev/disk/by-uuid/" SD_ID128_UUID_FORMAT_STR, SD_ID128_FORMAT_VAL(luks_uuid)) < 0)
                         return log_oom();
 
-                if (user_record_luks_discard(h)) {
+                if (user_record_luks_discard(h) || user_record_luks_offline_discard(h)) {
+                        /* If we want online or offline discard, discard once before we start using things. */
+
                         if (ioctl(image_fd, BLKDISCARD, (uint64_t[]) { 0, block_device_size }) < 0)
                                 log_full_errno(errno == EOPNOTSUPP ? LOG_DEBUG : LOG_WARNING, errno,
                                                "Failed to issue full-device BLKDISCARD on device, ignoring: %m");
@@ -1917,20 +2017,9 @@ int home_create_luks(
                 if (r < 0)
                         log_warning_errno(r, "Failed to set file attributes on %s, ignoring: %m", temporary_image_path);
 
-                if (user_record_luks_discard(h))
-                        r = ftruncate(image_fd, host_size);
-                else
-                        r = fallocate(image_fd, 0, 0, host_size);
-                if (r < 0) {
-                        if (ERRNO_IS_DISK_SPACE(errno)) {
-                                log_debug_errno(errno, "Not enough disk space to allocate home.");
-                                r = -ENOSPC; /* make recognizable */
-                                goto fail;
-                        }
-
-                        r = log_error_errno(errno, "Failed to truncate home image %s: %m", temporary_image_path);
+                r = home_truncate(h, image_fd, temporary_image_path, host_size);
+                if (r < 0)
                         goto fail;
-                }
 
                 log_info("Allocating image file completed.");
         }
@@ -1973,9 +2062,9 @@ int home_create_luks(
                         dm_name,
                         luks_uuid,
                         user_record_user_name_and_realm(h),
-                        pkcs11_decrypted_passwords,
+                        cache,
                         effective_passwords,
-                        user_record_luks_discard(h),
+                        user_record_luks_discard(h) || user_record_luks_offline_discard(h),
                         h,
                         &cd);
         if (r < 0)
@@ -1997,7 +2086,7 @@ int home_create_luks(
 
         log_info("Formatting file system completed.");
 
-        r = home_unshare_and_mount(dm_node, fstype, user_record_luks_discard(h));
+        r = home_unshare_and_mount(dm_node, fstype, user_record_luks_discard(h), user_record_mount_flags(h));
         if (r < 0)
                 goto fail;
 
@@ -2009,8 +2098,10 @@ int home_create_luks(
                 goto fail;
         }
 
-        if (mkdir(subdir, 0700) < 0) {
-                r = log_error_errno(errno, "Failed to create user directory in mounted image file: %m");
+        /* Prefer using a btrfs subvolume if we can, fall back to directory otherwise */
+        r = btrfs_subvol_make_fallback(subdir, 0700);
+        if (r < 0) {
+                log_error_errno(r, "Failed to create user directory in mounted image file: %m");
                 goto fail;
         }
 
@@ -2053,6 +2144,12 @@ int home_create_luks(
                 goto fail;
         }
 
+        if (user_record_luks_offline_discard(h)) {
+                r = run_fitrim(root_fd);
+                if (r < 0)
+                        goto fail;
+        }
+
         root_fd = safe_close(root_fd);
 
         r = umount_verbose("/run/systemd/user-home-mount");
@@ -2070,6 +2167,12 @@ int home_create_luks(
         dm_activated = false;
 
         loop = loop_device_unref(loop);
+
+        if (!user_record_luks_offline_discard(h)) {
+                r = run_fallocate(image_fd, NULL /* refresh stat() data */);
+                if (r < 0)
+                        goto fail;
+        }
 
         if (disk_uuid_path)
                 (void) ioctl(image_fd, BLKRRPART, 0);
@@ -2188,7 +2291,7 @@ static int can_resize_fs(int fd, uint64_t old_size, uint64_t new_size) {
         return CAN_RESIZE_ONLINE;
 }
 
-static int ext4_offline_resize_fs(HomeSetup *setup, uint64_t new_size, bool discard) {
+static int ext4_offline_resize_fs(HomeSetup *setup, uint64_t new_size, bool discard, unsigned long flags) {
         _cleanup_free_ char *size_str = NULL;
         bool re_open = false, re_mount = false;
         pid_t resize_pid, fsck_pid;
@@ -2258,7 +2361,7 @@ static int ext4_offline_resize_fs(HomeSetup *setup, uint64_t new_size, bool disc
 
         /* Re-establish mounts and reopen the directory */
         if (re_mount) {
-                r = home_mount_node(setup->dm_node, "ext4", discard);
+                r = home_mount_node(setup->dm_node, "ext4", discard, flags);
                 if (r < 0)
                         return r;
 
@@ -2465,7 +2568,7 @@ static int apply_resize_partition(int fd, sd_id128_t disk_uuids, struct fdisk_ta
 int home_resize_luks(
                 UserRecord *h,
                 bool already_activated,
-                char ***pkcs11_decrypted_passwords,
+                PasswordCache *cache,
                 HomeSetup *setup,
                 UserRecord **ret_home) {
 
@@ -2551,11 +2654,11 @@ int home_resize_luks(
                 }
         }
 
-        r = home_prepare_luks(h, already_activated, whole_disk, pkcs11_decrypted_passwords, setup, &header_home);
+        r = home_prepare_luks(h, already_activated, whole_disk, cache, setup, &header_home);
         if (r < 0)
                 return r;
 
-        r = home_load_embedded_identity(h, setup->root_fd, header_home, USER_RECONCILE_REQUIRE_NEWER_OR_EQUAL, pkcs11_decrypted_passwords, &embedded_home, &new_home);
+        r = home_load_embedded_identity(h, setup->root_fd, header_home, USER_RECONCILE_REQUIRE_NEWER_OR_EQUAL, cache, &embedded_home, &new_home);
         if (r < 0)
                 return r;
 
@@ -2625,19 +2728,9 @@ int home_resize_luks(
 
                 if (S_ISREG(st.st_mode)) {
                         /* Grow file size */
-
-                        if (user_record_luks_discard(h))
-                                r = ftruncate(image_fd, new_image_size);
-                        else
-                                r = fallocate(image_fd, 0, 0, new_image_size);
-                        if (r < 0) {
-                                if (ERRNO_IS_DISK_SPACE(errno)) {
-                                        log_debug_errno(errno, "Not enough disk space to grow home.");
-                                        return -ENOSPC; /* make recognizable */
-                                }
-
-                                return log_error_errno(errno, "Failed to grow image file %s: %m", ip);
-                        }
+                        r = home_truncate(h, image_fd, ip, new_image_size);
+                        if (r < 0)
+                                return r;
 
                         log_info("Growing of image file completed.");
                 }
@@ -2688,7 +2781,7 @@ int home_resize_luks(
         if (resize_type == CAN_RESIZE_ONLINE)
                 r = resize_fs(setup->root_fd, new_fs_size, NULL);
         else
-                r = ext4_offline_resize_fs(setup, new_fs_size, user_record_luks_discard(h));
+                r = ext4_offline_resize_fs(setup, new_fs_size, user_record_luks_discard(h), user_record_mount_flags(h));
         if (r < 0)
                 return log_error_errno(r, "Failed to resize file system: %m");
 
@@ -2769,13 +2862,14 @@ int home_resize_luks(
 int home_passwd_luks(
                 UserRecord *h,
                 HomeSetup *setup,
-                char **pkcs11_decrypted_passwords, /* the passwords acquired via PKCS#11 security tokens */
-                char **effective_passwords         /* new passwords */) {
+                PasswordCache *cache,      /* the passwords acquired via PKCS#11/FIDO2 security tokens */
+                char **effective_passwords /* new passwords */) {
 
         size_t volume_key_size, i, max_key_slots, n_effective;
         _cleanup_(erase_and_freep) void *volume_key = NULL;
         struct crypt_pbkdf_type good_pbkdf, minimal_pbkdf;
         const char *type;
+        char **list;
         int r;
 
         assert(h);
@@ -2800,12 +2894,14 @@ int home_passwd_luks(
         if (!volume_key)
                 return log_oom();
 
-        r = luks_try_passwords(setup->crypt_device, pkcs11_decrypted_passwords, volume_key, &volume_key_size);
-        if (r == -ENOKEY) {
-                r = luks_try_passwords(setup->crypt_device, h->password, volume_key, &volume_key_size);
-                if (r == -ENOKEY)
-                        return log_error_errno(SYNTHETIC_ERRNO(ENOKEY), "Failed to unlock LUKS superblock with supplied passwords.");
+        r = -ENOKEY;
+        FOREACH_POINTER(list, cache->pkcs11_passwords, cache->fido2_passwords, h->password) {
+                r = luks_try_passwords(setup->crypt_device, list, volume_key, &volume_key_size);
+                if (r != -ENOKEY)
+                        break;
         }
+        if (r == -ENOKEY)
+                return log_error_errno(SYNTHETIC_ERRNO(ENOKEY), "Failed to unlock LUKS superblock with supplied passwords.");
         if (r < 0)
                 return log_error_errno(r, "Failed to unlocks LUKS superblock: %m");
 
@@ -2825,7 +2921,8 @@ int home_passwd_luks(
                         continue;
                 }
 
-                if (strv_find(pkcs11_decrypted_passwords, effective_passwords[i])) {
+                if (strv_contains(cache->pkcs11_passwords, effective_passwords[i]) ||
+                    strv_contains(cache->fido2_passwords, effective_passwords[i])) {
                         log_debug("Using minimal PBKDF for slot %zu", i);
                         r = crypt_set_pbkdf_type(setup->crypt_device, &minimal_pbkdf);
                 } else {
@@ -2922,9 +3019,10 @@ static int luks_try_resume(
         return -ENOKEY;
 }
 
-int home_unlock_luks(UserRecord *h, char ***pkcs11_decrypted_passwords) {
+int home_unlock_luks(UserRecord *h, PasswordCache *cache) {
         _cleanup_free_ char *dm_name = NULL, *dm_node = NULL;
         _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
+        char **list;
         int r;
 
         assert(h);
@@ -2940,12 +3038,14 @@ int home_unlock_luks(UserRecord *h, char ***pkcs11_decrypted_passwords) {
         log_info("Discovered used LUKS device %s.", dm_node);
         crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
 
-        r = luks_try_resume(cd, dm_name, pkcs11_decrypted_passwords ? *pkcs11_decrypted_passwords : NULL);
-        if (r == -ENOKEY) {
-                r = luks_try_resume(cd, dm_name, h->password);
-                if (r == -ENOKEY)
-                        return log_error_errno(r, "No valid password for LUKS superblock.");
+        r = -ENOKEY;
+        FOREACH_POINTER(list, cache->pkcs11_passwords, cache->fido2_passwords, h->password) {
+                r = luks_try_resume(cd, dm_name, list);
+                if (r != -ENOKEY)
+                        break;
         }
+        if (r == -ENOKEY)
+                return log_error_errno(r, "No valid password for LUKS superblock.");
         if (r < 0)
                 return log_error_errno(r, "Failed to resume LUKS superblock: %m");
 

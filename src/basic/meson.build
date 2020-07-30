@@ -39,6 +39,7 @@ basic_sources = files('''
         device-nodes.h
         dirent-util.c
         dirent-util.h
+        dlfcn-util.h
         efivars.c
         efivars.h
         env-file.c
@@ -159,6 +160,8 @@ basic_sources = files('''
         ordered-set.h
         parse-util.c
         parse-util.h
+        path-lookup.c
+        path-lookup.h
         path-util.c
         path-util.h
         prioq.c
@@ -169,6 +172,7 @@ basic_sources = files('''
         process-util.h
         procfs-util.c
         procfs-util.h
+        pthread-util.h
         quota-util.c
         quota-util.h
         random-util.c
@@ -325,7 +329,8 @@ libbasic = static_library(
                         threads,
                         libcap,
                         libselinux,
-                        libm],
+                        libm,
+                        libdl],
         c_args : ['-fvisibility=default'],
         install : false)
 

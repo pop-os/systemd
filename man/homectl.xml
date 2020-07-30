@@ -50,7 +50,7 @@
       <listitem><para>An individual LUKS2 encrypted loopback file for a user, stored in
       <filename>/home/*.home</filename>. At login the file system contained in this files is mounted, after
       the LUKS2 encrypted volume has been attached. The user's password is identical to the encryption
-      passphrase of the LUKS2 volume. Access to data without preceeding user authentication is thus not
+      passphrase of the LUKS2 volume. Access to data without preceding user authentication is thus not
       possible, even for the system administrator. This storage mechanism provides the strongest data
       security and is thus recommended.</para></listitem>
 
@@ -119,9 +119,9 @@
         <term><option>--identity=</option><replaceable>FILE</replaceable></term>
 
         <listitem><para>Read the user's JSON record from the specified file. If passed as
-        <literal>-</literal> reads the user record from standard input. The supplied JSON object must follow
-        the structure documented on <ulink url="https://systemd.io/USER_RECORDS">JSON User
-        Records</ulink>. This option may be used in conjunction with the <command>create</command> and
+        <literal>-</literal> read the user record from standard input. The supplied JSON object must follow
+        the structure documented on <ulink url="https://systemd.io/USER_RECORD">JSON User Records</ulink>.
+        This option may be used in conjunction with the <command>create</command> and
         <command>update</command> commands (see below), where it allows configuring the user record in JSON
         as-is, instead of setting the individual user record properties (see below).</para></listitem>
       </varlistentry>
@@ -247,10 +247,9 @@
         different system and the configured UID is taken by another user there, then
         <command>systemd-homed</command> may assign the user a different UID on that system. The specified
         UID must be outside of the system user range. It is recommended to use the 60001…60513 UID range for
-        this purpose. If not specified the UID is automatically picked. When logging in and the home
-        directory is found to be owned by a UID not matching the user's assigned one the home directory and
-        all files and directories inside it will have their ownership changed automatically before login
-        completes.</para>
+        this purpose. If not specified, the UID is automatically picked. If the home directory is found to be
+        owned by a different UID when logging in, the home directory and everything underneath it will have
+        its ownership changed automatically before login completes.</para>
 
         <para>Note that users managed by <command>systemd-homed</command> always have a matching group
         associated with the same name as well as a GID matching the UID of the user. Thus, configuring the
@@ -266,18 +265,19 @@
         privileges. Note that <command>systemd-homed</command> does not manage any groups besides a group
         matching the user in name and numeric UID/GID. Thus any groups listed here must be registered
         independently, for example with <citerefentry
-        project='man-pages'><refentrytitle>groupadd</refentrytitle><manvolnum>8</manvolnum></citerefentry>. If
-        non-existant groups that are listed there are ignored. This option may be used more than once, in
-        which case all specified group lists are combined.</para></listitem>
+        project='man-pages'><refentrytitle>groupadd</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
+        Any non-existent groups are ignored. This option may be used more than once, in which case all
+        specified group lists are combined. If the user is currently a member of a group which is not listed,
+        the user will be removed from the group.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><option>--skel=</option><replaceable>PATH</replaceable></term>
 
         <listitem><para>Takes a file system path to a directory. Specifies the skeleton directory to
-        initialize the home directory with. All files and directories in the specified are copied into any
-        newly create home directory. If not specified defaults to
-        <filename>/etc/skel/</filename>.</para></listitem>
+        initialize the home directory with. All files and directories in the specified path are copied into
+        any newly create home directory. If not specified defaults to <filename>/etc/skel/</filename>.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -312,7 +312,7 @@
         <listitem><para>Takes a specifier indicating the preferred language of the user. The
         <varname>$LANG</varname> environment variable is initialized from this value on login, and thus a
         value suitable for this environment variable is accepted here, for example
-        <option>--language=de_DE.UTF8</option></para></listitem>
+        <option>--language=de_DE.UTF8</option>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -330,8 +330,50 @@
         security token with exactly one pair of X.509 certificate and private key. A random secret key is
         then generated, encrypted with the public key of the X.509 certificate, and stored as part of the
         user record. At login time it is decrypted with the PKCS#11 module and then used to unlock the
-        account and associated resources. See below for an example how to set up authentication with security
-        token.</para></listitem>
+        account and associated resources. See below for an example how to set up authentication with a
+        security token.</para>
+
+        <para>Instead of a valid PKCS#11 URI, the special strings <literal>list</literal> and
+        <literal>auto</literal> may be specified. If <literal>list</literal> is passed, a brief table of
+        suitable, currently plugged in PKCS#11 hardware tokens is shown, along with their URIs. If
+        <literal>auto</literal> is passed, a suitable PKCS#11 hardware token is automatically selected (this
+        operation will fail if there isn't exactly one suitable token discovered). The latter is a useful
+        shortcut for the most common case where a single PKCS#11 hardware token is plugged in.</para>
+
+        <para>Note that many hardware security tokens implement both PKCS#11/PIV and FIDO2 with the
+        <literal>hmac-secret</literal> extension (for example: the YubiKey 5 series), as supported with the
+        <option>--fido2-device=</option> option below. Both mechanisms are similarly powerful, though FIDO2
+        is the more modern technology. PKCS#11/PIV tokens have the benefit of being recognizable before
+        authentication and hence can be used for implying the user identity to use for logging in, which
+        FIDO2 does not allow. PKCS#11/PIV devices generally require initialization (i.e. storing a
+        private/public key pair on them, see example below) before they can be used; FIDO2 security tokens
+        generally do not required that, and work out of the box.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--fido2-device=</option><replaceable>PATH</replaceable></term>
+
+        <listitem><para>Takes a path to a Linux <literal>hidraw</literal> device
+        (e.g. <filename>/dev/hidraw1</filename>), referring to a FIDO2 security token implementing the
+        <literal>hmac-secret</literal> extension, that shall be able to unlock the user account. If used, a
+        random salt value is generated on the host, which is passed to the FIDO2 device, which calculates a
+        HMAC hash of it, keyed by its internal secret key. The result is then used as key for unlocking the
+        user account. The random salt is included in the user record, so that whenever authentication is
+        needed it can be passed again to the FIDO2 token, to retrieve the actual key.</para>
+
+        <para>Instead of a valid path to a FIDO2 <literal>hidraw</literal> device the special strings
+        <literal>list</literal> and <literal>auto</literal> may be specified. If <literal>list</literal> is
+        passed, a brief table of suitable discovered FIDO2 devices is shown. If <literal>auto</literal> is
+        passed, a suitable FIDO2 token is automatically selected, if exactly one is discovered. The latter is
+        a useful shortcut for the most common case where a single FIDO2 hardware token is plugged in.</para>
+
+        <para>Note that FIDO2 devices suitable for this option must implement the
+        <literal>hmac-secret</literal> extension. Most current devices (such as the YubiKey 5 series) do. If
+        the extension is not implemented the device cannot be used for unlocking home directories.</para>
+
+        <para>Note that many hardware security tokens implement both FIDO2 and PKCS#11/PIV (and thus may be
+        used with either <option>--fido2-device=</option> or <option>--pkcs11-token-uri=</option>), for a
+        discussion see above.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -395,20 +437,20 @@
 
         <listitem><para>Each of these options takes a time span specification as argument (in the syntax
         documented in
-        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>5</manvolnum></citerefentry>) and
-        configure various aspects of the user's password expiration policy. Specifically,
+        <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>) and
+        configures various aspects of the user's password expiration policy. Specifically,
         <option>--password-change-min=</option> configures how much time has to pass after changing the
         password of the user until the password may be changed again. If the user tries to change their
         password before this time passes the attempt is refused. <option>--password-change-max=</option>
-        configures how much time has to pass after the the password is changed until the password expires and
-        needs to be changed again. After this time passes any attempts to log in may only proceed after the
-        password is changed. <option>--password-change-warn=</option> specifies how much earlier than then
-        the time configured with <option>--password-change-max=</option> the user is warned at login to
-        change their password as it will expire soon. Finally <option>--password-change-inactive=</option>
-        configures the time which has to pass after the password as expired until the user is not permitted
-        to log in or change the password anymore. Note that these options only apply to password
-        authentication, and do not apply to other forms of authentication, for example PKCS#11-based security
-        token authentication.</para></listitem>
+        configures how soon after it has been changed the password expires and needs to be changed again.
+        After this time passes logging in may only proceed after the password is changed.
+        <option>--password-change-warn=</option> specifies how much earlier than then the time configured
+        with <option>--password-change-max=</option> the user is warned at login to change their password as
+        it will expire soon. Finally <option>--password-change-inactive=</option> configures the time which
+        has to pass after the password as expired until the user is not permitted to log in or change the
+        password anymore. Note that these options only apply to password authentication, and do not apply to
+        other forms of authentication, for example PKCS#11-based security token
+        authentication.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -467,7 +509,7 @@
         <citerefentry project='man-pages'><refentrytitle>su</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         or a similar tool. Use <option>--rlimit=LIMIT_NPROC=</option> to place a limit on the tasks actually
         running under the UID of the user, thus excluding any child processes that might have changed user
-        identity. This controls the <varname>TasksMax=</varname> settting of the per-user systemd slice unit
+        identity. This controls the <varname>TasksMax=</varname> setting of the per-user systemd slice unit
         <filename>user-$UID.slice</filename>. See
         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for further details.</para></listitem>
@@ -490,7 +532,7 @@
         <term><option>--cpu-weight=</option><replaceable>WEIGHT</replaceable></term>
         <term><option>--io-weight=</option><replaceable>WEIGHT</replaceable></term>
 
-        <listitem><para>Set a CPU and IO scheduling weights of the processes of the user, including those of
+        <listitem><para>Set CPU and IO scheduling weights of the processes of the user, including those of
         processes forked off by the user that changed user credentials. Takes a numeric value in the range
         1…10000. This controls the <varname>CPUWeight=</varname> and <varname>IOWeight=</varname> settings of
         the per-user systemd slice unit <filename>user-$UID.slice</filename>. See
@@ -504,9 +546,9 @@
         <listitem><para>Selects the storage mechanism to use for this home directory. Takes one of
         <literal>luks</literal>, <literal>fscrypt</literal>, <literal>directory</literal>,
         <literal>subvolume</literal>, <literal>cifs</literal>. For details about these mechanisms, see
-        above. If a new home directory is created and the storage type is not specifically specified defaults
-        to <literal>luks</literal> if supported, <literal>subvolume</literal> as first fallback if supported,
-        and <literal>directory</literal> if not.</para></listitem>
+        above. If a new home directory is created and the storage type is not specifically specified,
+        <citerefentry><refentrytitle>homed.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        defines which default storage to use.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -525,9 +567,10 @@
 
         <listitem><para>When LUKS2 storage is used configures the file system type to use inside the home
         directory LUKS2 container. One of <literal>ext4</literal>, <literal>xfs</literal>,
-        <literal>btrfs</literal>. If not specified defaults to <literal>ext4</literal>. Note that
-        <literal>xfs</literal> is not recommended as its support for file system resizing is too
-        limited.</para></listitem>
+        <literal>btrfs</literal>. If not specified
+        <citerefentry><refentrytitle>homed.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        defines which default file system type to use. Note that <literal>xfs</literal> is not recommended as
+        its support for file system resizing is too limited.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -542,6 +585,16 @@
         file system wants to allocate a block. Such I/O errors are generally not handled well by file systems
         nor applications. When LUKS2 storage is used on top of regular block devices (instead of on top a
         loopback file) the discard logic defaults to on.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--luks-offline-discard=</option><replaceable>BOOL</replaceable></term>
+
+        <listitem><para>Similar to <option>--luks-discard=</option>, controls the trimming of the file
+        system. However, while <option>--luks-discard=</option> controls what happens when the home directory
+        is active, <option>--luks-offline-discard=</option> controls what happens when it becomes inactive,
+        i.e. whether to trim/allocate the storage when deactivating the home directory. This option defaults
+        to on, to ensure disk space is minimized while a user is not logged in.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -641,8 +694,8 @@
         <para>Activation of a home directory involves various operations that depend on the selected storage
         mechanism. If the LUKS2 mechanism is used, this generally involves: inquiring the user for a
         password, setting up a loopback device, validating and activating the LUKS2 volume, checking the file
-        system, mounting the file system, and potentiatlly changing the ownership of all included files to
-        the correct UID/GID.</para></listitem>
+        system, mounting the file system, and potentially changing the ownership of all included files to the
+        correct UID/GID.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -707,7 +760,7 @@
       <varlistentry>
         <term><command>passwd</command> <replaceable>USER</replaceable></term>
 
-        <listitem><para>Change the password of the specified home direcory/user account.</para></listitem>
+        <listitem><para>Change the password of the specified home directory/user account.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -798,7 +851,7 @@
     </example>
 
     <example>
-      <title>Set up authentication with a YubiKey security token:</title>
+      <title>Set up authentication with a YubiKey security token using PKCS#11/PIV:</title>
 
       <programlisting># Clear the Yubikey from any old keys (careful!)
 ykman piv reset
@@ -809,16 +862,18 @@ ykman piv generate-key -a RSA2048 9d pubkey.pem
 # Create a self-signed certificate from this public key, and store it on the device.
 ykman piv generate-certificate --subject "Knobelei" 9d pubkey.pem
 
-# We don't need the publibc key on disk anymore
+# We don't need the public key on disk anymore
 rm pubkey.pem
 
-# Check if the newly create key on the Yubikey shows up as token in PKCS#11. Have a look at the output, and
-# copy the resulting token URI to the clipboard.
-p11tool --list-tokens
+# Allow the security token to unlock the account of user 'lafcadio'.
+homectl update lafcadio --pkcs11-token-uri=auto</programlisting>
+    </example>
 
-# Allow the security token referenced by the determined PKCS#11 URI to unlock the account of user
-# 'lafcadio'. (Replace the '…' by the URI from the clipboard.)
-homectl update lafcadio --pkcs11-token-uri=…</programlisting>
+    <example>
+      <title>Set up authentication with a FIDO2 security token:</title>
+
+      <programlisting># Allow a FIDO2 security token to unlock the account of user 'nihilbaxter'.
+homectl update nihilbaxter --fido2-device=auto</programlisting>
     </example>
   </refsect1>
 
@@ -827,6 +882,7 @@ homectl update lafcadio --pkcs11-token-uri=…</programlisting>
     <para>
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd-homed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>homed.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>userdbctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry project='man-pages'><refentrytitle>useradd</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry project='man-pages'><refentrytitle>cryptsetup</refentrytitle><manvolnum>8</manvolnum></citerefentry>

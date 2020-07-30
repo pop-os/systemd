@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <getopt.h>
+#include <linux/loop.h>
 #include <unistd.h>
 
 #include "sd-id128.h"
@@ -9,6 +10,7 @@
 #include "alloc-util.h"
 #include "ask-password-api.h"
 #include "copy.h"
+#include "dissect-image.h"
 #include "env-file.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -17,9 +19,12 @@
 #include "kbd-util.h"
 #include "libcrypt-util.h"
 #include "locale-util.h"
+#include "loop-util.h"
 #include "main-func.h"
 #include "memory-util.h"
 #include "mkdir.h"
+#include "mount-util.h"
+#include "namespace-util.h"
 #include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"
@@ -30,10 +35,13 @@
 #include "strv.h"
 #include "terminal-util.h"
 #include "time-util.h"
+#include "tmpfile-util-label.h"
+#include "tmpfile-util.h"
 #include "umask-util.h"
 #include "user-util.h"
 
 static char *arg_root = NULL;
+static char *arg_image = NULL;
 static char *arg_locale = NULL;  /* $LANG */
 static char *arg_keymap = NULL;
 static char *arg_locale_messages = NULL; /* $LC_MESSAGES */
@@ -41,17 +49,26 @@ static char *arg_timezone = NULL;
 static char *arg_hostname = NULL;
 static sd_id128_t arg_machine_id = {};
 static char *arg_root_password = NULL;
+static char *arg_root_shell = NULL;
+static char *arg_kernel_cmdline = NULL;
 static bool arg_prompt_locale = false;
 static bool arg_prompt_keymap = false;
 static bool arg_prompt_timezone = false;
 static bool arg_prompt_hostname = false;
 static bool arg_prompt_root_password = false;
+static bool arg_prompt_root_shell = false;
 static bool arg_copy_locale = false;
 static bool arg_copy_keymap = false;
 static bool arg_copy_timezone = false;
 static bool arg_copy_root_password = false;
+static bool arg_copy_root_shell = false;
+static bool arg_force = false;
+static bool arg_delete_root_password = false;
+static bool arg_root_password_is_hashed = false;
+static bool arg_welcome = true;
 
 STATIC_DESTRUCTOR_REGISTER(arg_root, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_locale, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_locale_messages, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_keymap, freep);
@@ -79,6 +96,9 @@ static void print_welcome(void) {
         static bool done = false;
         const char *pn;
         int r;
+
+        if (!arg_welcome)
+                return;
 
         if (done)
                 return;
@@ -205,6 +225,14 @@ static int prompt_loop(const char *text, char **l, unsigned percentage, bool (*i
         }
 }
 
+static bool locale_is_ok(const char *name) {
+
+        if (arg_root)
+                return locale_is_valid(name);
+
+        return locale_is_installed(name) > 0;
+}
+
 static int prompt_locale(void) {
         _cleanup_strv_free_ char **locales = NULL;
         int r;
@@ -238,7 +266,7 @@ static int prompt_locale(void) {
                 print_welcome();
 
                 r = prompt_loop("Please enter system locale name or number",
-                                locales, 60, locale_is_valid, &arg_locale);
+                                locales, 60, locale_is_ok, &arg_locale);
                 if (r < 0)
                         return r;
 
@@ -246,7 +274,7 @@ static int prompt_locale(void) {
                         return 0;
 
                 r = prompt_loop("Please enter system message locale name or number",
-                                locales, 60, locale_is_valid, &arg_locale_messages);
+                                locales, 60, locale_is_ok, &arg_locale_messages);
                 if (r < 0)
                         return r;
 
@@ -265,7 +293,7 @@ static int process_locale(void) {
         int r;
 
         etc_localeconf = prefix_roota(arg_root, "/etc/locale.conf");
-        if (laccess(etc_localeconf, F_OK) >= 0)
+        if (laccess(etc_localeconf, F_OK) >= 0 && !arg_force)
                 return 0;
 
         if (arg_copy_locale && arg_root) {
@@ -332,7 +360,7 @@ static int process_keymap(void) {
         int r;
 
         etc_vconsoleconf = prefix_roota(arg_root, "/etc/vconsole.conf");
-        if (laccess(etc_vconsoleconf, F_OK) >= 0)
+        if (laccess(etc_vconsoleconf, F_OK) >= 0 && !arg_force)
                 return 0;
 
         if (arg_copy_keymap && arg_root) {
@@ -404,7 +432,7 @@ static int process_timezone(void) {
         int r;
 
         etc_localtime = prefix_roota(arg_root, "/etc/localtime");
-        if (laccess(etc_localtime, F_OK) >= 0)
+        if (laccess(etc_localtime, F_OK) >= 0 && !arg_force)
                 return 0;
 
         if (arg_copy_timezone && arg_root) {
@@ -484,7 +512,7 @@ static int process_hostname(void) {
         int r;
 
         etc_hostname = prefix_roota(arg_root, "/etc/hostname");
-        if (laccess(etc_hostname, F_OK) >= 0)
+        if (laccess(etc_hostname, F_OK) >= 0 && !arg_force)
                 return 0;
 
         r = prompt_hostname();
@@ -495,7 +523,8 @@ static int process_hostname(void) {
                 return 0;
 
         r = write_string_file(etc_hostname, arg_hostname,
-                              WRITE_STRING_FILE_CREATE | WRITE_STRING_FILE_SYNC | WRITE_STRING_FILE_MKDIR_0755);
+                              WRITE_STRING_FILE_CREATE | WRITE_STRING_FILE_SYNC | WRITE_STRING_FILE_MKDIR_0755 |
+                              (arg_force ? WRITE_STRING_FILE_ATOMIC : 0));
         if (r < 0)
                 return log_error_errno(r, "Failed to write %s: %m", etc_hostname);
 
@@ -509,14 +538,15 @@ static int process_machine_id(void) {
         int r;
 
         etc_machine_id = prefix_roota(arg_root, "/etc/machine-id");
-        if (laccess(etc_machine_id, F_OK) >= 0)
+        if (laccess(etc_machine_id, F_OK) >= 0 && !arg_force)
                 return 0;
 
         if (sd_id128_is_null(arg_machine_id))
                 return 0;
 
         r = write_string_file(etc_machine_id, sd_id128_to_string(arg_machine_id, id),
-                              WRITE_STRING_FILE_CREATE | WRITE_STRING_FILE_SYNC | WRITE_STRING_FILE_MKDIR_0755);
+                              WRITE_STRING_FILE_CREATE | WRITE_STRING_FILE_SYNC | WRITE_STRING_FILE_MKDIR_0755 |
+                              (arg_force ? WRITE_STRING_FILE_ATOMIC : 0));
         if (r < 0)
                 return log_error_errno(r, "Failed to write machine id: %m");
 
@@ -525,17 +555,13 @@ static int process_machine_id(void) {
 }
 
 static int prompt_root_password(void) {
-        const char *msg1, *msg2, *etc_shadow;
+        const char *msg1, *msg2;
         int r;
 
         if (arg_root_password)
                 return 0;
 
         if (!arg_prompt_root_password)
-                return 0;
-
-        etc_shadow = prefix_roota(arg_root, "/etc/shadow");
-        if (laccess(etc_shadow, F_OK) >= 0)
                 return 0;
 
         print_welcome();
@@ -578,100 +604,376 @@ static int prompt_root_password(void) {
         return 0;
 }
 
-static int write_root_shadow(const char *path, const struct spwd *p) {
-        _cleanup_fclose_ FILE *f = NULL;
+static int find_shell(const char *path, const char *root) {
         int r;
 
         assert(path);
-        assert(p);
 
-        RUN_WITH_UMASK(0777)
-                f = fopen(path, "wex");
-        if (!f)
-                return -errno;
+        if (!valid_shell(path))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "%s is not a valid shell", path);
 
-        r = putspent_sane(p, f);
+        r = chase_symlinks(path, root, CHASE_PREFIX_ROOT, NULL, NULL);
+        if (r < 0) {
+                const char *p;
+                p = prefix_roota(root, path);
+                return log_error_errno(r, "Failed to resolve shell %s: %m", p);
+        }
+
+        return 0;
+}
+
+static int prompt_root_shell(void) {
+        int r;
+
+        if (arg_root_shell || !arg_prompt_root_shell)
+                return 0;
+
+        print_welcome();
+        putchar('\n');
+
+        for (;;) {
+                _cleanup_free_ char *s = NULL;
+
+                r = ask_string(&s, "%s Please enter root shell for new system (empty to skip): ", special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET));
+                if (r < 0)
+                        return log_error_errno(r, "Failed to query root shell: %m");
+
+                if (isempty(s)) {
+                        log_warning("No shell entered, skipping.");
+                        break;
+                }
+
+                r = find_shell(s, arg_root);
+                if (r < 0)
+                        continue;
+
+                arg_root_shell = TAKE_PTR(s);
+                break;
+        }
+
+        return 0;
+}
+
+static int write_root_passwd(const char *passwd_path, const char *password, const char *shell) {
+        _cleanup_fclose_ FILE *original = NULL, *passwd = NULL;
+        _cleanup_(unlink_and_freep) char *passwd_tmp = NULL;
+        int r;
+
+        assert(password);
+
+        r = fopen_temporary_label("/etc/passwd", passwd_path, &passwd, &passwd_tmp);
         if (r < 0)
                 return r;
 
-        return fflush_sync_and_check(f);
+        original = fopen(passwd_path, "re");
+        if (original) {
+                struct passwd *i;
+
+                r = sync_rights(fileno(original), fileno(passwd));
+                if (r < 0)
+                        return r;
+
+                while ((r = fgetpwent_sane(original, &i)) > 0) {
+
+                        if (streq(i->pw_name, "root")) {
+                                i->pw_passwd = (char *) password;
+                                if (shell)
+                                        i->pw_shell = (char *) shell;
+                        }
+
+                        r = putpwent_sane(i, passwd);
+                        if (r < 0)
+                                return r;
+                }
+                if (r < 0)
+                        return r;
+
+        } else {
+                struct passwd root = {
+                        .pw_name = (char *) "root",
+                        .pw_passwd = (char *) password,
+                        .pw_uid = 0,
+                        .pw_gid = 0,
+                        .pw_gecos = (char *) "Super User",
+                        .pw_dir = (char *) "/root",
+                        .pw_shell = (char *) (shell ?: "/bin/sh"),
+                };
+
+                if (errno != ENOENT)
+                        return -errno;
+
+                r = fchmod(fileno(passwd), 0644);
+                if (r < 0)
+                        return -errno;
+
+                r = putpwent_sane(&root, passwd);
+                if (r < 0)
+                        return r;
+        }
+
+        r = fflush_sync_and_check(passwd);
+        if (r < 0)
+                return r;
+
+        r = rename_and_apply_smack_floor_label(passwd_tmp, passwd_path);
+        if (r < 0)
+                return r;
+
+        return 0;
 }
 
-static int process_root_password(void) {
-
-        struct spwd item = {
-                .sp_namp = (char*) "root",
-                .sp_min = -1,
-                .sp_max = -1,
-                .sp_warn = -1,
-                .sp_inact = -1,
-                .sp_expire = -1,
-                .sp_flag = (unsigned long) -1, /* this appears to be what everybody does ... */
-        };
-        _cleanup_free_ char *salt = NULL;
-        _cleanup_close_ int lock = -1;
-        struct crypt_data cd = {};
-
-        const char *etc_shadow;
+static int write_root_shadow(const char *shadow_path, const char *hashed_password) {
+        _cleanup_fclose_ FILE *original = NULL, *shadow = NULL;
+        _cleanup_(unlink_and_freep) char *shadow_tmp = NULL;
         int r;
 
+        assert(hashed_password);
+
+        r = fopen_temporary_label("/etc/shadow", shadow_path, &shadow, &shadow_tmp);
+        if (r < 0)
+                return r;
+
+        original = fopen(shadow_path, "re");
+        if (original) {
+                struct spwd *i;
+
+                r = sync_rights(fileno(original), fileno(shadow));
+                if (r < 0)
+                        return r;
+
+                while ((r = fgetspent_sane(original, &i)) > 0) {
+
+                        if (streq(i->sp_namp, "root")) {
+                                i->sp_pwdp = (char *) hashed_password;
+                                i->sp_lstchg = (long) (now(CLOCK_REALTIME) / USEC_PER_DAY);
+                        }
+
+                        r = putspent_sane(i, shadow);
+                        if (r < 0)
+                                return r;
+                }
+                if (r < 0)
+                        return r;
+
+        } else {
+                struct spwd root = {
+                        .sp_namp = (char*) "root",
+                        .sp_pwdp = (char *) hashed_password,
+                        .sp_lstchg = (long) (now(CLOCK_REALTIME) / USEC_PER_DAY),
+                        .sp_min = -1,
+                        .sp_max = -1,
+                        .sp_warn = -1,
+                        .sp_inact = -1,
+                        .sp_expire = -1,
+                        .sp_flag = (unsigned long) -1, /* this appears to be what everybody does ... */
+                };
+
+                if (errno != ENOENT)
+                        return -errno;
+
+                r = fchmod(fileno(shadow), 0000);
+                if (r < 0)
+                        return -errno;
+
+                r = putspent_sane(&root, shadow);
+                if (r < 0)
+                        return r;
+        }
+
+        r = fflush_sync_and_check(shadow);
+        if (r < 0)
+                return r;
+
+        r = rename_and_apply_smack_floor_label(shadow_tmp, shadow_path);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
+static int process_root_args(void) {
+        _cleanup_close_ int lock = -1;
+        struct crypt_data cd = {};
+        const char *password, *hashed_password;
+        const char *etc_passwd, *etc_shadow;
+        int r;
+
+        etc_passwd = prefix_roota(arg_root, "/etc/passwd");
         etc_shadow = prefix_roota(arg_root, "/etc/shadow");
-        if (laccess(etc_shadow, F_OK) >= 0)
+
+        /* We only mess with passwd and shadow if both do not exist or --force is specified. These files are
+         * tightly coupled and hence we make sure we have permission from the user to create/modify both
+         * files. */
+        if ((laccess(etc_passwd, F_OK) >= 0 || laccess(etc_shadow, F_OK) >= 0) && !arg_force)
                 return 0;
 
-        (void) mkdir_parents(etc_shadow, 0755);
+        (void) mkdir_parents(etc_passwd, 0755);
 
         lock = take_etc_passwd_lock(arg_root);
         if (lock < 0)
-                return log_error_errno(lock, "Failed to take a lock: %m");
+                return log_error_errno(lock, "Failed to take a lock on %s: %m", etc_passwd);
+
+        if (arg_copy_root_shell && arg_root) {
+                struct passwd *p;
+
+                errno = 0;
+                p = getpwnam("root");
+                if (!p)
+                        return log_error_errno(errno_or_else(EIO), "Failed to find passwd entry for root: %m");
+
+                r = free_and_strdup(&arg_root_shell, p->pw_shell);
+                if (r < 0)
+                        return log_oom();
+        }
+
+        r = prompt_root_shell();
+        if (r < 0)
+                return r;
 
         if (arg_copy_root_password && arg_root) {
                 struct spwd *p;
 
                 errno = 0;
                 p = getspnam("root");
-                if (p || errno != ENOENT) {
-                        if (!p) {
-                                if (!errno)
-                                        errno = EIO;
+                if (!p)
+                        return log_error_errno(errno_or_else(EIO), "Failed to find shadow entry for root: %m");
 
-                                return log_error_errno(errno, "Failed to find shadow entry for root: %m");
-                        }
+                r = free_and_strdup(&arg_root_password, p->sp_pwdp);
+                if (r < 0)
+                        return log_oom();
 
-                        r = write_root_shadow(etc_shadow, p);
-                        if (r < 0)
-                                return log_error_errno(r, "Failed to write %s: %m", etc_shadow);
-
-                        log_info("%s copied.", etc_shadow);
-                        return 0;
-                }
+                arg_root_password_is_hashed = true;
         }
 
         r = prompt_root_password();
         if (r < 0)
                 return r;
 
-        if (!arg_root_password)
-                return 0;
+        if (arg_root_password && arg_root_password_is_hashed) {
+                password = "x";
+                hashed_password = arg_root_password;
+        } else if (arg_root_password) {
+                _cleanup_free_ char *salt = NULL;
+                /* hashed_password points inside cd after crypt_r returns so cd has function scope. */
 
-        r = make_salt(&salt);
+                password = "x";
+
+                r = make_salt(&salt);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to get salt: %m");
+
+                errno = 0;
+                hashed_password = crypt_r(arg_root_password, salt, &cd);
+                if (!hashed_password)
+                        return log_error_errno(errno == 0 ? SYNTHETIC_ERRNO(EINVAL) : errno,
+                                        "Failed to encrypt password: %m");
+        } else if (arg_delete_root_password)
+                password = hashed_password = "";
+        else
+                password = hashed_password = "!";
+
+        r = write_root_passwd(etc_passwd, password, arg_root_shell);
         if (r < 0)
-                return log_error_errno(r, "Failed to get salt: %m");
+                return log_error_errno(r, "Failed to write %s: %m", etc_passwd);
 
-        errno = 0;
-        item.sp_pwdp = crypt_r(arg_root_password, salt, &cd);
-        if (!item.sp_pwdp)
-                return log_error_errno(errno == 0 ? SYNTHETIC_ERRNO(EINVAL) : errno,
-                                       "Failed to encrypt password: %m");
+        log_info("%s written", etc_passwd);
 
-        item.sp_lstchg = (long) (now(CLOCK_REALTIME) / USEC_PER_DAY);
-
-        r = write_root_shadow(etc_shadow, &item);
+        r = write_root_shadow(etc_shadow, hashed_password);
         if (r < 0)
                 return log_error_errno(r, "Failed to write %s: %m", etc_shadow);
 
         log_info("%s written.", etc_shadow);
         return 0;
+}
+
+static int process_kernel_cmdline(void) {
+        const char *etc_kernel_cmdline;
+        int r;
+
+        etc_kernel_cmdline = prefix_roota(arg_root, "/etc/kernel/cmdline");
+        if (laccess(etc_kernel_cmdline, F_OK) >= 0 && !arg_force)
+                return 0;
+
+        if (!arg_kernel_cmdline)
+                return 0;
+
+        r = write_string_file(etc_kernel_cmdline, arg_kernel_cmdline,
+                              WRITE_STRING_FILE_CREATE | WRITE_STRING_FILE_SYNC | WRITE_STRING_FILE_MKDIR_0755 |
+                              (arg_force ? WRITE_STRING_FILE_ATOMIC : 0));
+        if (r < 0)
+                return log_error_errno(r, "Failed to write %s: %m", etc_kernel_cmdline);
+
+        log_info("%s written.", etc_kernel_cmdline);
+        return 0;
+}
+
+static int setup_image(char **ret_mount_dir, LoopDevice **ret_loop_device, DecryptedImage **ret_decrypted_image) {
+        DissectImageFlags f = DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_VALIDATE_OS|DISSECT_IMAGE_RELAX_VAR_CHECK|DISSECT_IMAGE_FSCK;
+        _cleanup_(loop_device_unrefp) LoopDevice *d = NULL;
+        _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
+        _cleanup_(dissected_image_unrefp) DissectedImage *dissected_image = NULL;
+        _cleanup_(rmdir_and_freep) char *mount_dir = NULL;
+        _cleanup_free_ char *temp = NULL;
+        int r;
+
+        if (!arg_image) {
+                *ret_mount_dir = NULL;
+                *ret_decrypted_image = NULL;
+                *ret_loop_device = NULL;
+                return 0;
+        }
+
+        assert(!arg_root);
+
+        r = tempfn_random_child(NULL, "firstboot", &temp);
+        if (r < 0)
+                return log_error_errno(r, "Failed to generate temporary mount directory: %m");
+
+        r = loop_device_make_by_path(arg_image, O_RDWR, LO_FLAGS_PARTSCAN, &d);
+        if (r < 0)
+                return log_error_errno(r, "Failed to set up loopback device: %m");
+
+        r = dissect_image_and_warn(d->fd, arg_image, NULL, 0, NULL, f, &dissected_image);
+        if (r < 0)
+                return r;
+
+        r = dissected_image_decrypt_interactively(dissected_image, NULL, NULL, 0, NULL, NULL, NULL, 0, f, &decrypted_image);
+        if (r < 0)
+                return r;
+
+        r = detach_mount_namespace();
+        if (r < 0)
+                return log_error_errno(r, "Failed to detach mount namespace: %m");
+
+        mount_dir = strdup(temp);
+        if (!mount_dir)
+                return log_oom();
+
+        r = mkdir_p(mount_dir, 0700);
+        if (r < 0) {
+                mount_dir = mfree(mount_dir);
+                return log_error_errno(r, "Failed to create mount point: %m");
+        }
+
+        r = dissected_image_mount(dissected_image, mount_dir, UID_INVALID, f);
+        if (r < 0)
+                return log_error_errno(r, "Failed to mount image: %m");
+
+        if (decrypted_image) {
+                r = decrypted_image_relinquish(decrypted_image);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to relinquish DM devices: %m");
+        }
+
+        loop_device_relinquish(d);
+
+        arg_root = TAKE_PTR(temp);
+
+        *ret_mount_dir = TAKE_PTR(mount_dir);
+        *ret_decrypted_image = TAKE_PTR(decrypted_image);
+        *ret_loop_device = TAKE_PTR(d);
+
+        return 1;
 }
 
 static int help(void) {
@@ -684,29 +986,37 @@ static int help(void) {
 
         printf("%s [OPTIONS...]\n\n"
                "Configures basic settings of the system.\n\n"
-               "  -h --help                    Show this help\n"
-               "     --version                 Show package version\n"
-               "     --root=PATH               Operate on an alternate filesystem root\n"
-               "     --locale=LOCALE           Set primary locale (LANG=)\n"
-               "     --locale-messages=LOCALE  Set message locale (LC_MESSAGES=)\n"
-               "     --keymap=KEYMAP           Set keymap\n"
-               "     --timezone=TIMEZONE       Set timezone\n"
-               "     --hostname=NAME           Set host name\n"
-               "     --machine-ID=ID           Set machine ID\n"
-               "     --root-password=PASSWORD  Set root password\n"
-               "     --root-password-file=FILE Set root password from file\n"
-               "     --prompt-locale           Prompt the user for locale settings\n"
-               "     --prompt-keymap           Prompt the user for keymap settings\n"
-               "     --prompt-timezone         Prompt the user for timezone\n"
-               "     --prompt-hostname         Prompt the user for hostname\n"
-               "     --prompt-root-password    Prompt the user for root password\n"
-               "     --prompt                  Prompt for all of the above\n"
-               "     --copy-locale             Copy locale from host\n"
-               "     --copy-keymap             Copy keymap from host\n"
-               "     --copy-timezone           Copy timezone from host\n"
-               "     --copy-root-password      Copy root password from host\n"
-               "     --copy                    Copy locale, keymap, timezone, root password\n"
-               "     --setup-machine-id        Generate a new random machine ID\n"
+               "  -h --help                                 Show this help\n"
+               "     --version                              Show package version\n"
+               "     --root=PATH                            Operate on an alternate filesystem root\n"
+               "     --image=PATH                           Operate on an alternate filesystem image\n"
+               "     --locale=LOCALE                        Set primary locale (LANG=)\n"
+               "     --locale-messages=LOCALE               Set message locale (LC_MESSAGES=)\n"
+               "     --keymap=KEYMAP                        Set keymap\n"
+               "     --timezone=TIMEZONE                    Set timezone\n"
+               "     --hostname=NAME                        Set hostname\n"
+               "     --machine-ID=ID                        Set machine ID\n"
+               "     --root-password=PASSWORD               Set root password from plaintext password\n"
+               "     --root-password-file=FILE              Set root password from file\n"
+               "     --root-password-hashed=HASHED_PASSWORD Set root password from hashed password\n"
+               "     --root-shell=SHELL                     Set root shell\n"
+               "     --prompt-locale                        Prompt the user for locale settings\n"
+               "     --prompt-keymap                        Prompt the user for keymap settings\n"
+               "     --prompt-timezone                      Prompt the user for timezone\n"
+               "     --prompt-hostname                      Prompt the user for hostname\n"
+               "     --prompt-root-password                 Prompt the user for root password\n"
+               "     --prompt-root-shell                    Prompt the user for root shell\n"
+               "     --prompt                               Prompt for all of the above\n"
+               "     --copy-locale                          Copy locale from host\n"
+               "     --copy-keymap                          Copy keymap from host\n"
+               "     --copy-timezone                        Copy timezone from host\n"
+               "     --copy-root-password                   Copy root password from host\n"
+               "     --copy-root-shell                      Copy root shell from host\n"
+               "     --copy                                 Copy locale, keymap, timezone, root password\n"
+               "     --setup-machine-id                     Generate a new random machine ID\n"
+               "     --force                                Overwrite existing files\n"
+               "     --delete-root-password                 Delete root password\n"
+               "     --welcome=no                           Disable the welcome text\n"
                "\nSee the %s for details.\n"
                , program_invocation_short_name
                , link
@@ -720,6 +1030,7 @@ static int parse_argv(int argc, char *argv[]) {
         enum {
                 ARG_VERSION = 0x100,
                 ARG_ROOT,
+                ARG_IMAGE,
                 ARG_LOCALE,
                 ARG_LOCALE_MESSAGES,
                 ARG_KEYMAP,
@@ -728,44 +1039,61 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_MACHINE_ID,
                 ARG_ROOT_PASSWORD,
                 ARG_ROOT_PASSWORD_FILE,
+                ARG_ROOT_PASSWORD_HASHED,
+                ARG_ROOT_SHELL,
+                ARG_KERNEL_COMMAND_LINE,
                 ARG_PROMPT,
                 ARG_PROMPT_LOCALE,
                 ARG_PROMPT_KEYMAP,
                 ARG_PROMPT_TIMEZONE,
                 ARG_PROMPT_HOSTNAME,
                 ARG_PROMPT_ROOT_PASSWORD,
+                ARG_PROMPT_ROOT_SHELL,
                 ARG_COPY,
                 ARG_COPY_LOCALE,
                 ARG_COPY_KEYMAP,
                 ARG_COPY_TIMEZONE,
                 ARG_COPY_ROOT_PASSWORD,
+                ARG_COPY_ROOT_SHELL,
                 ARG_SETUP_MACHINE_ID,
+                ARG_FORCE,
+                ARG_DELETE_ROOT_PASSWORD,
+                ARG_WELCOME,
         };
 
         static const struct option options[] = {
-                { "help",                 no_argument,       NULL, 'h'                      },
-                { "version",              no_argument,       NULL, ARG_VERSION              },
-                { "root",                 required_argument, NULL, ARG_ROOT                 },
-                { "locale",               required_argument, NULL, ARG_LOCALE               },
-                { "locale-messages",      required_argument, NULL, ARG_LOCALE_MESSAGES      },
-                { "keymap",               required_argument, NULL, ARG_KEYMAP               },
-                { "timezone",             required_argument, NULL, ARG_TIMEZONE             },
-                { "hostname",             required_argument, NULL, ARG_HOSTNAME             },
-                { "machine-id",           required_argument, NULL, ARG_MACHINE_ID           },
-                { "root-password",        required_argument, NULL, ARG_ROOT_PASSWORD        },
-                { "root-password-file",   required_argument, NULL, ARG_ROOT_PASSWORD_FILE   },
-                { "prompt",               no_argument,       NULL, ARG_PROMPT               },
-                { "prompt-locale",        no_argument,       NULL, ARG_PROMPT_LOCALE        },
-                { "prompt-keymap",        no_argument,       NULL, ARG_PROMPT_KEYMAP        },
-                { "prompt-timezone",      no_argument,       NULL, ARG_PROMPT_TIMEZONE      },
-                { "prompt-hostname",      no_argument,       NULL, ARG_PROMPT_HOSTNAME      },
-                { "prompt-root-password", no_argument,       NULL, ARG_PROMPT_ROOT_PASSWORD },
-                { "copy",                 no_argument,       NULL, ARG_COPY                 },
-                { "copy-locale",          no_argument,       NULL, ARG_COPY_LOCALE          },
-                { "copy-keymap",          no_argument,       NULL, ARG_COPY_KEYMAP          },
-                { "copy-timezone",        no_argument,       NULL, ARG_COPY_TIMEZONE        },
-                { "copy-root-password",   no_argument,       NULL, ARG_COPY_ROOT_PASSWORD   },
-                { "setup-machine-id",     no_argument,       NULL, ARG_SETUP_MACHINE_ID     },
+                { "help",                    no_argument,       NULL, 'h'                         },
+                { "version",                 no_argument,       NULL, ARG_VERSION                 },
+                { "root",                    required_argument, NULL, ARG_ROOT                    },
+                { "image",                   required_argument, NULL, ARG_IMAGE                   },
+                { "locale",                  required_argument, NULL, ARG_LOCALE                  },
+                { "locale-messages",         required_argument, NULL, ARG_LOCALE_MESSAGES         },
+                { "keymap",                  required_argument, NULL, ARG_KEYMAP                  },
+                { "timezone",                required_argument, NULL, ARG_TIMEZONE                },
+                { "hostname",                required_argument, NULL, ARG_HOSTNAME                },
+                { "machine-id",              required_argument, NULL, ARG_MACHINE_ID              },
+                { "root-password",           required_argument, NULL, ARG_ROOT_PASSWORD           },
+                { "root-password-file",      required_argument, NULL, ARG_ROOT_PASSWORD_FILE      },
+                { "root-password-hashed",    required_argument, NULL, ARG_ROOT_PASSWORD_HASHED    },
+                { "root-shell",              required_argument, NULL, ARG_ROOT_SHELL              },
+                { "kernel-command-line",     required_argument, NULL, ARG_KERNEL_COMMAND_LINE     },
+                { "prompt",                  no_argument,       NULL, ARG_PROMPT                  },
+                { "prompt-locale",           no_argument,       NULL, ARG_PROMPT_LOCALE           },
+                { "prompt-keymap",           no_argument,       NULL, ARG_PROMPT_KEYMAP           },
+                { "prompt-timezone",         no_argument,       NULL, ARG_PROMPT_TIMEZONE         },
+                { "prompt-hostname",         no_argument,       NULL, ARG_PROMPT_HOSTNAME         },
+                { "prompt-root-password",    no_argument,       NULL, ARG_PROMPT_ROOT_PASSWORD    },
+                { "prompt-root-shell",       no_argument,       NULL, ARG_PROMPT_ROOT_SHELL       },
+                { "copy",                    no_argument,       NULL, ARG_COPY                    },
+                { "copy-locale",             no_argument,       NULL, ARG_COPY_LOCALE             },
+                { "copy-keymap",             no_argument,       NULL, ARG_COPY_KEYMAP             },
+                { "copy-timezone",           no_argument,       NULL, ARG_COPY_TIMEZONE           },
+                { "copy-root-password",      no_argument,       NULL, ARG_COPY_ROOT_PASSWORD      },
+                { "copy-root-shell",         no_argument,       NULL, ARG_COPY_ROOT_SHELL         },
+                { "setup-machine-id",        no_argument,       NULL, ARG_SETUP_MACHINE_ID        },
+                { "force",                   no_argument,       NULL, ARG_FORCE                   },
+                { "delete-root-password",    no_argument,       NULL, ARG_DELETE_ROOT_PASSWORD    },
+                { "welcome",                 required_argument, NULL, ARG_WELCOME                 },
                 {}
         };
 
@@ -790,11 +1118,13 @@ static int parse_argv(int argc, char *argv[]) {
                                 return r;
                         break;
 
-                case ARG_LOCALE:
-                        if (!locale_is_valid(optarg))
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Locale %s is not valid.", optarg);
+                case ARG_IMAGE:
+                        r = parse_path_argument_and_warn(optarg, false, &arg_image);
+                        if (r < 0)
+                                return r;
+                        break;
 
+                case ARG_LOCALE:
                         r = free_and_strdup(&arg_locale, optarg);
                         if (r < 0)
                                 return log_oom();
@@ -802,10 +1132,6 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_LOCALE_MESSAGES:
-                        if (!locale_is_valid(optarg))
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Locale %s is not valid.", optarg);
-
                         r = free_and_strdup(&arg_locale_messages, optarg);
                         if (r < 0)
                                 return log_oom();
@@ -838,6 +1164,8 @@ static int parse_argv(int argc, char *argv[]) {
                         r = free_and_strdup(&arg_root_password, optarg);
                         if (r < 0)
                                 return log_oom();
+
+                        arg_root_password_is_hashed = false;
                         break;
 
                 case ARG_ROOT_PASSWORD_FILE:
@@ -846,6 +1174,26 @@ static int parse_argv(int argc, char *argv[]) {
                         r = read_one_line_file(optarg, &arg_root_password);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read %s: %m", optarg);
+
+                        arg_root_password_is_hashed = false;
+                        break;
+
+                case ARG_ROOT_PASSWORD_HASHED:
+                        r = free_and_strdup(&arg_root_password, optarg);
+                        if (r < 0)
+                                return log_oom();
+
+                        arg_root_password_is_hashed = true;
+                        break;
+
+                case ARG_ROOT_SHELL:
+                        r = find_shell(optarg, arg_root);
+                        if (r < 0)
+                                return r;
+
+                        r = free_and_strdup(&arg_root_shell, optarg);
+                        if (r < 0)
+                                return log_oom();
 
                         break;
 
@@ -868,8 +1216,16 @@ static int parse_argv(int argc, char *argv[]) {
 
                         break;
 
+                case ARG_KERNEL_COMMAND_LINE:
+                        r = free_and_strdup(&arg_kernel_cmdline, optarg);
+                        if (r < 0)
+                                return log_oom();
+
+                        break;
+
                 case ARG_PROMPT:
-                        arg_prompt_locale = arg_prompt_keymap = arg_prompt_timezone = arg_prompt_hostname = arg_prompt_root_password = true;
+                        arg_prompt_locale = arg_prompt_keymap = arg_prompt_timezone = arg_prompt_hostname =
+                                arg_prompt_root_password = arg_prompt_root_shell = true;
                         break;
 
                 case ARG_PROMPT_LOCALE:
@@ -892,8 +1248,13 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_prompt_root_password = true;
                         break;
 
+                case ARG_PROMPT_ROOT_SHELL:
+                        arg_prompt_root_shell = true;
+                        break;
+
                 case ARG_COPY:
-                        arg_copy_locale = arg_copy_keymap = arg_copy_timezone = arg_copy_root_password = true;
+                        arg_copy_locale = arg_copy_keymap = arg_copy_timezone = arg_copy_root_password =
+                                arg_copy_root_shell = true;
                         break;
 
                 case ARG_COPY_LOCALE:
@@ -912,12 +1273,31 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_copy_root_password = true;
                         break;
 
-                case ARG_SETUP_MACHINE_ID:
+                case ARG_COPY_ROOT_SHELL:
+                        arg_copy_root_shell = true;
+                        break;
 
+                case ARG_SETUP_MACHINE_ID:
                         r = sd_id128_randomize(&arg_machine_id);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to generate randomized machine ID: %m");
 
+                        break;
+
+                case ARG_FORCE:
+                        arg_force = true;
+                        break;
+
+                case ARG_DELETE_ROOT_PASSWORD:
+                        arg_delete_root_password = true;
+                        break;
+
+                case ARG_WELCOME:
+                        r = parse_boolean(optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --welcome= argument: %s", optarg);
+
+                        arg_welcome = r;
                         break;
 
                 case '?':
@@ -927,11 +1307,28 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option");
                 }
 
+        /* We check if the specified locale strings are valid down here, so that we can take --root= into
+         * account when looking for the locale files. */
+
+        if (arg_locale && !locale_is_ok(arg_locale))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Locale %s is not installed.", arg_locale);
+        if (arg_locale_messages && !locale_is_ok(arg_locale_messages))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Locale %s is not installed.", arg_locale_messages);
+
+        if (arg_delete_root_password && (arg_copy_root_password || arg_root_password || arg_prompt_root_password))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "--delete-root-password cannot be combined with other root password options");
+
+        if (arg_image && arg_root)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Please specify either --root= or --image=, the combination of both is not supported.");
+
         return 1;
 }
 
 static int run(int argc, char *argv[]) {
-        bool enabled;
+        _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
+        _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
+        _cleanup_(umount_and_rmdir_and_freep) char *unlink_dir = NULL;
         int r;
 
         r = parse_argv(argc, argv);
@@ -942,11 +1339,23 @@ static int run(int argc, char *argv[]) {
 
         umask(0022);
 
-        r = proc_cmdline_get_bool("systemd.firstboot", &enabled);
+        if (!arg_root && !arg_image) {
+                bool enabled;
+
+                /* If we are called without --root=/--image= let's honour the systemd.firstboot kernel
+                 * command line option, because we are called to provision the host with basic settings (as
+                 * opposed to some other file system tree/image) */
+
+                r = proc_cmdline_get_bool("systemd.firstboot", &enabled);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse systemd.firstboot= kernel command line argument, ignoring: %m");
+                if (r > 0 && !enabled)
+                        return 0; /* disabled */
+        }
+
+        r = setup_image(&unlink_dir, &loop_device, &decrypted_image);
         if (r < 0)
-                return log_error_errno(r, "Failed to parse systemd.firstboot= kernel command line argument, ignoring: %m");
-        if (r > 0 && !enabled)
-                return 0; /* disabled */
+                return r;
 
         r = process_locale();
         if (r < 0)
@@ -968,7 +1377,11 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return r;
 
-        r = process_root_password();
+        r = process_root_args();
+        if (r < 0)
+                return r;
+
+        r = process_kernel_cmdline();
         if (r < 0)
                 return r;
 

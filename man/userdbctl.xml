@@ -163,11 +163,10 @@
     <title>Well-Known Services</title>
 
     <para>The <command>userdbctl services</command> command will list all currently running services that
-    provide user or group definitions to the system. The following are well-known services are shown among
-    this list.</para>
+    provide user or group definitions to the system. The following well-known services are shown among
+    this list:</para>
 
     <variablelist>
-
       <varlistentry>
         <term><constant>io.systemd.DynamicUser</constant></term>
 
@@ -185,6 +184,15 @@
         <citerefentry><refentrytitle>systemd-homed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         and makes all users (and their groups) belonging to home directories managed by that service
         available to the system.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><constant>io.systemd.Machine</constant></term>
+
+        <listitem><para>This service is provided by
+        <citerefentry><refentrytitle>systemd-machined.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        and synthesizes records for all users/groups used by a container that employs user
+        namespacing.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -218,7 +226,7 @@
 
     <para>Note that <command>userdbctl</command> has internal support for NSS-based lookups too. This means
     that if neither <constant>io.systemd.Multiplexer</constant> nor
-    <constant>io.systemd.NameSeviceSwitch</constant> are running look-ups into the the basic user/group
+    <constant>io.systemd.NameSeviceSwitch</constant> are running look-ups into the basic user/group
     databases will still work.</para>
   </refsect1>
 

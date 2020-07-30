@@ -12,6 +12,8 @@ libcore_shared_sources = '''
 '''.split()
 
 libcore_sources = '''
+        apparmor-setup.c
+        apparmor-setup.h
         audit-fd.c
         audit-fd.h
         automount.c
@@ -72,6 +74,8 @@ libcore_sources = '''
         emergency-action.h
         execute.c
         execute.h
+        generator-setup.c
+        generator-setup.h
         hostname-setup.c
         hostname-setup.h
         ima-setup.c

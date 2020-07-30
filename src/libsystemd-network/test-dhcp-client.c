@@ -4,10 +4,11 @@
 ***/
 
 #include <errno.h>
+#include <net/if.h>
+#include <net/if_arp.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <net/if.h>
 
 #include "sd-dhcp-client.h"
 #include "sd-event.h"
@@ -257,7 +258,7 @@ int dhcp_network_send_raw_socket(int s, const union sockaddr_union *link, const 
 }
 
 int dhcp_network_bind_raw_socket(
-                int index,
+                int ifindex,
                 union sockaddr_union *link,
                 uint32_t id,
                 const uint8_t *addr, size_t addr_len,

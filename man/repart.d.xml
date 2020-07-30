@@ -1,7 +1,8 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<refentry id="repart.d" conditional='ENABLE_REPART'>
+<refentry id="repart.d" conditional='ENABLE_REPART'
+          xmlns:xi="http://www.w3.org/2001/XInclude">
 
   <refentryinfo>
     <title>repart.d</title>
@@ -139,7 +140,7 @@
 
               <row>
                 <entry><constant>root-secondary</constant></entry>
-                <entry>Root file system partition of the secondary architecture of the local architecture; usually the matching 32bit architecture for the local 64bit architecture)</entry>
+                <entry>Root file system partition of the secondary architecture of the local architecture (usually the matching 32bit architecture for the local 64bit architecture)</entry>
               </row>
 
               <row>
@@ -214,7 +215,17 @@
         setting is not used for matching. It is also not used when a label is already set for an existing
         partition. It is thus only used when a partition is newly created or when an existing one had a no
         label set (that is: an empty label). If not specified a label derived from the partition type is
-        automatically used.</para></listitem>
+        automatically used. Simple specifier expansion is supported, see below.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>UUID=</varname></term>
+
+        <listitem><para>The UUID to assign to the partition if none is assigned yet. Note that this
+        setting is not used for matching. It is also not used when a UUID is already set for an existing
+        partition. It is thus only used when a partition is newly created or when an existing one had a
+        all-zero UUID set. If not specified a UUID derived from the partition type is automatically
+        used.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -289,11 +300,34 @@
         <term><varname>PaddingMinBytes=</varname></term>
         <term><varname>PaddingMaxBytes=</varname></term>
 
-        <listitem><para>Specifies minimum and maximum size constrains in bytes for the free space after the
+        <listitem><para>Specifies minimum and maximum size constraints in bytes for the free space after the
         partition (the "padding"). Semantics are similar to <varname>SizeMinBytes=</varname> and
         <varname>SizeMaxBytes=</varname>, except that unlike partition sizes free space can be shrunk and can
         be as small as zero. By default no size constraints on padding are set, so that only
         <varname>PaddingWeight=</varname> determines the size of the padding applied.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>CopyBlocks=</varname></term>
+
+        <listitem><para>Takes a path to a regular file, block device node or directory. If specified and the
+        partition is newly created the data from the specified path is written to the newly created
+        partition, on the block level. If a directory is specified the backing block device of the file
+        system the directory is on is determined and the data read directly from that. This option is useful
+        to efficiently replicate existing file systems on the block level on a new partition, for example to
+        build a simple OS installer or OS image builder.</para>
+
+        <para>The file specified here must have a size that is a multiple of the basic block size 512 and not
+        be empty. If this option is used, the size allocation algorithm is slightly altered: the partition is
+        created as least as big as required to fit the data in, i.e. the data size is an additional minimum
+        size value taken into consideration for the allocation algorithm, similar to and in addition to the
+        <varname>SizeMin=</varname> value configured above.</para>
+
+        <para>This option has no effect if the partition it is declared for already exists, i.e. existing
+        data is never overwritten. Note that the data is copied in before the partition table is updated,
+        i.e. before the partition actually is persistently created. This provides robustness: it is
+        guaranteed that the partition either doesn't exist or exists fully populated; it is not possible that
+        the partition exists but is not or only partially populated.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -304,6 +338,40 @@
         into their original state by removing partitions and creating them anew. Defaults to off.</para></listitem>
       </varlistentry>
     </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>Specifiers</title>
+
+    <para>Specifiers may be used in the <varname>Label=</varname> setting. The following expansions are understood:</para>
+      <table class='specifiers'>
+        <title>Specifiers available</title>
+        <tgroup cols='3' align='left' colsep='1' rowsep='1'>
+          <colspec colname="spec" />
+          <colspec colname="mean" />
+          <colspec colname="detail" />
+          <thead>
+            <row>
+              <entry>Specifier</entry>
+              <entry>Meaning</entry>
+              <entry>Details</entry>
+            </row>
+          </thead>
+          <tbody>
+            <xi:include href="standard-specifiers.xml" xpointer="a"/>
+            <xi:include href="standard-specifiers.xml" xpointer="b"/>
+            <xi:include href="standard-specifiers.xml" xpointer="B"/>
+            <xi:include href="standard-specifiers.xml" xpointer="H"/>
+            <xi:include href="standard-specifiers.xml" xpointer="l"/>
+            <xi:include href="standard-specifiers.xml" xpointer="m"/>
+            <xi:include href="standard-specifiers.xml" xpointer="o"/>
+            <xi:include href="standard-specifiers.xml" xpointer="v"/>
+            <xi:include href="standard-specifiers.xml" xpointer="w"/>
+            <xi:include href="standard-specifiers.xml" xpointer="W"/>
+            <xi:include href="standard-specifiers.xml" xpointer="percent"/>
+          </tbody>
+        </tgroup>
+      </table>
   </refsect1>
 
   <refsect1>

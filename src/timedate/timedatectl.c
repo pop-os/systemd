@@ -9,15 +9,17 @@
 #include "sd-bus.h"
 
 #include "bus-error.h"
-#include "bus-util.h"
+#include "bus-locator.h"
+#include "bus-map-properties.h"
+#include "bus-print-properties.h"
 #include "format-table.h"
 #include "in-addr-util.h"
 #include "main-func.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "pretty-print.h"
-#include "spawn-polkit-agent.h"
 #include "sparse-endian.h"
+#include "spawn-polkit-agent.h"
 #include "string-table.h"
 #include "strv.h"
 #include "terminal-util.h"
@@ -158,7 +160,7 @@ static int print_status_info(const StatusInfo *i) {
 
         r = table_print(table, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to show table: %m");
+                return table_log_print_error(r);
 
         if (i->rtc_local)
                 printf("\n%s"
@@ -239,14 +241,13 @@ static int set_time(int argc, char **argv, void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to parse time specification '%s': %m", argv[1]);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.timedate1",
-                               "/org/freedesktop/timedate1",
-                               "org.freedesktop.timedate1",
-                               "SetTime",
-                               &error,
-                               NULL,
-                               "xbb", (int64_t) t, relative, interactive);
+        r = bus_call_method(
+                        bus,
+                        bus_timedate,
+                        "SetTime",
+                        &error,
+                        NULL,
+                        "xbb", (int64_t) t, relative, interactive);
         if (r < 0)
                 return log_error_errno(r, "Failed to set time: %s", bus_error_message(&error, r));
 
@@ -260,14 +261,7 @@ static int set_timezone(int argc, char **argv, void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.timedate1",
-                               "/org/freedesktop/timedate1",
-                               "org.freedesktop.timedate1",
-                               "SetTimezone",
-                               &error,
-                               NULL,
-                               "sb", argv[1], arg_ask_password);
+        r = bus_call_method(bus, bus_timedate, "SetTimezone", &error, NULL, "sb", argv[1], arg_ask_password);
         if (r < 0)
                 return log_error_errno(r, "Failed to set time zone: %s", bus_error_message(&error, r));
 
@@ -285,14 +279,13 @@ static int set_local_rtc(int argc, char **argv, void *userdata) {
         if (b < 0)
                 return log_error_errno(b, "Failed to parse local RTC setting '%s': %m", argv[1]);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.timedate1",
-                               "/org/freedesktop/timedate1",
-                               "org.freedesktop.timedate1",
-                               "SetLocalRTC",
-                               &error,
-                               NULL,
-                               "bbb", b, arg_adjust_system_clock, arg_ask_password);
+        r = bus_call_method(
+                        bus,
+                        bus_timedate,
+                        "SetLocalRTC",
+                        &error,
+                        NULL,
+                        "bbb", b, arg_adjust_system_clock, arg_ask_password);
         if (r < 0)
                 return log_error_errno(r, "Failed to set local RTC: %s", bus_error_message(&error, r));
 
@@ -310,14 +303,7 @@ static int set_ntp(int argc, char **argv, void *userdata) {
         if (b < 0)
                 return log_error_errno(b, "Failed to parse NTP setting '%s': %m", argv[1]);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.timedate1",
-                               "/org/freedesktop/timedate1",
-                               "org.freedesktop.timedate1",
-                               "SetNTP",
-                               &error,
-                               NULL,
-                               "bb", b, arg_ask_password);
+        r = bus_call_method(bus, bus_timedate, "SetNTP", &error, NULL, "bb", b, arg_ask_password);
         if (r < 0)
                 return log_error_errno(r, "Failed to set ntp: %s", bus_error_message(&error, r));
 
@@ -331,14 +317,7 @@ static int list_timezones(int argc, char **argv, void *userdata) {
         int r;
         char** zones;
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.timedate1",
-                               "/org/freedesktop/timedate1",
-                               "org.freedesktop.timedate1",
-                               "ListTimezones",
-                               &error,
-                               &reply,
-                               NULL);
+        r = bus_call_method(bus, bus_timedate, "ListTimezones", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request list of time zones: %s",
                                        bus_error_message(&error, r));
@@ -386,10 +365,9 @@ static const char * const ntp_leap_table[4] = {
         [3] = "not synchronized",
 };
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wtype-limits"
+DISABLE_WARNING_TYPE_LIMITS;
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(ntp_leap, uint32_t);
-#pragma GCC diagnostic pop
+REENABLE_WARNING;
 
 static int print_ntp_status_info(NTPStatusInfo *i) {
         char ts[FORMAT_TIMESPAN_MAX], jitter[FORMAT_TIMESPAN_MAX],
@@ -431,7 +409,7 @@ static int print_ntp_status_info(NTPStatusInfo *i) {
         if (r < 0)
                 return table_log_add_error(r);
 
-        r = table_add_cell_stringf(table, NULL, "%s (%s)", i->server_address, i->server_name);
+        r = table_add_cell_stringf(table, NULL, "%s (%s)", strna(i->server_address), strna(i->server_name));
         if (r < 0)
                 return table_log_add_error(r);
 
@@ -455,7 +433,7 @@ static int print_ntp_status_info(NTPStatusInfo *i) {
 
                 r = table_print(table, NULL);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to show table: %m");
+                        return table_log_print_error(r);
 
                 return 0;
         }
@@ -464,7 +442,7 @@ static int print_ntp_status_info(NTPStatusInfo *i) {
                 log_error("Invalid NTP response");
                 r = table_print(table, NULL);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to show table: %m");
+                        return table_log_print_error(r);
 
                 return 0;
         }
@@ -548,7 +526,7 @@ static int print_ntp_status_info(NTPStatusInfo *i) {
 
         r = table_print(table, NULL);
         if (r < 0)
-                log_error_errno(r, "Failed to show table: %m");
+                return table_log_print_error(r);
 
         return 0;
 }
@@ -686,7 +664,7 @@ static int on_properties_changed(sd_bus_message *m, void *userdata, sd_bus_error
 
         r = sd_bus_message_read(m, "s", &name);
         if (r < 0)
-                return log_error_errno(r, "Failed to read interface name: %m");
+                return bus_log_parse_error(r);
 
         if (!streq_ptr(name, "org.freedesktop.timesync1.Manager"))
                 return 0;
@@ -843,15 +821,7 @@ static int parse_ifindex_bus(sd_bus *bus, const char *str) {
                 return r;
         assert(r < 0);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.network1",
-                        "/org/freedesktop/network1",
-                        "org.freedesktop.network1.Manager",
-                        "GetLinkByName",
-                        &error,
-                        &reply,
-                        "s", str);
+        r = bus_call_method(bus, bus_network_mgr, "GetLinkByName", &error, &reply, "s", str);
         if (r < 0)
                 return log_error_errno(r, "Failed to get ifindex of interfaces %s: %s", str, bus_error_message(&error, r));
 
@@ -876,13 +846,7 @@ static int verb_ntp_servers(int argc, char **argv, void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &req,
-                        "org.freedesktop.network1",
-                        "/org/freedesktop/network1",
-                        "org.freedesktop.network1.Manager",
-                        "SetLinkNTP");
+        r = bus_message_new_method_call(bus, &req, bus_network_mgr, "SetLinkNTP");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -914,15 +878,7 @@ static int verb_revert(int argc, char **argv, void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.network1",
-                        "/org/freedesktop/network1",
-                        "org.freedesktop.network1.Manager",
-                        "RevertLinkNTP",
-                        &error,
-                        NULL,
-                        "i", ifindex);
+        r = bus_call_method(bus, bus_network_mgr, "RevertLinkNTP", &error, NULL, "i", ifindex);
         if (r < 0)
                 return log_error_errno(r, "Failed to revert interface configuration: %s", bus_error_message(&error, r));
 
@@ -1098,9 +1054,7 @@ static int run(int argc, char *argv[]) {
         int r;
 
         setlocale(LC_ALL, "");
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -1108,7 +1062,7 @@ static int run(int argc, char *argv[]) {
 
         r = bus_connect_transport(arg_transport, arg_host, false, &bus);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         return timedatectl_main(bus, argc, argv);
 }

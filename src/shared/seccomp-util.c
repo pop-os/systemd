@@ -24,7 +24,7 @@
 
 const uint32_t seccomp_local_archs[] = {
 
-        /* Note: always list the native arch we are compiled as last, so that users can blacklist seccomp(), but our own calls to it still succeed */
+        /* Note: always list the native arch we are compiled as last, so that users can deny-list seccomp(), but our own calls to it still succeed */
 
 #if defined(__x86_64__) && defined(__ILP32__)
                 SCMP_ARCH_X86,
@@ -1112,7 +1112,7 @@ int seccomp_parse_syscall_filter(
 
                 /* If we previously wanted to forbid a syscall and now
                  * we want to allow it, then remove it from the list. */
-                if (!(flags & SECCOMP_PARSE_INVERT) == !!(flags & SECCOMP_PARSE_WHITELIST)) {
+                if (!(flags & SECCOMP_PARSE_INVERT) == !!(flags & SECCOMP_PARSE_ALLOW_LIST)) {
                         r = hashmap_put(filter, INT_TO_PTR(id + 1), INT_TO_PTR(errno_num));
                         if (r < 0)
                                 switch (r) {
@@ -1315,7 +1315,7 @@ int seccomp_protect_syslog(void) {
         return 0;
 }
 
-int seccomp_restrict_address_families(Set *address_families, bool whitelist) {
+int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
         uint32_t arch;
         int r;
 
@@ -1362,13 +1362,13 @@ int seccomp_restrict_address_families(Set *address_families, bool whitelist) {
                 if (r < 0)
                         return r;
 
-                if (whitelist) {
+                if (allow_list) {
                         int af, first = 0, last = 0;
                         void *afp;
 
-                        /* If this is a whitelist, we first block the address families that are out of range and then
-                         * everything that is not in the set. First, we find the lowest and highest address family in
-                         * the set. */
+                        /* If this is an allow list, we first block the address families that are out of
+                         * range and then everything that is not in the set. First, we find the lowest and
+                         * highest address family in the set. */
 
                         SET_FOREACH(afp, address_families, i) {
                                 af = PTR_TO_INT(afp);
@@ -1448,9 +1448,8 @@ int seccomp_restrict_address_families(Set *address_families, bool whitelist) {
                 } else {
                         void *af;
 
-                        /* If this is a blacklist, then generate one rule for
-                         * each address family that are then combined in OR
-                         * checks. */
+                        /* If this is a deny list, then generate one rule for each address family that are
+                         * then combined in OR checks. */
 
                         SET_FOREACH(af, address_families, i) {
 
@@ -1506,11 +1505,11 @@ int seccomp_restrict_realtime(void) {
                         return r;
 
                 /* Go through all policies with lower values than that, and block them -- unless they appear in the
-                 * whitelist. */
+                 * allow list. */
                 for (p = 0; p < max_policy; p++) {
                         bool good = false;
 
-                        /* Check if this is in the whitelist. */
+                        /* Check if this is in the allow list. */
                         for (i = 0; i < ELEMENTSOF(permitted_policies); i++)
                                 if (permitted_policies[i] == p) {
                                         good = true;
@@ -1533,8 +1532,8 @@ int seccomp_restrict_realtime(void) {
                         }
                 }
 
-                /* Blacklist all other policies, i.e. the ones with higher values. Note that all comparisons are
-                 * unsigned here, hence no need no check for < 0 values. */
+                /* Deny-list all other policies, i.e. the ones with higher values. Note that all comparisons
+                 * are unsigned here, hence no need no check for < 0 values. */
                 r = seccomp_rule_add_exact(
                                 seccomp,
                                 SCMP_ACT_ERRNO(EPERM),
@@ -1742,17 +1741,13 @@ int seccomp_restrict_archs(Set *archs) {
         return 0;
 }
 
-int parse_syscall_archs(char **l, Set **archs) {
-        _cleanup_set_free_ Set *_archs = NULL;
+int parse_syscall_archs(char **l, Set **ret_archs) {
+        _cleanup_set_free_ Set *archs = NULL;
         char **s;
         int r;
 
         assert(l);
-        assert(archs);
-
-        r = set_ensure_allocated(&_archs, NULL);
-        if (r < 0)
-                return r;
+        assert(ret_archs);
 
         STRV_FOREACH(s, l) {
                 uint32_t a;
@@ -1761,13 +1756,12 @@ int parse_syscall_archs(char **l, Set **archs) {
                 if (r < 0)
                         return -EINVAL;
 
-                r = set_put(_archs, UINT32_TO_PTR(a + 1));
+                r = set_ensure_put(&archs, NULL, UINT32_TO_PTR(a + 1));
                 if (r < 0)
                         return -ENOMEM;
         }
 
-        *archs = TAKE_PTR(_archs);
-
+        *ret_archs = TAKE_PTR(archs);
         return 0;
 }
 
@@ -2001,6 +1995,22 @@ static int seccomp_restrict_sxid(scmp_filter_ctx seccomp, mode_t m) {
                 log_debug_errno(r, "Failed to add filter for openat: %m");
         else
                 any = true;
+
+#if defined(__SNR_openat2)
+        /* The new openat2() system call can't be filtered sensibly, since it moves the flags parameter into
+         * an indirect structure. Let's block it entirely for now. That should be a reasonably OK thing to do
+         * for now, since openat2() is very new and code generally needs fallback logic anyway to be
+         * compatible with kernels that are not absolutely recent. */
+        r = seccomp_rule_add_exact(
+                        seccomp,
+                        SCMP_ACT_ERRNO(EPERM),
+                        SCMP_SYS(openat2),
+                        0);
+        if (r < 0)
+                log_debug_errno(r, "Failed to add filter for openat2: %m");
+        else
+                any = true;
+#endif
 
         r = seccomp_rule_add_exact(
                         seccomp,

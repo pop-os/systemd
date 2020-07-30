@@ -22,6 +22,7 @@
 #include "journal-internal.h"
 #include "journal-util.h"
 #include "json.h"
+#include "locale-util.h"
 #include "log.h"
 #include "logs-show.h"
 #include "macro.h"
@@ -39,6 +40,7 @@
 #include "time-util.h"
 #include "utf8.h"
 #include "util.h"
+#include "web-util.h"
 
 /* up to three lines (each up to 100 characters) or 300 characters, whichever is less */
 #define PRINT_LINE_THRESHOLD 3
@@ -47,21 +49,86 @@
 #define JSON_THRESHOLD 4096U
 
 static int print_catalog(FILE *f, sd_journal *j) {
-        int r;
         _cleanup_free_ char *t = NULL, *z = NULL;
+        const char *newline, *prefix;
+        int r;
+
+        assert(j);
 
         r = sd_journal_get_catalog(j, &t);
+        if (r == -ENOENT)
+                return 0;
         if (r < 0)
-                return r;
+                return log_error_errno(r, "Failed to find catalog entry: %m");
 
-        z = strreplace(strstrip(t), "\n", "\n-- ");
+        if (is_locale_utf8())
+                prefix = strjoina(special_glyph(SPECIAL_GLYPH_LIGHT_SHADE), special_glyph(SPECIAL_GLYPH_LIGHT_SHADE));
+        else
+                prefix = "--";
+
+        if (colors_enabled())
+                newline = strjoina(ANSI_NORMAL "\n" ANSI_GREY, prefix, ANSI_NORMAL " " ANSI_GREEN);
+        else
+                newline = strjoina("\n", prefix, " ");
+
+        z = strreplace(strstrip(t), "\n", newline);
         if (!z)
                 return log_oom();
 
-        fputs("-- ", f);
-        fputs(z, f);
-        fputc('\n', f);
+        if (colors_enabled())
+                fprintf(f, ANSI_GREY "%s" ANSI_NORMAL " " ANSI_GREEN, prefix);
+        else
+                fprintf(f, "%s ", prefix);
 
+        fputs(z, f);
+
+        if (colors_enabled())
+                fputs(ANSI_NORMAL "\n", f);
+        else
+                fputc('\n', f);
+
+        return 1;
+}
+
+static int url_from_catalog(sd_journal *j, char **ret) {
+        _cleanup_free_ char *t = NULL, *url = NULL;
+        const char *weblink;
+        int r;
+
+        assert(j);
+        assert(ret);
+
+        r = sd_journal_get_catalog(j, &t);
+        if (r == -ENOENT)
+                goto notfound;
+        if (r < 0)
+                return log_error_errno(r, "Failed to find catalog entry: %m");
+
+        weblink = startswith(t, "Documentation:");
+        if (!weblink) {
+                weblink = strstr(t + 1, "\nDocumentation:");
+                if (!weblink)
+                        goto notfound;
+
+                weblink += 15;
+        }
+
+        /* Skip whitespace to value */
+        weblink += strspn(weblink, " \t");
+
+        /* Cut out till next whitespace/newline */
+        url = strndup(weblink, strcspn(weblink, WHITESPACE));
+        if (!url)
+                return log_oom();
+
+        if (!documentation_url_is_valid(url))
+                goto notfound;
+
+        *ret = TAKE_PTR(url);
+        return 1;
+
+notfound:
+        *ret = NULL;
         return 0;
 }
 
@@ -121,17 +188,14 @@ static int parse_fieldv(const void *data, size_t length, const ParseFieldVec *fi
         return 0;
 }
 
-static int field_set_test(Set *fields, const char *name, size_t n) {
-        char *s = NULL;
+static int field_set_test(const Set *fields, const char *name, size_t n) {
+        char *s;
 
         if (!fields)
                 return 1;
 
         s = strndupa(name, n);
-        if (!s)
-                return log_oom();
-
-        return set_get(fields, s) ? 1 : 0;
+        return set_contains(fields, s);
 }
 
 static bool shall_print(const char *p, size_t l, OutputFlags flags) {
@@ -369,15 +433,18 @@ static int output_short(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const size_t highlight[2]) {
 
         int r;
         const void *data;
-        size_t length;
-        size_t n = 0;
-        _cleanup_free_ char *hostname = NULL, *identifier = NULL, *comm = NULL, *pid = NULL, *fake_pid = NULL, *message = NULL, *realtime = NULL, *monotonic = NULL, *priority = NULL, *transport = NULL, *config_file = NULL, *unit = NULL, *user_unit = NULL;
-        size_t hostname_len = 0, identifier_len = 0, comm_len = 0, pid_len = 0, fake_pid_len = 0, message_len = 0, realtime_len = 0, monotonic_len = 0, priority_len = 0, transport_len = 0, config_file_len = 0, unit_len = 0, user_unit_len = 0;
+        size_t length, n = 0;
+        _cleanup_free_ char *hostname = NULL, *identifier = NULL, *comm = NULL, *pid = NULL, *fake_pid = NULL,
+                *message = NULL, *realtime = NULL, *monotonic = NULL, *priority = NULL, *transport = NULL,
+                *config_file = NULL, *unit = NULL, *user_unit = NULL, *documentation_url = NULL;
+        size_t hostname_len = 0, identifier_len = 0, comm_len = 0, pid_len = 0, fake_pid_len = 0, message_len = 0,
+                realtime_len = 0, monotonic_len = 0, priority_len = 0, transport_len = 0, config_file_len = 0,
+                unit_len = 0, user_unit_len = 0, documentation_url_len = 0;
         int p = LOG_INFO;
         bool ellipsized = false, audit;
         const ParseFieldVec fields[] = {
@@ -394,6 +461,7 @@ static int output_short(
                 PARSE_FIELD_VEC_ENTRY("CONFIG_FILE=", &config_file, &config_file_len),
                 PARSE_FIELD_VEC_ENTRY("_SYSTEMD_UNIT=", &unit, &unit_len),
                 PARSE_FIELD_VEC_ENTRY("_SYSTEMD_USER_UNIT=", &user_unit, &user_unit_len),
+                PARSE_FIELD_VEC_ENTRY("DOCUMENTATION=", &documentation_url, &documentation_url_len),
         };
         size_t highlight_shifted[] = {highlight ? highlight[0] : 0, highlight ? highlight[1] : 0};
 
@@ -482,30 +550,64 @@ static int output_short(
                 n += fake_pid_len + 2;
         }
 
+        fputs(": ", f);
+
+        if (urlify_enabled()) {
+                _cleanup_free_ char *c = NULL;
+
+                /* Insert a hyperlink to a documentation URL before the message. Note that we don't make the
+                 * whole message a hyperlink, since otherwise the whole screen might end up being just
+                 * hyperlinks. Moreover, we want to be able to highlight parts of the message (such as the
+                 * config file, see below) hence let's keep the documentation URL link separate. */
+
+                if (documentation_url && shall_print(documentation_url, documentation_url_len, flags)) {
+                        c = strndup(documentation_url, documentation_url_len);
+                        if (!c)
+                                return log_oom();
+
+                        if (!documentation_url_is_valid(c)) /* Eat up invalid links */
+                                c = mfree(c);
+                }
+
+                if (!c)
+                        (void) url_from_catalog(j, &c); /* Acquire from catalog if not embedded in log message itself */
+
+                if (c) {
+                        _cleanup_free_ char *urlified = NULL;
+
+                        if (terminal_urlify(c, special_glyph(SPECIAL_GLYPH_EXTERNAL_LINK), &urlified) >= 0) {
+                                fputs(urlified, f);
+                                fputc(' ', f);
+                        }
+                }
+        }
+
         if (!(flags & OUTPUT_SHOW_ALL) && !utf8_is_printable(message, message_len)) {
                 char bytes[FORMAT_BYTES_MAX];
-                fprintf(f, ": [%s blob data]\n", format_bytes(bytes, sizeof(bytes), message_len));
+                fprintf(f, "[%s blob data]\n", format_bytes(bytes, sizeof(bytes), message_len));
         } else {
-                fputs(": ", f);
 
                 /* URLify config_file string in message, if the message starts with it.
                  * Skip URLification if the highlighted pattern overlaps. */
                 if (config_file &&
                     message_len >= config_file_len &&
                     memcmp(message, config_file, config_file_len) == 0 &&
-                    IN_SET(message[config_file_len], ':', ' ', '\0') &&
+                    (message_len == config_file_len || IN_SET(message[config_file_len], ':', ' ')) &&
                     (!highlight || highlight_shifted[0] == 0 || highlight_shifted[0] > config_file_len)) {
 
                         _cleanup_free_ char *t = NULL, *urlified = NULL;
 
                         t = strndup(config_file, config_file_len);
                         if (t && terminal_urlify_path(t, NULL, &urlified) >= 0) {
-                                size_t shift = strlen(urlified) - config_file_len;
+                                size_t urlified_len = strlen(urlified);
+                                size_t shift = urlified_len - config_file_len;
                                 char *joined;
 
-                                joined = strjoin(urlified, message + config_file_len);
+                                joined = realloc(urlified, message_len + shift);
                                 if (joined) {
+                                        memcpy(joined + urlified_len, message + config_file_len, message_len - config_file_len);
                                         free_and_replace(message, joined);
+                                        TAKE_PTR(urlified);
                                         message_len += shift;
                                         if (highlight) {
                                                 highlight_shifted[0] += shift;
@@ -522,7 +624,7 @@ static int output_short(
         }
 
         if (flags & OUTPUT_CATALOG)
-                print_catalog(f, j);
+                (void) print_catalog(f, j);
 
         return ellipsized;
 }
@@ -533,7 +635,7 @@ static int output_verbose(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const size_t highlight[2]) {
 
         const void *data;
@@ -641,7 +743,7 @@ static int output_verbose(
                 return r;
 
         if (flags & OUTPUT_CATALOG)
-                print_catalog(f, j);
+                (void) print_catalog(f, j);
 
         return 0;
 }
@@ -652,7 +754,7 @@ static int output_export(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const size_t highlight[2]) {
 
         sd_id128_t boot_id;
@@ -849,7 +951,7 @@ static int update_json_data(
 static int update_json_data_split(
                 Hashmap *h,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const void *data,
                 size_t size) {
 
@@ -870,7 +972,7 @@ static int update_json_data_split(
                 return 0;
 
         name = strndupa(data, eq - (const char*) data);
-        if (output_fields && !set_get(output_fields, name))
+        if (output_fields && !set_contains(output_fields, name))
                 return 0;
 
         return update_json_data(h, flags, name, eq + 1, size - (eq - (const char*) data) - 1);
@@ -882,7 +984,7 @@ static int output_json(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const size_t highlight[2]) {
 
         char sid[SD_ID128_STRING_MAX], usecbuf[DECIMAL_STR_MAX(usec_t)];
@@ -1016,57 +1118,83 @@ finish:
         return r;
 }
 
+static int output_cat_field(
+                FILE *f,
+                sd_journal *j,
+                OutputFlags flags,
+                const char *field,
+                const size_t highlight[2]) {
+
+        const char *highlight_on, *highlight_off;
+        const void *data;
+        size_t l, fl;
+        int r;
+
+        if (FLAGS_SET(flags, OUTPUT_COLOR)) {
+                highlight_on = ANSI_HIGHLIGHT_RED;
+                highlight_off = ANSI_NORMAL;
+        } else
+                highlight_on = highlight_off = "";
+
+        r = sd_journal_get_data(j, field, &data, &l);
+        if (r == -EBADMSG) {
+                log_debug_errno(r, "Skipping message we can't read: %m");
+                return 0;
+        }
+        if (r == -ENOENT) /* An entry without the requested field */
+                return 0;
+        if (r < 0)
+                return log_error_errno(r, "Failed to get data: %m");
+
+        fl = strlen(field);
+        assert(l >= fl + 1);
+        assert(((char*) data)[fl] == '=');
+
+        data = (const uint8_t*) data + fl + 1;
+        l -= fl + 1;
+
+        if (highlight && FLAGS_SET(flags, OUTPUT_COLOR)) {
+                assert(highlight[0] <= highlight[1]);
+                assert(highlight[1] <= l);
+
+                fwrite((const char*) data, 1, highlight[0], f);
+                fwrite(highlight_on, 1, strlen(highlight_on), f);
+                fwrite((const char*) data + highlight[0], 1, highlight[1] - highlight[0], f);
+                fwrite(highlight_off, 1, strlen(highlight_off), f);
+                fwrite((const char*) data + highlight[1], 1, l - highlight[1], f);
+        } else
+                fwrite((const char*) data, 1, l, f);
+
+        fputc('\n', f);
+        return 0;
+}
+
 static int output_cat(
                 FILE *f,
                 sd_journal *j,
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const size_t highlight[2]) {
 
-        const void *data;
-        size_t l;
+        const char *field;
+        Iterator iterator;
         int r;
-        const char *highlight_on = "", *highlight_off = "";
 
         assert(j);
         assert(f);
 
-        if (flags & OUTPUT_COLOR) {
-                highlight_on = ANSI_HIGHLIGHT_RED;
-                highlight_off = ANSI_NORMAL;
+        (void) sd_journal_set_data_threshold(j, 0);
+
+        if (set_isempty(output_fields))
+                return output_cat_field(f, j, flags, "MESSAGE", highlight);
+
+        SET_FOREACH(field, output_fields, iterator) {
+                r = output_cat_field(f, j, flags, field, streq(field, "MESSAGE") ? highlight : NULL);
+                if (r < 0)
+                        return r;
         }
-
-        sd_journal_set_data_threshold(j, 0);
-
-        r = sd_journal_get_data(j, "MESSAGE", &data, &l);
-        if (r == -EBADMSG) {
-                log_debug_errno(r, "Skipping message we can't read: %m");
-                return 0;
-        }
-        if (r < 0) {
-                /* An entry without MESSAGE=? */
-                if (r == -ENOENT)
-                        return 0;
-
-                return log_error_errno(r, "Failed to get data: %m");
-        }
-
-        assert(l >= 8);
-
-        if (highlight && (flags & OUTPUT_COLOR)) {
-                assert(highlight[0] <= highlight[1]);
-                assert(highlight[1] <= l - 8);
-
-                fwrite((const char*) data + 8, 1, highlight[0], f);
-                fwrite(highlight_on, 1, strlen(highlight_on), f);
-                fwrite((const char*) data + 8 + highlight[0], 1, highlight[1] - highlight[0], f);
-                fwrite(highlight_off, 1, strlen(highlight_off), f);
-                fwrite((const char*) data + 8 + highlight[1], 1, l - 8 - highlight[1], f);
-        } else
-                fwrite((const char*) data + 8, 1, l - 8, f);
-        fputc('\n', f);
 
         return 0;
 }
@@ -1077,7 +1205,7 @@ static int (*output_funcs[_OUTPUT_MODE_MAX])(
                 OutputMode mode,
                 unsigned n_columns,
                 OutputFlags flags,
-                Set *output_fields,
+                const Set *output_fields,
                 const size_t highlight[2]) = {
 
         [OUTPUT_SHORT]             = output_short,
@@ -1107,30 +1235,25 @@ int show_journal_entry(
                 const size_t highlight[2],
                 bool *ellipsized) {
 
-        int ret;
-        _cleanup_set_free_free_ Set *fields = NULL;
+        _cleanup_set_free_ Set *fields = NULL;
+        int r;
+
         assert(mode >= 0);
         assert(mode < _OUTPUT_MODE_MAX);
 
         if (n_columns <= 0)
                 n_columns = columns();
 
-        if (output_fields) {
-                fields = set_new(&string_hash_ops);
-                if (!fields)
-                        return log_oom();
+        r = set_put_strdupv(&fields, output_fields);
+        if (r < 0)
+                return r;
 
-                ret = set_put_strdupv(fields, output_fields);
-                if (ret < 0)
-                        return ret;
-        }
+        r = output_funcs[mode](f, j, mode, n_columns, flags, fields, highlight);
 
-        ret = output_funcs[mode](f, j, mode, n_columns, flags, fields, highlight);
-
-        if (ellipsized && ret > 0)
+        if (ellipsized && r > 0)
                 *ellipsized = true;
 
-        return ret;
+        return r;
 }
 
 static int maybe_print_begin_newline(FILE *f, OutputFlags *flags) {

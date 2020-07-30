@@ -6,14 +6,16 @@
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
+#include "bus-get-properties.h"
+#include "bus-message-util.h"
 #include "bus-polkit.h"
-#include "bus-util.h"
 #include "dns-domain.h"
 #include "networkd-link-bus.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "parse-util.h"
 #include "resolve-util.h"
+#include "socket-netlink.h"
 #include "strv.h"
 #include "user-util.h"
 
@@ -108,15 +110,18 @@ int bus_link_method_set_ntp_servers(sd_bus_message *message, void *userdata, sd_
 
         strv_free_and_replace(l->ntp, ntp);
 
-        (void) link_dirty(l);
+        link_dirty(l);
+        r = link_save_and_clean(l);
+        if (r < 0)
+                return r;
 
         return sd_bus_reply_method_return(message, NULL);
 }
 
-int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        _cleanup_free_ struct in_addr_data *dns = NULL;
-        size_t allocated = 0, n = 0;
+static int bus_link_method_set_dns_servers_internal(sd_bus_message *message, void *userdata, sd_bus_error *error, bool extended) {
+        struct in_addr_full **dns;
         Link *l = userdata;
+        size_t n;
         int r;
 
         assert(message);
@@ -126,52 +131,7 @@ int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_
         if (r < 0)
                 return r;
 
-        r = sd_bus_message_enter_container(message, 'a', "(iay)");
-        if (r < 0)
-                return r;
-
-        for (;;) {
-                int family;
-                size_t sz;
-                const void *d;
-
-                assert_cc(sizeof(int) == sizeof(int32_t));
-
-                r = sd_bus_message_enter_container(message, 'r', "iay");
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        break;
-
-                r = sd_bus_message_read(message, "i", &family);
-                if (r < 0)
-                        return r;
-
-                if (!IN_SET(family, AF_INET, AF_INET6))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unknown address family %i", family);
-
-                r = sd_bus_message_read_array(message, 'y', &d, &sz);
-                if (r < 0)
-                        return r;
-                if (sz != FAMILY_ADDRESS_SIZE(family))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid address size");
-
-                if (!dns_server_address_valid(family, d))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid DNS server address");
-
-                r = sd_bus_message_exit_container(message);
-                if (r < 0)
-                        return r;
-
-                if (!GREEDY_REALLOC(dns, allocated, n+1))
-                        return -ENOMEM;
-
-                dns[n].family = family;
-                memcpy(&dns[n].address, d, sz);
-                n++;
-        }
-
-        r = sd_bus_message_exit_container(message);
+        r = bus_message_read_dns_servers(message, error, extended, &dns, &n);
         if (r < 0)
                 return r;
 
@@ -180,16 +140,40 @@ int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_
                                     NULL, true, UID_INVALID,
                                     &l->manager->polkit_registry, error);
         if (r < 0)
-                return r;
-        if (r == 0)
-                return 1; /* Polkit will call us back */
+                goto finalize;
+        if (r == 0) {
+                r = 1; /* Polkit will call us back */
+                goto finalize;
+        }
+
+        if (l->n_dns != (unsigned) -1)
+                for (unsigned i = 0; i < l->n_dns; i++)
+                        in_addr_full_free(l->dns[i]);
 
         free_and_replace(l->dns, dns);
         l->n_dns = n;
 
-        (void) link_dirty(l);
+        link_dirty(l);
+        r = link_save_and_clean(l);
+        if (r < 0)
+                return r;
 
         return sd_bus_reply_method_return(message, NULL);
+
+finalize:
+        for (size_t i = 0; i < n; i++)
+                in_addr_full_free(dns[i]);
+        free(dns);
+
+        return r;
+}
+
+int bus_link_method_set_dns_servers(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return bus_link_method_set_dns_servers_internal(message, userdata, error, false);
+}
+
+int bus_link_method_set_dns_servers_ex(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return bus_link_method_set_dns_servers_internal(message, userdata, error, true);
 }
 
 int bus_link_method_set_domains(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -262,7 +246,10 @@ int bus_link_method_set_domains(sd_bus_message *message, void *userdata, sd_bus_
         l->search_domains = TAKE_PTR(search_domains);
         l->route_domains = TAKE_PTR(route_domains);
 
-        (void) link_dirty(l);
+        link_dirty(l);
+        r = link_save_and_clean(l);
+        if (r < 0)
+                return r;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -293,7 +280,11 @@ int bus_link_method_set_default_route(sd_bus_message *message, void *userdata, s
 
         if (l->dns_default_route != b) {
                 l->dns_default_route = b;
-                (void) link_dirty(l);
+
+                link_dirty(l);
+                r = link_save_and_clean(l);
+                if (r < 0)
+                        return r;
         }
 
         return sd_bus_reply_method_return(message, NULL);
@@ -335,7 +326,11 @@ int bus_link_method_set_llmnr(sd_bus_message *message, void *userdata, sd_bus_er
 
         if (l->llmnr != mode) {
                 l->llmnr = mode;
-                (void) link_dirty(l);
+
+                link_dirty(l);
+                r = link_save_and_clean(l);
+                if (r < 0)
+                        return r;
         }
 
         return sd_bus_reply_method_return(message, NULL);
@@ -377,7 +372,11 @@ int bus_link_method_set_mdns(sd_bus_message *message, void *userdata, sd_bus_err
 
         if (l->mdns != mode) {
                 l->mdns = mode;
-                (void) link_dirty(l);
+
+                link_dirty(l);
+                r = link_save_and_clean(l);
+                if (r < 0)
+                        return r;
         }
 
         return sd_bus_reply_method_return(message, NULL);
@@ -419,7 +418,11 @@ int bus_link_method_set_dns_over_tls(sd_bus_message *message, void *userdata, sd
 
         if (l->dns_over_tls_mode != mode) {
                 l->dns_over_tls_mode = mode;
-                (void) link_dirty(l);
+
+                link_dirty(l);
+                r = link_save_and_clean(l);
+                if (r < 0)
+                        return r;
         }
 
         return sd_bus_reply_method_return(message, NULL);
@@ -461,7 +464,11 @@ int bus_link_method_set_dnssec(sd_bus_message *message, void *userdata, sd_bus_e
 
         if (l->dnssec_mode != mode) {
                 l->dnssec_mode = mode;
-                (void) link_dirty(l);
+
+                link_dirty(l);
+                r = link_save_and_clean(l);
+                if (r < 0)
+                        return r;
         }
 
         return sd_bus_reply_method_return(message, NULL);
@@ -498,7 +505,7 @@ int bus_link_method_set_dnssec_negative_trust_anchors(sd_bus_message *message, v
                 return -ENOMEM;
 
         STRV_FOREACH(i, ntas) {
-                r = set_put_strdup(ns, *i);
+                r = set_put_strdup(&ns, *i);
                 if (r < 0)
                         return r;
         }
@@ -515,7 +522,10 @@ int bus_link_method_set_dnssec_negative_trust_anchors(sd_bus_message *message, v
         set_free_free(l->dnssec_negative_trust_anchors);
         l->dnssec_negative_trust_anchors = TAKE_PTR(ns);
 
-        (void) link_dirty(l);
+        link_dirty(l);
+        r = link_save_and_clean(l);
+        if (r < 0)
+                return r;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -541,7 +551,11 @@ int bus_link_method_revert_ntp(sd_bus_message *message, void *userdata, sd_bus_e
                 return 1; /* Polkit will call us back */
 
         link_ntp_settings_clear(l);
-        (void) link_dirty(l);
+
+        link_dirty(l);
+        r = link_save_and_clean(l);
+        if (r < 0)
+                return r;
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -567,7 +581,40 @@ int bus_link_method_revert_dns(sd_bus_message *message, void *userdata, sd_bus_e
                 return 1; /* Polkit will call us back */
 
         link_dns_settings_clear(l);
-        (void) link_dirty(l);
+
+        link_dirty(l);
+        r = link_save_and_clean(l);
+        if (r < 0)
+                return r;
+
+        return sd_bus_reply_method_return(message, NULL);
+}
+
+int bus_link_method_force_renew(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Link *l = userdata;
+        int r;
+
+        assert(l);
+
+        if (!l->network)
+                return sd_bus_error_setf(error, BUS_ERROR_UNMANAGED_INTERFACE,
+                                         "Interface %s is not managed by systemd-networkd",
+                                         l->ifname);
+
+        r = bus_verify_polkit_async(message, CAP_NET_ADMIN,
+                                    "org.freedesktop.network1.forcerenew",
+                                    NULL, true, UID_INVALID,
+                                    &l->manager->polkit_registry, error);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return 1; /* Polkit will call us back */
+
+        if (l->dhcp_server) {
+                r = sd_dhcp_server_forcerenew(l->dhcp_server);
+                if (r < 0)
+                        return r;
+        }
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -622,10 +669,9 @@ int bus_link_method_reconfigure(sd_bus_message *message, void *userdata, sd_bus_
                 return r;
 
         link_set_state(l, LINK_STATE_INITIALIZED);
-        r = link_save(l);
+        r = link_save_and_clean(l);
         if (r < 0)
                 return r;
-        link_clean(l);
 
         return sd_bus_reply_method_return(message, NULL);
 }
@@ -641,6 +687,7 @@ const sd_bus_vtable link_vtable[] = {
 
         SD_BUS_METHOD("SetNTP", "as", NULL, bus_link_method_set_ntp_servers, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetDNS", "a(iay)", NULL, bus_link_method_set_dns_servers, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("SetDNSEx", "a(iayqs)", NULL, bus_link_method_set_dns_servers_ex, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetDomains", "a(sb)", NULL, bus_link_method_set_domains, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetDefaultRoute", "b", NULL, bus_link_method_set_default_route, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("SetLLMNR", "s", NULL, bus_link_method_set_llmnr, SD_BUS_VTABLE_UNPRIVILEGED),
@@ -651,6 +698,7 @@ const sd_bus_vtable link_vtable[] = {
         SD_BUS_METHOD("RevertNTP", NULL, NULL, bus_link_method_revert_ntp, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("RevertDNS", NULL, NULL, bus_link_method_revert_dns, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("Renew", NULL, NULL, bus_link_method_renew, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD("ForceRenew", NULL, NULL, bus_link_method_force_renew, SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD("Reconfigure", NULL, NULL, bus_link_method_reconfigure, SD_BUS_VTABLE_UNPRIVILEGED),
 
         SD_BUS_VTABLE_END
@@ -728,6 +776,9 @@ int link_object_find(sd_bus *bus, const char *path, const char *interface, void 
 
         r = link_get(m, ifindex, &link);
         if (r < 0)
+                return 0;
+
+        if (streq(interface, "org.freedesktop.network1.DHCPServer") && !link->dhcp_server)
                 return 0;
 
         *found = link;

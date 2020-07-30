@@ -341,7 +341,7 @@ static int determine_hostname(char **full_hostname, char **llmnr_hostname, char 
         p = h;
         r = dns_label_unescape(&p, label, sizeof label, 0);
         if (r < 0)
-                return log_error_errno(r, "Failed to unescape host name: %m");
+                return log_error_errno(r, "Failed to unescape hostname: %m");
         if (r == 0)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Couldn't find a single label in hostname.");
@@ -371,7 +371,7 @@ static int determine_hostname(char **full_hostname, char **llmnr_hostname, char 
 
         r = dns_label_escape_new(decoded, r, &n);
         if (r < 0)
-                return log_error_errno(r, "Failed to escape host name: %m");
+                return log_error_errno(r, "Failed to escape hostname: %m");
 
         if (is_localhost(n))
                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -411,7 +411,7 @@ static int make_fallback_hostnames(char **full_hostname, char **llmnr_hostname, 
         p = fallback_hostname();
         r = dns_label_unescape(&p, label, sizeof label, 0);
         if (r < 0)
-                return log_error_errno(r, "Failed to unescape fallback host name: %m");
+                return log_error_errno(r, "Failed to unescape fallback hostname: %m");
 
         assert(r > 0); /* The fallback hostname must have at least one label */
 
@@ -581,8 +581,8 @@ int manager_new(Manager **ret) {
                 .dns_stub_tcp_fd = -1,
                 .hostname_fd = -1,
 
-                .llmnr_support = RESOLVE_SUPPORT_YES,
-                .mdns_support = RESOLVE_SUPPORT_YES,
+                .llmnr_support = DEFAULT_LLMNR_MODE,
+                .mdns_support = DEFAULT_MDNS_MODE,
                 .dnssec_mode = DEFAULT_DNSSEC_MODE,
                 .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
                 .enable_cache = DNS_CACHE_MODE_YES,
@@ -741,12 +741,9 @@ Manager *manager_free(Manager *m) {
 
 int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         _cleanup_(dns_packet_unrefp) DnsPacket *p = NULL;
-        union {
-                struct cmsghdr header; /* For alignment */
-                uint8_t buffer[CMSG_SPACE(MAXSIZE(struct in_pktinfo, struct in6_pktinfo))
-                               + CMSG_SPACE(int) /* ttl/hoplimit */
-                               + EXTRA_CMSG_SPACE /* kernel appears to require extra buffer space */];
-        } control;
+        CMSG_BUFFER_TYPE(CMSG_SPACE(MAXSIZE(struct in_pktinfo, struct in6_pktinfo))
+                         + CMSG_SPACE(int) /* ttl/hoplimit */
+                         + EXTRA_CMSG_SPACE /* kernel appears to require extra buffer space */) control;
         union sockaddr_union sa;
         struct iovec iov;
         struct msghdr mh = {
@@ -930,10 +927,8 @@ static int manager_ipv4_send(
                 uint16_t port,
                 const struct in_addr *source,
                 DnsPacket *p) {
-        union {
-                struct cmsghdr header; /* For alignment */
-                uint8_t buffer[CMSG_SPACE(sizeof(struct in_pktinfo))];
-        } control = {};
+
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct in_pktinfo))) control = {};
         union sockaddr_union sa;
         struct iovec iov;
         struct msghdr mh = {
@@ -988,10 +983,7 @@ static int manager_ipv6_send(
                 const struct in6_addr *source,
                 DnsPacket *p) {
 
-        union {
-                struct cmsghdr header; /* For alignment */
-                uint8_t buffer[CMSG_SPACE(sizeof(struct in6_pktinfo))];
-        } control = {};
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct in6_pktinfo))) control = {};
         union sockaddr_union sa;
         struct iovec iov;
         struct msghdr mh = {

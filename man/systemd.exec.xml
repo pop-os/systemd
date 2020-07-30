@@ -139,6 +139,60 @@
         <varname>PrivateDevices=</varname> below, as it may change the setting of
         <varname>DevicePolicy=</varname>.</para>
 
+        <para>Units making use of <varname>RootImage=</varname> automatically gain an
+        <varname>After=</varname> dependency on <filename>systemd-udevd.service</filename>.</para>
+
+        <xi:include href="system-only.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RootHash=</varname></term>
+
+        <listitem><para>Takes a data integrity (dm-verity) root hash specified in hexadecimal, or the path to a file
+        containing a root hash in ASCII hexadecimal format. This option enables data integrity checks using dm-verity,
+        if the used image contains the appropriate integrity data (see above) or if <varname>RootVerity=</varname> is used.
+        The specified hash must match the root hash of integrity data, and is usually at least 256 bits (and hence 64
+        formatted hexadecimal characters) long (in case of SHA256 for example). If this option is not specified, but
+        the image file carries the <literal>user.verity.roothash</literal> extended file attribute (see <citerefentry
+        project='man-pages'><refentrytitle>xattr</refentrytitle><manvolnum>7</manvolnum></citerefentry>), then the root
+        hash is read from it, also as formatted hexadecimal characters. If the extended file attribute is not found (or
+        is not supported by the underlying file system), but a file with the <filename>.roothash</filename> suffix is
+        found next to the image file, bearing otherwise the same name (except if the image has the
+        <filename>.raw</filename> suffix, in which case the root hash file must not have it in its name), the root hash
+        is read from it and automatically used, also as formatted hexadecimal characters.</para>
+
+        <xi:include href="system-only.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RootHashSignature=</varname></term>
+
+        <listitem><para>Takes a PKCS7 formatted binary signature of the <varname>RootHash=</varname> option as a path
+        to a DER encoded signature file or as an ASCII base64 string encoding of the DER encoded signature, prefixed
+        by <literal>base64:</literal>. The dm-verity volume will only be opened if the signature of the root hash
+        signature is valid and created by a public key present in the kernel keyring. If this option is not specified,
+        but a file with the <filename>.roothash.p7s</filename> suffix is found next to the image file, bearing otherwise
+        the same name (except if the image has the <filename>.raw</filename> suffix, in which case the signature file
+        must not have it in its name), the signature is read from it and automatically used.</para>
+
+        <xi:include href="system-only.xml" xpointer="singular"/></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>RootVerity=</varname></term>
+
+        <listitem><para>Takes the path to a data integrity (dm-verity) file. This option enables data integrity checks
+        using dm-verity, if <varname>RootImage=</varname> is used and a root-hash is passed and if the used image itself
+        does not contains the integrity data. The integrity data must be matched by the root hash. If this option is not
+        specified, but a file with the <filename>.verity</filename> suffix is found next to the image file, bearing otherwise
+        the same name (except if the image has the <filename>.raw</filename> suffix, in which case the verity data file must
+        not have it in its name), the verity data is read from it and automatically used.</para>
+
+        <para>This option is supported only for disk images that contain a single file system, without an
+        enveloping partition table. Images that contain a GPT partition table should instead include both
+        root file system and matching Verity data in the same image, implementing the <ulink
+        url="https://systemd.io/DISCOVERABLE_PARTITIONS">Discoverable Partition Specification</ulink>.</para>
+
         <xi:include href="system-only.xml" xpointer="singular"/></listitem>
       </varlistentry>
 
@@ -278,7 +332,7 @@
         files or directories. Moreover <varname>ProtectSystem=strict</varname> and
         <varname>ProtectHome=read-only</varname> are implied, thus prohibiting the service to write to
         arbitrary file system locations. In order to allow the service to write to certain directories, they
-        have to be whitelisted using <varname>ReadWritePaths=</varname>, but care must be taken so that
+        have to be allow-listed using <varname>ReadWritePaths=</varname>, but care must be taken so that
         UID/GID recycling doesn't create security issues involving files created by the service. Use
         <varname>RuntimeDirectory=</varname> (see below) in order to assign a writable runtime directory to a
         service, owned by the dynamic user/group and removed automatically when the unit is terminated. Use
@@ -457,10 +511,11 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
       <varlistentry>
         <term><varname>AppArmorProfile=</varname></term>
 
-        <listitem><para>Takes a profile name as argument. The process executed by the unit will switch to this profile
-        when started.  Profiles must already be loaded in the kernel, or the unit will fail. This result in a non
-        operation if AppArmor is not enabled. If prefixed by <literal>-</literal>, all errors will be ignored. This
-        does not affect commands prefixed with <literal>+</literal>.</para></listitem>
+        <listitem><para>Takes a profile name as argument. The process executed by the unit will switch to
+        this profile when started. Profiles must already be loaded in the kernel, or the unit will fail. If
+        prefixed by <literal>-</literal>, all errors will be ignored. This setting has no effect if AppArmor
+        is not enabled. This setting not affect commands prefixed with <literal>+</literal>.</para>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -655,8 +710,39 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <term><varname>UMask=</varname></term>
 
         <listitem><para>Controls the file mode creation mask. Takes an access mode in octal notation. See
-        <citerefentry><refentrytitle>umask</refentrytitle><manvolnum>2</manvolnum></citerefentry> for details. Defaults
-        to 0022.</para></listitem>
+        <citerefentry><refentrytitle>umask</refentrytitle><manvolnum>2</manvolnum></citerefentry> for
+        details. Defaults to 0022 for system units. For units of the user service manager the default value
+        is inherited from the user instance (whose default is inherited from the system service manager, and
+        thus also is 0022). Hence changing the default value of a user instance, either via
+        <varname>UMask=</varname> or via a PAM module, will affect the user instance itself and all user
+        units started by the user instance unless a user unit has specified its own
+        <varname>UMask=</varname>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>CoredumpFilter=</varname></term>
+
+        <listitem><para>Controls which types of memory mappings will be saved if the process dumps core
+        (using the <filename>/proc/<replaceable>pid</replaceable>/coredump_filter</filename> file). Takes a
+        whitespace-separated combination of mapping type names or numbers (with the default base 16). Mapping
+        type names are <constant>private-anonymous</constant>, <constant>shared-anonymous</constant>,
+        <constant>private-file-backed</constant>, <constant>shared-file-backed</constant>,
+        <constant>elf-headers</constant>, <constant>private-huge</constant>,
+        <constant>shared-huge</constant>, <constant>private-dax</constant>, <constant>shared-dax</constant>,
+        and the special values <constant>all</constant> (all types) and <constant>default</constant> (the
+        kernel default of <literal><constant>private-anonymous</constant>
+        <constant>shared-anonymous</constant> <constant>elf-headers</constant>
+        <constant>private-huge</constant></literal>). See
+        <citerefentry project='man-pages'><refentrytitle>core</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        for the meaning of the mapping types. When specified multiple times, all specified masks are
+        ORed. When not set, or if the empty value is assigned, the inherited value is not changed.</para>
+
+        <example>
+          <title>Add DAX pages to the dump filter</title>
+
+          <programlisting>CoredumpFilter=default private-dax shared-dax</programlisting>
+        </example>
+        </listitem>
       </varlistentry>
 
       <varlistentry>
@@ -795,7 +881,7 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         in <varname>NUMAMask=</varname>. For more details on each policy please see,
         <citerefentry><refentrytitle>set_mempolicy</refentrytitle><manvolnum>2</manvolnum></citerefentry>. For overall
         overview of NUMA support in Linux see,
-        <citerefentry><refentrytitle>numa</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+        <citerefentry project='man-pages'><refentrytitle>numa</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
         </para></listitem>
       </varlistentry>
 
@@ -982,14 +1068,16 @@ CapabilityBoundingSet=~CAP_B CAP_C</programlisting>
         <varname>RootDirectory=</varname> or <varname>RootImage=</varname> these paths always reside on the host and
         are mounted from there into the unit's file system namespace.</para>
 
-        <para>If <varname>DynamicUser=</varname> is used in conjunction with <varname>StateDirectory=</varname>,
-        <varname>CacheDirectory=</varname> and <varname>LogsDirectory=</varname> is slightly altered: the directories
-        are created below <filename>/var/lib/private</filename>, <filename>/var/cache/private</filename> and
+        <para>If <varname>DynamicUser=</varname> is used in conjunction with
+        <varname>StateDirectory=</varname>, the logic for <varname>CacheDirectory=</varname> and
+        <varname>LogsDirectory=</varname> is slightly altered: the directories are created below
+        <filename>/var/lib/private</filename>, <filename>/var/cache/private</filename> and
         <filename>/var/log/private</filename>, respectively, which are host directories made inaccessible to
-        unprivileged users, which ensures that access to these directories cannot be gained through dynamic user ID
-        recycling. Symbolic links are created to hide this difference in behaviour. Both from perspective of the host
-        and from inside the unit, the relevant directories hence always appear directly below
-        <filename>/var/lib</filename>, <filename>/var/cache</filename> and <filename>/var/log</filename>.</para>
+        unprivileged users, which ensures that access to these directories cannot be gained through dynamic
+        user ID recycling. Symbolic links are created to hide this difference in behaviour. Both from
+        perspective of the host and from inside the unit, the relevant directories hence always appear
+        directly below <filename>/var/lib</filename>, <filename>/var/cache</filename> and
+        <filename>/var/log</filename>.</para>
 
         <para>Use <varname>RuntimeDirectory=</varname> to manage one or more runtime directories for the unit and bind
         their lifetime to the daemon runtime. This is particularly useful for unprivileged daemons that cannot create
@@ -1064,8 +1152,8 @@ StateDirectory=aaa/bbb ccc</programlisting>
         clean …</command>, see
         <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry> for
         details. Takes the usual time values and defaults to <constant>infinity</constant>, i.e. by default
-        no time-out is applied. If a time-out is configured the clean operation will be aborted forcibly when
-        the time-out is reached, potentially leaving resources on disk.</para></listitem>
+        no timeout is applied. If a timeout is configured the clean operation will be aborted forcibly when
+        the timeout is reached, potentially leaving resources on disk.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1079,12 +1167,13 @@ StateDirectory=aaa/bbb ccc</programlisting>
         contain symlinks, they are resolved relative to the root directory set with
         <varname>RootDirectory=</varname>/<varname>RootImage=</varname>.</para>
 
-        <para>Paths listed in <varname>ReadWritePaths=</varname> are accessible from within the namespace with the same
-        access modes as from outside of it. Paths listed in <varname>ReadOnlyPaths=</varname> are accessible for
-        reading only, writing will be refused even if the usual file access controls would permit this. Nest
-        <varname>ReadWritePaths=</varname> inside of <varname>ReadOnlyPaths=</varname> in order to provide writable
-        subdirectories within read-only directories. Use <varname>ReadWritePaths=</varname> in order to whitelist
-        specific paths for write access if <varname>ProtectSystem=strict</varname> is used.</para>
+        <para>Paths listed in <varname>ReadWritePaths=</varname> are accessible from within the namespace
+        with the same access modes as from outside of it. Paths listed in <varname>ReadOnlyPaths=</varname>
+        are accessible for reading only, writing will be refused even if the usual file access controls would
+        permit this. Nest <varname>ReadWritePaths=</varname> inside of <varname>ReadOnlyPaths=</varname> in
+        order to provide writable subdirectories within read-only directories. Use
+        <varname>ReadWritePaths=</varname> in order to allow-list specific paths for write access if
+        <varname>ProtectSystem=strict</varname> is used.</para>
 
         <para>Paths listed in <varname>InaccessiblePaths=</varname> will be made inaccessible for processes inside
         the namespace along with everything below them in the file system hierarchy. This may be more restrictive than
@@ -1152,8 +1241,8 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         <term><varname>PrivateTmp=</varname></term>
 
         <listitem><para>Takes a boolean argument. If true, sets up a new file system namespace for the executed
-        processes and mounts private <filename>/tmp</filename> and <filename>/var/tmp</filename> directories inside it
-        that is not shared by processes outside of the namespace. This is useful to secure access to temporary files of
+        processes and mounts private <filename>/tmp/</filename> and <filename>/var/tmp/</filename> directories inside it
+        that are not shared by processes outside of the namespace. This is useful to secure access to temporary files of
         the process, but makes sharing between processes via <filename>/tmp</filename> or <filename>/var/tmp</filename>
         impossible. If this is enabled, all temporary files created by a service in these directories will be removed
         after the service is stopped.  Defaults to false. It is possible to run two or more units within the same
@@ -1313,7 +1402,7 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         this option removes <constant>CAP_SYS_TIME</constant> and <constant>CAP_WAKE_ALARM</constant> from the
         capability bounding set for this unit, installs a system call filter to block calls that can set the
         clock, and <varname>DeviceAllow=char-rtc r</varname> is implied. This ensures <filename>/dev/rtc0</filename>,
-        <filename>/dev/rtc1</filename>, etc are made read only to the service. See
+        <filename>/dev/rtc1</filename>, etc. are made read-only to the service. See
         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
         for the details about <varname>DeviceAllow=</varname>.</para>
 
@@ -1398,29 +1487,31 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
       <varlistentry>
         <term><varname>RestrictAddressFamilies=</varname></term>
 
-        <listitem><para>Restricts the set of socket address families accessible to the processes of this unit. Takes a
-        space-separated list of address family names to whitelist, such as <constant>AF_UNIX</constant>,
-        <constant>AF_INET</constant> or <constant>AF_INET6</constant>. When prefixed with <constant>~</constant> the
-        listed address families will be applied as blacklist, otherwise as whitelist.  Note that this restricts access
-        to the <citerefentry
-        project='man-pages'><refentrytitle>socket</refentrytitle><manvolnum>2</manvolnum></citerefentry> system call
-        only. Sockets passed into the process by other means (for example, by using socket activation with socket
-        units, see <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
-        are unaffected. Also, sockets created with <function>socketpair()</function> (which creates connected AF_UNIX
-        sockets only) are unaffected. Note that this option has no effect on 32-bit x86, s390, s390x, mips, mips-le,
-        ppc, ppc-le, pcc64, ppc64-le and is ignored (but works correctly on other ABIs, including x86-64). Note that on
-        systems supporting multiple ABIs (such as x86/x86-64) it is recommended to turn off alternative ABIs for
-        services, so that they cannot be used to circumvent the restrictions of this option. Specifically, it is
-        recommended to combine this option with <varname>SystemCallArchitectures=native</varname> or similar. If
-        running in user mode, or in system mode, but without the <constant>CAP_SYS_ADMIN</constant> capability
-        (e.g. setting <varname>User=nobody</varname>), <varname>NoNewPrivileges=yes</varname> is implied. By default,
-        no restrictions apply, all address families are accessible to processes. If assigned the empty string, any
-        previous address family restriction changes are undone. This setting does not affect commands prefixed with
-        <literal>+</literal>.</para>
+        <listitem><para>Restricts the set of socket address families accessible to the processes of this
+        unit. Takes a space-separated list of address family names to allow-list, such as
+        <constant>AF_UNIX</constant>, <constant>AF_INET</constant> or <constant>AF_INET6</constant>. When
+        prefixed with <constant>~</constant> the listed address families will be applied as deny list,
+        otherwise as allow list.  Note that this restricts access to the <citerefentry
+        project='man-pages'><refentrytitle>socket</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+        system call only. Sockets passed into the process by other means (for example, by using socket
+        activation with socket units, see
+        <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry>)
+        are unaffected. Also, sockets created with <function>socketpair()</function> (which creates connected
+        AF_UNIX sockets only) are unaffected. Note that this option has no effect on 32-bit x86, s390, s390x,
+        mips, mips-le, ppc, ppc-le, ppc64, ppc64-le and is ignored (but works correctly on other ABIs,
+        including x86-64). Note that on systems supporting multiple ABIs (such as x86/x86-64) it is
+        recommended to turn off alternative ABIs for services, so that they cannot be used to circumvent the
+        restrictions of this option. Specifically, it is recommended to combine this option with
+        <varname>SystemCallArchitectures=native</varname> or similar. If running in user mode, or in system
+        mode, but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
+        <varname>User=nobody</varname>), <varname>NoNewPrivileges=yes</varname> is implied. By default, no
+        restrictions apply, all address families are accessible to processes. If assigned the empty string,
+        any previous address family restriction changes are undone. This setting does not affect commands
+        prefixed with <literal>+</literal>.</para>
 
         <para>Use this option to limit exposure of processes to remote access, in particular via exotic and sensitive
         network protocols, such as <constant>AF_PACKET</constant>. Note that in most cases, the local
-        <constant>AF_UNIX</constant> address family should be included in the configured whitelist as it is frequently
+        <constant>AF_UNIX</constant> address family should be included in the configured allow list as it is frequently
         used for local communication, including for
         <citerefentry><refentrytitle>syslog</refentrytitle><manvolnum>2</manvolnum></citerefentry>
         logging.</para></listitem>
@@ -1438,9 +1529,9 @@ BindReadOnlyPaths=/var/lib/systemd</programlisting>
         any combination of: <constant>cgroup</constant>, <constant>ipc</constant>, <constant>net</constant>,
         <constant>mnt</constant>, <constant>pid</constant>, <constant>user</constant> and <constant>uts</constant>. Any
         namespace type listed is made accessible to the unit's processes, access to namespace types not listed is
-        prohibited (whitelisting). By prepending the list with a single tilde character (<literal>~</literal>) the
+        prohibited (allow-listing). By prepending the list with a single tilde character (<literal>~</literal>) the
         effect may be inverted: only the listed namespace types will be made inaccessible, all unlisted ones are
-        permitted (blacklisting). If the empty string is assigned, the default namespace restrictions are applied,
+        permitted (deny-listing). If the empty string is assigned, the default namespace restrictions are applied,
         which is equivalent to false. This option may appear more than once, in which case the namespace types are
         merged by <constant>OR</constant>, or by <constant>AND</constant> if the lines are prefixed with
         <literal>~</literal> (see examples below). Internally, this setting limits access to the
@@ -1601,14 +1692,14 @@ RestrictNamespaces=~cgroup net</programlisting>
         points of the file system namespace created for each process of this unit. Other file system namespacing unit
         settings (see the discussion in <varname>PrivateMounts=</varname> above) will implicitly disable mount and
         unmount propagation from the unit's processes towards the host by changing the propagation setting of all mount
-        points in the unit's file system namepace to <option>slave</option> first. Setting this option to
+        points in the unit's file system namespace to <option>slave</option> first. Setting this option to
         <option>shared</option> does not reestablish propagation in that case.</para>
 
         <para>If not set – but file system namespaces are enabled through another file system namespace unit setting –
         <option>shared</option> mount propagation is used, but — as mentioned — as <option>slave</option> is applied
         first, propagation from the unit's processes to the host is still turned off.</para>
 
-        <para>It is not recommended to to use <option>private</option> mount propagation for units, as this means
+        <para>It is not recommended to use <option>private</option> mount propagation for units, as this means
         temporary mounts (such as removable media) of the host will stay mounted and thus indefinitely busy in forked
         off processes, as unmount propagation events won't be received by the file system namespace of the unit.</para>
 
@@ -1630,15 +1721,15 @@ RestrictNamespaces=~cgroup net</programlisting>
 
         <listitem><para>Takes a space-separated list of system call names. If this setting is used, all
         system calls executed by the unit processes except for the listed ones will result in immediate
-        process termination with the <constant>SIGSYS</constant> signal (whitelisting). (See
+        process termination with the <constant>SIGSYS</constant> signal (allow-listing). (See
         <varname>SystemCallErrorNumber=</varname> below for changing the default action). If the first
         character of the list is <literal>~</literal>, the effect is inverted: only the listed system calls
-        will result in immediate process termination (blacklisting). Blacklisted system calls and system call
+        will result in immediate process termination (deny-listing). Deny-listed system calls and system call
         groups may optionally be suffixed with a colon (<literal>:</literal>) and <literal>errno</literal>
         error number (between 0 and 4095) or errno name such as <constant>EPERM</constant>,
         <constant>EACCES</constant> or <constant>EUCLEAN</constant> (see <citerefentry
         project='man-pages'><refentrytitle>errno</refentrytitle><manvolnum>3</manvolnum></citerefentry> for a
-        full list). This value will be returned when a blacklisted system call is triggered, instead of
+        full list). This value will be returned when a deny-listed system call is triggered, instead of
         terminating the processes immediately.  This value takes precedence over the one given in
         <varname>SystemCallErrorNumber=</varname>, see below.  If running in user mode, or in system mode,
         but without the <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting
@@ -1647,7 +1738,7 @@ RestrictNamespaces=~cgroup net</programlisting>
         for enforcing a minimal sandboxing environment. Note that the <function>execve</function>,
         <function>exit</function>, <function>exit_group</function>, <function>getrlimit</function>,
         <function>rt_sigreturn</function>, <function>sigreturn</function> system calls and the system calls
-        for querying time and sleeping are implicitly whitelisted and do not need to be listed
+        for querying time and sleeping are implicitly allow-listed and do not need to be listed
         explicitly. This option may be specified more than once, in which case the filter masks are
         merged. If the empty string is assigned, the filter is reset, all prior assignments will have no
         effect. This does not affect commands prefixed with <literal>+</literal>.</para>
@@ -1665,12 +1756,13 @@ RestrictNamespaces=~cgroup net</programlisting>
         might be necessary to temporarily disable system call filters in order to simplify debugging of such
         failures.</para>
 
-        <para>If you specify both types of this option (i.e.  whitelisting and blacklisting), the first encountered
-        will take precedence and will dictate the default action (termination or approval of a system call). Then the
-        next occurrences of this option will add or delete the listed system calls from the set of the filtered system
-        calls, depending of its type and the default action. (For example, if you have started with a whitelisting of
-        <function>read</function> and <function>write</function>, and right after it add a blacklisting of
-        <function>write</function>, then <function>write</function> will be removed from the set.)</para>
+        <para>If you specify both types of this option (i.e.  allow-listing and deny-listing), the first
+        encountered will take precedence and will dictate the default action (termination or approval of a
+        system call). Then the next occurrences of this option will add or delete the listed system calls
+        from the set of the filtered system calls, depending of its type and the default action. (For
+        example, if you have started with an allow list rule for <function>read</function> and
+        <function>write</function>, and right after it add a deny list rule for <function>write</function>,
+        then <function>write</function> will be removed from the set.)</para>
 
         <para>As the number of possible system calls is large, predefined sets of system calls are provided.  A set
         starts with <literal>@</literal> character, followed by name of the set.
@@ -1714,7 +1806,7 @@ RestrictNamespaces=~cgroup net</programlisting>
               </row>
               <row>
                 <entry>@file-system</entry>
-                <entry>File system operations: opening, creating files and directories for read and write, renaming and removing them, reading file properties, or creating hard and symbolic links.</entry>
+                <entry>File system operations: opening, creating files and directories for read and write, renaming and removing them, reading file properties, or creating hard and symbolic links</entry>
               </row>
               <row>
                 <entry>@io-event</entry>
@@ -1730,7 +1822,7 @@ RestrictNamespaces=~cgroup net</programlisting>
               </row>
               <row>
                 <entry>@memlock</entry>
-                <entry>Locking of memory into RAM (<citerefentry project='man-pages'><refentrytitle>mlock</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>mlockall</refentrytitle><manvolnum>2</manvolnum></citerefentry> and related calls)</entry>
+                <entry>Locking of memory in RAM (<citerefentry project='man-pages'><refentrytitle>mlock</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>mlockall</refentrytitle><manvolnum>2</manvolnum></citerefentry> and related calls)</entry>
               </row>
               <row>
                 <entry>@module</entry>
@@ -1754,7 +1846,7 @@ RestrictNamespaces=~cgroup net</programlisting>
               </row>
               <row>
                 <entry>@process</entry>
-                <entry>Process control, execution, namespaceing operations (<citerefentry project='man-pages'><refentrytitle>clone</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>kill</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>namespaces</refentrytitle><manvolnum>7</manvolnum></citerefentry>, …</entry>
+                <entry>Process control, execution, namespaceing operations (<citerefentry project='man-pages'><refentrytitle>clone</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>kill</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>namespaces</refentrytitle><manvolnum>7</manvolnum></citerefentry>, …)</entry>
               </row>
               <row>
                 <entry>@raw-io</entry>
@@ -1782,11 +1874,11 @@ RestrictNamespaces=~cgroup net</programlisting>
               </row>
               <row>
                 <entry>@sync</entry>
-                <entry>Synchronizing files and memory to disk: (<citerefentry project='man-pages'><refentrytitle>fsync</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>msync</refentrytitle><manvolnum>2</manvolnum></citerefentry>, and related calls)</entry>
+                <entry>Synchronizing files and memory to disk (<citerefentry project='man-pages'><refentrytitle>fsync</refentrytitle><manvolnum>2</manvolnum></citerefentry>, <citerefentry project='man-pages'><refentrytitle>msync</refentrytitle><manvolnum>2</manvolnum></citerefentry>, and related calls)</entry>
               </row>
               <row>
                 <entry>@system-service</entry>
-                <entry>A reasonable set of system calls used by common system services, excluding any special purpose calls. This is the recommended starting point for whitelisting system calls for system services, as it contains what is typically needed by system services, but excludes overly specific interfaces. For example, the following APIs are excluded: <literal>@clock</literal>, <literal>@mount</literal>, <literal>@swap</literal>, <literal>@reboot</literal>.</entry>
+                <entry>A reasonable set of system calls used by common system services, excluding any special purpose calls. This is the recommended starting point for allow-listing system calls for system services, as it contains what is typically needed by system services, but excludes overly specific interfaces. For example, the following APIs are excluded: <literal>@clock</literal>, <literal>@mount</literal>, <literal>@swap</literal>, <literal>@reboot</literal>.</entry>
               </row>
               <row>
                 <entry>@timer</entry>
@@ -1802,9 +1894,10 @@ RestrictNamespaces=~cgroup net</programlisting>
         <command>systemd-analyze syscall-filter</command> to list the actual list of system calls in each
         filter.</para>
 
-        <para>Generally, whitelisting system calls (rather than blacklisting) is the safer mode of operation. It is
-        recommended to enforce system call whitelists for all long-running system services. Specifically, the
-        following lines are a relatively safe basic choice for the majority of system services:</para>
+        <para>Generally, allow-listing system calls (rather than deny-listing) is the safer mode of
+        operation. It is recommended to enforce system call allow lists for all long-running system
+        services. Specifically, the following lines are a relatively safe basic choice for the majority of
+        system services:</para>
 
         <programlisting>[Service]
 SystemCallFilter=@system-service
@@ -1815,9 +1908,9 @@ SystemCallErrorNumber=EPERM</programlisting>
         call may be used to execute operations similar to what can be done with the older
         <function>kill()</function> system call, hence blocking the latter without the former only provides
         weak protection. Since new system calls are added regularly to the kernel as development progresses,
-        keeping system call blacklists comprehensive requires constant work. It is thus recommended to use
-        whitelisting instead, which offers the benefit that new system calls are by default implicitly
-        blocked until the whitelist is updated.</para>
+        keeping system call deny lists comprehensive requires constant work. It is thus recommended to use
+        allow-listing instead, which offers the benefit that new system calls are by default implicitly
+        blocked until the allow list is updated.</para>
 
         <para>Also note that a number of system calls are required to be accessible for the dynamic linker to
         work. The dynamic linker is required for running most regular programs (specifically: all dynamic ELF
@@ -1859,7 +1952,7 @@ SystemCallErrorNumber=EPERM</programlisting>
         manager is compiled for). If running in user mode, or in system mode, but without the
         <constant>CAP_SYS_ADMIN</constant> capability (e.g. setting <varname>User=nobody</varname>),
         <varname>NoNewPrivileges=yes</varname> is implied. By default, this option is set to the empty list, i.e. no
-        system call architecture filtering is applied.</para>
+        filtering is applied.</para>
 
         <para>If this setting is used, processes of this unit will only be permitted to call native system calls, and
         system calls of the specified architectures. For the purposes of this option, the x32 architecture is treated
@@ -2117,8 +2210,9 @@ SystemCallErrorNumber=EPERM</programlisting>
         <constant>AF_UNIX</constant> socket in the file system, as in that case only a
         single stream connection is created for both input and output.</para>
 
-        <para><option>append:<replaceable>path</replaceable></option> is similar to <option>file:<replaceable>path
-        </replaceable></option> above, but it opens the file in append mode.</para>
+        <para><option>append:<replaceable>path</replaceable></option> is similar to
+        <option>file:<replaceable>path</replaceable></option> above, but it opens the file in append mode.
+        </para>
 
         <para><option>socket</option> connects standard output to a socket acquired via socket activation. The
         semantics are similar to the same option of <varname>StandardInput=</varname>, see above.</para>
@@ -2455,7 +2549,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
     <varname>UnsetEnvironment=</varname> are removed again from the compiled environment variable list, immediately
     before it is passed to the executed process.</para>
 
-    <para>The following select environment variables are set or propagated by the service manager for each invoked
+    <para>The following environment variables are set or propagated by the service manager for each invoked
     process:</para>
 
     <variablelist class='environment-variables'>
@@ -2526,7 +2620,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         <term><varname>$LOGS_DIRECTORY</varname></term>
         <term><varname>$CONFIGURATION_DIRECTORY</varname></term>
 
-        <listitem><para>Contains and absolute paths to the directories defined with
+        <listitem><para>Absolute paths to the directories defined with
         <varname>RuntimeDirectory=</varname>, <varname>StateDirectory=</varname>,
         <varname>CacheDirectory=</varname>, <varname>LogsDirectory=</varname>, and
         <varname>ConfigurationDirectory=</varname> when those settings are used.</para>
@@ -2586,6 +2680,13 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
         <varname>StandardError=tty</varname>). See
         <citerefentry project='man-pages'><refentrytitle>termcap</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
         </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>$LOG_NAMESPACE</varname></term>
+
+        <listitem><para>If the <varname>LogNamespace=</varname> service setting is used, contains name of the
+        selected logging namespace.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -3125,7 +3226,7 @@ StandardInputData=SWNrIHNpdHplIGRhIHVuJyBlc3NlIEtsb3BzLAp1ZmYgZWVtYWwga2xvcHAncy
           <row>
             <entry>242</entry>
             <entry><constant>EXIT_NUMA_POLICY</constant></entry>
-            <entry>Failed to set up unit's NUMA memory policy. See <varname>NUMAPolicy=</varname> and <varname>NUMAMask=</varname>above.</entry>
+            <entry>Failed to set up unit's NUMA memory policy. See <varname>NUMAPolicy=</varname> and <varname>NUMAMask=</varname> above.</entry>
           </row>
 
         </tbody>

@@ -20,7 +20,7 @@
 #include "bus-common-errors.h"
 #include "bus-error.h"
 #include "bus-internal.h"
-#include "bus-util.h"
+#include "bus-locator.h"
 #include "cgroup-setup.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -99,6 +99,7 @@ static int acquire_user_record(
 
         _cleanup_(user_record_unrefp) UserRecord *ur = NULL;
         const char *username = NULL, *json = NULL;
+        _cleanup_free_ char *field = NULL;
         int r;
 
         assert(handle);
@@ -114,39 +115,18 @@ static int acquire_user_record(
                 return PAM_SERVICE_ERR;
         }
 
-        /* If pam_systemd_homed (or some other module) already acqired the user record we can reuse it
+        /* If pam_systemd_homed (or some other module) already acquired the user record we can reuse it
          * here. */
-        r = pam_get_data(handle, "systemd-user-record", (const void**) &json);
-        if (r != PAM_SUCCESS || !json) {
-                _cleanup_free_ char *formatted = NULL;
+        field = strjoin("systemd-user-record-", username);
+        if (!field)
+                return pam_log_oom(handle);
 
-                if (!IN_SET(r, PAM_SUCCESS, PAM_NO_MODULE_DATA)) {
-                        pam_syslog(handle, LOG_ERR, "Failed to get PAM user record data: %s", pam_strerror(handle, r));
-                        return r;
-                }
-
-                /* Request the record ourselves */
-                r = userdb_by_name(username, 0, &ur);
-                if (r < 0) {
-                        pam_syslog(handle, LOG_ERR, "Failed to get user record: %s", strerror_safe(r));
-                        return PAM_USER_UNKNOWN;
-                }
-
-                r = json_variant_format(ur->json, 0, &formatted);
-                if (r < 0) {
-                        pam_syslog(handle, LOG_ERR, "Failed to format user JSON: %s", strerror_safe(r));
-                        return PAM_SERVICE_ERR;
-                }
-
-                /* And cache it for everyone else */
-                r = pam_set_data(handle, "systemd-user-record", formatted, pam_cleanup_free);
-                if (r < 0) {
-                        pam_syslog(handle, LOG_ERR, "Failed to set PAM user record data: %s", pam_strerror(handle, r));
-                        return r;
-                }
-
-                TAKE_PTR(formatted);
-        } else {
+        r = pam_get_data(handle, field, (const void**) &json);
+        if (!IN_SET(r, PAM_SUCCESS, PAM_NO_MODULE_DATA)) {
+                pam_syslog(handle, LOG_ERR, "Failed to get PAM user record data: %s", pam_strerror(handle, r));
+                return r;
+        }
+        if (r == PAM_SUCCESS && json) {
                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
 
                 /* Parse cached record */
@@ -171,6 +151,31 @@ static int acquire_user_record(
                         pam_syslog(handle, LOG_ERR, "Acquired user record does not match user name.");
                         return PAM_SERVICE_ERR;
                 }
+        } else {
+                _cleanup_free_ char *formatted = NULL;
+
+                /* Request the record ourselves */
+                r = userdb_by_name(username, 0, &ur);
+                if (r < 0) {
+                        pam_syslog(handle, LOG_ERR, "Failed to get user record: %s", strerror_safe(r));
+                        return PAM_USER_UNKNOWN;
+                }
+
+                r = json_variant_format(ur->json, 0, &formatted);
+                if (r < 0) {
+                        pam_syslog(handle, LOG_ERR, "Failed to format user JSON: %s", strerror_safe(r));
+                        return PAM_SERVICE_ERR;
+                }
+
+                /* And cache it for everyone else */
+                r = pam_set_data(handle, field, formatted, pam_cleanup_free);
+                if (r < 0) {
+                        pam_syslog(handle, LOG_ERR, "Failed to set PAM user record data '%s': %s",
+                                   field, pam_strerror(handle, r));
+                        return r;
+                }
+
+                TAKE_PTR(formatted);
         }
 
         if (!uid_is_valid(ur->uid)) {
@@ -280,7 +285,6 @@ static int get_seat_from_display(const char *display, const char **seat, uint32_
 
 static int export_legacy_dbus_address(
                 pam_handle_t *handle,
-                uid_t uid,
                 const char *runtime) {
 
         const char *s;
@@ -461,8 +465,17 @@ static bool validate_runtime_directory(pam_handle_t *handle, const char *path, u
         assert(handle);
         assert(path);
 
-        /* Just some extra paranoia: let's not set $XDG_RUNTIME_DIR if the directory we'd set it to isn't actually set
-         * up properly for us. */
+        /* Some extra paranoia: let's not set $XDG_RUNTIME_DIR if the directory we'd set it to isn't actually
+         * set up properly for us. This is supposed to provide a careful safety net for supporting su/sudo
+         * type transitions: in that case the UID changes, but the session and thus the user owning it
+         * doesn't change. Since the $XDG_RUNTIME_DIR lifecycle is bound to the session's user being logged
+         * in at least once we should be particularly careful when setting the environment variable, since
+         * otherwise we might end up setting $XDG_RUNTIME_DIR to some directory owned by the wrong user. */
+
+        if (!path_is_absolute(path)) {
+                pam_syslog(handle, LOG_ERR, "Provided runtime directory '%s' is not absolute.", path);
+                goto fail;
+        }
 
         if (lstat(path, &st) < 0) {
                 pam_syslog(handle, LOG_ERR, "Failed to stat() runtime directory '%s': %s", path, strerror_safe(errno));
@@ -580,9 +593,9 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
                 if (pam_getenv(handle, "LANG")) {
                         if (debug)
                                 pam_syslog(handle, LOG_DEBUG, "PAM environment variable $LANG already set, not changing based on user record.");
-                } else if (!locale_is_valid(ur->preferred_language)) {
+                } else if (locale_is_installed(ur->preferred_language) <= 0) {
                         if (debug)
-                                pam_syslog(handle, LOG_DEBUG, "Preferred language specified in user record is not valid locally, not setting $LANG.");
+                                pam_syslog(handle, LOG_DEBUG, "Preferred language specified in user record is not valid or not installed, not setting $LANG.");
                 } else {
                         _cleanup_free_ char *joined = NULL;
 
@@ -618,6 +631,29 @@ static int apply_user_record_settings(pam_handle_t *handle, UserRecord *ur, bool
         return PAM_SUCCESS;
 }
 
+static int configure_runtime_directory(
+                pam_handle_t *handle,
+                UserRecord *ur,
+                const char *rt) {
+
+        int r;
+
+        assert(handle);
+        assert(ur);
+        assert(rt);
+
+        if (!validate_runtime_directory(handle, rt, ur->uid))
+                return PAM_SUCCESS;
+
+        r = pam_misc_setenv(handle, "XDG_RUNTIME_DIR", rt, 0);
+        if (r != PAM_SUCCESS) {
+                pam_syslog(handle, LOG_ERR, "Failed to set runtime dir: %s", pam_strerror(handle, r));
+                return r;
+        }
+
+        return export_legacy_dbus_address(handle, rt);
+}
+
 _public_ PAM_EXTERN int pam_sm_open_session(
                 pam_handle_t *handle,
                 int flags,
@@ -643,10 +679,6 @@ _public_ PAM_EXTERN int pam_sm_open_session(
 
         assert(handle);
 
-        /* Make this a NOP on non-logind systems */
-        if (!logind_running())
-                return PAM_SUCCESS;
-
         if (parse_argv(handle,
                        argc, argv,
                        &class_pam,
@@ -662,6 +694,10 @@ _public_ PAM_EXTERN int pam_sm_open_session(
         if (r != PAM_SUCCESS)
                 return r;
 
+        /* Make most of this a NOP on non-logind systems */
+        if (!logind_running())
+                goto success;
+
         /* Make sure we don't enter a loop by talking to
          * systemd-logind when it is actually waiting for the
          * background to finish start-up. If the service is
@@ -673,23 +709,11 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 char rt[STRLEN("/run/user/") + DECIMAL_STR_MAX(uid_t)];
 
                 xsprintf(rt, "/run/user/"UID_FMT, ur->uid);
-                if (validate_runtime_directory(handle, rt, ur->uid)) {
-                        r = pam_misc_setenv(handle, "XDG_RUNTIME_DIR", rt, 0);
-                        if (r != PAM_SUCCESS) {
-                                pam_syslog(handle, LOG_ERR, "Failed to set runtime dir: %s", pam_strerror(handle, r));
-                                return r;
-                        }
-                }
-
-                r = export_legacy_dbus_address(handle, ur->uid, rt);
+                r = configure_runtime_directory(handle, ur, rt);
                 if (r != PAM_SUCCESS)
                         return r;
 
-                r = apply_user_record_settings(handle, ur, debug);
-                if (r != PAM_SUCCESS)
-                        return r;
-
-                return PAM_SUCCESS;
+                goto success;
         }
 
         /* Otherwise, we ask logind to create a session for us */
@@ -789,13 +813,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                            strna(memory_max), strna(tasks_max), strna(cpu_weight), strna(io_weight), strna(runtime_max_sec));
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "CreateSession");
+        r = bus_message_new_method_call(bus, &m, bus_login_mgr, "CreateSession");
         if (r < 0)
                 return pam_bus_log_create_error(handle, r);
 
@@ -849,7 +867,9 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 if (sd_bus_error_has_name(&error, BUS_ERROR_SESSION_BUSY)) {
                         if (debug)
                                 pam_syslog(handle, LOG_DEBUG, "Not creating session: %s", bus_error_message(&error, r));
-                        return PAM_SUCCESS;
+
+                        /* We are already in a session, don't do anything */
+                        goto success;
                 } else {
                         pam_syslog(handle, LOG_ERR, "Failed to create session: %s", bus_error_message(&error, r));
                         return PAM_SESSION_ERR;
@@ -879,19 +899,11 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 return r;
 
         if (original_uid == ur->uid) {
-                /* Don't set $XDG_RUNTIME_DIR if the user we now
-                 * authenticated for does not match the original user
-                 * of the session. We do this in order not to result
-                 * in privileged apps clobbering the runtime directory
-                 * unnecessarily. */
+                /* Don't set $XDG_RUNTIME_DIR if the user we now authenticated for does not match the
+                 * original user of the session. We do this in order not to result in privileged apps
+                 * clobbering the runtime directory unnecessarily. */
 
-                if (validate_runtime_directory(handle, runtime_path, ur->uid)) {
-                        r = update_environment(handle, "XDG_RUNTIME_DIR", runtime_path);
-                        if (r != PAM_SUCCESS)
-                                return r;
-                }
-
-                r = export_legacy_dbus_address(handle, ur->uid, runtime_path);
+                r = configure_runtime_directory(handle, ur, runtime_path);
                 if (r != PAM_SUCCESS)
                         return r;
         }
@@ -946,6 +958,7 @@ _public_ PAM_EXTERN int pam_sm_open_session(
                 }
         }
 
+success:
         r = apply_user_record_settings(handle, ur, debug);
         if (r != PAM_SUCCESS)
                 return r;
@@ -996,15 +1009,7 @@ _public_ PAM_EXTERN int pam_sm_close_session(
                 if (r != PAM_SUCCESS)
                         return r;
 
-                r = sd_bus_call_method(bus,
-                                       "org.freedesktop.login1",
-                                       "/org/freedesktop/login1",
-                                       "org.freedesktop.login1.Manager",
-                                       "ReleaseSession",
-                                       &error,
-                                       NULL,
-                                       "s",
-                                       id);
+                r = bus_call_method(bus, bus_login_mgr, "ReleaseSession", &error, NULL, "s", id);
                 if (r < 0) {
                         pam_syslog(handle, LOG_ERR, "Failed to release session: %s", bus_error_message(&error, r));
                         return PAM_SESSION_ERR;

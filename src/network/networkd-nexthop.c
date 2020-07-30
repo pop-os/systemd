@@ -209,11 +209,7 @@ static int nexthop_add_internal(Link *link, Set **nexthops, NextHop *in, NextHop
         nexthop->family = in->family;
         nexthop->gw = in->gw;
 
-        r = set_ensure_allocated(nexthops, &nexthop_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = set_put(*nexthops, nexthop);
+        r = set_ensure_put(nexthops, &nexthop_hash_ops, nexthop);
         if (r < 0)
                 return r;
         if (r == 0)
@@ -245,11 +241,7 @@ int nexthop_add(Link *link, NextHop *in, NextHop **ret) {
                         return r;
         } else if (r == 0) {
                 /* Take over a foreign nexthop */
-                r = set_ensure_allocated(&link->nexthops, &nexthop_hash_ops);
-                if (r < 0)
-                        return r;
-
-                r = set_put(link->nexthops, nexthop);
+                r = set_ensure_put(&link->nexthops, &nexthop_hash_ops, nexthop);
                 if (r < 0)
                         return r;
 
@@ -422,11 +414,11 @@ int config_parse_nexthop_id(
 
         r = nexthop_new_static(network, filename, section_line, &n);
         if (r < 0)
-                return r;
+                return log_oom();
 
         r = safe_atou32(rvalue, &n->id);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r,
+                log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Could not parse nexthop id \"%s\", ignoring assignment: %m", rvalue);
                 return 0;
         }
@@ -459,11 +451,11 @@ int config_parse_nexthop_gateway(
 
         r = nexthop_new_static(network, filename, section_line, &n);
         if (r < 0)
-                return r;
+                return log_oom();
 
         r = in_addr_from_string_auto(rvalue, &n->family, &n->gw);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r,
+                log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Invalid %s='%s', ignoring assignment: %m", lvalue, rvalue);
                 return 0;
         }

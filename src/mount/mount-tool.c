@@ -6,8 +6,8 @@
 #include "sd-device.h"
 
 #include "bus-error.h"
+#include "bus-locator.h"
 #include "bus-unit-util.h"
-#include "bus-util.h"
 #include "bus-wait-for-jobs.h"
 #include "device-util.h"
 #include "dirent-util.h"
@@ -364,7 +364,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                "At most two arguments required.");
 
-                if (arg_mount_type && (fstype_is_api_vfs(arg_mount_type) || fstype_is_network(arg_mount_type))) {
+                if (arg_mount_type && !fstype_is_blockdev_backed(arg_mount_type)) {
                         arg_mount_what = strdup(argv[optind]);
                         if (!arg_mount_what)
                                 return log_oom();
@@ -551,13 +551,7 @@ static int start_transient_mount(
         if (r < 0)
                 return log_error_errno(r, "Failed to make mount unit name: %m");
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "StartTransientUnit");
+        r = bus_message_new_method_call(bus, &m, bus_systemd_mgr, "StartTransientUnit");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -638,13 +632,7 @@ static int start_transient_automount(
         if (r < 0)
                 return log_error_errno(r, "Failed to make mount unit name: %m");
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "StartTransientUnit");
+        r = bus_message_new_method_call(bus, &m, bus_systemd_mgr, "StartTransientUnit");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -854,13 +842,7 @@ static int stop_mount(
         if (r < 0)
                 return log_error_errno(r, "Failed to make %s unit name from path %s: %m", suffix + 1, where);
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "StopUnit");
+        r = bus_message_new_method_call(bus, &m, bus_systemd_mgr, "StopUnit");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -954,10 +936,9 @@ static int umount_by_device(sd_bus *bus, const char *what) {
         if (r < 0)
                 return log_device_error_errno(d, r, "Failed to get device property: %m");
 
-        if (!streq(v, "filesystem")) {
-                log_device_error(d, "%s does not contain a known file system.", what);
-                return -EINVAL;
-        }
+        if (!streq(v, "filesystem"))
+                return log_device_error_errno(d, SYNTHETIC_ERRNO(EINVAL),
+                                              "%s does not contain a known file system.", what);
 
         if (sd_device_get_property_value(d, "SYSTEMD_MOUNT_WHERE", &v) >= 0)
                 r2 = stop_mounts(bus, v);
@@ -1293,10 +1274,9 @@ static int discover_loop_backing_file(void) {
         if (r < 0)
                 return log_error_errno(r, "Failed to get device from device number: %m");
 
-        if (sd_device_get_property_value(d, "ID_FS_USAGE", &v) < 0 || !streq(v, "filesystem")) {
-                log_device_error(d, "%s does not contain a known file system.", arg_mount_what);
-                return -EINVAL;
-        }
+        if (sd_device_get_property_value(d, "ID_FS_USAGE", &v) < 0 || !streq(v, "filesystem"))
+                return log_device_error_errno(d, SYNTHETIC_ERRNO(EINVAL),
+                                              "%s does not contain a known file system.", arg_mount_what);
 
         r = acquire_mount_type(d);
         if (r < 0)
@@ -1454,7 +1434,7 @@ static int list_devices(void) {
 
         r = table_print(table, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to print table: %m");
+                return table_log_print_error(r);
 
         return 0;
 }
@@ -1476,12 +1456,12 @@ static int run(int argc, char* argv[]) {
 
         r = bus_connect_transport_systemd(arg_transport, arg_host, arg_user, &bus);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         if (arg_action == ACTION_UMOUNT)
                 return action_umount(bus, argc, argv);
 
-        if ((!arg_mount_type || !fstype_is_network(arg_mount_type))
+        if ((!arg_mount_type || fstype_is_blockdev_backed(arg_mount_type))
             && !path_is_normalized(arg_mount_what)) {
                 log_error("Path contains non-normalized components: %s", arg_mount_what);
                 return -EINVAL;

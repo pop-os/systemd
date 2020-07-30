@@ -23,6 +23,7 @@
 #include "main-func.h"
 #include "mkdir.h"
 #include "parse-util.h"
+#include "path-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
 #include "rlimit-util.h"
@@ -240,14 +241,14 @@ int start_upload(Uploader *u,
                             "systemd-journal-upload " GIT_VERSION,
                             LOG_WARNING, );
 
-                if (arg_key || startswith(u->url, "https://")) {
+                if (!streq_ptr(arg_key, "-") && (arg_key || startswith(u->url, "https://"))) {
                         easy_setopt(curl, CURLOPT_SSLKEY, arg_key ?: PRIV_KEY_FILE,
                                     LOG_ERR, return -EXFULL);
                         easy_setopt(curl, CURLOPT_SSLCERT, arg_cert ?: CERT_FILE,
                                     LOG_ERR, return -EXFULL);
                 }
 
-                if (streq_ptr(arg_trust, "all"))
+                if (STRPTR_IN_SET(arg_trust, "-", "all"))
                         easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0,
                                     LOG_ERR, return -EUCLEAN);
                 else if (arg_trust || startswith(u->url, "https://"))
@@ -515,18 +516,63 @@ static int perform_upload(Uploader *u) {
         return update_cursor_state(u);
 }
 
+static int config_parse_path_or_ignore(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_free_ char *n = NULL;
+        bool fatal = ltype;
+        char **s = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if (isempty(rvalue))
+                goto finalize;
+
+        n = strdup(rvalue);
+        if (!n)
+                return log_oom();
+
+        if (streq(n, "-"))
+                goto finalize;
+
+        r = path_simplify_and_warn(n, PATH_CHECK_ABSOLUTE | (fatal ? PATH_CHECK_FATAL : 0), unit, filename, line, lvalue);
+        if (r < 0)
+                return fatal ? -ENOEXEC : 0;
+
+finalize:
+        return free_and_replace(*s, n);
+}
+
 static int parse_config(void) {
         const ConfigTableItem items[] = {
-                { "Upload",  "URL",                    config_parse_string, 0, &arg_url    },
-                { "Upload",  "ServerKeyFile",          config_parse_path,   0, &arg_key    },
-                { "Upload",  "ServerCertificateFile",  config_parse_path,   0, &arg_cert   },
-                { "Upload",  "TrustedCertificateFile", config_parse_path,   0, &arg_trust  },
-                {}};
+                { "Upload",  "URL",                    config_parse_string,         0, &arg_url    },
+                { "Upload",  "ServerKeyFile",          config_parse_path_or_ignore, 0, &arg_key    },
+                { "Upload",  "ServerCertificateFile",  config_parse_path_or_ignore, 0, &arg_cert   },
+                { "Upload",  "TrustedCertificateFile", config_parse_path_or_ignore, 0, &arg_trust  },
+                {}
+        };
 
-        return config_parse_many_nulstr(PKGSYSCONFDIR "/journal-upload.conf",
-                                        CONF_PATHS_NULSTR("systemd/journal-upload.conf.d"),
-                                        "Upload\0", config_item_table_lookup, items,
-                                        CONFIG_PARSE_WARN, NULL);
+        return config_parse_many_nulstr(
+                        PKGSYSCONFDIR "/journal-upload.conf",
+                        CONF_PATHS_NULSTR("systemd/journal-upload.conf.d"),
+                        "Upload\0",
+                        config_item_table_lookup, items,
+                        CONFIG_PARSE_WARN,
+                        NULL,
+                        NULL);
 }
 
 static int help(void) {
@@ -769,13 +815,13 @@ static int open_journal(sd_journal **j) {
 }
 
 static int run(int argc, char **argv) {
-        _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         _cleanup_(destroy_uploader) Uploader u = {};
+        _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         bool use_journal;
         int r;
 
         log_show_color(true);
-        log_parse_environment();
+        log_parse_environment_cli();
 
         /* The journal merging logic potentially needs a lot of fds. */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
