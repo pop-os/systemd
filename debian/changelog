@@ -1,8 +1,13 @@
-systemd (246-1) UNRELEASED; urgency=medium
+systemd (246-1) experimental; urgency=medium
 
   * New upstream version 246
+  * Rebase patches
+  * Update symbols file for libsystemd0
+  * Bump libapparmor-dev Build-Depends to (>= 2.13)
+  * Disable libfido2 support.
+    This is only used by homed which we don't enable.
 
- -- Michael Biebl <biebl@debian.org>  Thu, 30 Jul 2020 21:56:37 +0200
+ -- Michael Biebl <biebl@debian.org>  Thu, 30 Jul 2020 22:22:24 +0200
 
 systemd (245.7-1) unstable; urgency=medium
 
