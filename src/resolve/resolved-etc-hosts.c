@@ -100,7 +100,7 @@ static int parse_line(EtcHosts *hosts, unsigned nr, const char *line) {
 
                 r = extract_first_word(&line, &name, NULL, EXTRACT_RELAX);
                 if (r < 0)
-                        return log_error_errno(r, "/etc/hosts:%u: couldn't extract host name: %m", nr);
+                        return log_error_errno(r, "/etc/hosts:%u: couldn't extract hostname: %m", nr);
                 if (r == 0)
                         break;
 
@@ -120,15 +120,10 @@ static int parse_line(EtcHosts *hosts, unsigned nr, const char *line) {
                         /* Optimize the case where we don't need to store any addresses, by storing
                          * only the name in a dedicated Set instead of the hashmap */
 
-                        r = set_ensure_allocated(&hosts->no_address, &dns_name_hash_ops);
-                        if (r < 0)
-                                return log_oom();
-
-                        r = set_put(hosts->no_address, name);
+                        r = set_ensure_consume(&hosts->no_address, &dns_name_hash_ops, TAKE_PTR(name));
                         if (r < 0)
                                 return r;
 
-                        TAKE_PTR(name);
                         continue;
                 }
 
@@ -162,7 +157,7 @@ static int parse_line(EtcHosts *hosts, unsigned nr, const char *line) {
         }
 
         if (!found)
-                log_warning("/etc/hosts:%u: line is missing any host names", nr);
+                log_warning("/etc/hosts:%u: line is missing any hostnames", nr);
 
         return 0;
 }

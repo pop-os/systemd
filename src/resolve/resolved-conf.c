@@ -8,7 +8,10 @@
 #include "parse-util.h"
 #include "resolved-conf.h"
 #include "resolved-dnssd.h"
-#include "resolved-util.h"
+#include "resolved-manager.h"
+#include "resolved-dns-search-domain.h"
+#include "dns-domain.h"
+#include "socket-netlink.h"
 #include "specifier.h"
 #include "string-table.h"
 #include "string-util.h"
@@ -25,24 +28,33 @@ static const char* const dns_stub_listener_mode_table[_DNS_STUB_LISTENER_MODE_MA
 DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(dns_stub_listener_mode, DnsStubListenerMode, DNS_STUB_LISTENER_YES);
 
 static int manager_add_dns_server_by_string(Manager *m, DnsServerType type, const char *word) {
+        _cleanup_free_ char *server_name = NULL;
         union in_addr_union address;
         int family, r, ifindex = 0;
+        uint16_t port;
         DnsServer *s;
-        _cleanup_free_ char *server_name = NULL;
 
         assert(m);
         assert(word);
 
-        r = in_addr_ifindex_name_from_string_auto(word, &family, &address, &ifindex, &server_name);
+        r = in_addr_port_ifindex_name_from_string_auto(word, &family, &address, &port, &ifindex, &server_name);
         if (r < 0)
                 return r;
+
+        if (IN_SET(port, 53, 853))
+                port = 0;
 
         /* Silently filter out 0.0.0.0 and 127.0.0.53 (our own stub DNS listener) */
         if (!dns_server_address_valid(family, &address))
                 return 0;
 
+        /* By default, the port number is determined with the transaction feature level.
+         * See dns_transaction_port() and dns_server_port(). */
+        if (IN_SET(port, 53, 853))
+                port = 0;
+
         /* Filter out duplicates */
-        s = dns_server_find(manager_get_first_dns_server(m, type), family, &address, ifindex);
+        s = dns_server_find(manager_get_first_dns_server(m, type), family, &address, port, ifindex, server_name);
         if (s) {
                 /*
                  * Drop the marker. This is used to find the servers
@@ -54,7 +66,7 @@ static int manager_add_dns_server_by_string(Manager *m, DnsServerType type, cons
                 return 0;
         }
 
-        return dns_server_new(m, NULL, type, NULL, family, &address, ifindex, server_name);
+        return dns_server_new(m, NULL, type, NULL, family, &address, port, ifindex, server_name);
 }
 
 int manager_parse_dns_server_string_and_warn(Manager *m, DnsServerType type, const char *string) {
@@ -218,10 +230,15 @@ int config_parse_search_domains(
 
 int config_parse_dnssd_service_name(const char *unit, const char *filename, unsigned line, const char *section, unsigned section_line, const char *lvalue, int ltype, const char *rvalue, void *data, void *userdata) {
         static const Specifier specifier_table[] = {
+                { 'm', specifier_machine_id,      NULL },
                 { 'b', specifier_boot_id,         NULL },
                 { 'H', specifier_host_name,       NULL },
-                { 'm', specifier_machine_id,      NULL },
                 { 'v', specifier_kernel_release,  NULL },
+                { 'a', specifier_architecture,    NULL },
+                { 'o', specifier_os_id,           NULL },
+                { 'w', specifier_os_version_id,   NULL },
+                { 'B', specifier_os_build_id,     NULL },
+                { 'W', specifier_os_variant_id,   NULL },
                 {}
         };
         DnssdService *s = userdata;
@@ -373,11 +390,14 @@ int manager_parse_config_file(Manager *m) {
 
         assert(m);
 
-        r = config_parse_many_nulstr(PKGSYSCONFDIR "/resolved.conf",
-                                     CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
-                                     "Resolve\0",
-                                     config_item_perf_lookup, resolved_gperf_lookup,
-                                     CONFIG_PARSE_WARN, m);
+        r = config_parse_many_nulstr(
+                        PKGSYSCONFDIR "/resolved.conf",
+                        CONF_PATHS_NULSTR("systemd/resolved.conf.d"),
+                        "Resolve\0",
+                        config_item_perf_lookup, resolved_gperf_lookup,
+                        CONFIG_PARSE_WARN,
+                        m,
+                        NULL);
         if (r < 0)
                 return r;
 

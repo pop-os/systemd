@@ -78,7 +78,7 @@ typedef enum {
         TK_M_ATTR,                          /* string, takes filename through attribute, sd_device_get_sysattr_value(), util_resolve_subsys_kernel(), etc. */
         TK_M_SYSCTL,                        /* string, takes kernel parameter through attribute */
 
-        /* matches parent paramters */
+        /* matches parent parameters */
         TK_M_PARENTS_KERNEL,                /* string */
         TK_M_PARENTS_SUBSYSTEM,             /* string */
         TK_M_PARENTS_DRIVER,                /* string */
@@ -595,7 +595,7 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
                 if (!is_match) {
                         if (streq(value, "%k"))
                                 return log_token_error_errno(rules, SYNTHETIC_ERRNO(EINVAL),
-                                                             "Ignoring NAME=\"%%k\" is ignored, as it breaks kernel supplied names.");
+                                                             "NAME=\"%%k\" is ignored, as it breaks kernel supplied names.");
                         if (isempty(value))
                                 return log_token_error_errno(rules, SYNTHETIC_ERRNO(EINVAL),
                                                              "Ignoring NAME=\"\", as udev will not delete any device nodes.");
@@ -860,7 +860,7 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
                         check_value_format_and_warn(rules, key, value, true);
                         r = rule_line_add_token(rule_line, TK_A_OWNER, op, value, NULL);
                 } else {
-                        log_token_debug(rules, "Resolving user name is disabled, ignoring %s=%s", key, value);
+                        log_token_debug(rules, "User name resolution is disabled, ignoring %s=%s", key, value);
                         return 0;
                 }
         } else if (streq(key, "GROUP")) {
@@ -943,7 +943,7 @@ static int parse_token(UdevRules *rules, const char *key, char *attr, UdevRuleOp
                 if (op != OP_ASSIGN)
                         return log_token_invalid_op(rules, key);
                 if (FLAGS_SET(rule_line->type, LINE_HAS_GOTO)) {
-                        log_token_warning(rules, "Contains multiple GOTO key, ignoring GOTO=\"%s\".", value);
+                        log_token_warning(rules, "Contains multiple GOTO keys, ignoring GOTO=\"%s\".", value);
                         return 0;
                 }
 
@@ -1174,7 +1174,7 @@ static void rule_resolve_goto(UdevRuleFile *rule_file) {
         }
 }
 
-static int parse_file(UdevRules *rules, const char *filename) {
+int udev_rules_parse_file(UdevRules *rules, const char *filename) {
         _cleanup_free_ char *continuation = NULL, *name = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         UdevRuleFile *rule_file;
@@ -1277,30 +1277,41 @@ static int parse_file(UdevRules *rules, const char *filename) {
         return 0;
 }
 
-int udev_rules_new(UdevRules **ret_rules, ResolveNameTiming resolve_name_timing) {
-        _cleanup_(udev_rules_freep) UdevRules *rules = NULL;
-        _cleanup_strv_free_ char **files = NULL;
-        char **f;
-        int r;
-
+UdevRules* udev_rules_new(ResolveNameTiming resolve_name_timing) {
         assert(resolve_name_timing >= 0 && resolve_name_timing < _RESOLVE_NAME_TIMING_MAX);
 
-        rules = new(UdevRules, 1);
+        UdevRules *rules = new(UdevRules, 1);
         if (!rules)
-                return -ENOMEM;
+                return NULL;
 
         *rules = (UdevRules) {
                 .resolve_name_timing = resolve_name_timing,
         };
 
+        return rules;
+}
+
+int udev_rules_load(UdevRules **ret_rules, ResolveNameTiming resolve_name_timing) {
+        _cleanup_(udev_rules_freep) UdevRules *rules = NULL;
+        _cleanup_strv_free_ char **files = NULL;
+        char **f;
+        int r;
+
+        rules = udev_rules_new(resolve_name_timing);
+        if (!rules)
+                return -ENOMEM;
+
         (void) udev_rules_check_timestamp(rules);
 
         r = conf_files_list_strv(&files, ".rules", NULL, 0, RULES_DIRS);
         if (r < 0)
-                return log_error_errno(r, "Failed to enumerate rules files: %m");
+                return log_debug_errno(r, "Failed to enumerate rules files: %m");
 
-        STRV_FOREACH(f, files)
-                (void) parse_file(rules, *f);
+        STRV_FOREACH(f, files) {
+                r = udev_rules_parse_file(rules, *f);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to read rules file %s, ignoring: %m", *f);
+        }
 
         *ret_rules = TAKE_PTR(rules);
         return 0;
@@ -1329,11 +1340,7 @@ static bool token_match_string(UdevRuleToken *token, const char *str) {
                 match = isempty(str);
                 break;
         case MATCH_TYPE_SUBSYSTEM:
-                NULSTR_FOREACH(i, "subsystem\0class\0bus\0")
-                        if (streq(i, str)) {
-                                match = true;
-                                break;
-                        }
+                match = STR_IN_SET(str, "subsystem", "class", "bus");
                 break;
         case MATCH_TYPE_PLAIN_WITH_EMPTY:
                 if (isempty(str)) {
@@ -1523,6 +1530,7 @@ static int udev_rule_apply_token_to_event(
                 sd_device *dev,
                 UdevEvent *event,
                 usec_t timeout_usec,
+                int timeout_signal,
                 Hashmap *properties_list) {
 
         UdevRuleToken *token;
@@ -1647,7 +1655,7 @@ static int udev_rule_apply_token_to_event(
                 if (r == -ENOENT)
                         return token->op == OP_NOMATCH;
                 if (r < 0)
-                        return log_rule_error_errno(dev, rules, r, "Failed to test the existence of '%s': %m", buf);
+                        return log_rule_error_errno(dev, rules, r, "Failed to test for the existence of '%s': %m", buf);
 
                 if (stat(buf, &statbuf) < 0)
                         return token->op == OP_NOMATCH;
@@ -1665,19 +1673,19 @@ static int udev_rule_apply_token_to_event(
                 (void) udev_event_apply_format(event, token->value, buf, sizeof(buf), false);
                 log_rule_debug(dev, rules, "Running PROGRAM '%s'", buf);
 
-                r = udev_event_spawn(event, timeout_usec, true, buf, result, sizeof(result));
+                r = udev_event_spawn(event, timeout_usec, timeout_signal, true, buf, result, sizeof(result));
                 if (r != 0) {
                         if (r < 0)
-                                log_rule_warning_errno(dev, rules, r, "Failed to execute '%s', ignoring: %m", buf);
+                                log_rule_warning_errno(dev, rules, r, "Failed to execute \"%s\": %m", buf);
                         else /* returned value is positive when program fails */
-                                log_rule_debug(dev, rules, "Command \"%s\" returned %d (error), ignoring", buf, r);
+                                log_rule_debug(dev, rules, "Command \"%s\" returned %d (error)", buf, r);
                         return token->op == OP_NOMATCH;
                 }
 
                 delete_trailing_chars(result, "\n");
                 count = util_replace_chars(result, UDEV_ALLOWED_CHARS_INPUT);
                 if (count > 0)
-                        log_rule_debug(dev, rules, "Replaced %zu character(s) from result of '%s'",
+                        log_rule_debug(dev, rules, "Replaced %zu character(s) in result of \"%s\"",
                                        count, buf);
 
                 event->program_result = strdup(result);
@@ -1735,7 +1743,7 @@ static int udev_rule_apply_token_to_event(
                 (void) udev_event_apply_format(event, token->value, buf, sizeof(buf), false);
                 log_rule_debug(dev, rules, "Importing properties from results of '%s'", buf);
 
-                r = udev_event_spawn(event, timeout_usec, true, buf, result, sizeof result);
+                r = udev_event_spawn(event, timeout_usec, timeout_signal, true, buf, result, sizeof result);
                 if (r != 0) {
                         if (r < 0)
                                 log_rule_warning_errno(dev, rules, r, "Failed to execute '%s', ignoring: %m", buf);
@@ -1817,7 +1825,7 @@ static int udev_rule_apply_token_to_event(
         case TK_M_IMPORT_CMDLINE: {
                 _cleanup_free_ char *value = NULL;
 
-                r = proc_cmdline_get_key(token->value, PROC_CMDLINE_VALUE_OPTIONAL, &value);
+                r = proc_cmdline_get_key(token->value, PROC_CMDLINE_VALUE_OPTIONAL|PROC_CMDLINE_IGNORE_EFI_OPTIONS, &value);
                 if (r < 0)
                         return log_rule_error_errno(dev, rules, r,
                                                     "Failed to read '%s' option from /proc/cmdline: %m",
@@ -2165,7 +2173,8 @@ static bool token_is_for_parents(UdevRuleToken *token) {
 
 static int udev_rule_apply_parent_token_to_event(
                 UdevRules *rules,
-                UdevEvent *event) {
+                UdevEvent *event,
+                int timeout_signal) {
 
         UdevRuleLine *line;
         UdevRuleToken *head;
@@ -2178,7 +2187,7 @@ static int udev_rule_apply_parent_token_to_event(
                 LIST_FOREACH(tokens, line->current_token, head) {
                         if (!token_is_for_parents(line->current_token))
                                 return true; /* All parent tokens match. */
-                        r = udev_rule_apply_token_to_event(rules, event->dev_parent, event, 0, NULL);
+                        r = udev_rule_apply_token_to_event(rules, event->dev_parent, event, 0, timeout_signal, NULL);
                         if (r < 0)
                                 return r;
                         if (r == 0)
@@ -2199,6 +2208,7 @@ static int udev_rule_apply_line_to_event(
                 UdevRules *rules,
                 UdevEvent *event,
                 usec_t timeout_usec,
+                int timeout_signal,
                 Hashmap *properties_list,
                 UdevRuleLine **next_line) {
 
@@ -2232,7 +2242,7 @@ static int udev_rule_apply_line_to_event(
                         if (parents_done)
                                 continue;
 
-                        r = udev_rule_apply_parent_token_to_event(rules, event);
+                        r = udev_rule_apply_parent_token_to_event(rules, event, timeout_signal);
                         if (r <= 0)
                                 return r;
 
@@ -2240,7 +2250,7 @@ static int udev_rule_apply_line_to_event(
                         continue;
                 }
 
-                r = udev_rule_apply_token_to_event(rules, event->dev, event, timeout_usec, properties_list);
+                r = udev_rule_apply_token_to_event(rules, event->dev, event, timeout_usec, timeout_signal, properties_list);
                 if (r <= 0)
                         return r;
         }
@@ -2255,6 +2265,7 @@ int udev_rules_apply_to_event(
                 UdevRules *rules,
                 UdevEvent *event,
                 usec_t timeout_usec,
+                int timeout_signal,
                 Hashmap *properties_list) {
 
         UdevRuleFile *file;
@@ -2267,7 +2278,7 @@ int udev_rules_apply_to_event(
         LIST_FOREACH(rule_files, file, rules->rule_files) {
                 rules->current_file = file;
                 LIST_FOREACH_SAFE(rule_lines, file->current_line, next_line, file->rule_lines) {
-                        r = udev_rule_apply_line_to_event(rules, event, timeout_usec, properties_list, &next_line);
+                        r = udev_rule_apply_line_to_event(rules, event, timeout_usec, timeout_signal, properties_list, &next_line);
                         if (r < 0)
                                 return r;
                 }

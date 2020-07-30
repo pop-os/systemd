@@ -27,6 +27,7 @@
 #define strncaseeq(a, b, n) (strncasecmp((a), (b), (n)) == 0)
 
 int strcmp_ptr(const char *a, const char *b) _pure_;
+int strcasecmp_ptr(const char *a, const char *b) _pure_;
 
 static inline bool streq_ptr(const char *a, const char *b) {
         return strcmp_ptr(a, b) == 0;
@@ -112,8 +113,10 @@ typedef enum SplitFlags {
         SPLIT_RELAX                      = 0x01 << 1,
 } SplitFlags;
 
+/* Smelly. Do not use this anymore. Use extract_first_word() instead! */
 const char* split(const char **state, size_t *l, const char *separator, SplitFlags flags);
 
+/* Similar, don't use this anymore */
 #define FOREACH_WORD(word, length, s, state)                            \
         _FOREACH_WORD(word, length, s, WHITESPACE, 0, state)
 

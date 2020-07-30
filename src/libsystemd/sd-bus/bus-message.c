@@ -46,7 +46,7 @@ static void message_free_part(sd_bus_message *m, struct bus_body_part *part) {
         assert(part);
 
         if (part->memfd >= 0) {
-                /* erase if requested, but ony if the memfd is not sealed yet, i.e. is writable */
+                /* erase if requested, but only if the memfd is not sealed yet, i.e. is writable */
                 if (m->sensitive && !m->sealed)
                         explicit_bzero_safe(part->data, part->size);
 
@@ -451,7 +451,7 @@ int bus_message_from_header(
         if (!IN_SET(h->version, 1, 2))
                 return -EBADMSG;
 
-        if (h->type <= _SD_BUS_MESSAGE_TYPE_INVALID || h->type >= _SD_BUS_MESSAGE_TYPE_MAX)
+        if (h->type == _SD_BUS_MESSAGE_TYPE_INVALID)
                 return -EBADMSG;
 
         if (!IN_SET(h->endian, BUS_LITTLE_ENDIAN, BUS_BIG_ENDIAN))
@@ -585,14 +585,14 @@ _public_ int sd_bus_message_new(
                 sd_bus_message **m,
                 uint8_t type) {
 
-        sd_bus_message *t;
-
         assert_return(bus, -ENOTCONN);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(bus->state != BUS_UNSET, -ENOTCONN);
         assert_return(m, -EINVAL);
-        assert_return(type > _SD_BUS_MESSAGE_TYPE_INVALID && type < _SD_BUS_MESSAGE_TYPE_MAX, -EINVAL);
+        /* Creation of messages with _SD_BUS_MESSAGE_TYPE_INVALID is allowed. */
+        assert_return(type < _SD_BUS_MESSAGE_TYPE_MAX, -EINVAL);
 
-        t = malloc0(ALIGN(sizeof(sd_bus_message)) + sizeof(struct bus_header));
+        sd_bus_message *t = malloc0(ALIGN(sizeof(sd_bus_message)) + sizeof(struct bus_header));
         if (!t)
                 return -ENOMEM;
 
@@ -623,6 +623,7 @@ _public_ int sd_bus_message_new_signal(
         int r;
 
         assert_return(bus, -ENOTCONN);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(bus->state != BUS_UNSET, -ENOTCONN);
         assert_return(object_path_is_valid(path), -EINVAL);
         assert_return(interface_name_is_valid(interface), -EINVAL);
@@ -663,6 +664,7 @@ _public_ int sd_bus_message_new_method_call(
         int r;
 
         assert_return(bus, -ENOTCONN);
+        assert_return(bus = bus_resolve(bus), -ENOPKG);
         assert_return(bus->state != BUS_UNSET, -ENOTCONN);
         assert_return(!destination || service_name_is_valid(destination), -EINVAL);
         assert_return(object_path_is_valid(path), -EINVAL);
@@ -3020,7 +3022,7 @@ int bus_body_part_map(struct bus_body_part *part) {
                 return 0;
         }
 
-        shift = part->memfd_offset - ((part->memfd_offset / page_size()) * page_size());
+        shift = PAGE_OFFSET(part->memfd_offset);
         psz = PAGE_ALIGN(part->size + shift);
 
         if (part->memfd >= 0)
@@ -5497,9 +5499,6 @@ int bus_message_parse_fields(sd_bus_message *m) {
                 if (m->reply_cookie == 0 || !m->error.name)
                         return -EBADMSG;
                 break;
-
-        default:
-                assert_not_reached("Bad message type");
         }
 
         /* Refuse non-local messages that claim they are local */
@@ -5931,18 +5930,31 @@ int bus_message_remarshal(sd_bus *bus, sd_bus_message **m) {
 }
 
 _public_ int sd_bus_message_get_priority(sd_bus_message *m, int64_t *priority) {
+        static bool warned = false;
+
         assert_return(m, -EINVAL);
         assert_return(priority, -EINVAL);
 
-        *priority = m->priority;
+        if (!warned) {
+                log_debug("sd_bus_message_get_priority() is deprecated and always returns 0.");
+                warned = true;
+        }
+
+        *priority = 0;
         return 0;
 }
 
 _public_ int sd_bus_message_set_priority(sd_bus_message *m, int64_t priority) {
+        static bool warned = false;
+
         assert_return(m, -EINVAL);
         assert_return(!m->sealed, -EPERM);
 
-        m->priority = priority;
+        if (!warned) {
+                log_debug("sd_bus_message_set_priority() is deprecated and does nothing.");
+                warned = true;
+        }
+
         return 0;
 }
 

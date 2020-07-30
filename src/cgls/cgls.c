@@ -164,9 +164,7 @@ static void show_cg_info(const char *controller, const char *path) {
 static int run(int argc, char *argv[]) {
         int r, output_flags;
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -199,7 +197,7 @@ static int run(int argc, char *argv[]) {
                                                                           arg_show_unit == SHOW_UNIT_USER,
                                                                           &bus);
                                         if (r < 0)
-                                                return log_error_errno(r, "Failed to create bus connection: %m");
+                                                return bus_log_connect_error(r);
                                 }
 
                                 q = show_cgroup_get_unit_path_and_warn(bus, *name, &cgroup);

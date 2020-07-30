@@ -61,6 +61,8 @@ sources = files('''
         networkd-conf.h
         networkd-dhcp-common.c
         networkd-dhcp-common.h
+        networkd-dhcp-server-bus.c
+        networkd-dhcp-server-bus.h
         networkd-dhcp-server.c
         networkd-dhcp-server.h
         networkd-dhcp4.c
@@ -103,26 +105,52 @@ sources = files('''
         networkd-routing-policy-rule.h
         networkd-speed-meter.c
         networkd-speed-meter.h
+        networkd-sriov.c
+        networkd-sriov.h
         networkd-util.c
         networkd-util.h
         networkd-wifi.c
         networkd-wifi.h
+        tc/cake.c
+        tc/cake.h
         tc/codel.c
         tc/codel.h
+        tc/drr.c
+        tc/drr.h
+        tc/ets.c
+        tc/ets.h
+        tc/fifo.c
+        tc/fifo.h
         tc/fq.c
         tc/fq.h
         tc/fq-codel.c
         tc/fq-codel.h
+        tc/gred.c
+        tc/gred.h
+        tc/hhf.c
+        tc/hhf.h
+        tc/htb.c
+        tc/htb.h
         tc/netem.c
         tc/netem.h
+        tc/pie.c
+        tc/pie.h
         tc/qdisc.c
         tc/qdisc.h
+        tc/qfq.c
+        tc/qfq.h
+        tc/sfb.c
+        tc/sfb.h
         tc/sfq.c
         tc/sfq.h
         tc/tbf.c
         tc/tbf.h
         tc/tc-util.c
         tc/tc-util.h
+        tc/tc.c
+        tc/tc.h
+        tc/tclass.c
+        tc/tclass.h
         tc/teql.c
         tc/teql.h
 '''.split())

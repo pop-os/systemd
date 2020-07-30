@@ -32,13 +32,18 @@ typedef enum {
 } WriteStringFileFlags;
 
 typedef enum {
-        READ_FULL_FILE_SECURE   = 1 << 0,
-        READ_FULL_FILE_UNBASE64 = 1 << 1,
-        READ_FULL_FILE_UNHEX    = 1 << 2,
+        READ_FULL_FILE_SECURE              = 1 << 0, /* erase any buffers we employ internally, after use */
+        READ_FULL_FILE_UNBASE64            = 1 << 1, /* base64 decode what we read */
+        READ_FULL_FILE_UNHEX               = 1 << 2, /* hex decode what we read */
+        READ_FULL_FILE_WARN_WORLD_READABLE = 1 << 3, /* if regular file, log at LOG_WARNING level if access mode above 0700 */
+        READ_FULL_FILE_CONNECT_SOCKET      = 1 << 4, /* if socket inode, connect to it and read off it */
 } ReadFullFileFlags;
 
 int fopen_unlocked(const char *path, const char *options, FILE **ret);
 int fdopen_unlocked(int fd, const char *options, FILE **ret);
+int take_fdopen_unlocked(int *fd, const char *options, FILE **ret);
+FILE* take_fdopen(int *fd, const char *options);
+DIR* take_fdopendir(int *dfd);
 FILE* open_memstream_unlocked(char **ptr, size_t *sizeloc);
 FILE* fmemopen_unlocked(void *buf, size_t size, const char *mode);
 
@@ -103,3 +108,7 @@ static inline int read_nul_string(FILE *f, size_t limit, char **ret) {
 int safe_fgetc(FILE *f, char *ret);
 
 int warn_file_is_world_accessible(const char *filename, struct stat *st, const char *unit, unsigned line);
+
+int sync_rights(int from, int to);
+
+int rename_and_apply_smack_floor_label(const char *temp_path, const char *dest_path);

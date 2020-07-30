@@ -35,9 +35,9 @@
     <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>
     for the common options of all unit configuration files. The common
     configuration items are configured in the generic
-    <literal>[Unit]</literal> and <literal>[Install]</literal>
+    [Unit] and [Install]
     sections. The service specific configuration options are
-    configured in the <literal>[Service]</literal> section.</para>
+    configured in the [Service] section.</para>
 
     <para>Additional options are listed in
     <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
@@ -138,7 +138,7 @@
   <refsect1>
     <title>Options</title>
 
-    <para>Service files must include a <literal>[Service]</literal>
+    <para>Service files must include a [Service]
     section, which carries information about the service and the
     process it supervises. A number of options that may be used in
     this section are shared with other unit types. These options are
@@ -147,7 +147,7 @@
     <citerefentry><refentrytitle>systemd.kill</refentrytitle><manvolnum>5</manvolnum></citerefentry>
     and
     <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
-    The options specific to the <literal>[Service]</literal> section
+    The options specific to the [Service] section
     of service units are the following:</para>
 
     <variablelist class='unit-directives'>
@@ -199,7 +199,7 @@
             option is used without <varname>RemainAfterExit=</varname> the service will never enter
             <literal>active</literal> unit state, but directly transition from <literal>activating</literal>
             to <literal>deactivating</literal> or <literal>dead</literal> since no process is configured that
-            shall run continously. In particular this means that after a service of this type ran (and which
+            shall run continuously. In particular this means that after a service of this type ran (and which
             has <varname>RemainAfterExit=</varname> not set) it will not show up as started afterwards, but
             as dead.</para></listitem>
 
@@ -464,7 +464,7 @@
         of the daemon, and may be used for command lines like the
         following:</para>
 
-        <programlisting>/bin/kill -HUP $MAINPID</programlisting>
+        <programlisting>ExecReload=kill -HUP $MAINPID</programlisting>
 
         <para>Note however that reloading a daemon by sending a signal
         (as with the example line above) is usually not a good choice,
@@ -473,7 +473,14 @@
         other. It is strongly recommended to set
         <varname>ExecReload=</varname> to a command that not only
         triggers a configuration reload of the daemon, but also
-        synchronously waits for it to complete.</para>
+        synchronously waits for it to complete. For example,
+        <citerefentry project='mankier'><refentrytitle>dbus-broker</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        uses the following:</para>
+
+        <programlisting>ExecReload=busctl call org.freedesktop.DBus \
+        /org/freedesktop/DBus org.freedesktop.DBus \
+        ReloadConfig
+</programlisting>
         </listitem>
       </varlistentry>
 
@@ -553,22 +560,18 @@
 
       <varlistentry>
         <term><varname>TimeoutStartSec=</varname></term>
-        <listitem><para>Configures the time to wait for start-up. If a
-        daemon service does not signal start-up completion within the
-        configured time, the service will be considered failed and
-        will be shut down again. Takes a unit-less value in seconds,
-        or a time span value such as "5min 20s". Pass
-        <literal>infinity</literal> to disable the timeout logic. Defaults to
-        <varname>DefaultTimeoutStartSec=</varname> from the manager
-        configuration file, except when
-        <varname>Type=oneshot</varname> is used, in which case the
-        timeout is disabled by default (see
+        <listitem><para>Configures the time to wait for start-up. If a daemon service does not signal start-up
+        completion within the configured time, the service will be considered failed and will be shut down again. The
+        precise action depends on the <varname>TimeoutStartFailureMode=</varname> option. Takes a unit-less value in
+        seconds, or a time span value such as "5min 20s". Pass <literal>infinity</literal> to disable the timeout logic.
+        Defaults to <varname>DefaultTimeoutStartSec=</varname> from the manager configuration file, except when
+        <varname>Type=oneshot</varname> is used, in which case the timeout is disabled by default (see
         <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>).
         </para>
 
         <para>If a service of <varname>Type=notify</varname> sends <literal>EXTEND_TIMEOUT_USEC=…</literal>, this may cause
         the start time to be extended beyond <varname>TimeoutStartSec=</varname>. The first receipt of this message
-        must occur before <varname>TimeoutStartSec=</varname> is exceeded, and once the start time has exended beyond
+        must occur before <varname>TimeoutStartSec=</varname> is exceeded, and once the start time has extended beyond
         <varname>TimeoutStartSec=</varname>, the service manager will allow the service to continue to start, provided
         the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified until the service
         startup status is finished by <literal>READY=1</literal>. (see
@@ -581,7 +584,8 @@
         <listitem><para>This option serves two purposes. First, it configures the time to wait for each
         <varname>ExecStop=</varname> command. If any of them times out, subsequent <varname>ExecStop=</varname> commands
         are skipped and the service will be terminated by <constant>SIGTERM</constant>. If no <varname>ExecStop=</varname>
-        commands are specified, the service gets the <constant>SIGTERM</constant> immediately. Second, it configures the time
+        commands are specified, the service gets the <constant>SIGTERM</constant> immediately. This default behavior
+        can be changed by the <varname>TimeoutStopFailureMode=</varname> option. Second, it configures the time
         to wait for the service itself to stop. If it doesn't terminate in the specified time, it will be forcibly terminated
         by <constant>SIGKILL</constant> (see <varname>KillMode=</varname> in
         <citerefentry><refentrytitle>systemd.kill</refentrytitle><manvolnum>5</manvolnum></citerefentry>).
@@ -595,7 +599,7 @@
 
         <para>If a service of <varname>Type=notify</varname> sends <literal>EXTEND_TIMEOUT_USEC=…</literal>, this may cause
         the stop time to be extended beyond <varname>TimeoutStopSec=</varname>. The first receipt of this message
-        must occur before <varname>TimeoutStopSec=</varname> is exceeded, and once the stop time has exended beyond
+        must occur before <varname>TimeoutStopSec=</varname> is exceeded, and once the stop time has extended beyond
         <varname>TimeoutStopSec=</varname>, the service manager will allow the service to continue to stop, provided
         the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified, or terminates itself
         (see <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>).
@@ -624,7 +628,7 @@
         <para>If a service of <varname>Type=notify</varname> handles <constant>SIGABRT</constant> itself (instead of relying
         on the kernel to write a core dump) it can send <literal>EXTEND_TIMEOUT_USEC=…</literal> to
         extended the abort time beyond <varname>TimeoutAbortSec=</varname>. The first receipt of this message
-        must occur before <varname>TimeoutAbortSec=</varname> is exceeded, and once the abort time has exended beyond
+        must occur before <varname>TimeoutAbortSec=</varname> is exceeded, and once the abort time has extended beyond
         <varname>TimeoutAbortSec=</varname>, the service manager will allow the service to continue to abort, provided
         the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified, or terminates itself
         (see <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>).
@@ -640,6 +644,28 @@
       </varlistentry>
 
       <varlistentry>
+        <term><varname>TimeoutStartFailureMode=</varname></term>
+        <term><varname>TimeoutStopFailureMode=</varname></term>
+
+        <listitem><para>These options configure the action that is taken in case a daemon service does not signal
+        start-up within its configured <varname>TimeoutStartSec=</varname>, respectively if it does not stop within
+        <varname>TimeoutStopSec=</varname>. Takes one of <option>terminate</option>, <option>abort</option> and
+        <option>kill</option>. Both options default to <option>terminate</option>.</para>
+
+        <para>If <option>terminate</option> is set the service will be gracefully terminated by sending the signal
+        specified in <varname>KillSignal=</varname> (defaults to <constant>SIGTERM</constant>, see
+        <citerefentry><refentrytitle>systemd.kill</refentrytitle><manvolnum>5</manvolnum></citerefentry>). If the
+        service does not terminate the <varname>FinalKillSignal=</varname> is sent after
+        <varname>TimeoutStopSec=</varname>. If <option>abort</option> is set, <varname>WatchdogSignal=</varname> is sent
+        instead and <varname>TimeoutAbortSec=</varname> applies before sending <varname>FinalKillSignal=</varname>.
+        This setting may be used to analyze services that fail to start-up or shut-down intermittently.
+        By using <option>kill</option> the service is immediately terminated by sending
+        <varname>FinalKillSignal=</varname> without any further timeout. This setting can be used to expedite the
+        shutdown of failing services.
+        </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
         <term><varname>RuntimeMaxSec=</varname></term>
 
         <listitem><para>Configures a maximum time for the service to run. If this is used and the service has been
@@ -650,7 +676,7 @@
 
         <para>If a service of <varname>Type=notify</varname> sends <literal>EXTEND_TIMEOUT_USEC=…</literal>, this may cause
         the runtime to be extended beyond <varname>RuntimeMaxSec=</varname>. The first receipt of this message
-        must occur before <varname>RuntimeMaxSec=</varname> is exceeded, and once the runtime has exended beyond
+        must occur before <varname>RuntimeMaxSec=</varname> is exceeded, and once the runtime has extended beyond
         <varname>RuntimeMaxSec=</varname>, the service manager will allow the service to continue to run, provided
         the service repeats <literal>EXTEND_TIMEOUT_USEC=…</literal> within the interval specified until the service
         shutdown is achieved by <literal>STOPPING=1</literal> (or termination). (see
@@ -858,7 +884,7 @@
         project='man-pages'><refentrytitle>signal</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
         a list of signal names.</para>
 
-        <para>Note that this setting does not change the the mapping between numeric exit statuses and their
+        <para>Note that this setting does not change the mapping between numeric exit statuses and their
         names, i.e. regardless how this setting is used 0 will still be mapped to <literal>SUCCESS</literal>
         (and thus typically shown as <literal>0/SUCCESS</literal> in tool outputs) and 1 to
         <literal>FAILURE</literal> (and thus typically shown as <literal>1/FAILURE</literal>), and so on. It
@@ -870,7 +896,7 @@
         this option will have no effect.</para>
 
         <example>
-          <title>A service with with the <varname>SuccessExitStatus=</varname> setting</title>
+          <title>A service with the <varname>SuccessExitStatus=</varname> setting</title>
 
           <programlisting>SuccessExitStatus=TEMPFAIL 250 SIGUSR1</programlisting>
 
@@ -965,7 +991,14 @@
         <option>exec</option>. Conversely, if an auxiliary process of the unit sends an
         <function>sd_notify()</function> message and immediately exits, the service manager might not be able to
         properly attribute the message to the unit, and thus will ignore it, even if
-        <varname>NotifyAccess=</varname><option>all</option> is set for it.</para></listitem>
+        <varname>NotifyAccess=</varname><option>all</option> is set for it.</para>
+
+        <para>Hence, to eliminate all race conditions involving lookup of the client's unit and attribution of notifications
+        to units correctly, <function>sd_notify_barrier()</function> may be used. This call acts as a synchronization point
+        and ensures all notifications sent before this call have been picked up by the service manager when it returns
+        successfully. Use of <function>sd_notify_barrier()</function> is needed for clients which are not invoked by the
+        service manager, otherwise this synchronization mechanism is unnecessary for attribution of notifications to the
+        unit.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1045,8 +1078,8 @@
         manager. If set to <constant>kill</constant> and one of the service's processes is killed by the OOM
         killer the kernel is instructed to kill all remaining processes of the service, too. Defaults to the
         setting <varname>DefaultOOMPolicy=</varname> in
-        <citerefentry><refentrytitle>system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry> is
-        set to, except for services where <varname>Delegate=</varname> is turned on, where it defaults to
+        <citerefentry><refentrytitle>systemd-system.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        is set to, except for services where <varname>Delegate=</varname> is turned on, where it defaults to
         <constant>continue</constant>.</para>
 
         <para>Use the <varname>OOMScoreAdjust=</varname> setting to configure whether processes of the unit
@@ -1462,7 +1495,7 @@ ExecStart=/usr/sbin/simple-dbus-service
 WantedBy=multi-user.target</programlisting>
 
       <para>For <emphasis>bus-activatable</emphasis> services, do not
-      include a <literal>[Install]</literal> section in the systemd
+      include a [Install] section in the systemd
       service file, but use the <varname>SystemdService=</varname>
       option in the corresponding DBus service file, for example
       (<filename>/usr/share/dbus-1/system-services/org.example.simple-dbus-service.service</filename>):</para>

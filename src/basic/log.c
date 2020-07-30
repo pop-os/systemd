@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <sys/signalfd.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <sys/un.h>
@@ -51,6 +52,7 @@ static bool syslog_is_stream = false;
 
 static bool show_color = false;
 static bool show_location = false;
+static bool show_time = false;
 
 static bool upgrade_syslog_to_journal = false;
 static bool always_reopen_console = false;
@@ -218,6 +220,32 @@ fail:
         return r;
 }
 
+static bool stderr_is_journal(void) {
+        _cleanup_free_ char *w = NULL;
+        const char *e;
+        uint64_t dev, ino;
+        struct stat st;
+
+        e = getenv("JOURNAL_STREAM");
+        if (!e)
+                return false;
+
+        if (extract_first_word(&e, &w, ":", EXTRACT_DONT_COALESCE_SEPARATORS) <= 0)
+                return false;
+        if (!e)
+                return false;
+
+        if (safe_atou64(w, &dev) < 0)
+                return false;
+        if (safe_atou64(e, &ino) < 0)
+                return false;
+
+        if (fstat(STDERR_FILENO, &st) < 0)
+                return false;
+
+        return st.st_dev == dev && st.st_ino == ino;
+}
+
 int log_open(void) {
         int r;
 
@@ -237,9 +265,7 @@ int log_open(void) {
                 return 0;
         }
 
-        if (log_target != LOG_TARGET_AUTO ||
-            getpid_cached() == 1 ||
-            isatty(STDERR_FILENO) <= 0) {
+        if (log_target != LOG_TARGET_AUTO || getpid_cached() == 1 || stderr_is_journal()) {
 
                 if (!prohibit_ipc &&
                     IN_SET(log_target, LOG_TARGET_AUTO,
@@ -332,8 +358,10 @@ static int write_to_console(
                 const char *func,
                 const char *buffer) {
 
-        char location[256], prefix[1 + DECIMAL_STR_MAX(int) + 2];
-        struct iovec iovec[6] = {};
+        char location[256],
+             header_time[FORMAT_TIMESTAMP_MAX],
+             prefix[1 + DECIMAL_STR_MAX(int) + 2];
+        struct iovec iovec[8] = {};
         const char *on = NULL, *off = NULL;
         size_t n = 0;
 
@@ -343,6 +371,13 @@ static int write_to_console(
         if (log_target == LOG_TARGET_CONSOLE_PREFIXED) {
                 xsprintf(prefix, "<%i>", level);
                 iovec[n++] = IOVEC_MAKE_STRING(prefix);
+        }
+
+        if (show_time) {
+                if (format_timestamp(header_time, sizeof(header_time), now(CLOCK_REALTIME))) {
+                        iovec[n++] = IOVEC_MAKE_STRING(header_time);
+                        iovec[n++] = IOVEC_MAKE_STRING(" ");
+                }
         }
 
         if (show_color)
@@ -1099,21 +1134,31 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
                 if (log_show_location_from_string(value ?: "1") < 0)
                         log_warning("Failed to parse log location setting '%s'. Ignoring.", value);
+
+        } else if (proc_cmdline_key_streq(key, "systemd.log_time")) {
+
+                if (log_show_time_from_string(value ?: "1") < 0)
+                        log_warning("Failed to parse log time setting '%s'. Ignoring.", value);
+
         }
 
         return 0;
 }
 
 void log_parse_environment_realm(LogRealm realm) {
-        /* Do not call from library code. */
-
-        const char *e;
-
         if (getpid_cached() == 1 || get_ctty_devnr(0, NULL) < 0)
                 /* Only try to read the command line in daemons. We assume that anything that has a
                  * controlling tty is user stuff. For PID1 we do a special check in case it hasn't
                  * closed the console yet. */
                 (void) proc_cmdline_parse(parse_proc_cmdline_item, NULL, PROC_CMDLINE_STRIP_RD_PREFIX);
+
+        log_parse_environment_cli_realm(realm);
+}
+
+void log_parse_environment_cli_realm(LogRealm realm) {
+        /* Do not call from library code. */
+
+        const char *e;
 
         e = getenv("SYSTEMD_LOG_TARGET");
         if (e && log_set_target_from_string(e) < 0)
@@ -1130,6 +1175,10 @@ void log_parse_environment_realm(LogRealm realm) {
         e = getenv("SYSTEMD_LOG_LOCATION");
         if (e && log_show_location_from_string(e) < 0)
                 log_warning("Failed to parse log location '%s'. Ignoring.", e);
+
+        e = getenv("SYSTEMD_LOG_TIME");
+        if (e && log_show_time_from_string(e) < 0)
+                log_warning("Failed to parse log time '%s'. Ignoring.", e);
 }
 
 LogTarget log_get_target(void) {
@@ -1156,6 +1205,14 @@ bool log_get_show_location(void) {
         return show_location;
 }
 
+void log_show_time(bool b) {
+        show_time = b;
+}
+
+bool log_get_show_time(void) {
+        return show_time;
+}
+
 int log_show_color_from_string(const char *e) {
         int t;
 
@@ -1175,6 +1232,17 @@ int log_show_location_from_string(const char *e) {
                 return t;
 
         log_show_location(t);
+        return 0;
+}
+
+int log_show_time_from_string(const char *e) {
+        int t;
+
+        t = parse_boolean(e);
+        if (t < 0)
+                return t;
+
+        log_show_time(t);
         return 0;
 }
 
@@ -1364,5 +1432,13 @@ void log_setup_service(void) {
 
         log_set_target(LOG_TARGET_AUTO);
         log_parse_environment();
+        (void) log_open();
+}
+
+void log_setup_cli(void) {
+        /* Sets up logging the way it is most appropriate for running a program as a CLI utility. */
+
+        log_show_color(true);
+        log_parse_environment_cli();
         (void) log_open();
 }

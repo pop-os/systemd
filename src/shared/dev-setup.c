@@ -56,30 +56,37 @@ int dev_setup(const char *prefix, uid_t uid, gid_t gid) {
         return 0;
 }
 
-int make_inaccessible_nodes(const char *root, uid_t uid, gid_t gid) {
+int make_inaccessible_nodes(
+                const char *runtime_dir,
+                uid_t uid,
+                gid_t gid) {
+
         static const struct {
                 const char *name;
                 mode_t mode;
         } table[] = {
-                { "",                   S_IFDIR  | 0755 },
-                { "/inaccessible",      S_IFDIR  | 0000 },
-                { "/inaccessible/reg",  S_IFREG  | 0000 },
-                { "/inaccessible/dir",  S_IFDIR  | 0000 },
-                { "/inaccessible/fifo", S_IFIFO  | 0000 },
-                { "/inaccessible/sock", S_IFSOCK | 0000 },
+                { "/systemd",                   S_IFDIR  | 0755 },
+                { "/systemd/inaccessible",      S_IFDIR  | 0000 },
+                { "/systemd/inaccessible/reg",  S_IFREG  | 0000 },
+                { "/systemd/inaccessible/dir",  S_IFDIR  | 0000 },
+                { "/systemd/inaccessible/fifo", S_IFIFO  | 0000 },
+                { "/systemd/inaccessible/sock", S_IFSOCK | 0000 },
 
                 /* The following two are likely to fail if we lack the privs for it (for example in an userns
                  * environment, if CAP_SYS_MKNOD is missing, or if a device node policy prohibit major/minor of 0
                  * device nodes to be created). But that's entirely fine. Consumers of these files should carry
                  * fallback to use a different node then, for example <root>/inaccessible/sock, which is close
                  * enough in behaviour and semantics for most uses. */
-                { "/inaccessible/chr",  S_IFCHR  | 0000 },
-                { "/inaccessible/blk",  S_IFBLK  | 0000 },
+                { "/systemd/inaccessible/chr",  S_IFCHR  | 0000 },
+                { "/systemd/inaccessible/blk",  S_IFBLK  | 0000 },
         };
 
         _cleanup_umask_ mode_t u;
         size_t i;
         int r;
+
+        if (!runtime_dir)
+                runtime_dir = "/run";
 
         u = umask(0000);
 
@@ -91,17 +98,17 @@ int make_inaccessible_nodes(const char *root, uid_t uid, gid_t gid) {
         for (i = 0; i < ELEMENTSOF(table); i++) {
                 _cleanup_free_ char *path = NULL;
 
-                path = path_join(root, table[i].name);
+                path = path_join(runtime_dir, table[i].name);
                 if (!path)
                         return log_oom();
 
                 if (S_ISDIR(table[i].mode))
-                        r = mkdir(path, table[i].mode & 07777);
+                        r = mkdir_label(path, table[i].mode & 07777);
                 else
-                        r = mknod(path, table[i].mode, makedev(0, 0));
+                        r = mknod_label(path, table[i].mode, makedev(0, 0));
                 if (r < 0) {
-                        if (errno != EEXIST)
-                                log_debug_errno(errno, "Failed to create '%s', ignoring: %m", path);
+                        if (r != -EEXIST)
+                                log_debug_errno(r, "Failed to create '%s', ignoring: %m", path);
                         continue;
                 }
 

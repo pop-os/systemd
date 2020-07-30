@@ -11,6 +11,7 @@
 #include "selinux-util.h"
 #include "string-util.h"
 #include "udevadm.h"
+#include "udevd.h"
 #include "udev-util.h"
 #include "verbs.h"
 #include "util.h"
@@ -110,6 +111,9 @@ static int udevadm_main(int argc, char *argv[]) {
 static int run(int argc, char *argv[]) {
         int r;
 
+        if (strstr(program_invocation_short_name, "udevd"))
+                return run_udevd(argc, argv);
+
         udev_parse_config();
         log_parse_environment();
         log_open();
@@ -120,7 +124,10 @@ static int run(int argc, char *argv[]) {
 
         log_set_max_level_realm(LOG_REALM_SYSTEMD, log_get_max_level());
 
-        mac_selinux_init();
+        r = mac_selinux_init();
+        if (r < 0)
+                return r;
+
         return udevadm_main(argc, argv);
 }
 

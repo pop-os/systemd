@@ -12,7 +12,9 @@ typedef struct TemporaryFileSystem TemporaryFileSystem;
 #include <stdbool.h>
 
 #include "dissect-image.h"
+#include "fs-util.h"
 #include "macro.h"
+#include "string-util.h"
 
 typedef enum ProtectHome {
         PROTECT_HOME_NO,
@@ -88,8 +90,25 @@ int setup_namespace(
                 ProtectHome protect_home,
                 ProtectSystem protect_system,
                 unsigned long mount_flags,
+                const void *root_hash,
+                size_t root_hash_size,
+                const char *root_hash_path,
+                const void *root_hash_sig,
+                size_t root_hash_sig_size,
+                const char *root_hash_sig_path,
+                const char *root_verity,
                 DissectImageFlags dissected_image_flags,
                 char **error_path);
+
+#define RUN_SYSTEMD_EMPTY "/run/systemd/empty"
+
+static inline void namespace_cleanup_tmpdir(char *p) {
+        PROTECT_ERRNO;
+        if (!streq_ptr(p, RUN_SYSTEMD_EMPTY))
+                (void) rmdir(p);
+        free(p);
+}
+DEFINE_TRIVIAL_CLEANUP_FUNC(char*, namespace_cleanup_tmpdir);
 
 int setup_tmp_dirs(
                 const char *id,

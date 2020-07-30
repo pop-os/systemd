@@ -168,6 +168,14 @@ _public_ int sd_network_link_get_address_state(int ifindex, char **state) {
         return network_link_get_string(ifindex, "ADDRESS_STATE", state);
 }
 
+_public_ int sd_network_link_get_dhcp6_client_iaid_string(int ifindex, char **iaid) {
+        return network_link_get_string(ifindex, "DHCP6_CLIENT_IAID", iaid);
+}
+
+_public_ int sd_network_link_get_dhcp6_client_duid_string(int ifindex, char **duid) {
+        return network_link_get_string(ifindex, "DHCP6_CLIENT_DUID", duid);
+}
+
 _public_ int sd_network_link_get_required_for_online(int ifindex) {
         _cleanup_free_ char *s = NULL;
         int r;
@@ -224,14 +232,6 @@ _public_ int sd_network_link_get_dnssec_negative_trust_anchors(int ifindex, char
         return network_link_get_strv(ifindex, "DNSSEC_NTA", nta);
 }
 
-_public_ int sd_network_link_get_timezone(int ifindex, char **ret) {
-        return network_link_get_string(ifindex, "TIMEZONE", ret);
-}
-
-_public_ int sd_network_link_get_dhcp4_address(int ifindex, char **ret) {
-        return network_link_get_string(ifindex, "DHCP4_ADDRESS", ret);
-}
-
 _public_ int sd_network_link_get_dns(int ifindex, char ***ret) {
         return network_link_get_strv(ifindex, "DNS", ret);
 }
@@ -240,16 +240,16 @@ _public_ int sd_network_link_get_ntp(int ifindex, char ***ret) {
         return network_link_get_strv(ifindex, "NTP", ret);
 }
 
+_public_ int sd_network_link_get_sip(int ifindex, char ***ret) {
+        return network_link_get_strv(ifindex, "SIP", ret);
+}
+
 _public_ int sd_network_link_get_search_domains(int ifindex, char ***ret) {
         return network_link_get_strv(ifindex, "DOMAINS", ret);
 }
 
 _public_ int sd_network_link_get_route_domains(int ifindex, char ***ret) {
         return network_link_get_strv(ifindex, "ROUTE_DOMAINS", ret);
-}
-
-_public_ int sd_network_link_get_sip_servers(int ifindex, char ***ret) {
-        return network_link_get_strv(ifindex, "SIP", ret);
 }
 
 _public_ int sd_network_link_get_dns_default_route(int ifindex) {

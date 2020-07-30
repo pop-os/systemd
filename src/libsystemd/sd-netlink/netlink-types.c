@@ -93,9 +93,20 @@ static const NLType rtnl_link_info_data_ipvlan_types[] = {
         [IFLA_IPVLAN_FLAGS]  = { .type = NETLINK_TYPE_U16 },
 };
 
+static const NLType rtnl_macvlan_macaddr_types[] = {
+        [IFLA_MACVLAN_MACADDR] = { .type = NETLINK_TYPE_ETHER_ADDR },
+};
+
+static const NLTypeSystem rtnl_macvlan_macaddr_type_system = {
+        .count = ELEMENTSOF(rtnl_macvlan_macaddr_types),
+        .types = rtnl_macvlan_macaddr_types,
+};
+
 static const NLType rtnl_link_info_data_macvlan_types[] = {
         [IFLA_MACVLAN_MODE]  = { .type = NETLINK_TYPE_U32 },
         [IFLA_MACVLAN_FLAGS] = { .type = NETLINK_TYPE_U16 },
+        [IFLA_MACVLAN_MACADDR_MODE] = { .type = NETLINK_TYPE_U32 },
+        [IFLA_MACVLAN_MACADDR_DATA] = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_macvlan_macaddr_type_system },
 };
 
 static const NLType rtnl_link_info_data_bridge_types[] = {
@@ -316,6 +327,7 @@ static const NLType rtnl_link_info_data_can_types[] = {
         [IFLA_CAN_BITTIMING]            = { .size = sizeof(struct can_bittiming) },
         [IFLA_CAN_RESTART_MS]           = { .type = NETLINK_TYPE_U32 },
         [IFLA_CAN_CTRLMODE]             = { .size = sizeof(struct can_ctrlmode) },
+        [IFLA_CAN_TERMINATION]          = { .type = NETLINK_TYPE_U16 },
 };
 
 static const NLType rtnl_link_info_data_macsec_types[] = {
@@ -536,15 +548,50 @@ static const NLTypeSystem rtnl_prop_list_type_system = {
         .types = rtnl_prop_list_types,
 };
 
+static const NLType rtnl_vf_vlan_list_types[] = {
+        [IFLA_VF_VLAN_INFO]  = { .size = sizeof(struct ifla_vf_vlan_info) },
+};
+
+static const NLTypeSystem rtnl_vf_vlan_type_system = {
+        .count = ELEMENTSOF(rtnl_vf_vlan_list_types),
+        .types = rtnl_vf_vlan_list_types,
+};
+
+static const NLType rtnl_vf_vlan_info_types[] = {
+        [IFLA_VF_MAC]           = { .size = sizeof(struct ifla_vf_mac) },
+        [IFLA_VF_VLAN]          = { .size = sizeof(struct ifla_vf_vlan) },
+        [IFLA_VF_VLAN_LIST]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_vf_vlan_type_system},
+        [IFLA_VF_TX_RATE]       = { .size = sizeof(struct ifla_vf_tx_rate) },
+        [IFLA_VF_SPOOFCHK]      = { .size = sizeof(struct ifla_vf_spoofchk) },
+        [IFLA_VF_RATE]          = { .size = sizeof(struct ifla_vf_rate) },
+        [IFLA_VF_LINK_STATE]    = { .size = sizeof(struct ifla_vf_link_state) },
+        [IFLA_VF_RSS_QUERY_EN]  = { .size = sizeof(struct ifla_vf_rss_query_en) },
+        [IFLA_VF_TRUST]         = { .size = sizeof(struct ifla_vf_trust) },
+        [IFLA_VF_IB_NODE_GUID]  = { .size = sizeof(struct ifla_vf_guid) },
+        [IFLA_VF_IB_PORT_GUID]  = { .size = sizeof(struct ifla_vf_guid) },
+};
+
+static const NLTypeSystem rtnl_vf_vlan_info_type_system = {
+        .count = ELEMENTSOF(rtnl_vf_vlan_info_types),
+        .types = rtnl_vf_vlan_info_types,
+};
+
+static const NLType rtnl_link_io_srv_types[] = {
+        [IFLA_VF_INFO] = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_vf_vlan_info_type_system },
+};
+
+static const NLTypeSystem rtnl_io_srv_type_system = {
+        .count = ELEMENTSOF(rtnl_link_io_srv_types),
+        .types = rtnl_link_io_srv_types,
+};
+
 static const NLType rtnl_link_types[] = {
         [IFLA_ADDRESS]          = { .type = NETLINK_TYPE_ETHER_ADDR },
         [IFLA_BROADCAST]        = { .type = NETLINK_TYPE_ETHER_ADDR },
         [IFLA_IFNAME]           = { .type = NETLINK_TYPE_STRING, .size = IFNAMSIZ - 1 },
         [IFLA_MTU]              = { .type = NETLINK_TYPE_U32 },
         [IFLA_LINK]             = { .type = NETLINK_TYPE_U32 },
-/*
-        [IFLA_QDISC],
-*/
+        [IFLA_QDISC]            = { .type = NETLINK_TYPE_STRING },
         [IFLA_STATS]            = { .size = sizeof(struct rtnl_link_stats) },
 /*
         [IFLA_COST],
@@ -565,10 +612,8 @@ static const NLType rtnl_link_types[] = {
         [IFLA_LINKINFO]         = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_link_info_type_system },
         [IFLA_NET_NS_PID]       = { .type = NETLINK_TYPE_U32 },
         [IFLA_IFALIAS]          = { .type = NETLINK_TYPE_STRING, .size = IFALIASZ - 1 },
-/*
-        [IFLA_NUM_VF],
-        [IFLA_VFINFO_LIST]      = {. type = NETLINK_TYPE_NESTED, },
-*/
+        [IFLA_NUM_VF]           = { .type = NETLINK_TYPE_U32 },
+        [IFLA_VFINFO_LIST]      = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_io_srv_type_system },
         [IFLA_STATS64]          = { .size = sizeof(struct rtnl_link_stats64) },
 /*
         [IFLA_VF_PORTS]         = { .type = NETLINK_TYPE_NESTED },
@@ -745,12 +790,48 @@ static const NLTypeSystem rtnl_nexthop_type_system = {
        .types = rtnl_nexthop_types,
 };
 
+static const NLType rtnl_tca_option_data_cake_types[] = {
+        [TCA_CAKE_BASE_RATE64] = { .type = NETLINK_TYPE_U64 },
+        [TCA_CAKE_OVERHEAD]    = { .type = NETLINK_TYPE_S32 },
+        [TCA_CAKE_MPU]         = { .type = NETLINK_TYPE_U32 },
+};
+
 static const NLType rtnl_tca_option_data_codel_types[] = {
         [TCA_CODEL_TARGET]        = { .type = NETLINK_TYPE_U32 },
         [TCA_CODEL_LIMIT]         = { .type = NETLINK_TYPE_U32 },
         [TCA_CODEL_INTERVAL]      = { .type = NETLINK_TYPE_U32 },
         [TCA_CODEL_ECN]           = { .type = NETLINK_TYPE_U32 },
         [TCA_CODEL_CE_THRESHOLD]  = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLType rtnl_tca_option_data_drr_types[] = {
+        [TCA_DRR_QUANTUM] = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLType rtnl_tca_option_data_ets_quanta_types[] = {
+        [TCA_ETS_QUANTA_BAND] = { .type = NETLINK_TYPE_U32, },
+};
+
+static const NLTypeSystem rtnl_tca_option_data_ets_quanta_type_system = {
+        .count = ELEMENTSOF(rtnl_tca_option_data_ets_quanta_types),
+        .types = rtnl_tca_option_data_ets_quanta_types,
+};
+
+static const NLType rtnl_tca_option_data_ets_prio_types[] = {
+        [TCA_ETS_PRIOMAP_BAND] = { .type = NETLINK_TYPE_U8, },
+};
+
+static const NLTypeSystem rtnl_tca_option_data_ets_prio_type_system = {
+        .count = ELEMENTSOF(rtnl_tca_option_data_ets_prio_types),
+        .types = rtnl_tca_option_data_ets_prio_types,
+};
+
+static const NLType rtnl_tca_option_data_ets_types[] = {
+        [TCA_ETS_NBANDS]      = { .type = NETLINK_TYPE_U8 },
+        [TCA_ETS_NSTRICT]     = { .type = NETLINK_TYPE_U8 },
+        [TCA_ETS_QUANTA]      = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_option_data_ets_quanta_type_system },
+        [TCA_ETS_PRIOMAP]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_option_data_ets_prio_type_system },
+        [TCA_ETS_QUANTA_BAND] = { .type = NETLINK_TYPE_U32 },
 };
 
 static const NLType rtnl_tca_option_data_fq_types[] = {
@@ -780,6 +861,36 @@ static const NLType rtnl_tca_option_data_fq_codel_types[] = {
         [TCA_FQ_CODEL_MEMORY_LIMIT]    = { .type = NETLINK_TYPE_U32 },
 };
 
+static const NLType rtnl_tca_option_data_gred_types[] = {
+        [TCA_GRED_DPS] = { .size = sizeof(struct tc_gred_sopt) },
+};
+
+static const NLType rtnl_tca_option_data_hhf_types[] = {
+        [TCA_HHF_BACKLOG_LIMIT] = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLType rtnl_tca_option_data_htb_types[] = {
+        [TCA_HTB_PARMS]  = { .size = sizeof(struct tc_htb_opt) },
+        [TCA_HTB_INIT]   = { .size = sizeof(struct tc_htb_glob) },
+        [TCA_HTB_CTAB]   = { .size = TC_RTAB_SIZE },
+        [TCA_HTB_RTAB]   = { .size = TC_RTAB_SIZE },
+        [TCA_HTB_RATE64] = { .type = NETLINK_TYPE_U64 },
+        [TCA_HTB_CEIL64] = { .type = NETLINK_TYPE_U64 },
+};
+
+static const NLType rtnl_tca_option_data_pie_types[] = {
+        [TCA_PIE_LIMIT]   = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLType rtnl_tca_option_data_qfq_types[] = {
+        [TCA_QFQ_WEIGHT] = { .type = NETLINK_TYPE_U32 },
+        [TCA_QFQ_LMAX]   = { .type = NETLINK_TYPE_U32 },
+};
+
+static const NLType rtnl_tca_option_data_sfb_types[] = {
+        [TCA_SFB_PARMS] = { .size = sizeof(struct tc_sfb_qopt) },
+};
+
 static const NLType rtnl_tca_option_data_tbf_types[] = {
         [TCA_TBF_PARMS]   = { .size = sizeof(struct tc_tbf_qopt) },
         [TCA_TBF_RTAB]    = { .size = TC_RTAB_SIZE },
@@ -791,21 +902,48 @@ static const NLType rtnl_tca_option_data_tbf_types[] = {
 };
 
 static const char* const nl_union_tca_option_data_table[] = {
+        [NL_UNION_TCA_OPTION_DATA_CAKE] = "cake",
         [NL_UNION_TCA_OPTION_DATA_CODEL] = "codel",
+        [NL_UNION_TCA_OPTION_DATA_DRR] = "drr",
+        [NL_UNION_TCA_OPTION_DATA_ETS] = "ets",
         [NL_UNION_TCA_OPTION_DATA_FQ] = "fq",
         [NL_UNION_TCA_OPTION_DATA_FQ_CODEL] = "fq_codel",
+        [NL_UNION_TCA_OPTION_DATA_GRED] = "gred",
+        [NL_UNION_TCA_OPTION_DATA_HHF] = "hhf",
+        [NL_UNION_TCA_OPTION_DATA_HTB] = "htb",
+        [NL_UNION_TCA_OPTION_DATA_PIE] = "pie",
+        [NL_UNION_TCA_OPTION_DATA_QFQ] = "qfq",
+        [NL_UNION_TCA_OPTION_DATA_SFB] = "sfb",
         [NL_UNION_TCA_OPTION_DATA_TBF] = "tbf",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(nl_union_tca_option_data, NLUnionTCAOptionData);
 
 static const NLTypeSystem rtnl_tca_option_data_type_systems[] = {
+        [NL_UNION_TCA_OPTION_DATA_CAKE] =        { .count = ELEMENTSOF(rtnl_tca_option_data_cake_types),
+                                                   .types = rtnl_tca_option_data_cake_types },
         [NL_UNION_TCA_OPTION_DATA_CODEL] =       { .count = ELEMENTSOF(rtnl_tca_option_data_codel_types),
                                                    .types = rtnl_tca_option_data_codel_types },
+        [NL_UNION_TCA_OPTION_DATA_DRR] =         { .count = ELEMENTSOF(rtnl_tca_option_data_drr_types),
+                                                   .types = rtnl_tca_option_data_drr_types },
+        [NL_UNION_TCA_OPTION_DATA_ETS] =         { .count = ELEMENTSOF(rtnl_tca_option_data_ets_types),
+                                                   .types = rtnl_tca_option_data_ets_types },
         [NL_UNION_TCA_OPTION_DATA_FQ] =          { .count = ELEMENTSOF(rtnl_tca_option_data_fq_types),
                                                    .types = rtnl_tca_option_data_fq_types },
         [NL_UNION_TCA_OPTION_DATA_FQ_CODEL] =    { .count = ELEMENTSOF(rtnl_tca_option_data_fq_codel_types),
                                                    .types = rtnl_tca_option_data_fq_codel_types },
+        [NL_UNION_TCA_OPTION_DATA_GRED] =        { .count = ELEMENTSOF(rtnl_tca_option_data_gred_types),
+                                                   .types = rtnl_tca_option_data_gred_types },
+        [NL_UNION_TCA_OPTION_DATA_HHF] =         { .count = ELEMENTSOF(rtnl_tca_option_data_hhf_types),
+                                                   .types = rtnl_tca_option_data_hhf_types },
+        [NL_UNION_TCA_OPTION_DATA_HTB] =         { .count = ELEMENTSOF(rtnl_tca_option_data_htb_types),
+                                                   .types = rtnl_tca_option_data_htb_types },
+        [NL_UNION_TCA_OPTION_DATA_PIE] =         { .count = ELEMENTSOF(rtnl_tca_option_data_pie_types),
+                                                   .types = rtnl_tca_option_data_pie_types },
+        [NL_UNION_TCA_OPTION_DATA_QFQ] =         { .count = ELEMENTSOF(rtnl_tca_option_data_qfq_types),
+                                                   .types = rtnl_tca_option_data_qfq_types },
+        [NL_UNION_TCA_OPTION_DATA_SFB] =         { .count = ELEMENTSOF(rtnl_tca_option_data_sfb_types),
+                                                   .types = rtnl_tca_option_data_sfb_types },
         [NL_UNION_TCA_OPTION_DATA_TBF] =         { .count = ELEMENTSOF(rtnl_tca_option_data_tbf_types),
                                                    .types = rtnl_tca_option_data_tbf_types },
 };
@@ -818,16 +956,16 @@ static const NLTypeSystemUnion rtnl_tca_option_data_type_system_union = {
         .match = TCA_KIND,
 };
 
-static const NLType rtnl_qdisc_types[] = {
+static const NLType rtnl_tca_types[] = {
         [TCA_KIND]           = { .type = NETLINK_TYPE_STRING },
         [TCA_OPTIONS]        = { .type = NETLINK_TYPE_UNION, .type_system_union = &rtnl_tca_option_data_type_system_union },
         [TCA_INGRESS_BLOCK]  = { .type = NETLINK_TYPE_U32 },
         [TCA_EGRESS_BLOCK]   = { .type = NETLINK_TYPE_U32 },
 };
 
-static const NLTypeSystem rtnl_qdisc_type_system = {
-        .count = ELEMENTSOF(rtnl_qdisc_types),
-        .types = rtnl_qdisc_types,
+static const NLTypeSystem rtnl_tca_type_system = {
+        .count = ELEMENTSOF(rtnl_tca_types),
+        .types = rtnl_tca_types,
 };
 
 static const NLType error_types[] = {
@@ -868,9 +1006,12 @@ static const NLType rtnl_types[] = {
         [RTM_NEWNEXTHOP]   = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_nexthop_type_system, .size = sizeof(struct nhmsg) },
         [RTM_DELNEXTHOP]   = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_nexthop_type_system, .size = sizeof(struct nhmsg) },
         [RTM_GETNEXTHOP]   = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_nexthop_type_system, .size = sizeof(struct nhmsg) },
-        [RTM_NEWQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_qdisc_type_system, .size = sizeof(struct tcmsg) },
-        [RTM_DELQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_qdisc_type_system, .size = sizeof(struct tcmsg) },
-        [RTM_GETQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_qdisc_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_NEWQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_DELQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_GETQDISC]     = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_NEWTCLASS]    = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_DELTCLASS]    = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_GETTCLASS]    = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
 };
 
 const NLTypeSystem rtnl_type_system_root = {

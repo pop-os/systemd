@@ -447,8 +447,8 @@ static int dns_scope_socket(
         return TAKE_FD(fd);
 }
 
-int dns_scope_socket_udp(DnsScope *s, DnsServer *server, uint16_t port) {
-        return dns_scope_socket(s, SOCK_DGRAM, AF_UNSPEC, NULL, server, port, NULL);
+int dns_scope_socket_udp(DnsScope *s, DnsServer *server) {
+        return dns_scope_socket(s, SOCK_DGRAM, AF_UNSPEC, NULL, server, dns_server_port(server), NULL);
 }
 
 int dns_scope_socket_tcp(DnsScope *s, int family, const union in_addr_union *address, DnsServer *server, uint16_t port, union sockaddr_union *ret_socket_address) {
@@ -496,9 +496,8 @@ DnsScopeMatch dns_scope_good_domain(
         assert(s);
         assert(domain);
 
-        /* Checks if the specified domain is something to look up on
-         * this scope. Note that this accepts non-qualified hostnames,
-         * i.e. those without any search path prefixed yet. */
+        /* Checks if the specified domain is something to look up on this scope. Note that this accepts
+         * non-qualified hostnames, i.e. those without any search path suffixed. */
 
         if (ifindex != 0 && (!s->link || s->link->ifindex != ifindex))
                 return DNS_SCOPE_NO;
@@ -620,7 +619,7 @@ DnsScopeMatch dns_scope_good_domain(
                      manager_is_own_hostname(s->manager, domain) <= 0))  /* never resolve the local hostname via LLMNR */
                         return DNS_SCOPE_YES_BASE + 1; /* Return +1, as we consider ourselves authoritative
                                                         * for single-label names, i.e. one label. This is
-                                                        * particular relevant as it means a "." route on some
+                                                        * particularly relevant as it means a "." route on some
                                                         * other scope won't pull all traffic away from
                                                         * us. (If people actually want to pull traffic away
                                                         * from us they should turn off LLMNR on the
@@ -652,20 +651,21 @@ bool dns_scope_good_key(DnsScope *s, const DnsResourceKey *key) {
 
         if (s->protocol == DNS_PROTOCOL_DNS) {
 
-                /* On classic DNS, looking up non-address RRs is always
-                 * fine. (Specifically, we want to permit looking up
-                 * DNSKEY and DS records on the root and top-level
-                 * domains.) */
+                /* On classic DNS, looking up non-address RRs is always fine. (Specifically, we want to
+                 * permit looking up DNSKEY and DS records on the root and top-level domains.) */
                 if (!dns_resource_key_is_address(key))
                         return true;
 
-                /* However, we refuse to look up A and AAAA RRs on the
-                 * root and single-label domains, under the assumption
-                 * that those should be resolved via LLMNR or search
-                 * path only, and should not be leaked onto the
-                 * internet. */
-                return !(dns_name_is_single_label(dns_resource_key_name(key)) ||
-                         dns_name_is_root(dns_resource_key_name(key)));
+                /* Unless explicitly overridden, we refuse to look up A and AAAA RRs on the root and
+                 * single-label domains, under the assumption that those should be resolved via LLMNR or
+                 * search path only, and should not be leaked onto the internet. */
+                const char* name = dns_resource_key_name(key);
+
+                if (!s->manager->resolve_unicast_single_label &&
+                    dns_name_is_single_label(name))
+                        return false;
+
+                return !dns_name_is_root(name);
         }
 
         /* On mDNS and LLMNR, send A and AAAA queries only on the
@@ -1170,7 +1170,7 @@ DnsSearchDomain *dns_scope_get_search_domains(DnsScope *s) {
         return s->manager->search_domains;
 }
 
-bool dns_scope_name_needs_search_domain(DnsScope *s, const char *name) {
+bool dns_scope_name_wants_search_domain(DnsScope *s, const char *name) {
         assert(s);
 
         if (s->protocol != DNS_PROTOCOL_DNS)
@@ -1254,11 +1254,7 @@ int dns_scope_announce(DnsScope *scope, bool goodbye) {
                 if (!scope->announced &&
                     dns_resource_key_is_dnssd_ptr(z->rr->key)) {
                         if (!set_contains(types, dns_resource_key_name(z->rr->key))) {
-                                r = set_ensure_allocated(&types, &dns_name_hash_ops);
-                                if (r < 0)
-                                        return log_debug_errno(r, "Failed to allocate set: %m");
-
-                                r = set_put(types, dns_resource_key_name(z->rr->key));
+                                r = set_ensure_put(&types, &dns_name_hash_ops, dns_resource_key_name(z->rr->key));
                                 if (r < 0)
                                         return log_debug_errno(r, "Failed to add item to set: %m");
                         }

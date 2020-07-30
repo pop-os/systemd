@@ -11,6 +11,7 @@
 #include "sd-netlink.h"
 
 #include "alloc-util.h"
+#include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "bus-util.h"
 #include "conf-parser.h"
@@ -23,6 +24,7 @@
 #include "local-addresses.h"
 #include "netlink-util.h"
 #include "network-internal.h"
+#include "networkd-dhcp-server-bus.h"
 #include "networkd-dhcp6.h"
 #include "networkd-link-bus.h"
 #include "networkd-manager-bus.h"
@@ -30,6 +32,7 @@
 #include "networkd-network-bus.h"
 #include "networkd-speed-meter.h"
 #include "ordered-set.h"
+#include "path-lookup.h"
 #include "path-util.h"
 #include "set.h"
 #include "signal-util.h"
@@ -101,7 +104,7 @@ static int match_prepare_for_sleep(sd_bus_message *message, void *userdata, sd_b
 
         r = sd_bus_message_read(message, "b", &b);
         if (r < 0) {
-                log_debug_errno(r, "Failed to parse PrepareForSleep signal: %m");
+                bus_log_parse_error(r);
                 return 0;
         }
 
@@ -152,6 +155,10 @@ int manager_connect_bus(Manager *m) {
         if (r < 0)
                return log_error_errno(r, "Failed to add link object vtable: %m");
 
+        r = sd_bus_add_fallback_vtable(m->bus, NULL, "/org/freedesktop/network1/link", "org.freedesktop.network1.DHCPServer", dhcp_server_vtable, link_object_find, m);
+        if (r < 0)
+               return log_error_errno(r, "Failed to add link object vtable: %m");
+
         r = sd_bus_add_node_enumerator(m->bus, NULL, "/org/freedesktop/network1/link", link_node_enumerator, m);
         if (r < 0)
                 return log_error_errno(r, "Failed to add link enumerator: %m");
@@ -163,6 +170,10 @@ int manager_connect_bus(Manager *m) {
         r = sd_bus_add_node_enumerator(m->bus, NULL, "/org/freedesktop/network1/network", network_node_enumerator, m);
         if (r < 0)
                 return log_error_errno(r, "Failed to add network enumerator: %m");
+
+        r = bus_log_control_api_register(m->bus);
+        if (r < 0)
+                return r;
 
         r = sd_bus_request_name_async(m->bus, NULL, "org.freedesktop.network1", 0, NULL, NULL);
         if (r < 0)
@@ -230,7 +241,7 @@ static int manager_udev_process_link(sd_device_monitor *monitor, sd_device *devi
                 return 0;
         }
         if (r > 0) {
-                log_device_debug(device, "Interface is under renaming, wait for the interface to be renamed: %m");
+                log_device_debug(device, "Interface is under renaming, wait for the interface to be renamed.");
                 return 0;
         }
 
@@ -494,7 +505,9 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
 
                 log_link_debug(link,
                                "%s route: dst: %s%s, src: %s, gw: %s, prefsrc: %s, scope: %s, table: %s, proto: %s, type: %s",
-                               type == RTM_DELROUTE ? "Forgetting" : route ? "Received remembered" : "Remembering",
+                               (!route && !link->manager->manage_foreign_routes) ? "Ignoring received foreign" :
+                               type == RTM_DELROUTE ? "Forgetting" :
+                               route ? "Received remembered" : "Remembering",
                                strna(buf_dst), strempty(buf_dst_prefixlen),
                                strna(buf_src), strna(buf_gw), strna(buf_prefsrc),
                                format_route_scope(tmp->scope, buf_scope, sizeof buf_scope),
@@ -505,7 +518,7 @@ int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, vo
 
         switch (type) {
         case RTM_NEWROUTE:
-                if (!route) {
+                if (!route && link->manager->manage_foreign_routes) {
                         /* A route appeared that we did not request */
                         r = route_add_foreign(link, tmp, &route);
                         if (r < 0) {
@@ -844,8 +857,10 @@ int manager_rtnl_process_address(sd_netlink *rtnl, sd_netlink_message *message, 
                                                valid_str ? "for " : "forever", strempty(valid_str));
                 }
 
-                /* address_update() logs internally, so we don't need to. */
-                (void) address_update(address, flags, scope, &cinfo);
+                /* address_update() logs internally, so we don't need to here. */
+                r = address_update(address, flags, scope, &cinfo);
+                if (r < 0)
+                        link_enter_failed(link);
 
                 break;
 
@@ -1260,6 +1275,9 @@ int manager_rtnl_process_nexthop(sd_netlink *rtnl, sd_netlink_message *message, 
         if (r < 0 && r != -ENODATA) {
                 log_warning_errno(r, "rtnl: could not get NHA_OIF attribute, ignoring: %m");
                 return 0;
+        } else if (tmp->oif <= 0) {
+                log_warning("rtnl: received nexthop message with invalid ifindex %d, ignoring.", tmp->oif);
+                return 0;
         }
 
         r = link_get(m, tmp->oif, &link);
@@ -1409,33 +1427,36 @@ static int manager_connect_rtnl(Manager *m) {
         return 0;
 }
 
-static int ordered_set_put_in_addr_data(OrderedSet *s, const struct in_addr_data *address) {
-        char *p;
+static int ordered_set_put_dns_server(OrderedSet *s, int ifindex, struct in_addr_full *dns) {
+        const char *p;
         int r;
 
         assert(s);
-        assert(address);
+        assert(dns);
 
-        r = in_addr_to_string(address->family, &address->address, &p);
-        if (r < 0)
-                return r;
+        if (dns->ifindex != 0 && dns->ifindex != ifindex)
+                return 0;
 
-        r = ordered_set_consume(s, p);
+        p = in_addr_full_to_string(dns);
+        if (!p)
+                return 0;
+
+        r = ordered_set_put_strdup(s, p);
         if (r == -EEXIST)
                 return 0;
 
         return r;
 }
 
-static int ordered_set_put_in_addr_datav(OrderedSet *s, const struct in_addr_data *addresses, unsigned n) {
+static int ordered_set_put_dns_servers(OrderedSet *s, int ifindex, struct in_addr_full **dns, unsigned n) {
         int r, c = 0;
         unsigned i;
 
         assert(s);
-        assert(addresses || n == 0);
+        assert(dns || n == 0);
 
         for (i = 0; i < n; i++) {
-                r = ordered_set_put_in_addr_data(s, addresses+i);
+                r = ordered_set_put_dns_server(s, ifindex, dns[i]);
                 if (r < 0)
                         return r;
 
@@ -1511,8 +1532,8 @@ static int manager_save(Manager *m) {
         if (!ntp)
                 return -ENOMEM;
 
-       sip = ordered_set_new(&string_hash_ops);
-       if (!sip)
+        sip = ordered_set_new(&string_hash_ops);
+        if (!sip)
                 return -ENOMEM;
 
         search_domains = ordered_set_new(&dns_name_hash_ops);
@@ -1524,6 +1545,8 @@ static int manager_save(Manager *m) {
                 return -ENOMEM;
 
         HASHMAP_FOREACH(link, m->links, i) {
+                const struct in_addr *addresses;
+
                 if (link->flags & IFF_LOOPBACK)
                         continue;
 
@@ -1540,7 +1563,10 @@ static int manager_save(Manager *m) {
                         continue;
 
                 /* First add the static configured entries */
-                r = ordered_set_put_in_addr_datav(dns, link->network->dns, link->network->n_dns);
+                if (link->n_dns != (unsigned) -1)
+                        r = ordered_set_put_dns_servers(dns, link->ifindex, link->dns, link->n_dns);
+                else
+                        r = ordered_set_put_dns_servers(dns, link->ifindex, link->network->dns, link->network->n_dns);
                 if (r < 0)
                         return r;
 
@@ -1561,8 +1587,6 @@ static int manager_save(Manager *m) {
 
                 /* Secondly, add the entries acquired via DHCP */
                 if (link->network->dhcp_use_dns) {
-                        const struct in_addr *addresses;
-
                         r = sd_dhcp_lease_get_dns(link->dhcp_lease, &addresses);
                         if (r > 0) {
                                 r = ordered_set_put_in4_addrv(dns, addresses, r, in4_addr_is_non_local);
@@ -1573,8 +1597,6 @@ static int manager_save(Manager *m) {
                 }
 
                 if (link->network->dhcp_use_ntp) {
-                        const struct in_addr *addresses;
-
                         r = sd_dhcp_lease_get_ntp(link->dhcp_lease, &addresses);
                         if (r > 0) {
                                 r = ordered_set_put_in4_addrv(ntp, addresses, r, in4_addr_is_non_local);
@@ -1585,8 +1607,6 @@ static int manager_save(Manager *m) {
                 }
 
                 if (link->network->dhcp_use_sip) {
-                        const struct in_addr *addresses;
-
                         r = sd_dhcp_lease_get_sip(link->dhcp_lease, &addresses);
                         if (r > 0) {
                                 r = ordered_set_put_in4_addrv(sip, addresses, r, in4_addr_is_non_local);
@@ -1709,8 +1729,7 @@ static int manager_dirty_handler(sd_event_source *s, void *userdata) {
                 manager_save(m);
 
         SET_FOREACH(link, m->dirty_links, i)
-                if (link_save(link) >= 0)
-                        link_clean(link);
+                (void) link_save_and_clean(link);
 
         return 1;
 }
@@ -1747,6 +1766,7 @@ int manager_new(Manager **ret) {
 
         *m = (Manager) {
                 .speed_meter_interval_usec = SPEED_METER_DEFAULT_TIME_INTERVAL,
+                .manage_foreign_routes = true,
                 .ethtool_fd = -1,
         };
 
@@ -1803,27 +1823,20 @@ int manager_new(Manager **ret) {
 }
 
 void manager_free(Manager *m) {
-        struct in6_addr *a;
         AddressPool *pool;
         Link *link;
+        Iterator i;
 
         if (!m)
                 return;
 
         free(m->state_file);
 
-        while ((a = hashmap_first_key(m->dhcp6_prefixes)))
-                (void) dhcp6_prefix_remove(m, a);
-        m->dhcp6_prefixes = hashmap_free(m->dhcp6_prefixes);
-
-        while ((link = hashmap_steal_first(m->links))) {
-                if (link->dhcp6_client)
-                        (void) dhcp6_lease_pd_prefix_lost(link->dhcp6_client, link);
-
+        HASHMAP_FOREACH(link, m->links, i)
                 (void) link_stop_clients(link, true);
 
-                link_unref(link);
-        }
+        m->dhcp6_prefixes = hashmap_free_with_destructor(m->dhcp6_prefixes, dhcp6_pd_free);
+        m->dhcp6_pd_prefixes = set_free_with_destructor(m->dhcp6_pd_prefixes, dhcp6_pd_free);
 
         m->dirty_links = set_free_with_destructor(m->dirty_links, link_unref);
         m->links_requesting_uuid = set_free_with_destructor(m->links_requesting_uuid, link_unref);
@@ -1839,9 +1852,9 @@ void manager_free(Manager *m) {
 
         /* routing_policy_rule_free() access m->rules and m->rules_foreign.
          * So, it is necessary to set NULL after the sets are freed. */
-        m->rules = set_free_with_destructor(m->rules, routing_policy_rule_free);
-        m->rules_foreign = set_free_with_destructor(m->rules_foreign, routing_policy_rule_free);
-        set_free_with_destructor(m->rules_saved, routing_policy_rule_free);
+        m->rules = set_free(m->rules);
+        m->rules_foreign = set_free(m->rules_foreign);
+        set_free(m->rules_saved);
 
         sd_netlink_unref(m->rtnl);
         sd_netlink_unref(m->genl);
@@ -1880,7 +1893,7 @@ int manager_start(Manager *m) {
         manager_save(m);
 
         HASHMAP_FOREACH(link, m->links, i)
-                link_save(link);
+                (void) link_save(link);
 
         return 0;
 }
@@ -2018,6 +2031,9 @@ int manager_rtnl_enumerate_routes(Manager *m) {
 
         assert(m);
         assert(m->rtnl);
+
+        if (!m->manage_foreign_routes)
+                return 0;
 
         r = sd_rtnl_message_new_route(m->rtnl, &req, RTM_GETROUTE, 0, 0);
         if (r < 0)
@@ -2300,23 +2316,15 @@ int manager_request_product_uuid(Manager *m, Link *link) {
 
                 assert_se(duid = link_get_duid(link));
 
-                r = set_ensure_allocated(&m->links_requesting_uuid, NULL);
+                r = set_ensure_put(&m->links_requesting_uuid, NULL, link);
                 if (r < 0)
                         return log_oom();
+                if (r > 0)
+                        link_ref(link);
 
-                r = set_ensure_allocated(&m->duids_requesting_uuid, NULL);
+                r = set_ensure_put(&m->duids_requesting_uuid, NULL, duid);
                 if (r < 0)
                         return log_oom();
-
-                r = set_put(m->links_requesting_uuid, link);
-                if (r < 0)
-                        return log_oom();
-
-                r = set_put(m->duids_requesting_uuid, duid);
-                if (r < 0)
-                        return log_oom();
-
-                link_ref(link);
         }
 
         if (!m->bus || sd_bus_is_ready(m->bus) <= 0) {

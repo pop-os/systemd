@@ -86,10 +86,13 @@ static int dnssd_service_load(Manager *manager, const char *filename) {
 
         dropin_dirname = strjoina(service->name, ".dnssd.d");
 
-        r = config_parse_many(filename, DNSSD_SERVICE_DIRS, dropin_dirname,
-                              "Service\0",
-                              config_item_perf_lookup, resolved_dnssd_gperf_lookup,
-                              false, service, NULL);
+        r = config_parse_many(
+                        filename, DNSSD_SERVICE_DIRS, dropin_dirname,
+                        "Service\0",
+                        config_item_perf_lookup, resolved_dnssd_gperf_lookup,
+                        CONFIG_PARSE_WARN,
+                        service,
+                        NULL);
         if (r < 0)
                 return r;
 
@@ -153,10 +156,15 @@ static int specifier_dnssd_host_name(char specifier, const void *data, const voi
 
 int dnssd_render_instance_name(DnssdService *s, char **ret_name) {
         static const Specifier specifier_table[] = {
+                { 'm', specifier_machine_id,      NULL },
                 { 'b', specifier_boot_id,         NULL },
                 { 'H', specifier_dnssd_host_name, NULL },
-                { 'm', specifier_machine_id,      NULL },
                 { 'v', specifier_kernel_release,  NULL },
+                { 'a', specifier_architecture,    NULL },
+                { 'o', specifier_os_id,           NULL },
+                { 'w', specifier_os_version_id,   NULL },
+                { 'B', specifier_os_build_id,     NULL },
+                { 'W', specifier_os_variant_id,   NULL },
                 {}
         };
         _cleanup_free_ char *name = NULL;

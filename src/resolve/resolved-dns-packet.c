@@ -839,7 +839,7 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
 
         rds = p->size - saved_size;
 
-        switch (rr->unparseable ? _DNS_TYPE_INVALID : rr->key->type) {
+        switch (rr->unparsable ? _DNS_TYPE_INVALID : rr->key->type) {
 
         case DNS_TYPE_SRV:
                 r = dns_packet_append_uint16(p, rr->srv.priority, NULL);
@@ -856,14 +856,14 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
 
                 /* RFC 2782 states "Unless and until permitted by future standards
                  * action, name compression is not to be used for this field." */
-                r = dns_packet_append_name(p, rr->srv.name, false, false, NULL);
+                r = dns_packet_append_name(p, rr->srv.name, false, true, NULL);
                 break;
 
         case DNS_TYPE_PTR:
         case DNS_TYPE_NS:
         case DNS_TYPE_CNAME:
         case DNS_TYPE_DNAME:
-                r = dns_packet_append_name(p, rr->ptr.name, true, false, NULL);
+                r = dns_packet_append_name(p, rr->ptr.name, true, true, NULL);
                 break;
 
         case DNS_TYPE_HINFO:
@@ -906,11 +906,11 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
                 break;
 
         case DNS_TYPE_SOA:
-                r = dns_packet_append_name(p, rr->soa.mname, true, false, NULL);
+                r = dns_packet_append_name(p, rr->soa.mname, true, true, NULL);
                 if (r < 0)
                         goto fail;
 
-                r = dns_packet_append_name(p, rr->soa.rname, true, false, NULL);
+                r = dns_packet_append_name(p, rr->soa.rname, true, true, NULL);
                 if (r < 0)
                         goto fail;
 
@@ -938,7 +938,7 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
                 if (r < 0)
                         goto fail;
 
-                r = dns_packet_append_name(p, rr->mx.exchange, true, false, NULL);
+                r = dns_packet_append_name(p, rr->mx.exchange, true, true, NULL);
                 break;
 
         case DNS_TYPE_LOC:
@@ -1125,7 +1125,7 @@ int dns_packet_append_rr(DnsPacket *p, const DnsResourceRecord *rr, const DnsAns
 
         case DNS_TYPE_OPT:
         case DNS_TYPE_OPENPGPKEY:
-        case _DNS_TYPE_INVALID: /* unparseable */
+        case _DNS_TYPE_INVALID: /* unparsable */
         default:
 
                 r = dns_packet_append_blob(p, rr->generic.data, rr->generic.data_size, NULL);
@@ -1815,8 +1815,8 @@ int dns_packet_read_rr(DnsPacket *p, DnsResourceRecord **ret, bool *ret_cache_fl
                         break;
                 } else {
                         dns_packet_rewind(p, pos);
-                        rr->unparseable = true;
-                        goto unparseable;
+                        rr->unparsable = true;
+                        goto unparsable;
                 }
         }
 
@@ -2059,7 +2059,7 @@ int dns_packet_read_rr(DnsPacket *p, DnsResourceRecord **ret, bool *ret_cache_fl
         case DNS_TYPE_OPT: /* we only care about the header of OPT for now. */
         case DNS_TYPE_OPENPGPKEY:
         default:
-        unparseable:
+        unparsable:
                 r = dns_packet_read_memdup(p, rdlength, &rr->generic.data, &rr->generic.data_size, NULL);
 
                 break;

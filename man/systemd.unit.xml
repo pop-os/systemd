@@ -6,7 +6,8 @@
 ]>
 <!-- SPDX-License-Identifier: LGPL-2.1+ -->
 
-<refentry id="systemd.unit">
+<refentry id="systemd.unit"
+          xmlns:xi="http://www.w3.org/2001/XInclude">
 
   <refentryinfo>
     <title>systemd.unit</title>
@@ -80,7 +81,7 @@
     target, a watched file system path, a timer controlled and supervised by
     <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>, a
     resource management slice or a group of externally created processes. See
-    <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+    <citerefentry><refentrytitle>systemd.syntax</refentrytitle><manvolnum>7</manvolnum></citerefentry>
     for a general description of the syntax.</para>
 
     <para>This man page lists the common configuration options of all
@@ -224,9 +225,6 @@
     compared to settings in the name specific override directories. So the contents of
     <filename>foo-.service.d/10-override.conf</filename> would override
     <filename>service.d/10-override.conf</filename>.</para>
-
-    <!-- Note that we do not document .include here, as we consider it mostly obsolete, and want
-         people to use .d/ drop-ins instead. -->
 
     <para>Note that while systemd offers a flexible dependency system
     between units it is recommended to use this functionality only
@@ -739,7 +737,7 @@
         that the listed unit is fully started up before the configured unit is started.</para>
 
         <para>When two units with an ordering dependency between them are shut down, the inverse of the
-        start-up order is applied. i.e. if a unit is configured with <varname>After=</varname> on another
+        start-up order is applied. I.e. if a unit is configured with <varname>After=</varname> on another
         unit, the former is stopped before the latter if both are shut down. Given two units with any
         ordering dependency between them, if one unit is shut down and the other is started up, the shutdown
         is ordered before the start-up. It doesn't matter if the ordering dependency is
@@ -750,7 +748,8 @@
         type when precisely a unit has finished starting up. Most importantly, for service units start-up is
         considered completed for the purpose of <varname>Before=</varname>/<varname>After=</varname> when all
         its configured start-up commands have been invoked and they either failed or reported start-up
-        success. Note that this does includes ExecStartPost (or ExecStopPost for the shutdown case).</para>
+        success. Note that this does includes <varname>ExecStartPost=</varname> (or
+        <varname>ExecStopPost=</varname> for the shutdown case).</para>
 
         <para>Note that those settings are independent of and orthogonal to the requirement dependencies as
         configured by <varname>Requires=</varname>, <varname>Wants=</varname>, <varname>Requisite=</varname>,
@@ -834,7 +833,7 @@
         <option>--job-mode=</option> option for details on the
         possible values. If this is set to <literal>isolate</literal>,
         only a single unit may be listed in
-        <varname>OnFailure=</varname>..</para></listitem>
+        <varname>OnFailure=</varname>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -1028,9 +1027,9 @@
         <term><varname>StartLimitAction=</varname></term>
 
         <listitem><para>Configure an additional action to take if the rate limit configured with
-        <varname>StartLimitIntervalSec=</varname> and <varname>StartLimitBurst=</varname> is hit.  Takes the same
-        values as the setting <varname>FailureAction=</varname>/<varname>SuccessAction=</varname> settings and executes
-        the same actions. If <option>none</option> is set, hitting the rate limit will trigger no action besides that
+        <varname>StartLimitIntervalSec=</varname> and <varname>StartLimitBurst=</varname> is hit. Takes the same
+        values as the <varname>FailureAction=</varname>/<varname>SuccessAction=</varname> settings. If
+        <option>none</option> is set, hitting the rate limit will trigger no action except that
         the start will not be permitted. Defaults to <option>none</option>.</para></listitem>
       </varlistentry>
 
@@ -1169,6 +1168,7 @@
           <literal>podman</literal>,
           <literal>rkt</literal>,
           <literal>wsl</literal>,
+          <literal>proot</literal>,
           <literal>acrn</literal> to test
           against a specific implementation, or
           <literal>private-users</literal> to check whether we are running in a user namespace. See
@@ -1224,6 +1224,24 @@
         </varlistentry>
 
         <varlistentry>
+          <term><varname>ConditionEnvironment=</varname></term>
+
+          <listitem><para><varname>ConditionEnvironment=</varname> may be used to check whether a specific
+          environment variable is set (or if prefixed with the exclamation mark — unset) in the service
+          manager's environment block.
+
+          The argument may be a single word, to check if the variable with this name is defined in the
+          environment block, or an assignment
+          (<literal><replaceable>name</replaceable>=<replaceable>value</replaceable></literal>), to check if
+          the variable with this exact value is defined. Note that the environment block of the service
+          manager itself is checked, i.e. not any variables defined with <varname>Environment=</varname> or
+          <varname>EnvironmentFile=</varname>, as described above. This is particularly useful when the
+          service manager runs inside a containerized environment or as per-user service manager, in order to
+          check for variables passed in by the enclosing container manager or PAM.</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
           <term><varname>ConditionSecurity=</varname></term>
 
           <listitem><para><varname>ConditionSecurity=</varname> may be used to check whether the given
@@ -1273,6 +1291,13 @@
           <citerefentry><refentrytitle>systemd-update-done.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
           to make sure they run before the stamp file's modification time gets reset indicating a completed
           update.</para>
+
+          <para>If the <varname>systemd.condition-needs-update=</varname> option is specified on the kernel
+          command line (taking a boolean), it will override the result of this condition check, taking
+          precedence over any file modification time checks. If it is used
+          <filename>systemd-update-done.service</filename> will not have immediate effect on any following
+          <varname>ConditionNeedsUpdate=</varname> checks, until the system is rebooted where the kernel
+          command line option is not specified anymore.</para>
           </listitem>
         </varlistentry>
 
@@ -1284,6 +1309,10 @@
           (specifically: an <filename>/etc</filename> with no <filename>/etc/machine-id</filename>). This may
           be used to populate <filename>/etc</filename> on the first boot after factory reset, or when a new
           system instance boots up for the first time.</para>
+
+          <para>If the <varname>systemd.condition-first-boot=</varname> option is specified on the kernel
+          command line (taking a boolean), it will override the result of this condition check, taking
+          precedence over <filename>/etc/machine-id</filename> existence checks.</para>
           </listitem>
         </varlistentry>
 
@@ -1340,6 +1369,18 @@
           <listitem><para><varname>ConditionPathIsReadWrite=</varname> is similar to
           <varname>ConditionPathExists=</varname> but verifies that the underlying file system is readable
           and writable (i.e. not mounted read-only).</para>
+          </listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><varname>ConditionPathIsEncrypted=</varname></term>
+
+          <listitem><para><varname>ConditionPathIsEncrypted=</varname> is similar to
+          <varname>ConditionPathExists=</varname> but verifies that the underlying file system's backing
+          block device is encrypted using dm-crypt/LUKS. Note that this check does not cover ext4
+          per-directory encryption, and only detects block level encryption. Moreover, if the specified path
+          resides on a file system on top of a loopback block device, only encryption above the loopback device is
+          detected. It is not detected whether the file system backing the loopback block device is encrypted.</para>
           </listitem>
         </varlistentry>
 
@@ -1598,7 +1639,7 @@
   <refsect1>
     <title>[Install] Section Options</title>
 
-    <para>Unit files may include an <literal>[Install]</literal> section, which carries installation information for
+    <para>Unit files may include an [Install] section, which carries installation information for
     the unit. This section is not interpreted by
     <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry> during runtime; it is
     used by the <command>enable</command> and <command>disable</command> commands of the
@@ -1692,7 +1733,7 @@
     and resolvable for the setting to be valid. The following
     specifiers are understood:</para>
 
-    <table>
+    <table class='specifiers'>
       <title>Specifiers available in unit files</title>
       <tgroup cols='3' align='left' colsep='1' rowsep='1'>
         <colspec colname="spec" />
@@ -1707,10 +1748,14 @@
         </thead>
         <tbody>
           <row>
-            <entry><literal>%b</literal></entry>
-            <entry>Boot ID</entry>
-            <entry>The boot ID of the running system, formatted as string. See <citerefentry><refentrytitle>random</refentrytitle><manvolnum>4</manvolnum></citerefentry> for more information.</entry>
+            <!-- We do not use the common definition from standard-specifiers.xml here since it includes a
+                 reference onto our own man page, which would make the rendered version self-referential. -->
+            <entry><literal>%a</literal></entry>
+            <entry>Architecture</entry>
+            <entry>A short string identifying the architecture of the local system. A string such as <constant>x86</constant>, <constant>x86-64</constant> or <constant>arm64</constant>. See the architectures defined for <varname>ConditionArchitecture=</varname> above for a full list.</entry>
           </row>
+          <xi:include href="standard-specifiers.xml" xpointer="b"/>
+          <xi:include href="standard-specifiers.xml" xpointer="B"/>
           <row>
             <entry><literal>%C</literal></entry>
             <entry>Cache directory root</entry>
@@ -1734,9 +1779,16 @@
 Note that this setting is <emphasis>not</emphasis> influenced by the <varname>User=</varname> setting configurable in the [Service] section of the service unit.</entry>
           </row>
           <row>
+            <!-- We do not use the common definition from standard-specifiers.xml here since we want a
+                 slightly more verbose explanation here, referring to the reload cycle. -->
             <entry><literal>%H</literal></entry>
             <entry>Host name</entry>
             <entry>The hostname of the running system at the point in time the unit configuration is loaded.</entry>
+          </row>
+          <row>
+            <entry><literal>%l</literal></entry>
+            <entry>Short host name</entry>
+            <entry>The hostname of the running system at the point in time the unit configuration is loaded, truncated at the first dot to remove any domain component.</entry>
           </row>
           <row>
             <entry><literal>%i</literal></entry>
@@ -1763,11 +1815,8 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
             <entry>Log directory root</entry>
             <entry>This is either <filename>/var/log</filename> (for the system manager) or the path <literal>$XDG_CONFIG_HOME</literal> resolves to with <filename index="false">/log</filename> appended (for user managers).</entry>
           </row>
-          <row>
-            <entry><literal>%m</literal></entry>
-            <entry>Machine ID</entry>
-            <entry>The machine ID of the running system, formatted as string. See <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry> for more information.</entry>
-          </row>
+          <xi:include href="standard-specifiers.xml" xpointer="m"/>
+          <xi:include href="standard-specifiers.xml" xpointer="o"/>
           <row>
             <entry><literal>%n</literal></entry>
             <entry>Full unit name</entry>
@@ -1832,21 +1881,15 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
 
 Note that this setting is <emphasis>not</emphasis> influenced by the <varname>User=</varname> setting configurable in the [Service] section of the service unit.</entry>
           </row>
-          <row>
-            <entry><literal>%v</literal></entry>
-            <entry>Kernel release</entry>
-            <entry>Identical to <command>uname -r</command> output</entry>
-          </row>
+          <xi:include href="standard-specifiers.xml" xpointer="v"/>
           <row>
             <entry><literal>%V</literal></entry>
             <entry>Directory for larger and persistent temporary files</entry>
             <entry>This is either <filename>/var/tmp</filename> or the path <literal>$TMPDIR</literal>, <literal>$TEMP</literal> or <literal>$TMP</literal> are set to.</entry>
           </row>
-          <row>
-            <entry><literal>%%</literal></entry>
-            <entry>Single percent sign</entry>
-            <entry>Use <literal>%%</literal> in place of <literal>%</literal> to specify a single percent sign.</entry>
-          </row>
+          <xi:include href="standard-specifiers.xml" xpointer="w"/>
+          <xi:include href="standard-specifiers.xml" xpointer="W"/>
+          <xi:include href="standard-specifiers.xml" xpointer="percent"/>
         </tbody>
       </tgroup>
     </table>

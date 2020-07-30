@@ -91,7 +91,7 @@
 
       <listitem><para>The boot manager optionally reads a random seed from the ESP partition, combines it
       with a 'system token' stored in a persistent EFI variable and derives a random seed to use by the OS as
-      entropy pool initializaton, providing a full entropy pool during early boot.</para></listitem>
+      entropy pool initialization, providing a full entropy pool during early boot.</para></listitem>
     </itemizedlist>
 
     <para><citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
@@ -123,6 +123,7 @@
 
       <varlistentry>
         <term><keycap>↵</keycap> (Enter)</term>
+        <term><keycap>→</keycap> (Right)</term>
         <listitem><para>Boot selected entry</para></listitem>
       </varlistentry>
 
@@ -166,6 +167,7 @@
       <varlistentry>
         <term><keycap>h</keycap></term>
         <term><keycap>?</keycap></term>
+        <term><keycap>F1</keycap></term>
         <listitem><para>Show a help screen</para></listitem>
       </varlistentry>
 
@@ -312,7 +314,7 @@
         is maintained persistently, while <varname>LoaderConfigTimeoutOneShot</varname> is a one-time override which is
         read once (in which case it takes precedence over <varname>LoaderConfigTimeout</varname>) and then
         removed. <varname>LoaderConfigTimeout</varname> may be manipulated with the
-        <keycap>t</keycap>/<keycap>T</keycap> keys, see above.)</para></listitem>
+        <keycap>t</keycap>/<keycap>T</keycap> keys, see above.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -342,7 +344,7 @@
         boots. <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
         <option>set-default</option> and <option>set-oneshot</option> commands make use of these variables. The boot
         loader modifies <varname>LoaderEntryDefault</varname> on request, when the <keycap>d</keycap> key is used, see
-        above.)</para></listitem>
+        above.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -421,9 +423,9 @@
       <varlistentry>
         <term><varname>LoaderSystemToken</varname></term>
 
-        <listitem><para>A binary random data field, that is used for generating the random see to pass to the
-        OS (see above). Note that this random data is generally only generated once, during OS installation,
-        and is then never updated again.</para></listitem>
+        <listitem><para>A binary random data field, that is used for generating the random seed to pass to
+        the OS (see above). Note that this random data is generally only generated once, during OS
+        installation, and is then never updated again.</para></listitem>
       </varlistentry>
     </variablelist>
 
@@ -475,10 +477,10 @@
     considered 'good' from then on.</para>
 
     <para>The boot menu takes the 'tries left' counter into account when sorting the menu entries: entries in 'bad'
-    state are ordered at the end of the list, and entries in 'good' or 'indeterminate' at the beginning. The user can
+    state are ordered at the beginning of the list, and entries in 'good' or 'indeterminate' at the end. The user can
     freely choose to boot any entry of the menu, including those already marked 'bad'. If the menu entry to boot is
-    automatically determined, this means that 'good' or 'indeterminate' entries are generally preferred (as the top item of
-    the menu is the one booted by default), and 'bad' entries will only be considered if there are no 'good' or
+    automatically determined, this means that 'good' or 'indeterminate' entries are generally preferred (as the bottom
+    item of the menu is the one booted by default), and 'bad' entries will only be considered if there are no 'good' or
     'indeterminate' entries left.</para>
 
     <para>The <citerefentry><refentrytitle>kernel-install</refentrytitle><manvolnum>8</manvolnum></citerefentry> kernel

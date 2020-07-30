@@ -21,6 +21,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "io-util.h"
 #include "log.h"
 #include "macro.h"
 #include "memory-util.h"
@@ -104,7 +105,7 @@ int socket_address_verify(const SocketAddress *a, bool strict) {
                                 if (a->size != offsetof(struct sockaddr_un, sun_path) + (e - a->sockaddr.un.sun_path) + 1)
                                         return -EINVAL;
                         } else {
-                                /* If there's no embedded NUL byte, then then the size needs to match the whole
+                                /* If there's no embedded NUL byte, then the size needs to match the whole
                                  * structure or the structure with one extra NUL byte suffixed. (Yeah, Linux is awful,
                                  * and considers both equivalent: getsockname() even extends sockaddr_un beyond its
                                  * size if the path is non NUL terminated.)*/
@@ -818,10 +819,7 @@ ssize_t send_one_fd_iov_sa(
                 const struct sockaddr *sa, socklen_t len,
                 int flags) {
 
-        union {
-                struct cmsghdr cmsghdr;
-                uint8_t buf[CMSG_SPACE(sizeof(int))];
-        } control = {};
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int))) control = {};
         struct msghdr mh = {
                 .msg_name = (struct sockaddr*) sa,
                 .msg_namelen = len,
@@ -850,8 +848,6 @@ ssize_t send_one_fd_iov_sa(
                 cmsg->cmsg_type = SCM_RIGHTS;
                 cmsg->cmsg_len = CMSG_LEN(sizeof(int));
                 memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
-
-                mh.msg_controllen = CMSG_SPACE(sizeof(int));
         }
         k = sendmsg(transport_fd, &mh, MSG_NOSIGNAL | flags);
         if (k < 0)
@@ -877,17 +873,14 @@ ssize_t receive_one_fd_iov(
                 int flags,
                 int *ret_fd) {
 
-        union {
-                struct cmsghdr cmsghdr;
-                uint8_t buf[CMSG_SPACE(sizeof(int))];
-        } control = {};
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int))) control;
         struct msghdr mh = {
                 .msg_control = &control,
                 .msg_controllen = sizeof(control),
                 .msg_iov = iov,
                 .msg_iovlen = iovlen,
         };
-        struct cmsghdr *cmsg, *found = NULL;
+        struct cmsghdr *found;
         ssize_t k;
 
         assert(transport_fd >= 0);
@@ -905,16 +898,7 @@ ssize_t receive_one_fd_iov(
         if (k < 0)
                 return k;
 
-        CMSG_FOREACH(cmsg, &mh) {
-                if (cmsg->cmsg_level == SOL_SOCKET &&
-                    cmsg->cmsg_type == SCM_RIGHTS &&
-                    cmsg->cmsg_len == CMSG_LEN(sizeof(int))) {
-                        assert(!found);
-                        found = cmsg;
-                        break;
-                }
-        }
-
+        found = cmsg_find(&mh, SOL_SOCKET, SCM_RIGHTS, CMSG_LEN(sizeof(int)));
         if (!found) {
                 cmsg_close_all(&mh);
 
@@ -985,10 +969,6 @@ fallback:
 
 int flush_accept(int fd) {
 
-        struct pollfd pollfd = {
-                .fd = fd,
-                .events = POLLIN,
-        };
         int r, b;
         socklen_t l = sizeof(b);
 
@@ -1009,12 +989,12 @@ int flush_accept(int fd) {
         for (unsigned iteration = 0;; iteration++) {
                 int cfd;
 
-                r = poll(&pollfd, 1, 0);
+                r = fd_wait_for_event(fd, POLLIN, 0);
                 if (r < 0) {
-                        if (errno == EINTR)
+                        if (r == -EINTR)
                                 continue;
 
-                        return -errno;
+                        return r;
                 }
                 if (r == 0)
                         return 0;
@@ -1150,6 +1130,7 @@ int socket_bind_to_ifname(int fd, const char *ifname) {
 
 int socket_bind_to_ifindex(int fd, int ifindex) {
         char ifname[IF_NAMESIZE + 1];
+        int r;
 
         assert(fd >= 0);
 
@@ -1161,10 +1142,9 @@ int socket_bind_to_ifindex(int fd, int ifindex) {
                 return 0;
         }
 
-        if (setsockopt(fd, SOL_SOCKET, SO_BINDTOIFINDEX, &ifindex, sizeof(ifindex)) >= 0)
-                return 0;
-        if (errno != ENOPROTOOPT)
-                return -errno;
+        r = setsockopt_int(fd, SOL_SOCKET, SO_BINDTOIFINDEX, ifindex);
+        if (r != -ENOPROTOOPT)
+                return r;
 
         /* Fall back to SO_BINDTODEVICE on kernels < 5.0 which didn't have SO_BINDTOIFINDEX */
         if (!format_ifname(ifindex, ifname))
@@ -1191,5 +1171,27 @@ ssize_t recvmsg_safe(int sockfd, struct msghdr *msg, int flags) {
         }
 
         return n;
+}
 
+int socket_pass_pktinfo(int fd, bool b) {
+        int af;
+        socklen_t sl = sizeof(af);
+
+        if (getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &af, &sl) < 0)
+                return -errno;
+
+        switch (af) {
+
+        case AF_INET:
+                return setsockopt_int(fd, IPPROTO_IP, IP_PKTINFO, b);
+
+        case AF_INET6:
+                return setsockopt_int(fd, IPPROTO_IPV6, IPV6_RECVPKTINFO, b);
+
+        case AF_NETLINK:
+                return setsockopt_int(fd, SOL_NETLINK, NETLINK_PKTINFO, b);
+
+        default:
+                return -EAFNOSUPPORT;
+        }
 }

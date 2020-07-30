@@ -19,9 +19,8 @@ static int process_deps(Unit *u, UnitDependency dependency, const char *dir_suff
         r = unit_file_find_dropin_paths(NULL,
                                         u->manager->lookup_paths.search_path,
                                         u->manager->unit_path_cache,
-                                        dir_suffix,
-                                        NULL,
-                                        u->names,
+                                        dir_suffix, NULL,
+                                        u->id, u->aliases,
                                         &paths);
         if (r < 0)
                 return r;
@@ -114,12 +113,13 @@ int unit_load_dropin(Unit *u) {
         }
 
         STRV_FOREACH(f, u->dropin_paths)
-                (void) config_parse(u->id, *f, NULL,
-                                    UNIT_VTABLE(u)->sections,
-                                    config_item_perf_lookup, load_fragment_gperf_lookup,
-                                    0, u);
-
-        u->dropin_mtime = now(CLOCK_REALTIME);
+                (void) config_parse(
+                                u->id, *f, NULL,
+                                UNIT_VTABLE(u)->sections,
+                                config_item_perf_lookup, load_fragment_gperf_lookup,
+                                0,
+                                u,
+                                &u->dropin_mtime);
 
         return 0;
 }

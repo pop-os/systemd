@@ -139,7 +139,7 @@ static int verb_show(int argc, char **argv, void *userdata) {
         if (table) {
                 r = table_print(table, NULL);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to print table: %m");
+                        return table_log_print_error(r);
         }
 
         return 0;
@@ -249,9 +249,7 @@ static int id128_main(int argc, char *argv[]) {
 static int run(int argc, char *argv[]) {
         int r;
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

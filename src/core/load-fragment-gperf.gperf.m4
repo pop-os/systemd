@@ -23,11 +23,15 @@ m4_define(`EXEC_CONTEXT_CONFIG_ITEMS',
 `$1.WorkingDirectory,            config_parse_working_directory,     0,                             offsetof($1, exec_context)
 $1.RootDirectory,                config_parse_unit_path_printf,      true,                          offsetof($1, exec_context.root_directory)
 $1.RootImage,                    config_parse_unit_path_printf,      true,                          offsetof($1, exec_context.root_image)
+$1.RootHash,                     config_parse_exec_root_hash,        0,                             offsetof($1, exec_context)
+$1.RootHashSignature,            config_parse_exec_root_hash_sig,    0,                             offsetof($1, exec_context)
+$1.RootVerity,                   config_parse_unit_path_printf,      true,                          offsetof($1, exec_context.root_verity)
 $1.User,                         config_parse_user_group_compat,     0,                             offsetof($1, exec_context.user)
 $1.Group,                        config_parse_user_group_compat,     0,                             offsetof($1, exec_context.group)
 $1.SupplementaryGroups,          config_parse_user_group_strv_compat, 0,                            offsetof($1, exec_context.supplementary_groups)
 $1.Nice,                         config_parse_exec_nice,             0,                             offsetof($1, exec_context)
 $1.OOMScoreAdjust,               config_parse_exec_oom_score_adjust, 0,                             offsetof($1, exec_context)
+$1.CoredumpFilter,               config_parse_exec_coredump_filter,  0,                             offsetof($1, exec_context)
 $1.IOSchedulingClass,            config_parse_exec_io_class,         0,                             offsetof($1, exec_context)
 $1.IOSchedulingPriority,         config_parse_exec_io_priority,      0,                             offsetof($1, exec_context)
 $1.CPUSchedulingPolicy,          config_parse_exec_cpu_sched_policy, 0,                             offsetof($1, exec_context)
@@ -321,6 +325,8 @@ Service.TimeoutSec,              config_parse_service_timeout,       0,         
 Service.TimeoutStartSec,         config_parse_service_timeout,       0,                             0
 Service.TimeoutStopSec,          config_parse_sec_fix_0,             0,                             offsetof(Service, timeout_stop_usec)
 Service.TimeoutAbortSec,         config_parse_service_timeout_abort, 0,                             0
+Service.TimeoutStartFailureMode, config_parse_service_timeout_failure_mode,  0,                     offsetof(Service, timeout_start_failure_mode)
+Service.TimeoutStopFailureMode,  config_parse_service_timeout_failure_mode,  0,                     offsetof(Service, timeout_stop_failure_mode)
 Service.RuntimeMaxSec,           config_parse_sec,                   0,                             offsetof(Service, runtime_max_usec)
 Service.WatchdogSec,             config_parse_sec,                   0,                             offsetof(Service, watchdog_usec)
 m4_dnl The following five only exist for compatibility, they moved into Unit, see above
@@ -395,6 +401,7 @@ Socket.Transparent,              config_parse_bool,                  0,         
 Socket.Broadcast,                config_parse_bool,                  0,                             offsetof(Socket, broadcast)
 Socket.PassCredentials,          config_parse_bool,                  0,                             offsetof(Socket, pass_cred)
 Socket.PassSecurity,             config_parse_bool,                  0,                             offsetof(Socket, pass_sec)
+Socket.PassPacketInfo,           config_parse_bool,                  0,                             offsetof(Socket, pass_pktinfo)
 Socket.TCPCongestion,            config_parse_string,                0,                             offsetof(Socket, tcp_congestion)
 Socket.ReusePort,                config_parse_bool,                  0,                             offsetof(Socket, reuse_port)
 Socket.MessageQueueMaxMessages,  config_parse_long,                  0,                             offsetof(Socket, mq_maxmsg)
@@ -428,6 +435,7 @@ Mount.DirectoryMode,             config_parse_mode,                  0,         
 Mount.SloppyOptions,             config_parse_bool,                  0,                             offsetof(Mount, sloppy_options)
 Mount.LazyUnmount,               config_parse_bool,                  0,                             offsetof(Mount, lazy_unmount)
 Mount.ForceUnmount,              config_parse_bool,                  0,                             offsetof(Mount, force_unmount)
+Mount.ReadWriteOnly,             config_parse_bool,                  0,                             offsetof(Mount, read_write_only)
 EXEC_CONTEXT_CONFIG_ITEMS(Mount)m4_dnl
 CGROUP_CONTEXT_CONFIG_ITEMS(Mount)m4_dnl
 KILL_CONTEXT_CONFIG_ITEMS(Mount)m4_dnl

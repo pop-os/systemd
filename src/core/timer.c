@@ -367,7 +367,7 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
                         continue;
 
                 if (v->base == TIMER_CALENDAR) {
-                        usec_t b;
+                        usec_t b, rebased;
 
                         /* If we know the last time this was
                          * triggered, schedule the job based relative
@@ -387,12 +387,14 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
                         if (r < 0)
                                 continue;
 
-                        /* To make the delay due to RandomizedDelaySec= work even at boot,
-                         * if the scheduled time has already passed, set the time when systemd
-                         * first started as the scheduled time.
-                         * Also, we don't have to check t->persistent since the logic implicitly express true. */
-                        if (v->next_elapse < UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].realtime)
-                                v->next_elapse = UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].realtime;
+                        /* To make the delay due to RandomizedDelaySec= work even at boot, if the scheduled
+                         * time has already passed, set the time when systemd first started as the scheduled
+                         * time. Note that we base this on the monotonic timestamp of the boot, not the
+                         * realtime one, since the wallclock might have been off during boot. */
+                        rebased = map_clock_usec(UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic,
+                                                 CLOCK_MONOTONIC, CLOCK_REALTIME);
+                        if (v->next_elapse < rebased)
+                                v->next_elapse = rebased;
 
                         if (!found_realtime)
                                 t->next_elapse_realtime = v->next_elapse;
@@ -925,6 +927,5 @@ const UnitVTable timer_vtable = {
         .time_change = timer_time_change,
         .timezone_change = timer_timezone_change,
 
-        .bus_vtable = bus_timer_vtable,
         .bus_set_property = bus_timer_set_property,
 };

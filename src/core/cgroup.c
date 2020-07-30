@@ -16,7 +16,9 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
+#include "io-util.h"
 #include "limits-util.h"
+#include "nulstr-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
@@ -215,31 +217,12 @@ void cgroup_context_done(CGroupContext *c) {
 }
 
 static int unit_get_kernel_memory_limit(Unit *u, const char *file, uint64_t *ret) {
-        _cleanup_free_ char *raw_kval = NULL;
-        uint64_t kval;
-        int r;
-
         assert(u);
 
         if (!u->cgroup_realized)
                 return -EOWNERDEAD;
 
-        r = cg_get_attribute("memory", u->cgroup_path, file, &raw_kval);
-        if (r < 0)
-                return r;
-
-        if (streq(raw_kval, "max")) {
-                *ret = CGROUP_LIMIT_MAX;
-                return 0;
-        }
-
-        r = safe_atou64(raw_kval, &kval);
-        if (r < 0)
-                return r;
-
-        *ret = kval;
-
-        return 0;
+        return cg_get_attribute_as_uint64("memory", u->cgroup_path, file, ret);
 }
 
 static int unit_compare_memory_limit(Unit *u, const char *property_name, uint64_t *ret_unit_value, uint64_t *ret_kernel_value) {
@@ -1007,12 +990,12 @@ static int cgroup_apply_devices(Unit *u) {
                                       "Failed to reset devices.allow/devices.deny: %m");
         }
 
-        bool whitelist_static = policy == CGROUP_DEVICE_POLICY_CLOSED ||
+        bool allow_list_static = policy == CGROUP_DEVICE_POLICY_CLOSED ||
                 (policy == CGROUP_DEVICE_POLICY_AUTO && c->device_allow);
-        if (whitelist_static)
-                (void) bpf_devices_whitelist_static(prog, path);
+        if (allow_list_static)
+                (void) bpf_devices_allow_list_static(prog, path);
 
-        bool any = whitelist_static;
+        bool any = allow_list_static;
         LIST_FOREACH(device_allow, a, c->device_allow) {
                 char acc[4], *val;
                 unsigned k = 0;
@@ -1028,11 +1011,11 @@ static int cgroup_apply_devices(Unit *u) {
                 acc[k++] = 0;
 
                 if (path_startswith(a->path, "/dev/"))
-                        r = bpf_devices_whitelist_device(prog, path, a->path, acc);
+                        r = bpf_devices_allow_list_device(prog, path, a->path, acc);
                 else if ((val = startswith(a->path, "block-")))
-                        r = bpf_devices_whitelist_major(prog, path, val, 'b', acc);
+                        r = bpf_devices_allow_list_major(prog, path, val, 'b', acc);
                 else if ((val = startswith(a->path, "char-")))
-                        r = bpf_devices_whitelist_major(prog, path, val, 'c', acc);
+                        r = bpf_devices_allow_list_major(prog, path, val, 'c', acc);
                 else {
                         log_unit_debug(u, "Ignoring device '%s' while writing cgroup attribute.", a->path);
                         continue;
@@ -1046,7 +1029,7 @@ static int cgroup_apply_devices(Unit *u) {
                 log_unit_warning_errno(u, SYNTHETIC_ERRNO(ENODEV), "No devices matched by device filter.");
 
                 /* The kernel verifier would reject a program we would build with the normal intro and outro
-                   but no whitelisting rules (outro would contain an unreachable instruction for successful
+                   but no allow-listing rules (outro would contain an unreachable instruction for successful
                    return). */
                 policy = CGROUP_DEVICE_POLICY_STRICT;
         }
@@ -2680,6 +2663,16 @@ void unit_add_to_cgroup_empty_queue(Unit *u) {
                 log_debug_errno(r, "Failed to enable cgroup empty event source: %m");
 }
 
+static void unit_remove_from_cgroup_empty_queue(Unit *u) {
+        assert(u);
+
+        if (!u->in_cgroup_empty_queue)
+                return;
+
+        LIST_REMOVE(cgroup_empty_queue, u->manager->cgroup_empty_queue, u);
+        u->in_cgroup_empty_queue = false;
+}
+
 int unit_check_oom(Unit *u) {
         _cleanup_free_ char *oom_kill = NULL;
         bool increased;
@@ -2780,6 +2773,41 @@ static void unit_add_to_cgroup_oom_queue(Unit *u) {
                 log_error_errno(r, "Failed to enable cgroup oom event source: %m");
 }
 
+static int unit_check_cgroup_events(Unit *u) {
+        char *values[2] = {};
+        int r;
+
+        assert(u);
+
+        r = cg_get_keyed_attribute_graceful(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "cgroup.events",
+                                            STRV_MAKE("populated", "frozen"), values);
+        if (r < 0)
+                return r;
+
+        /* The cgroup.events notifications can be merged together so act as we saw the given state for the
+         * first time. The functions we call to handle given state are idempotent, which makes them
+         * effectively remember the previous state. */
+        if (values[0]) {
+                if (streq(values[0], "1"))
+                        unit_remove_from_cgroup_empty_queue(u);
+                else
+                        unit_add_to_cgroup_empty_queue(u);
+        }
+
+        /* Disregard freezer state changes due to operations not initiated by us */
+        if (values[1] && IN_SET(u->freezer_state, FREEZER_FREEZING, FREEZER_THAWING)) {
+                if (streq(values[1], "0"))
+                        unit_thawed(u);
+                else
+                        unit_frozen(u);
+        }
+
+        free(values[0]);
+        free(values[1]);
+
+        return 0;
+}
+
 static int on_cgroup_inotify_event(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         Manager *m = userdata;
 
@@ -2816,7 +2844,7 @@ static int on_cgroup_inotify_event(sd_event_source *s, int fd, uint32_t revents,
 
                         u = hashmap_get(m->cgroup_control_inotify_wd_unit, INT_TO_PTR(e->wd));
                         if (u)
-                                unit_add_to_cgroup_empty_queue(u);
+                                unit_check_cgroup_events(u);
 
                         u = hashmap_get(m->cgroup_memory_inotify_wd_unit, INT_TO_PTR(e->wd));
                         if (u)
@@ -3112,7 +3140,6 @@ int manager_notify_cgroup_empty(Manager *m, const char *cgroup) {
 }
 
 int unit_get_memory_current(Unit *u, uint64_t *ret) {
-        _cleanup_free_ char *v = NULL;
         int r;
 
         assert(u);
@@ -3134,22 +3161,11 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
         r = cg_all_unified();
         if (r < 0)
                 return r;
-        if (r > 0)
-                r = cg_get_attribute("memory", u->cgroup_path, "memory.current", &v);
-        else
-                r = cg_get_attribute("memory", u->cgroup_path, "memory.usage_in_bytes", &v);
-        if (r == -ENOENT)
-                return -ENODATA;
-        if (r < 0)
-                return r;
 
-        return safe_atou64(v, ret);
+        return cg_get_attribute_as_uint64("memory", u->cgroup_path, r > 0 ? "memory.current" : "memory.usage_in_bytes", ret);
 }
 
 int unit_get_tasks_current(Unit *u, uint64_t *ret) {
-        _cleanup_free_ char *v = NULL;
-        int r;
-
         assert(u);
         assert(ret);
 
@@ -3166,17 +3182,10 @@ int unit_get_tasks_current(Unit *u, uint64_t *ret) {
         if ((u->cgroup_realized_mask & CGROUP_MASK_PIDS) == 0)
                 return -ENODATA;
 
-        r = cg_get_attribute("pids", u->cgroup_path, "pids.current", &v);
-        if (r == -ENOENT)
-                return -ENODATA;
-        if (r < 0)
-                return r;
-
-        return safe_atou64(v, ret);
+        return cg_get_attribute_as_uint64("pids", u->cgroup_path, "pids.current", ret);
 }
 
 static int unit_get_cpu_usage_raw(Unit *u, nsec_t *ret) {
-        _cleanup_free_ char *v = NULL;
         uint64_t ns;
         int r;
 
@@ -3212,17 +3221,8 @@ static int unit_get_cpu_usage_raw(Unit *u, nsec_t *ret) {
                         return r;
 
                 ns = us * NSEC_PER_USEC;
-        } else {
-                r = cg_get_attribute("cpuacct", u->cgroup_path, "cpuacct.usage", &v);
-                if (r == -ENOENT)
-                        return -ENODATA;
-                if (r < 0)
-                        return r;
-
-                r = safe_atou64(v, &ns);
-                if (r < 0)
-                        return r;
-        }
+        } else
+                return cg_get_attribute_as_uint64("cpuacct", u->cgroup_path, "cpuacct.usage", ret);
 
         *ret = ns;
         return 0;
@@ -3597,6 +3597,46 @@ int compare_job_priority(const void *a, const void *b) {
         return strcmp(x->unit->id, y->unit->id);
 }
 
+int unit_cgroup_freezer_action(Unit *u, FreezerAction action) {
+        _cleanup_free_ char *path = NULL;
+        FreezerState target, kernel = _FREEZER_STATE_INVALID;
+        int r;
+
+        assert(u);
+        assert(IN_SET(action, FREEZER_FREEZE, FREEZER_THAW));
+
+        if (!u->cgroup_realized)
+                return -EBUSY;
+
+        target = action == FREEZER_FREEZE ? FREEZER_FROZEN : FREEZER_RUNNING;
+
+        r = unit_freezer_state_kernel(u, &kernel);
+        if (r < 0)
+                log_unit_debug_errno(u, r, "Failed to obtain cgroup freezer state: %m");
+
+        if (target == kernel) {
+                u->freezer_state = target;
+                return 0;
+        }
+
+        r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "cgroup.freeze", &path);
+        if (r < 0)
+                return r;
+
+        log_unit_debug(u, "%s unit.", action == FREEZER_FREEZE ? "Freezing" : "Thawing");
+
+        if (action == FREEZER_FREEZE)
+                u->freezer_state = FREEZER_FREEZING;
+        else
+                u->freezer_state = FREEZER_THAWING;
+
+        r = write_string_file(path, one_zero(action == FREEZER_FREEZE), WRITE_STRING_FILE_DISABLE_BUFFER);
+        if (r < 0)
+                return r;
+
+        return 1;
+}
+
 static const char* const cgroup_device_policy_table[_CGROUP_DEVICE_POLICY_MAX] = {
         [CGROUP_DEVICE_POLICY_AUTO]   = "auto",
         [CGROUP_DEVICE_POLICY_CLOSED] = "closed",
@@ -3632,3 +3672,10 @@ int unit_get_cpuset(Unit *u, CPUSet *cpus, const char *name) {
 }
 
 DEFINE_STRING_TABLE_LOOKUP(cgroup_device_policy, CGroupDevicePolicy);
+
+static const char* const freezer_action_table[_FREEZER_ACTION_MAX] = {
+        [FREEZER_FREEZE] = "freeze",
+        [FREEZER_THAW] = "thaw",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(freezer_action, FreezerAction);

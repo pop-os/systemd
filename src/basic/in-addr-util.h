@@ -36,10 +36,12 @@ bool in4_addr_equal(const struct in_addr *a, const struct in_addr *b);
 int in_addr_equal(int family, const union in_addr_union *a, const union in_addr_union *b);
 int in_addr_prefix_intersect(int family, const union in_addr_union *a, unsigned aprefixlen, const union in_addr_union *b, unsigned bprefixlen);
 int in_addr_prefix_next(int family, union in_addr_union *u, unsigned prefixlen);
+int in_addr_prefix_nth(int family, union in_addr_union *u, unsigned prefixlen, uint64_t nth);
 int in_addr_random_prefix(int family, union in_addr_union *u, unsigned prefixlen_fixed_part, unsigned prefixlen);
 int in_addr_to_string(int family, const union in_addr_union *u, char **ret);
 int in_addr_prefix_to_string(int family, const union in_addr_union *u, unsigned prefixlen, char **ret);
 int in_addr_ifindex_to_string(int family, const union in_addr_union *u, int ifindex, char **ret);
+int in_addr_port_ifindex_name_to_string(int family, const union in_addr_union *u, uint16_t port, int ifindex, const char *server_name, char **ret);
 int in_addr_from_string(int family, const char *s, union in_addr_union *ret);
 int in_addr_from_string_auto(const char *s, int *ret_family, union in_addr_union *ret);
 

@@ -192,7 +192,9 @@ static int process_one_password_file(const char *filename) {
         r = config_parse(NULL, filename, NULL,
                          NULL,
                          config_item_table_lookup, items,
-                         CONFIG_PARSE_RELAXED|CONFIG_PARSE_WARN, NULL);
+                         CONFIG_PARSE_RELAXED|CONFIG_PARSE_WARN,
+                         NULL,
+                         NULL);
         if (r < 0)
                 return r;
 
@@ -392,6 +394,10 @@ static int process_and_watch_password_files(bool watch) {
 
                         return -errno;
                 }
+
+                if (pollfd[FD_SIGNAL].revents & POLLNVAL ||
+                    pollfd[FD_INOTIFY].revents & POLLNVAL)
+                        return -EBADF;
 
                 if (pollfd[FD_INOTIFY].revents != 0)
                         (void) flush_fd(notify);

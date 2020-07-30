@@ -84,9 +84,13 @@ typedef struct netdev_channels {
 
 typedef struct netdev_ring_param {
         uint32_t rx_pending;
+        uint32_t rx_mini_pending;
+        uint32_t rx_jumbo_pending;
         uint32_t tx_pending;
 
         bool rx_pending_set;
+        bool rx_mini_pending_set;
+        bool rx_jumbo_pending_set;
         bool tx_pending_set;
 } netdev_ring_param;
 
@@ -103,6 +107,7 @@ int ethtool_set_glinksettings(int *ethtool_fd, const char *ifname,
                               int autonegotiation, uint32_t advertise[static N_ADVERTISE],
                               uint64_t speed, Duplex duplex, NetDevPort port);
 int ethtool_set_channels(int *ethtool_fd, const char *ifname, netdev_channels *channels);
+int ethtool_set_flow_control(int *fd, const char *ifname, int rx, int tx, int autoneg);
 
 const char *duplex_to_string(Duplex d) _const_;
 Duplex duplex_from_string(const char *d) _pure_;

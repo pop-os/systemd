@@ -108,6 +108,15 @@ static const char* const unit_active_state_table[_UNIT_ACTIVE_STATE_MAX] = {
 
 DEFINE_STRING_TABLE_LOOKUP(unit_active_state, UnitActiveState);
 
+static const char* const freezer_state_table[_FREEZER_STATE_MAX] = {
+        [FREEZER_RUNNING] = "running",
+        [FREEZER_FREEZING] = "freezing",
+        [FREEZER_FROZEN] = "frozen",
+        [FREEZER_THAWING] = "thawing",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(freezer_state, FreezerState);
+
 static const char* const automount_state_table[_AUTOMOUNT_STATE_MAX] = {
         [AUTOMOUNT_DEAD] = "dead",
         [AUTOMOUNT_WAITING] = "waiting",
@@ -176,6 +185,7 @@ static const char* const service_state_table[_SERVICE_STATE_MAX] = {
         [SERVICE_STOP_SIGTERM] = "stop-sigterm",
         [SERVICE_STOP_SIGKILL] = "stop-sigkill",
         [SERVICE_STOP_POST] = "stop-post",
+        [SERVICE_FINAL_WATCHDOG] = "final-watchdog",
         [SERVICE_FINAL_SIGTERM] = "final-sigterm",
         [SERVICE_FINAL_SIGKILL] = "final-sigkill",
         [SERVICE_FAILED] = "failed",

@@ -17,6 +17,7 @@
 #include "process-util.h"
 #include "sort-util.h"
 #include "string-util.h"
+#include "strv.h"
 #include "time-util.h"
 
 #define BITS_WEEKDAYS 127
@@ -28,6 +29,9 @@
  * our stack to overflow. It's unlikely that legitimate uses require more than a few
  * linked compenents anyway. */
 #define CALENDARSPEC_COMPONENTS_MAX 240
+
+/* Let's make sure that the microsecond component is safe to be stored in an 'int' */
+assert_cc(INT_MAX >= USEC_PER_SEC);
 
 static void chain_free(CalendarComponent *c) {
         CalendarComponent *n;
@@ -171,7 +175,7 @@ int calendar_spec_normalize(CalendarSpec *c) {
         return 0;
 }
 
-_pure_ static bool chain_valid(CalendarComponent *c, int from, int to, bool end_of_month) {
+static bool chain_valid(CalendarComponent *c, int from, int to, bool end_of_month) {
         assert(to >= from);
 
         if (!c)
@@ -980,9 +984,10 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
                 if (r < 0)
                         return r;
 
-        } else if (strcaseeq(p, "annually") ||
-                   strcaseeq(p, "yearly") ||
-                   strcaseeq(p, "anually") /* backwards compatibility */ ) {
+        } else if (STRCASE_IN_SET(p,
+                                  "annually",
+                                  "yearly",
+                                  "anually") /* backwards compatibility */ ) {
 
                 r = const_chain(1, &c->month);
                 if (r < 0)
@@ -1041,10 +1046,11 @@ int calendar_spec_from_string(const char *p, CalendarSpec **spec) {
                 if (r < 0)
                         return r;
 
-        } else if (strcaseeq(p, "biannually") ||
-                   strcaseeq(p, "bi-annually") ||
-                   strcaseeq(p, "semiannually") ||
-                   strcaseeq(p, "semi-annually")) {
+        } else if (STRCASE_IN_SET(p,
+                                  "biannually",
+                                  "bi-annually",
+                                  "semiannually",
+                                  "semi-annually")) {
 
                 r = const_chain(1, &c->month);
                 if (r < 0)

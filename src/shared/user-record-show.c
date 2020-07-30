@@ -279,7 +279,7 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
                 printf(" Access Mode: 0%03oo\n", user_record_access_mode(hr));
 
         if (storage == USER_LUKS) {
-                printf("LUKS Discard: %s\n", yes_no(user_record_luks_discard(hr)));
+                printf("LUKS Discard: online=%s offline=%s\n", yes_no(user_record_luks_discard(hr)), yes_no(user_record_luks_offline_discard(hr)));
 
                 if (!sd_id128_is_null(hr->luks_uuid))
                         printf("   LUKS UUID: " SD_ID128_FORMAT_STR "\n", SD_ID128_FORMAT_VAL(hr->luks_uuid));
@@ -340,12 +340,48 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
 
         if (hr->disk_usage != UINT64_MAX) {
                 char buf[FORMAT_BYTES_MAX];
-                printf("  Disk Usage: %s\n", format_bytes(buf, sizeof(buf), hr->disk_usage));
+
+                if (hr->disk_size != UINT64_MAX) {
+                        unsigned permille;
+
+                        permille = (unsigned) DIV_ROUND_UP(hr->disk_usage * 1000U, hr->disk_size); /* Round up! */
+                        printf("  Disk Usage: %s (= %u.%01u%%)\n",
+                               format_bytes(buf, sizeof(buf), hr->disk_usage),
+                               permille / 10, permille % 10);
+                } else
+                        printf("  Disk Usage: %s\n", format_bytes(buf, sizeof(buf), hr->disk_usage));
         }
 
         if (hr->disk_free != UINT64_MAX) {
                 char buf[FORMAT_BYTES_MAX];
-                printf("   Disk Free: %s\n", format_bytes(buf, sizeof(buf), hr->disk_free));
+
+                if (hr->disk_size != UINT64_MAX) {
+                        const char *color_on, *color_off;
+                        unsigned permille;
+
+                        permille = (unsigned) ((hr->disk_free * 1000U) / hr->disk_size); /* Round down! */
+
+                        /* Color the output red or yellow if we are below 10% resp. 25% free. Because 10% and
+                         * 25% can be a lot of space still, let's additionally make some absolute
+                         * restrictions: 1G and 2G */
+                        if (permille <= 100U &&
+                            hr->disk_free < 1024U*1024U*1024U /* 1G */) {
+                                color_on = ansi_highlight_red();
+                                color_off = ansi_normal();
+                        } else if (permille <= 250U &&
+                                   hr->disk_free < 2U*1024U*1024U*1024U /* 2G */) {
+                                color_on = ansi_highlight_yellow();
+                                color_off = ansi_normal();
+                        } else
+                                color_on = color_off = "";
+
+                        printf("   Disk Free: %s%s (= %u.%01u%%)%s\n",
+                               color_on,
+                               format_bytes(buf, sizeof(buf), hr->disk_free),
+                               permille / 10, permille % 10,
+                               color_off);
+                } else
+                        printf("   Disk Free: %s\n", format_bytes(buf, sizeof(buf), hr->disk_free));
         }
 
         if (hr->disk_floor != UINT64_MAX) {
@@ -436,9 +472,12 @@ void user_record_show(UserRecord *hr, bool show_full_group_info) {
 
                 STRV_FOREACH(i, hr->pkcs11_token_uri)
                         printf(i == hr->pkcs11_token_uri ?
-                               "  Sec. Token: %s\n" :
+                               "PKCS11 Token: %s\n" :
                                "              %s\n", *i);
         }
+
+        if (hr->n_fido2_hmac_credential > 0)
+                printf(" FIDO2 Token: %zu\n", hr->n_fido2_hmac_credential);
 
         k = strv_length(hr->hashed_password);
         if (k == 0)

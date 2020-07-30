@@ -8,6 +8,7 @@
 #include "io-util.h"
 #include "missing_network.h"
 #include "resolved-dns-stream.h"
+#include "resolved-manager.h"
 
 #define DNS_STREAM_TIMEOUT_USEC (10 * USEC_PER_SEC)
 #define DNS_STREAMS_MAX 128
@@ -86,11 +87,9 @@ static int dns_stream_complete(DnsStream *s, int error) {
 }
 
 static int dns_stream_identify(DnsStream *s) {
-        union {
-                struct cmsghdr header; /* For alignment */
-                uint8_t buffer[CMSG_SPACE(MAXSIZE(struct in_pktinfo, struct in6_pktinfo))
-                               + EXTRA_CMSG_SPACE /* kernel appears to require extra space */];
-        } control;
+        CMSG_BUFFER_TYPE(CMSG_SPACE(MAXSIZE(struct in_pktinfo, struct in6_pktinfo))
+                         + CMSG_SPACE(int) + /* for the TTL */
+                         + EXTRA_CMSG_SPACE /* kernel appears to require extra space */) control;
         struct msghdr mh = {};
         struct cmsghdr *cmsg;
         socklen_t sl;
@@ -191,7 +190,7 @@ static int dns_stream_identify(DnsStream *s) {
                 s->ifindex = manager_find_ifindex(s->manager, s->local.sa.sa_family, s->local.sa.sa_family == AF_INET ? (union in_addr_union*) &s->local.in.sin_addr : (union in_addr_union*)  &s->local.in6.sin6_addr);
 
         if (s->protocol == DNS_PROTOCOL_LLMNR && s->ifindex > 0) {
-                uint32_t ifindex = htobe32(s->ifindex);
+                be32_t ifindex = htobe32(s->ifindex);
 
                 /* Make sure all packets for this connection are sent on the same interface */
                 if (s->local.sa.sa_family == AF_INET) {

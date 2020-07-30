@@ -9,6 +9,7 @@
 #include "fd-util.h"
 #include "group-record-nss.h"
 #include "group-record.h"
+#include "io-util.h"
 #include "main-func.h"
 #include "process-util.h"
 #include "strv.h"
@@ -137,9 +138,9 @@ static int vl_method_get_user_record(Varlink *link, JsonVariant *parameters, Var
 
         if (streq_ptr(p.service, "io.systemd.NameServiceSwitch")) {
                 if (uid_is_valid(p.uid))
-                        r = nss_user_record_by_uid(p.uid, &hr);
+                        r = nss_user_record_by_uid(p.uid, true, &hr);
                 else if (p.user_name)
-                        r = nss_user_record_by_name(p.user_name, &hr);
+                        r = nss_user_record_by_name(p.user_name, true, &hr);
                 else {
                         _cleanup_(json_variant_unrefp) JsonVariant *last = NULL;
 
@@ -324,9 +325,9 @@ static int vl_method_get_group_record(Varlink *link, JsonVariant *parameters, Va
         if (streq_ptr(p.service, "io.systemd.NameServiceSwitch")) {
 
                 if (gid_is_valid(p.gid))
-                        r = nss_group_record_by_gid(p.gid, &g);
+                        r = nss_group_record_by_gid(p.gid, true, &g);
                 else if (p.group_name)
-                        r = nss_group_record_by_name(p.group_name, &g);
+                        r = nss_group_record_by_name(p.group_name, true, &g);
                 else {
                         _cleanup_(json_variant_unrefp) JsonVariant *last = NULL;
 
@@ -467,7 +468,7 @@ static int vl_method_get_memberships(Varlink *link, JsonVariant *parameters, Var
                         const char *last = NULL;
                         char **i;
 
-                        r = nss_group_record_by_name(p.group_name, &g);
+                        r = nss_group_record_by_name(p.group_name, true, &g);
                         if (r == -ESRCH)
                                 return varlink_error(link, "io.systemd.UserDatabase.NoRecordFound", NULL);
                         if (r < 0)
@@ -659,7 +660,6 @@ static int process_connection(VarlinkServer *server, int fd) {
 static int run(int argc, char *argv[]) {
         usec_t start_time, listen_idle_usec, last_busy_usec = USEC_INFINITY;
         _cleanup_(varlink_server_unrefp) VarlinkServer *server = NULL;
-        _cleanup_close_ int lock = -1;
         unsigned n_iterations = 0;
         int m, listen_fd, r;
 
@@ -696,8 +696,8 @@ static int run(int argc, char *argv[]) {
                 return log_error_errno(r, "Failed to parse USERDB_FIXED_WORKER: %m");
         listen_idle_usec = r ? USEC_INFINITY : LISTEN_IDLE_USEC;
 
-        lock = userdb_nss_compat_disable();
-        if (lock < 0)
+        r = userdb_block_nss_systemd(true);
+        if (r < 0)
                 return log_error_errno(r, "Failed to disable userdb NSS compatibility: %m");
 
         start_time = now(CLOCK_MONOTONIC);
@@ -715,7 +715,8 @@ static int run(int argc, char *argv[]) {
                 n = now(CLOCK_MONOTONIC);
                 if (n >= usec_add(start_time, RUNTIME_MAX_USEC)) {
                         char buf[FORMAT_TIMESPAN_MAX];
-                        log_debug("Exiting worker, ran for %s, that's enough.", format_timespan(buf, sizeof(buf), usec_sub_unsigned(n, start_time), 0));
+                        log_debug("Exiting worker, ran for %s, that's enough.",
+                                  format_timespan(buf, sizeof(buf), usec_sub_unsigned(n, start_time), 0));
                         break;
                 }
 
@@ -723,7 +724,8 @@ static int run(int argc, char *argv[]) {
                         last_busy_usec = n;
                 else if (listen_idle_usec != USEC_INFINITY && n >= usec_add(last_busy_usec, listen_idle_usec)) {
                         char buf[FORMAT_TIMESPAN_MAX];
-                        log_debug("Exiting worker, been idle for %s, .", format_timespan(buf, sizeof(buf), usec_sub_unsigned(n, last_busy_usec), 0));
+                        log_debug("Exiting worker, been idle for %s.",
+                                  format_timespan(buf, sizeof(buf), usec_sub_unsigned(n, last_busy_usec), 0));
                         break;
                 }
 
@@ -736,7 +738,7 @@ static int run(int argc, char *argv[]) {
                 (void) rename_process("systemd-userwork: processing...");
 
                 if (fd == -EAGAIN)
-                        continue; /* The listening socket as SO_RECVTIMEO set, hence a time-out is expected
+                        continue; /* The listening socket has SO_RECVTIMEO set, hence a timeout is expected
                                    * after a while, let's check if it's time to exit though. */
                 if (fd == -EINTR)
                         continue; /* Might be that somebody attached via strace, let's just continue in that
@@ -745,18 +747,14 @@ static int run(int argc, char *argv[]) {
                         return log_error_errno(fd, "Failed to accept() from listening socket: %m");
 
                 if (now(CLOCK_MONOTONIC) <= usec_add(n, PRESSURE_SLEEP_TIME_USEC)) {
-                        struct pollfd pfd = {
-                                .fd = listen_fd,
-                                .events = POLLIN,
-                        };
-
                         /* We only slept a very short time? If so, let's see if there are more sockets
                          * pending, and if so, let's ask our parent for more workers */
 
-                        if (poll(&pfd, 1, 0) < 0)
-                                return log_error_errno(errno, "Failed to test for POLLIN on listening socket: %m");
+                        r = fd_wait_for_event(listen_fd, POLLIN, 0);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to test for POLLIN on listening socket: %m");
 
-                        if (FLAGS_SET(pfd.revents, POLLIN)) {
+                        if (FLAGS_SET(r, POLLIN)) {
                                 pid_t parent;
 
                                 parent = getppid();
