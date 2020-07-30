@@ -71,6 +71,7 @@ CONFFLAGS = \
 	-Drepart=false \
 	-Duserdb=false \
 	-Dhomed=false \
+	-Dlibfido2=false \
 	-Dfdisk=false \
 	-Dpwquality=false \
 	-Dp11kit=false \
