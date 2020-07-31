@@ -1,4 +1,4 @@
-systemd (245.7-1ubuntu1) UNRELEASED; urgency=medium
+systemd (245.7-1ubuntu1) groovy; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
     - Dropped changes:
@@ -7,7 +7,7 @@ systemd (245.7-1ubuntu1) UNRELEASED; urgency=medium
       * networkd: if RA was implicit, do not await ndisc_configured
         (upstream's #15469 fixed the delay differently)
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 28 Jul 2020 14:17:05 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 31 Jul 2020 13:05:33 +0200
 
 systemd (245.7-1) unstable; urgency=medium
 
