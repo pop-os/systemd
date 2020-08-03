@@ -1,3 +1,9 @@
+systemd (246-2) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 03 Aug 2020 09:46:27 +0200
+
 systemd (246-1) experimental; urgency=medium
 
   * New upstream version 246
