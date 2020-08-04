@@ -74,12 +74,21 @@ typedef enum ServiceResult {
         _SERVICE_RESULT_INVALID = -1
 } ServiceResult;
 
+typedef enum ServiceTimeoutFailureMode {
+        SERVICE_TIMEOUT_TERMINATE,
+        SERVICE_TIMEOUT_ABORT,
+        SERVICE_TIMEOUT_KILL,
+        _SERVICE_TIMEOUT_FAILURE_MODE_MAX,
+        _SERVICE_TIMEOUT_FAILURE_MODE_INVALID = -1
+} ServiceTimeoutFailureMode;
+
 struct ServiceFDStore {
         Service *service;
 
         int fd;
         char *fdname;
         sd_event_source *event_source;
+        bool do_poll;
 
         LIST_FIELDS(ServiceFDStore, fd_store);
 };
@@ -102,6 +111,8 @@ struct Service {
         usec_t timeout_abort_usec;
         bool timeout_abort_set;
         usec_t runtime_max_usec;
+        ServiceTimeoutFailureMode timeout_start_failure_mode;
+        ServiceTimeoutFailureMode timeout_stop_failure_mode;
 
         dual_timestamp watchdog_timestamp;
         usec_t watchdog_usec;            /* the requested watchdog timeout in the unit file */
@@ -199,6 +210,11 @@ static inline usec_t service_timeout_abort_usec(Service *s) {
         return s->timeout_abort_set ? s->timeout_abort_usec : s->timeout_stop_usec;
 }
 
+static inline usec_t service_get_watchdog_usec(Service *s) {
+        assert(s);
+        return s->watchdog_override_enable ? s->watchdog_override_usec : s->watchdog_original_usec;
+}
+
 extern const UnitVTable service_vtable;
 
 int service_set_socket_fd(Service *s, int fd, struct Socket *socket, bool selinux_context_net);
@@ -221,6 +237,9 @@ NotifyState notify_state_from_string(const char *s) _pure_;
 
 const char* service_result_to_string(ServiceResult i) _const_;
 ServiceResult service_result_from_string(const char *s) _pure_;
+
+const char* service_timeout_failure_mode_to_string(ServiceTimeoutFailureMode i) _const_;
+ServiceTimeoutFailureMode service_timeout_failure_mode_from_string(const char *s) _pure_;
 
 DEFINE_CAST(SERVICE, Service);
 

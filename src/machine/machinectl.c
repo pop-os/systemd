@@ -16,9 +16,11 @@
 #include "alloc-util.h"
 #include "bus-common-errors.h"
 #include "bus-error.h"
+#include "bus-locator.h"
+#include "bus-map-properties.h"
+#include "bus-print-properties.h"
 #include "bus-unit-procs.h"
 #include "bus-unit-util.h"
-#include "bus-util.h"
 #include "bus-wait-for-jobs.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
@@ -108,14 +110,7 @@ static int call_get_os_release(sd_bus *bus, const char *method, const char *name
                 awaited_args++;
         query_res = newa0(const char *, awaited_args);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        method,
-                        &error,
-                        &reply, "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, method, &error, &reply, "s", name);
         if (r < 0)
                 return log_debug_errno(r, "Failed to call '%s()': %s", method, bus_error_message(&error, r));
 
@@ -179,14 +174,7 @@ static int call_get_addresses(
         assert(prefix);
         assert(prefix2);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.machine1",
-                               "/org/freedesktop/machine1",
-                               "org.freedesktop.machine1.Manager",
-                               "GetMachineAddresses",
-                               NULL,
-                               &reply,
-                               "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, "GetMachineAddresses", NULL, &reply, "s", name);
         if (r < 0)
                 return log_debug_errno(r, "Could not get addresses: %s", bus_error_message(&error, r));
 
@@ -249,7 +237,7 @@ static int show_table(Table *table, const char *word) {
         if (table_get_rows(table) > 1 || OUTPUT_MODE_IS_JSON(arg_output)) {
                 r = table_set_sort(table, (size_t) 0, (size_t) -1);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to sort table: %m");
+                        return table_log_sort_error(r);
 
                 table_set_header(table, arg_legend);
 
@@ -258,7 +246,7 @@ static int show_table(Table *table, const char *word) {
                 else
                         r = table_print(table, NULL);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to show table: %m");
+                        return table_log_print_error(r);
         }
 
         if (arg_legend) {
@@ -283,14 +271,7 @@ static int list_machines(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.machine1",
-                               "/org/freedesktop/machine1",
-                               "org.freedesktop.machine1.Manager",
-                               "ListMachines",
-                               &error,
-                               &reply,
-                               NULL);
+        r = bus_call_method(bus, bus_machine_mgr, "ListMachines", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Could not get machines: %s", bus_error_message(&error, r));
 
@@ -369,14 +350,7 @@ static int list_images(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.machine1",
-                               "/org/freedesktop/machine1",
-                               "org.freedesktop.machine1.Manager",
-                               "ListImages",
-                               &error,
-                               &reply,
-                               NULL);
+        r = bus_call_method(bus, bus_machine_mgr, "ListImages", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Could not get images: %s", bus_error_message(&error, r));
 
@@ -493,14 +467,7 @@ static int print_uid_shift(sd_bus *bus, const char *name) {
         assert(bus);
         assert(name);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.machine1",
-                               "/org/freedesktop/machine1",
-                               "org.freedesktop.machine1.Manager",
-                               "GetMachineUIDShift",
-                               &error,
-                               &reply,
-                               "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, "GetMachineUIDShift", &error, &reply, "s", name);
         if (r < 0)
                 return log_debug_errno(r, "Failed to query UID/GID shift: %s", bus_error_message(&error, r));
 
@@ -751,14 +718,7 @@ static int show_machine(int argc, char *argv[], void *userdata) {
         for (int i = 1; i < argc; i++) {
                 const char *path = NULL;
 
-                r = sd_bus_call_method(bus,
-                                       "org.freedesktop.machine1",
-                                       "/org/freedesktop/machine1",
-                                       "org.freedesktop.machine1.Manager",
-                                       "GetMachine",
-                                       &error,
-                                       &reply,
-                                       "s", argv[i]);
+                r = bus_call_method(bus, bus_machine_mgr, "GetMachine", &error, &reply, "s", argv[i]);
                 if (r < 0)
                         return log_error_errno(r, "Could not get path to machine: %s", bus_error_message(&error, -r));
 
@@ -780,13 +740,7 @@ static int print_image_hostname(sd_bus *bus, const char *name) {
         const char *hn;
         int r;
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "GetImageHostname",
-                        NULL, &reply, "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, "GetImageHostname", NULL, &reply, "s", name);
         if (r < 0)
                 return r;
 
@@ -807,13 +761,7 @@ static int print_image_machine_id(sd_bus *bus, const char *name) {
         size_t size;
         int r;
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "GetImageMachineID",
-                        NULL, &reply, "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, "GetImageMachineID", NULL, &reply, "s", name);
         if (r < 0)
                 return r;
 
@@ -834,13 +782,7 @@ static int print_image_machine_info(sd_bus *bus, const char *name) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         int r;
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "GetImageMachineInfo",
-                        NULL, &reply, "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, "GetImageMachineInfo", NULL, &reply, "s", name);
         if (r < 0)
                 return r;
 
@@ -1093,15 +1035,7 @@ static int show_image(int argc, char *argv[], void *userdata) {
         for (int i = 1; i < argc; i++) {
                 const char *path = NULL;
 
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.machine1",
-                                "/org/freedesktop/machine1",
-                                "org.freedesktop.machine1.Manager",
-                                "GetImage",
-                                &error,
-                                &reply,
-                                "s", argv[i]);
+                r = bus_call_method(bus, bus_machine_mgr, "GetImage", &error, &reply, "s", argv[i]);
                 if (r < 0)
                         return log_error_errno(r, "Could not get path to image: %s", bus_error_message(&error, -r));
 
@@ -1131,11 +1065,9 @@ static int kill_machine(int argc, char *argv[], void *userdata) {
                 arg_kill_who = "all";
 
         for (int i = 1; i < argc; i++) {
-                r = sd_bus_call_method(
+                r = bus_call_method(
                                 bus,
-                                "org.freedesktop.machine1",
-                                "/org/freedesktop/machine1",
-                                "org.freedesktop.machine1.Manager",
+                                bus_machine_mgr,
                                 "KillMachine",
                                 &error,
                                 NULL,
@@ -1171,15 +1103,7 @@ static int terminate_machine(int argc, char *argv[], void *userdata) {
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         for (int i = 1; i < argc; i++) {
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.machine1",
-                                "/org/freedesktop/machine1",
-                                "org.freedesktop.machine1.Manager",
-                                "TerminateMachine",
-                                &error,
-                                NULL,
-                                "s", argv[i]);
+                r = bus_call_method(bus, bus_machine_mgr, "TerminateMachine", &error, NULL, "s", argv[i]);
                 if (r < 0)
                         return log_error_errno(r, "Could not terminate machine: %s", bus_error_message(&error, -r));
         }
@@ -1213,12 +1137,10 @@ static int copy_files(int argc, char *argv[], void *userdata) {
                 host_path = abs_host_path;
         }
 
-        r = sd_bus_message_new_method_call(
+        r = bus_message_new_method_call(
                         bus,
                         &m,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
+                        bus_machine_mgr,
                         copy_from ? "CopyFromMachine" : "CopyToMachine");
         if (r < 0)
                 return bus_log_create_error(r);
@@ -1249,11 +1171,9 @@ static int bind_mount(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(
+        r = bus_call_method(
                         bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
+                        bus_machine_mgr,
                         "BindMountMachine",
                         &error,
                         NULL,
@@ -1425,15 +1345,7 @@ static int login_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to request machine removal match: %m");
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "OpenMachineLogin",
-                        &error,
-                        &reply,
-                        "s", machine);
+        r = bus_call_method(bus, bus_machine_mgr, "OpenMachineLogin", &error, &reply, "s", machine);
         if (r < 0)
                 return log_error_errno(r, "Failed to get login PTY: %s", bus_error_message(&error, -r));
 
@@ -1498,13 +1410,7 @@ static int shell_machine(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "Failed to request machine removal match: %m");
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "OpenMachineShell");
+        r = bus_message_new_method_call(bus, &m, bus_machine_mgr, "OpenMachineShell");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -1545,13 +1451,7 @@ static int remove_image(int argc, char *argv[], void *userdata) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
 
-                r = sd_bus_message_new_method_call(
-                                bus,
-                                &m,
-                                "org.freedesktop.machine1",
-                                "/org/freedesktop/machine1",
-                                "org.freedesktop.machine1.Manager",
-                                "RemoveImage");
+                r = bus_message_new_method_call(bus, &m, bus_machine_mgr, "RemoveImage");
                 if (r < 0)
                         return bus_log_create_error(r);
 
@@ -1577,11 +1477,9 @@ static int rename_image(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(
+        r = bus_call_method(
                         bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
+                        bus_machine_mgr,
                         "RenameImage",
                         &error,
                         NULL,
@@ -1602,13 +1500,7 @@ static int clone_image(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "CloneImage");
+        r = bus_message_new_method_call(bus, &m, bus_machine_mgr, "CloneImage");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -1641,15 +1533,7 @@ static int read_only_image(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "MarkImageReadOnly",
-                        &error,
-                        NULL,
-                        "sb", argv[1], b);
+        r = bus_call_method(bus, bus_machine_mgr, "MarkImageReadOnly", &error, NULL, "sb", argv[1], b);
         if (r < 0)
                 return log_error_errno(r, "Could not mark image read-only: %s", bus_error_message(&error, -r));
 
@@ -1663,15 +1547,7 @@ static int image_exists(sd_bus *bus, const char *name) {
         assert(bus);
         assert(name);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "GetImage",
-                        &error,
-                        NULL,
-                        "s", name);
+        r = bus_call_method(bus, bus_machine_mgr, "GetImage", &error, NULL, "s", name);
         if (r < 0) {
                 if (sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_IMAGE))
                         return 0;
@@ -1933,12 +1809,10 @@ static int transfer_image_common(sd_bus *bus, sd_bus_message *m) {
         if (r < 0)
                 return log_error_errno(r, "Failed to attach bus to event loop: %m");
 
-        r = sd_bus_match_signal_async(
+        r = bus_match_signal_async(
                         bus,
                         &slot_job_removed,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
+                        bus_import_mgr,
                         "TransferRemoved",
                         match_transfer_removed, NULL, &path);
         if (r < 0)
@@ -2022,13 +1896,7 @@ static int import_tar(int argc, char *argv[], void *userdata) {
                         return log_error_errno(errno, "Failed to open %s: %m", path);
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "ImportTar");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "ImportTar");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2089,13 +1957,7 @@ static int import_raw(int argc, char *argv[], void *userdata) {
                         return log_error_errno(errno, "Failed to open %s: %m", path);
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "ImportRaw");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "ImportRaw");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2150,13 +2012,7 @@ static int import_fs(int argc, char *argv[], void *userdata) {
                         return log_error_errno(errno, "Failed to open directory '%s': %m", path);
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "ImportFileSystem");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "ImportFileSystem");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2215,13 +2071,7 @@ static int export_tar(int argc, char *argv[], void *userdata) {
                         return log_error_errno(errno, "Failed to open %s: %m", path);
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "ExportTar");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "ExportTar");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2264,13 +2114,7 @@ static int export_raw(int argc, char *argv[], void *userdata) {
                         return log_error_errno(errno, "Failed to open %s: %m", path);
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "ExportRaw");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "ExportRaw");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2326,13 +2170,7 @@ static int pull_tar(int argc, char *argv[], void *userdata) {
                 }
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "PullTar");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "PullTar");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2389,13 +2227,7 @@ static int pull_raw(int argc, char *argv[], void *userdata) {
                 }
         }
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.import1",
-                        "/org/freedesktop/import1",
-                        "org.freedesktop.import1.Manager",
-                        "PullRaw");
+        r = bus_message_new_method_call(bus, &m, bus_import_mgr, "PullRaw");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -2438,14 +2270,7 @@ static int list_transfers(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        r = sd_bus_call_method(bus,
-                               "org.freedesktop.import1",
-                               "/org/freedesktop/import1",
-                               "org.freedesktop.import1.Manager",
-                               "ListTransfers",
-                               &error,
-                               &reply,
-                               NULL);
+        r = bus_call_method(bus, bus_import_mgr, "ListTransfers", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Could not get transfers: %s", bus_error_message(&error, -r));
 
@@ -2542,15 +2367,7 @@ static int cancel_transfer(int argc, char *argv[], void *userdata) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to parse transfer id: %s", argv[i]);
 
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.import1",
-                                "/org/freedesktop/import1",
-                                "org.freedesktop.import1.Manager",
-                                "CancelTransfer",
-                                &error,
-                                NULL,
-                                "u", id);
+                r = bus_call_method(bus, bus_import_mgr, "CancelTransfer", &error, NULL, "u", id);
                 if (r < 0)
                         return log_error_errno(r, "Could not cancel transfer: %s", bus_error_message(&error, -r));
         }
@@ -2577,26 +2394,10 @@ static int set_limit(int argc, char *argv[], void *userdata) {
         if (argc > 2)
                 /* With two arguments changes the quota limit of the
                  * specified image */
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.machine1",
-                                "/org/freedesktop/machine1",
-                                "org.freedesktop.machine1.Manager",
-                                "SetImageLimit",
-                                &error,
-                                NULL,
-                                "st", argv[1], limit);
+                r = bus_call_method(bus, bus_machine_mgr, "SetImageLimit", &error, NULL, "st", argv[1], limit);
         else
                 /* With one argument changes the pool quota limit */
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.machine1",
-                                "/org/freedesktop/machine1",
-                                "org.freedesktop.machine1.Manager",
-                                "SetPoolLimit",
-                                &error,
-                                NULL,
-                                "t", limit);
+                r = bus_call_method(bus, bus_machine_mgr, "SetPoolLimit", &error, NULL, "t", limit);
 
         if (r < 0)
                 return log_error_errno(r, "Could not set limit: %s", bus_error_message(&error, r));
@@ -2616,13 +2417,7 @@ static int clean_images(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_message_new_method_call(
-                        bus,
-                        &m,
-                        "org.freedesktop.machine1",
-                        "/org/freedesktop/machine1",
-                        "org.freedesktop.machine1.Manager",
-                        "CleanPool");
+        r = bus_message_new_method_call(bus, &m, bus_machine_mgr, "CleanPool");
         if (r < 0)
                 return bus_log_create_error(r);
 
@@ -3089,9 +2884,7 @@ static int run(int argc, char *argv[]) {
         int r;
 
         setlocale(LC_ALL, "");
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         /* The journal merging logic potentially needs a lot of fds. */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
@@ -3104,7 +2897,7 @@ static int run(int argc, char *argv[]) {
 
         r = bus_connect_transport(arg_transport, arg_host, false, &bus);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         (void) sd_bus_set_allow_interactive_authorization(bus, arg_ask_password);
 

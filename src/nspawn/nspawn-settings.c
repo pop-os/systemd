@@ -78,7 +78,7 @@ int settings_load(FILE *f, const char *path, Settings **ret) {
                          "Files\0",
                          config_item_perf_lookup, nspawn_gperf_lookup,
                          CONFIG_PARSE_WARN,
-                         s);
+                         s, NULL);
         if (r < 0)
                 return r;
 
@@ -129,8 +129,8 @@ Settings* settings_free(Settings *s) {
         free(s->pivot_root_new);
         free(s->pivot_root_old);
         free(s->working_directory);
-        strv_free(s->syscall_whitelist);
-        strv_free(s->syscall_blacklist);
+        strv_free(s->syscall_allow_list);
+        strv_free(s->syscall_deny_list);
         rlimit_free_all(s->rlimit);
         free(s->hostname);
         cpu_set_reset(&s->cpu_set);
@@ -292,35 +292,6 @@ int config_parse_capability(
                 return 0;
 
         *result |= u;
-        return 0;
-}
-
-int config_parse_id128(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        sd_id128_t t, *result = data;
-        int r;
-
-        assert(filename);
-        assert(lvalue);
-        assert(rvalue);
-
-        r = sd_id128_from_string(rvalue, &t);
-        if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse 128bit ID/UUID, ignoring: %s", rvalue);
-                return 0;
-        }
-
-        *result = t;
         return 0;
 }
 
@@ -718,9 +689,9 @@ int config_parse_syscall_filter(
                 }
 
                 if (negative)
-                        r = strv_extend(&settings->syscall_blacklist, word);
+                        r = strv_extend(&settings->syscall_deny_list, word);
                 else
-                        r = strv_extend(&settings->syscall_whitelist, word);
+                        r = strv_extend(&settings->syscall_allow_list, word);
                 if (r < 0)
                         return log_oom();
         }
@@ -821,8 +792,16 @@ static const char *const resolv_conf_mode_table[_RESOLV_CONF_MODE_MAX] = {
         [RESOLV_CONF_OFF] = "off",
         [RESOLV_CONF_COPY_HOST] = "copy-host",
         [RESOLV_CONF_COPY_STATIC] = "copy-static",
+        [RESOLV_CONF_COPY_UPLINK] = "copy-uplink",
+        [RESOLV_CONF_COPY_STUB] = "copy-stub",
+        [RESOLV_CONF_REPLACE_HOST] = "replace-host",
+        [RESOLV_CONF_REPLACE_STATIC] = "replace-static",
+        [RESOLV_CONF_REPLACE_UPLINK] = "replace-uplink",
+        [RESOLV_CONF_REPLACE_STUB] = "replace-stub",
         [RESOLV_CONF_BIND_HOST] = "bind-host",
         [RESOLV_CONF_BIND_STATIC] = "bind-static",
+        [RESOLV_CONF_BIND_UPLINK] = "bind-uplink",
+        [RESOLV_CONF_BIND_STUB] = "bind-stub",
         [RESOLV_CONF_DELETE] = "delete",
         [RESOLV_CONF_AUTO] = "auto",
 };

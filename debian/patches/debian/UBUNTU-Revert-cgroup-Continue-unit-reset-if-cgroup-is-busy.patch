@@ -11,10 +11,10 @@ Forwarded: https://github.com/systemd/systemd/issues/13629
  1 file changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index ddd3f40..c5ef41f 100644
+index 031b28a..992ce2d 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
-@@ -2447,13 +2447,10 @@ void unit_prune_cgroup(Unit *u) {
+@@ -2430,13 +2430,10 @@ void unit_prune_cgroup(Unit *u) {
          is_root_slice = unit_has_name(u, SPECIAL_ROOT_SLICE);
  
          r = cg_trim_everywhere(u->manager->cgroup_supported, u->cgroup_path, !is_root_slice);

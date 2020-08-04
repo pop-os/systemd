@@ -351,7 +351,7 @@ static int help(void) {
                "  -p --priority=RANGE        Show entries with the specified priority\n"
                "     --facility=FACILITY...  Show entries with the specified facilities\n"
                "  -g --grep=PATTERN          Show entries with MESSAGE matching PATTERN\n"
-               "     --case-sensitive[=BOOL] Force case sensitive or insenstive matching\n"
+               "     --case-sensitive[=BOOL] Force case sensitive or insensitive matching\n"
                "  -e --pager-end             Immediately jump to the end in the pager\n"
                "  -f --follow                Follow the journal\n"
                "  -n --lines[=INTEGER]       Number of journal entries to show\n"
@@ -875,12 +875,7 @@ static int parse_argv(int argc, char *argv[]) {
                                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                                "Bad --facility= argument \"%s\".", fac);
 
-                                r = set_ensure_allocated(&arg_facilities, NULL);
-                                if (r < 0)
-                                        return log_oom();
-
-                                r = set_put(arg_facilities, INT_TO_PTR(num));
-                                if (r < 0)
+                                if (set_ensure_put(&arg_facilities, NULL, INT_TO_PTR(num)) < 0)
                                         return log_oom();
                         }
 
@@ -1783,7 +1778,6 @@ static int setup_keys(void) {
         int fd = -1, r;
         sd_id128_t machine, boot;
         char *p = NULL, *k = NULL;
-        struct FSSHeader h;
         uint64_t n;
         struct stat st;
 
@@ -1873,15 +1867,17 @@ static int setup_keys(void) {
         if (r < 0)
                 log_warning_errno(r, "Failed to set file attributes: %m");
 
-        zero(h);
+        struct FSSHeader h = {
+                .machine_id = machine,
+                .boot_id = boot,
+                .header_size = htole64(sizeof(h)),
+                .start_usec = htole64(n * arg_interval),
+                .interval_usec = htole64(arg_interval),
+                .fsprg_secpar = htole16(FSPRG_RECOMMENDED_SECPAR),
+                .fsprg_state_size = htole64(state_size),
+        };
+
         memcpy(h.signature, "KSHHRHLP", 8);
-        h.machine_id = machine;
-        h.boot_id = boot;
-        h.header_size = htole64(sizeof(h));
-        h.start_usec = htole64(n * arg_interval);
-        h.interval_usec = htole64(arg_interval);
-        h.fsprg_secpar = htole16(FSPRG_RECOMMENDED_SECPAR);
-        h.fsprg_state_size = htole64(state_size);
 
         r = loop_write(fd, &h, sizeof(h), false);
         if (r < 0) {
@@ -2092,9 +2088,12 @@ static int wait_for_change(sd_journal *j, int poll_fd) {
                 return log_error_errno(errno, "Couldn't wait for journal event: %m");
         }
 
-        if (pollfds[1].revents & (POLLHUP|POLLERR)) /* STDOUT has been closed? */
+        if (pollfds[1].revents & (POLLHUP|POLLERR|POLLNVAL)) /* STDOUT has been closed? */
                 return log_debug_errno(SYNTHETIC_ERRNO(ECANCELED),
                                        "Standard output has been closed.");
+
+        if (pollfds[0].revents & POLLNVAL)
+                return log_debug_errno(SYNTHETIC_ERRNO(EBADF), "Change fd closed?");
 
         r = sd_journal_process(j);
         if (r < 0)
@@ -2111,9 +2110,7 @@ int main(int argc, char *argv[]) {
         int n_shown = 0, r, poll_fd = -1;
 
         setlocale(LC_ALL, "");
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         /* Increase max number of open files if we can, we might needs this when browsing journal files, which might be
          * split up into many files. */

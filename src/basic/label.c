@@ -10,11 +10,11 @@
 #include "selinux-util.h"
 #include "smack-util.h"
 
-int label_fix(const char *path, LabelFixFlags flags) {
+int label_fix_container(const char *path, const char *inside_path, LabelFixFlags flags) {
         int r, q;
 
-        r = mac_selinux_fix(path, flags);
-        q = mac_smack_fix(path, flags);
+        r = mac_selinux_fix_container(path, inside_path, flags);
+        q = mac_smack_fix_container(path, inside_path, flags);
 
         if (r < 0)
                 return r;
@@ -43,6 +43,26 @@ int symlink_label(const char *old_path, const char *new_path) {
                 return r;
 
         return mac_smack_fix(new_path, 0);
+}
+
+int mknod_label(const char *pathname, mode_t mode, dev_t dev) {
+        int r;
+
+        assert(pathname);
+
+        r = mac_selinux_create_file_prepare(pathname, mode);
+        if (r < 0)
+                return r;
+
+        if (mknod(pathname, mode, dev) < 0)
+                r = -errno;
+
+        mac_selinux_create_file_clear();
+
+        if (r < 0)
+                return r;
+
+        return mac_smack_fix(pathname, 0);
 }
 
 int btrfs_subvol_make_label(const char *path) {

@@ -1268,21 +1268,14 @@ int server_process_datagram(
         int *fds = NULL, v = 0;
         size_t n_fds = 0;
 
-        union {
-                struct cmsghdr cmsghdr;
-
-                /* We use NAME_MAX space for the SELinux label
-                 * here. The kernel currently enforces no
-                 * limit, but according to suggestions from
-                 * the SELinux people this will change and it
-                 * will probably be identical to NAME_MAX. For
-                 * now we use that, but this should be updated
-                 * one day when the final limit is known. */
-                uint8_t buf[CMSG_SPACE(sizeof(struct ucred)) +
-                            CMSG_SPACE(sizeof(struct timeval)) +
-                            CMSG_SPACE(sizeof(int)) + /* fd */
-                            CMSG_SPACE(NAME_MAX)]; /* selinux label */
-        } control = {};
+        /* We use NAME_MAX space for the SELinux label here. The kernel currently enforces no limit, but
+         * according to suggestions from the SELinux people this will change and it will probably be
+         * identical to NAME_MAX. For now we use that, but this should be updated one day when the final
+         * limit is known. */
+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred)) +
+                         CMSG_SPACE(sizeof(struct timeval)) +
+                         CMSG_SPACE(sizeof(int)) + /* fd */
+                         CMSG_SPACE(NAME_MAX) /* selinux label */) control;
 
         union sockaddr_union sa = {};
 
@@ -1640,23 +1633,24 @@ static int server_parse_config_file(Server *s) {
                 /* If we are running in namespace mode, load the namespace specific configuration file, and nothing else */
                 namespaced = strjoina(PKGSYSCONFDIR "/journald@", s->namespace, ".conf");
 
-                r = config_parse(
-                                NULL,
-                                namespaced, NULL,
-                                "Journal\0",
-                                config_item_perf_lookup, journald_gperf_lookup,
-                                CONFIG_PARSE_WARN, s);
+                r = config_parse(NULL,
+                                 namespaced, NULL,
+                                 "Journal\0",
+                                 config_item_perf_lookup, journald_gperf_lookup,
+                                 CONFIG_PARSE_WARN, s,
+                                 NULL);
                 if (r < 0)
                         return r;
 
                 return 0;
         }
 
-        return config_parse_many_nulstr(PKGSYSCONFDIR "/journald.conf",
-                                        CONF_PATHS_NULSTR("systemd/journald.conf.d"),
-                                        "Journal\0",
-                                        config_item_perf_lookup, journald_gperf_lookup,
-                                        CONFIG_PARSE_WARN, s);
+        return config_parse_many_nulstr(
+                        PKGSYSCONFDIR "/journald.conf",
+                        CONF_PATHS_NULSTR("systemd/journald.conf.d"),
+                        "Journal\0",
+                        config_item_perf_lookup, journald_gperf_lookup,
+                        CONFIG_PARSE_WARN, s, NULL);
 }
 
 static int server_dispatch_sync(sd_event_source *es, usec_t t, void *userdata) {
@@ -1752,7 +1746,7 @@ static int server_open_hostname(Server *s) {
 
         r = sd_event_source_set_priority(s->hostname_event_source, SD_EVENT_PRIORITY_IMPORTANT-10);
         if (r < 0)
-                return log_error_errno(r, "Failed to adjust priority of host name event source: %m");
+                return log_error_errno(r, "Failed to adjust priority of hostname event source: %m");
 
         return 0;
 }
@@ -1956,7 +1950,7 @@ static int vl_method_synchronize(Varlink *link, JsonVariant *parameters, Varlink
         if (r < 0)
                 return log_error_errno(r, "Failed to set event source destroy callback: %m");
 
-        varlink_ref(link); /* The varlink object is now left to the destroy callack to unref */
+        varlink_ref(link); /* The varlink object is now left to the destroy callback to unref */
 
         r = sd_event_source_set_priority(event_source, SD_EVENT_PRIORITY_NORMAL+15);
         if (r < 0)

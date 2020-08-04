@@ -17,8 +17,9 @@
 #include "analyze-verify.h"
 #include "build.h"
 #include "bus-error.h"
+#include "bus-locator.h"
+#include "bus-map-properties.h"
 #include "bus-unit-util.h"
-#include "bus-util.h"
 #include "calendarspec.h"
 #include "conf-files.h"
 #include "copy.h"
@@ -349,14 +350,7 @@ static int acquire_time_data(sd_bus *bus, struct unit_times **out) {
         if (r < 0)
                 return r;
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "ListUnits",
-                        &error, &reply,
-                        NULL);
+        r = bus_call_method(bus, bus_systemd_mgr, "ListUnits", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to list units: %s", bus_error_message(&error, r));
 
@@ -633,7 +627,7 @@ static int analyze_plot(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, &use_full_bus);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         n = acquire_boot_times(bus, &boot);
         if (n < 0)
@@ -1032,7 +1026,7 @@ static int analyze_critical_chain(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         n = acquire_time_data(bus, &times);
         if (n <= 0)
@@ -1075,7 +1069,7 @@ static int analyze_blame(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         n = acquire_time_data(bus, &times);
         if (n <= 0)
@@ -1132,7 +1126,7 @@ static int analyze_time(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         r = pretty_boot_time(bus, &buf);
         if (r < 0)
@@ -1270,7 +1264,7 @@ static int dot(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         r = expand_patterns(bus, strv_skip(argv, 1), &expanded_patterns);
         if (r < 0)
@@ -1284,15 +1278,7 @@ static int dot(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return r;
 
-        r = sd_bus_call_method(
-                        bus,
-                       "org.freedesktop.systemd1",
-                       "/org/freedesktop/systemd1",
-                       "org.freedesktop.systemd1.Manager",
-                       "ListUnits",
-                       &error,
-                       &reply,
-                       "");
+        r = bus_call_method(bus, bus_systemd_mgr, "ListUnits", &error, &reply, "");
         if (r < 0)
                 log_error_errno(r, "Failed to list units: %s", bus_error_message(&error, r));
 
@@ -1334,15 +1320,7 @@ static int dump_fallback(sd_bus *bus) {
 
         assert(bus);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "Dump",
-                        &error,
-                        &reply,
-                        NULL);
+        r = bus_call_method(bus, bus_systemd_mgr, "Dump", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to issue method call Dump: %s", bus_error_message(&error, r));
 
@@ -1363,22 +1341,14 @@ static int dump(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         (void) pager_open(arg_pager_flags);
 
         if (!sd_bus_can_send(bus, SD_BUS_TYPE_UNIX_FD))
                 return dump_fallback(bus);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "DumpByFileDescriptor",
-                        &error,
-                        &reply,
-                        NULL);
+        r = bus_call_method(bus, bus_systemd_mgr, "DumpByFileDescriptor", &error, &reply, NULL);
         if (r < 0) {
                 /* fall back to Dump if DumpByFileDescriptor is not supported */
                 if (!IN_SET(r, -EACCES, -EBADR))
@@ -1442,17 +1412,9 @@ static int set_log_level(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
-        r = sd_bus_set_property(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "LogLevel",
-                        &error,
-                        "s",
-                        argv[1]);
+        r = bus_set_property(bus, bus_systemd_mgr, "LogLevel", &error, "s", argv[1]);
         if (r < 0)
                 return log_error_errno(r, "Failed to issue method call: %s", bus_error_message(&error, r));
 
@@ -1467,16 +1429,9 @@ static int get_log_level(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
-        r = sd_bus_get_property_string(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "LogLevel",
-                        &error,
-                        &level);
+        r = bus_get_property_string(bus, bus_systemd_mgr, "LogLevel", &error, &level);
         if (r < 0)
                 return log_error_errno(r, "Failed to get log level: %s", bus_error_message(&error, r));
 
@@ -1498,17 +1453,9 @@ static int set_log_target(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
-        r = sd_bus_set_property(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "LogTarget",
-                        &error,
-                        "s",
-                        argv[1]);
+        r = bus_set_property(bus, bus_systemd_mgr, "LogTarget", &error, "s", argv[1]);
         if (r < 0)
                 return log_error_errno(r, "Failed to issue method call: %s", bus_error_message(&error, r));
 
@@ -1523,16 +1470,9 @@ static int get_log_target(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
-        r = sd_bus_get_property_string(
-                        bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "LogTarget",
-                        &error,
-                        &target);
+        r = bus_get_property_string(bus, bus_systemd_mgr, "LogTarget", &error, &target);
         if (r < 0)
                 return log_error_errno(r, "Failed to get log target: %s", bus_error_message(&error, r));
 
@@ -1655,7 +1595,7 @@ static int dump_exit_status(int argc, char *argv[], void *userdata) {
 #if HAVE_SECCOMP
 
 static int load_kernel_syscalls(Set **ret) {
-        _cleanup_(set_free_freep) Set *syscalls = NULL;
+        _cleanup_set_free_ Set *syscalls = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -1691,11 +1631,7 @@ static int load_kernel_syscalls(Set **ret) {
                 if (STR_IN_SET(e, "newuname", "newfstat", "newstat", "newlstat", "sysctl"))
                         continue;
 
-                r = set_ensure_allocated(&syscalls, &string_hash_ops);
-                if (r < 0)
-                        return log_oom();
-
-                r = set_put_strdup(syscalls, e);
+                r = set_put_strdup(&syscalls, e);
                 if (r < 0)
                         return log_error_errno(r, "Failed to add system call to list: %m");
         }
@@ -1735,7 +1671,7 @@ static int dump_syscall_filters(int argc, char *argv[], void *userdata) {
         (void) pager_open(arg_pager_flags);
 
         if (strv_isempty(strv_skip(argv, 1))) {
-                _cleanup_(set_free_freep) Set *kernel = NULL;
+                _cleanup_set_free_ Set *kernel = NULL;
                 int i, k;
 
                 k = load_kernel_syscalls(&kernel);
@@ -2117,19 +2053,11 @@ static int service_watchdogs(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         if (argc == 1) {
                 /* get ServiceWatchdogs */
-                r = sd_bus_get_property_trivial(
-                                bus,
-                                "org.freedesktop.systemd1",
-                                "/org/freedesktop/systemd1",
-                                "org.freedesktop.systemd1.Manager",
-                                "ServiceWatchdogs",
-                                &error,
-                                'b',
-                                &b);
+                r = bus_get_property_trivial(bus, bus_systemd_mgr, "ServiceWatchdogs", &error, 'b', &b);
                 if (r < 0)
                         return log_error_errno(r, "Failed to get service-watchdog state: %s", bus_error_message(&error, r));
 
@@ -2141,15 +2069,7 @@ static int service_watchdogs(int argc, char *argv[], void *userdata) {
                 if (b < 0)
                         return log_error_errno(b, "Failed to parse service-watchdogs argument: %m");
 
-                r = sd_bus_set_property(
-                                bus,
-                                "org.freedesktop.systemd1",
-                                "/org/freedesktop/systemd1",
-                                "org.freedesktop.systemd1.Manager",
-                                "ServiceWatchdogs",
-                                &error,
-                                "b",
-                                b);
+                r = bus_set_property(bus, bus_systemd_mgr, "ServiceWatchdogs", &error, "b", b);
                 if (r < 0)
                         return log_error_errno(r, "Failed to set service-watchdog state: %s", bus_error_message(&error, r));
         }
@@ -2171,7 +2091,7 @@ static int do_security(int argc, char *argv[], void *userdata) {
 
         r = acquire_bus(&bus, NULL);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         (void) pager_open(arg_pager_flags);
 
@@ -2457,9 +2377,7 @@ static int run(int argc, char *argv[]) {
         setlocale(LC_ALL, "");
         setlocale(LC_NUMERIC, "C"); /* we want to format/parse floats in C style */
 
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

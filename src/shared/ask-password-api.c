@@ -27,6 +27,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "io-util.h"
+#include "locale-util.h"
 #include "log.h"
 #include "macro.h"
 #include "memory-util.h"
@@ -134,12 +135,12 @@ static int add_to_keyring(const char *keyname, AskPasswordFlags flags, char **pa
         if (keyctl(KEYCTL_SET_TIMEOUT,
                    (unsigned long) serial,
                    (unsigned long) DIV_ROUND_UP(KEYRING_TIMEOUT_USEC, USEC_PER_SEC), 0, 0) < 0)
-                log_debug_errno(errno, "Failed to adjust timeout: %m");
+                log_debug_errno(errno, "Failed to adjust kernel keyring key timeout: %m");
 
         /* Tell everyone to check the keyring */
         (void) touch("/run/systemd/ask-password");
 
-        log_debug("Added key to keyring as %" PRIi32 ".", serial);
+        log_debug("Added key to kernel keyring as %" PRIi32 ".", serial);
 
         return 1;
 }
@@ -151,7 +152,7 @@ static int add_to_keyring_and_log(const char *keyname, AskPasswordFlags flags, c
 
         r = add_to_keyring(keyname, flags, passwords);
         if (r < 0)
-                return log_debug_errno(r, "Failed to add password to keyring: %m");
+                return log_debug_errno(r, "Failed to add password to kernel keyring: %m");
 
         return 0;
 }
@@ -304,6 +305,12 @@ int ask_password_plymouth(
                         goto finish;
                 }
 
+                if (pollfd[POLL_SOCKET].revents & POLLNVAL ||
+                    (notify >= 0 && pollfd[POLL_INOTIFY].revents & POLLNVAL)) {
+                        r = -EBADF;
+                        goto finish;
+                }
+
                 if (notify >= 0 && pollfd[POLL_INOTIFY].revents != 0)
                         (void) flush_fd(notify);
 
@@ -430,6 +437,9 @@ int ask_password_tty(
         if (!message)
                 message = "Password:";
 
+        if (emoji_enabled())
+                message = strjoina(special_glyph(SPECIAL_GLYPH_LOCK_AND_KEY), " ", message);
+
         if (flag_file || ((flags & ASK_PASSWORD_ACCEPT_CACHED) && keyname)) {
                 notify = inotify_init1(IN_CLOEXEC|IN_NONBLOCK);
                 if (notify < 0)
@@ -534,6 +544,12 @@ int ask_password_tty(
                         goto finish;
                 } else if (k == 0) {
                         r = -ETIME;
+                        goto finish;
+                }
+
+                if ((pollfd[POLL_TTY].revents & POLLNVAL) ||
+                    (notify >= 0 && (pollfd[POLL_INOTIFY].revents & POLLNVAL))) {
+                        r = -EBADF;
                         goto finish;
                 }
 
@@ -791,13 +807,11 @@ int ask_password_agent(
 
         (void) fchmod(fd, 0644);
 
-        f = fdopen(fd, "w");
+        f = take_fdopen(&fd, "w");
         if (!f) {
                 r = -errno;
                 goto finish;
         }
-
-        fd = -1;
 
         signal_fd = signalfd(-1, &mask, SFD_NONBLOCK|SFD_CLOEXEC);
         if (signal_fd < 0) {
@@ -857,14 +871,10 @@ int ask_password_agent(
         pollfd[FD_INOTIFY].events = POLLIN;
 
         for (;;) {
+                CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred))) control;
                 char passphrase[LINE_MAX+1];
-                struct msghdr msghdr;
                 struct iovec iovec;
                 struct ucred *ucred;
-                union {
-                        struct cmsghdr cmsghdr;
-                        uint8_t buf[CMSG_SPACE(sizeof(struct ucred))];
-                } control;
                 ssize_t n;
                 int k;
                 usec_t t;
@@ -887,6 +897,13 @@ int ask_password_agent(
 
                 if (k <= 0) {
                         r = -ETIME;
+                        goto finish;
+                }
+
+                if (pollfd[FD_SOCKET].revents & POLLNVAL ||
+                    pollfd[FD_SIGNAL].revents & POLLNVAL ||
+                    (notify >= 0 && pollfd[FD_INOTIFY].revents & POLLNVAL)) {
+                        r = -EBADF;
                         goto finish;
                 }
 
@@ -916,12 +933,12 @@ int ask_password_agent(
 
                 iovec = IOVEC_MAKE(passphrase, sizeof(passphrase));
 
-                zero(control);
-                zero(msghdr);
-                msghdr.msg_iov = &iovec;
-                msghdr.msg_iovlen = 1;
-                msghdr.msg_control = &control;
-                msghdr.msg_controllen = sizeof(control);
+                struct msghdr msghdr = {
+                        .msg_iov = &iovec,
+                        .msg_iovlen = 1,
+                        .msg_control = &control,
+                        .msg_controllen = sizeof(control),
+                };
 
                 n = recvmsg_safe(socket_fd, &msghdr, 0);
                 if (IN_SET(n, -EAGAIN, -EINTR))
@@ -938,15 +955,12 @@ int ask_password_agent(
                         continue;
                 }
 
-                if (msghdr.msg_controllen < CMSG_LEN(sizeof(struct ucred)) ||
-                    control.cmsghdr.cmsg_level != SOL_SOCKET ||
-                    control.cmsghdr.cmsg_type != SCM_CREDENTIALS ||
-                    control.cmsghdr.cmsg_len != CMSG_LEN(sizeof(struct ucred))) {
+                ucred = CMSG_FIND_DATA(&msghdr, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
+                if (!ucred) {
                         log_debug("Received message without credentials. Ignoring.");
                         continue;
                 }
 
-                ucred = (struct ucred*) CMSG_DATA(&control.cmsghdr);
                 if (ucred->uid != 0) {
                         log_debug("Got request from unprivileged user. Ignoring.");
                         continue;

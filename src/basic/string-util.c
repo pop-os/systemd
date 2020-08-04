@@ -19,18 +19,19 @@
 #include "util.h"
 
 int strcmp_ptr(const char *a, const char *b) {
-
         /* Like strcmp(), but tries to make sense of NULL pointers */
+
         if (a && b)
                 return strcmp(a, b);
+        return CMP(a, b); /* Direct comparison of pointers, one of which is NULL */
+}
 
-        if (!a && b)
-                return -1;
+int strcasecmp_ptr(const char *a, const char *b) {
+        /* Like strcasecmp(), but tries to make sense of NULL pointers */
 
-        if (a && !b)
-                return 1;
-
-        return 0;
+        if (a && b)
+                return strcasecmp(a, b);
+        return CMP(a, b); /* Direct comparison of pointers, one of which is NULL */
 }
 
 char* endswith(const char *s, const char *postfix) {
@@ -126,45 +127,58 @@ static size_t strcspn_escaped(const char *s, const char *reject) {
 }
 
 /* Split a string into words. */
-const char* split(const char **state, size_t *l, const char *separator, SplitFlags flags) {
+const char* split(
+                const char **state,
+                size_t *l,
+                const char *separator,
+                SplitFlags flags) {
+
         const char *current;
+
+        assert(state);
+        assert(l);
+
+        if (!separator)
+                separator = WHITESPACE;
 
         current = *state;
 
-        if (!*current) {
-                assert(**state == '\0');
+        if (*current == '\0') /* already at the end? */
                 return NULL;
-        }
 
-        current += strspn(current, separator);
-        if (!*current) {
+        current += strspn(current, separator); /* skip leading separators */
+        if (*current == '\0') { /* at the end now? */
                 *state = current;
                 return NULL;
         }
 
-        if (flags & SPLIT_QUOTES && strchr("\'\"", *current)) {
-                char quotechars[2] = {*current, '\0'};
+        if (FLAGS_SET(flags, SPLIT_QUOTES)) {
 
-                *l = strcspn_escaped(current + 1, quotechars);
-                if (current[*l + 1] == '\0' || current[*l + 1] != quotechars[0] ||
-                    (current[*l + 2] && !strchr(separator, current[*l + 2]))) {
-                        /* right quote missing or garbage at the end */
-                        if (flags & SPLIT_RELAX) {
-                                *state = current + *l + 1 + (current[*l + 1] != '\0');
-                                return current + 1;
+                if (strchr(QUOTES, *current)) {
+                        /* We are looking at a quote */
+                        *l = strcspn_escaped(current + 1, CHAR_TO_STR(*current));
+                        if (current[*l + 1] != *current ||
+                            (current[*l + 2] != 0 && !strchr(separator, current[*l + 2]))) {
+                                /* right quote missing or garbage at the end */
+                                if (FLAGS_SET(flags, SPLIT_RELAX)) {
+                                        *state = current + *l + 1 + (current[*l + 1] != '\0');
+                                        return current + 1;
+                                }
+                                *state = current;
+                                return NULL;
                         }
-                        *state = current;
-                        return NULL;
+                        *state = current++ + *l + 2;
+
+                } else {
+                        /* We are looking at a something that is not a quote */
+                        *l = strcspn_escaped(current, separator);
+                        if (current[*l] && !strchr(separator, current[*l]) && !FLAGS_SET(flags, SPLIT_RELAX)) {
+                                /* unfinished escape */
+                                *state = current;
+                                return NULL;
+                        }
+                        *state = current + *l;
                 }
-                *state = current++ + *l + 2;
-        } else if (flags & SPLIT_QUOTES) {
-                *l = strcspn_escaped(current, separator);
-                if (current[*l] && !strchr(separator, current[*l]) && !(flags & SPLIT_RELAX)) {
-                        /* unfinished escape */
-                        *state = current;
-                        return NULL;
-                }
-                *state = current + *l;
         } else {
                 *l = strcspn(current, separator);
                 *state = current + *l;

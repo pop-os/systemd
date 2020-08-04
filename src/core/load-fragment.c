@@ -13,6 +13,8 @@
 #include <sched.h>
 #include <sys/resource.h>
 
+#include "sd-messages.h"
+
 #include "af-list.h"
 #include "alloc-util.h"
 #include "all-units.h"
@@ -29,6 +31,7 @@
 #include "errno-list.h"
 #include "escape.h"
 #include "fd-util.h"
+#include "fileio.h"
 #include "fs-util.h"
 #include "hexdecoct.h"
 #include "io-util.h"
@@ -117,13 +120,13 @@ DEFINE_CONFIG_PARSE_ENUM(config_parse_device_policy, cgroup_device_policy, CGrou
 DEFINE_CONFIG_PARSE_ENUM(config_parse_exec_keyring_mode, exec_keyring_mode, ExecKeyringMode, "Failed to parse keyring mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_exec_utmp_mode, exec_utmp_mode, ExecUtmpMode, "Failed to parse utmp mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_job_mode, job_mode, JobMode, "Failed to parse job mode");
-DEFINE_CONFIG_PARSE_ENUM(config_parse_kill_mode, kill_mode, KillMode, "Failed to parse kill mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_notify_access, notify_access, NotifyAccess, "Failed to parse notify access specifier");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_protect_home, protect_home, ProtectHome, "Failed to parse protect home value");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_protect_system, protect_system, ProtectSystem, "Failed to parse protect system value");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_runtime_preserve_mode, exec_preserve_mode, ExecPreserveMode, "Failed to parse runtime directory preserve mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_type, service_type, ServiceType, "Failed to parse service type");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_service_restart, service_restart, ServiceRestart, "Failed to parse service restart specifier");
+DEFINE_CONFIG_PARSE_ENUM(config_parse_service_timeout_failure_mode, service_timeout_failure_mode, ServiceTimeoutFailureMode, "Failed to parse timeout failure mode");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_socket_bind, socket_address_bind_ipv6_only_or_bool, SocketAddressBindIPv6Only, "Failed to parse bind IPv6 only value");
 DEFINE_CONFIG_PARSE_ENUM(config_parse_oom_policy, oom_policy, OOMPolicy, "Failed to parse OOM policy");
 DEFINE_CONFIG_PARSE_ENUM_WITH_DEFAULT(config_parse_ip_tos, ip_tos, int, -1, "Failed to parse IP TOS value");
@@ -589,6 +592,87 @@ int config_parse_exec_oom_score_adjust(
         c->oom_score_adjust = oa;
         c->oom_score_adjust_set = true;
 
+        return 0;
+}
+
+int config_parse_exec_coredump_filter(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        ExecContext *c = data;
+        int r;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if (isempty(rvalue)) {
+                c->coredump_filter = 0;
+                c->coredump_filter_set = false;
+                return 0;
+        }
+
+        uint64_t f;
+        r = coredump_filter_mask_from_string(rvalue, &f);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse the CoredumpFilter=%s, ignoring: %m", rvalue);
+                return 0;
+        }
+
+        c->coredump_filter |= f;
+        c->oom_score_adjust_set = true;
+        return 0;
+}
+
+int config_parse_kill_mode(
+                const char* unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        KillMode *k = data, m;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if (isempty(rvalue)) {
+                *k = KILL_CONTROL_GROUP;
+                return 0;
+        }
+
+        m = kill_mode_from_string(rvalue);
+        if (m < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Failed to parse kill mode specification, ignoring: %s", rvalue);
+                return 0;
+        }
+
+        if (m == KILL_NONE)
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Unit configured to use KillMode=none. "
+                           "This is unsafe, as it disables systemd's process lifecycle management for the service. "
+                           "Please update your service to use a safer KillMode=, such as 'mixed' or 'control-group'. "
+                           "Support for KillMode=none is deprecated and will eventually be removed.");
+
+        *k = m;
         return 0;
 }
 
@@ -1060,6 +1144,7 @@ int config_parse_exec_output(
         const char *n;
         ExecContext *c = data;
         const Unit *u = userdata;
+        bool obsolete = false;
         ExecOutput eo;
         int r;
 
@@ -1083,6 +1168,14 @@ int config_parse_exec_output(
                 }
 
                 eo = EXEC_OUTPUT_NAMED_FD;
+
+        } else if (streq(rvalue, "syslog")) {
+                eo = EXEC_OUTPUT_JOURNAL;
+                obsolete = true;
+
+        } else if (streq(rvalue, "syslog+console")) {
+                eo = EXEC_OUTPUT_JOURNAL_AND_CONSOLE;
+                obsolete = true;
 
         } else if ((n = startswith(rvalue, "file:"))) {
 
@@ -1114,6 +1207,11 @@ int config_parse_exec_output(
                         return 0;
                 }
         }
+
+        if (obsolete)
+                log_syntax(unit, LOG_NOTICE, filename, line, 0,
+                           "Standard output type %s is obsolete, automatically updating to %s. Please update your unit file, and consider removing the setting altogether.",
+                           rvalue, exec_output_to_string(eo));
 
         if (streq(lvalue, "StandardOutput")) {
                 if (eo == EXEC_OUTPUT_NAMED_FD)
@@ -1314,6 +1412,124 @@ int config_parse_exec_cpu_sched_prio(const char *unit,
 
         c->cpu_sched_priority = i;
         c->cpu_sched_set = true;
+
+        return 0;
+}
+
+int config_parse_exec_root_hash(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_free_ void *roothash_decoded = NULL;
+        ExecContext *c = data;
+        size_t roothash_decoded_size = 0;
+        int r;
+
+        assert(data);
+        assert(filename);
+        assert(line);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                /* Reset if the empty string is assigned */
+                c->root_hash_path = mfree(c->root_hash_path);
+                c->root_hash = mfree(c->root_hash);
+                c->root_hash_size = 0;
+                return 0;
+        }
+
+        if (path_is_absolute(rvalue)) {
+                /* We have the path to a roothash to load and decode, eg: RootHash=/foo/bar.roothash */
+                _cleanup_free_ char *p = NULL;
+
+                p = strdup(rvalue);
+                if (!p)
+                        return -ENOMEM;
+
+                free_and_replace(c->root_hash_path, p);
+                c->root_hash = mfree(c->root_hash);
+                c->root_hash_size = 0;
+                return 0;
+        }
+
+        /* We have a roothash to decode, eg: RootHash=012345789abcdef */
+        r = unhexmem(rvalue, strlen(rvalue), &roothash_decoded, &roothash_decoded_size);
+        if (r < 0)
+                return log_syntax(unit, LOG_ERR, filename, line, r, "Failed to decode RootHash=, ignoring: %s", rvalue);
+        if (roothash_decoded_size < sizeof(sd_id128_t))
+                return log_syntax(unit, LOG_ERR, filename, line, SYNTHETIC_ERRNO(EINVAL), "RootHash= is too short, ignoring: %s", rvalue);
+
+        free_and_replace(c->root_hash, roothash_decoded);
+        c->root_hash_size = roothash_decoded_size;
+        c->root_hash_path = mfree(c->root_hash_path);
+
+        return 0;
+}
+
+int config_parse_exec_root_hash_sig(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        _cleanup_free_ void *roothash_sig_decoded = NULL;
+        char *value;
+        ExecContext *c = data;
+        size_t roothash_sig_decoded_size = 0;
+        int r;
+
+        assert(data);
+        assert(filename);
+        assert(line);
+        assert(rvalue);
+
+        if (isempty(rvalue)) {
+                /* Reset if the empty string is assigned */
+                c->root_hash_sig_path = mfree(c->root_hash_sig_path);
+                c->root_hash_sig = mfree(c->root_hash_sig);
+                c->root_hash_sig_size = 0;
+                return 0;
+        }
+
+        if (path_is_absolute(rvalue)) {
+                /* We have the path to a roothash signature to load and decode, eg: RootHashSignature=/foo/bar.roothash.p7s */
+                _cleanup_free_ char *p = NULL;
+
+                p = strdup(rvalue);
+                if (!p)
+                        return -ENOMEM;
+
+                free_and_replace(c->root_hash_sig_path, p);
+                c->root_hash_sig = mfree(c->root_hash_sig);
+                c->root_hash_sig_size = 0;
+                return 0;
+        }
+
+        if (!(value = startswith(rvalue, "base64:")))
+                return log_syntax(unit, LOG_ERR, filename, line, SYNTHETIC_ERRNO(EINVAL), "Failed to decode RootHashSignature=, not a path but doesn't start with 'base64:', ignoring: %s", rvalue);
+
+        /* We have a roothash signature to decode, eg: RootHashSignature=base64:012345789abcdef */
+        r = unbase64mem(value, strlen(value), &roothash_sig_decoded, &roothash_sig_decoded_size);
+        if (r < 0)
+                return log_syntax(unit, LOG_ERR, filename, line, r, "Failed to decode RootHashSignature=, ignoring: %s", rvalue);
+
+        free_and_replace(c->root_hash_sig, roothash_sig_decoded);
+        c->root_hash_sig_size = roothash_sig_decoded_size;
+        c->root_hash_sig_path = mfree(c->root_hash_sig_path);
 
         return 0;
 }
@@ -1895,7 +2111,7 @@ int config_parse_bus_name(
                 return 0;
         }
 
-        if (!service_name_is_valid(k)) {
+        if (!sd_bus_service_name_is_valid(k)) {
                 log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid bus name, ignoring: %s", k);
                 return 0;
         }
@@ -2072,6 +2288,15 @@ int config_parse_user_group_compat(
                 log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid user/group name or numeric ID: %s", k);
                 return -ENOEXEC;
         }
+
+        if (strstr(lvalue, "User") && streq(k, NOBODY_USER_NAME))
+                log_struct(LOG_NOTICE,
+                           "MESSAGE=%s:%u: Special user %s configured, this is not safe!", filename, line, k,
+                           "UNIT=%s", unit,
+                           "MESSAGE_ID=" SD_MESSAGE_NOBODY_USER_UNSUITABLE_STR,
+                           "OFFENDING_USER=%s", k,
+                           "CONFIG_FILE=%s", filename,
+                           "CONFIG_LINE=%u", line);
 
         return free_and_replace(*user, k);
 }
@@ -2863,7 +3088,7 @@ int config_parse_syscall_filter(
         if (isempty(rvalue)) {
                 /* Empty assignment resets the list */
                 c->syscall_filter = hashmap_free(c->syscall_filter);
-                c->syscall_whitelist = false;
+                c->syscall_allow_list = false;
                 return 0;
         }
 
@@ -2879,15 +3104,15 @@ int config_parse_syscall_filter(
 
                 if (invert)
                         /* Allow everything but the ones listed */
-                        c->syscall_whitelist = false;
+                        c->syscall_allow_list = false;
                 else {
                         /* Allow nothing but the ones listed */
-                        c->syscall_whitelist = true;
+                        c->syscall_allow_list = true;
 
-                        /* Accept default syscalls if we are on a whitelist */
+                        /* Accept default syscalls if we are on a allow_list */
                         r = seccomp_parse_syscall_filter(
                                         "@default", -1, c->syscall_filter,
-                                        SECCOMP_PARSE_PERMISSIVE|SECCOMP_PARSE_WHITELIST,
+                                        SECCOMP_PARSE_PERMISSIVE|SECCOMP_PARSE_ALLOW_LIST,
                                         unit,
                                         NULL, 0);
                         if (r < 0)
@@ -2920,7 +3145,7 @@ int config_parse_syscall_filter(
                                 name, num, c->syscall_filter,
                                 SECCOMP_PARSE_LOG|SECCOMP_PARSE_PERMISSIVE|
                                 (invert ? SECCOMP_PARSE_INVERT : 0)|
-                                (c->syscall_whitelist ? SECCOMP_PARSE_WHITELIST : 0),
+                                (c->syscall_allow_list ? SECCOMP_PARSE_ALLOW_LIST : 0),
                                 unit, filename, line);
                 if (r < 0)
                         return r;
@@ -2948,10 +3173,6 @@ int config_parse_syscall_archs(
                 return 0;
         }
 
-        r = set_ensure_allocated(archs, NULL);
-        if (r < 0)
-                return log_oom();
-
         for (;;) {
                 _cleanup_free_ char *word = NULL;
                 uint32_t a;
@@ -2974,7 +3195,7 @@ int config_parse_syscall_archs(
                         continue;
                 }
 
-                r = set_put(*archs, UINT32_TO_PTR(a + 1));
+                r = set_ensure_put(archs, NULL, UINT32_TO_PTR(a + 1));
                 if (r < 0)
                         return log_oom();
         }
@@ -3039,7 +3260,7 @@ int config_parse_address_families(
         if (isempty(rvalue)) {
                 /* Empty assignment resets the list */
                 c->address_families = set_free(c->address_families);
-                c->address_families_whitelist = false;
+                c->address_families_allow_list = false;
                 return 0;
         }
 
@@ -3053,7 +3274,7 @@ int config_parse_address_families(
                 if (!c->address_families)
                         return log_oom();
 
-                c->address_families_whitelist = !invert;
+                c->address_families_allow_list = !invert;
         }
 
         for (p = rvalue;;) {
@@ -3081,7 +3302,7 @@ int config_parse_address_families(
                 /* If we previously wanted to forbid an address family and now
                  * we want to allow it, then just remove it from the list.
                  */
-                if (!invert == c->address_families_whitelist)  {
+                if (!invert == c->address_families_allow_list)  {
                         r = set_put(c->address_families, INT_TO_PTR(af));
                         if (r < 0)
                                 return log_oom();
@@ -3277,7 +3498,12 @@ int config_parse_memory_limit(
         uint64_t bytes = CGROUP_LIMIT_MAX;
         int r;
 
-        if (!isempty(rvalue) && !streq(rvalue, "infinity")) {
+        if (isempty(rvalue) && STR_IN_SET(lvalue, "DefaultMemoryLow",
+                                                  "DefaultMemoryMin",
+                                                  "MemoryLow",
+                                                  "MemoryMin"))
+                bytes = CGROUP_LIMIT_MIN;
+        else if (!isempty(rvalue) && !streq(rvalue, "infinity")) {
 
                 r = parse_permille(rvalue);
                 if (r < 0) {
@@ -3297,17 +3523,11 @@ int config_parse_memory_limit(
         }
 
         if (streq(lvalue, "DefaultMemoryLow")) {
+                c->default_memory_low = bytes;
                 c->default_memory_low_set = true;
-                if (isempty(rvalue))
-                        c->default_memory_low = CGROUP_LIMIT_MIN;
-                else
-                        c->default_memory_low = bytes;
         } else if (streq(lvalue, "DefaultMemoryMin")) {
+                c->default_memory_min = bytes;
                 c->default_memory_min_set = true;
-                if (isempty(rvalue))
-                        c->default_memory_min = CGROUP_LIMIT_MIN;
-                else
-                        c->default_memory_min = bytes;
         } else if (streq(lvalue, "MemoryMin")) {
                 c->memory_min = bytes;
                 c->memory_min_set = true;
@@ -4770,7 +4990,9 @@ int unit_load_fragment(Unit *u) {
                         r = config_parse(u->id, fragment, f,
                                          UNIT_VTABLE(u)->sections,
                                          config_item_perf_lookup, load_fragment_gperf_lookup,
-                                         CONFIG_PARSE_ALLOW_INCLUDE, u);
+                                         0,
+                                         u,
+                                         NULL);
                         if (r == -ENOEXEC)
                                 log_unit_notice_errno(u, r, "Unit configuration has fatal error, unit will not be started.");
                         if (r < 0)
@@ -4845,6 +5067,7 @@ void unit_dump_config_items(FILE *f) {
                 { config_parse_exec,                  "PATH [ARGUMENT [...]]" },
                 { config_parse_service_type,          "SERVICETYPE" },
                 { config_parse_service_restart,       "SERVICERESTART" },
+                { config_parse_service_timeout_failure_mode, "TIMEOUTMODE" },
                 { config_parse_kill_mode,             "KILLMODE" },
                 { config_parse_signal,                "SIGNAL" },
                 { config_parse_socket_listen,         "SOCKET [...]" },
@@ -5005,22 +5228,36 @@ int config_parse_output_restricted(
                 void *userdata) {
 
         ExecOutput t, *eo = data;
+        bool obsolete = false;
 
         assert(filename);
         assert(lvalue);
         assert(rvalue);
         assert(data);
 
-        t = exec_output_from_string(rvalue);
-        if (t < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse output type, ignoring: %s", rvalue);
-                return 0;
+        if (streq(rvalue, "syslog")) {
+                t = EXEC_OUTPUT_JOURNAL;
+                obsolete = true;
+        } else if (streq(rvalue, "syslog+console")) {
+                t = EXEC_OUTPUT_JOURNAL_AND_CONSOLE;
+                obsolete = true;
+        } else {
+                t = exec_output_from_string(rvalue);
+                if (t < 0) {
+                        log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse output type, ignoring: %s", rvalue);
+                        return 0;
+                }
+
+                if (IN_SET(t, EXEC_OUTPUT_SOCKET, EXEC_OUTPUT_NAMED_FD, EXEC_OUTPUT_FILE, EXEC_OUTPUT_FILE_APPEND)) {
+                        log_syntax(unit, LOG_ERR, filename, line, 0, "Standard output types socket, fd:, file:, append: are not supported as defaults, ignoring: %s", rvalue);
+                        return 0;
+                }
         }
 
-        if (IN_SET(t, EXEC_OUTPUT_SOCKET, EXEC_OUTPUT_NAMED_FD, EXEC_OUTPUT_FILE, EXEC_OUTPUT_FILE_APPEND)) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Standard output types socket, fd:, file:, append: are not supported as defaults, ignoring: %s", rvalue);
-                return 0;
-        }
+        if (obsolete)
+                log_syntax(unit, LOG_NOTICE, filename, line, 0,
+                           "Standard output type %s is obsolete, automatically updating to %s. Please update your configuration.",
+                           rvalue, exec_output_to_string(t));
 
         *eo = t;
         return 0;

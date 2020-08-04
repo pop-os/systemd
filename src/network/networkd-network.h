@@ -17,6 +17,7 @@
 #include "networkd-brvlan.h"
 #include "networkd-dhcp-common.h"
 #include "networkd-dhcp4.h"
+#include "networkd-dhcp6.h"
 #include "networkd-dhcp-server.h"
 #include "networkd-fdb.h"
 #include "networkd-ipv6-proxy-ndp.h"
@@ -30,8 +31,8 @@
 #include "networkd-routing-policy-rule.h"
 #include "networkd-util.h"
 #include "ordered-set.h"
-#include "qdisc.h"
 #include "resolve-util.h"
+#include "socket-netlink.h"
 
 typedef enum IPv6PrivacyExtensions {
         /* The values map to the kernel's /proc/sys/net/ipv6/conf/xxx/use_tempaddr values */
@@ -53,7 +54,22 @@ typedef enum KeepConfiguration {
         _KEEP_CONFIGURATION_INVALID = -1,
 } KeepConfiguration;
 
+typedef enum IPv6LinkLocalAddressGenMode {
+       IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_EUI64          = IN6_ADDR_GEN_MODE_EUI64,
+       IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_NONE           = IN6_ADDR_GEN_MODE_NONE,
+       IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_STABLE_PRIVACY = IN6_ADDR_GEN_MODE_STABLE_PRIVACY,
+       IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_RANDOM         = IN6_ADDR_GEN_MODE_RANDOM,
+       _IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_MAX,
+       _IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_INVALID        = -1
+} IPv6LinkLocalAddressGenMode;
+
 typedef struct Manager Manager;
+
+typedef struct NetworkDHCPServerEmitAddress {
+        bool emit;
+        struct in_addr *addresses;
+        size_t n_addresses;
+} NetworkDHCPServerEmitAddress;
 
 struct Network {
         Manager *manager;
@@ -92,11 +108,14 @@ struct Network {
         AddressFamily dhcp;
         DHCPClientIdentifier dhcp_client_identifier;
         char *dhcp_vendor_class_identifier;
+        char *dhcp_mudurl;
         char **dhcp_user_class;
         char *dhcp_hostname;
         uint64_t dhcp_max_attempts;
         uint32_t dhcp_route_metric;
+        bool dhcp_route_metric_set;
         uint32_t dhcp_route_table;
+        uint32_t dhcp_fallback_lease_lifetime;
         uint32_t dhcp_route_mtu;
         uint16_t dhcp_client_port;
         int dhcp_critical;
@@ -105,11 +124,14 @@ struct Network {
         bool dhcp_send_hostname;
         bool dhcp_broadcast;
         bool dhcp_use_dns;
+        bool dhcp_use_dns_set;
         bool dhcp_routes_to_dns;
         bool dhcp_use_ntp;
+        bool dhcp_use_ntp_set;
         bool dhcp_use_sip;
         bool dhcp_use_mtu;
         bool dhcp_use_routes;
+        int dhcp_use_gateway;
         bool dhcp_use_timezone;
         bool rapid_commit;
         bool dhcp_use_hostname;
@@ -118,32 +140,34 @@ struct Network {
         bool dhcp_send_decline;
         DHCPUseDomains dhcp_use_domains;
         sd_ipv4acd *dhcp_acd;
-        Set *dhcp_black_listed_ip;
+        Set *dhcp_deny_listed_ip;
+        Set *dhcp_allow_listed_ip;
         Set *dhcp_request_options;
         OrderedHashmap *dhcp_client_send_options;
+        OrderedHashmap *dhcp_client_send_vendor_options;
         OrderedHashmap *dhcp_server_send_options;
+        OrderedHashmap *dhcp_server_send_vendor_options;
 
         /* DHCPv6 Client support*/
         bool dhcp6_use_dns;
+        bool dhcp6_use_dns_set;
         bool dhcp6_use_ntp;
+        bool dhcp6_use_ntp_set;
         uint8_t dhcp6_pd_length;
+        uint32_t dhcp6_route_metric;
+        bool dhcp6_route_metric_set;
+        char *dhcp6_mudurl;
+        char **dhcp6_user_class;
+        char **dhcp6_vendor_class;
         struct in6_addr dhcp6_pd_address;
+        DHCP6ClientStartMode dhcp6_without_ra;
+        OrderedHashmap *dhcp6_client_send_options;
+        OrderedHashmap *dhcp6_client_send_vendor_options;
+        Set *dhcp6_request_options;
 
         /* DHCP Server Support */
         bool dhcp_server;
-
-        bool dhcp_server_emit_dns;
-        struct in_addr *dhcp_server_dns;
-        unsigned n_dhcp_server_dns;
-
-        bool dhcp_server_emit_ntp;
-        struct in_addr *dhcp_server_ntp;
-        unsigned n_dhcp_server_ntp;
-
-        bool dhcp_server_emit_sip;
-        struct in_addr *dhcp_server_sip;
-        unsigned n_dhcp_server_sip;
-
+        NetworkDHCPServerEmitAddress dhcp_server_emit[_SD_DHCP_LEASE_SERVER_TYPE_MAX];
         bool dhcp_server_emit_router;
         bool dhcp_server_emit_timezone;
         char *dhcp_server_timezone;
@@ -151,8 +175,9 @@ struct Network {
         uint32_t dhcp_server_pool_offset;
         uint32_t dhcp_server_pool_size;
 
-        /* IPV4LL Support */
+        /* link local addressing support */
         AddressFamily link_local;
+        IPv6LinkLocalAddressGenMode ipv6ll_address_gen_mode;
         bool ipv4ll_route;
 
         bool default_route_on_device;
@@ -172,6 +197,11 @@ struct Network {
         bool dhcp6_force_pd_other_information; /* Start DHCPv6 PD also when 'O'
                                                   RA flag is set, see RFC 7084,
                                                   WPD-4 */
+
+        /* DHCPv6 Prefix Delegation support */
+        int64_t dhcp6_pd_subnet_id;
+        bool dhcp6_pd_assign;
+        union in_addr_union dhcp6_pd_token;
 
         /* Bridge Support */
         int use_bpdu;
@@ -195,13 +225,20 @@ struct Network {
         uint32_t br_untagged_bitmap[BRIDGE_VLAN_BITMAP_LEN];
 
         /* CAN support */
-        uint64_t can_bitrate;
+        uint32_t can_bitrate;
         unsigned can_sample_point;
+        uint32_t can_data_bitrate;
+        unsigned can_data_sample_point;
         usec_t can_restart_us;
         int can_triple_sampling;
+        int can_termination;
+        int can_listen_only;
+        int can_fd_mode;
+        int can_non_iso;
 
         AddressFamily ip_forward;
         bool ip_masquerade;
+        int ipv4_accept_local;
 
         int ipv6_accept_ra;
         int ipv6_dad_transmits;
@@ -215,22 +252,24 @@ struct Network {
         bool ipv6_accept_ra_use_onlink_prefix;
         bool active_slave;
         bool primary_slave;
-        DHCPUseDomains ipv6_accept_ra_use_domains;
-        uint32_t ipv6_accept_ra_route_table;
         bool ipv6_accept_ra_route_table_set;
-        Set *ndisc_black_listed_prefix;
-        OrderedHashmap *ipv6_tokens;
+        DHCPUseDomains ipv6_accept_ra_use_domains;
+        IPv6AcceptRAStartDHCP6Client ipv6_accept_ra_start_dhcp6_client;
+        uint32_t ipv6_accept_ra_route_table;
+        Set *ndisc_deny_listed_prefix;
+        OrderedSet *ipv6_tokens;
 
         IPv6PrivacyExtensions ipv6_privacy_extensions;
 
         struct ether_addr *mac;
         uint32_t mtu;
+        uint32_t group;
         int arp;
         int multicast;
         int allmulticast;
         bool unmanaged;
         bool configure_without_carrier;
-        bool ignore_carrier_loss;
+        int ignore_carrier_loss;
         KeepConfiguration keep_configuration;
         uint32_t iaid;
         DUID duid;
@@ -240,8 +279,10 @@ struct Network {
         bool required_for_online; /* Is this network required to be considered online? */
         LinkOperationalStateRange required_operstate_for_online;
 
+        /* LLDP support */
         LLDPMode lldp_mode; /* LLDP reception */
         LLDPEmit lldp_emit; /* LLDP transmission */
+        char *lldp_mud;    /* LLDP MUD URL */
 
         LIST_HEAD(Address, static_addresses);
         LIST_HEAD(Route, static_routes);
@@ -274,10 +315,11 @@ struct Network {
         Hashmap *prefixes_by_section;
         Hashmap *route_prefixes_by_section;
         Hashmap *rules_by_section;
-        OrderedHashmap *qdiscs_by_section;
+        OrderedHashmap *tc_by_section;
+        OrderedHashmap *sr_iov_by_section;
 
         /* All kinds of DNS configuration */
-        struct in_addr_data *dns;
+        struct in_addr_full **dns;
         unsigned n_dns;
         OrderedSet *search_domains, *route_domains;
 
@@ -289,7 +331,6 @@ struct Network {
         Set *dnssec_negative_trust_anchors;
 
         char **ntp;
-        char **sip;
         char **bind_carrier;
 };
 
@@ -325,6 +366,7 @@ CONFIG_PARSER_PROTOTYPE(config_parse_dnssec_negative_trust_anchors);
 CONFIG_PARSER_PROTOTYPE(config_parse_ntp);
 CONFIG_PARSER_PROTOTYPE(config_parse_required_for_online);
 CONFIG_PARSER_PROTOTYPE(config_parse_keep_configuration);
+CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_link_local_address_gen_mode);
 
 const struct ConfigPerfItem* network_network_gperf_lookup(const char *key, GPERF_LEN_TYPE length);
 
@@ -333,3 +375,6 @@ IPv6PrivacyExtensions ipv6_privacy_extensions_from_string(const char *s) _pure_;
 
 const char* keep_configuration_to_string(KeepConfiguration i) _const_;
 KeepConfiguration keep_configuration_from_string(const char *s) _pure_;
+
+const char* ipv6_link_local_address_gen_mode_to_string(IPv6LinkLocalAddressGenMode s) _const_;
+IPv6LinkLocalAddressGenMode ipv6_link_local_address_gen_mode_from_string(const char *s) _pure_;

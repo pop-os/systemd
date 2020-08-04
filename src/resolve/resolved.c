@@ -7,32 +7,40 @@
 #include "sd-daemon.h"
 #include "sd-event.h"
 
+#include "bus-log-control-api.h"
 #include "capability-util.h"
 #include "daemon-util.h"
 #include "main-func.h"
 #include "mkdir.h"
+#include "resolved-bus.h"
 #include "resolved-conf.h"
 #include "resolved-manager.h"
 #include "resolved-resolv-conf.h"
 #include "selinux-util.h"
+#include "service-util.h"
 #include "signal-util.h"
 #include "user-util.h"
 
 static int run(int argc, char *argv[]) {
-        _cleanup_(notify_on_cleanup) const char *notify_stop = NULL;
         _cleanup_(manager_freep) Manager *m = NULL;
+        _cleanup_(notify_on_cleanup) const char *notify_stop = NULL;
         int r;
 
         log_setup_service();
 
-        if (argc != 1)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "This program takes no arguments.");
+        r = service_parse_argv("systemd-resolved.service",
+                               "Provide name resolution with caching using DNS, mDNS, LLMNR.",
+                               BUS_IMPLEMENTATIONS(&manager_object,
+                                                   &log_control_object),
+                               argc, argv);
+        if (r <= 0)
+                return r;
 
         umask(0022);
 
         r = mac_selinux_init();
         if (r < 0)
-                return log_error_errno(r, "SELinux setup failed: %m");
+                return r;
 
         /* Drop privileges, but only if we have been started as root. If we are not running as root we assume most
          * privileges are already dropped and we can't create our directory. */

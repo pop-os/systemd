@@ -52,7 +52,9 @@ VLAN.MVRP,                                config_parse_tristate,                
 VLAN.LooseBinding,                        config_parse_tristate,                     0,                             offsetof(VLan, loose_binding)
 VLAN.ReorderHeader,                       config_parse_tristate,                     0,                             offsetof(VLan, reorder_hdr)
 MACVLAN.Mode,                             config_parse_macvlan_mode,                 0,                             offsetof(MacVlan, mode)
+MACVLAN.SourceMACAddress,                 config_parse_hwaddrs,                      0,                             offsetof(MacVlan, match_source_mac)
 MACVTAP.Mode,                             config_parse_macvlan_mode,                 0,                             offsetof(MacVlan, mode)
+MACVTAP.SourceMACAddress,                 config_parse_hwaddrs,                      0,                             offsetof(MacVlan, match_source_mac)
 IPVLAN.Mode,                              config_parse_ipvlan_mode,                  0,                             offsetof(IPVlan, mode)
 IPVLAN.Flags,                             config_parse_ipvlan_flags,                 0,                             offsetof(IPVlan, flags)
 IPVTAP.Mode,                              config_parse_ipvlan_mode,                  0,                             offsetof(IPVlan, mode)
@@ -206,6 +208,7 @@ Bridge.DefaultPVID,                       config_parse_default_port_vlanid,     
 Bridge.MulticastQuerier,                  config_parse_tristate,                     0,                             offsetof(Bridge, mcast_querier)
 Bridge.MulticastSnooping,                 config_parse_tristate,                     0,                             offsetof(Bridge, mcast_snooping)
 Bridge.VLANFiltering,                     config_parse_tristate,                     0,                             offsetof(Bridge, vlan_filtering)
+Bridge.VLANProtocol,                      config_parse_vlanprotocol,                 0,                             offsetof(Bridge, vlan_protocol)
 Bridge.STP,                               config_parse_tristate,                     0,                             offsetof(Bridge, stp)
 Bridge.MulticastIGMPVersion,              config_parse_uint8,                        0,                             offsetof(Bridge, igmp_version)
 VRF.TableId,                              config_parse_uint32,                       0,                             offsetof(Vrf, table) /* deprecated */

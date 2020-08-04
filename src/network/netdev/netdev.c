@@ -2,6 +2,7 @@
 
 #include <net/if.h>
 #include <netinet/in.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "bond.h"
@@ -24,6 +25,7 @@
 #include "network-internal.h"
 #include "networkd-manager.h"
 #include "nlmon.h"
+#include "path-lookup.h"
 #include "siphash24.h"
 #include "stat-util.h"
 #include "string-table.h"
@@ -135,12 +137,12 @@ int config_parse_netdev_kind(
 
         k = netdev_kind_from_string(rvalue);
         if (k < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Failed to parse netdev kind, ignoring assignment: %s", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Failed to parse netdev kind, ignoring assignment: %s", rvalue);
                 return 0;
         }
 
         if (*kind != _NETDEV_KIND_INVALID && *kind != k) {
-                log_syntax(unit, LOG_ERR, filename, line, 0,
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "Specified netdev kind is different from the previous value '%s', ignoring assignment: %s",
                            netdev_kind_to_string(*kind), rvalue);
                 return 0;
@@ -362,7 +364,7 @@ static int netdev_enslave(NetDev *netdev, Link *link, link_netlink_message_handl
                 if (r >= 0)
                         callback(netdev->manager->rtnl, m, link);
         } else {
-                /* the netdev is not yet read, save this request for when it is */
+                /* the netdev is not yet ready, save this request for when it is */
                 netdev_join_callback *cb;
 
                 cb = new(netdev_join_callback, 1);
@@ -684,15 +686,18 @@ int netdev_load_one(Manager *manager, const char *filename) {
         };
 
         dropin_dirname = strjoina(basename(filename), ".d");
-        r = config_parse_many(filename, NETWORK_DIRS, dropin_dirname,
-                              NETDEV_COMMON_SECTIONS NETDEV_OTHER_SECTIONS,
-                              config_item_perf_lookup, network_netdev_gperf_lookup,
-                              CONFIG_PARSE_WARN, netdev_raw, NULL);
+        r = config_parse_many(
+                        filename, NETWORK_DIRS, dropin_dirname,
+                        NETDEV_COMMON_SECTIONS NETDEV_OTHER_SECTIONS,
+                        config_item_perf_lookup, network_netdev_gperf_lookup,
+                        CONFIG_PARSE_WARN,
+                        netdev_raw,
+                        NULL);
         if (r < 0)
                 return r;
 
         /* skip out early if configuration does not match the environment */
-        if (!condition_test_list(netdev_raw->conditions, NULL, NULL, NULL)) {
+        if (!condition_test_list(netdev_raw->conditions, environ, NULL, NULL, NULL)) {
                 log_debug("%s: Conditions in the file do not match the system environment, skipping.", filename);
                 return 0;
         }
@@ -724,10 +729,12 @@ int netdev_load_one(Manager *manager, const char *filename) {
         if (NETDEV_VTABLE(netdev)->init)
                 NETDEV_VTABLE(netdev)->init(netdev);
 
-        r = config_parse_many(filename, NETWORK_DIRS, dropin_dirname,
-                              NETDEV_VTABLE(netdev)->sections,
-                              config_item_perf_lookup, network_netdev_gperf_lookup,
-                              CONFIG_PARSE_WARN, netdev, NULL);
+        r = config_parse_many(
+                        filename, NETWORK_DIRS, dropin_dirname,
+                        NETDEV_VTABLE(netdev)->sections,
+                        config_item_perf_lookup, network_netdev_gperf_lookup,
+                        CONFIG_PARSE_WARN,
+                        netdev, NULL);
         if (r < 0)
                 return r;
 

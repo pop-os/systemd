@@ -23,10 +23,10 @@ Users may override this setting in the .network files by specifying
  2 files changed, 5 insertions(+), 3 deletions(-)
 
 diff --git a/man/systemd.network.xml b/man/systemd.network.xml
-index 5175704..a283802 100644
+index 7798619..f0906ff 100644
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
-@@ -257,7 +257,7 @@
+@@ -346,7 +346,7 @@
              <literal>IPv6AcceptRA=</literal>.</para>
  
              <para>Furthermore, note that by default the domain name
@@ -34,8 +34,8 @@ index 5175704..a283802 100644
 +            specified through DHCP, on Ubuntu, are used for name resolution.
              See option <option>UseDomains=</option> below.</para>
  
-             <para>See the <literal>[DHCPv4]</literal> or <literal>[DHCPv6]</literal> section below for
-@@ -1453,7 +1453,7 @@
+             <para>See the [DHCPv4] or [DHCPv6] sections below for further configuration options for the DHCP
+@@ -1568,7 +1568,7 @@
              the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name received from
              the DHCP server will be used for routing DNS queries only, but not for searching, similar to the effect of
              the <option>Domains=</option> setting when the argument is prefixed with <literal>~</literal>. Defaults to
@@ -43,8 +43,8 @@ index 5175704..a283802 100644
 +            true on Ubuntu.</para>
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
-             of all host names, in particular of single-label names. It is generally safer to use the supplied domain
-@@ -1730,7 +1730,7 @@
+             of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
+@@ -2004,7 +2004,7 @@
              the effect of the <option>Domains=</option> setting. If set to <literal>route</literal>, the domain name
              received via IPv6 RA will be used for routing DNS queries only, but not for searching, similar to the
              effect of the <option>Domains=</option> setting when the argument is prefixed with
@@ -52,12 +52,12 @@ index 5175704..a283802 100644
 +            <literal>~</literal>. Defaults to true on Ubuntu.</para>
  
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
-             of all host names, in particular of single-label names. It is generally safer to use the supplied domain
+             of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 5d2612e..b3f62c0 100644
+index d34155b..3f7c241 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -391,6 +391,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -403,6 +403,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  /* NOTE: this var might be overwritten by network_apply_anonymize_if_set */
                  .dhcp_send_hostname = true,
                  .dhcp_send_release = true,
@@ -65,7 +65,7 @@ index 5d2612e..b3f62c0 100644
                  /* To enable/disable RFC7844 Anonymity Profiles */
                  .dhcp_anonymize = false,
                  .dhcp_route_metric = DHCP_ROUTE_METRIC,
-@@ -452,6 +453,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -472,6 +473,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
                  .multicast = -1,
                  .allmulticast = -1,
                  .ipv6_accept_ra_use_dns = true,

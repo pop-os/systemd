@@ -10,14 +10,14 @@ really have no need for vga or seabios in this case.
  1 file changed, 1 insertion(+)
 
 diff --git a/test/test-functions b/test/test-functions
-index 0876ed3..4e5ace7 100644
+index 863cc18..f9a01d5 100644
 --- a/test/test-functions
 +++ b/test/test-functions
-@@ -220,6 +220,7 @@ $KERNEL_APPEND \
+@@ -336,6 +336,7 @@ $KERNEL_APPEND \
  -net none \
  -m $QEMU_MEM \
  -nographic \
 +-vga none \
  -kernel $KERNEL_BIN \
- -drive format=raw,cache=unsafe,file=${TESTDIR}/rootdisk.img \
+ -drive format=raw,cache=unsafe,file=$image \
  $QEMU_OPTIONS \

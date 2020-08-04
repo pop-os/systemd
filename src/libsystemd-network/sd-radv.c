@@ -77,6 +77,12 @@ _public_ sd_event *sd_radv_get_event(sd_radv *ra) {
         return ra->event;
 }
 
+_public_ int sd_radv_is_running(sd_radv *ra) {
+        assert_return(ra, false);
+
+        return ra->state != SD_RADV_STATE_IDLE;
+}
+
 static void radv_reset(sd_radv *ra) {
         assert(ra);
 
@@ -415,7 +421,7 @@ _public_ int sd_radv_start(sd_radv *ra) {
 
 _public_ int sd_radv_set_ifindex(sd_radv *ra, int ifindex) {
         assert_return(ra, -EINVAL);
-        assert_return(ifindex >= -1, -EINVAL);
+        assert_return(ifindex > 0, -EINVAL);
 
         if (ra->state != SD_RADV_STATE_IDLE)
                 return -EBUSY;
@@ -572,6 +578,15 @@ _public_ int sd_radv_add_prefix(sd_radv *ra, sd_radv_prefix *p, int dynamic) {
 
         cur = p;
 
+        /* If RAs have already been sent, send an RA immediately to announce the newly-added prefix */
+        if (ra->ra_sent > 0) {
+            r = radv_send(ra, NULL, ra->lifetime);
+            if (r < 0)
+                    log_radv_errno(r, "Unable to send Router Advertisement for added prefix: %m");
+            else
+                    log_radv("Sent Router Advertisement for added prefix");
+        }
+
  update:
         r = sd_event_now(ra->event, clock_boottime_or_monotonic(), &time_now);
         if (r < 0)
@@ -678,6 +693,15 @@ _public_ int sd_radv_add_route_prefix(sd_radv *ra, sd_radv_route_prefix *p, int 
         if (!dynamic) {
                 log_radv("Added prefix %s/%u", strempty(pretty), p->opt.prefixlen);
                 return 0;
+        }
+
+        /* If RAs have already been sent, send an RA immediately to announce the newly-added route prefix */
+        if (ra->ra_sent > 0) {
+            r = radv_send(ra, NULL, ra->lifetime);
+            if (r < 0)
+                    log_radv_errno(r, "Unable to send Router Advertisement for added route prefix: %m");
+            else
+                    log_radv("Sent Router Advertisement for added route prefix");
         }
 
  update:
@@ -823,6 +847,18 @@ _public_ int sd_radv_prefix_set_prefix(sd_radv_prefix *p, const struct in6_addr 
 
         p->opt.in6_addr = *in6_addr;
         p->opt.prefixlen = prefixlen;
+
+        return 0;
+}
+
+_public_ int sd_radv_prefix_get_prefix(sd_radv_prefix *p, struct in6_addr *ret_in6_addr,
+                                       unsigned char *ret_prefixlen) {
+        assert_return(p, -EINVAL);
+        assert_return(ret_in6_addr, -EINVAL);
+        assert_return(ret_prefixlen, -EINVAL);
+
+        *ret_in6_addr = p->opt.in6_addr;
+        *ret_prefixlen = p->opt.prefixlen;
 
         return 0;
 }

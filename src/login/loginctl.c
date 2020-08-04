@@ -9,8 +9,10 @@
 
 #include "alloc-util.h"
 #include "bus-error.h"
+#include "bus-locator.h"
+#include "bus-map-properties.h"
+#include "bus-print-properties.h"
 #include "bus-unit-procs.h"
-#include "bus-util.h"
 #include "cgroup-show.h"
 #include "cgroup-util.h"
 #include "format-table.h"
@@ -64,14 +66,7 @@ static int get_session_path(sd_bus *bus, const char *session_id, sd_bus_error *e
         int r;
         char *ans;
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "GetSession",
-                        error, &reply,
-                        "s", session_id);
+        r = bus_call_method(bus, bus_login_mgr, "GetSession", error, &reply, "s", session_id);
         if (r < 0)
                 return r;
 
@@ -96,7 +91,7 @@ static int show_table(Table *table, const char *word) {
         if (table_get_rows(table) > 1 || OUTPUT_MODE_IS_JSON(arg_output)) {
                 r = table_set_sort(table, (size_t) 0, (size_t) -1);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to sort table: %m");
+                        return table_log_sort_error(r);
 
                 table_set_header(table, arg_legend);
 
@@ -105,7 +100,7 @@ static int show_table(Table *table, const char *word) {
                 else
                         r = table_print(table, NULL);
                 if (r < 0)
-                        return log_error_errno(r, "Failed to show table: %m");
+                        return table_log_print_error(r);
         }
 
         if (arg_legend) {
@@ -130,14 +125,7 @@ static int list_sessions(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "ListSessions",
-                        &error, &reply,
-                        NULL);
+        r = bus_call_method(bus, bus_login_mgr, "ListSessions", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to list sessions: %s", bus_error_message(&error, r));
 
@@ -211,14 +199,7 @@ static int list_users(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "ListUsers",
-                        &error, &reply,
-                        NULL);
+        r = bus_call_method(bus, bus_login_mgr, "ListUsers", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to list users: %s", bus_error_message(&error, r));
 
@@ -268,14 +249,7 @@ static int list_seats(int argc, char *argv[], void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "ListSeats",
-                        &error, &reply,
-                        NULL);
+        r = bus_call_method(bus, bus_login_mgr, "ListSeats", &error, &reply, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to list seats: %s", bus_error_message(&error, r));
 
@@ -825,7 +799,15 @@ static int show_properties(sd_bus *bus, const char *path, bool *new_line) {
 
         *new_line = true;
 
-        r = bus_print_all_properties(bus, "org.freedesktop.login1", path, print_property, arg_property, arg_value, arg_all, NULL);
+        r = bus_print_all_properties(
+                        bus,
+                        "org.freedesktop.login1",
+                        path,
+                        print_property,
+                        arg_property,
+                        arg_value,
+                        arg_all,
+                        NULL);
         if (r < 0)
                 return bus_log_parse_error(r);
 
@@ -835,7 +817,7 @@ static int show_properties(sd_bus *bus, const char *path, bool *new_line) {
 static int show_session(int argc, char *argv[], void *userdata) {
         bool properties, new_line = false;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_free_ char *path = NULL;
 
@@ -854,7 +836,7 @@ static int show_session(int argc, char *argv[], void *userdata) {
                 return print_session_status_info(bus, "/org/freedesktop/login1/session/auto", &new_line);
         }
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 r = get_session_path(bus, argv[i], &error, &path);
                 if (r < 0)
                         return log_error_errno(r, "Failed to get session path: %s", bus_error_message(&error, r));
@@ -874,7 +856,7 @@ static int show_session(int argc, char *argv[], void *userdata) {
 static int show_user(int argc, char *argv[], void *userdata) {
         bool properties, new_line = false;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
@@ -891,7 +873,7 @@ static int show_user(int argc, char *argv[], void *userdata) {
                 return print_user_status_info(bus, "/org/freedesktop/login1/user/self", &new_line);
         }
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message * reply = NULL;
                 const char *path = NULL;
@@ -931,7 +913,7 @@ static int show_user(int argc, char *argv[], void *userdata) {
 static int show_seat(int argc, char *argv[], void *userdata) {
         bool properties, new_line = false;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
@@ -948,19 +930,12 @@ static int show_seat(int argc, char *argv[], void *userdata) {
                 return print_seat_status_info(bus, "/org/freedesktop/login1/seat/auto", &new_line);
         }
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message * reply = NULL;
                 const char *path = NULL;
 
-                r = sd_bus_call_method(
-                                bus,
-                                "org.freedesktop.login1",
-                                "/org/freedesktop/login1",
-                                "org.freedesktop.login1.Manager",
-                                "GetSeat",
-                                &error, &reply,
-                                "s", argv[i]);
+                r = bus_call_method(bus, bus_login_mgr, "GetSeat", &error, &reply, "s", argv[i]);
                 if (r < 0)
                         return log_error_errno(r, "Failed to get seat: %s", bus_error_message(&error, r));
 
@@ -983,7 +958,7 @@ static int show_seat(int argc, char *argv[], void *userdata) {
 static int activate(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
@@ -1007,13 +982,11 @@ static int activate(int argc, char *argv[], void *userdata) {
                 return 0;
         }
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
 
-                r = sd_bus_call_method(
+                r = bus_call_method(
                                 bus,
-                                "org.freedesktop.login1",
-                                "/org/freedesktop/login1",
-                                "org.freedesktop.login1.Manager",
+                                bus_login_mgr,
                                 streq(argv[0], "lock-session")      ? "LockSession" :
                                 streq(argv[0], "unlock-session")    ? "UnlockSession" :
                                 streq(argv[0], "terminate-session") ? "TerminateSession" :
@@ -1030,7 +1003,7 @@ static int activate(int argc, char *argv[], void *userdata) {
 static int kill_session(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
@@ -1040,16 +1013,14 @@ static int kill_session(int argc, char *argv[], void *userdata) {
         if (!arg_kill_who)
                 arg_kill_who = "all";
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
 
-                r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "KillSession",
-                        &error, NULL,
-                        "ssi", argv[i], arg_kill_who, arg_signal);
+                r = bus_call_method(
+                                bus,
+                                bus_login_mgr,
+                                "KillSession",
+                                &error, NULL,
+                                "ssi", argv[i], arg_kill_who, arg_signal);
                 if (r < 0)
                         return log_error_errno(r, "Could not kill session: %s", bus_error_message(&error, -r));
         }
@@ -1062,7 +1033,7 @@ static int enable_linger(int argc, char *argv[], void *userdata) {
         sd_bus *bus = userdata;
         char* short_argv[3];
         bool b;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
@@ -1082,7 +1053,7 @@ static int enable_linger(int argc, char *argv[], void *userdata) {
                 argc = 2;
         }
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 uid_t uid;
 
                 if (isempty(argv[i]))
@@ -1093,14 +1064,12 @@ static int enable_linger(int argc, char *argv[], void *userdata) {
                                 return log_error_errno(r, "Failed to look up user %s: %m", argv[i]);
                 }
 
-                r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "SetUserLinger",
-                        &error, NULL,
-                        "ubb", (uint32_t) uid, b, true);
+                r = bus_call_method(
+                                bus,
+                                bus_login_mgr,
+                                "SetUserLinger",
+                                &error, NULL,
+                                "ubb", (uint32_t) uid, b, true);
                 if (r < 0)
                         return log_error_errno(r, "Could not enable linger: %s", bus_error_message(&error, -r));
         }
@@ -1111,28 +1080,21 @@ static int enable_linger(int argc, char *argv[], void *userdata) {
 static int terminate_user(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 uid_t uid;
 
                 r = get_user_creds((const char**) (argv+i), &uid, NULL, NULL, NULL, 0);
                 if (r < 0)
                         return log_error_errno(r, "Failed to look up user %s: %m", argv[i]);
 
-                r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "TerminateUser",
-                        &error, NULL,
-                        "u", (uint32_t) uid);
+                r = bus_call_method(bus, bus_login_mgr, "TerminateUser", &error, NULL, "u", (uint32_t) uid);
                 if (r < 0)
                         return log_error_errno(r, "Could not terminate user: %s", bus_error_message(&error, -r));
         }
@@ -1143,7 +1105,7 @@ static int terminate_user(int argc, char *argv[], void *userdata) {
 static int kill_user(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
@@ -1153,18 +1115,16 @@ static int kill_user(int argc, char *argv[], void *userdata) {
         if (!arg_kill_who)
                 arg_kill_who = "all";
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 uid_t uid;
 
                 r = get_user_creds((const char**) (argv+i), &uid, NULL, NULL, NULL, 0);
                 if (r < 0)
                         return log_error_errno(r, "Failed to look up user %s: %m", argv[i]);
 
-                r = sd_bus_call_method(
+                r = bus_call_method(
                         bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
+                        bus_login_mgr,
                         "KillUser",
                         &error, NULL,
                         "ui", (uint32_t) uid, arg_signal);
@@ -1178,24 +1138,21 @@ static int kill_user(int argc, char *argv[], void *userdata) {
 static int attach(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        for (i = 2; i < argc; i++) {
+        for (int i = 2; i < argc; i++) {
 
-                r = sd_bus_call_method(
+                r = bus_call_method(
                         bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
+                        bus_login_mgr,
                         "AttachDevice",
                         &error, NULL,
                         "ssb", argv[1], argv[i], true);
-
                 if (r < 0)
                         return log_error_errno(r, "Could not attach device: %s", bus_error_message(&error, -r));
         }
@@ -1213,14 +1170,7 @@ static int flush_devices(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "FlushDevices",
-                        &error, NULL,
-                        "b", true);
+        r = bus_call_method(bus, bus_login_mgr, "FlushDevices", &error, NULL, "b", true);
         if (r < 0)
                 return log_error_errno(r, "Could not flush devices: %s", bus_error_message(&error, -r));
 
@@ -1237,11 +1187,9 @@ static int lock_sessions(int argc, char *argv[], void *userdata) {
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        r = sd_bus_call_method(
+        r = bus_call_method(
                         bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
+                        bus_login_mgr,
                         streq(argv[0], "lock-sessions") ? "LockSessions" : "UnlockSessions",
                         &error, NULL,
                         NULL);
@@ -1254,23 +1202,16 @@ static int lock_sessions(int argc, char *argv[], void *userdata) {
 static int terminate_seat(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         sd_bus *bus = userdata;
-        int r, i;
+        int r;
 
         assert(bus);
         assert(argv);
 
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
 
-                r = sd_bus_call_method(
-                        bus,
-                        "org.freedesktop.login1",
-                        "/org/freedesktop/login1",
-                        "org.freedesktop.login1.Manager",
-                        "TerminateSeat",
-                        &error, NULL,
-                        "s", argv[i]);
+                r = bus_call_method(bus, bus_login_mgr, "TerminateSeat", &error, NULL, "s", argv[i]);
                 if (r < 0)
                         return log_error_errno(r, "Could not terminate seat: %s", bus_error_message(&error, -r));
         }
@@ -1347,7 +1288,6 @@ static int help(int argc, char *argv[], void *userdata) {
 }
 
 static int parse_argv(int argc, char *argv[]) {
-
         enum {
                 ARG_VERSION = 0x100,
                 ARG_VALUE,
@@ -1486,7 +1426,6 @@ static int parse_argv(int argc, char *argv[]) {
 }
 
 static int loginctl_main(int argc, char *argv[], sd_bus *bus) {
-
         static const Verb verbs[] = {
                 { "help",              VERB_ANY, VERB_ANY, 0,            help              },
                 { "list-sessions",     VERB_ANY, 1,        VERB_DEFAULT, list_sessions     },
@@ -1523,9 +1462,7 @@ static int run(int argc, char *argv[]) {
         int r;
 
         setlocale(LC_ALL, "");
-        log_show_color(true);
-        log_parse_environment();
-        log_open();
+        log_setup_cli();
 
         /* The journal merging logic potentially needs a lot of fds. */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
@@ -1538,7 +1475,7 @@ static int run(int argc, char *argv[]) {
 
         r = bus_connect_transport(arg_transport, arg_host, false, &bus);
         if (r < 0)
-                return log_error_errno(r, "Failed to create bus connection: %m");
+                return bus_log_connect_error(r);
 
         (void) sd_bus_set_allow_interactive_authorization(bus, arg_ask_password);
 

@@ -94,7 +94,7 @@ static int dns_query_candidate_next_search_domain(DnsQueryCandidate *c) {
 }
 
 static int dns_query_candidate_add_transaction(DnsQueryCandidate *c, DnsResourceKey *key) {
-        DnsTransaction *t;
+        _cleanup_(dns_transaction_gcp) DnsTransaction *t = NULL;
         int r;
 
         assert(c);
@@ -105,39 +105,26 @@ static int dns_query_candidate_add_transaction(DnsQueryCandidate *c, DnsResource
                 r = dns_transaction_new(&t, c->scope, key);
                 if (r < 0)
                         return r;
-        } else {
-                if (set_contains(c->transactions, t))
-                        return 0;
-        }
-
-        r = set_ensure_allocated(&c->transactions, NULL);
-        if (r < 0)
-                goto gc;
-
-        r = set_ensure_allocated(&t->notify_query_candidates, NULL);
-        if (r < 0)
-                goto gc;
+        } else if (set_contains(c->transactions, t))
+                return 0;
 
         r = set_ensure_allocated(&t->notify_query_candidates_done, NULL);
         if (r < 0)
-                goto gc;
+                return r;
 
-        r = set_put(t->notify_query_candidates, c);
+        r = set_ensure_put(&t->notify_query_candidates, NULL, c);
         if (r < 0)
-                goto gc;
+                return r;
 
-        r = set_put(c->transactions, t);
+        r = set_ensure_put(&c->transactions, NULL, t);
         if (r < 0) {
                 (void) set_remove(t->notify_query_candidates, c);
-                goto gc;
+                return r;
         }
 
         t->clamp_ttl = c->query->clamp_ttl;
+        TAKE_PTR(t);
         return 1;
-
-gc:
-        dns_transaction_gc(t);
-        return r;
 }
 
 static int dns_query_candidate_go(DnsQueryCandidate *c) {
@@ -513,7 +500,7 @@ static int on_query_timeout(sd_event_source *s, usec_t usec, void *userdata) {
 }
 
 static int dns_query_add_candidate(DnsQuery *q, DnsScope *s) {
-        DnsQueryCandidate *c;
+        _cleanup_(dns_query_candidate_freep) DnsQueryCandidate *c = NULL;
         int r;
 
         assert(q);
@@ -524,24 +511,21 @@ static int dns_query_add_candidate(DnsQuery *q, DnsScope *s) {
                 return r;
 
         /* If this a single-label domain on DNS, we might append a suitable search domain first. */
-        if ((q->flags & SD_RESOLVED_NO_SEARCH) == 0 &&
-            dns_scope_name_needs_search_domain(s, dns_question_first_name(q->question_idna))) {
-                /* OK, we need a search domain now. Let's find one for this scope */
+        if (!FLAGS_SET(q->flags, SD_RESOLVED_NO_SEARCH) &&
+            dns_scope_name_wants_search_domain(s, dns_question_first_name(q->question_idna))) {
+                /* OK, we want a search domain now. Let's find one for this scope */
 
                 r = dns_query_candidate_next_search_domain(c);
-                if (r <= 0) /* if there's no search domain, then we won't add any transaction. */
-                        goto fail;
+                if (r < 0)
+                        return r;
         }
 
         r = dns_query_candidate_setup_transactions(c);
         if (r < 0)
-                goto fail;
+                return r;
 
+        TAKE_PTR(c);
         return 0;
-
-fail:
-        dns_query_candidate_free(c);
-        return r;
 }
 
 static int dns_query_synthesize_reply(DnsQuery *q, DnsTransactionState *state) {

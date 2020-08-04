@@ -9,10 +9,10 @@ other error code, instead of not supported. Skip the test for both error codes.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/test/test-sleep.c b/src/test/test-sleep.c
-index 2e63aac..85b6890 100644
+index 8b4fa82..af3a6c0 100644
 --- a/src/test/test-sleep.c
 +++ b/src/test/test-sleep.c
-@@ -53,7 +53,7 @@ static int test_fiemap(const char *path) {
+@@ -54,7 +54,7 @@ static int test_fiemap(const char *path) {
          if (fd < 0)
                  return log_error_errno(errno, "failed to open %s: %m", path);
          r = read_fiemap(fd, &fiemap);

@@ -12,10 +12,10 @@ LP: #1870410
  2 files changed, 13 insertions(+), 11 deletions(-)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index b735915..db1d7ff 100644
+index a83ffc3..4e2a3ab 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -188,8 +188,10 @@ int sd_dhcp_client_set_request_option(sd_dhcp_client *client, uint8_t option) {
+@@ -249,8 +249,10 @@ int sd_dhcp_client_set_request_option(sd_dhcp_client *client, uint8_t option) {
          }
  
          for (i = 0; i < client->req_opts_size; i++)
@@ -29,10 +29,10 @@ index b735915..db1d7ff 100644
          if (!GREEDY_REALLOC(client->req_opts, client->req_opts_allocated,
                              client->req_opts_size + 1))
 diff --git a/src/libsystemd-network/test-dhcp-client.c b/src/libsystemd-network/test-dhcp-client.c
-index 4e9b388..071a2c3 100644
+index 8f2f446..3e6f721 100644
 --- a/src/libsystemd-network/test-dhcp-client.c
 +++ b/src/libsystemd-network/test-dhcp-client.c
-@@ -71,17 +71,17 @@ static void test_request_basic(sd_event *e) {
+@@ -72,17 +72,17 @@ static void test_request_basic(sd_event *e) {
          assert_se(sd_dhcp_client_set_hostname(client, "~host.domain") == -EINVAL);
  
          assert_se(sd_dhcp_client_set_request_option(client,
@@ -55,7 +55,7 @@ index 4e9b388..071a2c3 100644
  
          assert_se(sd_dhcp_client_set_request_option(client,
                                          SD_DHCP_OPTION_PAD) == -EINVAL);
-@@ -101,9 +101,9 @@ static void test_request_basic(sd_event *e) {
+@@ -102,9 +102,9 @@ static void test_request_basic(sd_event *e) {
           * Options not set by default (using or not anonymize) are option 17
           * (SD_DHCP_OPTION_ROOT_PATH) and 42 (SD_DHCP_OPTION_NTP_SERVER) */
          assert_se(sd_dhcp_client_set_request_option(client, 17) == 0);
@@ -67,7 +67,7 @@ index 4e9b388..071a2c3 100644
  
          sd_dhcp_client_unref(client);
  }
-@@ -126,7 +126,7 @@ static void test_request_anonymize(sd_event *e) {
+@@ -127,7 +127,7 @@ static void test_request_anonymize(sd_event *e) {
          assert_se(r >= 0);
  
          assert_se(sd_dhcp_client_set_request_option(client,
@@ -76,7 +76,7 @@ index 4e9b388..071a2c3 100644
          /* This PRL option is not set when using Anonymize */
          assert_se(sd_dhcp_client_set_request_option(client,
                                          SD_DHCP_OPTION_HOST_NAME) == 0);
-@@ -137,7 +137,7 @@ static void test_request_anonymize(sd_event *e) {
+@@ -138,7 +138,7 @@ static void test_request_anonymize(sd_event *e) {
          /* RFC7844: option 101 (SD_DHCP_OPTION_NEW_TZDB_TIMEZONE) is not set in the
           * default PRL when using Anonymize, */
          assert_se(sd_dhcp_client_set_request_option(client, 101) == 0);

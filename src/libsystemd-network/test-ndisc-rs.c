@@ -174,8 +174,8 @@ static int test_rs_hangcheck(sd_event_source *s, uint64_t usec,
         return 0;
 }
 
-int icmp6_bind_router_solicitation(int index) {
-        assert_se(index == 42);
+int icmp6_bind_router_solicitation(int ifindex) {
+        assert_se(ifindex == 42);
 
         if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, test_fd) < 0)
                 return -errno;
@@ -183,8 +183,7 @@ int icmp6_bind_router_solicitation(int index) {
         return test_fd[0];
 }
 
-int icmp6_bind_router_advertisement(int index) {
-
+int icmp6_bind_router_advertisement(int ifindex) {
         return -ENOSYS;
 }
 
@@ -218,7 +217,7 @@ static int send_ra(uint8_t flags) {
         advertisement[5] = flags;
 
         assert_se(write(test_fd[1], advertisement, sizeof(advertisement)) ==
-               sizeof(advertisement));
+                  sizeof(advertisement));
 
         if (verbose)
                 printf("  sent RA with flag 0x%02x\n", flags);
@@ -292,10 +291,11 @@ static void test_rs(void) {
         assert_se(sd_ndisc_set_callback(nd, test_callback, e) >= 0);
 
         assert_se(sd_event_add_time(e, &test_hangcheck, clock_boottime_or_monotonic(),
-                                 time_now + 2 *USEC_PER_SEC, 0,
-                                 test_rs_hangcheck, NULL) >= 0);
+                                    time_now + 30 * USEC_PER_SEC, 0,
+                                    test_rs_hangcheck, NULL) >= 0);
 
         assert_se(sd_ndisc_stop(nd) >= 0);
+        assert_se(sd_ndisc_start(nd) >= 0);
         assert_se(sd_ndisc_start(nd) >= 0);
         assert_se(sd_ndisc_stop(nd) >= 0);
 
@@ -393,8 +393,8 @@ static void test_timeout(void) {
         assert_se(sd_ndisc_set_mac(nd, &mac_addr) >= 0);
 
         assert_se(sd_event_add_time(e, &test_hangcheck, clock_boottime_or_monotonic(),
-                                 time_now + 2U * USEC_PER_SEC, 0,
-                                 test_rs_hangcheck, NULL) >= 0);
+                                    time_now + 30 * USEC_PER_SEC, 0,
+                                    test_rs_hangcheck, NULL) >= 0);
 
         assert_se(sd_ndisc_start(nd) >= 0);
 

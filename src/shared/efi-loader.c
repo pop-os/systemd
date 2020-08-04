@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1+ */
 
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -11,6 +12,7 @@
 #include "io-util.h"
 #include "parse-util.h"
 #include "sort-util.h"
+#include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "utf8.h"
@@ -28,10 +30,11 @@
 #define END_ENTIRE_DEVICE_PATH_SUBTYPE      0xff
 #define EFI_OS_INDICATIONS_BOOT_TO_FW_UI    0x0000000000000001
 
-#define boot_option__contents {                 \
-        uint32_t attr;                          \
-        uint16_t path_len;                      \
-        uint16_t title[];                       \
+#define boot_option__contents                   \
+        {                                       \
+                uint32_t attr;                  \
+                uint16_t path_len;              \
+                uint16_t title[];               \
         }
 
 struct boot_option boot_option__contents;
@@ -49,33 +52,39 @@ struct drive_path {
         uint8_t signature_type;
 } _packed_;
 
-#define device_path__contents {                 \
-        uint8_t type;                           \
-        uint8_t sub_type;                       \
-        uint16_t length;                        \
-        union {                                 \
-                uint16_t path[0];               \
-                struct drive_path drive;        \
-        };                                      \
+#define device_path__contents                           \
+        {                                               \
+                uint8_t type;                           \
+                uint8_t sub_type;                       \
+                uint16_t length;                        \
+                union {                                 \
+                        uint16_t path[0];               \
+                        struct drive_path drive;        \
+                };                                      \
         }
 
 struct device_path device_path__contents;
 struct device_path__packed device_path__contents _packed_;
 assert_cc(sizeof(struct device_path) == sizeof(struct device_path__packed));
 
-
 int efi_reboot_to_firmware_supported(void) {
         _cleanup_free_ void *v = NULL;
+        static int cache = -1;
         uint64_t b;
         size_t s;
         int r;
 
-        if (!is_efi_boot())
+        if (cache > 0)
+                return 0;
+        if (cache == 0)
                 return -EOPNOTSUPP;
 
+        if (!is_efi_boot())
+                goto not_supported;
+
         r = efi_get_variable(EFI_VENDOR_GLOBAL, "OsIndicationsSupported", NULL, &v, &s);
-        if (r == -ENOENT) /* variable doesn't exist? it's not supported then */
-                return -EOPNOTSUPP;
+        if (r == -ENOENT)
+                goto not_supported; /* variable doesn't exist? it's not supported then */
         if (r < 0)
                 return r;
         if (s != sizeof(uint64_t))
@@ -83,36 +92,68 @@ int efi_reboot_to_firmware_supported(void) {
 
         b = *(uint64_t*) v;
         if (!(b & EFI_OS_INDICATIONS_BOOT_TO_FW_UI))
-                return -EOPNOTSUPP; /* bit unset? it's not supported then */
+                goto not_supported; /* bit unset? it's not supported then */
 
+        cache = 1;
         return 0;
+
+not_supported:
+        cache = 0;
+        return -EOPNOTSUPP;
 }
 
-static int get_os_indications(uint64_t *os_indication) {
+static int get_os_indications(uint64_t *ret) {
+        static struct stat cache_stat = {};
         _cleanup_free_ void *v = NULL;
+        _cleanup_free_ char *fn = NULL;
+        static uint64_t cache;
+        struct stat new_stat;
         size_t s;
         int r;
+
+        assert(ret);
 
         /* Let's verify general support first */
         r = efi_reboot_to_firmware_supported();
         if (r < 0)
                 return r;
 
+        fn = efi_variable_path(EFI_VENDOR_GLOBAL, "OsIndications");
+        if (!fn)
+                return -ENOMEM;
+
+        /* stat() the EFI variable, to see if the mtime changed. If it did we need to cache again. */
+        if (stat(fn, &new_stat) < 0) {
+                if (errno != ENOENT)
+                        return -errno;
+
+                /* Doesn't exist? Then we can exit early (also see below) */
+                *ret = 0;
+                return 0;
+
+        } else if (stat_inode_unmodified(&new_stat, &cache_stat)) {
+                /* inode didn't change, we can return the cached value */
+                *ret = cache;
+                return 0;
+        }
+
         r = efi_get_variable(EFI_VENDOR_GLOBAL, "OsIndications", NULL, &v, &s);
         if (r == -ENOENT) {
                 /* Some firmware implementations that do support OsIndications and report that with
-                 * OsIndicationsSupported will remove the OsIndications variable when it is unset. Let's pretend it's 0
-                 * then, to hide this implementation detail. Note that this call will return -ENOENT then only if the
-                 * support for OsIndications is missing entirely, as determined by efi_reboot_to_firmware_supported()
-                 * above. */
-                *os_indication = 0;
+                 * OsIndicationsSupported will remove the OsIndications variable when it is unset. Let's
+                 * pretend it's 0 then, to hide this implementation detail. Note that this call will return
+                 * -ENOENT then only if the support for OsIndications is missing entirely, as determined by
+                 * efi_reboot_to_firmware_supported() above. */
+                *ret = 0;
                 return 0;
-        } else if (r < 0)
+        }
+        if (r < 0)
                 return r;
-        else if (s != sizeof(uint64_t))
+        if (s != sizeof(uint64_t))
                 return -EINVAL;
 
-        *os_indication = *(uint64_t *)v;
+        cache_stat = new_stat;
+        *ret = cache = *(uint64_t *)v;
         return 0;
 }
 
@@ -135,10 +176,7 @@ int efi_set_reboot_to_firmware(bool value) {
         if (r < 0)
                 return r;
 
-        if (value)
-                b_new = b | EFI_OS_INDICATIONS_BOOT_TO_FW_UI;
-        else
-                b_new = b & ~EFI_OS_INDICATIONS_BOOT_TO_FW_UI;
+        b_new = UPDATE_FLAG(b, EFI_OS_INDICATIONS_BOOT_TO_FW_UI, value);
 
         /* Avoid writing to efi vars store if we can due to firmware bugs. */
         if (b != b_new)
@@ -672,6 +710,76 @@ int efi_loader_get_features(uint64_t *ret) {
                                        "LoaderFeatures EFI variable doesn't have the right size.");
 
         memcpy(ret, v, sizeof(uint64_t));
+        return 0;
+}
+
+int efi_loader_get_config_timeout_one_shot(usec_t *ret) {
+        _cleanup_free_ char *v = NULL, *fn = NULL;
+        static struct stat cache_stat = {};
+        struct stat new_stat;
+        static usec_t cache;
+        uint64_t sec;
+        int r;
+
+        assert(ret);
+
+        fn = efi_variable_path(EFI_VENDOR_LOADER, "LoaderConfigTimeoutOneShot");
+        if (!fn)
+                return -ENOMEM;
+
+        /* stat() the EFI variable, to see if the mtime changed. If it did we need to cache again. */
+        if (stat(fn, &new_stat) < 0)
+                return -errno;
+
+        if (stat_inode_unmodified(&new_stat, &cache_stat)) {
+                *ret = cache;
+                return 0;
+        }
+
+        r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderConfigTimeoutOneShot", &v);
+        if (r < 0)
+                return r;
+
+        r = safe_atou64(v, &sec);
+        if (r < 0)
+                return r;
+        if (sec > USEC_INFINITY / USEC_PER_SEC)
+                return -ERANGE;
+
+        cache_stat = new_stat;
+        *ret = cache = sec * USEC_PER_SEC; /* return in µs */
+        return 0;
+}
+
+int efi_loader_update_entry_one_shot_cache(char **cache, struct stat *cache_stat) {
+        _cleanup_free_ char *fn = NULL, *v = NULL;
+        struct stat new_stat;
+        int r;
+
+        assert(cache);
+        assert(cache_stat);
+
+        fn = efi_variable_path(EFI_VENDOR_LOADER, "LoaderEntryOneShot");
+        if (!fn)
+                return -ENOMEM;
+
+        /* stat() the EFI variable, to see if the mtime changed. If it did we need to cache again. */
+        if (stat(fn, &new_stat) < 0)
+                return -errno;
+
+        if (stat_inode_unmodified(&new_stat, cache_stat))
+                return 0;
+
+        r = efi_get_variable_string(EFI_VENDOR_LOADER, "LoaderEntryOneShot", &v);
+        if (r < 0)
+                return r;
+
+        if (!efi_loader_entry_name_valid(v))
+                return -EINVAL;
+
+        *cache_stat = new_stat;
+        free_and_replace(*cache, v);
+
         return 0;
 }
 

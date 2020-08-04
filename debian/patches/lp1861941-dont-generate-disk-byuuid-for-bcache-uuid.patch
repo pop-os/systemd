@@ -42,10 +42,10 @@ Last-Update: 2020-07-23
  1 file changed, 3 insertions(+)
 
 diff --git a/rules.d/60-persistent-storage.rules b/rules.d/60-persistent-storage.rules
-index 9084792..12229de 100644
+index fc7f733..0950478 100644
 --- a/rules.d/60-persistent-storage.rules
 +++ b/rules.d/60-persistent-storage.rules
-@@ -110,8 +110,11 @@ KERNEL=="sr*", ENV{DISK_EJECT_REQUEST}!="?*", ENV{ID_CDROM_MEDIA_TRACK_COUNT_DAT
+@@ -113,8 +113,11 @@ KERNEL=="sr*", ENV{DISK_EJECT_REQUEST}!="?*", ENV{ID_CDROM_MEDIA_TRACK_COUNT_DAT
  KERNEL!="sr*", IMPORT{builtin}="blkid"
  
  # by-label/by-uuid links (filesystem metadata)

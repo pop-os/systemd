@@ -272,6 +272,8 @@ static BOOLEAN line_edit(
 
                 case KEYPRESS(0, 0, CHAR_LINEFEED):
                 case KEYPRESS(0, 0, CHAR_CARRIAGE_RETURN):
+                case KEYPRESS(0, CHAR_CARRIAGE_RETURN, 0): /* EZpad Mini 4s firmware sends malformed events */
+                case KEYPRESS(0, CHAR_CARRIAGE_RETURN, CHAR_CARRIAGE_RETURN): /* Teclast X98+ II firmware sends malformed events */
                         if (StrCmp(line, line_in) != 0)
                                 *line_out = TAKE_PTR(line);
                         enter = TRUE;
@@ -742,6 +744,9 @@ static BOOLEAN menu_run(
 
                 case KEYPRESS(0, 0, CHAR_LINEFEED):
                 case KEYPRESS(0, 0, CHAR_CARRIAGE_RETURN):
+                case KEYPRESS(0, CHAR_CARRIAGE_RETURN, 0): /* EZpad Mini 4s firmware sends malformed events */
+                case KEYPRESS(0, CHAR_CARRIAGE_RETURN, CHAR_CARRIAGE_RETURN): /* Teclast X98+ II firmware sends malformed events */
+                case KEYPRESS(0, SCAN_RIGHT, 0):
                         exit = TRUE;
                         break;
 
@@ -1200,7 +1205,7 @@ static VOID config_entry_parse_tries(
                         }
 
                         new_factor = factor * 10;
-                        if (new_factor < factor) /* overflow chck */
+                        if (new_factor < factor) /* overflow check */
                                 return;
 
                         factor = new_factor;
@@ -1518,11 +1523,11 @@ static VOID config_load_entries(
 static INTN config_entry_compare(ConfigEntry *a, ConfigEntry *b) {
         INTN r;
 
-        /* Order entries that have no tries left to the end of the list */
+        /* Order entries that have no tries left to the beginning of the list */
         if (a->tries_left != 0 && b->tries_left == 0)
-                return -1;
-        if (a->tries_left == 0 && b->tries_left != 0)
                 return 1;
+        if (a->tries_left == 0 && b->tries_left != 0)
+                return -1;
 
         r = str_verscmp(a->id, b->id);
         if (r != 0)
@@ -1532,17 +1537,17 @@ static INTN config_entry_compare(ConfigEntry *a, ConfigEntry *b) {
             b->tries_left == (UINTN) -1)
                 return 0;
 
-        /* If both items have boot counting, and otherwise are identical, put the entry with more tries left first */
+        /* If both items have boot counting, and otherwise are identical, put the entry with more tries left last */
         if (a->tries_left > b->tries_left)
-                return -1;
-        if (a->tries_left < b->tries_left)
                 return 1;
+        if (a->tries_left < b->tries_left)
+                return -1;
 
         /* If they have the same number of tries left, then let the one win which was tried fewer times so far */
         if (a->tries_done < b->tries_done)
-                return -1;
-        if (a->tries_done > b->tries_done)
                 return 1;
+        if (a->tries_done > b->tries_done)
+                return -1;
 
         return 0;
 }

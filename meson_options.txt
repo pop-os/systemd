@@ -26,6 +26,8 @@ option('static-libsystemd', type : 'combo',
 option('static-libudev', type : 'combo',
        choices : ['false', 'true', 'pic', 'no-pic'],
        description : '''install a static library for libudev''')
+option('standalone-binaries', type : 'boolean', value : 'false',
+       description : '''also build standalone versions of supported binaries''')
 
 option('sysvinit-path', type : 'string', value : '/etc/init.d',
        description : 'the directory where the SysV init scripts are located')
@@ -35,6 +37,8 @@ option('telinit-path', type : 'string', value : '/lib/sysvinit/telinit',
        description : 'path to telinit')
 option('rc-local', type : 'string',
        value : '/etc/rc.local')
+option('initrd', type: 'boolean',
+       description : 'install services for use when running systemd in initrd')
 
 option('quotaon-path', type : 'string', description : 'path to quotaon')
 option('quotacheck-path', type : 'string', description : 'path to quotacheck')
@@ -140,6 +144,8 @@ option('hwdb', type : 'boolean',
        description : 'support for the hardware database')
 option('rfkill', type : 'boolean',
        description : 'support for the rfkill tools')
+option('xdg-autostart', type : 'boolean',
+       description : 'install the xdg-autostart-generator and unit')
 option('man', type : 'combo', choices : ['auto', 'true', 'false'],
        value : 'false',
        description : 'build and install man pages')
@@ -230,6 +236,14 @@ option('default-dns-over-tls', type : 'combo',
        description : 'default DNS-over-TLS mode',
        choices : ['yes', 'opportunistic', 'no'],
        value : 'no')
+option('default-mdns', type : 'combo',
+       choices : ['yes', 'resolve', 'no'],
+       description : 'default MulticastDNS mode',
+       value : 'yes')
+option('default-llmnr', type : 'combo',
+       choices : ['yes', 'resolve', 'no'],
+       description : 'default LLMNR mode',
+       value : 'yes')
 option('dns-over-tls', type : 'combo', choices : ['auto', 'gnutls', 'openssl', 'true', 'false'],
        description : 'DNS-over-TLS support')
 option('dns-servers', type : 'string',
@@ -281,7 +295,7 @@ option('libcryptsetup', type : 'combo', choices : ['auto', 'true', 'false'],
 option('libcurl', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'libcurl support')
 option('idn', type : 'boolean',
-       description : 'use IDN when printing host names')
+       description : 'use IDN when printing hostnames')
 option('libidn2', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'libidn2 support')
 option('libidn', type : 'combo', choices : ['auto', 'true', 'false'],
@@ -298,6 +312,8 @@ option('openssl', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'openssl support')
 option('p11kit', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'p11kit support')
+option('libfido2', type : 'combo', choices : ['auto', 'true', 'false'],
+       description : 'FIDO2 support')
 option('elfutils', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'elfutils support')
 option('zlib', type : 'combo', choices : ['auto', 'true', 'false'],
@@ -308,6 +324,8 @@ option('xz', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'xz compression support')
 option('lz4', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'lz4 compression support')
+option('zstd', type : 'combo', choices : ['auto', 'true', 'false'],
+       description : 'zstd compression support')
 option('xkbcommon', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'xkbcommon keymap support')
 option('pcre2', type : 'combo', choices : ['auto', 'true', 'false'],
@@ -339,6 +357,8 @@ option('tests', type : 'combo', choices : ['true', 'unsafe', 'false'],
        description : 'enable extra tests with =unsafe')
 option('slow-tests', type : 'boolean', value : 'false',
        description : 'run the slow tests by default')
+option('fuzz-tests', type : 'boolean', value : 'false',
+       description : 'run the fuzzer regression tests by default')
 option('install-tests', type : 'boolean', value : 'false',
        description : 'install test executables')
 
@@ -354,9 +374,7 @@ option('oss-fuzz', type : 'boolean', value : 'false',
        description : 'build against oss-fuzz')
 option('llvm-fuzz', type : 'boolean', value : 'false',
        description : 'build against LLVM libFuzzer')
-option('fuzzbuzz', type : 'boolean', value : 'false',
-       description : 'build against FuzzBuzz')
-option('fuzzbuzz-engine', type : 'string',
-       description : 'the name of the FuzzBuzz fuzzing engine')
-option('fuzzbuzz-engine-dir', type : 'string',
-       description : 'the directory where the FuzzBuzz fuzzing engine is')
+option('kernel-install', type: 'boolean', value: 'true',
+       description : 'install kernel-install and associated files')
+option('analyze', type: 'boolean', value: 'true',
+       description : 'install systemd-analyze')

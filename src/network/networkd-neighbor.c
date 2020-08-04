@@ -132,7 +132,7 @@ int neighbor_configure(Neighbor *neighbor, Link *link, link_netlink_message_hand
         if (r < 0)
                 return log_link_error_errno(link, r, "Could not set state: %m");
 
-        r = sd_netlink_message_set_flags(req, NLM_F_REQUEST | NLM_F_CREATE | NLM_F_REPLACE);
+        r = sd_netlink_message_set_flags(req, NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_REPLACE);
         if (r < 0)
                 return log_link_error_errno(link, r, "Could not set flags: %m");
 
@@ -247,7 +247,7 @@ static int neighbor_compare_func(const Neighbor *a, const Neighbor *b) {
         return memcmp(&a->lladdr, &b->lladdr, a->lladdr_size);
 }
 
-DEFINE_PRIVATE_HASH_OPS(neighbor_hash_ops, Neighbor, neighbor_hash_func, neighbor_compare_func);
+DEFINE_PRIVATE_HASH_OPS_WITH_KEY_DESTRUCTOR(neighbor_hash_ops, Neighbor, neighbor_hash_func, neighbor_compare_func, neighbor_free);
 
 int neighbor_get(Link *link, int family, const union in_addr_union *addr, const union lladdr_union *lladdr, size_t lladdr_size, Neighbor **ret) {
         Neighbor neighbor, *existing;
@@ -300,11 +300,7 @@ static int neighbor_add_internal(Link *link, Set **neighbors, int family, const 
                 .lladdr_size = lladdr_size,
         };
 
-        r = set_ensure_allocated(neighbors, &neighbor_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = set_put(*neighbors, neighbor);
+        r = set_ensure_put(neighbors, &neighbor_hash_ops, neighbor);
         if (r < 0)
                 return r;
         if (r == 0)
@@ -314,8 +310,7 @@ static int neighbor_add_internal(Link *link, Set **neighbors, int family, const 
 
         if (ret)
                 *ret = neighbor;
-
-        neighbor = NULL;
+        TAKE_PTR(neighbor);
 
         return 0;
 }
@@ -332,11 +327,7 @@ int neighbor_add(Link *link, int family, const union in_addr_union *addr, const 
                         return r;
         } else if (r == 0) {
                 /* Neighbor is foreign, claim it as recognized */
-                r = set_ensure_allocated(&link->neighbors, &neighbor_hash_ops);
-                if (r < 0)
-                        return r;
-
-                r = set_put(link->neighbors, neighbor);
+                r = set_ensure_put(&link->neighbors, &neighbor_hash_ops, neighbor);
                 if (r < 0)
                         return r;
 
@@ -408,11 +399,12 @@ int config_parse_neighbor_address(
 
         r = neighbor_new_static(network, filename, section_line, &n);
         if (r < 0)
-                return r;
+                return log_oom();
 
         r = in_addr_from_string_auto(rvalue, &n->family, &n->in_addr);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Neighbor Address is invalid, ignoring assignment: %s", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Neighbor Address is invalid, ignoring assignment: %s", rvalue);
                 return 0;
         }
 
@@ -445,7 +437,7 @@ int config_parse_neighbor_lladdr(
 
         r = neighbor_new_static(network, filename, section_line, &n);
         if (r < 0)
-                return r;
+                return log_oom();
 
         r = ether_addr_from_string(rvalue, &n->lladdr.mac);
         if (r >= 0)
@@ -453,7 +445,7 @@ int config_parse_neighbor_lladdr(
         else {
                 r = in_addr_from_string_auto(rvalue, &family, &n->lladdr.ip);
                 if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r,
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Neighbor LinkLayerAddress= is invalid, ignoring assignment: %s",
                                    rvalue);
                         return 0;
@@ -490,11 +482,11 @@ int config_parse_neighbor_hwaddr(
 
         r = neighbor_new_static(network, filename, section_line, &n);
         if (r < 0)
-                return r;
+                return log_oom();
 
         r = ether_addr_from_string(rvalue, &n->lladdr.mac);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r,
+                log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Neighbor MACAddress= is invalid, ignoring assignment: %s", rvalue);
                 return 0;
         }

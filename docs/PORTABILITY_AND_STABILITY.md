@@ -87,7 +87,7 @@ And now, here's the list of (hopefully) all APIs that we have introduced with sy
 | [Boot Loader interface](https://systemd.io/BOOT_LOADER_INTERFACE) | EFI variables | yes | yes | gummiboot | yes | - | no |
 | [Service bus API](https://www.freedesktop.org/wiki/Software/systemd/dbus) | D-Bus | yes | yes | system-config-services | no | - | no |
 | [logind](https://www.freedesktop.org/wiki/Software/systemd/logind) | D-Bus | yes | yes | GNOME | no | - | no |
-| [sd-login.h API](https://www.freedesktop.org/software/systemd/man/sd-login.html) | C Library | yes | yes | GNOME, PolicyKit, ... | no | - | no |
+| [sd-login.h API](https://www.freedesktop.org/software/systemd/man/sd-login.html) | C Library | yes | yes | GNOME, polkit, ... | no | - | no |
 | [sd-daemon.h API](https://www.freedesktop.org/software/systemd/man/sd-daemon.html) | C Library or Drop-in | yes | yes | numerous | yes | - | yes |
 | [sd-id128.h API](https://www.freedesktop.org/software/systemd/man/sd-id128.html) | C Library | yes | yes | - | yes | - | no |
 | [sd-journal.h API](https://www.freedesktop.org/software/systemd/man/sd-journal.html) | C Library | yes | yes | - | maybe | - | no |
@@ -98,7 +98,7 @@ And now, here's the list of (hopefully) all APIs that we have introduced with sy
 | [Unit file format](https://www.freedesktop.org/software/systemd/man/systemd.unit.html) | File format | yes | yes | numerous | no | - | no |
 | [Network](https://www.freedesktop.org/software/systemd/man/systemd.network.html) & [Netdev file format](https://www.freedesktop.org/software/systemd/man/systemd.netdev.html) | File format | yes | yes | no | no | - | no |
 | [Link file format](https://www.freedesktop.org/software/systemd/man/systemd.link.html) | File format | yes | yes | no | no | - | no |
-| [Journal File Format](https://www.freedesktop.org/wiki/Software/systemd/journal-files) | File format | yes | yes | - | maybe | - | no |
+| [Journal File Format](https://systemd.io/JOURNAL_FILE_FORMAT) | File format | yes | yes | - | maybe | - | no |
 | [Journal Export Format](https://www.freedesktop.org/wiki/Software/systemd/export) | File format | yes | yes | - | yes | - | no |
 | [Cooperation in cgroup tree](https://www.freedesktop.org/wiki/Software/systemd/PaxControlGroups) | Treaty | yes | yes | libvirt | yes | libvirt | no |
 | [Password Agents](https://www.freedesktop.org/wiki/Software/systemd/PasswordAgents) | Socket+Files | yes | yes | - | yes | - | no |

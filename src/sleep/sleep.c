@@ -23,6 +23,7 @@
 #include "fd-util.h"
 #include "fileio.h"
 #include "format-util.h"
+#include "io-util.h"
 #include "log.h"
 #include "main-func.h"
 #include "parse-util.h"
@@ -70,7 +71,7 @@ static int write_hibernate_location_info(const HibernateLocation *hibernate_loca
                         return 0;
                 }
 
-                return log_debug_errno(errno, "/sys/power/resume_offset not writeable: %m");
+                return log_debug_errno(errno, "/sys/power/resume_offset not writable: %m");
         }
 
         xsprintf(offset_str, "%" PRIu64, hibernate_location->offset);
@@ -244,7 +245,6 @@ static int execute_s2h(const SleepConfig *sleep_config) {
         _cleanup_close_ int tfd = -1;
         char buf[FORMAT_TIMESPAN_MAX];
         struct itimerspec ts = {};
-        struct pollfd fds;
         int r;
 
         assert(sleep_config);
@@ -266,18 +266,13 @@ static int execute_s2h(const SleepConfig *sleep_config) {
         if (r < 0)
                 return r;
 
-        fds = (struct pollfd) {
-                .fd = tfd,
-                .events = POLLIN,
-        };
-        r = poll(&fds, 1, 0);
+        r = fd_wait_for_event(tfd, POLLIN, 0);
         if (r < 0)
-                return log_error_errno(errno, "Error polling timerfd: %m");
+                return log_error_errno(r, "Error polling timerfd: %m");
+        if (!FLAGS_SET(r, POLLIN)) /* We woke up before the alarm time, we are done. */
+                return 0;
 
         tfd = safe_close(tfd);
-
-        if (!FLAGS_SET(fds.revents, POLLIN)) /* We woke up before the alarm time, we are done. */
-                return 0;
 
         /* If woken up after alarm time, hibernate */
         log_debug("Attempting to hibernate after waking from %s timer",

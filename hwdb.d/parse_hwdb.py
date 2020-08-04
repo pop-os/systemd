@@ -59,6 +59,7 @@ REAL = Combine((INTEGER + Optional('.' + Optional(INTEGER))) ^ ('.' + INTEGER))
 SIGNED_REAL = Combine(Optional(Word('-+')) + REAL)
 UDEV_TAG = Word(string.ascii_uppercase, alphanums + '_')
 
+# Those patterns are used in type-specific matches
 TYPES = {'mouse':    ('usb', 'bluetooth', 'ps2', '*'),
          'evdev':    ('name', 'atkbd', 'input'),
          'id-input': ('modalias'),
@@ -68,13 +69,30 @@ TYPES = {'mouse':    ('usb', 'bluetooth', 'ps2', '*'),
          'sensor':   ('modalias', ),
         }
 
+# Patterns that are used to set general properties on a device
+GENERAL_MATCHES = {'acpi',
+                   'bluetooth',
+                   'usb',
+                   'pci',
+                   'sdio',
+                   'vmbus',
+                   'OUI',
+                   }
+
+def upperhex_word(length):
+    return Word(nums + 'ABCDEF', exact=length)
+
 @lru_cache()
 def hwdb_grammar():
     ParserElement.setDefaultWhitespaceChars('')
 
     prefix = Or(category + ':' + Or(conn) + ':'
                 for category, conn in TYPES.items())
-    matchline = Combine(prefix + Word(printables + ' ' + '®')) + EOL
+
+    matchline_typed = Combine(prefix + Word(printables + ' ' + '®'))
+    matchline_general = Combine(Or(GENERAL_MATCHES) + ':' + Word(printables + ' ' + '®'))
+    matchline = (matchline_typed | matchline_general) + EOL
+
     propertyline = (White(' ', exact=1).suppress() +
                     Combine(UDEV_TAG - '=' - Word(alphanums + '_=:@*.!-;, "') - Optional(pythonStyleComment)) +
                     EOL)
@@ -102,6 +120,7 @@ def property_grammar():
              ('MOUSE_WHEEL_CLICK_ANGLE_HORIZONTAL', INTEGER),
              ('MOUSE_WHEEL_CLICK_COUNT', INTEGER),
              ('MOUSE_WHEEL_CLICK_COUNT_HORIZONTAL', INTEGER),
+             ('ID_AUTOSUSPEND', Literal('1')),
              ('ID_INPUT', Literal('1')),
              ('ID_INPUT_ACCELEROMETER', Literal('1')),
              ('ID_INPUT_JOYSTICK', Literal('1')),
@@ -115,8 +134,6 @@ def property_grammar():
              ('ID_INPUT_TOUCHPAD', Literal('1')),
              ('ID_INPUT_TOUCHSCREEN', Literal('1')),
              ('ID_INPUT_TRACKBALL', Literal('1')),
-             ('MOUSE_WHEEL_TILT_HORIZONTAL', Literal('1')),
-             ('MOUSE_WHEEL_TILT_VERTICAL', Literal('1')),
              ('POINTINGSTICK_SENSITIVITY', INTEGER),
              ('POINTINGSTICK_CONST_ACCEL', REAL),
              ('ID_INPUT_JOYSTICK_INTEGRATION', Or(('internal', 'external'))),
@@ -166,8 +183,27 @@ def parse(fname):
         return []
     return [convert_properties(g) for g in parsed.GROUPS]
 
-def check_match_uniqueness(groups):
+def check_matches(groups):
     matches = sum((group[0] for group in groups), [])
+
+    # This is a partial check. The other cases could be also done, but those
+    # two are most commonly wrong.
+    grammars = { 'usb' : 'v' + upperhex_word(4) + Optional('p' + upperhex_word(4)),
+                 'pci' : 'v' + upperhex_word(8) + Optional('d' + upperhex_word(8)),
+    }
+
+    for match in matches:
+        prefix, rest = match.split(':', maxsplit=1)
+        gr = grammars.get(prefix)
+        if gr:
+            try:
+                gr.parseString(rest)
+            except ParseBaseException as e:
+                error('Pattern {!r} is invalid: {}', rest, e)
+                continue
+            if rest[-1] not in '*:':
+                error('pattern {} does not end with "*" or ":"', match)
+
     matches.sort()
     prev = None
     for match in matches:
@@ -242,7 +278,7 @@ if __name__ == '__main__':
     for fname in args:
         groups = parse(fname)
         print_summary(fname, groups)
-        check_match_uniqueness(groups)
+        check_matches(groups)
         check_properties(groups)
 
     sys.exit(ERROR)

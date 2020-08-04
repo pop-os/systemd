@@ -13,10 +13,10 @@ creating a ipv6ll address, even though we don't want that.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index 813f382..0a703ce 100644
+index 666682a..33b234f 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -1616,7 +1616,7 @@ static int link_address_genmode_handler(sd_netlink *rtnl, sd_netlink_message *m,
+@@ -1792,7 +1792,7 @@ static int link_address_genmode_handler(sd_netlink *rtnl, sd_netlink_message *m,
          else
                  log_link_debug(link, "Setting address genmode done.");
  

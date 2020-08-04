@@ -315,7 +315,7 @@ static int server_read_dev_kmsg(Server *s) {
                 if (IN_SET(errno, EAGAIN, EINTR, EPIPE))
                         return 0;
 
-                return log_error_errno(errno, "Failed to read from kernel: %m");
+                return log_error_errno(errno, "Failed to read from /dev/kmsg: %m");
         }
 
         dev_kmsg_record(s, buffer, l);
@@ -423,7 +423,7 @@ int server_open_kernel_seqnum(Server *s) {
 
         assert(s);
 
-        /* We store the seqnum we last read in an mmaped file. That way we can just use it like a variable,
+        /* We store the seqnum we last read in an mmapped file. That way we can just use it like a variable,
          * but it is persistent and automatically flushed at reboot. */
 
         if (!s->read_kmsg)

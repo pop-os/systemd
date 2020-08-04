@@ -9,15 +9,15 @@ Changes introducing LINK_STATE_INITIALIZED broke netplan.io's ethernets autopkgt
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/network/networkd-link-bus.c b/src/network/networkd-link-bus.c
-index efb72b6..2f7b8f2 100644
+index f623a9b..30019c0 100644
 --- a/src/network/networkd-link-bus.c
 +++ b/src/network/networkd-link-bus.c
-@@ -621,7 +621,7 @@ int bus_link_method_reconfigure(sd_bus_message *message, void *userdata, sd_bus_
+@@ -668,7 +668,7 @@ int bus_link_method_reconfigure(sd_bus_message *message, void *userdata, sd_bus_
          if (r < 0)
                  return r;
  
 -        link_set_state(l, LINK_STATE_INITIALIZED);
 +        link_set_state(l, LINK_STATE_PENDING);
-         r = link_save(l);
+         r = link_save_and_clean(l);
          if (r < 0)
                  return r;

@@ -6,7 +6,8 @@
 
   Copyright © 2010 Brandon Philips
 -->
-<refentry id="tmpfiles.d">
+<refentry id="tmpfiles.d"
+          xmlns:xi="http://www.w3.org/2001/XInclude">
 
   <refentryinfo>
     <title>tmpfiles.d</title>
@@ -616,7 +617,7 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
     <para>Specifiers can be used in the "path" and "argument" fields.
     An unknown or unresolvable specifier is treated as invalid configuration.
     The following expansions are understood:</para>
-      <table>
+      <table class='specifiers'>
         <title>Specifiers available</title>
         <tgroup cols='3' align='left' colsep='1' rowsep='1'>
           <colspec colname="spec" />
@@ -630,11 +631,9 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
             </row>
           </thead>
           <tbody>
-            <row>
-              <entry><literal>%b</literal></entry>
-              <entry>Boot ID</entry>
-              <entry>The boot ID of the running system, formatted as string. See <citerefentry><refentrytitle>random</refentrytitle><manvolnum>4</manvolnum></citerefentry> for more information.</entry>
-            </row>
+            <xi:include href="standard-specifiers.xml" xpointer="a"/>
+            <xi:include href="standard-specifiers.xml" xpointer="b"/>
+            <xi:include href="standard-specifiers.xml" xpointer="B"/>
             <row>
               <entry><literal>%C</literal></entry>
               <entry>System or user cache directory</entry>
@@ -645,21 +644,15 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
               <entry>User home directory</entry>
               <entry>This is the home directory of the user running the command. In case of the system instance this resolves to <literal>/root</literal>.</entry>
             </row>
-            <row>
-              <entry><literal>%H</literal></entry>
-              <entry>Host name</entry>
-              <entry>The hostname of the running system.</entry>
-            </row>
+            <xi:include href="standard-specifiers.xml" xpointer="H"/>
+            <xi:include href="standard-specifiers.xml" xpointer="l"/>
             <row>
               <entry><literal>%L</literal></entry>
               <entry>System or user log directory</entry>
               <entry>In <option>--user</option> mode, this is the same as <varname>$XDG_CONFIG_HOME</varname> with <filename index="false">/log</filename> appended, and <filename>/var/log</filename> otherwise.</entry>
             </row>
-            <row>
-              <entry><literal>%m</literal></entry>
-              <entry>Machine ID</entry>
-              <entry>The machine ID of the running system, formatted as string. See <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry> for more information.</entry>
-            </row>
+            <xi:include href="standard-specifiers.xml" xpointer="m"/>
+            <xi:include href="standard-specifiers.xml" xpointer="o"/>
             <row>
               <entry><literal>%S</literal></entry>
               <entry>System or user state directory</entry>
@@ -695,21 +688,15 @@ w- /proc/sys/vm/swappiness - - - - 10</programlisting></para>
               <entry>User UID</entry>
               <entry>This is the numeric UID of the user running the command. In case of the system instance this resolves to <constant>0</constant>.</entry>
             </row>
-            <row>
-              <entry><literal>%v</literal></entry>
-              <entry>Kernel release</entry>
-              <entry>Identical to <command>uname -r</command> output.</entry>
-            </row>
+            <xi:include href="standard-specifiers.xml" xpointer="v"/>
             <row>
               <entry><literal>%V</literal></entry>
               <entry>Directory for larger and persistent temporary files</entry>
               <entry>This is either <filename>/var/tmp</filename> or the path <literal>$TMPDIR</literal>, <literal>$TEMP</literal> or <literal>$TMP</literal> are set to.</entry>
             </row>
-            <row>
-              <entry><literal>%%</literal></entry>
-              <entry>Escaped <literal>%</literal></entry>
-              <entry>Single percent sign.</entry>
-            </row>
+            <xi:include href="standard-specifiers.xml" xpointer="w"/>
+            <xi:include href="standard-specifiers.xml" xpointer="W"/>
+            <xi:include href="standard-specifiers.xml" xpointer="percent"/>
           </tbody>
         </tgroup>
       </table>

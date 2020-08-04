@@ -59,10 +59,14 @@ int parse_sleep_config(SleepConfig **ret_sleep_config) {
                 {}
         };
 
-        (void) config_parse_many_nulstr(PKGSYSCONFDIR "/sleep.conf",
-                                        CONF_PATHS_NULSTR("systemd/sleep.conf.d"),
-                                        "Sleep\0", config_item_table_lookup, items,
-                                        CONFIG_PARSE_WARN, NULL);
+        (void) config_parse_many_nulstr(
+                        PKGSYSCONFDIR "/sleep.conf",
+                        CONF_PATHS_NULSTR("systemd/sleep.conf.d"),
+                        "Sleep\0",
+                        config_item_table_lookup, items,
+                        CONFIG_PARSE_WARN,
+                        NULL,
+                        NULL);
 
         /* use default values unless set */
         sc->allow_suspend = allow_suspend != 0;
@@ -121,10 +125,16 @@ int can_sleep_state(char **types) {
 
                 k = strlen(*type);
                 FOREACH_WORD_SEPARATOR(word, l, p, WHITESPACE, state)
-                        if (l == k && memcmp(word, *type, l) == 0)
+                        if (l == k && memcmp(word, *type, l) == 0) {
+                                log_debug("Sleep mode \"%s\" is supported by the kernel.", *type);
                                 return true;
+                        }
         }
 
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *t = strv_join(types, "/");
+                log_debug("Sleep mode %s not supported by the kernel, sorry.", strnull(t));
+        }
         return false;
 }
 
@@ -213,7 +223,7 @@ static int swap_device_to_device_id(const SwapEntry *swap, dev_t *ret_dev) {
 }
 
 /*
- * Attempt to calculate the swap file offset on supported filesystems. On unsuported
+ * Attempt to calculate the swap file offset on supported filesystems. On unsupported
  * filesystems, a debug message is logged and ret_offset is set to UINT64_MAX.
  */
 static int calculate_swap_file_offset(const SwapEntry *swap, uint64_t *ret_offset) {

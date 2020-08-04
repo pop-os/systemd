@@ -544,7 +544,7 @@ int bpf_firewall_compile(Unit *u) {
                                             "BPF_F_ALLOW_MULTI is not supported on this manager, not doing BPF firewall on slice units.");
 
         /* Note that when we compile a new firewall we first flush out the access maps and the BPF programs themselves,
-         * but we reuse the the accounting maps. That way the firewall in effect always maps to the actual
+         * but we reuse the accounting maps. That way the firewall in effect always maps to the actual
          * configuration, but we don't flush out the accounting unnecessarily */
 
         u->ip_bpf_ingress = bpf_program_unref(u->ip_bpf_ingress);
@@ -595,7 +595,7 @@ static int load_bpf_progs_from_fs_to_set(Unit *u, char **filter_paths, Set **set
         set_clear(*set);
 
         STRV_FOREACH(bpf_fs_path, filter_paths) {
-                _cleanup_free_ BPFProgram *prog = NULL;
+                _cleanup_(bpf_program_unrefp) BPFProgram *prog = NULL;
                 int r;
 
                 r = bpf_program_new(BPF_PROG_TYPE_CGROUP_SKB, &prog);
@@ -606,14 +606,9 @@ static int load_bpf_progs_from_fs_to_set(Unit *u, char **filter_paths, Set **set
                 if (r < 0)
                         return log_unit_error_errno(u, r, "Loading of ingress BPF program %s failed: %m", *bpf_fs_path);
 
-                r = set_ensure_allocated(set, &filter_prog_hash_ops);
-                if (r < 0)
-                        return log_unit_error_errno(u, r, "Can't allocate BPF program set: %m");
-
-                r = set_put(*set, prog);
+                r = set_ensure_consume(set, &filter_prog_hash_ops, TAKE_PTR(prog));
                 if (r < 0)
                         return log_unit_error_errno(u, r, "Can't add program to BPF program set: %m");
-                TAKE_PTR(prog);
         }
 
         return 0;
@@ -662,12 +657,9 @@ static int attach_custom_bpf_progs(Unit *u, const char *path, int attach_type, S
                 r = bpf_program_cgroup_attach(prog, attach_type, path, BPF_F_ALLOW_MULTI);
                 if (r < 0)
                         return log_unit_error_errno(u, r, "Attaching custom egress BPF program to cgroup %s failed: %m", path);
-                /* Remember that these BPF programs are installed now. */
-                r = set_ensure_allocated(set_installed, &filter_prog_hash_ops);
-                if (r < 0)
-                        return log_unit_error_errno(u, r, "Can't allocate BPF program set: %m");
 
-                r = set_put(*set_installed, prog);
+                /* Remember that these BPF programs are installed now. */
+                r = set_ensure_put(set_installed, &filter_prog_hash_ops, prog);
                 if (r < 0)
                         return log_unit_error_errno(u, r, "Can't add program to BPF program set: %m");
                 bpf_program_ref(prog);

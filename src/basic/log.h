@@ -59,9 +59,12 @@ void log_show_color(bool b);
 bool log_get_show_color(void) _pure_;
 void log_show_location(bool b);
 bool log_get_show_location(void) _pure_;
+void log_show_time(bool b);
+bool log_get_show_time(void) _pure_;
 
 int log_show_color_from_string(const char *e);
 int log_show_location_from_string(const char *e);
+int log_show_time_from_string(const char *e);
 
 LogTarget log_get_target(void) _pure_;
 int log_get_max_level_realm(LogRealm realm) _pure_;
@@ -81,8 +84,11 @@ void log_close(void);
 void log_forget_fds(void);
 
 void log_parse_environment_realm(LogRealm realm);
+void log_parse_environment_cli_realm(LogRealm realm);
 #define log_parse_environment() \
         log_parse_environment_realm(LOG_REALM)
+#define log_parse_environment_cli() \
+        log_parse_environment_cli_realm(LOG_REALM)
 
 int log_dispatch_internal(
                 int level,
@@ -338,3 +344,4 @@ int log_syntax_invalid_utf8_internal(
 #define DEBUG_LOGGING _unlikely_(log_get_max_level() >= LOG_DEBUG)
 
 void log_setup_service(void);
+void log_setup_cli(void);

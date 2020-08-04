@@ -7,11 +7,13 @@
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/random.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
 
 #if HAVE_SYS_AUXV_H
@@ -75,7 +77,7 @@ int rdrand(unsigned long *ret) {
          *           hash functions for its hash tables, with a seed generated randomly. The hash tables
          *           systemd employs watch the fill level closely and reseed if necessary. This allows use of
          *           a low quality RNG initially, as long as it improves should a hash table be under attack:
-         *           the attacker after all needs to to trigger many collisions to exploit it for the purpose
+         *           the attacker after all needs to trigger many collisions to exploit it for the purpose
          *           of DoS, but if doing so improves the seed the attack surface is reduced as the attack
          *           takes place.
          *
@@ -208,7 +210,9 @@ int genuine_random_bytes(void *p, size_t n, RandomFlags flags) {
         if (have_syscall != 0 && !HAS_FEATURE_MEMORY_SANITIZER) {
 
                 for (;;) {
-                        r = getrandom(p, n, FLAGS_SET(flags, RANDOM_BLOCK) ? 0 : GRND_NONBLOCK);
+                        r = getrandom(p, n,
+                                      (FLAGS_SET(flags, RANDOM_BLOCK) ? 0 : GRND_NONBLOCK) |
+                                      (FLAGS_SET(flags, RANDOM_ALLOW_INSECURE) ? GRND_INSECURE : 0));
                         if (r > 0) {
                                 have_syscall = true;
 
@@ -264,6 +268,18 @@ int genuine_random_bytes(void *p, size_t n, RandomFlags flags) {
 
                                 /* Use /dev/urandom instead */
                                 break;
+
+                        } else if (errno == EINVAL) {
+
+                                /* Most likely: unknown flag. We know that GRND_INSECURE might cause this,
+                                 * hence try without. */
+
+                                if (FLAGS_SET(flags, RANDOM_ALLOW_INSECURE)) {
+                                        flags = flags &~ RANDOM_ALLOW_INSECURE;
+                                        continue;
+                                }
+
+                                return -errno;
                         } else
                                 return -errno;
                 }
@@ -326,9 +342,11 @@ void initialize_srand(void) {
 
 /* INT_MAX gives us only 31 bits, so use 24 out of that. */
 #if RAND_MAX >= INT_MAX
+assert_cc(RAND_MAX >= 16777215);
 #  define RAND_STEP 3
 #else
-/* SHORT_INT_MAX or lower gives at most 15 bits, we just just 8 out of that. */
+/* SHORT_INT_MAX or lower gives at most 15 bits, we just use 8 out of that. */
+assert_cc(RAND_MAX >= 255);
 #  define RAND_STEP 1
 #endif
 
@@ -393,7 +411,7 @@ void random_bytes(void *p, size_t n) {
          * This function is hence not useful for generating UUIDs or cryptographic key material.
          */
 
-        if (genuine_random_bytes(p, n, RANDOM_EXTEND_WITH_PSEUDO|RANDOM_MAY_FAIL|RANDOM_ALLOW_RDRAND) >= 0)
+        if (genuine_random_bytes(p, n, RANDOM_EXTEND_WITH_PSEUDO|RANDOM_MAY_FAIL|RANDOM_ALLOW_RDRAND|RANDOM_ALLOW_INSECURE) >= 0)
                 return;
 
         /* If for some reason some user made /dev/urandom unavailable to us, or the kernel has no entropy, use a PRNG instead. */
@@ -421,4 +439,37 @@ size_t random_pool_size(void) {
 
         /* Use the minimum as default, if we can't retrieve the correct value */
         return RANDOM_POOL_SIZE_MIN;
+}
+
+int random_write_entropy(int fd, const void *seed, size_t size, bool credit) {
+        int r;
+
+        assert(fd >= 0);
+        assert(seed && size > 0);
+
+        if (credit) {
+                _cleanup_free_ struct rand_pool_info *info = NULL;
+
+                /* The kernel API only accepts "int" as entropy count (which is in bits), let's avoid any
+                 * chance for confusion here. */
+                if (size > INT_MAX / 8)
+                        return -EOVERFLOW;
+
+                info = malloc(offsetof(struct rand_pool_info, buf) + size);
+                if (!info)
+                        return -ENOMEM;
+
+                info->entropy_count = size * 8;
+                info->buf_size = size;
+                memcpy(info->buf, seed, size);
+
+                if (ioctl(fd, RNDADDENTROPY, info) < 0)
+                        return -errno;
+        } else {
+                r = loop_write(fd, seed, size, false);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
 }

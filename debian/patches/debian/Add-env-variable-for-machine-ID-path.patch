@@ -33,7 +33,7 @@ index 9b38ef0..29b8abe 100644
                          return r;
  
 diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
-index d97ccfd..4c15bf8 100644
+index dfea70c..c00282d 100644
 --- a/src/test/test-fs-util.c
 +++ b/src/test/test-fs-util.c
 @@ -211,7 +211,7 @@ static void test_chase_symlinks(void) {

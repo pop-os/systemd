@@ -17,7 +17,7 @@ static int ipv4ll_address_lost(Link *link) {
 
         assert(link);
 
-        link->ipv4ll_address = false;
+        link->ipv4ll_address_configured = false;
 
         r = sd_ipv4ll_get_address(link->ipv4ll, &addr);
         if (r < 0)
@@ -47,7 +47,7 @@ static int ipv4ll_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link 
         int r;
 
         assert(link);
-        assert(!link->ipv4ll_address);
+        assert(!link->ipv4ll_address_configured);
 
         r = sd_netlink_message_get_errno(m);
         if (r < 0 && r != -EEXIST) {
@@ -57,7 +57,7 @@ static int ipv4ll_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link 
         } else if (r >= 0)
                 (void) manager_rtnl_process_address(rtnl, m, link->manager);
 
-        link->ipv4ll_address = true;
+        link->ipv4ll_address_configured = true;
         link_check_ready(link);
 
         return 1;
@@ -71,7 +71,7 @@ static int ipv4ll_address_claimed(sd_ipv4ll *ll, Link *link) {
         assert(ll);
         assert(link);
 
-        link->ipv4ll_address = false;
+        link->ipv4ll_address_configured = false;
 
         r = sd_ipv4ll_get_address(ll, &address);
         if (r == -ENOENT)
@@ -92,7 +92,7 @@ static int ipv4ll_address_claimed(sd_ipv4ll *ll, Link *link) {
         ll_addr->broadcast.s_addr = ll_addr->in_addr.in.s_addr | htobe32(0xfffffffflu >> ll_addr->prefixlen);
         ll_addr->scope = RT_SCOPE_LINK;
 
-        r = address_configure(ll_addr, link, ipv4ll_address_handler, false);
+        r = address_configure(ll_addr, link, ipv4ll_address_handler, false, NULL);
         if (r < 0)
                 return r;
 
@@ -154,6 +154,10 @@ int ipv4ll_configure(Link *link) {
                 r = sd_ipv4ll_new(&link->ipv4ll);
                 if (r < 0)
                         return r;
+
+                r = sd_ipv4ll_attach_event(link->ipv4ll, NULL, 0);
+                if (r < 0)
+                        return r;
         }
 
         if (link->sd_device &&
@@ -162,10 +166,6 @@ int ipv4ll_configure(Link *link) {
                 if (r < 0)
                         return r;
         }
-
-        r = sd_ipv4ll_attach_event(link->ipv4ll, NULL, 0);
-        if (r < 0)
-                return r;
 
         r = sd_ipv4ll_set_mac(link->ipv4ll, &link->mac);
         if (r < 0)
@@ -208,7 +208,7 @@ int config_parse_ipv4ll(
 
         r = parse_boolean(rvalue);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r,
+                log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to parse %s=%s, ignoring assignment. "
                            "Note that the setting %s= is deprecated, please use LinkLocalAddressing= instead.",
                            lvalue, rvalue, lvalue);

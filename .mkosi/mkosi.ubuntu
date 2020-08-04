@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: LGPL-2.1+
 
 # This is a settings file for OS image generation using mkosi (https://github.com/systemd/mkosi).
-# Simply invoke "mkosi" in the project directory to build an OS image.
+# Symlink this file to mkosi.default in the project root directory and invoke "mkosi" to build an OS image.
 
 [Distribution]
 Distribution=ubuntu
-Release=bionic
+Release=focal
 Repositories=main,universe
 
 [Output]
@@ -25,7 +25,6 @@ BuildPackages=
         git
         gnu-efi
         gperf
-        iptables-dev
         libacl1-dev
         libaudit-dev
         libblkid-dev
@@ -39,6 +38,8 @@ BuildPackages=
         libgcrypt20-dev
         libgnutls28-dev
         libidn2-0-dev
+        libip4tc-dev
+        libip6tc-dev
         libkmod-dev
         liblz4-dev
         liblz4-tool
@@ -51,6 +52,8 @@ BuildPackages=
         libsmartcols-dev
         libtool
         libxkbcommon-dev
+        libxtables-dev
+        libzstd-dev
         m4
         meson
         pkg-config
@@ -61,8 +64,9 @@ BuildPackages=
         uuid-dev
         xsltproc
         xz-utils
+        zstd
 
 Packages=
-        libqrencode3
+        libqrencode4
         locales
         libidn2-0

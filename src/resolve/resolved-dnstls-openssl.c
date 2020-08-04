@@ -6,10 +6,12 @@
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/x509v3.h>
 
 #include "io-util.h"
 #include "resolved-dns-stream.h"
 #include "resolved-dnstls.h"
+#include "resolved-manager.h"
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(SSL*, SSL_free);
 DEFINE_TRIVIAL_CLEANUP_FUNC(BIO*, BIO_free);
@@ -80,13 +82,19 @@ int dnstls_stream_connect_tls(DnsStream *stream, DnsServer *server) {
 
         if (server->manager->dns_over_tls_mode == DNS_OVER_TLS_YES) {
                 X509_VERIFY_PARAM *v;
-                const unsigned char *ip;
 
                 SSL_set_verify(s, SSL_VERIFY_PEER, NULL);
                 v = SSL_get0_param(s);
-                ip = server->family == AF_INET ? (const unsigned char*) &server->address.in.s_addr : server->address.in6.s6_addr;
-                if (X509_VERIFY_PARAM_set1_ip(v, ip, FAMILY_ADDRESS_SIZE(server->family)) == 0)
-                        return -ECONNREFUSED;
+                if (server->server_name) {
+                        X509_VERIFY_PARAM_set_hostflags(v, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+                        if (X509_VERIFY_PARAM_set1_host(v, server->server_name, 0) == 0)
+                                return -ECONNREFUSED;
+                } else {
+                        const unsigned char *ip;
+                        ip = server->family == AF_INET ? (const unsigned char*) &server->address.in.s_addr : server->address.in6.s6_addr;
+                        if (X509_VERIFY_PARAM_set1_ip(v, ip, FAMILY_ADDRESS_SIZE(server->family)) == 0)
+                                return -ECONNREFUSED;
+                }
         }
 
         if (server->server_name) {

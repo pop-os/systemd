@@ -21,6 +21,7 @@ typedef enum DHCPOptionDataType {
         DHCP_OPTION_DATA_UINT32,
         DHCP_OPTION_DATA_STRING,
         DHCP_OPTION_DATA_IPV4ADDRESS,
+        DHCP_OPTION_DATA_IPV6ADDRESS,
         _DHCP_OPTION_DATA_MAX,
         _DHCP_OPTION_DATA_INVALID,
 } DHCPOptionDataType;
@@ -41,11 +42,13 @@ const char *dhcp_option_data_type_to_string(DHCPOptionDataType d) _const_;
 DHCPOptionDataType dhcp_option_data_type_from_string(const char *d) _pure_;
 
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp);
+CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_route_metric);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_dns);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_domains);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_ntp);
-CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_use_sip);
 CONFIG_PARSER_PROTOTYPE(config_parse_iaid);
 CONFIG_PARSER_PROTOTYPE(config_parse_section_route_table);
-CONFIG_PARSER_PROTOTYPE(config_parse_dhcp6_pd_hint);
+CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_user_class);
+CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_vendor_class);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_send_option);
+CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_request_options);

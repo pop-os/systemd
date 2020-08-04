@@ -4,9 +4,6 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <linux/vt.h>
-#if ENABLE_UTMP
-#include <utmpx.h>
-#endif
 
 #include "sd-device.h"
 
@@ -16,6 +13,7 @@
 #include "cgroup-util.h"
 #include "conf-parser.h"
 #include "device-util.h"
+#include "efi-loader.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "limits-util.h"
@@ -28,6 +26,7 @@
 #include "udev-util.h"
 #include "user-util.h"
 #include "userdb.h"
+#include "utmp-wtmp.h"
 
 void manager_reset_config(Manager *m) {
         assert(m);
@@ -55,6 +54,7 @@ void manager_reset_config(Manager *m) {
         m->idle_action = HANDLE_IGNORE;
 
         m->runtime_dir_size = physical_memory_scale(10U, 100U); /* 10% */
+        m->runtime_dir_inodes = DIV_ROUND_UP(m->runtime_dir_size, 4096); /* 4k per inode */
         m->sessions_max = 8192;
         m->inhibitors_max = 8192;
 
@@ -67,11 +67,13 @@ void manager_reset_config(Manager *m) {
 int manager_parse_config_file(Manager *m) {
         assert(m);
 
-        return config_parse_many_nulstr(PKGSYSCONFDIR "/logind.conf",
-                                        CONF_PATHS_NULSTR("systemd/logind.conf.d"),
-                                        "Login\0",
-                                        config_item_perf_lookup, logind_gperf_lookup,
-                                        CONFIG_PARSE_WARN, m);
+        return config_parse_many_nulstr(
+                        PKGSYSCONFDIR "/logind.conf",
+                        CONF_PATHS_NULSTR("systemd/logind.conf.d"),
+                        "Login\0",
+                        config_item_perf_lookup, logind_gperf_lookup,
+                        CONFIG_PARSE_WARN, m,
+                        NULL);
 }
 
 int manager_add_device(Manager *m, const char *sysfs, bool master, Device **ret_device) {
@@ -171,7 +173,7 @@ int manager_add_user_by_name(
         assert(m);
         assert(name);
 
-        r = userdb_by_name(name, 0, &ur);
+        r = userdb_by_name(name, USERDB_AVOID_SHADOW, &ur);
         if (r < 0)
                 return r;
 
@@ -189,7 +191,7 @@ int manager_add_user_by_uid(
         assert(m);
         assert(uid_is_valid(uid));
 
-        r = userdb_by_uid(uid, 0, &ur);
+        r = userdb_by_uid(uid, USERDB_AVOID_SHADOW, &ur);
         if (r < 0)
                 return r;
 
@@ -597,10 +599,10 @@ static int manager_count_external_displays(Manager *m) {
                 if (sd_device_get_sysname(d, &nn) < 0)
                         continue;
 
-                /* Ignore internal displays: the type is encoded in the sysfs name, as the second dash separated item
-                 * (the first is the card name, the last the connector number). We implement a blacklist of external
-                 * displays here, rather than a whitelist of internal ones, to ensure we don't block suspends too
-                 * eagerly. */
+                /* Ignore internal displays: the type is encoded in the sysfs name, as the second dash
+                 * separated item (the first is the card name, the last the connector number). We implement a
+                 * deny list of external displays here, rather than an allow list of internal ones, to ensure
+                 * we don't block suspends too eagerly. */
                 dash = strchr(nn, '-');
                 if (!dash)
                         continue;
@@ -681,13 +683,14 @@ bool manager_all_buttons_ignored(Manager *m) {
 int manager_read_utmp(Manager *m) {
 #if ENABLE_UTMP
         int r;
+        _cleanup_(utxent_cleanup) bool utmpx = false;
 
         assert(m);
 
         if (utmpxname(_PATH_UTMPX) < 0)
                 return log_error_errno(errno, "Failed to set utmp path to " _PATH_UTMPX ": %m");
 
-        setutxent();
+        utmpx = utxent_start();
 
         for (;;) {
                 _cleanup_free_ char *t = NULL;
@@ -700,8 +703,7 @@ int manager_read_utmp(Manager *m) {
                 if (!u) {
                         if (errno != 0)
                                 log_warning_errno(errno, "Failed to read " _PATH_UTMPX ", ignoring: %m");
-                        r = 0;
-                        break;
+                        return 0;
                 }
 
                 if (u->ut_type != USER_PROCESS)
@@ -711,18 +713,14 @@ int manager_read_utmp(Manager *m) {
                         continue;
 
                 t = strndup(u->ut_line, sizeof(u->ut_line));
-                if (!t) {
-                        r = log_oom();
-                        break;
-                }
+                if (!t)
+                        return log_oom();
 
                 c = path_startswith(t, "/dev/");
                 if (c) {
                         r = free_and_strdup(&t, c);
-                        if (r < 0) {
-                                log_oom();
-                                break;
-                        }
+                        if (r < 0)
+                                return log_oom();
                 }
 
                 if (isempty(t))
@@ -752,8 +750,6 @@ int manager_read_utmp(Manager *m) {
                 log_debug("Acquired TTY information '%s' from utmp for session '%s'.", s->tty, s->id);
         }
 
-        endutxent();
-        return r;
 #else
         return 0;
 #endif
@@ -814,5 +810,29 @@ void manager_reconnect_utmp(Manager *m) {
                 return;
 
         manager_connect_utmp(m);
+#endif
+}
+
+int manager_read_efi_boot_loader_entries(Manager *m) {
+#if ENABLE_EFI
+        int r;
+
+        assert(m);
+        if (m->efi_boot_loader_entries_set)
+                return 0;
+
+        r = efi_loader_get_entries(&m->efi_boot_loader_entries);
+        if (r == -ENOENT || ERRNO_IS_NOT_SUPPORTED(r)) {
+                log_debug_errno(r, "Boot loader reported no entries.");
+                m->efi_boot_loader_entries_set = true;
+                return 0;
+        }
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine entries reported by boot loader: %m");
+
+        m->efi_boot_loader_entries_set = true;
+        return 1;
+#else
+        return 0;
 #endif
 }

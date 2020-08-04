@@ -15,6 +15,8 @@
 #include "io-util.h"
 #include "parse-util.h"
 #include "process-util.h"
+#include "rm-rf.h"
+#include "socket-util.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tests.h"
@@ -444,20 +446,23 @@ static void test_write_string_file_verify(void) {
         _cleanup_free_ char *buf = NULL, *buf2 = NULL;
         int r;
 
-        assert_se(read_one_line_file("/proc/cmdline", &buf) >= 0);
+        r = read_one_line_file("/proc/version", &buf);
+        if (ERRNO_IS_PRIVILEGE(r))
+                return;
+        assert_se(r >= 0);
         assert_se(buf2 = strjoin(buf, "\n"));
 
-        r = write_string_file("/proc/cmdline", buf, 0);
+        r = write_string_file("/proc/version", buf, 0);
         assert_se(IN_SET(r, -EACCES, -EIO));
-        r = write_string_file("/proc/cmdline", buf2, 0);
+        r = write_string_file("/proc/version", buf2, 0);
         assert_se(IN_SET(r, -EACCES, -EIO));
 
-        assert_se(write_string_file("/proc/cmdline", buf, WRITE_STRING_FILE_VERIFY_ON_FAILURE) == 0);
-        assert_se(write_string_file("/proc/cmdline", buf2, WRITE_STRING_FILE_VERIFY_ON_FAILURE) == 0);
+        assert_se(write_string_file("/proc/version", buf, WRITE_STRING_FILE_VERIFY_ON_FAILURE) == 0);
+        assert_se(write_string_file("/proc/version", buf2, WRITE_STRING_FILE_VERIFY_ON_FAILURE) == 0);
 
-        r = write_string_file("/proc/cmdline", buf, WRITE_STRING_FILE_VERIFY_ON_FAILURE|WRITE_STRING_FILE_AVOID_NEWLINE);
+        r = write_string_file("/proc/version", buf, WRITE_STRING_FILE_VERIFY_ON_FAILURE|WRITE_STRING_FILE_AVOID_NEWLINE);
         assert_se(IN_SET(r, -EACCES, -EIO));
-        assert_se(write_string_file("/proc/cmdline", buf2, WRITE_STRING_FILE_VERIFY_ON_FAILURE|WRITE_STRING_FILE_AVOID_NEWLINE) == 0);
+        assert_se(write_string_file("/proc/version", buf2, WRITE_STRING_FILE_VERIFY_ON_FAILURE|WRITE_STRING_FILE_AVOID_NEWLINE) == 0);
 }
 
 static void test_load_env_file_pairs(void) {
@@ -630,8 +635,7 @@ static void test_tempfn(void) {
 static const char chars[] =
         "Aąę„”\n루\377";
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wtype-limits"
+DISABLE_WARNING_TYPE_LIMITS;
 
 static void test_fgetc(void) {
         _cleanup_fclose_ FILE *f = NULL;
@@ -662,7 +666,7 @@ static void test_fgetc(void) {
         assert_se(safe_fgetc(f, &c) == 0);
 }
 
-#pragma GCC diagnostic pop
+REENABLE_WARNING;
 
 static const char buffer[] =
         "Some test data\n"
@@ -757,7 +761,7 @@ static void test_read_line3(void) {
         _cleanup_free_ char *line = NULL;
         int r;
 
-        f = fopen("/proc/cmdline", "re");
+        f = fopen("/proc/uptime", "re");
         if (!f && IN_SET(errno, ENOENT, EPERM))
                 return;
         assert_se(f);
@@ -840,6 +844,53 @@ static void test_read_nul_string(void) {
         assert_se(read_nul_string(f, LONG_LINE_MAX, &s) == 0 && streq_ptr(s, ""));
 }
 
+static void test_read_full_file_socket(void) {
+        _cleanup_(rm_rf_physical_and_freep) char *z = NULL;
+        _cleanup_close_ int listener = -1;
+        _cleanup_free_ char *data = NULL;
+        union sockaddr_union sa;
+        const char *j;
+        size_t size;
+        pid_t pid;
+        int r;
+
+        log_info("/* %s */", __func__);
+
+        listener = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
+        assert_se(listener >= 0);
+
+        assert_se(mkdtemp_malloc(NULL, &z) >= 0);
+        j = strjoina(z, "/socket");
+
+        assert_se(sockaddr_un_set_path(&sa.un, j) >= 0);
+
+        assert_se(bind(listener, &sa.sa, SOCKADDR_UN_LEN(sa.un)) >= 0);
+        assert_se(listen(listener, 1) >= 0);
+
+        r = safe_fork("(server)", FORK_DEATHSIG|FORK_LOG, &pid);
+        assert_se(r >= 0);
+        if (r == 0) {
+                _cleanup_close_ int rfd = -1;
+                /* child */
+
+                rfd = accept4(listener, NULL, 0, SOCK_CLOEXEC);
+                assert_se(rfd >= 0);
+
+#define TEST_STR "This is a test\nreally."
+
+                assert_se(write(rfd, TEST_STR, strlen(TEST_STR)) == strlen(TEST_STR));
+                _exit(EXIT_SUCCESS);
+        }
+
+        assert_se(read_full_file_full(AT_FDCWD, j, 0, &data, &size) == -ENXIO);
+        assert_se(read_full_file_full(AT_FDCWD, j, READ_FULL_FILE_CONNECT_SOCKET, &data, &size) >= 0);
+        assert_se(size == strlen(TEST_STR));
+        assert_se(streq(data, TEST_STR));
+
+        assert_se(wait_for_terminate_and_check("(server)", pid, WAIT_LOG) >= 0);
+#undef TEST_STR
+}
+
 int main(int argc, char *argv[]) {
         test_setup_logging(LOG_DEBUG);
 
@@ -865,6 +916,7 @@ int main(int argc, char *argv[]) {
         test_read_line3();
         test_read_line4();
         test_read_nul_string();
+        test_read_full_file_socket();
 
         return 0;
 }

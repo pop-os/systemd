@@ -39,7 +39,7 @@ static bool arg_enabled = true;
 static bool arg_read_crypttab = true;
 static const char *arg_crypttab = NULL;
 static const char *arg_runtime_directory = NULL;
-static bool arg_whitelist = false;
+static bool arg_allow_list = false;
 static Hashmap *arg_disks = NULL;
 static char *arg_default_options = NULL;
 static char *arg_default_keyfile = NULL;
@@ -188,7 +188,11 @@ static int print_dependencies(FILE *f, const char* device_path) {
                 /* None, nothing to do */
                 return 0;
 
-        if (PATH_IN_SET(device_path, "/dev/urandom", "/dev/random", "/dev/hw_random")) {
+        if (PATH_IN_SET(device_path,
+                        "/dev/urandom",
+                        "/dev/random",
+                        "/dev/hw_random",
+                        "/dev/hwrng")) {
                 /* RNG device, add random dep */
                 fputs("After=systemd-random-seed.service\n", f);
                 return 0;
@@ -202,14 +206,16 @@ static int print_dependencies(FILE *f, const char* device_path) {
                 return 0;
 
         if (path_startswith(udev_node, "/dev/")) {
-                /* We are dealing with a block device, add dependency for correspoding unit */
+                /* We are dealing with a block device, add dependency for corresponding unit */
                 _cleanup_free_ char *unit = NULL;
 
                 r = unit_name_from_path(udev_node, ".device", &unit);
                 if (r < 0)
                         return log_error_errno(r, "Failed to generate unit name: %m");
 
-                fprintf(f, "After=%1$s\nRequires=%1$s\n", unit);
+                fprintf(f,
+                        "After=%1$s\n"
+                        "Requires=%1$s\n", unit);
         } else {
                 /* Regular file, add mount dependency */
                 _cleanup_free_ char *escaped_path = specifier_escape(device_path);
@@ -231,18 +237,18 @@ static int create_disk(
 
         _cleanup_free_ char *n = NULL, *d = NULL, *u = NULL, *e = NULL,
                 *keydev_mount = NULL, *keyfile_timeout_value = NULL,
-                *filtered = NULL, *u_escaped = NULL, *name_escaped = NULL, *header_path = NULL, *password_buffer = NULL;
+                *filtered = NULL, *u_escaped = NULL, *name_escaped = NULL, *header_path = NULL, *password_buffer = NULL,
+                *tmp_fstype = NULL;
         _cleanup_fclose_ FILE *f = NULL;
         const char *dmname;
-        bool noauto, nofail, tmp, swap, netdev, attach_in_initrd;
-        int r, detached_header, keyfile_can_timeout;
+        bool noauto, nofail, swap, netdev, attach_in_initrd;
+        int r, detached_header, keyfile_can_timeout, tmp;
 
         assert(name);
         assert(device);
 
         noauto = fstab_test_yes_no_option(options, "noauto\0" "auto\0");
         nofail = fstab_test_yes_no_option(options, "nofail\0" "fail\0");
-        tmp = fstab_test_option(options, "tmp\0");
         swap = fstab_test_option(options, "swap\0");
         netdev = fstab_test_option(options, "_netdev\0");
         attach_in_initrd = fstab_test_option(options, "x-initrd.attach\0");
@@ -254,6 +260,10 @@ static int create_disk(
         detached_header = fstab_filter_options(options, "header\0", NULL, &header_path, NULL);
         if (detached_header < 0)
                 return log_error_errno(detached_header, "Failed to parse header= option value: %m");
+
+        tmp = fstab_filter_options(options, "tmp\0", NULL, &tmp_fstype, NULL);
+        if (tmp < 0)
+                return log_error_errno(tmp, "Failed to parse tmp= option value: %m");
 
         if (tmp && swap)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -365,14 +375,23 @@ static int create_disk(
         if (r < 0)
                 return r;
 
-        if (tmp)
+        if (tmp) {
+                _cleanup_free_ char *tmp_fstype_escaped = NULL;
+
+                if (tmp_fstype) {
+                        tmp_fstype_escaped = specifier_escape(tmp_fstype);
+                        if (!tmp_fstype_escaped)
+                                return log_oom();
+                }
+
                 fprintf(f,
-                        "ExecStartPost=/sbin/mke2fs '/dev/mapper/%s'\n",
-                        name_escaped);
+                        "ExecStartPost=" ROOTLIBEXECDIR "/systemd-makefs '%s' '/dev/mapper/%s'\n",
+                        tmp_fstype_escaped ?: "ext4", name_escaped);
+        }
 
         if (swap)
                 fprintf(f,
-                        "ExecStartPost=/sbin/mkswap '/dev/mapper/%s'\n",
+                        "ExecStartPost=" ROOTLIBEXECDIR "/systemd-makefs swap '/dev/mapper/%s'\n",
                         name_escaped);
 
         if (keydev)
@@ -476,7 +495,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (!d)
                         return log_oom();
 
-                d->create = arg_whitelist = true;
+                d->create = arg_allow_list = true;
 
         } else if (streq(key, "luks.options")) {
 
@@ -540,7 +559,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                         if (!d)
                                 return log_oom();
 
-                        d->create = arg_whitelist = true;
+                        d->create = arg_allow_list = true;
 
                         free_and_replace(d->name, uuid_value);
                 } else
@@ -603,7 +622,7 @@ static int add_crypttab_devices(void) {
                 if (uuid)
                         d = hashmap_get(arg_disks, uuid);
 
-                if (arg_whitelist && !d) {
+                if (arg_allow_list && !d) {
                         log_info("Not creating device '%s' because it was not specified on the kernel command line.", name);
                         continue;
                 }

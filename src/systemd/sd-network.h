@@ -110,13 +110,13 @@ int sd_network_link_get_network_file(int ifindex, char **filename);
  * IP addresses */
 int sd_network_link_get_dns(int ifindex, char ***ret);
 
-/* Get DHCP4 address for a given link. This is string representations of
- * IPv4 address */
-int sd_network_link_get_dhcp4_address(int ifindex, char **ret);
-
 /* Get NTP entries for a given link. These are domain names or string
  * representations of IP addresses */
 int sd_network_link_get_ntp(int ifindex, char ***ret);
+
+/* Get SIP entries for a given link. These are string
+ * representations of IP addresses */
+int sd_network_link_get_sip(int ifindex, char ***ret);
 
 /* Indicates whether or not LLMNR should be enabled for the link
  * Possible levels of support: yes, no, resolve
@@ -160,9 +160,6 @@ int sd_network_link_get_search_domains(int ifindex, char ***domains);
 /* Get the route DNS domain names for a given link. */
 int sd_network_link_get_route_domains(int ifindex, char ***domains);
 
-/* Get the sip servers for a given link. */
-int sd_network_link_get_sip_servers(int ifindex, char ***sip);
-
 /* Get whether this link shall be used as 'default route' for DNS queries */
 int sd_network_link_get_dns_default_route(int ifindex);
 
@@ -172,8 +169,11 @@ int sd_network_link_get_carrier_bound_to(int ifindex, int **ifindexes);
 /* Get the CARRIERS that are bound to current link. */
 int sd_network_link_get_carrier_bound_by(int ifindex, int **ifindexes);
 
-/* Get the timezone that was learnt on a specific link. */
-int sd_network_link_get_timezone(int ifindex, char **timezone);
+/* Get DHCPv6 client IAID for a given link. */
+int sd_network_link_get_dhcp6_client_iaid_string(int ifindex, char **iaid);
+
+/* Get DHCPv6 client DUID for a given link. */
+int sd_network_link_get_dhcp6_client_duid_string(int ifindex, char **duid);
 
 /* Monitor object */
 typedef struct sd_network_monitor sd_network_monitor;

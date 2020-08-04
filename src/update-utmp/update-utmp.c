@@ -84,11 +84,10 @@ static int get_current_runlevel(Context *c) {
 
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         int r;
-        unsigned i;
 
         assert(c);
 
-        for (i = 0; i < ELEMENTSOF(table); i++) {
+        for (size_t i = 0; i < ELEMENTSOF(table); i++) {
                 _cleanup_free_ char *state = NULL, *path = NULL;
 
                 path = unit_dbus_path_from_name(table[i].special);
@@ -125,9 +124,8 @@ static int on_reboot(Context *c) {
 #if HAVE_AUDIT
         if (c->audit_fd >= 0)
                 if (audit_log_user_comm_message(c->audit_fd, AUDIT_SYSTEM_BOOT, "", "systemd-update-utmp", NULL, NULL, NULL, 1) < 0 &&
-                    errno != EPERM) {
+                    errno != EPERM)
                         r = log_error_errno(errno, "Failed to send audit message: %m");
-                }
 #endif
 
         /* If this call fails it will return 0, which
@@ -154,9 +152,8 @@ static int on_shutdown(Context *c) {
 #if HAVE_AUDIT
         if (c->audit_fd >= 0)
                 if (audit_log_user_comm_message(c->audit_fd, AUDIT_SYSTEM_SHUTDOWN, "", "systemd-update-utmp", NULL, NULL, NULL, 1) < 0 &&
-                    errno != EPERM) {
+                    errno != EPERM)
                         r = log_error_errno(errno, "Failed to send audit message: %m");
-                }
 #endif
 
         q = utmp_put_shutdown();
@@ -225,9 +222,6 @@ static int run(int argc, char *argv[]) {
         };
         int r;
 
-        if (getppid() != 1)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "This program should be invoked by init only.");
         if (argc != 2)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "This program requires one argument.");

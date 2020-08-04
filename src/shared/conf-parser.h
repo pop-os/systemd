@@ -10,13 +10,13 @@
 #include "alloc-util.h"
 #include "log.h"
 #include "macro.h"
+#include "time-util.h"
 
 /* An abstract parser for simple, line based, shallow configuration files consisting of variable assignments only. */
 
 typedef enum ConfigParseFlags {
         CONFIG_PARSE_RELAXED       = 1 << 0, /* Do not warn about unknown non-extension fields */
-        CONFIG_PARSE_ALLOW_INCLUDE = 1 << 1, /* Allow the deprecated .include stanza */
-        CONFIG_PARSE_WARN          = 1 << 2, /* Emit non-debug messages */
+        CONFIG_PARSE_WARN          = 1 << 1, /* Emit non-debug messages */
 } ConfigParseFlags;
 
 /* Argument list for parsers of specific configuration settings. */
@@ -84,11 +84,12 @@ int config_parse(
                 const char *unit,
                 const char *filename,
                 FILE *f,
-                const char *sections,  /* nulstr */
+                const char *sections,       /* nulstr */
                 ConfigItemLookup lookup,
                 const void *table,
                 ConfigParseFlags flags,
-                void *userdata);
+                void *userdata,
+                usec_t *ret_mtime);         /* possibly NULL */
 
 int config_parse_many_nulstr(
                 const char *conf_file,      /* possibly NULL */
@@ -97,7 +98,8 @@ int config_parse_many_nulstr(
                 ConfigItemLookup lookup,
                 const void *table,
                 ConfigParseFlags flags,
-                void *userdata);
+                void *userdata,
+                usec_t *ret_mtime);         /* possibly NULL */
 
 int config_parse_many(
                 const char *conf_file,      /* possibly NULL */
@@ -108,7 +110,7 @@ int config_parse_many(
                 const void *table,
                 ConfigParseFlags flags,
                 void *userdata,
-                char ***ret_dropins);       /* possibly NULL */
+                usec_t *ret_mtime);         /* possibly NULL */
 
 CONFIG_PARSER_PROTOTYPE(config_parse_int);
 CONFIG_PARSER_PROTOTYPE(config_parse_unsigned);
@@ -123,6 +125,7 @@ CONFIG_PARSER_PROTOTYPE(config_parse_iec_size);
 CONFIG_PARSER_PROTOTYPE(config_parse_si_uint64);
 CONFIG_PARSER_PROTOTYPE(config_parse_iec_uint64);
 CONFIG_PARSER_PROTOTYPE(config_parse_bool);
+CONFIG_PARSER_PROTOTYPE(config_parse_id128);
 CONFIG_PARSER_PROTOTYPE(config_parse_tristate);
 CONFIG_PARSER_PROTOTYPE(config_parse_string);
 CONFIG_PARSER_PROTOTYPE(config_parse_path);
@@ -143,6 +146,7 @@ CONFIG_PARSER_PROTOTYPE(config_parse_ifnames);
 CONFIG_PARSER_PROTOTYPE(config_parse_ip_port);
 CONFIG_PARSER_PROTOTYPE(config_parse_mtu);
 CONFIG_PARSER_PROTOTYPE(config_parse_rlimit);
+CONFIG_PARSER_PROTOTYPE(config_parse_vlanprotocol);
 
 typedef enum Disabled {
         DISABLED_CONFIGURATION,
@@ -161,7 +165,7 @@ typedef enum Disabled {
                                                                         \
                 r = parser(rvalue);                                     \
                 if (r < 0) {                                            \
-                        log_syntax(unit, LOG_ERR, filename, line, r,    \
+                        log_syntax(unit, LOG_WARNING, filename, line, r, \
                                    msg ", ignoring: %s", rvalue);       \
                         return 0;                                       \
                 }                                                       \
@@ -182,7 +186,7 @@ typedef enum Disabled {
                                                                         \
                 r = parser(rvalue, i);                                  \
                 if (r < 0)                                              \
-                        log_syntax(unit, LOG_ERR, filename, line, r,    \
+                        log_syntax(unit, LOG_WARNING, filename, line, r, \
                                    msg ", ignoring: %s", rvalue);       \
                                                                         \
                 return 0;                                               \
@@ -199,7 +203,7 @@ typedef enum Disabled {
                                                                         \
                 x = name##_from_string(rvalue);                         \
                 if (x < 0) {                                            \
-                        log_syntax(unit, LOG_ERR, filename, line, 0,    \
+                        log_syntax(unit, LOG_WARNING, filename, line, 0, \
                                    msg ", ignoring: %s", rvalue);       \
                         return 0;                                       \
                 }                                                       \
@@ -224,7 +228,7 @@ typedef enum Disabled {
                                                                         \
                 x = name##_from_string(rvalue);                         \
                 if (x < 0) {                                            \
-                        log_syntax(unit, LOG_ERR, filename, line, 0,    \
+                        log_syntax(unit, LOG_WARNING, filename, line, 0, \
                                    msg ", ignoring: %s", rvalue);       \
                         return 0;                                       \
                 }                                                       \
@@ -257,10 +261,10 @@ typedef enum Disabled {
                                                                                \
                         en = strndup(word, l);                                 \
                         if (!en)                                               \
-                                return -ENOMEM;                                \
+                                return log_oom();                              \
                                                                                \
                         if ((x = name##_from_string(en)) < 0) {                \
-                                log_syntax(unit, LOG_ERR, filename, line, 0,   \
+                                log_syntax(unit, LOG_WARNING, filename, line, 0, \
                                            msg ", ignoring: %s", en);          \
                                 continue;                                      \
                         }                                                      \
@@ -283,7 +287,7 @@ typedef enum Disabled {
                         if (new_xs)                                            \
                                 xs = new_xs;                                   \
                         else                                                   \
-                                return -ENOMEM;                                \
+                                return log_oom();                              \
                                                                                \
                         *(xs + i) = invalid;                                   \
                 }                                                              \

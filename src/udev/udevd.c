@@ -59,6 +59,7 @@
 #include "strv.h"
 #include "strxcpyx.h"
 #include "syslog-util.h"
+#include "udevd.h"
 #include "udev-builtin.h"
 #include "udev-ctrl.h"
 #include "udev-event.h"
@@ -74,6 +75,8 @@ static ResolveNameTiming arg_resolve_name_timing = RESOLVE_NAME_EARLY;
 static unsigned arg_children_max = 0;
 static usec_t arg_exec_delay_usec = 0;
 static usec_t arg_event_timeout_usec = 180 * USEC_PER_SEC;
+static int arg_timeout_signal = SIGKILL;
+static bool arg_blockdev_read_only = false;
 
 typedef struct Manager {
         sd_event *event;
@@ -227,7 +230,7 @@ static int on_event_timeout(sd_event_source *s, uint64_t usec, void *userdata) {
         assert(event);
         assert(event->worker);
 
-        kill_and_sigcont(event->worker->pid, SIGKILL);
+        kill_and_sigcont(event->worker->pid, arg_timeout_signal);
         event->worker->state = WORKER_KILLED;
 
         log_device_error(event->dev, "Worker ["PID_FMT"] processing SEQNUM=%"PRIu64" killed", event->worker->pid, event->seqnum);
@@ -381,6 +384,56 @@ static int worker_lock_block_device(sd_device *dev, int *ret_fd) {
         return 1;
 }
 
+static int worker_mark_block_device_read_only(sd_device *dev) {
+        _cleanup_close_ int fd = -1;
+        const char *val;
+        int state = 1, r;
+
+        assert(dev);
+
+        if (!arg_blockdev_read_only)
+                return 0;
+
+        /* Do this only once, when the block device is new. If the device is later retriggered let's not
+         * toggle the bit again, so that people can boot up with full read-only mode and then unset the bit
+         * for specific devices only. */
+        if (!device_for_action(dev, DEVICE_ACTION_ADD))
+                return 0;
+
+        r = sd_device_get_subsystem(dev, &val);
+        if (r < 0)
+                return log_device_debug_errno(dev, r, "Failed to get subsystem: %m");
+
+        if (!streq(val, "block"))
+                return 0;
+
+        r = sd_device_get_sysname(dev, &val);
+        if (r < 0)
+                return log_device_debug_errno(dev, r, "Failed to get sysname: %m");
+
+        /* Exclude synthetic devices for now, this is supposed to be a safety feature to avoid modification
+         * of physical devices, and what sits on top of those doesn't really matter if we don't allow the
+         * underlying block devices to receive changes. */
+        if (STARTSWITH_SET(val, "dm-", "md", "drbd", "loop", "nbd", "zram"))
+                return 0;
+
+        r = sd_device_get_devname(dev, &val);
+        if (r == -ENOENT)
+                return 0;
+        if (r < 0)
+                return log_device_debug_errno(dev, r, "Failed to get devname: %m");
+
+        fd = open(val, O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK);
+        if (fd < 0)
+                return log_device_debug_errno(dev, errno, "Failed to open '%s', ignoring: %m", val);
+
+        if (ioctl(fd, BLKROSET, &state) < 0)
+                return log_device_warning_errno(dev, errno, "Failed to mark block device '%s' read-only: %m", val);
+
+        log_device_info(dev, "Successfully marked block device '%s' read-only.", val);
+        return 0;
+}
+
 static int worker_process_device(Manager *manager, sd_device *dev) {
         _cleanup_(udev_event_freep) UdevEvent *udev_event = NULL;
         _cleanup_close_ int fd_lock = -1;
@@ -410,12 +463,14 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
         if (r < 0)
                 return r;
 
+        (void) worker_mark_block_device_read_only(dev);
+
         /* apply rules, create node, symlinks */
-        r = udev_event_execute_rules(udev_event, arg_event_timeout_usec, manager->properties, manager->rules);
+        r = udev_event_execute_rules(udev_event, arg_event_timeout_usec, arg_timeout_signal, manager->properties, manager->rules);
         if (r < 0)
                 return r;
 
-        udev_event_execute_run(udev_event, arg_event_timeout_usec);
+        udev_event_execute_run(udev_event, arg_event_timeout_usec, arg_timeout_signal);
 
         if (!manager->rtnl)
                 /* in case rtnl was initialized */
@@ -563,6 +618,14 @@ static void event_run(Manager *manager, struct event *event) {
 
         assert(manager);
         assert(event);
+
+        if (DEBUG_LOGGING) {
+                DeviceAction action;
+
+                r = device_get_action(event->dev, &action);
+                log_device_debug(event->dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) ready for processing",
+                                 event->seqnum, r >= 0 ? device_action_to_string(action) : "<unknown>");
+        }
 
         HASHMAP_FOREACH(worker, manager->workers, i) {
                 if (worker->state != WORKER_IDLE)
@@ -775,6 +838,9 @@ static int is_device_busy(Manager *manager, struct event *event) {
         return false;
 
 set_delaying_seqnum:
+        log_device_debug(event->dev, "SEQNUM=%" PRIu64 " blocked by SEQNUM=%" PRIu64,
+                         event->seqnum, loop_event->seqnum);
+
         event->delaying_seqnum = loop_event->seqnum;
         return true;
 }
@@ -859,7 +925,7 @@ static void event_queue_start(Manager *manager) {
         udev_builtin_init();
 
         if (!manager->rules) {
-                r = udev_rules_new(&manager->rules, arg_resolve_name_timing);
+                r = udev_rules_load(&manager->rules, arg_resolve_name_timing);
                 if (r < 0) {
                         log_warning_errno(r, "Failed to read udev rules: %m");
                         return;
@@ -900,19 +966,15 @@ static int on_worker(sd_event_source *s, int fd, uint32_t revents, void *userdat
                         .iov_base = &msg,
                         .iov_len = sizeof(msg),
                 };
-                union {
-                        struct cmsghdr cmsghdr;
-                        uint8_t buf[CMSG_SPACE(sizeof(struct ucred))];
-                } control = {};
+                CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred))) control;
                 struct msghdr msghdr = {
                         .msg_iov = &iovec,
                         .msg_iovlen = 1,
                         .msg_control = &control,
                         .msg_controllen = sizeof(control),
                 };
-                struct cmsghdr *cmsg;
                 ssize_t size;
-                struct ucred *ucred = NULL;
+                struct ucred *ucred;
                 struct worker *worker;
 
                 size = recvmsg_safe(fd, &msghdr, MSG_DONTWAIT);
@@ -931,12 +993,7 @@ static int on_worker(sd_event_source *s, int fd, uint32_t revents, void *userdat
                         continue;
                 }
 
-                CMSG_FOREACH(cmsg, &msghdr)
-                        if (cmsg->cmsg_level == SOL_SOCKET &&
-                            cmsg->cmsg_type == SCM_CREDENTIALS &&
-                            cmsg->cmsg_len == CMSG_LEN(sizeof(struct ucred)))
-                                ucred = (struct ucred*) CMSG_DATA(cmsg);
-
+                ucred = CMSG_FIND_DATA(&msghdr, SOL_SOCKET, SCM_CREDENTIALS, struct ucred);
                 if (!ucred || ucred->pid <= 0) {
                         log_warning("Ignoring worker message without valid PID");
                         continue;
@@ -1413,14 +1470,12 @@ static int listen_fds(int *ret_ctrl, int *ret_netlink) {
  *   udev.children_max=<number of workers>     events are fully serialized if set to 1
  *   udev.exec_delay=<number of seconds>       delay execution of every executed program
  *   udev.event_timeout=<number of seconds>    seconds to wait before terminating an event
+ *   udev.blockdev_read_only<=bool>            mark all block devices read-only when they appear
  */
 static int parse_proc_cmdline_item(const char *key, const char *value, void *data) {
-        int r = 0;
+        int r;
 
         assert(key);
-
-        if (!value)
-                return 0;
 
         if (proc_cmdline_key_streq(key, "udev.log_priority")) {
 
@@ -1452,8 +1507,38 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
                 r = parse_sec(value, &arg_exec_delay_usec);
 
-        } else if (startswith(key, "udev."))
-                log_warning("Unknown udev kernel command line option \"%s\", ignoring", key);
+        } else if (proc_cmdline_key_streq(key, "udev.timeout_signal")) {
+
+                if (proc_cmdline_value_missing(key, value))
+                        return 0;
+
+                r = signal_from_string(value);
+                if (r > 0)
+                        arg_timeout_signal = r;
+
+        } else if (proc_cmdline_key_streq(key, "udev.blockdev_read_only")) {
+
+                if (!value)
+                        arg_blockdev_read_only = true;
+                else {
+                        r = parse_boolean(value);
+                        if (r < 0)
+                                log_warning_errno(r, "Failed to parse udev.blockdev-read-only argument, ignoring: %s", value);
+                        else
+                                arg_blockdev_read_only = r;
+                }
+
+                if (arg_blockdev_read_only)
+                        log_notice("All physical block devices will be marked read-only.");
+
+                return 0;
+
+        } else {
+                if (startswith(key, "udev."))
+                        log_warning("Unknown udev kernel command line option \"%s\", ignoring.", key);
+
+                return 0;
+        }
 
         if (r < 0)
                 log_warning_errno(r, "Failed to parse \"%s=%s\", ignoring: %m", key, value);
@@ -1470,7 +1555,7 @@ static int help(void) {
                 return log_oom();
 
         printf("%s [OPTIONS...]\n\n"
-               "Manages devices.\n\n"
+               "Rule-based manager for device events and files.\n\n"
                "  -h --help                   Print this message\n"
                "  -V --version                Print version of the program\n"
                "  -d --daemon                 Detach and run in the background\n"
@@ -1489,15 +1574,20 @@ static int help(void) {
 }
 
 static int parse_argv(int argc, char *argv[]) {
+        enum {
+                ARG_TIMEOUT_SIGNAL,
+        };
+
         static const struct option options[] = {
-                { "daemon",             no_argument,            NULL, 'd' },
-                { "debug",              no_argument,            NULL, 'D' },
-                { "children-max",       required_argument,      NULL, 'c' },
-                { "exec-delay",         required_argument,      NULL, 'e' },
-                { "event-timeout",      required_argument,      NULL, 't' },
-                { "resolve-names",      required_argument,      NULL, 'N' },
-                { "help",               no_argument,            NULL, 'h' },
-                { "version",            no_argument,            NULL, 'V' },
+                { "daemon",             no_argument,            NULL, 'd'                 },
+                { "debug",              no_argument,            NULL, 'D'                 },
+                { "children-max",       required_argument,      NULL, 'c'                 },
+                { "exec-delay",         required_argument,      NULL, 'e'                 },
+                { "event-timeout",      required_argument,      NULL, 't'                 },
+                { "resolve-names",      required_argument,      NULL, 'N'                 },
+                { "help",               no_argument,            NULL, 'h'                 },
+                { "version",            no_argument,            NULL, 'V'                 },
+                { "timeout-signal",     required_argument,      NULL,  ARG_TIMEOUT_SIGNAL },
                 {}
         };
 
@@ -1521,6 +1611,14 @@ static int parse_argv(int argc, char *argv[]) {
                         r = parse_sec(optarg, &arg_exec_delay_usec);
                         if (r < 0)
                                 log_warning_errno(r, "Failed to parse --exec-delay= value '%s', ignoring: %m", optarg);
+                        break;
+                case ARG_TIMEOUT_SIGNAL:
+                        r = signal_from_string(optarg);
+                        if (r <= 0)
+                                log_warning_errno(r, "Failed to parse --timeout-signal= value '%s', ignoring: %m", optarg);
+                        else
+                                arg_timeout_signal = r;
+
                         break;
                 case 't':
                         r = parse_sec(optarg, &arg_event_timeout_usec);
@@ -1689,7 +1787,7 @@ static int main_loop(Manager *manager) {
 
         udev_builtin_init();
 
-        r = udev_rules_new(&manager->rules, arg_resolve_name_timing);
+        r = udev_rules_load(&manager->rules, arg_resolve_name_timing);
         if (!manager->rules)
                 return log_error_errno(r, "Failed to read udev rules: %m");
 
@@ -1711,7 +1809,7 @@ static int main_loop(Manager *manager) {
         return r;
 }
 
-static int run(int argc, char *argv[]) {
+int run_udevd(int argc, char *argv[]) {
         _cleanup_free_ char *cgroup = NULL;
         _cleanup_(manager_freep) Manager *manager = NULL;
         int fd_ctrl = -1, fd_uevent = -1;
@@ -1719,7 +1817,7 @@ static int run(int argc, char *argv[]) {
 
         log_set_target(LOG_TARGET_AUTO);
         log_open();
-        udev_parse_config_full(&arg_children_max, &arg_exec_delay_usec, &arg_event_timeout_usec, &arg_resolve_name_timing);
+        udev_parse_config_full(&arg_children_max, &arg_exec_delay_usec, &arg_event_timeout_usec, &arg_resolve_name_timing, &arg_timeout_signal);
         log_parse_environment();
         log_open(); /* Done again to update after reading configuration. */
 
@@ -1743,12 +1841,13 @@ static int run(int argc, char *argv[]) {
                 return r;
 
         if (arg_children_max == 0) {
-                unsigned long cpu_limit, mem_limit;
-                unsigned long cpu_count = 1;
-                cpu_set_t cpu_set;
+                unsigned long cpu_limit, mem_limit, cpu_count = 1;
 
-                if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0)
-                        cpu_count = CPU_COUNT(&cpu_set);
+                r = cpus_in_affinity_mask();
+                if (r < 0)
+                        log_warning_errno(r, "Failed to determine number of local CPUs, ignoring: %m");
+                else
+                        cpu_count = r;
 
                 cpu_limit = cpu_count * 2 + 16;
                 mem_limit = MAX(physical_memory() / (128UL*1024*1024), 10U);
@@ -1760,21 +1859,15 @@ static int run(int argc, char *argv[]) {
         }
 
         /* set umask before creating any file/directory */
-        r = chdir("/");
-        if (r < 0)
-                return log_error_errno(errno, "Failed to change dir to '/': %m");
-
         umask(022);
 
         r = mac_selinux_init();
         if (r < 0)
-                return log_error_errno(r, "Could not initialize labelling: %m");
+                return r;
 
         r = mkdir_errno_wrapper("/run/udev", 0755);
         if (r < 0 && r != -EEXIST)
                 return log_error_errno(r, "Failed to create /run/udev: %m");
-
-        dev_setup(NULL, UID_INVALID, GID_INVALID);
 
         if (getppid() == 1 && sd_booted() > 0) {
                 /* Get our own cgroup, we regularly kill everything udev has left behind.
@@ -1818,13 +1911,7 @@ static int run(int argc, char *argv[]) {
 
                 /* child */
                 (void) setsid();
-
-                r = set_oom_score_adjust(-1000);
-                if (r < 0)
-                        log_debug_errno(r, "Failed to adjust OOM score, ignoring: %m");
         }
 
         return main_loop(manager);
 }
-
-DEFINE_MAIN_FUNCTION(run);

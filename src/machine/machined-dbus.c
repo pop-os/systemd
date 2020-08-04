@@ -8,8 +8,9 @@
 #include "alloc-util.h"
 #include "btrfs-util.h"
 #include "bus-common-errors.h"
+#include "bus-get-properties.h"
+#include "bus-locator.h"
 #include "bus-polkit.h"
-#include "bus-util.h"
 #include "cgroup-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
@@ -620,11 +621,9 @@ static int clean_pool_done(Operation *operation, int ret, sd_bus_error *error) {
         if (lseek(operation->extra_fd, 0, SEEK_SET) == (off_t) -1)
                 return -errno;
 
-        f = fdopen(operation->extra_fd, "r");
+        f = take_fdopen(&operation->extra_fd, "r");
         if (!f)
                 return -errno;
-
-        operation->extra_fd = -1;
 
         /* The resulting temporary file starts with a boolean value that indicates success or not. */
         errno = 0;
@@ -884,11 +883,11 @@ static int method_set_image_limit(sd_bus_message *message, void *userdata, sd_bu
 }
 
 static int method_map_from_machine_user(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        _cleanup_fclose_ FILE *f = NULL;
         Manager *m = userdata;
-        const char *name, *p;
+        const char *name;
         Machine *machine;
         uint32_t uid;
+        uid_t converted;
         int r;
 
         r = sd_bus_message_read(message, "su", &name, &uid);
@@ -905,44 +904,20 @@ static int method_map_from_machine_user(sd_bus_message *message, void *userdata,
         if (machine->class != MACHINE_CONTAINER)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Not supported for non-container machines.");
 
-        p = procfs_file_alloca(machine->leader, "uid_map");
-        f = fopen(p, "re");
-        if (!f)
-                return -errno;
+        r = machine_translate_uid(machine, uid, &converted);
+        if (r == -ESRCH)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER_MAPPING, "Machine '%s' has no matching user mappings.", name);
+        if (r < 0)
+                return r;
 
-        for (;;) {
-                uid_t uid_base, uid_shift, uid_range, converted;
-                int k;
-
-                errno = 0;
-                k = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT, &uid_base, &uid_shift, &uid_range);
-                if (k < 0 && feof(f))
-                        break;
-                if (k != 3) {
-                        if (ferror(f))
-                                return errno_or_else(EIO);
-
-                        return -EIO;
-                }
-
-                if (uid < uid_base || uid >= uid_base + uid_range)
-                        continue;
-
-                converted = uid - uid_base + uid_shift;
-                if (!uid_is_valid(converted))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid user ID " UID_FMT, uid);
-
-                return sd_bus_reply_method_return(message, "u", (uint32_t) converted);
-        }
-
-        return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER_MAPPING, "Machine '%s' has no matching user mappings.", name);
+        return sd_bus_reply_method_return(message, "u", (uint32_t) converted);
 }
 
 static int method_map_to_machine_user(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_free_ char *o = NULL;
         Manager *m = userdata;
         Machine *machine;
-        uid_t uid;
-        Iterator i;
+        uid_t uid, converted;
         int r;
 
         r = sd_bus_message_read(message, "u", &uid);
@@ -953,63 +928,24 @@ static int method_map_to_machine_user(sd_bus_message *message, void *userdata, s
         if (uid < 0x10000)
                 return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER_MAPPING, "User " UID_FMT " belongs to host UID range", uid);
 
-        HASHMAP_FOREACH(machine, m->machines, i) {
-                _cleanup_fclose_ FILE *f = NULL;
-                char p[STRLEN("/proc//uid_map") + DECIMAL_STR_MAX(pid_t) + 1];
+        r = manager_find_machine_for_uid(m, uid, &machine, &converted);
+        if (r < 0)
+                return r;
+        if (!r)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER_MAPPING, "No matching user mapping for " UID_FMT ".", uid);
 
-                if (machine->class != MACHINE_CONTAINER)
-                        continue;
+        o = machine_bus_path(machine);
+        if (!o)
+                return -ENOMEM;
 
-                xsprintf(p, "/proc/" UID_FMT "/uid_map", machine->leader);
-                f = fopen(p, "re");
-                if (!f) {
-                        log_warning_errno(errno, "Failed to open %s, ignoring,", p);
-                        continue;
-                }
-
-                for (;;) {
-                        _cleanup_free_ char *o = NULL;
-                        uid_t uid_base, uid_shift, uid_range, converted;
-                        int k;
-
-                        errno = 0;
-                        k = fscanf(f, UID_FMT " " UID_FMT " " UID_FMT, &uid_base, &uid_shift, &uid_range);
-                        if (k < 0 && feof(f))
-                                break;
-                        if (k != 3) {
-                                if (ferror(f))
-                                        return errno_or_else(EIO);
-
-                                return -EIO;
-                        }
-
-                        /* The private user namespace is disabled, ignoring. */
-                        if (uid_shift == 0)
-                                continue;
-
-                        if (uid < uid_shift || uid >= uid_shift + uid_range)
-                                continue;
-
-                        converted = (uid - uid_shift + uid_base);
-                        if (!uid_is_valid(converted))
-                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid user ID " UID_FMT, uid);
-
-                        o = machine_bus_path(machine);
-                        if (!o)
-                                return -ENOMEM;
-
-                        return sd_bus_reply_method_return(message, "sou", machine->name, o, (uint32_t) converted);
-                }
-        }
-
-        return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER_MAPPING, "No matching user mapping for " UID_FMT ".", uid);
+        return sd_bus_reply_method_return(message, "sou", machine->name, o, (uint32_t) converted);
 }
 
-static int method_map_from_machine_group(sd_bus_message *message, void *groupdata, sd_bus_error *error) {
-        _cleanup_fclose_ FILE *f = NULL;
-        Manager *m = groupdata;
-        const char *name, *p;
+static int method_map_from_machine_group(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        Manager *m = userdata;
+        const char *name;
         Machine *machine;
+        gid_t converted;
         uint32_t gid;
         int r;
 
@@ -1027,44 +963,20 @@ static int method_map_from_machine_group(sd_bus_message *message, void *groupdat
         if (machine->class != MACHINE_CONTAINER)
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Not supported for non-container machines.");
 
-        p = procfs_file_alloca(machine->leader, "gid_map");
-        f = fopen(p, "re");
-        if (!f)
-                return -errno;
+        r = machine_translate_gid(machine, gid, &converted);
+        if (r == -ESRCH)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_USER_MAPPING, "Machine '%s' has no matching group mappings.", name);
+        if (r < 0)
+                return r;
 
-        for (;;) {
-                gid_t gid_base, gid_shift, gid_range, converted;
-                int k;
-
-                errno = 0;
-                k = fscanf(f, GID_FMT " " GID_FMT " " GID_FMT, &gid_base, &gid_shift, &gid_range);
-                if (k < 0 && feof(f))
-                        break;
-                if (k != 3) {
-                        if (ferror(f))
-                                return errno_or_else(EIO);
-
-                        return -EIO;
-                }
-
-                if (gid < gid_base || gid >= gid_base + gid_range)
-                        continue;
-
-                converted = gid - gid_base + gid_shift;
-                if (!gid_is_valid(converted))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid group ID " GID_FMT, gid);
-
-                return sd_bus_reply_method_return(message, "u", (uint32_t) converted);
-        }
-
-        return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_GROUP_MAPPING, "Machine '%s' has no matching group mappings.", name);
+        return sd_bus_reply_method_return(message, "u", (uint32_t) converted);
 }
 
-static int method_map_to_machine_group(sd_bus_message *message, void *groupdata, sd_bus_error *error) {
-        Manager *m = groupdata;
+static int method_map_to_machine_group(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_free_ char *o = NULL;
+        Manager *m = userdata;
         Machine *machine;
-        gid_t gid;
-        Iterator i;
+        gid_t gid, converted;
         int r;
 
         r = sd_bus_message_read(message, "u", &gid);
@@ -1075,103 +987,340 @@ static int method_map_to_machine_group(sd_bus_message *message, void *groupdata,
         if (gid < 0x10000)
                 return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_GROUP_MAPPING, "Group " GID_FMT " belongs to host GID range", gid);
 
-        HASHMAP_FOREACH(machine, m->machines, i) {
-                _cleanup_fclose_ FILE *f = NULL;
-                char p[STRLEN("/proc//gid_map") + DECIMAL_STR_MAX(pid_t) + 1];
+        r = manager_find_machine_for_gid(m, gid, &machine, &converted);
+        if (r < 0)
+                return r;
+        if (!r)
+                return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_GROUP_MAPPING, "No matching group mapping for " GID_FMT ".", gid);
 
-                if (machine->class != MACHINE_CONTAINER)
-                        continue;
+        o = machine_bus_path(machine);
+        if (!o)
+                return -ENOMEM;
 
-                xsprintf(p, "/proc/" GID_FMT "/gid_map", machine->leader);
-                f = fopen(p, "re");
-                if (!f) {
-                        log_warning_errno(errno, "Failed to open %s, ignoring,", p);
-                        continue;
-                }
-
-                for (;;) {
-                        _cleanup_free_ char *o = NULL;
-                        gid_t gid_base, gid_shift, gid_range, converted;
-                        int k;
-
-                        errno = 0;
-                        k = fscanf(f, GID_FMT " " GID_FMT " " GID_FMT, &gid_base, &gid_shift, &gid_range);
-                        if (k < 0 && feof(f))
-                                break;
-                        if (k != 3) {
-                                if (ferror(f))
-                                        return errno_or_else(EIO);
-
-                                return -EIO;
-                        }
-
-                        /* The private user namespace is disabled, ignoring. */
-                        if (gid_shift == 0)
-                                continue;
-
-                        if (gid < gid_shift || gid >= gid_shift + gid_range)
-                                continue;
-
-                        converted = (gid - gid_shift + gid_base);
-                        if (!gid_is_valid(converted))
-                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid group ID " GID_FMT, gid);
-
-                        o = machine_bus_path(machine);
-                        if (!o)
-                                return -ENOMEM;
-
-                        return sd_bus_reply_method_return(message, "sou", machine->name, o, (uint32_t) converted);
-                }
-        }
-
-        return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_GROUP_MAPPING, "No matching group mapping for " GID_FMT ".", gid);
+        return sd_bus_reply_method_return(message, "sou", machine->name, o, (uint32_t) converted);
 }
 
 const sd_bus_vtable manager_vtable[] = {
         SD_BUS_VTABLE_START(0),
+
         SD_BUS_PROPERTY("PoolPath", "s", property_get_pool_path, 0, 0),
         SD_BUS_PROPERTY("PoolUsage", "t", property_get_pool_usage, 0, 0),
         SD_BUS_PROPERTY("PoolLimit", "t", property_get_pool_limit, 0, 0),
-        SD_BUS_METHOD("GetMachine", "s", "o", method_get_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImage", "s", "o", method_get_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetMachineByPID", "u", "o", method_get_machine_by_pid, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("ListMachines", NULL, "a(ssso)", method_list_machines, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("ListImages", NULL, "a(ssbttto)", method_list_images, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("CreateMachine", "sayssusa(sv)", "o", method_create_machine, 0),
-        SD_BUS_METHOD("CreateMachineWithNetwork", "sayssusaia(sv)", "o", method_create_machine_with_network, 0),
-        SD_BUS_METHOD("RegisterMachine", "sayssus", "o", method_register_machine, 0),
-        SD_BUS_METHOD("RegisterMachineWithNetwork", "sayssusai", "o", method_register_machine_with_network, 0),
-        SD_BUS_METHOD("UnregisterMachine", "s", NULL, method_unregister_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("TerminateMachine", "s", NULL, method_terminate_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("KillMachine", "ssi", NULL, method_kill_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetMachineAddresses", "s", "a(iay)", method_get_machine_addresses, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetMachineOSRelease", "s", "a{ss}", method_get_machine_os_release, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("OpenMachinePTY", "s", "hs", method_open_machine_pty, 0),
-        SD_BUS_METHOD("OpenMachineLogin", "s", "hs", method_open_machine_login, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("OpenMachineShell", "sssasas", "hs", method_open_machine_shell, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("BindMountMachine", "sssbb", NULL, method_bind_mount_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("CopyFromMachine", "sss", NULL, method_copy_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("CopyToMachine", "sss", NULL, method_copy_machine, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("OpenMachineRootDirectory", "s", "h", method_open_machine_root_directory, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetMachineUIDShift", "s", "u", method_get_machine_uid_shift, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("RemoveImage", "s", NULL, method_remove_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("RenameImage", "ss", NULL, method_rename_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("CloneImage", "ssb", NULL, method_clone_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MarkImageReadOnly", "sb", NULL, method_mark_image_read_only, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageHostname", "s", "s", method_get_image_hostname, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageMachineID", "s", "ay", method_get_image_machine_id, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageMachineInfo", "s", "a{ss}", method_get_image_machine_info, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageOSRelease", "s", "a{ss}", method_get_image_os_release, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("SetPoolLimit", "t", NULL, method_set_pool_limit, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("SetImageLimit", "st", NULL, method_set_image_limit, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("CleanPool", "s", "a(st)", method_clean_pool, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MapFromMachineUser", "su", "u", method_map_from_machine_user, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MapToMachineUser", "u", "sou", method_map_to_machine_user, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MapFromMachineGroup", "su", "u", method_map_from_machine_group, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MapToMachineGroup", "u", "sou", method_map_to_machine_group, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_SIGNAL("MachineNew", "so", 0),
-        SD_BUS_SIGNAL("MachineRemoved", "so", 0),
+
+        SD_BUS_METHOD_WITH_NAMES("GetMachine",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "o",
+                                 SD_BUS_PARAM(machine),
+                                 method_get_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetImage",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "o",
+                                 SD_BUS_PARAM(image),
+                                 method_get_image,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetMachineByPID",
+                                 "u",
+                                 SD_BUS_PARAM(pid),
+                                 "o",
+                                 SD_BUS_PARAM(machine),
+                                 method_get_machine_by_pid,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("ListMachines",
+                                 NULL,,
+                                 "a(ssso)",
+                                 SD_BUS_PARAM(machines),
+                                 method_list_machines,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("ListImages",
+                                 NULL,,
+                                 "a(ssbttto)",
+                                 SD_BUS_PARAM(images),
+                                 method_list_images,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("CreateMachine",
+                                 "sayssusa(sv)",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(id)
+                                 SD_BUS_PARAM(service)
+                                 SD_BUS_PARAM(class)
+                                 SD_BUS_PARAM(leader)
+                                 SD_BUS_PARAM(root_directory)
+                                 SD_BUS_PARAM(scope_properties),
+                                 "o",
+                                 SD_BUS_PARAM(path),
+                                 method_create_machine, 0),
+        SD_BUS_METHOD_WITH_NAMES("CreateMachineWithNetwork",
+                                 "sayssusaia(sv)",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(id)
+                                 SD_BUS_PARAM(service)
+                                 SD_BUS_PARAM(class)
+                                 SD_BUS_PARAM(leader)
+                                 SD_BUS_PARAM(root_directory)
+                                 SD_BUS_PARAM(ifindices)
+                                 SD_BUS_PARAM(scope_properties),
+                                 "o",
+                                 SD_BUS_PARAM(path),
+                                 method_create_machine_with_network, 0),
+        SD_BUS_METHOD_WITH_NAMES("RegisterMachine",
+                                 "sayssus",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(id)
+                                 SD_BUS_PARAM(service)
+                                 SD_BUS_PARAM(class)
+                                 SD_BUS_PARAM(leader)
+                                 SD_BUS_PARAM(root_directory),
+                                 "o",
+                                 SD_BUS_PARAM(path),
+                                 method_register_machine, 0),
+        SD_BUS_METHOD_WITH_NAMES("RegisterMachineWithNetwork",
+                                 "sayssusai",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(id)
+                                 SD_BUS_PARAM(service)
+                                 SD_BUS_PARAM(class)
+                                 SD_BUS_PARAM(leader)
+                                 SD_BUS_PARAM(root_directory)
+                                 SD_BUS_PARAM(ifindices),
+                                 "o",
+                                 SD_BUS_PARAM(path),
+                                 method_register_machine_with_network, 0),
+        SD_BUS_METHOD_WITH_NAMES("UnregisterMachine",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 NULL,,
+                                 method_unregister_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("TerminateMachine",
+                                 "s",
+                                 SD_BUS_PARAM(id),
+                                 NULL,,
+                                 method_terminate_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("KillMachine",
+                                 "ssi",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(who)
+                                 SD_BUS_PARAM(signal),
+                                 NULL,,
+                                 method_kill_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetMachineAddresses",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "a(iay)",
+                                 SD_BUS_PARAM(addresses),
+                                 method_get_machine_addresses,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetMachineOSRelease",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "a{ss}",
+                                 SD_BUS_PARAM(fields),
+                                 method_get_machine_os_release,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("OpenMachinePTY",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "hs",
+                                 SD_BUS_PARAM(pty)
+                                 SD_BUS_PARAM(pty_path),
+                                 method_open_machine_pty,
+                                 0),
+        SD_BUS_METHOD_WITH_NAMES("OpenMachineLogin",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "hs",
+                                 SD_BUS_PARAM(pty)
+                                 SD_BUS_PARAM(pty_path),
+                                 method_open_machine_login,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("OpenMachineShell",
+                                 "sssasas",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(user)
+                                 SD_BUS_PARAM(path)
+                                 SD_BUS_PARAM(args)
+                                 SD_BUS_PARAM(environment),
+                                 "hs",
+                                 SD_BUS_PARAM(pty)
+                                 SD_BUS_PARAM(pty_path),
+                                 method_open_machine_shell,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("BindMountMachine",
+                                 "sssbb",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(source)
+                                 SD_BUS_PARAM(destination)
+                                 SD_BUS_PARAM(read_only)
+                                 SD_BUS_PARAM(mkdir),
+                                 NULL,,
+                                 method_bind_mount_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("CopyFromMachine",
+                                 "sss",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(source)
+                                 SD_BUS_PARAM(destination),
+                                 NULL,,
+                                 method_copy_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("CopyToMachine",
+                                 "sss",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(source)
+                                 SD_BUS_PARAM(destination),
+                                 NULL,,
+                                 method_copy_machine,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("OpenMachineRootDirectory",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "h",
+                                 SD_BUS_PARAM(fd),
+                                 method_open_machine_root_directory,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetMachineUIDShift",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "u",
+                                 SD_BUS_PARAM(shift),
+                                 method_get_machine_uid_shift,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("RemoveImage",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 NULL,,
+                                 method_remove_image,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("RenameImage",
+                                 "ss",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(new_name),
+                                 NULL,,
+                                 method_rename_image,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("CloneImage",
+                                 "ssb",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(new_name)
+                                 SD_BUS_PARAM(read_only),
+                                 NULL,,
+                                 method_clone_image,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("MarkImageReadOnly",
+                                 "sb",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(read_only),
+                                 NULL,,
+                                 method_mark_image_read_only,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetImageHostname",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "s",
+                                 SD_BUS_PARAM(hostname),
+                                 method_get_image_hostname,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetImageMachineID",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "ay",
+                                 SD_BUS_PARAM(id),
+                                 method_get_image_machine_id,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetImageMachineInfo",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "a{ss}",
+                                 SD_BUS_PARAM(machine_info),
+                                 method_get_image_machine_info,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("GetImageOSRelease",
+                                 "s",
+                                 SD_BUS_PARAM(name),
+                                 "a{ss}",
+                                 SD_BUS_PARAM(os_release),
+                                 method_get_image_os_release,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("SetPoolLimit",
+                                 "t",
+                                 SD_BUS_PARAM(size),
+                                 NULL,,
+                                 method_set_pool_limit,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("SetImageLimit",
+                                 "st",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(size),
+                                 NULL,,
+                                 method_set_image_limit,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("CleanPool",
+                                 "s",
+                                 SD_BUS_PARAM(mode),
+                                 "a(st)",
+                                 SD_BUS_PARAM(images),
+                                 method_clean_pool,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("MapFromMachineUser",
+                                 "su",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(uid_inner),
+                                 "u",
+                                 SD_BUS_PARAM(uid_outer),
+                                 method_map_from_machine_user,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("MapToMachineUser",
+                                 "u",
+                                 SD_BUS_PARAM(uid_outer),
+                                 "sou",
+                                 SD_BUS_PARAM(machine_name)
+                                 SD_BUS_PARAM(machine_path)
+                                 SD_BUS_PARAM(uid_inner),
+                                 method_map_to_machine_user,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("MapFromMachineGroup",
+                                 "su",
+                                 SD_BUS_PARAM(name)
+                                 SD_BUS_PARAM(gid_inner),
+                                 "u",
+                                 SD_BUS_PARAM(gid_outer),
+                                 method_map_from_machine_group,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("MapToMachineGroup",
+                                 "u",
+                                 SD_BUS_PARAM(gid_outer),
+                                 "sou",
+                                 SD_BUS_PARAM(machine_name)
+                                 SD_BUS_PARAM(machine_path)
+                                 SD_BUS_PARAM(gid_inner),
+                                 method_map_to_machine_group,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+
+        SD_BUS_SIGNAL_WITH_NAMES("MachineNew",
+                                 "so",
+                                 SD_BUS_PARAM(machine)
+                                 SD_BUS_PARAM(path),
+                                 0),
+        SD_BUS_SIGNAL_WITH_NAMES("MachineRemoved",
+                                 "so",
+                                 SD_BUS_PARAM(machine)
+                                 SD_BUS_PARAM(path),
+                                 0),
+
         SD_BUS_VTABLE_END
+};
+
+const BusObjectImplementation manager_object = {
+        "/org/freedesktop/machine1",
+        "org.freedesktop.machine1.Manager",
+        .vtables = BUS_VTABLES(manager_vtable),
+        .children = BUS_IMPLEMENTATIONS( &machine_object,
+                                         &image_object ),
 };
 
 int match_job_removed(sd_bus_message *message, void *userdata, sd_bus_error *error) {
@@ -1303,16 +1452,7 @@ int manager_unref_unit(
         assert(m);
         assert(unit);
 
-        return sd_bus_call_method(
-                        m->bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "UnrefUnit",
-                        error,
-                        NULL,
-                        "s",
-                        unit);
+        return bus_call_method(m->bus, bus_systemd_mgr, "UnrefUnit", error, NULL, "s", unit);
 }
 
 int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, char **job) {
@@ -1322,15 +1462,7 @@ int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, c
         assert(manager);
         assert(unit);
 
-        r = sd_bus_call_method(
-                        manager->bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "StopUnit",
-                        error,
-                        &reply,
-                        "ss", unit, "fail");
+        r = bus_call_method(manager->bus, bus_systemd_mgr, "StopUnit", error, &reply, "ss", unit, "fail");
         if (r < 0) {
                 if (sd_bus_error_has_name(error, BUS_ERROR_NO_SUCH_UNIT) ||
                     sd_bus_error_has_name(error, BUS_ERROR_LOAD_FAILED)) {
@@ -1367,15 +1499,7 @@ int manager_kill_unit(Manager *manager, const char *unit, int signo, sd_bus_erro
         assert(manager);
         assert(unit);
 
-        return sd_bus_call_method(
-                        manager->bus,
-                        "org.freedesktop.systemd1",
-                        "/org/freedesktop/systemd1",
-                        "org.freedesktop.systemd1.Manager",
-                        "KillUnit",
-                        error,
-                        NULL,
-                        "ssi", unit, "all", signo);
+        return bus_call_method(manager->bus, bus_systemd_mgr, "KillUnit", error, NULL, "ssi", unit, "all", signo);
 }
 
 int manager_unit_is_active(Manager *manager, const char *unit) {

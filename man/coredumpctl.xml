@@ -52,8 +52,8 @@
         matching specified characteristics. If no command is
         specified, this is the implied default.</para>
 
-        <para>The output is designed to be human readable and contains list contains
-        a table with the following columns:</para>
+        <para>The output is designed to be human readable and contains a table with the following
+        columns:</para>
         <variablelist>
           <varlistentry>
             <term>TIME</term>
@@ -134,7 +134,7 @@
 
         <listitem><para>Invoke a debugger on the last core dump
         matching specified characteristics. By default,
-        <citerefentry><refentrytitle>gdb</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        <citerefentry project='man-pages'><refentrytitle>gdb</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         will be used. This may be changed using the <option>--debugger=</option>
         option or the <varname>$SYSTEMD_DEBUGGER</varname> environment
         variable.</para></listitem>
@@ -213,7 +213,7 @@
 
         <listitem><para>Use the given debugger for the <command>debug</command>
         command. If not given and <varname>$SYSTEMD_DEBUGGER</varname> is unset, then
-        <citerefentry><refentrytitle>gdb</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+        <citerefentry project='man-pages'><refentrytitle>gdb</refentrytitle><manvolnum>1</manvolnum></citerefentry>
         will be used. </para></listitem>
       </varlistentry>
 

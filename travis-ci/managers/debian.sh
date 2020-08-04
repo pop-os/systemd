@@ -9,20 +9,25 @@
 # export CONT_NAME="my-fancy-container"
 # travis-ci/managers/debian.sh SETUP RUN CLEANUP
 
-PHASES=(${@:-SETUP RUN RUN_ASAN CLEANUP})
+PHASES=(${@:-SETUP RUN RUN_ASAN_UBSAN CLEANUP})
 DEBIAN_RELEASE="${DEBIAN_RELEASE:-testing}"
-CONT_NAME="${CONT_NAME:-debian-$DEBIAN_RELEASE-$RANDOM}"
+CONT_NAME="${CONT_NAME:-systemd-debian-$DEBIAN_RELEASE}"
 DOCKER_EXEC="${DOCKER_EXEC:-docker exec -it $CONT_NAME}"
 DOCKER_RUN="${DOCKER_RUN:-docker run}"
 REPO_ROOT="${REPO_ROOT:-$PWD}"
-ADDITIONAL_DEPS=(python3-libevdev
-                 python3-pyparsing
-                 clang
-                 perl
-                 libpwquality-dev
-                 libfdisk-dev
-                 libp11-kit-dev
-                 libssl-dev)
+ADDITIONAL_DEPS=(
+    clang
+    fdisk
+    libfdisk-dev
+    libp11-kit-dev
+    libpwquality-dev
+    libssl-dev
+    libzstd-dev
+    perl
+    python3-libevdev
+    python3-pyparsing
+    zstd
+)
 
 function info() {
     echo -e "\033[33;1m$1\033[0m"
@@ -51,18 +56,22 @@ for phase in "${PHASES[@]}"; do
             $DOCKER_EXEC apt-get -y build-dep systemd
             $DOCKER_EXEC apt-get -y install "${ADDITIONAL_DEPS[@]}"
             ;;
-        RUN|RUN_CLANG)
+        RUN|RUN_GCC|RUN_CLANG)
             if [[ "$phase" = "RUN_CLANG" ]]; then
                 ENV_VARS="-e CC=clang -e CXX=clang++"
+                MESON_ARGS="--optimization=1"
             fi
-            docker exec $ENV_VARS -it $CONT_NAME meson --werror -Dtests=unsafe -Dslow-tests=true -Dsplit-usr=true -Dman=true build
+            docker exec $ENV_VARS -it $CONT_NAME meson --werror -Dtests=unsafe -Dslow-tests=true -Dsplit-usr=true -Dman=true $MESON_ARGS build
             $DOCKER_EXEC ninja -v -C build
             docker exec -e "TRAVIS=$TRAVIS" -it $CONT_NAME ninja -C build test
             ;;
-        RUN_ASAN|RUN_CLANG_ASAN)
-            if [[ "$phase" = "RUN_CLANG_ASAN" ]]; then
+        RUN_ASAN_UBSAN|RUN_GCC_ASAN_UBSAN|RUN_CLANG_ASAN_UBSAN)
+            if [[ "$phase" = "RUN_CLANG_ASAN_UBSAN" ]]; then
                 ENV_VARS="-e CC=clang -e CXX=clang++"
-                MESON_ARGS="-Db_lundef=false" # See https://github.com/mesonbuild/meson/issues/764
+                # Build fuzzer regression tests only with clang (for now),
+                # see: https://github.com/systemd/systemd/pull/15886#issuecomment-632689604
+                # -Db_lundef=false: See https://github.com/mesonbuild/meson/issues/764
+                MESON_ARGS="-Db_lundef=false -Dfuzz-tests=true --optimization=1"
             fi
             docker exec $ENV_VARS -it $CONT_NAME meson --werror -Dtests=unsafe -Db_sanitize=address,undefined -Dsplit-usr=true $MESON_ARGS build
             $DOCKER_EXEC ninja -v -C build

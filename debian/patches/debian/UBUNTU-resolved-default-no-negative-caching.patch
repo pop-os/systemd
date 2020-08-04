@@ -10,42 +10,41 @@ Thanks: Dimitri John Ledkov for the suggestion
  3 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
-index 0f70ced..b112a0c 100644
+index 535a23f..e1632df 100644
 --- a/man/resolved.conf.xml
 +++ b/man/resolved.conf.xml
-@@ -231,11 +231,11 @@
- 
+@@ -248,10 +248,10 @@
        <varlistentry>
          <term><varname>Cache=</varname></term>
--        <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If <literal>yes</literal> (the default), resolving a domain name
-+        <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If <literal>yes</literal>, resolving a domain name
-         which already got queried earlier will return the previous result as long as it is still valid, and thus does
-         not result in a new network request. Be aware that turning off caching comes at a performance penalty, which
-         is particularly high when DNSSEC is used.</para>
--        If <literal>no-negative</literal>, only positive answers are cached.
-+        If <literal>no-negative</literal> (the default), only positive answers are cached.
+         <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If
+-        <literal>yes</literal> (the default), resolving a domain name which already got queried earlier will
++        <literal>yes</literal>, resolving a domain name which already got queried earlier will
+         return the previous result as long as it is still valid, and thus does not result in a new network
+         request. Be aware that turning off caching comes at a performance penalty, which is particularly high
+-        when DNSSEC is used. If <literal>no-negative</literal>, only positive answers are cached.</para>
++        when DNSSEC is used. If <literal>no-negative</literal> (the default), only positive answers are cached.</para>
  
          <para>Note that caching is turned off implicitly if the configured DNS server is on a host-local IP address
          (such as 127.0.0.1 or ::1), in order to avoid duplicate local caching.</para></listitem>
 diff --git a/src/resolve/resolved-gperf.gperf b/src/resolve/resolved-gperf.gperf
-index 049fe9e..5db0b2a 100644
+index 553da8d..4fb3711 100644
 --- a/src/resolve/resolved-gperf.gperf
 +++ b/src/resolve/resolved-gperf.gperf
-@@ -24,6 +24,6 @@ Resolve.LLMNR,           config_parse_resolve_support,        0,
- Resolve.MulticastDNS,    config_parse_resolve_support,        0,                   offsetof(Manager, mdns_support)
- Resolve.DNSSEC,          config_parse_dnssec_mode,            0,                   offsetof(Manager, dnssec_mode)
- Resolve.DNSOverTLS,      config_parse_dns_over_tls_mode,      0,                   offsetof(Manager, dns_over_tls_mode)
--Resolve.Cache,           config_parse_dns_cache_mode,         DNS_CACHE_MODE_YES,  offsetof(Manager, enable_cache)
-+Resolve.Cache,           config_parse_dns_cache_mode,         DNS_CACHE_MODE_NO_NEGATIVE,  offsetof(Manager, enable_cache)
- Resolve.DNSStubListener, config_parse_dns_stub_listener_mode, 0,                   offsetof(Manager, dns_stub_listener_mode)
- Resolve.ReadEtcHosts,    config_parse_bool,                   0,                   offsetof(Manager, read_etc_hosts)
-\ No newline at end of file
+@@ -25,7 +25,7 @@ Resolve.LLMNR,                     config_parse_resolve_support,        0,
+ Resolve.MulticastDNS,              config_parse_resolve_support,        0,                   offsetof(Manager, mdns_support)
+ Resolve.DNSSEC,                    config_parse_dnssec_mode,            0,                   offsetof(Manager, dnssec_mode)
+ Resolve.DNSOverTLS,                config_parse_dns_over_tls_mode,      0,                   offsetof(Manager, dns_over_tls_mode)
+-Resolve.Cache,                     config_parse_dns_cache_mode,         DNS_CACHE_MODE_YES,  offsetof(Manager, enable_cache)
++Resolve.Cache,                     config_parse_dns_cache_mode,         DNS_CACHE_MODE_NO_NEGATIVE,  offsetof(Manager, enable_cache)
+ Resolve.DNSStubListener,           config_parse_dns_stub_listener_mode, 0,                   offsetof(Manager, dns_stub_listener_mode)
+ Resolve.ReadEtcHosts,              config_parse_bool,                   0,                   offsetof(Manager, read_etc_hosts)
+ Resolve.ResolveUnicastSingleLabel, config_parse_bool,                   0,                   offsetof(Manager, resolve_unicast_single_label)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 85a50b1..c08a772 100644
+index 1da590b..9543b41 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -585,7 +585,7 @@ int manager_new(Manager **ret) {
-                 .mdns_support = RESOLVE_SUPPORT_NO,
+                 .mdns_support = DEFAULT_MDNS_MODE,
                  .dnssec_mode = DEFAULT_DNSSEC_MODE,
                  .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,
 -                .enable_cache = DNS_CACHE_MODE_YES,

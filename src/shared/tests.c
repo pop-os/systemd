@@ -21,6 +21,7 @@
 #include "env-util.h"
 #include "fs-util.h"
 #include "log.h"
+#include "namespace-util.h"
 #include "path-util.h"
 #include "random-util.h"
 #include "strv.h"
@@ -58,21 +59,25 @@ static void load_testdata_env(void) {
                 setenv(*k, *v, 0);
 }
 
-const char* get_testdata_dir(void) {
-        const char *env;
+int get_testdata_dir(const char *suffix, char **ret) {
+        const char *dir;
+        char *p;
 
         load_testdata_env();
 
         /* if the env var is set, use that */
-        env = getenv("SYSTEMD_TEST_DATA");
-        if (!env)
-                env = SYSTEMD_TEST_DATA;
-        if (access(env, F_OK) < 0) {
-                fprintf(stderr, "ERROR: $SYSTEMD_TEST_DATA directory [%s] does not exist\n", env);
-                exit(EXIT_FAILURE);
-        }
+        dir = getenv("SYSTEMD_TEST_DATA");
+        if (!dir)
+                dir = SYSTEMD_TEST_DATA;
+        if (access(dir, F_OK) < 0)
+                return log_error_errno(errno, "ERROR: $SYSTEMD_TEST_DATA directory [%s] not accessible: %m", dir);
 
-        return env;
+        p = path_join(dir, suffix);
+        if (!p)
+                return log_oom();
+
+        *ret = p;
+        return 0;
 }
 
 const char* get_catalog_dir(void) {
@@ -133,10 +138,7 @@ bool have_namespaces(void) {
 
         if (pid == 0) {
                 /* child */
-                if (unshare(CLONE_NEWNS) < 0)
-                        _exit(EXIT_FAILURE);
-
-                if (mount(NULL, "/", NULL, MS_SLAVE|MS_REC, NULL) < 0)
+                if (detach_mount_namespace() < 0)
                         _exit(EXIT_FAILURE);
 
                 _exit(EXIT_SUCCESS);
