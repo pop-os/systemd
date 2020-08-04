@@ -1,3 +1,30 @@
+systemd (246-2ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes:
+      * core: set /run size to 10%, like initramfs-tools does.
+        This is now upstream's default, also setting other limits
+      * UBUNTU-resolved-disable-global-LLMNR-and-MulticastDNS.patch
+      * Lock swap blockdevice while calling mkswap
+      * Cherry-pick reversion of detecting WSL by the presence of "microsoft"
+        in osrelease
+      * journald: stream pid change newline fix
+      * network: Change IgnoreCarrierLoss default to value of
+        ConfigureWithoutCarrier.
+      * network: do not re-attach sd-event object
+      * network: attach sd-event in link_load() when creating link dhcp_client
+        or ipv4ll
+  * debian/rules: Configure LLMNR and MulticastDNS to be disabled by default
+    instead of using a carried patch, like before.
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a186cce127ee1d2b0288e4db1470e45a2b1914d9
+  * debian/rules: Configure LLMNR and MulticastDNS to be disabled by default
+    instead of using a carried patch, like before.
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a186cce127ee1d2b0288e4db1470e45a2b1914d9
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 04 Aug 2020 09:34:10 +0200
+
 systemd (246-2) unstable; urgency=medium
 
   * Upload to unstable
