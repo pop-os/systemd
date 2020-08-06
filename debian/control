@@ -83,6 +83,7 @@ Conflicts: consolekit,
            systemd-shim, upstart,
            libpam-ck-connector,
 Breaks: systemd-shim (<< 10-4~),
+        isc-dhcp-client (<< 4.4.1-2.1ubuntu7),
         python-dbusmock (<< 0.18),
         python3-dbusmock (<< 0.18),
 Description: system and service manager
