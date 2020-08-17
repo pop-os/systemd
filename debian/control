@@ -82,6 +82,7 @@ Conflicts: consolekit,
 Breaks: systemd-shim (<< 10-4~),
         python-dbusmock (<< 0.18),
         python3-dbusmock (<< 0.18),
+        resolvconf (<< 1.83~),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
