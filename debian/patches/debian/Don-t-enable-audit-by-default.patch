@@ -16,10 +16,10 @@ Bug-Debian: https://bugs.debian.org/773528
  3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index 7705fa4..1658da4 100644
+index ff5050a..347de86 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -411,7 +411,7 @@
+@@ -417,7 +417,7 @@
          <command>systemd-journald</command> collects generated audit records, it just controls whether it
          tells the kernel to generate them. This means if another tool turns on auditing even if
          <command>systemd-journald</command> left it off, it will still collect the generated
