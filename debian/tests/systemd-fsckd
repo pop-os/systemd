@@ -8,6 +8,7 @@ import inspect
 import fileinput
 import os
 import platform
+import re
 import subprocess
 import shutil
 import stat
@@ -133,14 +134,14 @@ class FsckdTest(unittest.TestCase):
     def test_systemd_fsck_with_plymouth_failure(self):
         '''Ensure that a failing plymouth doesn't prevent fsckd to reconnect/exit'''
         if not self._after_reboot:
-            self.install_process_killer_unit('plymouthd', kill=True)
+            self.install_failing_service_override('plymouth-start')
             self.reboot()
         else:
             self.assertFsckdStop()
-            self.assertWasRunning('process-killer')
             self.assertFsckProceeded()
             self.assertFalse(self.is_active_unit('plymouth-start'))
             self.assertSystemRunning()
+            self.remove_failing_service_override('plymouth-start')
 
     def install_bin(self, source, dest):
         '''install mock fsck'''
@@ -222,6 +223,19 @@ WantedBy=systemd-fsck-root.service'''.format(PROCESS_KILLER_PATH,
                                              '--signal SIGKILL {}'.format(process_name) if kill else process_name))
         subprocess.check_call(['systemctl', 'daemon-reload'])
         subprocess.check_call(['systemctl', 'enable', 'process-killer'], stderr=subprocess.DEVNULL)
+
+    def install_failing_service_override(self, service_name):
+        '''Create a systemd unit override which will fail'''
+        with open('/etc/systemd/system/{}.service'.format(service_name), 'w') as override:
+            with open('/lib/systemd/system/{}.service'.format(service_name), 'r') as original:
+                for line in original.readlines():
+                    override.write(re.sub(r'ExecStart=.*', 'ExecStart=/usr/bin/false', line))
+        subprocess.check_call(['systemctl', 'daemon-reload'])
+
+    def remove_failing_service_override(self, service_name):
+        '''Create a systemd unit override which will fail'''
+        os.remove('/etc/systemd/system/{}.service'.format(service_name))
+        subprocess.check_call(['systemctl', 'daemon-reload'])
 
 
 def enable_plymouth_grub(enable=True):
