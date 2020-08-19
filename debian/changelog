@@ -1,3 +1,31 @@
+systemd (246.2-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge from Debian unstable
+  * Refresh patches
+  * test: accept that char device 0/0 can now be created witout privileges.
+    This fixes tests with Linux 5.8 and later (LP: #1891527)
+    Files:
+    - debian/patches/debian/Add-env-variable-for-machine-ID-path.patch
+    - debian/patches/test-accept-that-char-device-0-0-can-now-be-created-witou.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=57909a0fa4999ba9ff918cfe6bb3fa53c230dd36
+  * debian/tests/systemd-fsckd: Fail plymouth-start with overriding ExecStart=
+    The 'process-killer' stopped working with plymouth 0.9.5 (LP: #1886886)
+    File: debian/tests/systemd-fsckd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=efcc25b6011f23b9f90841f4ca0ee29ee674157f
+  * cherry-pick from stable: network: only process non-error message
+    File: debian/patches/network-only-process-non-error-message.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dc97e3f5330ae64909ef640ad1ac401374f18c16
+  * network: wait for previous address removal before configuring static addresses.
+    Fixes systemd-networkd to establish connection after resume from suspend
+    Files:
+    - debian/patches/network-wait-for-previous-address-removal-before-configur.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=31390403bc000892ada9cb0cbedb198dd83fe7a2
+  * network: do not fail if UseMTU=yes on DHCP lease lost
+    File: debian/patches/network-do-not-fail-if-UseMTU-yes-on-DHCP-lease-lost.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=21c23966e8dc5fd0858664a5b89d6a9460c41f61
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 20 Aug 2020 00:17:54 +0200
+
 systemd (246.2-1) unstable; urgency=medium
 
   * New upstream version 246.2
