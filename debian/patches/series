@@ -1,6 +1,7 @@
 test-accept-that-char-device-0-0-can-now-be-created-witou.patch
 network-only-process-non-error-message.patch
 network-wait-for-previous-address-removal-before-configur.patch
+network-do-not-fail-if-UseMTU-yes-on-DHCP-lease-lost.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

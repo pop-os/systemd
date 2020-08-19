@@ -1,0 +1,41 @@
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 18 Aug 2020 19:21:25 +0900
+Subject: network: do not fail if UseMTU=yes on DHCP lease lost
+
+This fixes a bug introduced by 6906794dd1698954b349ec3ec84f1494ecd63cd3.
+
+Fixes #16768.
+
+(cherry picked from commit 46b875fb803ce8ee9bcb6a23ad6339db4f735d3a)
+---
+ src/network/networkd-dhcp4.c | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
+index 722e0d2..d28c3e3 100644
+--- a/src/network/networkd-dhcp4.c
++++ b/src/network/networkd-dhcp4.c
+@@ -429,18 +429,17 @@ static int dhcp_reset_mtu(Link *link) {
+                 return 0;
+ 
+         r = sd_dhcp_lease_get_mtu(link->dhcp_lease, &mtu);
++        if (r == -ENODATA)
++                return 0;
+         if (r < 0)
+-                return r;
++                return log_link_error_errno(link, r, "DHCP error: failed to get MTU from lease: %m");
+ 
+         if (link->original_mtu == mtu)
+                 return 0;
+ 
+         r = link_set_mtu(link, link->original_mtu);
+-        if (r < 0) {
+-                log_link_error_errno(link, r, "DHCP error: could not reset MTU: %m");
+-                link_enter_failed(link);
+-                return r;
+-        }
++        if (r < 0)
++                return log_link_error_errno(link, r, "DHCP error: could not reset MTU: %m");
+ 
+         return 0;
+ }
