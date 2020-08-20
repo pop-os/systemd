@@ -146,6 +146,10 @@ if [ -n "$2" ] && [ "$(systemctl is-system-running)" != "stopping" ]; then
     _systemctl daemon-reexec || true
     # don't restart logind; this can be done again once this gets implemented:
     # https://github.com/systemd/systemd/issues/1163
+    if dpkg --compare-versions "$2" lt-nl "246-1~"; then
+	# the socket configuration changed
+	_systemctl try-restart systemd-networkd.socket || true
+    fi
     _systemctl try-restart systemd-networkd.service || true
     _systemctl try-restart systemd-resolved.service || true
     _systemctl try-restart systemd-journald.service || true
