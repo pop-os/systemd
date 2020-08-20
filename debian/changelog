@@ -1,4 +1,4 @@
-systemd (246.2-1ubuntu1) UNRELEASED; urgency=medium
+systemd (246.2-1ubuntu1) groovy; urgency=medium
 
   * Merge from Debian unstable
   * Refresh patches
@@ -27,8 +27,12 @@ systemd (246.2-1ubuntu1) UNRELEASED; urgency=medium
     (Closes: #968589) (LP: #1891716)
     File: debian/systemd.postinst
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e144a644488c6ff52c2bb7cee71f50aa95c4efd8
+  * debian/tests/control: Mark systemd-fsckd test as flaky.
+    It is flaky on Ubuntu CI infrastructure (LP: #1892358)
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8c55289624c6f44beb2c5bbae78aabc074d36b1a
 
- -- Balint Reczey <rbalint@ubuntu.com>  Thu, 20 Aug 2020 11:03:38 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 20 Aug 2020 23:37:48 +0200
 
 systemd (246.2-1) unstable; urgency=medium
 
