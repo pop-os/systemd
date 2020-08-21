@@ -1,6 +1,8 @@
 networkd-use-socket-activation-when-starting-networkd.patch
 test-network-stop-networkd-and-its-socket.patch
 seccomp-add-support-for-riscv64.patch
+analyze-rework-condition-testing.patch
+core-add-missing-conditions-asserts-to-unit-file-parsing.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
