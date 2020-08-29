@@ -1,0 +1,45 @@
+From: Chris Down <chris@chrisdown.name>
+Date: Tue, 25 Aug 2020 21:59:11 +0100
+Subject: path: Skip directories when finalising $PATH search
+
+Imagine $PATH /a:/b. There is an echo command at /b/echo. Under this
+configuration, this works fine:
+
+    % systemd-run --user --scope echo .
+    Running scope as unit: run-rfe98e0574b424d63a641644af511ff30.scope
+    .
+
+However, if I do `mkdir /a/echo`, this happens:
+
+    % systemd-run --user --scope echo .
+    Running scope as unit: run-rcbe9369537ed47f282ee12ce9f692046.scope
+    Failed to execute: Permission denied
+
+We check whether the resulting file is executable for the performing
+user, but of course, most directories are anyway, since that's needed to
+list within it. As such, another is_dir() check is needed prior to
+considering the search result final.
+
+Another approach might be to check S_ISREG, but there may be more gnarly
+edge cases there than just eliminating this obviously pathological
+example, so let's just do this for now.
+
+(cherry picked from commit 8b5cb69bc8b70d1dcc39ed2165907723099bd9d8)
+---
+ src/basic/path-util.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/basic/path-util.c b/src/basic/path-util.c
+index c4e022b..d3b4978 100644
+--- a/src/basic/path-util.c
++++ b/src/basic/path-util.c
+@@ -637,6 +637,9 @@ int find_binary(const char *name, char **ret) {
+                 if (!j)
+                         return -ENOMEM;
+ 
++                if (is_dir(j, true))
++                        continue;
++
+                 if (access(j, X_OK) >= 0) {
+                         /* Found it! */
+ 
