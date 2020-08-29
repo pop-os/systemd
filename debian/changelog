@@ -1,3 +1,23 @@
+systemd (246.2-2) unstable; urgency=medium
+
+  [ Balint Reczey ]
+  * debian/systemd.postinst: Restart systemd-networkd.socket on incompatible
+    change.
+    PassCredentials=yes is replaced with PassPacketInfo=yes and extra padding is
+    dropped, too.
+    (Closes: #968589, LP: #1891716)
+
+  [ Michael Biebl ]
+  * Fix restart of systemd-networkd.socket.
+    We can't restart the socket while systemd-networkd.service is still
+    active. Instead we stop the socket and ensure, that a try-restart of
+    systemd-networkd.service also starts the socket.
+  * seccomp: Add support for riscv64 (Closes: #954312)
+  * Support missing conditions/asserts everywhere (Closes: #968612)
+  * path: Skip directories when finalising $PATH search (Closes: #969006)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 29 Aug 2020 16:24:49 +0200
+
 systemd (246.2-1) unstable; urgency=medium
 
   * New upstream version 246.2
