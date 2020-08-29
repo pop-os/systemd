@@ -37,7 +37,7 @@ index e3ade92..60a5909 100644
                  { "SCMP_ARCH_S390X",       SCMP_ARCH_S390X       },
                  { "SCMP_ARCH_X32",         SCMP_ARCH_X32         },
 diff --git a/src/shared/seccomp-util.c b/src/shared/seccomp-util.c
-index 45bf309..7158b48 100644
+index 9958592..9f14d3f 100644
 --- a/src/shared/seccomp-util.c
 +++ b/src/shared/seccomp-util.c
 @@ -85,6 +85,8 @@ const uint32_t seccomp_local_archs[] = {
@@ -71,7 +71,7 @@ index 45bf309..7158b48 100644
          else if (streq(n, "s390"))
                  *ret = SCMP_ARCH_S390;
          else if (streq(n, "s390x"))
-@@ -1256,7 +1266,13 @@ int seccomp_protect_sysctl(void) {
+@@ -1252,7 +1262,13 @@ int seccomp_protect_sysctl(void) {
  
                  log_debug("Operating on architecture: %s", seccomp_arch_to_string(arch));
  
@@ -86,7 +86,7 @@ index 45bf309..7158b48 100644
                          /* No _sysctl syscall */
                          continue;
  
-@@ -1340,6 +1356,9 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
+@@ -1336,6 +1352,9 @@ int seccomp_restrict_address_families(Set *address_families, bool allow_list) {
                  case SCMP_ARCH_MIPS64N32:
                  case SCMP_ARCH_MIPSEL64:
                  case SCMP_ARCH_MIPS64:
@@ -96,7 +96,7 @@ index 45bf309..7158b48 100644
                          /* These we know we support (i.e. are the ones that do not use socketcall()) */
                          supported = true;
                          break;
-@@ -1577,7 +1596,7 @@ static int add_seccomp_syscall_filter(scmp_filter_ctx seccomp,
+@@ -1573,7 +1592,7 @@ static int add_seccomp_syscall_filter(scmp_filter_ctx seccomp,
  }
  
  /* For known architectures, check that syscalls are indeed defined or not. */
@@ -105,7 +105,7 @@ index 45bf309..7158b48 100644
  assert_cc(SCMP_SYS(shmget) > 0);
  assert_cc(SCMP_SYS(shmat) > 0);
  assert_cc(SCMP_SYS(shmdt) > 0);
-@@ -1622,13 +1641,16 @@ int seccomp_memory_deny_write_execute(void) {
+@@ -1618,13 +1637,16 @@ int seccomp_memory_deny_write_execute(void) {
                  case SCMP_ARCH_X86_64:
                  case SCMP_ARCH_X32:
                  case SCMP_ARCH_AARCH64:
