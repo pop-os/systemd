@@ -87,3 +87,4 @@ lp1875708/man-document-the-new-_LINE_BREAK-type.patch
 
 # Pop patches
 systemd-boot-id-compat.patch
+cryptswap-mount-fix.patch
