@@ -54,7 +54,7 @@ index e75d612..924fefb 100644
              <para>It is recommended to enable this option only on trusted networks, as setting this affects resolution
              of all hostnames, in particular of single-label names. It is generally safer to use the supplied domain
 diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index d34155b..3f7c241 100644
+index 97f5551..d079c45 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
 @@ -403,6 +403,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi

@@ -1,7 +1,6 @@
-test-accept-that-char-device-0-0-can-now-be-created-witou.patch
-network-only-process-non-error-message.patch
-network-wait-for-previous-address-removal-before-configur.patch
-network-do-not-fail-if-UseMTU-yes-on-DHCP-lease-lost.patch
+networkd-use-socket-activation-when-starting-networkd.patch
+test-network-stop-networkd-and-its-socket.patch
+seccomp-add-support-for-riscv64.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -44,6 +43,5 @@ Revert-network-do-not-drop-foreign-config-if-interface-is.patch
 lp1845909/0002-network-add-link-setting_genmode-flag.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
 network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
-riscv64-seccomp.patch
 dhcp-Allow-setting-request-options-again.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
