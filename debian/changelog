@@ -1,3 +1,19 @@
+systemd (246.4-1ubuntu1) groovy; urgency=medium
+
+  * Bugfix-only upload
+  * Merge from Debian unstable
+    - Changes dropped from Ubuntu delta:
+      * test: accept that char device 0/0 can now be created witout privileges.
+      * cherry-pick from stable: network: only process non-error message
+      * network: wait for previous address removal before configuring static
+        addresses.
+      * network: do not fail if UseMTU=yes on DHCP lease lost
+      * debian/systemd.postinst: Restart systemd-networkd.socket on incompatible
+        change
+      * Add riscv64 seccomp support.
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 02 Sep 2020 19:07:27 +0200
+
 systemd (246.4-1) unstable; urgency=medium
 
   * New upstream version 246.4
