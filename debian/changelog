@@ -1,3 +1,9 @@
+systemd (246.5-1) UNRELEASED; urgency=medium
+
+  * New upstream version 246.5
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 13 Sep 2020 21:01:16 +0200
+
 systemd (246.4-1) unstable; urgency=medium
 
   * New upstream version 246.4
