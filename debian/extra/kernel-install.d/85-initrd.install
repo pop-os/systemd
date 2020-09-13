@@ -20,6 +20,12 @@ if [ "$COMMAND" != add ]; then
     exit 1
 fi
 
+if [ "$#" -ge 5 ]; then
+    # An explicit initrd path was passed, 90-loaderentry.install knows how to handle this;
+    # copying here would just duplicate the file, since the basename is very likely different
+    exit 0
+fi
+
 if [ -e "$INITRD_SRC" ];then
     cp "$INITRD_SRC" "$INITRD_DEST"
 else
