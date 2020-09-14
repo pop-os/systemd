@@ -1,3 +1,14 @@
+systemd (246.5-1) unstable; urgency=medium
+
+  * New upstream version 246.5
+    - network: fix NDisc handling for the case when multiple routers exist
+      (Closes: #969599)
+    - core/socket: we may get ENOTCONN from socket_instantiate_service()
+      (Closes: #970156)
+  * Rebase patches
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 14 Sep 2020 08:04:39 +0200
+
 systemd (246.4-1ubuntu1) groovy; urgency=medium
 
   * Bugfix-only upload

@@ -59,7 +59,7 @@ index b225694..1c09bde 100755
      def create_iface(self):
          """Create temporary veth pairs for interface matching."""
 diff --git a/test/test-network/systemd-networkd-tests.py b/test/test-network/systemd-networkd-tests.py
-index 0ca1fb3..159bf48 100755
+index d528fa8..1757694 100755
 --- a/test/test-network/systemd-networkd-tests.py
 +++ b/test/test-network/systemd-networkd-tests.py
 @@ -328,7 +328,7 @@ def tearDownModule():
@@ -81,7 +81,7 @@ index 0ca1fb3..159bf48 100755
      if show_logs:
          print(check_output('journalctl _SYSTEMD_INVOCATION_ID=' + invocation_id))
      if remove_state_files:
-@@ -2428,7 +2429,8 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
+@@ -2440,7 +2441,8 @@ class NetworkdNetworkTests(unittest.TestCase, Utilities):
          self.assertRegex(output, 'Search Domains: one')
  
      def test_keep_configuration_static(self):
@@ -91,7 +91,7 @@ index 0ca1fb3..159bf48 100755
  
          check_output('ip link add name dummy98 type dummy')
          check_output('ip address add 10.1.2.3/16 dev dummy98')
-@@ -3591,7 +3593,8 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
+@@ -3603,7 +3605,8 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
          print(output)
          self.assertRegex(output, r'192.168.5.*')
  
@@ -101,7 +101,7 @@ index 0ca1fb3..159bf48 100755
  
          print('The lease address should be kept after networkd stopped')
          output = check_output('ip address show dev veth99 scope global')
-@@ -3626,7 +3629,8 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
+@@ -3638,7 +3641,8 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
          self.assertRegex(output, r'192.168.5.*')
  
          stop_dnsmasq(dnsmasq_pid_file)

@@ -11,7 +11,7 @@ Forwarded: https://github.com/systemd/systemd/issues/13629
  1 file changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/src/core/cgroup.c b/src/core/cgroup.c
-index 031b28a..992ce2d 100644
+index 1f9ba6c..3b5a672 100644
 --- a/src/core/cgroup.c
 +++ b/src/core/cgroup.c
 @@ -2430,13 +2430,10 @@ void unit_prune_cgroup(Unit *u) {
@@ -24,7 +24,7 @@ index 031b28a..992ce2d 100644
 -                 * the containing slice is stopped. So even if we failed now, this unit shouldn't assume
 -                 * that the cgroup is still realized the next time it is started. Do not return early
 -                 * on error, continue cleanup. */
--                log_unit_full(u, r == -EBUSY ? LOG_DEBUG : LOG_WARNING, r, "Failed to destroy cgroup %s, ignoring: %m", u->cgroup_path);
+-                log_unit_full_errno(u, r == -EBUSY ? LOG_DEBUG : LOG_WARNING, r, "Failed to destroy cgroup %s, ignoring: %m", u->cgroup_path);
 +        if (r < 0) {
 +                log_unit_debug_errno(u, r, "Failed to destroy cgroup %s, ignoring: %m", u->cgroup_path);
 +                return;
