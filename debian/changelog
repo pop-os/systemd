@@ -1,8 +1,9 @@
-systemd (246.6-1) UNRELEASED; urgency=medium
+systemd (246.6-1) unstable; urgency=medium
 
   * New upstream version 246.6
+  * Rebase patches
 
- -- Michael Biebl <biebl@debian.org>  Mon, 21 Sep 2020 18:41:20 +0200
+ -- Michael Biebl <biebl@debian.org>  Mon, 21 Sep 2020 20:28:36 +0200
 
 systemd (246.5-1) unstable; urgency=medium
 
