@@ -9,7 +9,7 @@ systemd (246.6-1ubuntu1) UNRELEASED; urgency=medium
   [ Balint Reczey ]
   * Bugfix-only upload
   * Merge from Debian unstable
-    - core: propagate unit start limit hit state to triggering path unit (LP: #1890913)
+    - core: propagate unit start limit hit state to triggering path unit (LP: #1891657)
 
  -- Balint Reczey <rbalint@ubuntu.com>  Tue, 22 Sep 2020 11:18:51 +0200
 
