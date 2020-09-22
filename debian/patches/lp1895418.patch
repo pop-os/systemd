@@ -1,0 +1,22 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Subject: fix resolved.conf Cache= default value
+Bug-Ubuntu: https://launchpad.net/bugs/1895418
+Forwarded: not-needed
+
+The actual default value was changed in the previous patch
+d/p/debian/UBUNTU-resolved-default-no-negative-caching.patch
+
+This only changes the commented-out value in the resolved.conf
+file so it matches the actual default
+
+--- systemd-246.4.orig/src/resolve/resolved.conf.in
++++ systemd-246.4/src/resolve/resolved.conf.in
+@@ -19,7 +19,7 @@
+ #DNSOverTLS=@DEFAULT_DNS_OVER_TLS_MODE@
+ #MulticastDNS=@DEFAULT_MDNS_MODE@
+ #LLMNR=@DEFAULT_LLMNR_MODE@
+-#Cache=yes
++#Cache=no-negative
+ #DNSStubListener=yes
+ #ReadEtcHosts=yes
+ #ResolveUnicastSingleLabel=no
