@@ -1,11 +1,17 @@
 systemd (246.6-1ubuntu1) UNRELEASED; urgency=medium
 
+  [ Dan Streetman ]
   * Fix resolved.conf Cache= default to match default (LP: #1895418)
     Files:
     - debian/patches/lp1895418.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dd4d93d94ebe2cf416f6b5a5eb59a16432cbc47b
 
- -- Dan Streetman <ddstreet@canonical.com>  Thu, 17 Sep 2020 16:49:30 -0400
+  [ Balint Reczey ]
+  * Bugfix-only upload
+  * Merge from Debian unstable
+    - core: propagate unit start limit hit state to triggering path unit (LP: #1890913)
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 22 Sep 2020 11:18:51 +0200
 
 systemd (246.6-1) unstable; urgency=medium
 
