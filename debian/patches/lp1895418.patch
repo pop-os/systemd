@@ -1,5 +1,7 @@
 From: Dan Streetman <ddstreet@canonical.com>
+Date: Tue, 22 Sep 2020 11:16:44 +0200
 Subject: fix resolved.conf Cache= default value
+
 Bug-Ubuntu: https://launchpad.net/bugs/1895418
 Forwarded: not-needed
 
@@ -8,9 +10,14 @@ d/p/debian/UBUNTU-resolved-default-no-negative-caching.patch
 
 This only changes the commented-out value in the resolved.conf
 file so it matches the actual default
+---
+ src/resolve/resolved.conf.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
---- systemd-246.4.orig/src/resolve/resolved.conf.in
-+++ systemd-246.4/src/resolve/resolved.conf.in
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index 082ad71..e9bf138 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
 @@ -19,7 +19,7 @@
  #DNSOverTLS=@DEFAULT_DNS_OVER_TLS_MODE@
  #MulticastDNS=@DEFAULT_MDNS_MODE@
