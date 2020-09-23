@@ -12,8 +12,11 @@ systemd (245.4-4ubuntu3.3) UNRELEASED; urgency=medium
   * d/p/lp1882596-man-fix-some-manvolnum.patch:
     - fix some man section references (LP: #1882596)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3959ec95eff78d38ec4409807f151572afe83fe9
+  * d/p/lp1895418-correct-resolved-conf-cache-default.patch:
+    - fix resolved.conf default Cache= value (LP: #1895418)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ebe274a2b01658ee39b372d7033c35209510b028
 
- -- Dan Streetman <ddstreet@canonical.com>  Fri, 24 Jul 2020 15:42:19 -0400
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 23 Sep 2020 15:15:48 -0400
 
 systemd (245.4-4ubuntu3.2) focal; urgency=medium
 
