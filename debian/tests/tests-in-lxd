@@ -23,7 +23,7 @@ autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
 EOF
 
 # help debugging if building lxd image still fails
-autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
+lxc image list | grep -q autopkgtest/ || autopkgtest-build-lxd ubuntu-daily:$(lsb_release -cs) || \
     (lxc launch ubuntu-daily:$(lsb_release -cs) systemd-lxc
      sleep 60
      lxc exec systemd-lxc systemctl is-system-running || (lxc exec systemd-lxc -- systemctl list-units --failed ; lxc exec systemd-lxc systemctl list-jobs ; lxc exec systemd-lxc -- journalctl -a)
