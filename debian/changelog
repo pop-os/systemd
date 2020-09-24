@@ -1,4 +1,4 @@
-systemd (246.6-1ubuntu1) UNRELEASED; urgency=medium
+systemd (246.6-1ubuntu1) groovy; urgency=medium
 
   [ Dan Streetman ]
   * Fix resolved.conf Cache= default to match default (LP: #1895418)
@@ -10,8 +10,15 @@ systemd (246.6-1ubuntu1) UNRELEASED; urgency=medium
   * Bugfix-only upload
   * Merge from Debian unstable
     - core: propagate unit start limit hit state to triggering path unit (LP: #1891657)
+  * Skip test_rsyslog in s390x containers.
+    The test is failing almost all the time. (LP: #1895576)
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ff8d286de52daa8b0856213ae52e66b81474fb57
+  * debian/tests/tests-in-lxd: Don't create the lxd test image twice
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e858e7c41b84bc4c34e8af79d6e4b6114fe23952
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 22 Sep 2020 11:18:51 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 24 Sep 2020 21:27:11 +0200
 
 systemd (246.6-1) unstable; urgency=medium
 
