@@ -102,6 +102,7 @@ class ServicesTest(unittest.TestCase):
 
     @unittest.skipIf('TEST_UPSTREAM' in os.environ,
                      'Forwarding to rsyslog is a Debian patch')
+    @unittest.skipIf(is_container and platform.machine() == 's390x', 'LP: #1895576')
     def test_rsyslog(self):
         out = subprocess.check_output(['ps', 'u', '-C', 'rsyslogd'])
         self.assertIn(b'bin/rsyslogd', out)
