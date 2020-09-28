@@ -347,7 +347,7 @@ Depends: ${shlibs:Depends},
          util-linux (>= 2.27.1),
          s390-tools (>> 1.6.2) [s390],
 Conflicts: hal
-Breaks: systemd (<< 233-4),
+Breaks: systemd (<< ${binary:Version}),
 Replaces: systemd (<< 233-4)
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
