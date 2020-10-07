@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.3) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.3) focal; urgency=medium
 
   [ Rafael David Tinoco ]
   * d/p/lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch:
@@ -15,8 +15,16 @@ systemd (245.4-4ubuntu3.3) UNRELEASED; urgency=medium
   * d/p/lp1895418-correct-resolved-conf-cache-default.patch:
     - fix resolved.conf default Cache= value (LP: #1895418)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ebe274a2b01658ee39b372d7033c35209510b028
+  * d/p/lp1897744-resolve-enable-RES_TRUSTAD-towards-the-127.0.0.53-st.patch:
+    - add resolv.conf 'trust-ad' option (LP: #1897744)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f6acc8c620b80adab7b048352d85e722b5ba8214
+  * d/t/*:
+    - Update tests to fix false negatives (LP: #1892358)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=cee6c31a6caec7888270c9fa8757105ab950ed0c
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a1c1a2bb0ff27faf84fe94583631dfd0f1f4ed8f
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9417ce996766c133c2a33d4102ce1494f3166774
 
- -- Dan Streetman <ddstreet@canonical.com>  Wed, 23 Sep 2020 15:15:48 -0400
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 08 Oct 2020 16:14:56 -0400
 
 systemd (245.4-4ubuntu3.2) focal; urgency=medium
 
