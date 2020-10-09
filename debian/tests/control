@@ -148,6 +148,7 @@ Depends: libsystemd-dev,
   plymouth,
   e2fsprogs,
   zstd,
+  squashfs-tools,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
