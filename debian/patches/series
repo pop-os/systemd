@@ -87,3 +87,4 @@ lp1875708/man-document-the-new-_LINE_BREAK-type.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 lp1882596-man-fix-some-manvolnum.patch
 lp1895418-correct-resolved-conf-cache-default.patch
+lp1897744-resolve-enable-RES_TRUSTAD-towards-the-127.0.0.53-st.patch
