@@ -1,0 +1,23 @@
+From: =?utf-8?q?Bj=C3=B8rn_Mork?= <bjorn@mork.no>
+Date: Tue, 13 Oct 2020 17:07:07 +0200
+Subject: units: update serial-getty@.service to support 57600 baud rate
+
+Fixes: #17306
+(cherry picked from commit 7fe7547ba3b953c142f41a9931dba7b6ff78fe0b)
+---
+ units/serial-getty@.service.m4 | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/units/serial-getty@.service.m4 b/units/serial-getty@.service.m4
+index cab89fb..4b72bef 100644
+--- a/units/serial-getty@.service.m4
++++ b/units/serial-getty@.service.m4
+@@ -33,7 +33,7 @@ Before=rescue.service
+ # The '-o' option value tells agetty to replace 'login' arguments with an
+ # option to preserve environment (-p), followed by '--' for safety, and then
+ # the entered username.
+-ExecStart=-/sbin/agetty -o '-p -- \\u' --keep-baud 115200,38400,9600 %I $TERM
++ExecStart=-/sbin/agetty -o '-p -- \\u' --keep-baud 115200,57600,38400,9600 %I $TERM
+ Type=idle
+ Restart=always
+ UtmpIdentifier=%I

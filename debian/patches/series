@@ -4,6 +4,7 @@ seccomp-add-support-for-riscv64.patch
 xdg-autostart-Add-support-for-Path-in-XDG-Desktop-File.patch
 xdg-autostart-Ignore-more-common-XDG-Desktop-Entry-fields.patch
 xdg-autostart-Lower-most-info-messages-to-debug-level.patch
+units-update-serial-getty-.service-to-support-57600-baud-.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
