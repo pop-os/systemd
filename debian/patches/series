@@ -23,3 +23,4 @@ debian/blacklist-upstream-test-25.patch
 debian/blacklist-upstream-test-24-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Keep-journal-files-compatible-with-older-versions.patch
+debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
