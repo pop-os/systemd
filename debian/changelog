@@ -1,3 +1,25 @@
+systemd (246.6-2) unstable; urgency=medium
+
+  * XDG autostart improvements
+    - Add support for Path= in XDG Desktop File
+    - Ignore more common XDG Desktop Entry fields
+    - Lower most info messages to debug level (Closes: #968116)
+  * Re-enable seccomp support on riscv64.
+    This should be safe now, as the code has fallbacks for systems with
+    older libseccomp versions.
+  * Move sysusers.d/sysctl.d/binfmt.d/modules-load.d back to /usr.
+    In Debian, late mounting of /usr is no longer supported, so it is safe
+    to install those files in /usr.
+    We want those facilities in /usr, not /, as this will make an eventual
+    switch to a merged-usr setup easier. (Closes: #971282)
+  * units: update serial-getty@.service to support 57600 baud rate
+    (Closes: #969144)
+  * bootspec: don't fail with EIO if searching for ESP and finding one without
+    an enveloping partition table
+    (Closes: #970534)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 15 Oct 2020 23:48:34 +0200
+
 systemd (246.6-1) unstable; urgency=medium
 
   * New upstream version 246.6
