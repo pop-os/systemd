@@ -1,6 +1,11 @@
 networkd-use-socket-activation-when-starting-networkd.patch
 test-network-stop-networkd-and-its-socket.patch
 seccomp-add-support-for-riscv64.patch
+xdg-autostart-Add-support-for-Path-in-XDG-Desktop-File.patch
+xdg-autostart-Ignore-more-common-XDG-Desktop-Entry-fields.patch
+xdg-autostart-Lower-most-info-messages-to-debug-level.patch
+units-update-serial-getty-.service-to-support-57600-baud-.patch
+bootspec-don-t-fail-with-EIO-if-searching-for-ESP-and-fin.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -20,6 +25,7 @@ debian/blacklist-upstream-test-25.patch
 debian/blacklist-upstream-test-24-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Keep-journal-files-compatible-with-older-versions.patch
+debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch

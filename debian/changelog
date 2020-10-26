@@ -1,4 +1,4 @@
-systemd (246.6-1ubuntu2) UNRELEASED; urgency=medium
+systemd (246.6-2ubuntu1) UNRELEASED; urgency=medium
 
   [ Dan Streetman ]
   * d/t/boot-smoke: update test to avoid false negatives
@@ -17,8 +17,33 @@ systemd (246.6-1ubuntu2) UNRELEASED; urgency=medium
   * debian/gbp.conf: Update debian-branch to ubuntu-hirsute
     File: debian/gbp.conf
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e0b78512dbb5141458468ba5e9c2a4e966ada088
+  * Merge from Debian unstable
+    - Move sysusers.d/sysctl.d/binfmt.d/modules-load.d back to /usr
+    (LP: #1897620)
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 26 Oct 2020 20:02:06 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 26 Oct 2020 20:03:21 +0100
+
+systemd (246.6-2) unstable; urgency=medium
+
+  * XDG autostart improvements
+    - Add support for Path= in XDG Desktop File
+    - Ignore more common XDG Desktop Entry fields
+    - Lower most info messages to debug level (Closes: #968116)
+  * Re-enable seccomp support on riscv64.
+    This should be safe now, as the code has fallbacks for systems with
+    older libseccomp versions.
+  * Move sysusers.d/sysctl.d/binfmt.d/modules-load.d back to /usr.
+    In Debian, late mounting of /usr is no longer supported, so it is safe
+    to install those files in /usr.
+    We want those facilities in /usr, not /, as this will make an eventual
+    switch to a merged-usr setup easier. (Closes: #971282)
+  * units: update serial-getty@.service to support 57600 baud rate
+    (Closes: #969144)
+  * bootspec: don't fail with EIO if searching for ESP and finding one without
+    an enveloping partition table
+    (Closes: #970534)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 15 Oct 2020 23:48:34 +0200
 
 systemd (246.6-1ubuntu1) groovy; urgency=medium
 
