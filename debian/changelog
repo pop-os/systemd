@@ -1,3 +1,25 @@
+systemd (246.6-1ubuntu2) UNRELEASED; urgency=medium
+
+  [ Dan Streetman ]
+  * d/t/boot-smoke: update test to avoid false negatives
+    File: debian/tests/boot-smoke
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=205c30ca53b0e421db28bb56afaf5f88650ce592
+  * d/t/boot-and-services: remove unneeded test lines
+    File: debian/tests/boot-and-services
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=71853082af4e668996db574915c5a156f9897fd3
+  * d/t/systemd-fsckd: rewrite test to try to fix false negatives (LP: #1892358)
+    Files:
+    - debian/tests/control
+    - debian/tests/systemd-fsckd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6ae6be039ec582410769d2d6d131e12bdcd19a68
+
+  [ Balint Reczey ]
+  * debian/gbp.conf: Update debian-branch to ubuntu-hirsute
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e0b78512dbb5141458468ba5e9c2a4e966ada088
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 26 Oct 2020 20:02:06 +0100
+
 systemd (246.6-1ubuntu1) groovy; urgency=medium
 
   [ Dan Streetman ]
