@@ -1,4 +1,4 @@
-systemd (246.6-2ubuntu1) UNRELEASED; urgency=medium
+systemd (246.6-2ubuntu1) hirsute; urgency=medium
 
   [ Dan Streetman ]
   * d/t/boot-smoke: update test to avoid false negatives
@@ -20,8 +20,12 @@ systemd (246.6-2ubuntu1) UNRELEASED; urgency=medium
   * Merge from Debian unstable
     - Move sysusers.d/sysctl.d/binfmt.d/modules-load.d back to /usr
     (LP: #1897620)
+  * debian/tests/systemd-fsckd: Plymouth-start stays active in 20.10 and later
+    (LP: #1892358)
+    File: debian/tests/systemd-fsckd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c46eda821e97df5595a4cdc5f5c41a9b49a51745
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 26 Oct 2020 20:03:21 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 29 Oct 2020 18:38:15 +0100
 
 systemd (246.6-2) unstable; urgency=medium
 
