@@ -1,0 +1,121 @@
+Index: systemd/src/shared/bootspec.c
+===================================================================
+--- systemd.orig/src/shared/bootspec.c
++++ systemd/src/shared/bootspec.c
+@@ -611,6 +611,10 @@ static int boot_entries_select_default(c
+                                 log_debug("Found default: id \"%s\" is matched by LoaderEntryOneShot",
+                                           config->entries[i].id);
+                                 return i;
++                        } else if (streq(config->entry_oneshot, config->entries[i].id_old)) {
++                                log_debug("Found default: id_old \"%s\" is matched by LoaderEntryOneShot",
++                                          config->entries[i].id_old);
++                                return i;
+                         }
+ 
+         if (config->entry_default)
+@@ -619,6 +623,10 @@ static int boot_entries_select_default(c
+                                 log_debug("Found default: id \"%s\" is matched by LoaderEntryDefault",
+                                           config->entries[i].id);
+                                 return i;
++                        } else if (streq(config->entry_default, config->entries[i].id_old)) {
++                                log_debug("Found default: id_old \"%s\" is matched by LoaderEntryDefault",
++                                          config->entries[i].id_old);
++                                return i;
+                         }
+ 
+         if (config->default_pattern)
+@@ -627,6 +635,10 @@ static int boot_entries_select_default(c
+                                 log_debug("Found default: id \"%s\" is matched by pattern \"%s\"",
+                                           config->entries[i].id, config->default_pattern);
+                                 return i;
++                        } else if (fnmatch(config->default_pattern, config->entries[i].id_old, FNM_CASEFOLD) == 0) {
++                                log_debug("Found default: id_old \"%s\" is matched by pattern \"%s\"",
++                                          config->entries[i].id_old, config->default_pattern);
++                                return i;
+                         }
+ 
+         log_debug("Found default: last entry \"%s\"", config->entries[config->n_entries - 1].id);
+Index: systemd/src/boot/efi/boot.c
+===================================================================
+--- systemd.orig/src/boot/efi/boot.c
++++ systemd/src/boot/efi/boot.c
+@@ -33,6 +33,7 @@ enum loader_type {
+ 
+ typedef struct {
+         CHAR16 *id; /* The unique identifier for this entry */
++        CHAR16 *id_old;
+         CHAR16 *title_show;
+         CHAR16 *title;
+         CHAR16 *version;
+@@ -887,6 +888,7 @@ static VOID config_entry_free(ConfigEntr
+                 return;
+ 
+         FreePool(entry->id);
++        FreePool(entry->id_old);
+         FreePool(entry->title_show);
+         FreePool(entry->title);
+         FreePool(entry->version);
+@@ -1310,6 +1312,7 @@ static VOID config_entry_add_from_file(
+         CHAR8 *line;
+         UINTN pos = 0;
+         CHAR8 *key, *value;
++        UINTN len;
+         EFI_STATUS err;
+         EFI_FILE_HANDLE handle;
+         _cleanup_freepool_ CHAR16 *initrd = NULL;
+@@ -1430,7 +1433,13 @@ static VOID config_entry_add_from_file(
+ 
+         entry->device = device;
+         entry->id = StrDuplicate(file);
++        entry->id_old = StrDuplicate(file);
++        len = StrLen(entry->id);
++        /* remove ".conf" */
++        if (len > 5)
++                entry->id_old[len - 5] = '\0';
+         StrLwr(entry->id);
++        StrLwr(entry->id_old);
+ 
+         config_add_entry(config, entry);
+ 
+@@ -1577,6 +1586,8 @@ static INTN config_entry_find(Config *co
+         for (i = 0; i < config->entry_count; i++)
+                 if (StrCmp(config->entries[i]->id, id) == 0)
+                         return (INTN) i;
++                else if (StrCmp(config->entries[i]->id_old, id) == 0)
++                        return (INTN) i;
+ 
+         return -1;
+ }
+@@ -1636,6 +1647,9 @@ static VOID config_default_entry_select(
+                         if (MetaiMatch(config->entries[i]->id, config->entry_default_pattern)) {
+                                 config->idx_default = i;
+                                 return;
++                        } else if (MetaiMatch(config->entries[i]->id_old, config->entry_default_pattern)) {
++                                config->idx_default = i;
++                                return;
+                         }
+                 }
+         }
+@@ -1752,6 +1766,7 @@ static BOOLEAN config_entry_add_call(
+         entry = AllocatePool(sizeof(ConfigEntry));
+         *entry = (ConfigEntry) {
+                 .id = StrDuplicate(id),
++                .id_old = StrDuplicate(id),
+                 .title = StrDuplicate(title),
+                 .call = call,
+                 .no_autoselect = TRUE,
+@@ -1783,12 +1798,14 @@ static ConfigEntry *config_entry_add_loa
+                 .device = device,
+                 .loader = StrDuplicate(loader),
+                 .id = StrDuplicate(id),
++                .id_old = StrDuplicate(id),
+                 .key = key,
+                 .tries_done = (UINTN) -1,
+                 .tries_left = (UINTN) -1,
+         };
+ 
+         StrLwr(entry->id);
++        StrLwr(entry->id_old);
+ 
+         config_add_entry(config, entry);
+         return entry;
