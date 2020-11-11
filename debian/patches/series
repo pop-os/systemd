@@ -203,3 +203,10 @@ lp2055397/0001-sd-netlink-introduce-sd_netlink_message_append_s8-an.patch
 lp2055397/0002-sd-netlink-add-missing-address-types.patch
 lp2055397/0003-network-add-RouteMetric-setting-in-Address-section.patch
 lp2055397/0004-network-dhcp4-also-apply-RouteMetric-setting-in-DHCP.patch
+
+# Pop patches
+systemd-boot-id-compat.patch
+cryptswap-mount-fix.patch
+system76-usb.patch
+arp.patch
+launchpad-build-fix.patch
