@@ -1,10 +1,30 @@
-systemd (247~rc2-1) UNRELEASED; urgency=medium
+systemd (247~rc2-1) experimental; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 247~rc2
     - tmpfiles: Handle filesystems without ACL support in more cases
       (Closes: #972135)
+  * Rebase patches
+  * Explicitly disable oomd
+  * Use -Dmode=release as we want a release, not developer, build
+  * Update symbols file for libudev1 and libsystemd0
 
- -- Michael Biebl <biebl@debian.org>  Thu, 12 Nov 2020 13:12:28 +0100
+  [ Luca Boccassi ]
+  * systemd-container: install systemd-dissect binary.
+    Required for TEST-50-DISSECT since:
+    https://github.com/systemd/systemd/pull/16046
+  * d/t/control: install squashfs-tools for upstream test.
+    Required by TEST-50-DISSECT since upstream PR:
+    https://github.com/systemd/systemd/pull/16046
+
+  [ Dan Streetman ]
+  * d/control: update meson minimum version
+    https://github.com/systemd/systemd/pull/13842#issuecomment-601105975
+  * d/t/upstream: convert 'blacklist' term to 'deny-list'
+    Support transition for upstream-ci from
+    https://github.com/systemd/systemd/pull/16262
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Nov 2020 21:23:22 +0100
 
 systemd (246.6-2) unstable; urgency=medium
 
