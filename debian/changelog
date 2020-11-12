@@ -1,3 +1,11 @@
+systemd (247~rc2-1) UNRELEASED; urgency=medium
+
+  * New upstream version 247~rc2
+    - tmpfiles: Handle filesystems without ACL support in more cases
+      (Closes: #972135)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Nov 2020 13:12:28 +0100
+
 systemd (246.6-2) unstable; urgency=medium
 
   * XDG autostart improvements
