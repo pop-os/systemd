@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index e889c8d..6d556fc 100644
+index cacbbd7..285f5b8 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -828,6 +828,7 @@ manpages = [
+@@ -840,6 +840,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index cfb9ffd..d38ff07 100644
+index 7996bc2..b597387 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2760,6 +2760,15 @@ executable(
+@@ -2885,6 +2885,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
@@ -973,18 +973,18 @@ index 0000000..4af8e45
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index 275daad..302c600 100644
+index ba60eb7..95d7eda 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -102,6 +102,7 @@ units = [
+@@ -103,6 +103,7 @@ units = [
+         ['systemd-exit.service',                ''],
          ['systemd-firstboot.service',           'ENABLE_FIRSTBOOT',
           'sysinit.target.wants/'],
-         ['systemd-halt.service',                ''],
 +        ['systemd-fsckd.socket',                ''],
+         ['systemd-halt.service',                ''],
+         ['systemd-homed-activate.service',      'ENABLE_HOMED'],
          ['systemd-initctl.socket',              'HAVE_SYSV_COMPAT',
-          'sockets.target.wants/'],
-         ['systemd-journal-catalog-update.service', '',
-@@ -171,6 +172,7 @@ in_units = [
+@@ -174,6 +175,7 @@ in_units = [
          ['systemd-pstore.service',               'ENABLE_PSTORE'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],
@@ -993,7 +993,7 @@ index 275daad..302c600 100644
          ['systemd-hibernate.service',            'ENABLE_HIBERNATE'],
          ['systemd-hybrid-sleep.service',         'ENABLE_HIBERNATE'],
 diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
-index 042081c..bea6c16 100644
+index c4a2948..1dce176 100644
 --- a/units/systemd-fsck-root.service.in
 +++ b/units/systemd-fsck-root.service.in
 @@ -13,6 +13,8 @@ Documentation=man:systemd-fsck-root.service(8)
@@ -1006,7 +1006,7 @@ index 042081c..bea6c16 100644
  
  [Service]
 diff --git a/units/systemd-fsck@.service.in b/units/systemd-fsck@.service.in
-index 3322083..bfa565b 100644
+index 6d9c9ab..48d5f29 100644
 --- a/units/systemd-fsck@.service.in
 +++ b/units/systemd-fsck@.service.in
 @@ -13,7 +13,8 @@ Documentation=man:systemd-fsck@.service(8)

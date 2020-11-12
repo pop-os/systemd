@@ -16,10 +16,10 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 173 insertions(+), 111 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 15cc1b8..f5dc149 100644
+index 5318d63..fa3409d 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1438,19 +1438,43 @@ int get_timezone(char **ret) {
+@@ -1456,19 +1456,43 @@ int get_timezone(char **ret) {
          const char *e;
          char *z;
          int r;
@@ -69,7 +69,7 @@ index 15cc1b8..f5dc149 100644
          e = PATH_STARTSWITH_SET(t, "/usr/share/zoneinfo/", "../usr/share/zoneinfo/");
          if (!e)
 diff --git a/src/core/locale-setup.c b/src/core/locale-setup.c
-index 33728b0..e2c4ae7 100644
+index 64761dd..b4ea9e2 100644
 --- a/src/core/locale-setup.c
 +++ b/src/core/locale-setup.c
 @@ -58,6 +58,27 @@ int locale_setup(char ***environment) {
@@ -101,7 +101,7 @@ index 33728b0..e2c4ae7 100644
                  char *s;
  
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index 233d081..0518921 100644
+index cb8153f..0b1c6f3 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
 @@ -92,6 +92,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {
@@ -177,7 +177,7 @@ index 233d081..0518921 100644
 -                if (in_section && first_word(l, "Option")) {
 -                        _cleanup_strv_free_ char **a = NULL;
 -
--                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
+-                        r = strv_split_full(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
 -                        if (r < 0)
 -                                return r;
 -
@@ -205,7 +205,7 @@ index 233d081..0518921 100644
 +                           "XKBVARIANT",        &c->x11_variant,
 +                           "XKBOPTIONS",        &c->x11_options);
  
--                        r = strv_split_extract(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
+-                        r = strv_split_full(&a, l, WHITESPACE, EXTRACT_UNQUOTE);
 -                        if (r < 0)
 -                                return -ENOMEM;
 -
@@ -411,7 +411,7 @@ index 233d081..0518921 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index c467b85..ca065d4 100644
+index cdc0938..7735d27 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -283,6 +283,8 @@ static int context_read_data(Context *c) {

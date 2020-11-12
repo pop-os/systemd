@@ -12,7 +12,7 @@ Closes: #869719
  1 file changed, 1 deletion(-)
 
 diff --git a/units/systemd-udevd.service.in b/units/systemd-udevd.service.in
-index f395e83..8ce0daa 100644
+index 6cfd3dc..a06d077 100644
 --- a/units/systemd-udevd.service.in
 +++ b/units/systemd-udevd.service.in
 @@ -35,7 +35,6 @@ MemoryDenyWriteExecute=yes
