@@ -38,6 +38,7 @@ endif
 CONFFLAGS = \
 	-Db_lto=true \
 	-Db_pie=true \
+	-Dmode=release \
 	-Drootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
 	-Dsplit-usr=true \
 	-Dversion-tag="$(DEB_VERSION)" \
