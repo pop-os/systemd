@@ -1,7 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd.netdev" conditional='ENABLE_NETWORKD'>
 
@@ -43,9 +43,9 @@
     directory <filename>/run/systemd/network</filename> and the local administration network
     directory <filename>/etc/systemd/network</filename>. All configuration files are collectively
     sorted and processed in lexical order, regardless of the directories in which they live.
-    However, files with identical filenames replace each other. Files in <filename>/etc</filename>
-    have the highest priority, files in <filename>/run</filename> take precedence over files with
-    the same name in <filename>/usr/lib</filename>. This can be used to override a system-supplied
+    However, files with identical filenames replace each other. Files in <filename>/etc/</filename>
+    have the highest priority, files in <filename>/run/</filename> take precedence over files with
+    the same name in <filename>/usr/lib/</filename>. This can be used to override a system-supplied
     configuration file with a local file if needed. As a special case, an empty file (file size 0)
     or symlink with the same name pointing to <filename>/dev/null</filename> disables the
     configuration file entirely (it is "masked").</para>
@@ -59,10 +59,10 @@
     <para>In addition to <filename>/etc/systemd/network</filename>, drop-in <literal>.d</literal>
     directories can be placed in <filename>/usr/lib/systemd/network</filename> or
     <filename>/run/systemd/network</filename> directories. Drop-in files in
-    <filename>/etc</filename> take precedence over those in <filename>/run</filename> which in turn
-    take precedence over those in <filename>/usr/lib</filename>. Drop-in files under any of these
+    <filename>/etc/</filename> take precedence over those in <filename>/run/</filename> which in turn
+    take precedence over those in <filename>/usr/lib/</filename>. Drop-in files under any of these
     directories take precedence over the main netdev file wherever located. (Of course, since
-    <filename>/run</filename> is temporary and <filename>/usr/lib</filename> is for vendors, it is
+    <filename>/run/</filename> is temporary and <filename>/usr/lib/</filename> is for vendors, it is
     unlikely drop-ins should be used in either of those places.)</para>
   </refsect1>
 
@@ -183,6 +183,8 @@
           <row><entry><varname>ifb</varname></entry>
           <entry> The Intermediate Functional Block (ifb) pseudo network interface acts as a QoS concentrator for multiple different sources of traffic.</entry></row>
 
+          <row><entry><varname>bareudp</varname></entry>
+          <entry> Bare UDP tunnels provide a generic L3 encapsulation support for tunnelling different L3 protocols like MPLS, IP etc. inside of an UDP tunnel.</entry></row>
         </tbody>
       </tgroup>
     </table>
@@ -521,9 +523,8 @@
   <refsect1>
     <title>[MACVTAP] Section Options</title>
 
-    <para>The [MACVTAP] section applies for
-    netdevs of kind <literal>macvtap</literal> and accepts the
-    same key as [MACVLAN].</para>
+    <para>The [MACVTAP] section applies for netdevs of kind <literal>macvtap</literal> and accepts the same
+    keys as [MACVLAN].</para>
   </refsect1>
 
   <refsect1>
@@ -556,9 +557,8 @@
   <refsect1>
     <title>[IPVTAP] Section Options</title>
 
-    <para>The [IPVTAP] section only applies for
-    netdevs of kind <literal>ipvtap</literal> and accepts the
-    same key as [IPVLAN].</para>
+    <para>The [IPVTAP] section only applies for netdevs of kind <literal>ipvtap</literal> and accepts the
+    same keys as [IPVLAN].</para>
   </refsect1>
 
   <refsect1>
@@ -711,20 +711,16 @@
       <varlistentry>
         <term><varname>DestinationPort=</varname></term>
         <listitem>
-          <para>Configures the default destination UDP port on a per-device basis.
-          If destination port is not specified then Linux kernel default will be used.
-          Set destination port 4789 to get the IANA assigned value. If not set or if the
-          destination port is assigned the empty string the default port of 4789 is used.</para>
+          <para>Configures the default destination UDP port. If the destination port is not specified then
+          Linux kernel default will be used. Set to 4789 to get the IANA assigned value.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>PortRange=</varname></term>
         <listitem>
-          <para>Configures VXLAN port range. VXLAN bases source
-          UDP port based on flow to help the receiver to be able
-          to load balance based on outer header flow. It
-          restricts the port range to the normal UDP local
-          ports, and allows overriding via configuration.</para>
+          <para>Configures the source port range for the VXLAN. The kernel assigns the source UDP port based
+          on the flow to help the receiver to do load balancing. When this option is not set, the normal
+          range of local UDP ports is used.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -816,7 +812,39 @@
       <varlistentry>
         <term><varname>IPDoNotFragment=</varname></term>
         <listitem>
-          <para>Accepts the same key in [VXLAN] section.</para>
+          <para>Accepts the same key as in [VXLAN] section.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Independent=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When true, the vxlan interface is created without underlying interfaces.
+          Defaults to <literal>false</literal>.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[BareUDP] Section Options</title>
+
+    <para>The [BareUDP] section only applies for
+    netdevs of kind <literal>bareudp</literal>, and accepts the
+    following keys:</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>DestinationPort=</varname></term>
+        <listitem>
+          <para>Specifies the destination UDP port (in range 1…65535). This is mandatory.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>EtherType=</varname></term>
+        <listitem>
+          <para>Specifies the L3 protocol. Takes one of <literal>ipv4</literal>, <literal>ipv6</literal>, <literal>mpls-uc</literal>
+          or <literal>mpls-mc</literal>. This is mandatory.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -842,8 +870,8 @@
         <term><varname>PeerTunnelId=</varname></term>
         <listitem>
           <para>Specifies the peer tunnel id. Takes a number in the range 1—4294967295. The value used must
-          match the <literal>PeerTunnelId=</literal> value being used at the peer. This setting is
-          compulsory.</para>
+          match the <literal>TunnelId=</literal> value being used at the peer. This setting is compulsory.
+          </para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -1066,43 +1094,43 @@
       <varlistentry>
         <term><varname>Port=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecReceiveChannel] section.</para>
+          <para>Accepts the same key as in [MACsecReceiveChannel] section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>MACAddress=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecReceiveChannel] section.</para>
+          <para>Accepts the same key as in [MACsecReceiveChannel] section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>PacketNumber=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecTransmitAssociation] section.</para>
+          <para>Accepts the same key as in [MACsecTransmitAssociation] section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>KeyId=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecTransmitAssociation] section.</para>
+          <para>Accepts the same key as in [MACsecTransmitAssociation] section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>Key=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecTransmitAssociation] section.</para>
+          <para>Accepts the same key as in [MACsecTransmitAssociation] section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>KeyFile=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecTransmitAssociation] section.</para>
+          <para>Accepts the same key as in [MACsecTransmitAssociation] section.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
         <term><varname>Activate=</varname></term>
         <listitem>
-          <para>Accepts the same key in [MACsecTransmitAssociation] section.</para>
+          <para>Accepts the same key as in [MACsecTransmitAssociation] section.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -1345,7 +1373,7 @@
           <para>Specifies the encapsulation mechanism used to store networking packets of various protocols
           inside the UDP packets. Supports the following values:
 
-          <literal>FooOverUDP</literal> provides the simplest no frills model of UDP encapsulation, it simply
+          <literal>FooOverUDP</literal> provides the simplest no-frills model of UDP encapsulation, it simply
           encapsulates packets directly in the UDP payload. <literal>GenericUDPEncapsulation</literal> is a
           generic and extensible encapsulation, it allows encapsulation of packets for any IP protocol and
           optional data as part of the encapsulation. For more detailed information see <ulink
@@ -1357,10 +1385,9 @@
       <varlistentry>
         <term><varname>Port=</varname></term>
         <listitem>
-          <para>Specifies the port number, where the IP encapsulation packets will arrive. Please take note
-          that the packets will arrive with the encapsulation will be removed. Then they will be manually fed
-          back into the network stack, and sent ahead for delivery to the real destination. This option is
-          mandatory.</para>
+          <para>Specifies the port number where the encapsulated packets will arrive. Those packets will be
+          removed and manually fed back into the network stack with the encapsulation removed to be sent to
+          the real destination. This option is mandatory.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -1743,7 +1770,8 @@
       <varlistentry>
         <term><varname>AdActorSystem=</varname></term>
         <listitem>
-          <para>Specifies the 802.3ad system mac address. This can not be either NULL or Multicast.</para>
+          <para>Specifies the 802.3ad system mac address. This can not be either
+          <constant>NULL</constant> or <constant>Multicast</constant>.</para>
         </listitem>
       </varlistentry>
 

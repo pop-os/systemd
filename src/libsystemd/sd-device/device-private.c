@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <ctype.h>
 #include <net/if.h>
@@ -316,32 +316,32 @@ static int device_amend(sd_device *device, const char *key, const char *value) {
                 if (r < 0)
                         return log_device_debug_errno(device, r, "sd-device: Failed to set SEQNUM to '%s': %m", value);
         } else if (streq(key, "DEVLINKS")) {
-                const char *word, *state;
-                size_t l;
+                for (const char *p = value;;) {
+                        _cleanup_free_ char *word = NULL;
 
-                FOREACH_WORD(word, l, value, state) {
-                        char devlink[l + 1];
-
-                        strncpy(devlink, word, l);
-                        devlink[l] = '\0';
-
-                        r = device_add_devlink(device, devlink);
+                        r = extract_first_word(&p, &word, NULL, 0);
                         if (r < 0)
-                                return log_device_debug_errno(device, r, "sd-device: Failed to add devlink '%s': %m", devlink);
+                                return r;
+                        if (r == 0)
+                                break;
+
+                        r = device_add_devlink(device, word);
+                        if (r < 0)
+                                return log_device_debug_errno(device, r, "sd-device: Failed to add devlink '%s': %m", word);
                 }
-        } else if (streq(key, "TAGS")) {
-                const char *word, *state;
-                size_t l;
+        } else if (STR_IN_SET(key, "TAGS", "CURRENT_TAGS")) {
+                for (const char *p = value;;) {
+                        _cleanup_free_ char *word = NULL;
 
-                FOREACH_WORD_SEPARATOR(word, l, value, ":", state) {
-                        char tag[l + 1];
-
-                        (void) strncpy(tag, word, l);
-                        tag[l] = '\0';
-
-                        r = device_add_tag(device, tag);
+                        r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
                         if (r < 0)
-                                return log_device_debug_errno(device, r, "sd-device: Failed to add tag '%s': %m", tag);
+                                return r;
+                        if (r == 0)
+                                break;
+
+                        r = device_add_tag(device, word, streq(key, "CURRENT_TAGS"));
+                        if (r < 0)
+                                return log_device_debug_errno(device, r, "sd-device: Failed to add tag '%s': %m", word);
                 }
         } else {
                 r = device_add_property_internal(device, key, value);
@@ -731,7 +731,6 @@ int device_new_from_stat_rdev(sd_device **ret, const struct stat *st) {
 
 int device_copy_properties(sd_device *device_dst, sd_device *device_src) {
         const char *property, *value;
-        Iterator i;
         int r;
 
         assert(device_dst);
@@ -741,13 +740,13 @@ int device_copy_properties(sd_device *device_dst, sd_device *device_src) {
         if (r < 0)
                 return r;
 
-        ORDERED_HASHMAP_FOREACH_KEY(value, property, device_src->properties_db, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(value, property, device_src->properties_db) {
                 r = device_add_property_aux(device_dst, property, value, true);
                 if (r < 0)
                         return r;
         }
 
-        ORDERED_HASHMAP_FOREACH_KEY(value, property, device_src->properties, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(value, property, device_src->properties) {
                 r = device_add_property_aux(device_dst, property, value, false);
                 if (r < 0)
                         return r;
@@ -759,8 +758,8 @@ int device_copy_properties(sd_device *device_dst, sd_device *device_src) {
 void device_cleanup_tags(sd_device *device) {
         assert(device);
 
-        set_free_free(device->tags);
-        device->tags = NULL;
+        device->all_tags = set_free_free(device->all_tags);
+        device->current_tags = set_free_free(device->current_tags);
         device->property_tags_outdated = true;
         device->tags_generation++;
 }
@@ -778,7 +777,7 @@ void device_remove_tag(sd_device *device, const char *tag) {
         assert(device);
         assert(tag);
 
-        free(set_remove(device->tags, tag));
+        free(set_remove(device->current_tags, tag));
         device->property_tags_outdated = true;
         device->tags_generation++;
 }
@@ -846,7 +845,10 @@ static bool device_has_info(sd_device *device) {
         if (!ordered_hashmap_isempty(device->properties_db))
                 return true;
 
-        if (!set_isempty(device->tags))
+        if (!set_isempty(device->all_tags))
+                return true;
+
+        if (!set_isempty(device->current_tags))
                 return true;
 
         if (device->watch_handle >= 0)
@@ -917,7 +919,6 @@ int device_update_db(sd_device *device) {
 
         if (has_info) {
                 const char *property, *value, *tag;
-                Iterator i;
 
                 if (major(device->devnum) > 0) {
                         const char *devlink;
@@ -935,11 +936,14 @@ int device_update_db(sd_device *device) {
                 if (device->usec_initialized > 0)
                         fprintf(f, "I:"USEC_FMT"\n", device->usec_initialized);
 
-                ORDERED_HASHMAP_FOREACH_KEY(value, property, device->properties_db, i)
+                ORDERED_HASHMAP_FOREACH_KEY(value, property, device->properties_db)
                         fprintf(f, "E:%s=%s\n", property, value);
 
                 FOREACH_DEVICE_TAG(device, tag)
-                        fprintf(f, "G:%s\n", tag);
+                        fprintf(f, "G:%s\n", tag); /* Any tag */
+
+                SET_FOREACH(tag, device->current_tags)
+                        fprintf(f, "Q:%s\n", tag); /* Current tag */
         }
 
         r = fflush_and_check(f);

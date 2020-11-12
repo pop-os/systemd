@@ -1,9 +1,13 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
+#include <sys/xattr.h>
 
 #include "errno-util.h"
 #include "home-util.h"
 #include "id128-util.h"
 #include "libcrypt-util.h"
+#include "memory-util.h"
+#include "modhex.h"
 #include "mountpoint-util.h"
 #include "path-util.h"
 #include "stat-util.h"
@@ -104,7 +108,7 @@ int user_record_synthesize(
 }
 
 int group_record_synthesize(GroupRecord *g, UserRecord *h) {
-        _cleanup_free_ char *un = NULL, *rr = NULL, *group_name_and_realm = NULL;
+        _cleanup_free_ char *un = NULL, *rr = NULL, *group_name_and_realm = NULL, *description = NULL;
         char smid[SD_ID128_STRING_MAX];
         sd_id128_t mid;
         int r;
@@ -133,10 +137,15 @@ int group_record_synthesize(GroupRecord *g, UserRecord *h) {
                         return -ENOMEM;
         }
 
+        description = strjoin("Primary Group of User ", un);
+        if (!description)
+                return -ENOMEM;
+
         r = json_build(&g->json,
                        JSON_BUILD_OBJECT(
                                        JSON_BUILD_PAIR("groupName", JSON_BUILD_STRING(un)),
                                        JSON_BUILD_PAIR_CONDITION(!!rr, "realm", JSON_BUILD_STRING(rr)),
+                                       JSON_BUILD_PAIR("description", JSON_BUILD_STRING(description)),
                                        JSON_BUILD_PAIR("binding", JSON_BUILD_OBJECT(
                                                                        JSON_BUILD_PAIR(sd_id128_to_string(mid, smid), JSON_BUILD_OBJECT(
                                                                                                        JSON_BUILD_PAIR("gid", JSON_BUILD_UNSIGNED(user_record_gid(h))))))),
@@ -275,7 +284,7 @@ int user_record_add_binding(
                 gid_t gid) {
 
         _cleanup_(json_variant_unrefp) JsonVariant *new_binding_entry = NULL, *binding = NULL;
-        char smid[SD_ID128_STRING_MAX], partition_uuids[37], luks_uuids[37], fs_uuids[37];
+        char smid[SD_ID128_STRING_MAX], partition_uuids[ID128_UUID_STRING_MAX], luks_uuids[ID128_UUID_STRING_MAX], fs_uuids[ID128_UUID_STRING_MAX];
         _cleanup_free_ char *ip = NULL, *hd = NULL, *ip_auto = NULL, *lc = NULL, *lcm = NULL, *fst = NULL;
         sd_id128_t mid;
         int r;
@@ -490,8 +499,21 @@ int user_record_test_image_path(UserRecord *h) {
         switch (user_record_storage(h)) {
 
         case USER_LUKS:
-                if (S_ISREG(st.st_mode))
+                if (S_ISREG(st.st_mode)) {
+                        ssize_t n;
+                        char x[2];
+
+                        n = getxattr(ip, "user.home-dirty", x, sizeof(x));
+                        if (n < 0) {
+                                if (errno != ENODATA)
+                                        log_debug_errno(errno, "Unable to read dirty xattr off image file, ignoring: %m");
+
+                        } else if (n == 1 && x[0] == '1')
+                                return USER_TEST_DIRTY;
+
                         return USER_TEST_EXISTS;
+                }
+
                 if (S_ISBLK(st.st_mode)) {
                         /* For block devices we can't really be sure if the device referenced actually is the
                          * fs we look for or some other file system (think: what does /dev/sdb1 refer
@@ -544,7 +566,7 @@ int user_record_test_image_path_and_warn(UserRecord *h) {
         return r;
 }
 
-int user_record_test_secret(UserRecord *h, UserRecord *secret) {
+int user_record_test_password(UserRecord *h, UserRecord *secret) {
         char **i;
         int r;
 
@@ -561,6 +583,48 @@ int user_record_test_secret(UserRecord *h, UserRecord *secret) {
                         return r;
                 if (r > 0)
                         return 0;
+        }
+
+        return -ENOKEY;
+}
+
+int user_record_test_recovery_key(UserRecord *h, UserRecord *secret) {
+        char **i;
+        int r;
+
+        assert(h);
+
+        /* Checks whether any of the specified passwords matches any of the hashed recovery keys of the entry */
+
+        if (h->n_recovery_key == 0)
+                return -ENXIO;
+
+        STRV_FOREACH(i, secret->password) {
+                for (size_t j = 0; j < h->n_recovery_key; j++) {
+                        _cleanup_(erase_and_freep) char *mangled = NULL;
+                        const char *p;
+
+                        if (streq(h->recovery_key[j].type, "modhex64")) {
+                                /* If this key is for a modhex64 recovery key, then try to normalize the
+                                 * passphrase to make things more robust: that way the password becomes case
+                                 * insensitive and the dashes become optional. */
+
+                                r = normalize_recovery_key(*i, &mangled);
+                                if (r == -EINVAL) /* Not a valid modhex64 passphrase, don't bother */
+                                        continue;
+                                if (r < 0)
+                                        return r;
+
+                                p = mangled;
+                        } else
+                                p = *i; /* Unknown recovery key types process as is */
+
+                        r = test_password_one(h->recovery_key[j].hashed_password, p);
+                        if (r < 0)
+                                return r;
+                        if (r > 0)
+                                return 0;
+                }
         }
 
         return -ENOKEY;
@@ -742,20 +806,13 @@ int user_record_make_hashed_password(UserRecord *h, char **secret, bool extend) 
         }
 
         STRV_FOREACH(i, secret) {
-                _cleanup_free_ char *salt = NULL;
-                struct crypt_data cd = {};
-                char *k;
+                _cleanup_(erase_and_freep) char *hashed = NULL;
 
-                r = make_salt(&salt);
+                r = hash_password(*i, &hashed);
                 if (r < 0)
                         return r;
 
-                errno = 0;
-                k = crypt_r(*i, salt, &cd);
-                if (!k)
-                        return errno_or_else(EINVAL);
-
-                r = strv_extend(&np, k);
+                r = strv_consume(&np, TAKE_PTR(hashed));
                 if (r < 0)
                         return r;
         }
@@ -1238,10 +1295,12 @@ int user_record_ratelimit(UserRecord *h) {
 
         usec = now(CLOCK_REALTIME);
 
-        if (h->ratelimit_begin_usec != UINT64_MAX && h->ratelimit_begin_usec > usec)
-                /* Hmm, time is running backwards? Say no! */
-                return 0;
-        else if (h->ratelimit_begin_usec == UINT64_MAX ||
+        if (h->ratelimit_begin_usec != UINT64_MAX && h->ratelimit_begin_usec > usec) {
+                /* Hmm, start-time is after the current time? If so, the RTC most likely doesn't work. */
+                new_ratelimit_begin_usec = usec;
+                new_ratelimit_count = 1;
+                log_debug("Rate limit timestamp is in the future, assuming incorrect system clock, resetting limit.");
+        } else if (h->ratelimit_begin_usec == UINT64_MAX ||
                  usec_add(h->ratelimit_begin_usec, user_record_ratelimit_interval_usec(h)) <= usec) {
                 /* Fresh start */
                 new_ratelimit_begin_usec = usec;

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 journal_client_sources = files('''
         audit-type.c
@@ -101,15 +101,16 @@ journald_gperf_c = custom_target(
 
 systemd_cat_sources = files('cat.c')
 
-journalctl_sources = files('journalctl.c')
+journalctl_sources = files('''
+        journalctl.c
+        pcre2-dlopen.c
+        pcre2-dlopen.h
+'''.split())
 
-if conf.get('HAVE_QRENCODE') == 1
-        journalctl_sources += files('journal-qrcode.c',
-                                    'journal-qrcode.h')
+if install_sysconfdir
+        install_data('journald.conf',
+                     install_dir : pkgsysconfdir)
 endif
-
-install_data('journald.conf',
-             install_dir : pkgsysconfdir)
 
 if get_option('create-log-dirs')
         meson.add_install_script(

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #if HAVE_LINUX_MEMFD_H
 #include <linux/memfd.h>
@@ -33,6 +33,7 @@
 #include "strv.h"
 #include "user-record-sign.h"
 #include "user-record-util.h"
+#include "user-record-pwquality.h"
 #include "user-record.h"
 #include "user-util.h"
 
@@ -453,6 +454,8 @@ static int convert_worker_errno(Home *h, int e, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_BAD_PASSWORD, "Password for home %s is incorrect or not sufficient for authentication.", h->user_name);
         case -EBADSLT:
                 return sd_bus_error_setf(error, BUS_ERROR_BAD_PASSWORD_AND_NO_TOKEN, "Password for home %s is incorrect or not sufficient, and configured security token not found either.", h->user_name);
+        case -EREMOTEIO:
+                return sd_bus_error_setf(error, BUS_ERROR_BAD_RECOVERY_KEY, "Recovery key for home %s is incorrect or not sufficient for authentication.", h->user_name);
         case -ENOANO:
                 return sd_bus_error_setf(error, BUS_ERROR_TOKEN_PIN_NEEDED, "PIN for security token required.");
         case -ERFKILL:
@@ -1008,11 +1011,17 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
         if (r < 0)
                 return r;
         if (r == 0) {
-                const char *homework;
+                const char *homework, *suffix, *unix_path;
 
                 /* Child */
 
-                if (setenv("NOTIFY_SOCKET", "/run/systemd/home/notify", 1) < 0) {
+                suffix = getenv("SYSTEMD_HOME_DEBUG_SUFFIX");
+                if (suffix)
+                        unix_path = strjoina("/run/systemd/home/notify.", suffix);
+                else
+                        unix_path = "/run/systemd/home/notify";
+
+                if (setenv("NOTIFY_SOCKET", unix_path, 1) < 0) {
                         log_error_errno(errno, "Failed to set $NOTIFY_SOCKET: %m");
                         _exit(EXIT_FAILURE);
                 }
@@ -1131,6 +1140,7 @@ int home_fixate(Home *h, UserRecord *secret, sd_bus_error *error) {
         case HOME_ABSENT:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_ABSENT, "Home %s is currently missing or not plugged in.", h->user_name);
         case HOME_INACTIVE:
+        case HOME_DIRTY:
         case HOME_ACTIVE:
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_ALREADY_FIXATED, "Home %s is already fixated.", h->user_name);
@@ -1176,6 +1186,7 @@ int home_activate(Home *h, UserRecord *secret, sd_bus_error *error) {
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 break;
         default:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_BUSY, "An operation on home %s is currently being executed.", h->user_name);
@@ -1216,6 +1227,7 @@ int home_authenticate(Home *h, UserRecord *secret, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_UNFIXATED:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
         case HOME_ACTIVE:
                 break;
         default:
@@ -1249,6 +1261,7 @@ int home_deactivate(Home *h, bool force, sd_bus_error *error) {
         case HOME_UNFIXATED:
         case HOME_ABSENT:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_NOT_ACTIVE, "Home %s not active.", h->user_name);
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
@@ -1284,6 +1297,7 @@ int home_create(Home *h, UserRecord *secret, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_EXISTS, "Selected home image of user %s already exists.", h->user_name);
         }
         case HOME_UNFIXATED:
+        case HOME_DIRTY:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_EXISTS, "Home of user %s already exists.", h->user_name);
         case HOME_ABSENT:
                 break;
@@ -1296,7 +1310,7 @@ int home_create(Home *h, UserRecord *secret, sd_bus_error *error) {
         if (h->record->enforce_password_policy == false)
                 log_debug("Password quality check turned off for account, skipping.");
         else {
-                r = quality_check_password(h->record, secret, error);
+                r = user_record_quality_check_password(h->record, secret, error);
                 if (r < 0)
                         return r;
         }
@@ -1323,6 +1337,7 @@ int home_remove(Home *h, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_UNFIXATED:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 break;
         case HOME_ACTIVE:
         default:
@@ -1461,6 +1476,7 @@ int home_update(Home *h, UserRecord *hr, sd_bus_error *error) {
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_INACTIVE:
+        case HOME_DIRTY:
         case HOME_ACTIVE:
                 break;
         default:
@@ -1495,6 +1511,7 @@ int home_resize(Home *h, uint64_t disk_size, UserRecord *secret, sd_bus_error *e
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_INACTIVE:
+        case HOME_DIRTY:
         case HOME_ACTIVE:
                 break;
         default:
@@ -1557,7 +1574,7 @@ static int home_may_change_password(
         assert(h);
 
         r = user_record_test_password_change_required(h->record);
-        if (IN_SET(r, -EKEYREVOKED, -EOWNERDEAD, -EKEYEXPIRED))
+        if (IN_SET(r, -EKEYREVOKED, -EOWNERDEAD, -EKEYEXPIRED, -ESTALE))
                 return 0; /* expired in some form, but changing is allowed */
         if (IN_SET(r, -EKEYREJECTED, -EROFS))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED, "Expiration settings of account %s do not allow changing of password.", h->user_name);
@@ -1590,6 +1607,7 @@ int home_passwd(Home *h,
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_INACTIVE:
+        case HOME_DIRTY:
         case HOME_ACTIVE:
                 break;
         default:
@@ -1647,7 +1665,7 @@ int home_passwd(Home *h,
         if (c->enforce_password_policy == false)
                 log_debug("Password quality check turned off for account, skipping.");
         else {
-                r = quality_check_password(c, merged_secret, error);
+                r = user_record_quality_check_password(c, merged_secret, error);
                 if (r < 0)
                         return r;
         }
@@ -1672,6 +1690,7 @@ int home_unregister(Home *h, sd_bus_error *error) {
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
         case HOME_ABSENT:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 break;
         case HOME_ACTIVE:
         default:
@@ -1696,6 +1715,7 @@ int home_lock(Home *h, sd_bus_error *error) {
         case HOME_UNFIXATED:
         case HOME_ABSENT:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_NOT_ACTIVE, "Home %s is not active.", h->user_name);
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is already locked.", h->user_name);
@@ -1740,6 +1760,7 @@ int home_unlock(Home *h, UserRecord *secret, sd_bus_error *error) {
         case HOME_ABSENT:
         case HOME_INACTIVE:
         case HOME_ACTIVE:
+        case HOME_DIRTY:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_NOT_LOCKED, "Home %s is not locked.", h->user_name);
         case HOME_LOCKED:
                 break;
@@ -1751,6 +1772,7 @@ int home_unlock(Home *h, UserRecord *secret, sd_bus_error *error) {
 }
 
 HomeState home_get_state(Home *h) {
+        int r;
         assert(h);
 
         /* When the state field is initialized, it counts. */
@@ -1763,8 +1785,11 @@ HomeState home_get_state(Home *h) {
                 return HOME_ACTIVE;
 
         /* And if we see the image being gone, we report this as absent */
-        if (user_record_test_image_path(h->record) == USER_TEST_ABSENT)
+        r = user_record_test_image_path(h->record);
+        if (r == USER_TEST_ABSENT)
                 return HOME_ABSENT;
+        if (r == USER_TEST_DIRTY)
+                return HOME_DIRTY;
 
         /* And for all other cases we return "inactive". */
         return HOME_INACTIVE;
@@ -2330,6 +2355,7 @@ static int home_dispatch_acquire(Home *h, Operation *o) {
                 break;
 
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 for_state = HOME_ACTIVATING_FOR_ACQUIRE;
                 call = home_activate_internal;
                 break;
@@ -2383,6 +2409,7 @@ static int home_dispatch_release(Home *h, Operation *o) {
                 case HOME_UNFIXATED:
                 case HOME_ABSENT:
                 case HOME_INACTIVE:
+                case HOME_DIRTY:
                         r = 1; /* done */
                         break;
 
@@ -2424,6 +2451,7 @@ static int home_dispatch_lock_all(Home *h, Operation *o) {
         case HOME_UNFIXATED:
         case HOME_ABSENT:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 log_info("Home %s is not active, no locking necessary.", h->user_name);
                 r = 1; /* done */
                 break;
@@ -2436,6 +2464,50 @@ static int home_dispatch_lock_all(Home *h, Operation *o) {
         case HOME_ACTIVE:
                 log_info("Locking home %s.", h->user_name);
                 r = home_lock(h, &error);
+                break;
+
+        default:
+                /* All other cases means we are currently executing an operation, which means the job remains
+                 * pending. */
+                return 0;
+        }
+
+        assert(!h->current_operation);
+
+        if (r != 0) /* failure or completed */
+                operation_result(o, r, &error);
+        else /* ongoing */
+                h->current_operation = operation_ref(o);
+
+        return 1;
+}
+
+static int home_dispatch_deactivate_all(Home *h, Operation *o) {
+        _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        int r;
+
+        assert(h);
+        assert(o);
+        assert(o->type == OPERATION_DEACTIVATE_ALL);
+
+        switch (home_get_state(h)) {
+
+        case HOME_UNFIXATED:
+        case HOME_ABSENT:
+        case HOME_INACTIVE:
+        case HOME_DIRTY:
+                log_info("Home %s is already deactivated.", h->user_name);
+                r = 1; /* done */
+                break;
+
+        case HOME_LOCKED:
+                log_info("Home %s is currently locked, not deactivating.", h->user_name);
+                r = 1; /* done */
+                break;
+
+        case HOME_ACTIVE:
+                log_info("Deactivating home %s.", h->user_name);
+                r = home_deactivate_internal(h, false, &error);
                 break;
 
         default:
@@ -2470,6 +2542,7 @@ static int home_dispatch_pipe_eof(Home *h, Operation *o) {
         case HOME_UNFIXATED:
         case HOME_ABSENT:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 log_info("Home %s already deactivated, no automatic deactivation needed.", h->user_name);
                 break;
 
@@ -2509,6 +2582,7 @@ static int home_dispatch_deactivate_force(Home *h, Operation *o) {
         case HOME_UNFIXATED:
         case HOME_ABSENT:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 log_debug("Home %s already deactivated, no forced deactivation due to unplug needed.", h->user_name);
                 break;
 
@@ -2549,6 +2623,7 @@ static int on_pending(sd_event_source *s, void *userdata) {
                         [OPERATION_ACQUIRE]          = home_dispatch_acquire,
                         [OPERATION_RELEASE]          = home_dispatch_release,
                         [OPERATION_LOCK_ALL]         = home_dispatch_lock_all,
+                        [OPERATION_DEACTIVATE_ALL]   = home_dispatch_deactivate_all,
                         [OPERATION_PIPE_EOF]         = home_dispatch_pipe_eof,
                         [OPERATION_DEACTIVATE_FORCE] = home_dispatch_deactivate_force,
                 };
@@ -2733,6 +2808,7 @@ static const char* const home_state_table[_HOME_STATE_MAX] = {
         [HOME_UNFIXATED]                   = "unfixated",
         [HOME_ABSENT]                      = "absent",
         [HOME_INACTIVE]                    = "inactive",
+        [HOME_DIRTY]                       = "dirty",
         [HOME_FIXATING]                    = "fixating",
         [HOME_FIXATING_FOR_ACTIVATION]     = "fixating-for-activation",
         [HOME_FIXATING_FOR_ACQUIRE]        = "fixating-for-acquire",

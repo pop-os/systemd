@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -10,7 +10,7 @@
 #include "alloc-util.h"
 #include "ask-password-api.h"
 #include "cryptsetup-pkcs11.h"
-#include "cryptsetup-util.h"
+#include "cryptsetup-keyfile.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "format-util.h"

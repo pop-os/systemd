@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd" >
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="org.freedesktop.login1" conditional='ENABLE_LOGIND'
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -504,13 +504,12 @@ node /org/freedesktop/login1 {
       stored on disk.</para>
 
       <para><function>AttachDevice()</function> may be used to assign a specific device to a specific
-      seat. The device is identified by its <filename>/sys</filename> path and must be eligible for seat
+      seat. The device is identified by its <filename>/sys/</filename> path and must be eligible for seat
       assignments. <function>AttachDevice()</function> takes three arguments: the seat id, the sysfs path,
       and a boolean for controlling polkit interactivity (see below). Device assignments are persistently
       stored on disk. To create a new seat, simply specify a previously unused seat id. For more information
       about the seat assignment logic see
-      <ulink url="https://www.freedesktop.org/wiki/Software/systemd/multiseat">Multi-Seat for Linux</ulink>.
-      </para>
+      <citerefentry><refentrytitle>sd-login</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para>
 
       <para><function>FlushDevices()</function> removes all explicit seat assignments for devices, resetting
       all assignments to the automatic defaults. The only argument it takes is the polkit interactivity
@@ -567,7 +566,7 @@ node /org/freedesktop/login1 {
 
       <para><function>SetWallMessage()</function> sets the wall message (the message that will be sent out to
       all terminals and stored in a
-      <citerefentry project='man-pages'><refentrytitle>utmp</refentrytitle><manvolnum>5</manvolnum></citerefentry> record) for a
+      <citerefentry project="man-pages"><refentrytitle>utmp</refentrytitle><manvolnum>5</manvolnum></citerefentry> record) for a
       subsequent scheduled shutdown operation. The parameter <varname>wall_message</varname> specifies the
       shutdown reason (and may be empty) which will be included in the shutdown message. The parameter
       <varname>enable</varname> specifies whether to print a wall message on shutdown.</para>

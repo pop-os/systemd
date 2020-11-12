@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "macro.h"
 #include "netlink-util.h"
@@ -79,11 +79,10 @@ int config_parse_trivial_link_equalizer_id(
                            lvalue, rvalue);
                 return 0;
         }
-        if (id > INT_MAX) {
+        if (id > INT_MAX)
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "'%s=' is too large, ignoring assignment: %s",
                            lvalue, rvalue);
-        }
 
         teql->id = id;
 

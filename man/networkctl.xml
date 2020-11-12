@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="networkctl" conditional='ENABLE_NETWORKD'
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -299,7 +299,10 @@ s - Service VLAN, m - Two-port MAC Relay (TPMR)
           <command>reconfigure</command>
           <replaceable>DEVICE…</replaceable>
         </term>
-        <listitem><para>Reconfigure network interfaces. Takes interface name or index number.</para></listitem>
+        <listitem><para>Reconfigure network interfaces. Takes interface name or index number. Note that
+        this does not reload <filename>.netdev</filename> or <filename>.network</filename>
+        corresponding to the the specified interface. So, if you edit config files, it is necessary to
+        call <command>networkctl reload</command> first to apply new settings.</para></listitem>
       </varlistentry>
 
       <varlistentry>

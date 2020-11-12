@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "errno-util.h"
 #include "format-table.h"
@@ -77,7 +77,9 @@ static int acquire_pkcs11_certificate(
 
         r = pkcs11_find_token(uri, pkcs11_callback, &data);
         if (r == -EAGAIN) /* pkcs11_find_token() doesn't log about this error, but all others */
-                return log_error_errno(ENXIO, "Specified PKCS#11 token with URI '%s' not found.", uri);
+                return log_error_errno(SYNTHETIC_ERRNO(ENXIO),
+                                       "Specified PKCS#11 token with URI '%s' not found.",
+                                       uri);
         if (r < 0)
                 return r;
 
@@ -86,7 +88,8 @@ static int acquire_pkcs11_certificate(
 
         return 0;
 #else
-        return log_error_errno(EOPNOTSUPP, "PKCS#11 tokens not supported on this build.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "PKCS#11 tokens not supported on this build.");
 #endif
 }
 
@@ -134,10 +137,7 @@ static int add_pkcs11_encrypted_key(
                 const void *decrypted_key, size_t decrypted_key_size) {
 
         _cleanup_(json_variant_unrefp) JsonVariant *l = NULL, *w = NULL, *e = NULL;
-        _cleanup_(erase_and_freep) char *base64_encoded = NULL;
-        _cleanup_free_ char *salt = NULL;
-        struct crypt_data cd = {};
-        char *k;
+        _cleanup_(erase_and_freep) char *base64_encoded = NULL, *hashed = NULL;
         int r;
 
         assert(v);
@@ -147,25 +147,20 @@ static int add_pkcs11_encrypted_key(
         assert(decrypted_key);
         assert(decrypted_key_size > 0);
 
-        r = make_salt(&salt);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate salt: %m");
-
         /* Before using UNIX hashing on the supplied key we base64 encode it, since crypt_r() and friends
          * expect a NUL terminated string, and we use a binary key */
         r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
         if (r < 0)
                 return log_error_errno(r, "Failed to base64 encode secret key: %m");
 
-        errno = 0;
-        k = crypt_r(base64_encoded, salt, &cd);
-        if (!k)
+        r = hash_password(base64_encoded, &hashed);
+        if (r < 0)
                 return log_error_errno(errno_or_else(EINVAL), "Failed to UNIX hash secret key: %m");
 
         r = json_build(&e, JSON_BUILD_OBJECT(
                                        JSON_BUILD_PAIR("uri", JSON_BUILD_STRING(uri)),
                                        JSON_BUILD_PAIR("data", JSON_BUILD_BASE64(encrypted_key, encrypted_key_size)),
-                                       JSON_BUILD_PAIR("hashedPassword", JSON_BUILD_STRING(k))));
+                                       JSON_BUILD_PAIR("hashedPassword", JSON_BUILD_STRING(hashed))));
         if (r < 0)
                 return log_error_errno(r, "Failed to build encrypted JSON key object: %m");
 
@@ -423,7 +418,8 @@ int list_pkcs11_tokens(void) {
 
         return 0;
 #else
-        return log_error_errno(EOPNOTSUPP, "PKCS#11 tokens not supported on this build.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "PKCS#11 tokens not supported on this build.");
 #endif
 }
 
@@ -475,6 +471,7 @@ int find_pkcs11_token_auto(char **ret) {
 
         return 0;
 #else
-        return log_error_errno(EOPNOTSUPP, "PKCS#11 tokens not supported on this build.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "PKCS#11 tokens not supported on this build.");
 #endif
 }

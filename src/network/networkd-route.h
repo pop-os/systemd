@@ -1,33 +1,30 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
+#include <inttypes.h>
+#include <stdbool.h>
+#include <stdio.h>
+
+#include "sd-netlink.h"
+
 #include "conf-parser.h"
-#include "macro.h"
-
-typedef struct Route Route;
-typedef struct NetworkConfigSection NetworkConfigSection;
-
-#include "networkd-network.h"
+#include "in-addr-util.h"
+#include "networkd-link.h"
 #include "networkd-util.h"
 
-typedef struct MultipathRouteVia {
-        uint16_t family;
-        union in_addr_union address;
-} _packed_ MultipathRouteVia;
+typedef struct Manager Manager;
+typedef struct Network Network;
 
-typedef struct MultipathRoute {
-        MultipathRouteVia gateway;
-        int ifindex;
-        uint32_t weight;
-} MultipathRoute;
-
-struct Route {
+typedef struct Route {
         Network *network;
         NetworkConfigSection *section;
 
         Link *link;
+        Manager *manager;
 
         int family;
+        int gw_family;
+        uint32_t gw_weight;
         int quickack;
         int fast_open_no_cookie;
         int ttl_propagate;
@@ -35,20 +32,24 @@ struct Route {
         unsigned char dst_prefixlen;
         unsigned char src_prefixlen;
         unsigned char scope;
-        bool scope_set;
         unsigned char protocol;  /* RTPROT_* */
         unsigned char type; /* RTN_* */
         unsigned char tos;
         uint32_t priority; /* note that ip(8) calls this 'metric' */
         uint32_t table;
-        bool table_set;
         uint32_t mtu;
         uint32_t initcwnd;
         uint32_t initrwnd;
         unsigned char pref;
         unsigned flags;
         int gateway_onlink;
-        bool gateway_from_dhcp;
+
+        bool scope_set:1;
+        bool table_set:1;
+        bool priority_set:1;
+        bool protocol_set:1;
+        bool pref_set:1;
+        bool gateway_from_dhcp_or_ra:1;
 
         union in_addr_union gw;
         union in_addr_union dst;
@@ -58,43 +59,33 @@ struct Route {
 
         usec_t lifetime;
         sd_event_source *expire;
-
-        LIST_FIELDS(Route, routes);
-};
+} Route;
 
 void route_hash_func(const Route *route, struct siphash *state);
 int route_compare_func(const Route *a, const Route *b);
 extern const struct hash_ops route_hash_ops;
 
 int route_new(Route **ret);
-void route_free(Route *route);
-int route_configure(Route *route, Link *link, link_netlink_message_handler_t callback, Route **ret);
-int route_remove(Route *route, Link *link, link_netlink_message_handler_t callback);
-
-int route_get(Link *link, Route *in, Route **ret);
-int route_add(Link *link, Route *in, Route **ret);
-int route_add_foreign(Link *link, Route *in, Route **ret);
-bool route_equal(Route *r1, Route *r2);
-
-int route_expire_handler(sd_event_source *s, uint64_t usec, void *userdata);
-int route_section_verify(Route *route, Network *network);
-
+Route *route_free(Route *route);
 DEFINE_NETWORK_SECTION_FUNCTIONS(Route, route_free);
+
+int route_configure(const Route *route, Link *link, link_netlink_message_handler_t callback, Route **ret);
+int route_remove(const Route *route, Manager *manager, Link *link, link_netlink_message_handler_t callback);
+
+int link_set_routes(Link *link);
+int link_drop_routes(Link *link);
+int link_drop_foreign_routes(Link *link);
+int link_serialize_routes(const Link *link, FILE *f);
+int link_deserialize_routes(Link *link, const char *routes);
+
+uint32_t link_get_dhcp_route_table(const Link *link);
+uint32_t link_get_ipv6_accept_ra_route_table(const Link *link);
+
+int manager_rtnl_process_route(sd_netlink *rtnl, sd_netlink_message *message, Manager *m);
 
 int network_add_ipv4ll_route(Network *network);
 int network_add_default_route_on_device(Network *network);
-
-const char* route_type_to_string(int t) _const_;
-int route_type_from_string(const char *s) _pure_;
-
-#define ROUTE_SCOPE_STR_MAX CONST_MAX(DECIMAL_STR_MAX(int), STRLEN("nowhere") + 1)
-const char *format_route_scope(int scope, char *buf, size_t size);
-
-#define ROUTE_TABLE_STR_MAX CONST_MAX(DECIMAL_STR_MAX(int), STRLEN("default") + 1)
-const char *format_route_table(int table, char *buf, size_t size);
-
-#define ROUTE_PROTOCOL_STR_MAX CONST_MAX(DECIMAL_STR_MAX(int), STRLEN("redirect") + 1)
-const char *format_route_protocol(int protocol, char *buf, size_t size);
+void network_drop_invalid_routes(Network *network);
 
 CONFIG_PARSER_PROTOTYPE(config_parse_gateway);
 CONFIG_PARSER_PROTOTYPE(config_parse_preferred_src);

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <fnmatch.h>
@@ -34,6 +34,7 @@ size_t strv_length(char * const *l) _pure_;
 
 int strv_extend_strv(char ***a, char * const *b, bool filter_duplicates);
 int strv_extend_strv_concat(char ***a, char * const *b, const char *suffix);
+int strv_prepend(char ***l, const char *value);
 int strv_extend(char ***l, const char *value);
 int strv_extendf(char ***l, const char *format, ...) _printf_(2,0);
 int strv_extend_front(char ***l, const char *value);
@@ -62,7 +63,7 @@ char **strv_new_internal(const char *x, ...) _sentinel_;
 char **strv_new_ap(const char *x, va_list ap);
 #define strv_new(...) strv_new_internal(__VA_ARGS__, NULL)
 
-#define STRV_IGNORE ((const char *) -1)
+#define STRV_IGNORE ((const char *) POINTER_MAX)
 
 static inline const char* STRV_IFNOTNULL(const char *x) {
         return x ? x : STRV_IGNORE;
@@ -72,17 +73,28 @@ static inline bool strv_isempty(char * const *l) {
         return !l || !*l;
 }
 
-char **strv_split_full(const char *s, const char *separator, SplitFlags flags);
-static inline char **strv_split(const char *s, const char *separator) {
-        return strv_split_full(s, separator, 0);
-}
 char **strv_split_newlines(const char *s);
 
-int strv_split_extract(char ***t, const char *s, const char *separators, ExtractFlags flags);
+int strv_split_full(char ***t, const char *s, const char *separators, ExtractFlags flags);
+static inline char **strv_split(const char *s, const char *separators) {
+        char **ret;
+        int r;
 
-char *strv_join_prefix(char * const *l, const char *separator, const char *prefix);
+        r = strv_split_full(&ret, s, separators, 0);
+        if (r < 0)
+                return NULL;
+
+        return ret;
+}
+
+/* Given a string containing white-space separated tuples of words themselves separated by ':',
+ * returns a vector of strings. If the second element in a tuple is missing, the corresponding
+ * string in the vector is an empty string. */
+int strv_split_colon_pairs(char ***t, const char *s);
+
+char *strv_join_full(char * const *l, const char *separator, const char *prefix, bool escape_separtor);
 static inline char *strv_join(char * const *l, const char *separator) {
-        return strv_join_prefix(l, separator, NULL);
+        return strv_join_full(l, separator, NULL, false);
 }
 
 char **strv_parse_nulstr(const char *s, size_t l);
@@ -117,10 +129,6 @@ bool strv_overlap(char * const *a, char * const *b) _pure_;
 
 char **strv_sort(char **l);
 void strv_print(char * const *l);
-
-#define STRV_MAKE(...) ((char**) ((const char*[]) { __VA_ARGS__, NULL }))
-
-#define STRV_MAKE_EMPTY ((char*[1]) { NULL })
 
 #define strv_from_stdarg_alloca(first)                          \
         ({                                                      \

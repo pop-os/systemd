@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include "conf-parser.h"
@@ -68,6 +68,10 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(IPv6Token *, freep);
 static inline char* NDISC_DNSSL_DOMAIN(const NDiscDNSSL *n) {
         return ((char*) n) + ALIGN(sizeof(NDiscDNSSL));
 }
+
+bool link_ipv6_accept_ra_enabled(Link *link);
+
+void network_adjust_ipv6_accept_ra(Network *network);
 
 int ndisc_configure(Link *link);
 void ndisc_vacuum(Link *link);

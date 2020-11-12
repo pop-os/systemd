@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <arpa/inet.h>
 #include <getopt.h>
@@ -135,7 +135,7 @@ typedef struct LinkInfo {
         sd_device *sd_device;
         int ifindex;
         unsigned short iftype;
-        struct ether_addr mac_address;
+        hw_addr_data hw_address;
         struct ether_addr permanent_mac_address;
         uint32_t master;
         uint32_t mtu;
@@ -416,13 +416,14 @@ static int decode_link(sd_netlink_message *m, LinkInfo *info, char **patterns, b
         info->alternative_names = TAKE_PTR(altnames);
 
         info->has_mac_address =
-                sd_netlink_message_read_ether_addr(m, IFLA_ADDRESS, &info->mac_address) >= 0 &&
-                memcmp(&info->mac_address, &ETHER_ADDR_NULL, sizeof(struct ether_addr)) != 0;
+                netlink_message_read_hw_addr(m, IFLA_ADDRESS, &info->hw_address) >= 0 &&
+                memcmp(&info->hw_address, &HW_ADDR_NULL, sizeof(hw_addr_data)) != 0;
 
         info->has_permanent_mac_address =
                 ethtool_get_permanent_macaddr(NULL, info->name, &info->permanent_mac_address) >= 0 &&
                 memcmp(&info->permanent_mac_address, &ETHER_ADDR_NULL, sizeof(struct ether_addr)) != 0 &&
-                memcmp(&info->permanent_mac_address, &info->mac_address, sizeof(struct ether_addr)) != 0;
+                (info->hw_address.length != sizeof(struct ether_addr) ||
+                 memcmp(&info->permanent_mac_address, info->hw_address.addr.bytes, sizeof(struct ether_addr)) != 0);
 
         (void) sd_netlink_message_read_u32(m, IFLA_MTU, &info->mtu);
         (void) sd_netlink_message_read_u32(m, IFLA_MIN_MTU, &info->min_mtu);
@@ -510,8 +511,8 @@ static int acquire_link_bitrates(sd_bus *bus, LinkInfo *link) {
 
         r = link_get_property(bus, link, &error, &reply, "org.freedesktop.network1.Link", "BitRates");
         if (r < 0) {
-                bool quiet = sd_bus_error_has_name(&error, SD_BUS_ERROR_UNKNOWN_PROPERTY) ||
-                             sd_bus_error_has_name(&error, BUS_ERROR_SPEED_METER_INACTIVE);
+                bool quiet = sd_bus_error_has_names(&error, SD_BUS_ERROR_UNKNOWN_PROPERTY,
+                                                            BUS_ERROR_SPEED_METER_INACTIVE);
 
                 return log_full_errno(quiet ? LOG_DEBUG : LOG_WARNING,
                                       r, "Failed to query link bit rates: %s", bus_error_message(&error, r));
@@ -1526,9 +1527,9 @@ static int link_status_one(
 
         if (info->has_mac_address) {
                 _cleanup_free_ char *description = NULL;
-                char ea[ETHER_ADDR_TO_STRING_MAX];
 
-                (void) ieee_oui(hwdb, &info->mac_address, &description);
+                if (info->hw_address.length == ETH_ALEN)
+                        (void) ieee_oui(hwdb, &info->hw_address.addr.ether, &description);
 
                 r = table_add_many(table,
                                    TABLE_EMPTY,
@@ -1536,7 +1537,7 @@ static int link_status_one(
                 if (r < 0)
                         return table_log_add_error(r);
                 r = table_add_cell_stringf(table, NULL, "%s%s%s%s",
-                                           ether_addr_to_string(&info->mac_address, ea),
+                                           HW_ADDR_TO_STR(&info->hw_address),
                                            description ? " (" : "",
                                            strempty(description),
                                            description ? ")" : "");
@@ -1653,12 +1654,11 @@ static int link_status_one(
                 if (r < 0)
                         return table_log_add_error(r);
 
-                if (info->port_state <= BR_STATE_BLOCKING) {
+                if (info->port_state <= BR_STATE_BLOCKING)
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Port State:",
                                            TABLE_STRING, bridge_state_to_string(info->port_state));
-                }
         } else if (streq_ptr(info->netdev_kind, "bond")) {
                 r = table_add_many(table,
                                    TABLE_EMPTY,
@@ -2477,7 +2477,6 @@ static int link_up_down(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_set_free_ Set *indexes = NULL;
         int index, r, i;
-        Iterator j;
         void *p;
 
         r = sd_netlink_open(&rtnl);
@@ -2498,7 +2497,7 @@ static int link_up_down(int argc, char *argv[], void *userdata) {
                         return log_oom();
         }
 
-        SET_FOREACH(p, indexes, j) {
+        SET_FOREACH(p, indexes) {
                 index = PTR_TO_INT(p);
                 r = link_up_down_send_message(rtnl, argv[0], index);
                 if (r < 0) {
@@ -2516,7 +2515,6 @@ static int link_delete(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_set_free_ Set *indexes = NULL;
         int index, r, i;
-        Iterator j;
         void *p;
 
         r = sd_netlink_open(&rtnl);
@@ -2537,7 +2535,7 @@ static int link_delete(int argc, char *argv[], void *userdata) {
                         return log_oom();
         }
 
-        SET_FOREACH(p, indexes, j) {
+        SET_FOREACH(p, indexes) {
                 index = PTR_TO_INT(p);
                 r = link_delete_send_message(rtnl, index);
                 if (r < 0) {
@@ -2641,7 +2639,6 @@ static int verb_reconfigure(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_set_free_ Set *indexes = NULL;
         int index, i, r;
-        Iterator j;
         void *p;
 
         r = sd_bus_open_system(&bus);
@@ -2662,7 +2659,7 @@ static int verb_reconfigure(int argc, char *argv[], void *userdata) {
                         return log_oom();
         }
 
-        SET_FOREACH(p, indexes, j) {
+        SET_FOREACH(p, indexes) {
                 index = PTR_TO_INT(p);
                 r = bus_call_method(bus, bus_network_mgr, "ReconfigureLink", &error, NULL, "i", index);
                 if (r < 0) {

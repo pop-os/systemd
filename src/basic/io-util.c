@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <limits.h>
@@ -153,10 +153,8 @@ int pipe_eof(int fd) {
         int r;
 
         r = fd_wait_for_event(fd, POLLIN, 0);
-        if (r < 0)
+        if (r <= 0)
                 return r;
-        if (r == 0)
-                return 0;
 
         return !!(r & POLLHUP);
 }

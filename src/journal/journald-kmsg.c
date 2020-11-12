@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -58,7 +58,7 @@ void server_forward_kmsg(
         /* Second: identifier and PID */
         if (ucred) {
                 if (!identifier) {
-                        get_process_comm(ucred->pid, &ident_buf);
+                        (void) get_process_comm(ucred->pid, &ident_buf);
                         identifier = ident_buf;
                 }
 

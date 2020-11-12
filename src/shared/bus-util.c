@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -14,14 +14,13 @@
 #include "sd-event.h"
 #include "sd-id128.h"
 
-/* #include "alloc-util.h" */
+#include "bus-common-errors.h"
 #include "bus-internal.h"
 #include "bus-label.h"
 #include "bus-util.h"
 #include "path-util.h"
 #include "socket-util.h"
 #include "stdio-util.h"
-/* #include "string-util.h" */
 
 static int name_owner_change_callback(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
         sd_event *e = userdata;
@@ -153,6 +152,13 @@ int bus_name_has_owner(sd_bus *c, const char *name, sd_bus_error *error) {
         return has_owner;
 }
 
+bool bus_error_is_unknown_service(const sd_bus_error *error) {
+        return sd_bus_error_has_names(error,
+                                      SD_BUS_ERROR_SERVICE_UNKNOWN,
+                                      SD_BUS_ERROR_NAME_HAS_NO_OWNER,
+                                      BUS_ERROR_NO_SUCH_UNIT);
+}
+
 int bus_check_peercred(sd_bus *c) {
         struct ucred ucred;
         int fd, r;
@@ -260,12 +266,10 @@ int bus_connect_transport(BusTransport transport, const char *host, bool user, s
                 if (user)
                         r = sd_bus_default_user(&bus);
                 else {
-                        if (sd_booted() <= 0) {
+                        if (sd_booted() <= 0)
                                 /* Print a friendly message when the local system is actually not running systemd as PID 1. */
-                                log_error("System has not been booted with systemd as init system (PID 1). Can't operate.");
-
-                                return -EHOSTDOWN;
-                        }
+                                return log_error_errno(SYNTHETIC_ERRNO(EHOSTDOWN),
+                                                       "System has not been booted with systemd as init system (PID 1). Can't operate.");
                         r = sd_bus_default_system(&bus);
                 }
                 break;

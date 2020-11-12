@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/stat.h>
 
@@ -176,7 +176,7 @@ _unused_ static void test_compress_stream(const char *compression,
         _cleanup_free_ char *cmd = NULL, *cmd2 = NULL;
         struct stat st = {};
 
-        r = find_binary(cat, NULL);
+        r = find_executable(cat, NULL);
         if (r < 0) {
                 log_error_errno(r, "Skipping %s, could not find %s binary: %m", __func__, cat);
                 return;

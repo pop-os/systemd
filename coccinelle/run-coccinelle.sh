@@ -10,7 +10,6 @@ EXCLUDED_PATHS=(
 )
 
 top="$(git rev-parse --show-toplevel)"
-iso_defs="$top/coccinelle/systemd-definitions.iso"
 args=
 
 # Create an array from files tracked by git...
@@ -32,12 +31,12 @@ if ! parallel -h >/dev/null; then
     exit 1
 fi
 
-for SCRIPT in ${@-$top/coccinelle/*.cocci} ; do
+for SCRIPT in ${@-$top/coccinelle/*.cocci}; do
     echo "--x-- Processing $SCRIPT --x--"
     TMPFILE=`mktemp`
     echo "+ spatch --sp-file $SCRIPT $args ..."
     parallel --halt now,fail=1 --keep-order --noswap --max-args=20 \
-             spatch --iso-file $iso_defs --sp-file $SCRIPT $args ::: "${files[@]}" \
+             spatch --macro-file="$top/coccinelle/macros.h" --sp-file $SCRIPT $args ::: "${files[@]}" \
              2>"$TMPFILE" || cat "$TMPFILE"
     echo -e "--x-- Processed $SCRIPT --x--\n"
 done

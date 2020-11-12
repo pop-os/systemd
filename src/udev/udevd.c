@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright © 2004 Chris Friesen <chris_friesen@sympatico.ca>
  * Copyright © 2009 Canonical Ltd.
@@ -251,7 +251,6 @@ static int on_event_timeout_warning(sd_event_source *s, uint64_t usec, void *use
 
 static void worker_attach_event(struct worker *worker, struct event *event) {
         sd_event *e;
-        uint64_t usec;
 
         assert(worker);
         assert(worker->manager);
@@ -266,13 +265,13 @@ static void worker_attach_event(struct worker *worker, struct event *event) {
 
         e = worker->manager->event;
 
-        assert_se(sd_event_now(e, CLOCK_MONOTONIC, &usec) >= 0);
+        (void) sd_event_add_time_relative(e, &event->timeout_warning_event, CLOCK_MONOTONIC,
+                                          udev_warn_timeout(arg_event_timeout_usec), USEC_PER_SEC,
+                                          on_event_timeout_warning, event);
 
-        (void) sd_event_add_time(e, &event->timeout_warning_event, CLOCK_MONOTONIC,
-                                 usec + udev_warn_timeout(arg_event_timeout_usec), USEC_PER_SEC, on_event_timeout_warning, event);
-
-        (void) sd_event_add_time(e, &event->timeout_event, CLOCK_MONOTONIC,
-                                 usec + arg_event_timeout_usec, USEC_PER_SEC, on_event_timeout, event);
+        (void) sd_event_add_time_relative(e, &event->timeout_event, CLOCK_MONOTONIC,
+                                          arg_event_timeout_usec, USEC_PER_SEC,
+                                          on_event_timeout, event);
 }
 
 static void manager_clear_for_worker(Manager *manager) {
@@ -460,6 +459,43 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
                 return -ENOMEM;
 
         r = worker_lock_block_device(dev, &fd_lock);
+        if (r == -EAGAIN) {
+                /* So this is a block device and the device is locked currently via the BSD advisory locks —
+                 * someone else is exclusively using it. This means we don't run our udev rules now, to not
+                 * interfere. However we want to know when the device is unlocked again, and retrigger the
+                 * device again then, so that the rules are run eventually. For that we use IN_CLOSE_WRITE
+                 * inotify watches (which isn't exactly the same as waiting for the BSD locks to release, but
+                 * not totally off, as long as unlock+close() is done together, as it usually is).
+                 *
+                 * (The user-facing side of this: https://systemd.io/BLOCK_DEVICE_LOCKING)
+                 *
+                 * There's a bit of a chicken and egg problem here for this however: inotify watching is
+                 * supposed to be enabled via an option set via udev rules (OPTIONS+="watch"). If we skip the
+                 * udev rules here however (as we just said we do), we would thus never see that specific
+                 * udev rule, and thus never turn on inotify watching. But in order to catch up eventually
+                 * and run them we we need the inotify watching: hence a classic chicken and egg problem.
+                 *
+                 * Our way out here: if we see the block device locked, unconditionally watch the device via
+                 * inotify, regardless of any explicit request via OPTIONS+="watch". Thus, a device that is
+                 * currently locked via the BSD file locks will be treated as if we ran a single udev rule
+                 * only for it: the one that turns on inotify watching for it. If we eventually see the
+                 * inotify IN_CLOSE_WRITE event, and then run the rules after all and we then realize that
+                 * this wasn't actually requested (i.e. no OPTIONS+="watch" set) we'll simply turn off the
+                 * watching again (see below). Effectively this means: inotify watching is now enabled either
+                 * a) when the udev rules say so, or b) while the device is locked.
+                 *
+                 * Worst case scenario hence: in the (unlikely) case someone locked the device and we clash
+                 * with that we might do inotify watching for a brief moment for a device where we actually
+                 * weren't supposed to. But that shouldn't be too bad, in particular as BSD locks being taken
+                 * on a block device is kinda an indication that the inotify logic is desired too, to some
+                 * degree — they go hand-in-hand after all. */
+
+                log_device_debug(dev, "Block device is currently locked, installing watch to wait until the lock is released.");
+                (void) udev_watch_begin(dev);
+
+                /* Now the watch is installed, let's lock the device again, maybe in the meantime things changed */
+                r = worker_lock_block_device(dev, &fd_lock);
+        }
         if (r < 0)
                 return r;
 
@@ -476,13 +512,14 @@ static int worker_process_device(Manager *manager, sd_device *dev) {
                 /* in case rtnl was initialized */
                 manager->rtnl = sd_netlink_ref(udev_event->rtnl);
 
-        /* apply/restore inotify watch */
+        /* apply/restore/end inotify watch */
         if (udev_event->inotify_watch) {
                 (void) udev_watch_begin(dev);
                 r = device_update_db(dev);
                 if (r < 0)
                         return log_device_debug_errno(dev, r, "Failed to update database under /run/udev/data/: %m");
-        }
+        } else
+                (void) udev_watch_end(dev);
 
         log_device_debug(dev, "Device (SEQNUM=%"PRIu64", ACTION=%s) processed",
                          seqnum, device_action_to_string(action));
@@ -528,7 +565,7 @@ static int worker_main(Manager *_manager, sd_device_monitor *monitor, sd_device 
         assert(monitor);
         assert(dev);
 
-        unsetenv("NOTIFY_SOCKET");
+        assert_se(unsetenv("NOTIFY_SOCKET") == 0);
 
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, -1) >= 0);
 
@@ -613,7 +650,6 @@ static int worker_spawn(Manager *manager, struct event *event) {
 static void event_run(Manager *manager, struct event *event) {
         static bool log_children_max_reached = true;
         struct worker *worker;
-        Iterator i;
         int r;
 
         assert(manager);
@@ -627,7 +663,7 @@ static void event_run(Manager *manager, struct event *event) {
                                  event->seqnum, r >= 0 ? device_action_to_string(action) : "<unknown>");
         }
 
-        HASHMAP_FOREACH(worker, manager->workers, i) {
+        HASHMAP_FOREACH(worker, manager->workers) {
                 if (worker->state != WORKER_IDLE)
                         continue;
 
@@ -656,6 +692,10 @@ static void event_run(Manager *manager, struct event *event) {
 
         /* Re-enable the debug message for the next batch of events */
         log_children_max_reached = true;
+
+        /* fork with up-to-date SELinux label database, so the child inherits the up-to-date db
+           and, until the next SELinux policy changes, we safe further reloads in future children */
+        mac_selinux_maybe_reload();
 
         /* start new worker and pass initial device */
         worker_spawn(manager, event);
@@ -721,11 +761,10 @@ static int event_queue_insert(Manager *manager, sd_device *dev) {
 
 static void manager_kill_workers(Manager *manager) {
         struct worker *worker;
-        Iterator i;
 
         assert(manager);
 
-        HASHMAP_FOREACH(worker, manager->workers, i) {
+        HASHMAP_FOREACH(worker, manager->workers) {
                 if (worker->state == WORKER_KILLED)
                         continue;
 
@@ -1049,7 +1088,7 @@ static int on_ctrl_msg(struct udev_ctrl *uctrl, enum udev_ctrl_msg_type type, co
 
         switch (type) {
         case UDEV_CTRL_SET_LOG_LEVEL:
-                log_debug("Received udev control message (SET_LOG_LEVEL), setting log_priority=%i", value->intval);
+                log_debug("Received udev control message (SET_LOG_LEVEL), setting log_level=%i", value->intval);
                 log_set_max_level_realm(LOG_REALM_UDEV, value->intval);
                 log_set_max_level_realm(LOG_REALM_SYSTEMD, value->intval);
                 manager_kill_workers(manager);
@@ -1466,7 +1505,7 @@ static int listen_fds(int *ret_ctrl, int *ret_netlink) {
 
 /*
  * read the kernel command line, in case we need to get into debug mode
- *   udev.log_priority=<level>                 syslog priority
+ *   udev.log_level=<level>                    syslog priority
  *   udev.children_max=<number of workers>     events are fully serialized if set to 1
  *   udev.exec_delay=<number of seconds>       delay execution of every executed program
  *   udev.event_timeout=<number of seconds>    seconds to wait before terminating an event
@@ -1477,7 +1516,8 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
         assert(key);
 
-        if (proc_cmdline_key_streq(key, "udev.log_priority")) {
+        if (proc_cmdline_key_streq(key, "udev.log_level") ||
+            proc_cmdline_key_streq(key, "udev.log_priority")) { /* kept for backward compatibility */
 
                 if (proc_cmdline_value_missing(key, value))
                         return 0;

@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd.network" conditional='ENABLE_NETWORKD'
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -43,9 +43,9 @@
     <filename>/run/systemd/network</filename> and the local administration network directory
     <filename>/etc/systemd/network</filename>. All configuration files are collectively sorted and processed
     in lexical order, regardless of the directories in which they live. However, files with identical
-    filenames replace each other. Files in <filename>/etc</filename> have the highest priority, files in
-    <filename>/run</filename> take precedence over files with the same name under
-    <filename>/usr</filename>. This can be used to override a system-supplied configuration file with a local
+    filenames replace each other. Files in <filename>/etc/</filename> have the highest priority, files in
+    <filename>/run/</filename> take precedence over files with the same name under
+    <filename>/usr/</filename>. This can be used to override a system-supplied configuration file with a local
     file if needed. As a special case, an empty file (file size 0) or symlink with the same name pointing to
     <filename>/dev/null</filename> disables the configuration file entirely (it is "masked").</para>
 
@@ -58,8 +58,8 @@
     <para>In addition to <filename>/etc/systemd/network</filename>, drop-in <literal>.d</literal>
     directories can be placed in <filename>/usr/lib/systemd/network</filename> or
     <filename>/run/systemd/network</filename> directories. Drop-in files in
-    <filename>/etc</filename> take precedence over those in <filename>/run</filename> which in turn
-    take precedence over those in <filename>/usr/lib</filename>. Drop-in files under any of these
+    <filename>/etc/</filename> take precedence over those in <filename>/run/</filename> which in turn
+    take precedence over those in <filename>/usr/lib/</filename>. Drop-in files under any of these
     directories take precedence over the main network file wherever located.</para>
 
     <para>Note that an interface without any static IPv6 addresses configured, and neither DHCPv6
@@ -408,36 +408,48 @@
         <varlistentry>
           <term><varname>IPv6Token=</varname></term>
           <listitem>
-            <para>Specifies an optional address generation mode and a required IPv6 address. If
-            the mode is present, the two parts must be separated with a colon
-            <literal><replaceable>mode</replaceable>:<replaceable>address</replaceable></literal>. The
-            address generation mode may be either <constant>prefixstable</constant> or
-            <constant>static</constant>. If not specified, <constant>static</constant> is assumed.
-            </para>
-            <para>When the mode is set to <constant>static</constant>, or unspecified, the lower bits of
-            the supplied address are combined with the upper bits of a prefix received in a Router Advertisement
-            message to form a complete address. Note that if multiple prefixes are received in an RA message, or in
-            multiple RA messages, addresses will be formed from each of them using the supplied address. This
-            mode implements SLAAC but uses a static interface identifier instead of an identifier generated
-            using the EUI-64 algorithm. Because the interface identifier is static, if Duplicate Address Detection
-            detects that the computed address is a duplicate (in use by another node on the link), then this
-            mode will fail to provide an address for that prefix.
-            </para>
-            <para>When the mode is set to <literal>prefixstable</literal> the RFC 7217 algorithm for generating
-            interface identifiers will be used, but only when a prefix received in an RA message matches the supplied address.
-            See <ulink url="https://tools.ietf.org/html/rfc7217">RFC 7217</ulink>. Prefix matching will be attempted
-            against each <constant>prefixstable</constant> IPv6Token variable provided in the configuration; if a received
-            prefix does not match any of the provided addresses, then the EUI-64 algorithm will be used to form
-            an interface identifier for that prefix. This mode is also SLAAC, but with a potentially stable interface
-            identifier which does not directly map to the interface's hardware address.
+            <para>Specifies an optional address generation mode for the Stateless Address
+            Autoconfiguration (SLAAC). Supported modes are <literal>prefixstable</literal> and
+            <literal>static</literal>.</para>
 
-            Note that the <constant>prefixstable</constant> algorithm includes both the interface's name and
-            MAC address in the hash used to compute the interface identifier, so if either of those are changed the resulting
-            interface identifier (and address) will change, even if the prefix received in the RA message has not changed.
+            <para>When the mode is set to <literal>static</literal>, an IPv6 address must be
+            specified after a colon (<literal>:</literal>), and the lower bits of the supplied
+            address are combined with the upper bits of a prefix received in a Router Advertisement
+            (RA) message to form a complete address. Note that if multiple prefixes are received in an
+            RA message, or in multiple RA messages, addresses will be formed from each of them using
+            the supplied address. This mode implements SLAAC but uses a static interface identifier
+            instead of an identifier generated by using the EUI-64 algorithm. Because the interface
+            identifier is static, if Duplicate Address Detection detects that the computed address is a
+            duplicate (in use by another node on the link), then this mode will fail to provide an
+            address for that prefix. If an IPv6 address without mode is specified, then
+            <literal>static</literal> mode is assumed.</para>
 
-            Note that if multiple <constant>prefixstable</constant> IPv6Token variables are supplied with addresses that
-            match a prefix received in an RA message, only the first one will be used to generate addresses.
-            </para>
+            <para>When the mode is set to <literal>prefixstable</literal> the
+            <ulink url="https://tools.ietf.org/html/rfc7217">RFC 7217</ulink> algorithm for generating
+            interface identifiers will be used. This mode can optionally take an IPv6 address separated
+            with a colon (<literal>:</literal>). If an IPv6 address is specified, then an interface
+            identifier is generated only when a prefix received in an RA message matches the supplied
+            address.</para>
+
+            <para>If no address generation mode is specified (which is the default), or a received
+            prefix does not match any of the addresses provided in <literal>prefixstable</literal>
+            mode, then the EUI-64 algorithm will be used to form an interface identifier for that
+            prefix. This mode is also SLAAC, but with a potentially stable interface identifier which
+            does not directly map to the interface's hardware address.</para>
+
+            <para>Note that the <literal>prefixstable</literal> algorithm uses both the interface
+            name and MAC address as input to the hash to compute the interface identifier, so if either
+            of those are changed the resulting interface identifier (and address) will change, even if
+            the prefix received in the RA message has not changed.</para>
+
+            <para>This setting can be specified multiple times. If an empty string is assigned, then
+            the all previous assignments are cleared.</para>
+
+            <para>Examples:
+            <programlisting>IPv6Token=::1a:2b:3c:4d
+IPv6Token=static:::1a:2b:3c:4d
+IPv6Token=prefixstable
+IPv6Token=prefixstable:2002:da8:1::</programlisting></para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -798,16 +810,22 @@
         </para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><varname>IPv6PrefixDelegation=</varname></term>
-          <listitem><para>Whether to enable or disable Router Advertisement sending on a link.  Allowed
-          values are <literal>static</literal> which distributes prefixes as defined in the
-          [IPv6PrefixDelegation] and any [IPv6Prefix] sections, <literal>dhcpv6</literal> which requests
-          prefixes using a DHCPv6 client configured for another link and any values configured in the
-          [IPv6PrefixDelegation] section while ignoring all static prefix configuration sections,
-          <literal>yes</literal> which uses both static configuration and DHCPv6, and
-          <literal>false</literal> which turns off IPv6 prefix delegation altogether. Defaults to
-          <literal>false</literal>. See the [IPv6PrefixDelegation] and the [IPv6Prefix] sections for more
+          <term><varname>IPv6SendRA=</varname></term>
+          <listitem><para>Whether to enable or disable Router Advertisement sending on a link. Takes a
+          boolean value. When enabled, prefixes configured in [IPv6Prefix] sections and routes
+          configured in [IPv6RoutePrefix] sections are distributed as defined in the [IPv6SendRA]
+          section. If <varname>DHCPv6PrefixDelegation=</varname> is enabled, then the delegated
+          prefixes are also distributed. See <varname>DHCPv6PrefixDelegation=</varname> setting and the
+          [IPv6SendRA], [IPv6Prefix], [IPv6RoutePrefix], and [DHCPv6PrefixDelegation] sections for more
           configuration options.</para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>DHCPv6PrefixDelegation=</varname></term>
+          <listitem><para>Takes a boolean value. When enabled, requests prefixes using a DHCPv6 client
+          configured on another link. By default, an address within each delegated prefix will be
+          assigned, and the prefixes will be announced through IPv6 Router Advertisement when
+          <varname>IPv6SendRA=</varname> is enabled. Such default settings can be configured in
+          [DHCPv6PrefixDelegation] section.</para></listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>IPv6MTUBytes=</varname></term>
@@ -1104,7 +1122,7 @@
       <para>An [IPv6AddressLabel] section accepts the following keys. Specify several [IPv6AddressLabel]
       sections to configure several address labels. IPv6 address labels are used for address selection. See
       <ulink url="https://tools.ietf.org/html/rfc3484">RFC 3484</ulink>. Precedence is managed by userspace,
-      and only the label itself is stored in the kernel</para>
+      and only the label itself is stored in the kernel.</para>
 
       <variablelist class='network-directives'>
         <varlistentry>
@@ -1270,9 +1288,9 @@
         <varlistentry>
           <term><varname>Gateway=</varname></term>
           <listitem>
-            <para>Takes the gateway address or special value <literal>_dhcp</literal>. If
-            <literal>_dhcp</literal>, then the gateway address provided by DHCP (or in the IPv6 case,
-            provided by IPv6 RA) is used.</para>
+            <para>Takes the gateway address or the special values <literal>_dhcp4</literal> and
+            <literal>_ipv6ra</literal>. If <literal>_dhcp4</literal> or <literal>_ipv6ra</literal> is
+            set, then the gateway address provided by DHCPv4 or IPv6 RA is used.</para>
           </listitem>
         </varlistentry>
          <varlistentry>
@@ -1377,21 +1395,22 @@
         <varlistentry>
           <term><varname>InitialCongestionWindow=</varname></term>
           <listitem>
-            <para>The TCP initial congestion window is used during the start of a TCP connection. During the start of a TCP
-            session, when a client requests a resource, the server's initial congestion window determines how many data bytes
-            will be sent during the initial burst of data. Takes a size in bytes between 1 and 4294967295 (2^32 - 1). The usual
-            suffixes K, M, G are supported and are understood to the base of 1024. When unset, the kernel's default will be used.
-            </para>
+            <para>The TCP initial congestion window is used during the start of a TCP connection.
+            During the start of a TCP session, when a client requests a resource, the server's initial
+            congestion window determines how many packets will be sent during the initial burst of data
+            without waiting for acknowledgement. Takes a number between 1 and 1023. Note that 100 is
+            considered an extremely large value for this option. When unset, the kernel's default
+            (typically 10) will be used.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>InitialAdvertisedReceiveWindow=</varname></term>
           <listitem>
-            <para>The TCP initial advertised receive window is the amount of receive data (in bytes) that can initially be buffered at one time
-            on a connection. The sending host can send only that amount of data before waiting for an acknowledgment and window update
-            from the receiving host. Takes a size in bytes between 1 and 4294967295 (2^32 - 1). The usual suffixes K, M, G are supported
-            and are understood to the base of 1024. When unset, the kernel's default will be used.
-            </para>
+            <para>The TCP initial advertised receive window is the amount of receive data (in bytes)
+            that can initially be buffered at one time on a connection. The sending host can send only
+            that amount of data before waiting for an acknowledgment and window update from the
+            receiving host. Takes a number between 1 and 1023. Note that 100 is considered an extremely
+            large value for this option. When unset, the kernel's default will be used.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -1536,11 +1555,16 @@
         <varlistentry>
           <term><varname>MUDURL=</varname></term>
           <listitem>
-            <para>When configured, the Manufacturer Usage Descriptions (MUD) URL will be sent to the
-            DHCPv4 server. Takes an URL of length up to 255 characters. A superficial verification that
-            the string is a valid URL will be performed. DHCPv4 clients are intended to have at most one
-            MUD URL associated with them. See
-            <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink>.</para>
+            <para>When configured, the specified Manufacturer Usage Description (MUD) URL will be sent to the
+            DHCPv4 server. Takes a URL of length up to 255 characters. A superficial verification that the
+            string is a valid URL will be performed. DHCPv4 clients are intended to have at most one MUD URL
+            associated with them. See <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink>.
+            </para>
+
+            <para>MUD is an embedded software standard defined by the IETF that allows IoT device makers to
+            advertise device specifications, including the intended communication patterns for their device
+            when it connects to the network. The network can then use this to author a context-specific
+            access policy, so the device functions only within those parameters.</para>
           </listitem>
         </varlistentry>
 
@@ -1835,18 +1859,18 @@
         <varlistentry>
           <term><varname>MUDURL=</varname></term>
           <listitem>
-            <para>When configured, the Manufacturer Usage Descriptions (MUD) URL will be sent to the DHCPV6 server.
-            Takes an URL of length up to 255 characters. A superficial verification that the string is a valid URL
-            will be performed. DHCPv6 clients are intended to have at most one MUD URL associated with them. See
-            <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink>.</para>
+            <para>When configured, the specified Manufacturer Usage Description (MUD) URL will be sent to
+            the DHCPV6 server. The syntax and semantics are the same as for <varname>MUDURL=</varname> in the
+            [DHCPv4] section described above.</para>
           </listitem>
         </varlistentry>
 
         <varlistentry>
           <term><varname>RequestOptions=</varname></term>
           <listitem>
-            <para>When configured, allows to set arbitrary request options in the DHCPv6 request options list and will
-            sent to the DHCPV6 server. A whitespace-separated list of integers in the range 1..254. Defaults to unset.</para>
+            <para>When configured, allows to set arbitrary request options in the DHCPv6 request options list
+            that will be sent to the DHCPV6 server. A whitespace-separated list of integers in the range
+            1..254. Defaults to unset.</para>
           </listitem>
         </varlistentry>
 
@@ -1920,7 +1944,7 @@
             <ulink url="https://en.wikipedia.org/wiki/Escape_sequences_in_C#Table_of_escape_sequences">C-style
             escapes</ulink>. This setting can be specified multiple times. If an empty string is specified,
             then all options specified earlier are cleared. Takes a whitespace-separated list of strings. Note that
-            currently NUL bytes are not allowed.</para>
+            currently <constant>NUL</constant> bytes are not allowed.</para>
           </listitem>
         </varlistentry>
 
@@ -1939,9 +1963,9 @@
 
   <refsect1>
     <title>[DHCPv6PrefixDelegation] Section Options</title>
-    <para>The [DHCPv6PrefixDelegation] section configures delegated prefix assigned by DHCPv6 server.
-    The settings in this section are used only when <varname>IPv6PrefixDelegation=</varname> setting is
-    enabled, or set to <literal>dhcp6</literal>.</para>
+    <para>The [DHCPv6PrefixDelegation] section configures delegated prefixes assigned by DHCPv6 server.
+    The settings in this section are used only when <varname>DHCPv6PrefixDelegation=</varname> setting
+    is enabled.</para>
 
     <variablelist class='network-directives'>
       <varlistentry>
@@ -1951,9 +1975,16 @@
           delegation. You can either set "auto" (the default) or a specific subnet ID (as defined in
           <ulink url="https://tools.ietf.org/html/rfc4291#section-2.5.4">RFC 4291</ulink>, section
           2.5.4), in which case the allowed value is hexadecimal, from 0 to 0x7fffffffffffffff
-          inclusive. This option is only effective when used together with
-          <varname>IPv6PrefixDelegation=</varname> and the corresponding configuration on the upstream
-          interface.</para>
+          inclusive.</para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Announce=</varname></term>
+        <listitem>
+          <para>Takes a boolean. When enabled, and <varname>IPv6SendRA=</varname> in [Network] section
+          is enabled, the delegated prefixes are distributed through the IPv6 Router Advertisement.
+          Defaults to yes.</para>
         </listitem>
       </varlistentry>
 
@@ -1961,19 +1992,22 @@
         <term><varname>Assign=</varname></term>
         <listitem>
           <para>Takes a boolean. Specifies whether to add an address from the delegated prefixes which
-          are received from the WAN interface by the <varname>IPv6PrefixDelegation=</varname>. When
-          true (on LAN interfce), the EUI-64 algorithm will be used to form an interface identifier
-          from the delegated prefixes. Defaults to true.</para>
+          are received from the WAN interface by the DHCPv6 Prefix Delegation. When true (on LAN
+          interfce), the EUI-64 algorithm will be used by default to form an interface identifier from
+          the delegated prefixes. See also <varname>Token=</varname> setting below. Defaults to yes.
+          </para>
         </listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>Token=</varname></term>
         <listitem>
-          <para>Specifies an optional address generation mode for <varname>Assign=</varname>. Takes an
-          IPv6 address. When set, the lower bits of the supplied address are combined with the upper
-          bits of a delegatad prefix received from the WAN interface by the
-          <varname>IPv6PrefixDelegation=</varname> prefixes to form a complete address.</para>
+          <para>Specifies an optional address generation mode for assigning an address in each
+          delegated prefix. Takes an IPv6 address. When set, the lower bits of the supplied address is
+          combined with the upper bits of each delegatad prefix received from the WAN interface by the
+          DHCPv6 Prefix Delegation to form a complete address. When <varname>Assign=</varname> is
+          disabled, this setting is ignored. When unset, the EUI-64 algorithm will be used to form
+          addresses. Defaults to unset.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -2037,8 +2071,8 @@
         <varlistentry>
           <term><varname>UseOnLinkPrefix=</varname></term>
           <listitem>
-            <para>When true (the default), the onlink prefix received in the Router Advertisement will be used and take
-            precedence over any statically configured ones.</para>
+            <para>When true (the default), the onlink prefix received in the Router Advertisement will be
+            used and takes precedence over any statically configured ones.</para>
           </listitem>
         </varlistentry>
 
@@ -2195,10 +2229,11 @@
   </refsect1>
 
   <refsect1>
-    <title>[IPv6PrefixDelegation] Section Options</title>
-    <para>The [IPv6PrefixDelegation] section contains settings for sending IPv6 Router Advertisements and
-    whether to act as a router, if enabled via the <varname>IPv6PrefixDelegation=</varname> option described
-    above. IPv6 network prefixes are defined with one or more [IPv6Prefix] sections.</para>
+    <title>[IPv6SendRA] Section Options</title>
+    <para>The [IPv6SendRA] section contains settings for sending IPv6 Router Advertisements and whether
+    to act as a router, if enabled via the <varname>IPv6SendRA=</varname> option described above. IPv6
+    network prefixes or routes are defined with one or more [IPv6Prefix] or [IPv6RoutePrefix] sections.
+    </para>
 
     <variablelist class='network-directives'>
 
@@ -2219,9 +2254,8 @@
       <varlistentry>
         <term><varname>RouterLifetimeSec=</varname></term>
 
-        <listitem><para>Takes a timespan. Configures the IPv6 router lifetime in seconds. If set,
-        this host also announces itself in Router Advertisements as an IPv6
-        router for the network link. When unset, the host is not acting as a router.</para>
+        <listitem><para>Takes a timespan. Configures the IPv6 router lifetime in seconds. When set to
+        0, the host is not acting as a router. Defaults to 30 minutes.</para>
         </listitem>
       </varlistentry>
 
@@ -2526,23 +2560,40 @@
         </varlistentry>
       </variablelist>
   </refsect1>
+  <refsect1>
+    <title>[BridgeMDB] Section Options</title>
+      <para>The [BridgeMDB] section manages the multicast membership entries forwarding database table of a port and accepts the following
+      keys. Specify several [BridgeMDB] sections to configure several permanent multicast membership entries.</para>
+
+      <variablelist class='network-directives'>
+        <varlistentry>
+          <term><varname>MulticastGroupAddress=</varname></term>
+          <listitem>
+            <para>Specifies the IPv4 or IPv6 multicast group address to add. This setting is mandatory.</para>
+          </listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><varname>VLANId=</varname></term>
+          <listitem>
+            <para>The VLAN ID for the new entry. Valid ranges are 0 (no VLAN) to 4094. Optional, defaults to 0.</para>
+          </listitem>
+        </varlistentry>
+      </variablelist>
+  </refsect1>
 
   <refsect1>
     <title>[LLDP] Section Options</title>
       <para>The [LLDP] section manages the Link Layer Discovery Protocol (LLDP) and accepts the following
-      keys.</para>
+      keys:</para>
       <variablelist class='network-directives'>
         <varlistentry>
           <term><varname>MUDURL=</varname></term>
           <listitem>
-            <para>Controls support for Ethernet LLDP packet's Manufacturer Usage Description (MUD). MUD is an embedded software
-            standard defined by the IETF that allows IoT Device makers to advertise device specifications, including the intended
-            communication patterns for their device when it connects to the network. The network can then use this intent to author
-            a context-specific access policy, so the device functions only within those parameters. Takes an URL of length up to 255
-            characters. A superficial verification that the string is a valid URL
-            will be performed. See
-            <ulink url="https://tools.ietf.org/html/rfc8520">RFC 8520</ulink> for details. The MUD URL received
-            from the LLDP packets will be saved at the state files and can be read via
+            <para>When configured, the specified Manufacturer Usage Descriptions (MUD) URL will be sent in
+            LLDP packets. The syntax and semantics are the same as for <varname>MUDURL=</varname> in the
+            [DHCPv4] section described above.</para>
+
+            <para>The MUD URLs received via LLDP packets are saved and can be read using the
             <function>sd_lldp_neighbor_get_mud_url()</function> function.</para>
           </listitem>
         </varlistentry>
@@ -2792,6 +2843,25 @@
   </refsect1>
 
   <refsect1>
+    <title>[FlowQueuePIE] Section Options</title>
+    <para>The <literal>[FlowQueuePIE]</literal> section manages the queueing discipline
+    (qdisc) of Flow Queue Proportional Integral controller-Enhanced (fq_pie).</para>
+
+    <variablelist class='network-directives'>
+      <xi:include href="tc.xml" xpointer="qdisc-parent" />
+      <xi:include href="tc.xml" xpointer="qdisc-handle" />
+
+      <varlistentry>
+        <term><varname>PacketLimit=</varname></term>
+        <listitem>
+          <para>Specifies the hard limit on the queue size in number of packets. When this limit is reached, incoming packets are
+          dropped. An unsigned integer ranges 1 to 4294967294. Defaults to unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
     <title>[StochasticFairBlue] Section Options</title>
     <para>The [StochasticFairBlue] section manages the queueing discipline (qdisc) of stochastic fair blue
     (sfb).</para>
@@ -2841,11 +2911,11 @@
       <varlistentry>
         <term><varname>LimitBytes=</varname></term>
         <listitem>
-          <para>Specifies the hard limit on the FIFO size in bytes. The size limit (a buffer size) to prevent
-          it from overflowing in case it is unable to dequeue packets as quickly as it receives them. When
-          this limit is reached, incoming packets are dropped. When suffixed with K, M, or G, the specified
-          size is parsed as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024. Defaults
-          to unset and kernel's default is used.</para>
+          <para>Specifies the hard limit in bytes on the FIFO buffer size. The size limit prevents overflow
+          in case the kernel is unable to dequeue packets as quickly as it receives them. When this limit is
+          reached, incoming packets are dropped. When suffixed with K, M, or G, the specified size is parsed
+          as Kilobytes, Megabytes, or Gigabytes, respectively, to the base of 1024. Defaults to unset and
+          kernel default is used.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -3052,13 +3122,12 @@
       <varlistentry>
         <term><varname>PriorityMap=</varname></term>
         <listitem>
-          <para>The priority map maps the priority of a packet to a band. The argument is a white-space
-          separated list of numbers. The first number indicates which band the packets with priority
-          0 should be put to, the second is for priority 1, and so on. There can be up to 16 numbers in
-          the list. If there are fewer, the default band that traffic with one of the unmentioned
-          priorities goes to is the last one. Each band number must be 0..255. This setting can be
-          specified multiple times. If an empty string is assigned, then the all previous assignments
-          are cleared.</para>
+          <para>The priority map maps the priority of a packet to a band. The argument is a whitespace
+          separated list of numbers. The first number indicates which band the packets with priority 0 should
+          be put to, the second is for priority 1, and so on. There can be up to 16 numbers in the list. If
+          there are fewer, the default band that traffic with one of the unmentioned priorities goes to is
+          the last one. Each band number must be in the range 0..255. This setting can be specified multiple
+          times. If an empty string is assigned, then the all previous assignments are cleared.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -3533,10 +3602,13 @@ DHCP=ipv6</programlisting>
 Name=enp2s0
 
 [Network]
-IPv6PrefixDelegation=dhcpv6</programlisting>
+IPv6SendRA=yes
+DHCPv6PrefixDelegation=yes</programlisting>
 
-      <para>This will enable IPv6 PD on the interface enp1s0 as an upstream interface where the
-      DHCPv6 client is running and enp2s0 as a downstream interface where the prefix is delegated to.</para>
+      <para>This will enable DHCPv6-PD on the interface enp1s0 as an upstream interface where the
+      DHCPv6 client is running and enp2s0 as a downstream interface where the prefix is delegated to.
+      The delegated prefixes are distributed by IPv6 Router Advertisement on the downstream network.
+      </para>
     </example>
 
     <example>

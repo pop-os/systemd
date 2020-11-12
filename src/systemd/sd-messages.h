@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef foosdmessageshfoo
 #define foosdmessageshfoo
 
@@ -127,6 +127,9 @@ _SD_BEGIN_DECLARATIONS;
 #define SD_MESSAGE_OVERMOUNTING           SD_ID128_MAKE(1d,ee,03,69,c7,fc,47,36,b7,09,9b,38,ec,b4,6e,e7)
 #define SD_MESSAGE_OVERMOUNTING_STR       SD_ID128_MAKE_STR(1d,ee,03,69,c7,fc,47,36,b7,09,9b,38,ec,b4,6e,e7)
 
+#define SD_MESSAGE_UNIT_OOMD_KILL         SD_ID128_MAKE(d9,89,61,1b,15,e4,4c,9d,bf,31,e3,c8,12,56,e4,ed)
+#define SD_MESSAGE_UNIT_OOMD_KILL_STR     SD_ID128_MAKE_STR(d9,89,61,1b,15,e4,4c,9d,bf,31,e3,c8,12,56,e4,ed)
+
 #define SD_MESSAGE_UNIT_OUT_OF_MEMORY     SD_ID128_MAKE(fe,6f,aa,94,e7,77,46,63,a0,da,52,71,78,91,d8,ef)
 #define SD_MESSAGE_UNIT_OUT_OF_MEMORY_STR SD_ID128_MAKE_STR(fe,6f,aa,94,e7,77,46,63,a0,da,52,71,78,91,d8,ef)
 
@@ -140,6 +143,8 @@ _SD_BEGIN_DECLARATIONS;
 #define SD_MESSAGE_SYSTEM_UNDOCKED_STR    SD_ID128_MAKE_STR(51,e1,71,bd,58,52,48,56,81,10,14,4c,51,7c,ca,53)
 #define SD_MESSAGE_POWER_KEY              SD_ID128_MAKE(b7,2e,a4,a2,88,15,45,a0,b5,0e,20,0e,55,b9,b0,71)
 #define SD_MESSAGE_POWER_KEY_STR          SD_ID128_MAKE_STR(b7,2e,a4,a2,88,15,45,a0,b5,0e,20,0e,55,b9,b0,71)
+#define SD_MESSAGE_REBOOT_KEY             SD_ID128_MAKE(9f,a9,d2,c0,12,13,4e,c3,85,45,1f,fe,31,6f,97,d0)
+#define SD_MESSAGE_REBOOT_KEY_STR         SD_ID128_MAKE_STR(9f,a9,d2,c0,12,13,4e,c3,85,45,1f,fe,31,6f,97,d0)
 #define SD_MESSAGE_SUSPEND_KEY            SD_ID128_MAKE(b7,2e,a4,a2,88,15,45,a0,b5,0e,20,0e,55,b9,b0,72)
 #define SD_MESSAGE_SUSPEND_KEY_STR        SD_ID128_MAKE_STR(b7,2e,a4,a2,88,15,45,a0,b5,0e,20,0e,55,b9,b0,72)
 #define SD_MESSAGE_HIBERNATE_KEY          SD_ID128_MAKE(b7,2e,a4,a2,88,15,45,a0,b5,0e,20,0e,55,b9,b0,73)

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdlib.h>
@@ -36,6 +36,8 @@ int main(int argc, char *argv[]) {
                 .protect_control_groups = true,
                 .protect_kernel_tunables = true,
                 .protect_kernel_modules = true,
+                .protect_proc = PROTECT_PROC_NOACCESS,
+                .proc_subset = PROC_SUBSET_PID,
         };
 
         char *root_directory;
@@ -63,6 +65,7 @@ int main(int argc, char *argv[]) {
 
         r = setup_namespace(root_directory,
                             NULL,
+                            NULL,
                             &ns_info,
                             (char **) writable,
                             (char **) readonly,
@@ -70,11 +73,12 @@ int main(int argc, char *argv[]) {
                             NULL,
                             &(BindMount) { .source = (char*) "/usr/bin", .destination = (char*) "/etc/systemd", .read_only = true }, 1,
                             &(TemporaryFileSystem) { .path = (char*) "/var", .options = (char*) "ro" }, 1,
+                            NULL,
+                            0,
                             tmp_dir,
                             var_tmp_dir,
                             NULL,
-                            PROTECT_HOME_NO,
-                            PROTECT_SYSTEM_NO,
+                            NULL,
                             0,
                             NULL,
                             0,

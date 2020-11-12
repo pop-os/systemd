@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/time.h>
 
@@ -13,7 +13,7 @@ bool ratelimit_below(RateLimit *r) {
 
         assert(r);
 
-        if (r->interval <= 0 || r->burst <= 0)
+        if (!ratelimit_configured(r))
                 return true;
 
         ts = now(CLOCK_MONOTONIC);

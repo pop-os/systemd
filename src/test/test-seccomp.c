@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 #include <poll.h>
@@ -73,6 +73,9 @@ static void test_architecture_table(void) {
                        "ppc\0"
                        "ppc64\0"
                        "ppc64-le\0"
+#ifdef SCMP_ARCH_RISCV64
+                       "riscv64\0"
+#endif
                        "s390\0"
                        "s390x\0") {
                 uint32_t c;
@@ -98,9 +101,6 @@ static void test_syscall_filter_set_find(void) {
 }
 
 static void test_filter_sets(void) {
-        unsigned i;
-        int r;
-
         log_info("/* %s */", __func__);
 
         if (!is_seccomp_available()) {
@@ -112,7 +112,7 @@ static void test_filter_sets(void) {
                 return;
         }
 
-        for (i = 0; i < _SYSCALL_FILTER_SET_MAX; i++) {
+        for (unsigned i = 0; i < _SYSCALL_FILTER_SET_MAX; i++) {
                 pid_t pid;
 
                 log_info("Testing %s", syscall_filter_sets[i].name);
@@ -121,10 +121,12 @@ static void test_filter_sets(void) {
                 assert_se(pid >= 0);
 
                 if (pid == 0) { /* Child? */
-                        int fd;
+                        int fd, r;
 
                         /* If we look at the default set (or one that includes it), allow-list instead of deny-list */
-                        if (IN_SET(i, SYSCALL_FILTER_SET_DEFAULT, SYSCALL_FILTER_SET_SYSTEM_SERVICE))
+                        if (IN_SET(i, SYSCALL_FILTER_SET_DEFAULT,
+                                      SYSCALL_FILTER_SET_SYSTEM_SERVICE,
+                                      SYSCALL_FILTER_SET_KNOWN))
                                 r = seccomp_load_syscall_filter_set(SCMP_ACT_ERRNO(EUCLEAN), syscall_filter_sets + i, SCMP_ACT_ALLOW, true);
                         else
                                 r = seccomp_load_syscall_filter_set(SCMP_ACT_ALLOW, syscall_filter_sets + i, SCMP_ACT_ERRNO(EUCLEAN), true);
@@ -148,22 +150,25 @@ static void test_filter_sets(void) {
 }
 
 static void test_filter_sets_ordered(void) {
-        size_t i;
-
         log_info("/* %s */", __func__);
 
         /* Ensure "@default" always remains at the beginning of the list */
         assert_se(SYSCALL_FILTER_SET_DEFAULT == 0);
         assert_se(streq(syscall_filter_sets[0].name, "@default"));
 
-        for (i = 0; i < _SYSCALL_FILTER_SET_MAX; i++) {
+        /* Ensure "@known" always remains at the end of the list */
+        assert_se(SYSCALL_FILTER_SET_KNOWN == _SYSCALL_FILTER_SET_MAX - 1);
+        assert_se(streq(syscall_filter_sets[SYSCALL_FILTER_SET_KNOWN].name, "@known"));
+
+        for (size_t i = 0; i < _SYSCALL_FILTER_SET_MAX; i++) {
                 const char *k, *p = NULL;
 
                 /* Make sure each group has a description */
                 assert_se(!isempty(syscall_filter_sets[0].help));
 
-                /* Make sure the groups are ordered alphabetically, except for the first entry */
-                assert_se(i < 2 || strcmp(syscall_filter_sets[i-1].name, syscall_filter_sets[i].name) < 0);
+                /* Make sure the groups are ordered alphabetically, except for the first and last entries */
+                assert_se(i < 2 || i == _SYSCALL_FILTER_SET_MAX - 1 ||
+                          strcmp(syscall_filter_sets[i-1].name, syscall_filter_sets[i].name) < 0);
 
                 NULSTR_FOREACH(k, syscall_filter_sets[i].value) {
 
@@ -313,7 +318,7 @@ static void test_protect_sysctl(void) {
         if (pid == 0) {
 #if defined __NR__sysctl && __NR__sysctl >= 0
                 assert_se(syscall(__NR__sysctl, NULL) < 0);
-                assert_se(errno == EFAULT);
+                assert_se(IN_SET(errno, EFAULT, ENOSYS));
 #endif
 
                 assert_se(seccomp_protect_sysctl() >= 0);

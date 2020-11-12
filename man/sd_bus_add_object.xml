@@ -1,7 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="sd_bus_add_object"
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -620,8 +620,8 @@
         <varlistentry>
           <term><constant>-EPROTOTYPE</constant></term>
 
-          <listitem><para><function>sd_bus_add_object_vtable</function> and
-          <function>sd_bus_add_fallback_vtable</function> have been both called for the same bus
+          <listitem><para><function>sd_bus_add_object_vtable()</function> and
+          <function>sd_bus_add_fallback_vtable()</function> have been both called for the same bus
           object path, which is not allowed.</para></listitem>
         </varlistentry>
 

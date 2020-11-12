@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <mntent.h>
@@ -11,7 +11,7 @@
 
 #include "alloc-util.h"
 #include "ask-password-api.h"
-#include "crypt-util.h"
+#include "cryptsetup-keyfile.h"
 #include "cryptsetup-pkcs11.h"
 #include "cryptsetup-util.h"
 #include "device-util.h"
@@ -288,19 +288,19 @@ static int parse_one_option(const char *option) {
 }
 
 static int parse_options(const char *options) {
-        const char *word, *state;
-        size_t l;
-        int r;
-
         assert(options);
 
-        FOREACH_WORD_SEPARATOR(word, l, options, ",", state) {
-                _cleanup_free_ char *o;
+        for (;;) {
+                _cleanup_free_ char *word = NULL;
+                int r;
 
-                o = strndup(word, l);
-                if (!o)
-                        return -ENOMEM;
-                r = parse_one_option(o);
+                r = extract_first_word(&options, &word, ",", EXTRACT_DONT_COALESCE_SEPARATORS | EXTRACT_UNESCAPE_SEPARATORS);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to parse options: %m");
+                if (r == 0)
+                        break;
+
+                r = parse_one_option(word);
                 if (r < 0)
                         return r;
         }
@@ -832,17 +832,13 @@ static int run(int argc, char *argv[]) {
         if (argc <= 1)
                 return help();
 
-        if (argc < 3) {
-                log_error("This program requires at least two arguments.");
-                return -EINVAL;
-        }
+        if (argc < 3)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "This program requires at least two arguments.");
 
         log_setup_service();
 
-        crypt_set_log_callback(NULL, cryptsetup_log_glue, NULL);
-        if (DEBUG_LOGGING)
-                /* libcryptsetup won't even consider debug messages by default */
-                crypt_set_debug_level(CRYPT_DEBUG_ALL);
+        cryptsetup_enable_logging(cd);
 
         umask(0022);
 
@@ -877,6 +873,9 @@ static int run(int argc, char *argv[]) {
                                 return r;
                 }
 
+                log_debug("%s %s ← %s type=%s cipher=%s", __func__,
+                          argv[2], argv[3], strempty(arg_type), strempty(arg_cipher));
+
                 /* A delicious drop of snake oil */
                 (void) mlockall(MCL_FUTURE);
 
@@ -906,7 +905,7 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "crypt_init() failed: %m");
 
-                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+                cryptsetup_enable_logging(cd);
 
                 status = crypt_status(cd, argv[2]);
                 if (IN_SET(status, CRYPT_ACTIVE, CRYPT_BUSY)) {
@@ -1032,7 +1031,7 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "crypt_init_by_name() failed: %m");
 
-                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+                cryptsetup_enable_logging(cd);
 
                 r = crypt_deactivate(cd, argv[2]);
                 if (r < 0)

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef foosddhcpclienthfoo
 #define foosddhcpclienthfoo
 
@@ -126,6 +126,7 @@ int sd_dhcp_client_set_ifindex(
 int sd_dhcp_client_set_mac(
                 sd_dhcp_client *client,
                 const uint8_t *addr,
+                const uint8_t *bcast_addr,
                 size_t addr_len,
                 uint16_t arp_type);
 int sd_dhcp_client_set_client_id(

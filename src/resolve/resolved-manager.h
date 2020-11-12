@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <sys/stat.h>
@@ -11,13 +11,14 @@
 #include "list.h"
 #include "ordered-set.h"
 #include "resolve-util.h"
+#include "varlink.h"
 
 typedef struct Manager Manager;
 
-#include "resolved-conf.h"
 #include "resolved-dns-query.h"
 #include "resolved-dns-search-domain.h"
 #include "resolved-dns-stream.h"
+#include "resolved-dns-stub.h"
 #include "resolved-dns-trust-anchor.h"
 #include "resolved-link.h"
 
@@ -132,14 +133,15 @@ struct Manager {
         dev_t etc_hosts_dev;
         bool read_etc_hosts;
 
-        /* Local DNS stub on 127.0.0.53:53 */
-        int dns_stub_udp_fd;
-        int dns_stub_tcp_fd;
+        OrderedSet *dns_extra_stub_listeners;
 
+        /* Local DNS stub on 127.0.0.53:53 */
         sd_event_source *dns_stub_udp_event_source;
         sd_event_source *dns_stub_tcp_event_source;
 
         Hashmap *polkit_registry;
+
+        VarlinkServer *varlink_server;
 };
 
 /* Manager */
@@ -183,7 +185,7 @@ DnsOverTlsMode manager_get_dns_over_tls_mode(Manager *m);
 
 void manager_dnssec_verdict(Manager *m, DnssecVerdict verdict, const DnsResourceKey *key);
 
-bool manager_routable(Manager *m, int family);
+bool manager_routable(Manager *m);
 
 void manager_flush_caches(Manager *m);
 void manager_reset_server_features(Manager *m);

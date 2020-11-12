@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 enable_tmpfiles = conf.get('ENABLE_TMPFILES') == 1
 
@@ -55,7 +55,7 @@ foreach file : m4_files
         endif
 endforeach
 
-if enable_tmpfiles
+if enable_tmpfiles and install_sysconfdir
         meson.add_install_script(
                 'sh', '-c',
                 mkdir_p.format(join_paths(sysconfdir, 'tmpfiles.d')))

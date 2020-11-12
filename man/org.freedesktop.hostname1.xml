@@ -5,7 +5,7 @@
 <!ENTITY % entities SYSTEM "custom-entities.ent" >
 %entities;
 ]>
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="org.freedesktop.hostname1" conditional='ENABLE_HOSTNAMED'
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -260,7 +260,8 @@ node /org/freedesktop/hostname1 {
       <interfacename>org.freedesktop.hostname1.set-hostname</interfacename>. For
       <function>SetStaticHostname()</function> and <function>SetPrettyHostname()</function> it is
       <interfacename>org.freedesktop.hostname1.set-static-hostname</interfacename>. For
-      <function>SetIconName()</function> and <function>SetChassis()</function> it is
+      <function>SetIconName()</function>, <function>SetChassis()</function>, <function>SetDeployment()</function>
+      and <function>SetLocation()</function> it is
       <interfacename>org.freedesktop.hostname1.set-machine-info</interfacename>.</para>
     </refsect2>
   </refsect1>

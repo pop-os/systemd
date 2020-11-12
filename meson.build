@@ -1,7 +1,7 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 project('systemd', 'c',
-        version : '246',
+        version : '247',
         license : 'LGPLv2+',
         default_options: [
                 'c_std=gnu99',
@@ -13,8 +13,8 @@ project('systemd', 'c',
         meson_version : '>= 0.46',
        )
 
-libsystemd_version = '0.29.0'
-libudev_version = '1.6.18'
+libsystemd_version = '0.30.0'
+libudev_version = '1.7.0'
 
 # We need the same data in two different formats, ugh!
 # Also, for hysterical reasons, we use different variable
@@ -37,6 +37,9 @@ relative_source_path = run_command('realpath',
                                    '--relative-to=@0@'.format(project_build_root),
                                    project_source_root).stdout().strip()
 conf.set_quoted('RELATIVE_SOURCE_PATH', relative_source_path)
+
+conf.set('BUILD_MODE', 'BUILD_MODE_' + get_option('mode').to_upper(),
+         description : 'tailor build to development or release builds')
 
 want_ossfuzz = get_option('oss-fuzz')
 want_libfuzzer = get_option('llvm-fuzz')
@@ -123,6 +126,7 @@ if rootlibdir == ''
         rootlibdir = join_paths(rootprefixdir, libdir.split('/')[-1])
 endif
 
+install_sysconfdir = get_option('install-sysconfdir')
 # Dirs of external packages
 pkgconfigdatadir = get_option('pkgconfigdatadir') == '' ? join_paths(datadir, 'pkgconfig') : get_option('pkgconfigdatadir')
 pkgconfiglibdir = get_option('pkgconfiglibdir') == '' ? join_paths(libdir, 'pkgconfig') : get_option('pkgconfiglibdir')
@@ -198,7 +202,7 @@ endif
 
 pamconfdir = get_option('pamconfdir')
 if pamconfdir == ''
-        pamconfdir = join_paths(sysconfdir, 'pam.d')
+        pamconfdir = join_paths(prefixdir, 'lib/pam.d')
 endif
 
 memory_accounting_default = get_option('memory-accounting-default')
@@ -296,6 +300,7 @@ substs.set('CERTIFICATEROOT',                                 get_option('certif
 substs.set('RANDOM_SEED',                                     join_paths(randomseeddir, 'random-seed'))
 substs.set('SYSTEM_SYSVINIT_PATH',                            sysvinit_path)
 substs.set('SYSTEM_SYSVRCND_PATH',                            sysvrcnd_path)
+substs.set('SYSTEMD_TEST_DATA',                               join_paths(testsdir, 'testdata'))
 substs.set('RC_LOCAL_PATH',                                   get_option('rc-local'))
 substs.set('MEMORY_ACCOUNTING_DEFAULT',                       memory_accounting_default ? 'yes' : 'no')
 substs.set('STATUS_UNIT_FORMAT_DEFAULT',                      status_unit_format_default)
@@ -528,6 +533,8 @@ foreach ident : [
                                  #include <unistd.h>
                                  #include <signal.h>
                                  #include <sys/wait.h>'''],
+        ['mallinfo',          '''#include <malloc.h>'''],
+        ['close_range',       '''#include <unistd.h>'''],
 ]
 
         have = cc.has_function(ident[0], prefix : ident[1], args : '-D_GNU_SOURCE')
@@ -691,35 +698,31 @@ if time_epoch == -1
 endif
 conf.set('TIME_EPOCH', time_epoch)
 
-system_uid_max = get_option('system-uid-max')
-if system_uid_max == -1
-        system_uid_max = run_command(
-                awk,
-                '/^\s*SYS_UID_MAX\s+/ { uid=$2 } END { print uid }',
-                '/etc/login.defs').stdout().strip()
-        if system_uid_max == ''
-                system_uid_max = 999
-        else
-                system_uid_max = system_uid_max.to_int()
+foreach tuple : [['system-alloc-uid-min', 'SYS_UID_MIN', 1],  # Also see login.defs(5).
+                 ['system-uid-max',       'SYS_UID_MAX', 999],
+                 ['system-alloc-gid-min', 'SYS_GID_MIN', 1],
+                 ['system-gid-max',       'SYS_GID_MAX', 999]]
+        v = get_option(tuple[0])
+        if v == -1
+                v = run_command(
+                        awk,
+                        '/^\s*@0@\s+/ { uid=$2 } END { print uid }'.format(tuple[1]),
+                        '/etc/login.defs').stdout().strip()
+                if v == ''
+                        v = tuple[2]
+                else
+                        v = v.to_int()
+                endif
         endif
+        conf.set(tuple[0].underscorify().to_upper(), v)
+        substs.set(tuple[0].underscorify().to_upper(), v)
+endforeach
+if conf.get('SYSTEM_ALLOC_UID_MIN') >= conf.get('SYSTEM_UID_MAX')
+        error('Invalid uid allocation range')
 endif
-conf.set('SYSTEM_UID_MAX', system_uid_max)
-substs.set('systemuidmax', system_uid_max)
-
-system_gid_max = get_option('system-gid-max')
-if system_gid_max == -1
-        system_gid_max = run_command(
-                awk,
-                '/^\s*SYS_GID_MAX\s+/ { gid=$2 } END { print gid }',
-                '/etc/login.defs').stdout().strip()
-        if system_gid_max == ''
-                system_gid_max = 999
-        else
-                system_gid_max = system_gid_max.to_int()
-        endif
+if conf.get('SYSTEM_ALLOC_GID_MIN') >= conf.get('SYSTEM_GID_MAX')
+        error('Invalid gid allocation range')
 endif
-conf.set('SYSTEM_GID_MAX', system_gid_max)
-substs.set('systemgidmax', system_gid_max)
 
 dynamic_uid_min = get_option('dynamic-uid-min')
 dynamic_uid_max = get_option('dynamic-uid-max')
@@ -792,7 +795,7 @@ tty_gid = get_option('tty-gid')
 conf.set('TTY_GID', tty_gid)
 substs.set('TTY_GID', tty_gid)
 
-# Ensure provided GID argument is numeric, otherwise fallback to default assignment
+# Ensure provided GID argument is numeric, otherwise fall back to default assignment
 users_gid = get_option('users-gid')
 substs.set('USERS_GID', users_gid < 0 ? '-' : users_gid)
 
@@ -878,6 +881,17 @@ librt = cc.find_library('rt')
 libm = cc.find_library('m')
 libdl = cc.find_library('dl')
 libcrypt = cc.find_library('crypt')
+
+crypt_header = conf.get('HAVE_CRYPT_H') == 1 ? '''#include <crypt.h>''' : '''#include <unistd.h>'''
+foreach ident : [
+        ['crypt_ra',               crypt_header],
+        ['crypt_preferred_method', crypt_header],
+        ['crypt_gensalt_ra',       crypt_header]]
+
+        have = cc.has_function(ident[0], prefix : ident[1], args : '-D_GNU_SOURCE',
+                               dependencies : libcrypt)
+        conf.set10('HAVE_' + ident[0].to_upper(), have)
+endforeach
 
 libcap = dependency('libcap', required : false)
 if not libcap.found()
@@ -1399,6 +1413,18 @@ conf.set10('ENABLE_HOMED', have)
 have = have and conf.get('HAVE_PAM') == 1
 conf.set10('ENABLE_PAM_HOME', have)
 
+have = get_option('oomd')
+if have == 'auto'
+        have = get_option('mode') == 'developer'
+else
+        have = have == 'true'
+        if have and get_option('mode') != 'developer'
+                error('oomd is not available in release mode (yet)')
+        endif
+endif
+conf.set10('ENABLE_OOMD', have)
+substs.set10('ENABLE_OOMD', have)
+
 want_remote = get_option('remote')
 if want_remote != 'false'
         have_deps = [conf.get('HAVE_MICROHTTPD') == 1,
@@ -1430,6 +1456,7 @@ foreach term : ['analyze',
                 'idn',
                 'ima',
                 'initrd',
+                'compat-mutable-uid-boundaries',
                 'ldconfig',
                 'localed',
                 'logind',
@@ -1456,7 +1483,10 @@ foreach term : ['analyze',
         have = get_option(term)
         name = 'ENABLE_' + term.underscorify().to_upper()
         conf.set10(name, have)
+        substs.set10(name, have)
 endforeach
+
+enable_sysusers = conf.get('ENABLE_SYSUSERS') == 1
 
 foreach tuple : [['nss-mymachines', 'machined'],
                  ['nss-resolve',    'resolve']]
@@ -1532,21 +1562,11 @@ meson_apply_m4 = find_program('tools/meson-apply-m4.sh')
 
 includes = include_directories('src/basic',
                                'src/boot',
+                               'src/core',
                                'src/home',
-                               'src/shared',
-                               'src/systemd',
                                'src/journal',
                                'src/journal-remote',
-                               'src/nspawn',
-                               'src/resolve',
-                               'src/timesync',
-                               'src/time-wait-sync',
-                               'src/login',
-                               'src/udev',
-                               'src/libudev',
-                               'src/core',
-                               'src/shutdown',
-                               'src/xdg-autostart-generator',
+                               'src/libsystemd-network',
                                'src/libsystemd/sd-bus',
                                'src/libsystemd/sd-device',
                                'src/libsystemd/sd-event',
@@ -1555,7 +1575,17 @@ includes = include_directories('src/basic',
                                'src/libsystemd/sd-netlink',
                                'src/libsystemd/sd-network',
                                'src/libsystemd/sd-resolve',
-                               'src/libsystemd-network',
+                               'src/libudev',
+                               'src/login',
+                               'src/nspawn',
+                               'src/resolve',
+                               'src/shared',
+                               'src/shutdown',
+                               'src/systemd',
+                               'src/time-wait-sync',
+                               'src/timesync',
+                               'src/udev',
+                               'src/xdg-autostart-generator',
                                '.')
 
 add_project_arguments('-include', 'config.h', language : 'c')
@@ -1626,8 +1656,16 @@ install_libsystemd_static = static_library(
                         libgcrypt],
         c_args : libsystemd_c_args + (static_libsystemd_pic ? [] : ['-fno-PIC']))
 
-# Generate autosuspend rules
+############################################################
+
+autosuspend_update_sh = find_program('tools/autosuspend-update.sh')
+hwdb_update_sh = find_program('tools/hwdb-update.sh')
 make_autosuspend_rules_py = find_program('tools/make-autosuspend-rules.py')
+make_directive_index_py = find_program('tools/make-directive-index.py')
+make_man_index_py = find_program('tools/make-man-index.py')
+syscall_names_update_sh = find_program('tools/syscall-names-update.sh')
+xml_helper_py = find_program('tools/xml_helper.py')
+update_dbus_docs_py = find_program('tools/update-dbus-docs.py')
 
 ############################################################
 
@@ -1646,6 +1684,7 @@ subdir('src/analyze')
 subdir('src/journal-remote')
 subdir('src/coredump')
 subdir('src/pstore')
+subdir('src/oom')
 subdir('src/hostname')
 subdir('src/import')
 subdir('src/partition')
@@ -1802,11 +1841,11 @@ public_programs += executable(
         include_directories : includes,
         link_with : [libshared],
         dependencies : [threads,
-                        libqrencode,
+                        libdl,
                         libxz,
                         liblz4,
-                        libpcre2,
-                        libzstd],
+                        libzstd,
+                        libdl],
         install_rpath : rootlibexecdir,
         install : true,
         install_dir : rootbindir)
@@ -1901,8 +1940,7 @@ if conf.get('HAVE_BLKID') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 install_rpath : rootlibexecdir,
-                install : true,
-                install_dir : rootlibexecdir)
+                install : true)
 endif
 
 if conf.get('ENABLE_RESOLVE') == 1
@@ -2083,9 +2121,77 @@ endif
 
 public_programs += executable(
         'systemctl',
+        'src/systemctl/systemctl-add-dependency.c',
+        'src/systemctl/systemctl-add-dependency.h',
+        'src/systemctl/systemctl-cancel-job.c',
+        'src/systemctl/systemctl-cancel-job.h',
+        'src/systemctl/systemctl-clean-or-freeze.c',
+        'src/systemctl/systemctl-clean-or-freeze.h',
+        'src/systemctl/systemctl-compat-halt.c',
+        'src/systemctl/systemctl-compat-halt.h',
+        'src/systemctl/systemctl-compat-runlevel.c',
+        'src/systemctl/systemctl-compat-runlevel.h',
+        'src/systemctl/systemctl-compat-shutdown.c',
+        'src/systemctl/systemctl-compat-shutdown.h',
+        'src/systemctl/systemctl-compat-telinit.c',
+        'src/systemctl/systemctl-compat-telinit.h',
+        'src/systemctl/systemctl-daemon-reload.c',
+        'src/systemctl/systemctl-daemon-reload.h',
+        'src/systemctl/systemctl-edit.c',
+        'src/systemctl/systemctl-edit.h',
+        'src/systemctl/systemctl-enable.c',
+        'src/systemctl/systemctl-enable.h',
+        'src/systemctl/systemctl-is-active.c',
+        'src/systemctl/systemctl-is-active.h',
+        'src/systemctl/systemctl-is-enabled.c',
+        'src/systemctl/systemctl-is-enabled.h',
+        'src/systemctl/systemctl-is-system-running.c',
+        'src/systemctl/systemctl-is-system-running.h',
+        'src/systemctl/systemctl-kill.c',
+        'src/systemctl/systemctl-kill.h',
+        'src/systemctl/systemctl-list-dependencies.c',
+        'src/systemctl/systemctl-list-dependencies.h',
+        'src/systemctl/systemctl-list-jobs.c',
+        'src/systemctl/systemctl-list-jobs.h',
+        'src/systemctl/systemctl-list-machines.c',
+        'src/systemctl/systemctl-list-machines.h',
+        'src/systemctl/systemctl-list-unit-files.c',
+        'src/systemctl/systemctl-list-unit-files.h',
+        'src/systemctl/systemctl-list-units.c',
+        'src/systemctl/systemctl-list-units.h',
+        'src/systemctl/systemctl-log-setting.c',
+        'src/systemctl/systemctl-log-setting.h',
+        'src/systemctl/systemctl-logind.c',
+        'src/systemctl/systemctl-logind.h',
+        'src/systemctl/systemctl-preset-all.c',
+        'src/systemctl/systemctl-preset-all.h',
+        'src/systemctl/systemctl-reset-failed.c',
+        'src/systemctl/systemctl-reset-failed.h',
+        'src/systemctl/systemctl-service-watchdogs.c',
+        'src/systemctl/systemctl-service-watchdogs.h',
+        'src/systemctl/systemctl-set-default.c',
+        'src/systemctl/systemctl-set-default.h',
+        'src/systemctl/systemctl-set-environment.c',
+        'src/systemctl/systemctl-set-environment.h',
+        'src/systemctl/systemctl-set-property.c',
+        'src/systemctl/systemctl-set-property.h',
+        'src/systemctl/systemctl-show.c',
+        'src/systemctl/systemctl-show.h',
+        'src/systemctl/systemctl-start-special.c',
+        'src/systemctl/systemctl-start-special.h',
+        'src/systemctl/systemctl-start-unit.c',
+        'src/systemctl/systemctl-start-unit.h',
+        'src/systemctl/systemctl-switch-root.c',
+        'src/systemctl/systemctl-switch-root.h',
+        'src/systemctl/systemctl-sysv-compat.c',
+        'src/systemctl/systemctl-sysv-compat.h',
+        'src/systemctl/systemctl-trivial-method.c',
+        'src/systemctl/systemctl-trivial-method.h',
+        'src/systemctl/systemctl-util.c',
+        'src/systemctl/systemctl-util.c',
+        'src/systemctl/systemctl-util.h',
         'src/systemctl/systemctl.c',
-        'src/systemctl/sysv-compat.h',
-        'src/systemctl/sysv-compat.c',
+        'src/systemctl/systemctl.h',
         include_directories : includes,
         link_with : systemctl_link_with,
         dependencies : [threads,
@@ -2177,8 +2283,7 @@ if conf.get('ENABLE_HOMED') == 1
                 link_with : [libshared],
                 dependencies : [threads,
                                 libcrypt,
-                                libopenssl,
-                                libpwquality],
+                                libopenssl],
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : rootlibexecdir)
@@ -2193,7 +2298,7 @@ if conf.get('ENABLE_HOMED') == 1
                                 libopenssl,
                                 libp11kit,
                                 libfido2,
-                                libpwquality],
+                                libdl],
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : rootbindir)
@@ -2264,8 +2369,8 @@ executable(
 if conf.get('HAVE_LIBCRYPTSETUP') == 1
         systemd_cryptsetup_sources = files('''
                 src/cryptsetup/cryptsetup-pkcs11.h
-                src/cryptsetup/cryptsetup-util.c
-                src/cryptsetup/cryptsetup-util.h
+                src/cryptsetup/cryptsetup-keyfile.c
+                src/cryptsetup/cryptsetup-keyfile.h
                 src/cryptsetup/cryptsetup.c
 '''.split())
 
@@ -2289,7 +2394,6 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 'src/cryptsetup/cryptsetup-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [libcryptsetup],
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2309,7 +2413,6 @@ if conf.get('HAVE_LIBCRYPTSETUP') == 1
                 'src/veritysetup/veritysetup-generator.c',
                 include_directories : includes,
                 link_with : [libshared],
-                dependencies : [libcryptsetup],
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : systemgeneratordir)
@@ -2641,6 +2744,27 @@ if conf.get('ENABLE_PSTORE') == 1
                 install_dir : rootlibexecdir)
 endif
 
+if conf.get('ENABLE_OOMD') == 1
+        executable('systemd-oomd',
+                   systemd_oomd_sources,
+                   include_directories : includes,
+                   link_with : [libshared],
+                   dependencies : [],
+                   install_rpath : rootlibexecdir,
+                   install : true,
+                   install_dir : rootlibexecdir)
+
+        public_programs += executable(
+                   'oomctl',
+                   oomctl_sources,
+                   include_directories : includes,
+                   link_with : [libshared],
+                   dependencies : [],
+                   install_rpath : rootlibexecdir,
+                   install : true,
+                   install_dir : rootbindir)
+endif
+
 if conf.get('ENABLE_BINFMT') == 1
         public_programs += executable(
                 'systemd-binfmt',
@@ -2653,8 +2777,10 @@ if conf.get('ENABLE_BINFMT') == 1
 
         meson.add_install_script('sh', '-c',
                                  mkdir_p.format(binfmtdir))
-        meson.add_install_script('sh', '-c',
-                                 mkdir_p.format(join_paths(sysconfdir, 'binfmt.d')))
+        if install_sysconfdir
+                meson.add_install_script('sh', '-c',
+                                         mkdir_p.format(join_paths(sysconfdir, 'binfmt.d')))
+        endif
 endif
 
 if conf.get('ENABLE_REPART') == 1
@@ -2664,13 +2790,13 @@ if conf.get('ENABLE_REPART') == 1
                 include_directories : includes,
                 link_with : [libshared],
                 dependencies : [threads,
-                                libcryptsetup,
                                 libblkid,
                                 libfdisk,
                                 libopenssl],
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : rootbindir)
+        public_programs += exe
 
         if want_tests != 'false'
                 test('test-repart',
@@ -2746,7 +2872,6 @@ executable('systemd-growfs',
            'src/partition/growfs.c',
            include_directories : includes,
            link_with : [libshared],
-           dependencies : [libcryptsetup],
            install_rpath : rootlibexecdir,
            install : true,
            install_dir : rootlibexecdir)
@@ -2769,8 +2894,10 @@ executable(
         install : true,
         install_dir : rootlibexecdir)
 
-install_data('src/sleep/sleep.conf',
-             install_dir : pkgsysconfdir)
+if install_sysconfdir
+        install_data('src/sleep/sleep.conf',
+                     install_dir : pkgsysconfdir)
+endif
 
 public_programs += executable(
         'systemd-sysctl',
@@ -2949,8 +3076,8 @@ public_programs += executable(
         install_rpath : rootlibexecdir,
         install : true)
 
-if conf.get('ENABLE_SYSUSERS') == 1
-        public_programs += executable(
+if enable_sysusers
+        exe = executable(
                 'systemd-sysusers',
                 'src/sysusers/sysusers.c',
                 include_directories : includes,
@@ -2958,12 +3085,21 @@ if conf.get('ENABLE_SYSUSERS') == 1
                 install_rpath : rootlibexecdir,
                 install : true,
                 install_dir : rootbindir)
+        public_programs += exe
+
+        if want_tests != 'false'
+                test('test-sysusers',
+                     test_sysusers_sh,
+                     # https://github.com/mesonbuild/meson/issues/2681
+                     args : exe.full_path())
+        endif
 
         if have_standalone_binaries
-                public_programs += executable(
+                exe = executable(
                         'systemd-sysusers.standalone',
                         'src/sysusers/sysusers.c',
                         include_directories : includes,
+                        c_args : '-DSTANDALONE',
                         link_with : [libshared_static,
                                      libbasic,
                                      libbasic_gcrypt,
@@ -2971,6 +3107,14 @@ if conf.get('ENABLE_SYSUSERS') == 1
                                      libjournal_client],
                         install : true,
                         install_dir : rootbindir)
+                public_programs += exe
+
+                if want_tests != 'false'
+                        test('test-sysusers.standalone',
+                             test_sysusers_sh,
+                             # https://github.com/mesonbuild/meson/issues/2681
+                             args : exe.full_path())
+                endif
         endif
 endif
 
@@ -2998,6 +3142,7 @@ if conf.get('ENABLE_TMPFILES') == 1
                         'systemd-tmpfiles.standalone',
                         systemd_tmpfiles_sources,
                         include_directories : includes,
+                        c_args : '-DSTANDALONE',
                         link_with : [libshared_static,
                                      libbasic,
                                      libbasic_gcrypt,
@@ -3103,8 +3248,10 @@ if conf.get('HAVE_KMOD') == 1
 
         meson.add_install_script('sh', '-c',
                                  mkdir_p.format(modulesloaddir))
-        meson.add_install_script('sh', '-c',
-                                 mkdir_p.format(join_paths(sysconfdir, 'modules-load.d')))
+        if install_sysconfdir
+                meson.add_install_script('sh', '-c',
+                                         mkdir_p.format(join_paths(sysconfdir, 'modules-load.d')))
+        endif
 endif
 
 public_programs += executable(
@@ -3198,6 +3345,7 @@ foreach tuple : tests
         type = tuple.length() >= 5 ? tuple[4] : ''
         defs = tuple.length() >= 6 ? tuple[5] : []
         incs = tuple.length() >= 7 ? tuple[6] : includes
+        parallel = tuple.length() >= 8 ? tuple[7] : true
         timeout = 30
 
         name = sources[0].split('/')[-1].split('.')[0]
@@ -3332,12 +3480,6 @@ run_target(
 
 ############################################################
 
-make_directive_index_py = find_program('tools/make-directive-index.py')
-make_man_index_py = find_program('tools/make-man-index.py')
-xml_helper_py = find_program('tools/xml_helper.py')
-hwdb_update_sh = find_program('tools/hwdb-update.sh')
-autosuspend_update_sh = find_program('tools/autosuspend-update.sh')
-
 subdir('sysctl.d')
 subdir('sysusers.d')
 subdir('tmpfiles.d')
@@ -3354,8 +3496,10 @@ subdir('docs/var-log')
 install_subdir('factory/etc',
                install_dir : factorydir)
 
-install_data('xorg/50-systemd-user.sh',
-             install_dir : xinitrcdir)
+if install_sysconfdir
+        install_data('xorg/50-systemd-user.sh',
+                     install_dir : xinitrcdir)
+endif
 install_data('modprobe.d/systemd.conf',
              install_dir : modprobedir)
 install_data('LICENSE.GPL2',
@@ -3503,6 +3647,7 @@ watchdog_opt = service_watchdog == '' ? 'disabled' : service_watchdog
 status = [
         '@0@ @1@'.format(meson.project_name(), meson.project_version()),
 
+        'build mode:                        @0@'.format(get_option('mode')),
         'split /usr:                        @0@'.format(split_usr),
         'split bin-sbin:                    @0@'.format(split_bin),
         'prefix directory:                  @0@'.format(prefixdir),
@@ -3527,12 +3672,12 @@ status = [
                                                               get_option('debug-tty')),
         'TTY GID:                           @0@'.format(tty_gid),
         'users GID:                         @0@'.format(substs.get('USERS_GID')),
-        'maximum system UID:                @0@'.format(system_uid_max),
-        'maximum system GID:                @0@'.format(system_gid_max),
-        'minimum dynamic UID:               @0@'.format(dynamic_uid_min),
-        'maximum dynamic UID:               @0@'.format(dynamic_uid_max),
-        'minimum container UID base:        @0@'.format(container_uid_base_min),
-        'maximum container UID base:        @0@'.format(container_uid_base_max),
+        'system UIDs:                       <=@0@ (alloc >=@1@)'.format(conf.get('SYSTEM_UID_MAX'),
+                                                                        conf.get('SYSTEM_ALLOC_UID_MIN')),
+        'system GIDs:                       <=@0@ (alloc >=@1@)'.format(conf.get('SYSTEM_GID_MAX'),
+                                                                        conf.get('SYSTEM_ALLOC_GID_MIN')),
+        'dynamic UIDs:                      @0@–@1@'.format(dynamic_uid_min, dynamic_uid_max),
+        'container UID bases:               @0@–@1@'.format(container_uid_base_min, container_uid_base_max),
         '/dev/kvm access mode:              @0@'.format(get_option('dev-kvm-mode')),
         'render group access mode:          @0@'.format(get_option('group-render-mode')),
         'certificate root directory:        @0@'.format(get_option('certificate-root')),
@@ -3616,6 +3761,7 @@ foreach tuple : [
         ['libcurl'],
         ['idn'],
         ['initrd'],
+        ['compat-mutable-uid-boundaries'],
         ['libidn2'],
         ['libidn'],
         ['libiptc'],
@@ -3648,6 +3794,7 @@ foreach tuple : [
         ['DNS-over-TLS(openssl)', conf.get('DNS_OVER_TLS_USE_OPENSSL') == 1],
         ['coredump'],
         ['pstore'],
+        ['oomd'],
         ['polkit'],
         ['legacy pkla',      install_polkit_pkla],
         ['efi'],

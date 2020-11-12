@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <getopt.h>
@@ -485,7 +485,7 @@ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_li
 
                 printf("\t  Leader: %"PRIu32, i.leader);
 
-                get_process_comm(i.leader, &t);
+                (void) get_process_comm(i.leader, &t);
                 if (t)
                         printf(" (%s)", t);
 
@@ -545,8 +545,7 @@ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_li
                 printf("\t    Unit: %s\n", i.scope);
                 show_unit_cgroup(bus, "org.freedesktop.systemd1.Scope", i.scope, i.leader);
 
-                if (arg_transport == BUS_TRANSPORT_LOCAL) {
-
+                if (arg_transport == BUS_TRANSPORT_LOCAL)
                         show_journal_by_unit(
                                         stdout,
                                         i.scope,
@@ -560,7 +559,6 @@ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_li
                                         SD_JOURNAL_LOCAL_ONLY,
                                         true,
                                         NULL);
-                }
         }
 
         return 0;
@@ -1022,7 +1020,7 @@ static int kill_session(int argc, char *argv[], void *userdata) {
                                 &error, NULL,
                                 "ssi", argv[i], arg_kill_who, arg_signal);
                 if (r < 0)
-                        return log_error_errno(r, "Could not kill session: %s", bus_error_message(&error, -r));
+                        return log_error_errno(r, "Could not kill session: %s", bus_error_message(&error, r));
         }
 
         return 0;
@@ -1071,7 +1069,7 @@ static int enable_linger(int argc, char *argv[], void *userdata) {
                                 &error, NULL,
                                 "ubb", (uint32_t) uid, b, true);
                 if (r < 0)
-                        return log_error_errno(r, "Could not enable linger: %s", bus_error_message(&error, -r));
+                        return log_error_errno(r, "Could not enable linger: %s", bus_error_message(&error, r));
         }
 
         return 0;
@@ -1096,7 +1094,7 @@ static int terminate_user(int argc, char *argv[], void *userdata) {
 
                 r = bus_call_method(bus, bus_login_mgr, "TerminateUser", &error, NULL, "u", (uint32_t) uid);
                 if (r < 0)
-                        return log_error_errno(r, "Could not terminate user: %s", bus_error_message(&error, -r));
+                        return log_error_errno(r, "Could not terminate user: %s", bus_error_message(&error, r));
         }
 
         return 0;
@@ -1129,7 +1127,7 @@ static int kill_user(int argc, char *argv[], void *userdata) {
                         &error, NULL,
                         "ui", (uint32_t) uid, arg_signal);
                 if (r < 0)
-                        return log_error_errno(r, "Could not kill user: %s", bus_error_message(&error, -r));
+                        return log_error_errno(r, "Could not kill user: %s", bus_error_message(&error, r));
         }
 
         return 0;
@@ -1154,7 +1152,7 @@ static int attach(int argc, char *argv[], void *userdata) {
                         &error, NULL,
                         "ssb", argv[1], argv[i], true);
                 if (r < 0)
-                        return log_error_errno(r, "Could not attach device: %s", bus_error_message(&error, -r));
+                        return log_error_errno(r, "Could not attach device: %s", bus_error_message(&error, r));
         }
 
         return 0;
@@ -1172,7 +1170,7 @@ static int flush_devices(int argc, char *argv[], void *userdata) {
 
         r = bus_call_method(bus, bus_login_mgr, "FlushDevices", &error, NULL, "b", true);
         if (r < 0)
-                return log_error_errno(r, "Could not flush devices: %s", bus_error_message(&error, -r));
+                return log_error_errno(r, "Could not flush devices: %s", bus_error_message(&error, r));
 
         return 0;
 }
@@ -1194,7 +1192,7 @@ static int lock_sessions(int argc, char *argv[], void *userdata) {
                         &error, NULL,
                         NULL);
         if (r < 0)
-                return log_error_errno(r, "Could not lock sessions: %s", bus_error_message(&error, -r));
+                return log_error_errno(r, "Could not lock sessions: %s", bus_error_message(&error, r));
 
         return 0;
 }
@@ -1213,7 +1211,7 @@ static int terminate_seat(int argc, char *argv[], void *userdata) {
 
                 r = bus_call_method(bus, bus_login_mgr, "TerminateSeat", &error, NULL, "s", argv[i]);
                 if (r < 0)
-                        return log_error_errno(r, "Could not terminate seat: %s", bus_error_message(&error, -r));
+                        return log_error_errno(r, "Could not terminate seat: %s", bus_error_message(&error, r));
         }
 
         return 0;
@@ -1266,6 +1264,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "  -H --host=[USER@]HOST    Operate on remote host\n"
                "  -M --machine=CONTAINER   Operate on local container\n"
                "  -p --property=NAME       Show only properties by this name\n"
+               "  -P NAME                  Equivalent to --value --property=NAME\n"
                "  -a --all                 Show all properties, including empty ones\n"
                "     --value               When showing properties, only print the value\n"
                "  -l --full                Do not ellipsize output\n"
@@ -1321,7 +1320,7 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        while ((c = getopt_long(argc, argv, "hp:als:H:M:n:o:", options, NULL)) >= 0)
+        while ((c = getopt_long(argc, argv, "hp:P:als:H:M:n:o:", options, NULL)) >= 0)
 
                 switch (c) {
 
@@ -1331,13 +1330,17 @@ static int parse_argv(int argc, char *argv[]) {
                 case ARG_VERSION:
                         return version();
 
+                case 'P':
+                        arg_value = true;
+                        _fallthrough_;
+
                 case 'p': {
                         r = strv_extend(&arg_property, optarg);
                         if (r < 0)
                                 return log_oom();
 
                         /* If the user asked for a particular
-                         * property, show it to him, even if it is
+                         * property, show it to them, even if it is
                          * empty. */
                         arg_all = true;
                         break;

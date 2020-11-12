@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <curl/curl.h>
 #include <linux/fs.h>
@@ -253,9 +253,7 @@ static int raw_pull_maybe_convert_qcow2(RawPull *i) {
 
         (void) unlink(i->temp_path);
         free_and_replace(i->temp_path, t);
-
-        safe_close(i->raw_job->disk_fd);
-        i->raw_job->disk_fd = TAKE_FD(converted_fd);
+        CLOSE_AND_REPLACE(i->raw_job->disk_fd, converted_fd);
 
         return 1;
 }

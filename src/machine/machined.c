@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <string.h>
@@ -136,7 +136,7 @@ static int manager_add_host_machine(Manager *m) {
 static int manager_enumerate_machines(Manager *m) {
         _cleanup_closedir_ DIR *d = NULL;
         struct dirent *de;
-        int r = 0;
+        int r;
 
         assert(m);
 
@@ -265,7 +265,6 @@ static void manager_gc(Manager *m, bool drop_not_started) {
 
 static int manager_startup(Manager *m) {
         Machine *machine;
-        Iterator i;
         int r;
 
         assert(m);
@@ -287,7 +286,7 @@ static int manager_startup(Manager *m) {
         manager_gc(m, false);
 
         /* And start everything */
-        HASHMAP_FOREACH(machine, m->machines, i)
+        HASHMAP_FOREACH(machine, m->machines)
                 machine_start(machine, NULL, NULL);
 
         return 0;

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef foosdbushfoo
 #define foosdbushfoo
 
@@ -33,12 +33,6 @@ _SD_BEGIN_DECLARATIONS;
 #define SD_BUS_DEFAULT ((sd_bus *) 1)
 #define SD_BUS_DEFAULT_USER ((sd_bus *) 2)
 #define SD_BUS_DEFAULT_SYSTEM ((sd_bus *) 3)
-
-/* https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-marshaling-signature */
-#define SD_BUS_MAXIMUM_SIGNATURE_LENGTH 255
-
-/* https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-names */
-#define SD_BUS_MAXIMUM_NAME_LENGTH 255
 
 /* Types */
 
@@ -458,6 +452,8 @@ int sd_bus_error_copy(sd_bus_error *dest, const sd_bus_error *e);
 int sd_bus_error_move(sd_bus_error *dest, sd_bus_error *e);
 int sd_bus_error_is_set(const sd_bus_error *e);
 int sd_bus_error_has_name(const sd_bus_error *e, const char *name);
+int sd_bus_error_has_names_sentinel(const sd_bus_error *e, ...) _sd_sentinel_;
+#define sd_bus_error_has_names(e, ...) sd_bus_error_has_names_sentinel(e, __VA_ARGS__, NULL)
 
 #define SD_BUS_ERROR_MAP(_name, _code)          \
         {                                       \

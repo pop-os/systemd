@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #if HAVE_SELINUX
 #include <selinux/selinux.h>
@@ -55,6 +55,7 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "syslog-util.h"
+#include "user-record.h"
 #include "user-util.h"
 
 #define USER_JOURNALS_MAX 1024
@@ -247,16 +248,15 @@ static bool uid_for_system_journal(uid_t uid) {
 }
 
 static void server_add_acls(JournalFile *f, uid_t uid) {
-#if HAVE_ACL
-        int r;
-#endif
         assert(f);
 
 #if HAVE_ACL
+        int r;
+
         if (uid_for_system_journal(uid))
                 return;
 
-        r = add_acls_for_user(f->fd, uid);
+        r = fd_add_uid_acl_permission(f->fd, uid, ACL_READ);
         if (r < 0)
                 log_warning_errno(r, "Failed to set ACL on %s, ignoring: %m", f->path);
 #endif
@@ -474,10 +474,9 @@ static int do_rotate(
 
 static void server_process_deferred_closes(Server *s) {
         JournalFile *f;
-        Iterator i;
 
         /* Perform any deferred closes which aren't still offlining. */
-        SET_FOREACH(f, s->deferred_closes, i) {
+        SET_FOREACH(f, s->deferred_closes) {
                 if (journal_file_is_offlining(f))
                         continue;
 
@@ -610,7 +609,6 @@ static int vacuum_offline_user_journals(Server *s) {
 
 void server_rotate(Server *s) {
         JournalFile *f;
-        Iterator i;
         void *k;
         int r;
 
@@ -621,7 +619,7 @@ void server_rotate(Server *s) {
         (void) do_rotate(s, &s->system_journal, "system", s->seal, 0);
 
         /* Then, rotate all user journals we have open (keeping them open) */
-        ORDERED_HASHMAP_FOREACH_KEY(f, k, s->user_journals, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(f, k, s->user_journals) {
                 r = do_rotate(s, &f, "user", s->seal, PTR_TO_UID(k));
                 if (r >= 0)
                         ordered_hashmap_replace(s->user_journals, k, f);
@@ -640,7 +638,6 @@ void server_rotate(Server *s) {
 
 void server_sync(Server *s) {
         JournalFile *f;
-        Iterator i;
         int r;
 
         if (s->system_journal) {
@@ -649,7 +646,7 @@ void server_sync(Server *s) {
                         log_warning_errno(r, "Failed to sync system journal, ignoring: %m");
         }
 
-        ORDERED_HASHMAP_FOREACH(f, s->user_journals, i) {
+        ORDERED_HASHMAP_FOREACH(f, s->user_journals) {
                 r = journal_file_set_offline(f, false);
                 if (r < 0)
                         log_warning_errno(r, "Failed to sync user journal, ignoring: %m");
@@ -1677,27 +1674,20 @@ int server_schedule_sync(Server *s, int priority) {
                 return 0;
 
         if (s->sync_interval_usec > 0) {
-                usec_t when;
-
-                r = sd_event_now(s->event, CLOCK_MONOTONIC, &when);
-                if (r < 0)
-                        return r;
-
-                when += s->sync_interval_usec;
 
                 if (!s->sync_event_source) {
-                        r = sd_event_add_time(
+                        r = sd_event_add_time_relative(
                                         s->event,
                                         &s->sync_event_source,
                                         CLOCK_MONOTONIC,
-                                        when, 0,
+                                        s->sync_interval_usec, 0,
                                         server_dispatch_sync, s);
                         if (r < 0)
                                 return r;
 
                         r = sd_event_source_set_priority(s->sync_event_source, SD_EVENT_PRIORITY_IMPORTANT);
                 } else {
-                        r = sd_event_source_set_time(s->sync_event_source, when);
+                        r = sd_event_source_set_time_relative(s->sync_event_source, s->sync_interval_usec);
                         if (r < 0)
                                 return r;
 
@@ -1888,7 +1878,7 @@ static int server_connect_notify(Server *s) {
         if (sd_watchdog_enabled(false, &s->watchdog_usec) > 0) {
                 s->send_watchdog = true;
 
-                r = sd_event_add_time(s->event, &s->watchdog_event_source, CLOCK_MONOTONIC, now(CLOCK_MONOTONIC) + s->watchdog_usec/2, s->watchdog_usec/4, dispatch_watchdog, s);
+                r = sd_event_add_time_relative(s->event, &s->watchdog_event_source, CLOCK_MONOTONIC, s->watchdog_usec/2, s->watchdog_usec/4, dispatch_watchdog, s);
                 if (r < 0)
                         return log_error_errno(r, "Failed to add watchdog time event: %m");
         }
@@ -2116,7 +2106,6 @@ static int server_idle_handler(sd_event_source *source, uint64_t usec, void *use
 
 int server_start_or_stop_idle_timer(Server *s) {
         _cleanup_(sd_event_source_unrefp) sd_event_source *source = NULL;
-        usec_t when;
         int r;
 
         assert(s);
@@ -2129,11 +2118,7 @@ int server_start_or_stop_idle_timer(Server *s) {
         if (s->idle_event_source)
                 return 1;
 
-        r = sd_event_now(s->event, CLOCK_MONOTONIC, &when);
-        if (r < 0)
-                return log_error_errno(r, "Failed to determine current time: %m");
-
-        r = sd_event_add_time(s->event, &source, CLOCK_MONOTONIC, usec_add(when, IDLE_TIMEOUT_USEC), 0, server_idle_handler, s);
+        r = sd_event_add_time_relative(s->event, &source, CLOCK_MONOTONIC, IDLE_TIMEOUT_USEC, 0, server_idle_handler, s);
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate idle timer: %m");
 
@@ -2148,7 +2133,6 @@ int server_start_or_stop_idle_timer(Server *s) {
 }
 
 int server_refresh_idle_timer(Server *s) {
-        usec_t when;
         int r;
 
         assert(s);
@@ -2156,11 +2140,7 @@ int server_refresh_idle_timer(Server *s) {
         if (!s->idle_event_source)
                 return 0;
 
-        r = sd_event_now(s->event, CLOCK_MONOTONIC, &when);
-        if (r < 0)
-                return log_error_errno(r, "Failed to determine current time: %m");
-
-        r = sd_event_source_set_time(s->idle_event_source, usec_add(when, IDLE_TIMEOUT_USEC));
+        r = sd_event_source_set_time_relative(s->idle_event_source, IDLE_TIMEOUT_USEC);
         if (r < 0)
                 return log_error_errno(r, "Failed to refresh idle timer: %m");
 
@@ -2451,7 +2431,6 @@ int server_init(Server *s, const char *namespace) {
 void server_maybe_append_tags(Server *s) {
 #if HAVE_GCRYPT
         JournalFile *f;
-        Iterator i;
         usec_t n;
 
         n = now(CLOCK_REALTIME);
@@ -2459,7 +2438,7 @@ void server_maybe_append_tags(Server *s) {
         if (s->system_journal)
                 journal_file_maybe_append_tag(s->system_journal, n);
 
-        ORDERED_HASHMAP_FOREACH(f, s->user_journals, i)
+        ORDERED_HASHMAP_FOREACH(f, s->user_journals)
                 journal_file_maybe_append_tag(f, n);
 #endif
 }
@@ -2573,7 +2552,7 @@ int config_parse_line_max(
 
                 r = parse_size(rvalue, 1024, &v);
                 if (r < 0) {
-                        log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse LineMax= value, ignoring: %s", rvalue);
+                        log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse LineMax= value, ignoring: %s", rvalue);
                         return 0;
                 }
 
@@ -2628,7 +2607,7 @@ int config_parse_compress(
                 if (r < 0) {
                         r = parse_size(rvalue, 1024, &compress->threshold_bytes);
                         if (r < 0)
-                                log_syntax(unit, LOG_ERR, filename, line, r,
+                                log_syntax(unit, LOG_WARNING, filename, line, r,
                                            "Failed to parse Compress= value, ignoring: %s", rvalue);
                         else
                                 compress->enabled = true;

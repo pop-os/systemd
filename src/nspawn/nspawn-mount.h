@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -19,6 +19,7 @@ typedef enum MountSettingsMask {
         MOUNT_MKDIR              = 1 << 8, /* if set, make directory to mount over first */
         MOUNT_TOUCH              = 1 << 9, /* if set, touch file to mount over first */
         MOUNT_PREFIX_ROOT        = 1 << 10,/* if set, prefix the source path with the container's root directory */
+        MOUNT_FOLLOW_SYMLINKS    = 1 << 11,/* if set, we'll follow symlinks for the mount target */
 } MountSettingsMask;
 
 typedef enum CustomMountType {

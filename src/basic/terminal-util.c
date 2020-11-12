@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1349,7 +1349,7 @@ int vt_release(int fd, bool restore) {
 
 void get_log_colors(int priority, const char **on, const char **off, const char **highlight) {
         /* Note that this will initialize output variables only when there's something to output.
-         * The caller must pre-initalize to "" or NULL as appropriate. */
+         * The caller must pre-initialize to "" or NULL as appropriate. */
 
         if (priority <= LOG_ERR) {
                 if (on)

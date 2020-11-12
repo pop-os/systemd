@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+
+/* SPDX-License-Identifier: LGPL-2.1-or-later
  *
  * libudev - interface to udev device information
  *
@@ -58,7 +58,6 @@ struct udev_ctrl {
 int udev_ctrl_new_from_fd(struct udev_ctrl **ret, int fd) {
         _cleanup_close_ int sock = -1;
         struct udev_ctrl *uctrl;
-        int r;
 
         assert(ret);
 
@@ -78,14 +77,6 @@ int udev_ctrl_new_from_fd(struct udev_ctrl **ret, int fd) {
                 .sock_connect = -1,
                 .bound = fd >= 0,
         };
-
-        /*
-         * FIXME: remove it as soon as we can depend on this:
-         *   http://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=90c6bd34f884cd9cee21f1d152baf6c18bcac949
-         */
-        r = setsockopt_int(uctrl->sock, SOL_SOCKET, SO_PASSCRED, true);
-        if (r < 0)
-                log_warning_errno(r, "Failed to set SO_PASSCRED: %m");
 
         uctrl->saddr.un = (struct sockaddr_un) {
                 .sun_family = AF_UNIX,
@@ -355,10 +346,6 @@ int udev_ctrl_send(struct udev_ctrl *uctrl, enum udev_ctrl_msg_type type, int in
         return 0;
 }
 
-static int udev_ctrl_wait_io_handler(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
-        return sd_event_exit(sd_event_source_get_event(s), 0);
-}
-
 int udev_ctrl_wait(struct udev_ctrl *uctrl, usec_t timeout) {
         _cleanup_(sd_event_source_unrefp) sd_event_source *source_io = NULL, *source_timeout = NULL;
         int r;
@@ -385,16 +372,17 @@ int udev_ctrl_wait(struct udev_ctrl *uctrl, usec_t timeout) {
                         return r;
         }
 
-        r = sd_event_add_io(uctrl->event, &source_io, uctrl->sock, EPOLLIN, udev_ctrl_wait_io_handler, NULL);
+        r = sd_event_add_io(uctrl->event, &source_io, uctrl->sock, EPOLLIN, NULL, INT_TO_PTR(0));
         if (r < 0)
                 return r;
 
         (void) sd_event_source_set_description(source_io, "udev-ctrl-wait-io");
 
         if (timeout != USEC_INFINITY) {
-                r = sd_event_add_time(uctrl->event, &source_timeout, clock_boottime_or_monotonic(),
-                                      usec_add(now(clock_boottime_or_monotonic()), timeout),
-                                      0, NULL, INT_TO_PTR(-ETIMEDOUT));
+                r = sd_event_add_time_relative(
+                                uctrl->event, &source_timeout, clock_boottime_or_monotonic(),
+                                timeout,
+                                0, NULL, INT_TO_PTR(-ETIMEDOUT));
                 if (r < 0)
                         return r;
 

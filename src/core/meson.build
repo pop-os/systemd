@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 libcore_shared_sources = '''
         killall.c
@@ -178,7 +178,8 @@ libcore = static_library(
                         libkmod,
                         libapparmor,
                         libselinux,
-                        libmount])
+                        libmount,
+                        libacl])
 
 systemd_sources = files('main.c')
 
@@ -191,12 +192,14 @@ in_files = [['macros.systemd',   rpmmacrosdir],
 foreach item : in_files
         file = item[0]
         dir = item[1]
+        if install_sysconfdir or dir != pkgsysconfdir
+                configure_file(
+                        input : file + '.in',
+                        output : file,
+                        configuration : substs,
+                        install_dir : dir == 'no' ? '' : dir)
+        endif
 
-        configure_file(
-                input : file + '.in',
-                output : file,
-                configuration : substs,
-                install_dir : dir == 'no' ? '' : dir)
 endforeach
 
 install_data('org.freedesktop.systemd1.conf',
@@ -216,6 +219,8 @@ meson.add_install_script('sh', '-c', mkdir_p.format(systemsleepdir))
 meson.add_install_script('sh', '-c', mkdir_p.format(systemgeneratordir))
 meson.add_install_script('sh', '-c', mkdir_p.format(usergeneratordir))
 
-meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(pkgsysconfdir, 'system')))
-meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(pkgsysconfdir, 'user')))
-meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(sysconfdir, 'xdg/systemd')))
+if install_sysconfdir
+        meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(pkgsysconfdir, 'system')))
+        meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(pkgsysconfdir, 'user')))
+        meson.add_install_script('sh', '-c', mkdir_p.format(join_paths(sysconfdir, 'xdg/systemd')))
+endif

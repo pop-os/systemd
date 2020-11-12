@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <limits.h>
@@ -30,13 +30,12 @@
 #define SNDBUF_SIZE (8*1024*1024)
 
 static void unsetenv_all(bool unset_environment) {
-
         if (!unset_environment)
                 return;
 
-        unsetenv("LISTEN_PID");
-        unsetenv("LISTEN_FDS");
-        unsetenv("LISTEN_FDNAMES");
+        assert_se(unsetenv("LISTEN_PID") == 0);
+        assert_se(unsetenv("LISTEN_FDS") == 0);
+        assert_se(unsetenv("LISTEN_FDNAMES") == 0);
 }
 
 _public_ int sd_listen_fds(int unset_environment) {
@@ -101,7 +100,7 @@ _public_ int sd_listen_fds_with_names(int unset_environment, char ***names) {
 
         e = getenv("LISTEN_FDNAMES");
         if (e) {
-                n_names = strv_split_extract(&l, e, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                n_names = strv_split_full(&l, e, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
                 if (n_names < 0) {
                         unsetenv_all(unset_environment);
                         return n_names;
@@ -548,7 +547,7 @@ _public_ int sd_pid_notify_with_fds(
 
 finish:
         if (unset_environment)
-                unsetenv("NOTIFY_SOCKET");
+                assert_se(unsetenv("NOTIFY_SOCKET") == 0);
 
         return r;
 }
@@ -672,9 +671,9 @@ _public_ int sd_watchdog_enabled(int unset_environment, uint64_t *usec) {
 
 finish:
         if (unset_environment && s)
-                unsetenv("WATCHDOG_USEC");
+                assert_se(unsetenv("WATCHDOG_USEC") == 0);
         if (unset_environment && p)
-                unsetenv("WATCHDOG_PID");
+                assert_se(unsetenv("WATCHDOG_PID") == 0);
 
         return r;
 }

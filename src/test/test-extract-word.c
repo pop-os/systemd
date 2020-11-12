@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdlib.h>
@@ -10,6 +10,8 @@
 static void test_extract_first_word(void) {
         const char *p, *original;
         char *t;
+
+        log_info("/* %s */", __func__);
 
         p = original = "foobar waldo";
         assert_se(extract_first_word(&p, &t, NULL, 0) > 0);
@@ -341,11 +343,53 @@ static void test_extract_first_word(void) {
         assert_se(streq(t, "foo\\xbar"));
         free(t);
         assert_se(p == NULL);
+
+        p = "\\:";
+        assert_se(extract_first_word(&p, &t, ":", EXTRACT_CUNESCAPE|EXTRACT_UNESCAPE_SEPARATORS) == 1);
+        assert_se(streq(t, ":"));
+        free(t);
+        assert_se(p == NULL);
+
+        p = "a\\:b";
+        assert_se(extract_first_word(&p, &t, ":", EXTRACT_CUNESCAPE|EXTRACT_UNESCAPE_SEPARATORS) == 1);
+        assert_se(streq(t, "a:b"));
+        free(t);
+        assert_se(p == NULL);
+
+        p = "a\\ b:c";
+        assert_se(extract_first_word(&p, &t, WHITESPACE ":", EXTRACT_CUNESCAPE|EXTRACT_UNESCAPE_SEPARATORS) == 1);
+        assert_se(streq(t, "a b"));
+        free(t);
+        assert_se(extract_first_word(&p, &t, WHITESPACE ":", EXTRACT_CUNESCAPE|EXTRACT_UNESCAPE_SEPARATORS) == 1);
+        assert_se(streq(t, "c"));
+        free(t);
+        assert_se(p == NULL);
+
+        p = "\\:";
+        assert_se(extract_first_word(&p, &t, ":", EXTRACT_CUNESCAPE) == -EINVAL);
+
+        p = "a\\:b";
+        assert_se(extract_first_word(&p, &t, ":", EXTRACT_CUNESCAPE) == -EINVAL);
+        assert_se(extract_first_word(&p, &t, ":", EXTRACT_CUNESCAPE) == 1);
+        assert_se(streq(t, "b"));
+        free(t);
+
+        p = "a\\ b:c";
+        assert_se(extract_first_word(&p, &t, WHITESPACE ":", EXTRACT_CUNESCAPE) == -EINVAL);
+        assert_se(extract_first_word(&p, &t, WHITESPACE ":", EXTRACT_CUNESCAPE) == 1);
+        assert_se(streq(t, "b"));
+        free(t);
+        assert_se(extract_first_word(&p, &t, WHITESPACE ":", EXTRACT_CUNESCAPE) == 1);
+        assert_se(streq(t, "c"));
+        free(t);
+        assert_se(p == NULL);
 }
 
 static void test_extract_first_word_and_warn(void) {
         const char *p, *original;
         char *t;
+
+        log_info("/* %s */", __func__);
 
         p = original = "foobar waldo";
         assert_se(extract_first_word_and_warn(&p, &t, NULL, 0, NULL, "fake", 1, original) > 0);
@@ -489,7 +533,9 @@ static void test_extract_first_word_and_warn(void) {
 
 static void test_extract_many_words(void) {
         const char *p, *original;
-        char *a, *b, *c;
+        char *a, *b, *c, *d, *e, *f;
+
+        log_info("/* %s */", __func__);
 
         p = original = "foobar waldi piep";
         assert_se(extract_many_words(&p, NULL, 0, &a, &b, &c, NULL) == 3);
@@ -500,6 +546,24 @@ static void test_extract_many_words(void) {
         free(a);
         free(b);
         free(c);
+
+        p = original = "foobar:waldi:piep ba1:ba2";
+        assert_se(extract_many_words(&p, ":" WHITESPACE, 0, &a, &b, &c, NULL) == 3);
+        assert_se(!isempty(p));
+        assert_se(streq_ptr(a, "foobar"));
+        assert_se(streq_ptr(b, "waldi"));
+        assert_se(streq_ptr(c, "piep"));
+        assert_se(extract_many_words(&p, ":" WHITESPACE, 0, &d, &e, &f, NULL) == 2);
+        assert_se(isempty(p));
+        assert_se(streq_ptr(d, "ba1"));
+        assert_se(streq_ptr(e, "ba2"));
+        assert_se(isempty(f));
+        free(a);
+        free(b);
+        free(c);
+        free(d);
+        free(e);
+        free(f);
 
         p = original = "'foobar' wa\"ld\"i   ";
         assert_se(extract_many_words(&p, NULL, 0, &a, &b, &c, NULL) == 2);

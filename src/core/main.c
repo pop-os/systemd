@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1064,13 +1064,11 @@ static int parse_argv(int argc, char *argv[]) {
                         assert_not_reached("Unhandled option code.");
                 }
 
-        if (optind < argc && getpid_cached() != 1) {
+        if (optind < argc && getpid_cached() != 1)
                 /* Hmm, when we aren't run as init system
                  * let's complain about excess arguments */
-
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Excess arguments.");
-        }
 
         return 0;
 }
@@ -1420,9 +1418,8 @@ static int fixup_environment(void) {
                 return -errno;
 
         /* The kernels sets HOME=/ for init. Let's undo this. */
-        if (path_equal_ptr(getenv("HOME"), "/") &&
-            unsetenv("HOME") < 0)
-                log_warning_errno(errno, "Failed to unset $HOME: %m");
+        if (path_equal_ptr(getenv("HOME"), "/"))
+                assert_se(unsetenv("HOME") == 0);
 
         return 0;
 }
@@ -1564,7 +1561,7 @@ static void initialize_clock(void) {
                 else
                         log_info("RTC configured in localtime, applying delta of %i minutes to system time.", min);
 
-        } else if (!in_initrd()) {
+        } else if (!in_initrd())
                 /*
                  * Do a dummy very first call to seal the kernel's time warp magic.
                  *
@@ -1577,7 +1574,6 @@ static void initialize_clock(void) {
                  * be treated as UTC that way.
                  */
                 (void) clock_reset_timewarp();
-        }
 
         r = clock_apply_epoch();
         if (r < 0)
@@ -2004,15 +2000,26 @@ static void log_execution_mode(bool *ret_first_boot) {
                         *ret_first_boot = false;
                         log_info("Running in initial RAM disk.");
                 } else {
-                        /* Let's check whether we are in first boot, i.e. whether /etc is still unpopulated. We use
-                         * /etc/machine-id as flag file, for this: if it exists we assume /etc is populated, if it
-                         * doesn't it's unpopulated. This allows container managers and installers to provision a
-                         * couple of files already. If the container manager wants to provision the machine ID itself
-                         * it should pass $container_uuid to PID 1. */
+                        int r;
+                        _cleanup_free_ char *id_text = NULL;
 
-                        *ret_first_boot = access("/etc/machine-id", F_OK) < 0;
-                        if (*ret_first_boot)
-                                log_info("Running with unpopulated /etc.");
+                        /* Let's check whether we are in first boot.  We use /etc/machine-id as flag file
+                         * for this: If it is missing or contains the value "uninitialized", this is the
+                         * first boot.  In any other case, it is not.  This allows container managers and
+                         * installers to provision a couple of files already.  If the container manager
+                         * wants to provision the machine ID itself it should pass $container_uuid to PID 1. */
+
+                        r = read_one_line_file("/etc/machine-id", &id_text);
+                        if (r < 0 || streq(id_text, "uninitialized")) {
+                                if (r < 0 && r != -ENOENT)
+                                        log_warning_errno(r, "Unexpected error while reading /etc/machine-id, ignoring: %m");
+
+                                *ret_first_boot = true;
+                                log_info("Detected first boot.");
+                        } else {
+                                *ret_first_boot = false;
+                                log_debug("Detected initialized system, this is not the first boot.");
+                        }
                 }
         } else {
                 if (DEBUG_LOGGING) {
@@ -2029,6 +2036,7 @@ static void log_execution_mode(bool *ret_first_boot) {
 
 static int initialize_runtime(
                 bool skip_setup,
+                bool first_boot,
                 struct rlimit *saved_rlimit_nofile,
                 struct rlimit *saved_rlimit_memlock,
                 const char **ret_error_message) {
@@ -2062,7 +2070,8 @@ static int initialize_runtime(
 
                         status_welcome();
                         hostname_setup();
-                        machine_id_setup(NULL, arg_machine_id, NULL);
+                        /* Force transient machine-id on first boot. */
+                        machine_id_setup(NULL, first_boot, arg_machine_id, NULL);
                         (void) loopback_setup();
                         bump_unix_max_dgram_qlen();
                         bump_file_max_and_nr_open();
@@ -2087,7 +2096,7 @@ static int initialize_runtime(
                         return log_emergency_errno(r, "Failed to determine $XDG_RUNTIME_DIR path: %m");
                 }
 
-                (void) mkdir_p(p, 0755);
+                (void) mkdir_p_label(p, 0755);
                 (void) make_inaccessible_nodes(p, UID_INVALID, GID_INVALID);
         }
 
@@ -2669,6 +2678,31 @@ int main(int argc, char *argv[]) {
                         goto finish;
                 }
 
+                /* Try to figure out if we can use colors with the console. No need to do that for user instances since
+                 * they never log into the console. */
+                log_show_color(colors_enabled());
+
+                r = make_null_stdio();
+                if (r < 0)
+                        log_warning_errno(r, "Failed to redirect standard streams to /dev/null, ignoring: %m");
+
+                /* Load the kernel modules early. */
+                if (!skip_setup)
+                        kmod_setup();
+
+                /* Mount /proc, /sys and friends, so that /proc/cmdline and /proc/$PID/fd is available. */
+                r = mount_setup(loaded_policy, skip_setup);
+                if (r < 0) {
+                        error_message = "Failed to mount API filesystems";
+                        goto finish;
+                }
+
+                /* The efivarfs is now mounted, let's read the random seed off it */
+                (void) efi_take_random_seed();
+
+                /* Cache command-line options passed from EFI variables */
+                if (!skip_setup)
+                        (void) cache_efi_options_variable();
         } else {
                 /* Running as user instance */
                 arg_system = false;
@@ -2682,37 +2716,6 @@ int main(int argc, char *argv[]) {
                         error_message = "Failed to initialize SELinux support";
                         goto finish;
                 }
-        }
-
-        if (arg_system) {
-                /* Try to figure out if we can use colors with the console. No need to do that for user instances since
-                 * they never log into the console. */
-                log_show_color(colors_enabled());
-
-                r = make_null_stdio();
-                if (r < 0)
-                        log_warning_errno(r, "Failed to redirect standard streams to /dev/null, ignoring: %m");
-        }
-
-        /* Mount /proc, /sys and friends, so that /proc/cmdline and /proc/$PID/fd is available. */
-        if (getpid_cached() == 1) {
-
-                /* Load the kernel modules early. */
-                if (!skip_setup)
-                        kmod_setup();
-
-                r = mount_setup(loaded_policy, skip_setup);
-                if (r < 0) {
-                        error_message = "Failed to mount API filesystems";
-                        goto finish;
-                }
-
-                /* The efivarfs is now mounted, let's read the random seed off it */
-                (void) efi_take_random_seed();
-
-                /* Cache command-line options passed from EFI variables */
-                if (!skip_setup)
-                        (void) cache_efi_options_variable();
         }
 
         /* Save the original RLIMIT_NOFILE/RLIMIT_MEMLOCK so that we can reset it later when
@@ -2796,6 +2799,7 @@ int main(int argc, char *argv[]) {
         log_execution_mode(&first_boot);
 
         r = initialize_runtime(skip_setup,
+                               first_boot,
                                &saved_rlimit_nofile,
                                &saved_rlimit_memlock,
                                &error_message);
@@ -2874,7 +2878,6 @@ finish:
                 m = manager_free(m);
         }
 
-        reset_arguments();
         mac_selinux_finish();
 
         if (reexecute)
@@ -2901,6 +2904,7 @@ finish:
                  * in become_shutdown() so normally we cannot free them yet. */
                 watchdog_free_device();
                 arg_watchdog_device = mfree(arg_watchdog_device);
+                reset_arguments();
                 return retval;
         }
 #endif
@@ -2926,5 +2930,6 @@ finish:
                 freeze_or_exit_or_reboot();
         }
 
+        reset_arguments();
         return retval;
 }

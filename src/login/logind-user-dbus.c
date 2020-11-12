@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 
@@ -216,7 +216,7 @@ int bus_user_method_terminate(sd_bus_message *message, void *userdata, sd_bus_er
         if (r == 0)
                 return 1; /* Will call us back */
 
-        r = user_stop(u, true);
+        r = user_stop(u, /* force */ true);
         if (r < 0)
                 return r;
 
@@ -319,14 +319,13 @@ static int user_node_enumerator(sd_bus *bus, const char *path, void *userdata, c
         sd_bus_message *message;
         Manager *m = userdata;
         User *user;
-        Iterator i;
         int r;
 
         assert(bus);
         assert(path);
         assert(nodes);
 
-        HASHMAP_FOREACH(user, m->users, i) {
+        HASHMAP_FOREACH(user, m->users) {
                 char *p;
 
                 p = user_bus_path(user);

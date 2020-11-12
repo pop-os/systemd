@@ -1,8 +1,11 @@
 # -*- mode: meson -*-
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 option('version-tag', type : 'string',
        description : 'override the git version string')
+
+option('mode', type : 'combo', choices : ['developer', 'release'],
+       description : 'autoenable features suitable for systemd development/release builds')
 
 option('split-usr', type : 'combo', choices : ['auto', 'true', 'false'],
        description : '''/bin, /sbin aren't symlinks into /usr''')
@@ -25,9 +28,9 @@ option('static-libsystemd', type : 'combo',
        description : '''install a static library for libsystemd''')
 option('static-libudev', type : 'combo',
        choices : ['false', 'true', 'pic', 'no-pic'],
-       description : '''install a static library for libudev''')
+       description : 'install a static library for libudev')
 option('standalone-binaries', type : 'boolean', value : 'false',
-       description : '''also build standalone versions of supported binaries''')
+       description : 'also build standalone versions of supported binaries')
 
 option('sysvinit-path', type : 'string', value : '/etc/init.d',
        description : 'the directory where the SysV init scripts are located')
@@ -37,8 +40,10 @@ option('telinit-path', type : 'string', value : '/lib/sysvinit/telinit',
        description : 'path to telinit')
 option('rc-local', type : 'string',
        value : '/etc/rc.local')
-option('initrd', type: 'boolean',
+option('initrd', type : 'boolean',
        description : 'install services for use when running systemd in initrd')
+option('compat-mutable-uid-boundaries', type : 'boolean', value : 'false',
+       description : 'look at uid boundaries in /etc/login.defs for compatibility')
 
 option('quotaon-path', type : 'string', description : 'path to quotaon')
 option('quotacheck-path', type : 'string', description : 'path to quotacheck')
@@ -92,6 +97,8 @@ option('coredump', type : 'boolean',
        description : 'install the coredump handler')
 option('pstore', type : 'boolean',
        description : 'install the pstore archival tool')
+option('oomd', type : 'combo', choices : ['auto', 'true', 'false'],
+       description : 'install the userspace oom killer')
 option('logind', type : 'boolean',
        description : 'install the systemd-logind stack')
 option('hostnamed', type : 'boolean',
@@ -173,6 +180,8 @@ option('pamconfdir', type : 'string',
        description : 'directory for PAM configuration ["no" disables]')
 option('docdir', type : 'string',
        description : 'documentation directory')
+option('install-sysconfdir', type : 'boolean', value : true,
+       description : 'install configuration files to $sysconfdir')
 
 option('fallback-hostname', type : 'string', value : 'localhost',
        description : 'the hostname used if none configured')
@@ -189,6 +198,10 @@ option('status-unit-format-default', type : 'combo',
        description : 'use unit name or description in messages by default')
 option('time-epoch', type : 'integer', value : '-1',
        description : 'time epoch for time clients')
+option('system-alloc-uid-min', type : 'integer', value : '-1',
+       description : 'minimum system UID used when allocating')
+option('system-alloc-gid-min', type : 'integer', value : '-1',
+       description : 'minimum system GID used when allocating')
 option('system-uid-max', type : 'integer', value : '-1',
        description : 'maximum system UID')
 option('system-gid-max', type : 'integer', value : '-1',

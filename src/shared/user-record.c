@@ -1,10 +1,12 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/mount.h>
 
 #include "cgroup-util.h"
 #include "dns-domain.h"
 #include "env-util.h"
+#include "fd-util.h"
+#include "fileio.h"
 #include "fs-util.h"
 #include "hexdecoct.h"
 #include "hostname-util.h"
@@ -20,6 +22,122 @@
 
 #define DEFAULT_RATELIMIT_BURST 30
 #define DEFAULT_RATELIMIT_INTERVAL_USEC (1*USEC_PER_MINUTE)
+
+#if ENABLE_COMPAT_MUTABLE_UID_BOUNDARIES
+static int parse_alloc_uid(const char *path, const char *name, const char *t, uid_t *ret_uid) {
+        uid_t uid;
+        int r;
+
+        r = parse_uid(t, &uid);
+        if (r < 0)
+                return log_debug_errno(r, "%s: failed to parse %s %s, ignoring: %m", path, name, t);
+        if (uid == 0)
+                uid = 1;
+
+        *ret_uid = uid;
+        return 0;
+}
+#endif
+
+int read_login_defs(UGIDAllocationRange *ret_defs, const char *path, const char *root) {
+        UGIDAllocationRange defs = {
+                .system_alloc_uid_min = SYSTEM_ALLOC_UID_MIN,
+                .system_uid_max = SYSTEM_UID_MAX,
+                .system_alloc_gid_min = SYSTEM_ALLOC_GID_MIN,
+                .system_gid_max = SYSTEM_GID_MAX,
+        };
+
+#if ENABLE_COMPAT_MUTABLE_UID_BOUNDARIES
+        _cleanup_fclose_ FILE *f = NULL;
+        int r;
+
+        if (!path)
+                path = "/etc/login.defs";
+
+        r = chase_symlinks_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT, "re", &f, NULL);
+        if (r == -ENOENT)
+                goto assign;
+        if (r < 0)
+                return log_debug_errno(r, "Failed to open %s: %m", path);
+
+        for (;;) {
+                _cleanup_free_ char *line = NULL;
+                char *t;
+
+                r = read_line(f, LINE_MAX, &line);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to read %s: %m", path);
+                if (r == 0)
+                        break;
+
+                if ((t = first_word(line, "SYS_UID_MIN")))
+                        (void) parse_alloc_uid(path, "SYS_UID_MIN", t, &defs.system_alloc_uid_min);
+                else if ((t = first_word(line, "SYS_UID_MAX")))
+                        (void) parse_alloc_uid(path, "SYS_UID_MAX", t, &defs.system_uid_max);
+                else if ((t = first_word(line, "SYS_GID_MIN")))
+                        (void) parse_alloc_uid(path, "SYS_GID_MIN", t, &defs.system_alloc_gid_min);
+                else if ((t = first_word(line, "SYS_GID_MAX")))
+                        (void) parse_alloc_uid(path, "SYS_GID_MAX", t, &defs.system_gid_max);
+        }
+
+ assign:
+        if (defs.system_alloc_uid_min > defs.system_uid_max) {
+                log_debug("%s: SYS_UID_MIN > SYS_UID_MAX, resetting.", path);
+                defs.system_alloc_uid_min = MIN(defs.system_uid_max - 1, (uid_t) SYSTEM_ALLOC_UID_MIN);
+                /* Look at sys_uid_max to make sure sys_uid_min..sys_uid_max remains a valid range. */
+        }
+        if (defs.system_alloc_gid_min > defs.system_gid_max) {
+                log_debug("%s: SYS_GID_MIN > SYS_GID_MAX, resetting.", path);
+                defs.system_alloc_gid_min = MIN(defs.system_gid_max - 1, (gid_t) SYSTEM_ALLOC_GID_MIN);
+                /* Look at sys_gid_max to make sure sys_gid_min..sys_gid_max remains a valid range. */
+        }
+#endif
+
+        *ret_defs = defs;
+        return 0;
+}
+
+const UGIDAllocationRange *acquire_ugid_allocation_range(void) {
+#if ENABLE_COMPAT_MUTABLE_UID_BOUNDARIES
+        static thread_local UGIDAllocationRange defs = {
+#else
+        static const UGIDAllocationRange defs = {
+#endif
+                .system_alloc_uid_min = SYSTEM_ALLOC_UID_MIN,
+                .system_uid_max = SYSTEM_UID_MAX,
+                .system_alloc_gid_min = SYSTEM_ALLOC_GID_MIN,
+                .system_gid_max = SYSTEM_GID_MAX,
+        };
+
+#if ENABLE_COMPAT_MUTABLE_UID_BOUNDARIES
+        /* This function will ignore failure to read the file, so it should only be called from places where
+         * we don't crucially depend on the answer. In other words, it's appropriate for journald, but
+         * probably not for sysusers. */
+
+        static thread_local bool initialized = false;
+
+        if (!initialized) {
+                (void) read_login_defs(&defs, NULL, NULL);
+                initialized = true;
+        }
+#endif
+
+        return &defs;
+}
+
+bool uid_is_system(uid_t uid) {
+        const UGIDAllocationRange *defs;
+        assert_se(defs = acquire_ugid_allocation_range());
+
+        return uid <= defs->system_uid_max;
+}
+
+bool gid_is_system(gid_t gid) {
+        const UGIDAllocationRange *defs;
+        assert_se(defs = acquire_ugid_allocation_range());
+
+        return gid <= defs->system_gid_max;
+}
 
 UserRecord* user_record_new(void) {
         UserRecord *h;
@@ -112,6 +230,14 @@ static void fido2_hmac_salt_done(Fido2HmacSalt *s) {
         erase_and_free(s->hashed_password);
 }
 
+static void recovery_key_done(RecoveryKey *k) {
+        if (!k)
+                return;
+
+        free(k->type);
+        erase_and_free(k->hashed_password);
+}
+
 static UserRecord* user_record_free(UserRecord *h) {
         if (!h)
                 return NULL;
@@ -169,6 +295,10 @@ static UserRecord* user_record_free(UserRecord *h) {
         for (size_t i = 0; i < h->n_fido2_hmac_salt; i++)
                 fido2_hmac_salt_done(h->fido2_hmac_salt + i);
 
+        strv_free(h->recovery_key_type);
+        for (size_t i = 0; i < h->n_recovery_key; i++)
+                recovery_key_done(h->recovery_key + i);
+
         json_variant_unref(h->json);
 
         return mfree(h);
@@ -203,7 +333,7 @@ int json_dispatch_realm(const char *name, JsonVariant *variant, JsonDispatchFlag
         return 0;
 }
 
-static int json_dispatch_gecos(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+int json_dispatch_gecos(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
         char **s = userdata;
         const char *n;
 
@@ -924,6 +1054,46 @@ static int dispatch_fido2_hmac_salt(const char *name, JsonVariant *variant, Json
         return 0;
 }
 
+static int dispatch_recovery_key(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+        UserRecord *h = userdata;
+        JsonVariant *e;
+        int r;
+
+        if (!json_variant_is_array(variant))
+                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an array of objects.", strna(name));
+
+        JSON_VARIANT_ARRAY_FOREACH(e, variant) {
+                RecoveryKey *array, *k;
+
+                static const JsonDispatch recovery_key_dispatch_table[] = {
+                        { "type",           JSON_VARIANT_STRING, json_dispatch_string, 0,                                      JSON_MANDATORY },
+                        { "hashedPassword", JSON_VARIANT_STRING, json_dispatch_string, offsetof(RecoveryKey, hashed_password), JSON_MANDATORY },
+                        {},
+                };
+
+                if (!json_variant_is_object(e))
+                        return json_log(e, flags, SYNTHETIC_ERRNO(EINVAL), "JSON array element is not an object.");
+
+                array = reallocarray(h->recovery_key, h->n_recovery_key + 1, sizeof(RecoveryKey));
+                if (!array)
+                        return log_oom();
+
+                h->recovery_key = array;
+                k = h->recovery_key + h->n_recovery_key;
+                *k = (RecoveryKey) {};
+
+                r = json_dispatch(e, recovery_key_dispatch_table, NULL, flags, k);
+                if (r < 0) {
+                        recovery_key_done(k);
+                        return r;
+                }
+
+                h->n_recovery_key++;
+        }
+
+        return 0;
+}
+
 static int dispatch_privileged(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
 
         static const JsonDispatch privileged_dispatch_table[] = {
@@ -932,6 +1102,7 @@ static int dispatch_privileged(const char *name, JsonVariant *variant, JsonDispa
                 { "sshAuthorizedKeys",  _JSON_VARIANT_TYPE_INVALID, json_dispatch_strv,       offsetof(UserRecord, ssh_authorized_keys),  0         },
                 { "pkcs11EncryptedKey", JSON_VARIANT_ARRAY,         dispatch_pkcs11_key,      0,                                          0         },
                 { "fido2HmacSalt",      JSON_VARIANT_ARRAY,         dispatch_fido2_hmac_salt, 0,                                          0         },
+                { "recoveryKey",        JSON_VARIANT_ARRAY,         dispatch_recovery_key,    0,                                          0         },
                 {},
         };
 
@@ -1475,6 +1646,7 @@ int user_record_load(UserRecord *h, JsonVariant *v, UserRecordLoadFlags load_fla
                 { "passwordChangeNow",          JSON_VARIANT_BOOLEAN,       json_dispatch_tristate,               offsetof(UserRecord, password_change_now),           0         },
                 { "pkcs11TokenUri",             JSON_VARIANT_ARRAY,         dispatch_pkcs11_uri_array,            offsetof(UserRecord, pkcs11_token_uri),              0         },
                 { "fido2HmacCredential",        JSON_VARIANT_ARRAY,         dispatch_fido2_hmac_credential_array, 0,                                                   0         },
+                { "recoveryKeyType",            JSON_VARIANT_ARRAY,         json_dispatch_strv,                   offsetof(UserRecord, recovery_key_type),             0         },
 
                 { "secret",                     JSON_VARIANT_OBJECT,        dispatch_secret,                      0,                                                   0         },
                 { "privileged",                 JSON_VARIANT_OBJECT,        dispatch_privileged,                  0,                                                   0         },
@@ -1581,7 +1753,7 @@ UserStorage user_record_storage(UserRecord *h) {
 const char *user_record_file_system_type(UserRecord *h) {
         assert(h);
 
-        return h->file_system_type ?: "ext4";
+        return h->file_system_type ?: "btrfs";
 }
 
 const char *user_record_skeleton_directory(UserRecord *h) {
@@ -1865,6 +2037,11 @@ uint64_t user_record_ratelimit_next_try(UserRecord *h) {
             h->ratelimit_count == UINT64_MAX)
                 return UINT64_MAX;
 
+        if (h->ratelimit_begin_usec > now(CLOCK_REALTIME)) /* If the ratelimit time is in the future, then
+                                                            * the local clock is probably incorrect. Let's
+                                                            * not refuse login then. */
+                return UINT64_MAX;
+
         if (h->ratelimit_count < user_record_ratelimit_burst(h))
                 return 0;
 
@@ -1971,18 +2148,19 @@ int user_record_test_blocked(UserRecord *h) {
 
         assert(h);
 
-        n = now(CLOCK_REALTIME);
-        if (h->last_change_usec != UINT64_MAX &&
-            h->last_change_usec > n) /* Don't allow log ins when the record is from the future */
-                return -ESTALE;
-
         if (h->locked > 0)
                 return -ENOLCK;
+
+        n = now(CLOCK_REALTIME);
 
         if (h->not_before_usec != UINT64_MAX && n < h->not_before_usec)
                 return -EL2HLT;
         if (h->not_after_usec != UINT64_MAX && n > h->not_after_usec)
                 return -EL3HLT;
+
+        if (h->last_change_usec != UINT64_MAX &&
+            h->last_change_usec > n) /* Complain during log-ins when the record is from the future */
+                return -ESTALE;
 
         return 0;
 }
@@ -2001,6 +2179,7 @@ int user_record_test_password_change_required(UserRecord *h) {
             -EKEYEXPIRED: Password is about to expire, warn user
                -ENETDOWN: Record has expiration info but no password change timestamp
                   -EROFS: No password change required nor permitted
+                 -ESTALE: RTC likely incorrect, last password change is in the future
                        0: No password change required, but permitted
          */
 
@@ -2009,6 +2188,14 @@ int user_record_test_password_change_required(UserRecord *h) {
                 return -EKEYREVOKED;
 
         n = now(CLOCK_REALTIME);
+
+        /* Password change in the future? Then our RTC is likely incorrect */
+        if (h->last_password_change_usec != UINT64_MAX &&
+            h->last_password_change_usec > n &&
+            (h->password_change_min_usec != UINT64_MAX ||
+             h->password_change_max_usec != UINT64_MAX ||
+             h->password_change_inactive_usec != UINT64_MAX))
+            return -ESTALE;
 
         /* Then, let's check if password changing is currently allowed at all */
         if (h->password_change_min_usec != UINT64_MAX) {

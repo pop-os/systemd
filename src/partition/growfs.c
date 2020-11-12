@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -12,7 +12,7 @@
 
 #include "blockdev-util.h"
 #include "btrfs-util.h"
-#include "crypt-util.h"
+#include "cryptsetup-util.h"
 #include "device-nodes.h"
 #include "dissect-image.h"
 #include "escape.h"
@@ -31,10 +31,14 @@ static bool arg_dry_run = false;
 #if HAVE_LIBCRYPTSETUP
 static int resize_crypt_luks_device(dev_t devno, const char *fstype, dev_t main_devno) {
         _cleanup_free_ char *devpath = NULL, *main_devpath = NULL;
-        _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
+        _cleanup_(sym_crypt_freep) struct crypt_device *cd = NULL;
         _cleanup_close_ int main_devfd = -1;
         uint64_t size;
         int r;
+
+        r = dlopen_cryptsetup();
+        if (r < 0)
+                return log_error_errno(r, "Cannot resize LUKS device: %m");
 
         r = device_path_make_major_minor(S_IFBLK, main_devno, &main_devpath);
         if (r < 0)
@@ -53,20 +57,20 @@ static int resize_crypt_luks_device(dev_t devno, const char *fstype, dev_t main_
         if (r < 0)
                 return log_error_errno(r, "Failed to format major/minor path: %m");
 
-        r = crypt_init(&cd, devpath);
+        r = sym_crypt_init(&cd, devpath);
         if (r < 0)
                 return log_error_errno(r, "crypt_init(\"%s\") failed: %m", devpath);
 
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+        cryptsetup_enable_logging(cd);
 
-        r = crypt_load(cd, CRYPT_LUKS, NULL);
+        r = sym_crypt_load(cd, CRYPT_LUKS, NULL);
         if (r < 0)
                 return log_debug_errno(r, "Failed to load LUKS metadata for %s: %m", devpath);
 
         if (arg_dry_run)
                 return 0;
 
-        r = crypt_resize(cd, main_devpath, 0);
+        r = sym_crypt_resize(cd, main_devpath, 0);
         if (r < 0)
                 return log_error_errno(r, "crypt_resize() of %s failed: %m", devpath);
 
@@ -86,9 +90,7 @@ static int maybe_resize_underlying_device(const char *mountpath, dev_t main_devn
         int r;
 
 #if HAVE_LIBCRYPTSETUP
-        crypt_set_log_callback(NULL, cryptsetup_log_glue, NULL);
-        if (DEBUG_LOGGING)
-                crypt_set_debug_level(CRYPT_DEBUG_ALL);
+        cryptsetup_enable_logging(NULL);
 #endif
 
         r = get_block_device_harder(mountpath, &devno);

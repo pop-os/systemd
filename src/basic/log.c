@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -22,6 +22,7 @@
 #include "io-util.h"
 #include "log.h"
 #include "macro.h"
+#include "missing_syscall.h"
 #include "parse-util.h"
 #include "proc-cmdline.h"
 #include "process-util.h"
@@ -53,6 +54,7 @@ static bool syslog_is_stream = false;
 static bool show_color = false;
 static bool show_location = false;
 static bool show_time = false;
+static bool show_tid = false;
 
 static bool upgrade_syslog_to_journal = false;
 static bool always_reopen_console = false;
@@ -265,28 +267,39 @@ int log_open(void) {
                 return 0;
         }
 
-        if (log_target != LOG_TARGET_AUTO || getpid_cached() == 1 || stderr_is_journal()) {
+        if (getpid_cached() == 1 ||
+            stderr_is_journal() ||
+            IN_SET(log_target,
+                   LOG_TARGET_KMSG,
+                   LOG_TARGET_JOURNAL,
+                   LOG_TARGET_JOURNAL_OR_KMSG,
+                   LOG_TARGET_SYSLOG,
+                   LOG_TARGET_SYSLOG_OR_KMSG)) {
 
-                if (!prohibit_ipc &&
-                    IN_SET(log_target, LOG_TARGET_AUTO,
-                                       LOG_TARGET_JOURNAL_OR_KMSG,
-                                       LOG_TARGET_JOURNAL)) {
-                        r = log_open_journal();
-                        if (r >= 0) {
-                                log_close_syslog();
-                                log_close_console();
-                                return r;
+                if (!prohibit_ipc) {
+                        if (IN_SET(log_target,
+                                   LOG_TARGET_AUTO,
+                                   LOG_TARGET_JOURNAL_OR_KMSG,
+                                   LOG_TARGET_JOURNAL)) {
+
+                                r = log_open_journal();
+                                if (r >= 0) {
+                                        log_close_syslog();
+                                        log_close_console();
+                                        return r;
+                                }
                         }
-                }
 
-                if (!prohibit_ipc &&
-                    IN_SET(log_target, LOG_TARGET_SYSLOG_OR_KMSG,
-                                       LOG_TARGET_SYSLOG)) {
-                        r = log_open_syslog();
-                        if (r >= 0) {
-                                log_close_journal();
-                                log_close_console();
-                                return r;
+                        if (IN_SET(log_target,
+                                   LOG_TARGET_SYSLOG_OR_KMSG,
+                                   LOG_TARGET_SYSLOG)) {
+
+                                r = log_open_syslog();
+                                if (r >= 0) {
+                                        log_close_journal();
+                                        log_close_console();
+                                        return r;
+                                }
                         }
                 }
 
@@ -360,8 +373,9 @@ static int write_to_console(
 
         char location[256],
              header_time[FORMAT_TIMESTAMP_MAX],
-             prefix[1 + DECIMAL_STR_MAX(int) + 2];
-        struct iovec iovec[8] = {};
+             prefix[1 + DECIMAL_STR_MAX(int) + 2],
+             tid_string[3 + DECIMAL_STR_MAX(pid_t) + 1];
+        struct iovec iovec[9];
         const char *on = NULL, *off = NULL;
         size_t n = 0;
 
@@ -378,6 +392,11 @@ static int write_to_console(
                         iovec[n++] = IOVEC_MAKE_STRING(header_time);
                         iovec[n++] = IOVEC_MAKE_STRING(" ");
                 }
+        }
+
+        if (show_tid) {
+                xsprintf(tid_string, "(" PID_FMT ") ", gettid());
+                iovec[n++] = IOVEC_MAKE_STRING(tid_string);
         }
 
         if (show_color)
@@ -539,6 +558,7 @@ static int log_do_header(
         r = snprintf(header, size,
                      "PRIORITY=%i\n"
                      "SYSLOG_FACILITY=%i\n"
+                     "TID=" PID_FMT "\n"
                      "%s%.256s%s"        /* CODE_FILE */
                      "%s%.*i%s"          /* CODE_LINE */
                      "%s%.256s%s"        /* CODE_FUNC */
@@ -548,6 +568,7 @@ static int log_do_header(
                      "SYSLOG_IDENTIFIER=%.256s\n",
                      LOG_PRI(level),
                      LOG_FAC(level),
+                     gettid(),
                      isempty(file) ? "" : "CODE_FILE=",
                      isempty(file) ? "" : file,
                      isempty(file) ? "" : "\n",
@@ -838,7 +859,6 @@ _noreturn_ void log_assert_failed_realm(
                 const char *file,
                 int line,
                 const char *func) {
-        (void) log_open();
         log_assert(LOG_REALM_PLUS_LEVEL(realm, LOG_CRIT), text, file, line, func,
                    "Assertion '%s' failed at %s:%u, function %s(). Aborting.");
         abort();
@@ -850,7 +870,6 @@ _noreturn_ void log_assert_failed_unreachable_realm(
                 const char *file,
                 int line,
                 const char *func) {
-        (void) log_open();
         log_assert(LOG_REALM_PLUS_LEVEL(realm, LOG_CRIT), text, file, line, func,
                    "Code should not be reached '%s' at %s:%u, function %s(). Aborting.");
         abort();
@@ -1135,6 +1154,11 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (log_show_location_from_string(value ?: "1") < 0)
                         log_warning("Failed to parse log location setting '%s'. Ignoring.", value);
 
+        } else if (proc_cmdline_key_streq(key, "systemd.log_tid")) {
+
+                if (log_show_tid_from_string(value ?: "1") < 0)
+                        log_warning("Failed to parse log tid setting '%s'. Ignoring.", value);
+
         } else if (proc_cmdline_key_streq(key, "systemd.log_time")) {
 
                 if (log_show_time_from_string(value ?: "1") < 0)
@@ -1179,6 +1203,10 @@ void log_parse_environment_cli_realm(LogRealm realm) {
         e = getenv("SYSTEMD_LOG_TIME");
         if (e && log_show_time_from_string(e) < 0)
                 log_warning("Failed to parse log time '%s'. Ignoring.", e);
+
+        e = getenv("SYSTEMD_LOG_TID");
+        if (e && log_show_tid_from_string(e) < 0)
+                log_warning("Failed to parse log tid '%s'. Ignoring.", e);
 }
 
 LogTarget log_get_target(void) {
@@ -1213,6 +1241,14 @@ bool log_get_show_time(void) {
         return show_time;
 }
 
+void log_show_tid(bool b) {
+        show_tid = b;
+}
+
+bool log_get_show_tid(void) {
+        return show_tid;
+}
+
 int log_show_color_from_string(const char *e) {
         int t;
 
@@ -1243,6 +1279,17 @@ int log_show_time_from_string(const char *e) {
                 return t;
 
         log_show_time(t);
+        return 0;
+}
+
+int log_show_tid_from_string(const char *e) {
+        int t;
+
+        t = parse_boolean(e);
+        if (t < 0)
+                return t;
+
+        log_show_tid(t);
         return 0;
 }
 
