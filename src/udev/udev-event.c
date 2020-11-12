@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include <ctype.h>
 #include <errno.h>
@@ -747,9 +747,9 @@ int udev_event_spawn(UdevEvent *event,
                         return log_device_error_errno(event->dev, errno,
                                                       "Failed to create pipe for command '%s': %m", cmd);
 
-        argv = strv_split_full(cmd, NULL, SPLIT_QUOTES|SPLIT_RELAX);
-        if (!argv)
-                return log_oom();
+        r = strv_split_full(&argv, cmd, NULL, EXTRACT_UNQUOTE | EXTRACT_RELAX | EXTRACT_RETAIN_ESCAPE);
+        if (r < 0)
+                return log_device_error_errno(event->dev, r, "Failed to split command: %m");
 
         if (isempty(argv[0]))
                 return log_device_error_errno(event->dev, SYNTHETIC_ERRNO(EINVAL),
@@ -940,20 +940,31 @@ static void event_execute_rules_on_remove(
                 (void) udev_node_remove(dev);
 }
 
-static int udev_event_on_move(UdevEvent *event) {
-        sd_device *dev = event->dev;
+static int udev_event_on_move(sd_device *dev) {
         int r;
-
-        if (sd_device_get_devnum(dev, NULL) < 0) {
-                r = device_copy_properties(dev, event->dev_db_clone);
-                if (r < 0)
-                        log_device_debug_errno(dev, r, "Failed to copy properties from cloned sd_device object, ignoring: %m");
-        }
 
         /* Drop previously added property */
         r = device_add_property(dev, "ID_RENAMING", NULL);
         if (r < 0)
                 return log_device_debug_errno(dev, r, "Failed to remove 'ID_RENAMING' property: %m");
+
+        return 0;
+}
+
+static int copy_all_tags(sd_device *d, sd_device *s) {
+        const char *tag;
+        int r;
+
+        assert(d);
+
+        if (!s)
+                return 0;
+
+        for (tag = sd_device_get_tag_first(s); tag; tag = sd_device_get_tag_next(s)) {
+                r = device_add_tag(d, tag, false);
+                if (r < 0)
+                        return r;
+        }
 
         return 0;
 }
@@ -990,12 +1001,16 @@ int udev_event_execute_rules(UdevEvent *event,
         if (r < 0)
                 return log_device_debug_errno(dev, r, "Failed to clone sd_device object: %m");
 
+        r = copy_all_tags(dev, event->dev_db_clone);
+        if (r < 0)
+                log_device_warning_errno(dev, r, "Failed to copy all tags from old database entry, ignoring: %m");
+
         if (sd_device_get_devnum(dev, NULL) >= 0)
                 /* Disable watch during event processing. */
                 (void) udev_watch_end(event->dev_db_clone);
 
         if (action == DEVICE_ACTION_MOVE) {
-                r = udev_event_on_move(event);
+                r = udev_event_on_move(event->dev);
                 if (r < 0)
                         return r;
         }
@@ -1026,6 +1041,13 @@ int udev_event_execute_rules(UdevEvent *event,
         if (r < 0)
                 return log_device_debug_errno(dev, r, "Failed to update database under /run/udev/data/: %m");
 
+        /* Yes, we run update_devnode() twice, because in the first invocation, that is before update of udev database,
+         * it could happen that two contenders are replacing each other's symlink. Hence we run it again to make sure
+         * symlinks point to devices that claim them with the highest priority. */
+        r = update_devnode(event);
+        if (r < 0)
+                return r;
+
         device_set_is_initialized(dev);
 
         return 0;
@@ -1034,10 +1056,9 @@ int udev_event_execute_rules(UdevEvent *event,
 void udev_event_execute_run(UdevEvent *event, usec_t timeout_usec, int timeout_signal) {
         const char *command;
         void *val;
-        Iterator i;
         int r;
 
-        ORDERED_HASHMAP_FOREACH_KEY(val, command, event->run_list, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(val, command, event->run_list) {
                 UdevBuiltinCommand builtin_cmd = PTR_TO_UDEV_BUILTIN_CMD(val);
 
                 if (builtin_cmd != _UDEV_BUILTIN_INVALID) {

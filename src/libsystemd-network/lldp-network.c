@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/filter.h>
 #include <netinet/if_ether.h>
@@ -47,7 +47,7 @@ int lldp_network_bind_raw_socket(int ifindex) {
 
         assert(ifindex > 0);
 
-        fd = socket(PF_PACKET, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK,
+        fd = socket(AF_PACKET, SOCK_RAW|SOCK_CLOEXEC|SOCK_NONBLOCK,
                     htobe16(ETHERTYPE_LLDP));
         if (fd < 0)
                 return -errno;

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/utsname.h>
 
@@ -50,6 +50,8 @@ struct security_info {
         bool ip_filters_custom_egress;
 
         char *keyring_mode;
+        char *protect_proc;
+        char *proc_subset;
         bool lock_personality;
         bool memory_deny_write_execute;
         bool no_new_privileges;
@@ -135,6 +137,8 @@ static void security_info_free(struct security_info *i) {
         free(i->root_image);
 
         free(i->keyring_mode);
+        free(i->protect_proc);
+        free(i->proc_subset);
         free(i->notify_access);
 
         free(i->device_policy);
@@ -388,6 +392,44 @@ static int assess_keyring_mode(
         return 0;
 }
 
+static int assess_protect_proc(
+                const struct security_assessor *a,
+                const struct security_info *info,
+                const void *data,
+                uint64_t *ret_badness,
+                char **ret_description) {
+
+        assert(ret_badness);
+        assert(ret_description);
+
+        if (streq_ptr(info->protect_proc, "noaccess"))
+                *ret_badness = 1;
+        else if (STRPTR_IN_SET(info->protect_proc, "invisible", "ptraceable"))
+                *ret_badness = 0;
+        else
+                *ret_badness = 3;
+
+        *ret_description = NULL;
+
+        return 0;
+}
+
+static int assess_proc_subset(
+                const struct security_assessor *a,
+                const struct security_info *info,
+                const void *data,
+                uint64_t *ret_badness,
+                char **ret_description) {
+
+        assert(ret_badness);
+        assert(ret_description);
+
+        *ret_badness = !streq_ptr(info->proc_subset, "pid");
+        *ret_description = NULL;
+
+        return 0;
+}
+
 static int assess_notify_access(
                 const struct security_assessor *a,
                 const struct security_info *info,
@@ -493,7 +535,7 @@ static int assess_system_call_architectures(
 
 #if HAVE_SECCOMP
 
-static bool syscall_names_in_filter(Set *s, bool allow_list, const SyscallFilterSet *f) {
+static bool syscall_names_in_filter(Set *s, bool allow_list, const SyscallFilterSet *f, const char **ret_offending_syscall) {
         const char *syscall;
 
         NULSTR_FOREACH(syscall, f->value) {
@@ -503,7 +545,7 @@ static bool syscall_names_in_filter(Set *s, bool allow_list, const SyscallFilter
                         const SyscallFilterSet *g;
 
                         assert_se(g = syscall_filter_set_find(syscall));
-                        if (syscall_names_in_filter(s, allow_list, g))
+                        if (syscall_names_in_filter(s, allow_list, g, ret_offending_syscall))
                                 return true; /* bad! */
 
                         continue;
@@ -516,10 +558,13 @@ static bool syscall_names_in_filter(Set *s, bool allow_list, const SyscallFilter
 
                 if (set_contains(s, syscall) == allow_list) {
                         log_debug("Offending syscall filter item: %s", syscall);
+                        if (ret_offending_syscall)
+                                *ret_offending_syscall = syscall;
                         return true; /* bad! */
                 }
         }
 
+        *ret_offending_syscall = NULL;
         return false;
 }
 
@@ -530,42 +575,48 @@ static int assess_system_call_filter(
                 uint64_t *ret_badness,
                 char **ret_description) {
 
-        const SyscallFilterSet *f;
-        char *d = NULL;
-        uint64_t b;
-
         assert(a);
         assert(info);
         assert(ret_badness);
         assert(ret_description);
 
         assert(a->parameter < _SYSCALL_FILTER_SET_MAX);
-        f = syscall_filter_sets + a->parameter;
+        const SyscallFilterSet *f = syscall_filter_sets + a->parameter;
+
+        char *d = NULL;
+        uint64_t b;
 
         if (!info->system_call_filter_allow_list && set_isempty(info->system_call_filter)) {
                 d = strdup("Service does not filter system calls");
                 b = 10;
         } else {
                 bool bad;
+                const char *offender = NULL;
 
                 log_debug("Analyzing system call filter, checking against: %s", f->name);
-                bad = syscall_names_in_filter(info->system_call_filter, info->system_call_filter_allow_list, f);
+                bad = syscall_names_in_filter(info->system_call_filter, info->system_call_filter_allow_list, f, &offender);
                 log_debug("Result: %s", bad ? "bad" : "good");
 
                 if (info->system_call_filter_allow_list) {
                         if (bad) {
-                                (void) asprintf(&d, "System call allow list defined for service, and %s is included", f->name);
+                                (void) asprintf(&d, "System call allow list defined for service, and %s is included "
+                                                "(e.g. %s is allowed)",
+                                                f->name, offender);
                                 b = 9;
                         } else {
-                                (void) asprintf(&d, "System call allow list defined for service, and %s is not included", f->name);
+                                (void) asprintf(&d, "System call allow list defined for service, and %s is not included",
+                                                f->name);
                                 b = 0;
                         }
                 } else {
                         if (bad) {
-                                (void) asprintf(&d, "System call deny list defined for service, and %s is not included", f->name);
+                                (void) asprintf(&d, "System call deny list defined for service, and %s is not included "
+                                                "(e.g. %s is allowed)",
+                                                f->name, offender);
                                 b = 10;
                         } else {
-                                (void) asprintf(&d, "System call deny list defined for service, and %s is included", f->name);
+                                (void) asprintf(&d, "System call deny list defined for service, and %s is included",
+                                                f->name);
                                 b = 0;
                         }
                 }
@@ -1139,6 +1190,24 @@ static const struct security_assessor security_assessor_table[] = {
                 .weight = 1000,
                 .range = 1,
                 .assess = assess_keyring_mode,
+        },
+        {
+                .id = "ProtectProc=",
+                .url = "https://www.freedesktop.org/software/systemd/man/systemd.exec.html#ProtectProc=",
+                .description_good = "Service has restricted access to process tree (/proc hidepid=)",
+                .description_bad = "Service has full access to process tree (/proc hidepid=)",
+                .weight = 1000,
+                .range = 3,
+                .assess = assess_protect_proc,
+        },
+        {
+                .id = "ProcSubset=",
+                .url = "https://www.freedesktop.org/software/systemd/man/systemd.exec.html#ProcSubset=",
+                .description_good = "Service has no access to non-process /proc files (/proc subset=)",
+                .description_bad = "Service has full access to non-process /proc files (/proc subset=)",
+                .weight = 10,
+                .range = 1,
+                .assess = assess_proc_subset,
         },
         {
                 .id = "NotifyAccess=",
@@ -1899,6 +1968,8 @@ static int acquire_security_info(sd_bus *bus, const char *name, struct security_
                 { "IPEgressFilterPath",      "as",      property_read_ip_filters,                0                                                         },
                 { "Id",                      "s",       NULL,                                    offsetof(struct security_info, id)                        },
                 { "KeyringMode",             "s",       NULL,                                    offsetof(struct security_info, keyring_mode)              },
+                { "ProtectProc",             "s",       NULL,                                    offsetof(struct security_info, protect_proc)              },
+                { "ProcSubset",              "s",       NULL,                                    offsetof(struct security_info, proc_subset)               },
                 { "LoadState",               "s",       NULL,                                    offsetof(struct security_info, load_state)                },
                 { "LockPersonality",         "b",       NULL,                                    offsetof(struct security_info, lock_personality)          },
                 { "MemoryDenyWriteExecute",  "b",       NULL,                                    offsetof(struct security_info, memory_deny_write_execute) },
@@ -2114,10 +2185,10 @@ int analyze_security(sd_bus *bus, char **units, AnalyzeSecurityFlags flags) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to mangle unit name '%s': %m", *i);
 
-                        if (!endswith(mangled, ".service")) {
-                                log_error("Unit %s is not a service unit, refusing.", *i);
-                                return -EINVAL;
-                        }
+                        if (!endswith(mangled, ".service"))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Unit %s is not a service unit, refusing.",
+                                                       *i);
 
                         if (unit_name_is_valid(mangled, UNIT_NAME_TEMPLATE)) {
                                 r = unit_name_replace_instance(mangled, "test-instance", &instance);

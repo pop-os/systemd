@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <getopt.h>
 #include <stdio.h>
@@ -538,14 +538,13 @@ static int parse_argv(int argc, char *argv[]) {
                 arg_aggressive_gc = true;
         }
 
-        if (arg_stdio == ARG_STDIO_AUTO) {
+        if (arg_stdio == ARG_STDIO_AUTO)
                 /* If we both --pty and --pipe are specified we'll automatically pick --pty if we are connected fully
                  * to a TTY and pick direct fd passing otherwise. This way, we automatically adapt to usage in a shell
                  * pipeline, but we are neatly interactive with tty-level isolation otherwise. */
                 arg_stdio = isatty(STDIN_FILENO) && isatty(STDOUT_FILENO) && isatty(STDERR_FILENO) ?
                         ARG_STDIO_PTY :
                         ARG_STDIO_DIRECT;
-        }
 
         if (argc > optind) {
                 char **l;
@@ -1146,7 +1145,7 @@ static int start_transient_service(
                                                &pty_reply,
                                                "s", arg_host);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to get machine PTY: %s", bus_error_message(&error, -r));
+                                return log_error_errno(r, "Failed to get machine PTY: %s", bus_error_message(&error, r));
 
                         r = sd_bus_message_read(pty_reply, "hs", &master, &s);
                         if (r < 0)
@@ -1336,7 +1335,7 @@ static int start_transient_service(
                         if (c.cpu_usage_nsec != NSEC_INFINITY) {
                                 char ts[FORMAT_TIMESPAN_MAX];
                                 log_info("CPU time consumed: %s",
-                                         format_timespan(ts, sizeof ts, (c.cpu_usage_nsec + NSEC_PER_USEC - 1) / NSEC_PER_USEC, USEC_PER_MSEC));
+                                         format_timespan(ts, sizeof ts, DIV_ROUND_UP(c.cpu_usage_nsec, NSEC_PER_USEC), USEC_PER_MSEC));
                         }
 
                         if (c.ip_ingress_bytes != UINT64_MAX) {
@@ -1468,7 +1467,7 @@ static int start_transient_scope(sd_bus *bus) {
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
         if (r < 0)
-                return log_error_errno(r, "Failed to start transient scope unit: %s", bus_error_message(&error, -r));
+                return log_error_errno(r, "Failed to start transient scope unit: %s", bus_error_message(&error, r));
 
         r = sd_bus_message_read(reply, "o", &object);
         if (r < 0)
@@ -1688,7 +1687,7 @@ static int start_transient_trigger(
 
         r = sd_bus_call(bus, m, 0, &error, &reply);
         if (r < 0)
-                return log_error_errno(r, "Failed to start transient %s unit: %s", suffix + 1, bus_error_message(&error, -r));
+                return log_error_errno(r, "Failed to start transient %s unit: %s", suffix + 1, bus_error_message(&error, r));
 
         r = sd_bus_message_read(reply, "o", &object);
         if (r < 0)
@@ -1720,12 +1719,16 @@ static int run(int argc, char* argv[]) {
         if (r <= 0)
                 return r;
 
-        if (!strv_isempty(arg_cmdline) && arg_transport == BUS_TRANSPORT_LOCAL) {
+        if (!strv_isempty(arg_cmdline) &&
+            arg_transport == BUS_TRANSPORT_LOCAL &&
+            !strv_find_startswith(arg_property, "RootDirectory=") &&
+            !strv_find_startswith(arg_property, "RootImage=")) {
+                /* Patch in an absolute path to fail early for user convenience, but only when we can do it
+                 * (i.e. we will be running from the same file system). This also uses the user's $PATH,
+                 * while we use a fixed search path in the manager. */
+
                 _cleanup_free_ char *command = NULL;
-
-                /* Patch in an absolute path */
-
-                r = find_binary(arg_cmdline[0], &command);
+                r = find_executable(arg_cmdline[0], &command);
                 if (r < 0)
                         return log_error_errno(r, "Failed to find executable %s: %m", arg_cmdline[0]);
 

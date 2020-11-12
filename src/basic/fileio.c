@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <ctype.h>
 #include <errno.h>
@@ -117,7 +117,7 @@ int write_string_stream_ts(
                 FILE *f,
                 const char *line,
                 WriteStringFileFlags flags,
-                struct timespec *ts) {
+                const struct timespec *ts) {
 
         bool needs_nl;
         int r, fd;
@@ -161,7 +161,7 @@ int write_string_stream_ts(
                 return r;
 
         if (ts) {
-                struct timespec twice[2] = {*ts, *ts};
+                const struct timespec twice[2] = {*ts, *ts};
 
                 if (futimens(fd, twice) < 0)
                         return -errno;
@@ -174,7 +174,7 @@ static int write_string_file_atomic(
                 const char *fn,
                 const char *line,
                 WriteStringFileFlags flags,
-                struct timespec *ts) {
+                const struct timespec *ts) {
 
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_free_ char *p = NULL;
@@ -221,7 +221,7 @@ int write_string_file_ts(
                 const char *fn,
                 const char *line,
                 WriteStringFileFlags flags,
-                struct timespec *ts) {
+                const struct timespec *ts) {
 
         _cleanup_fclose_ FILE *f = NULL;
         int q, r, fd;
@@ -252,7 +252,8 @@ int write_string_file_ts(
         /* We manually build our own version of fopen(..., "we") that works without O_CREAT and with O_NOFOLLOW if needed. */
         fd = open(fn, O_WRONLY|O_CLOEXEC|O_NOCTTY |
                   (FLAGS_SET(flags, WRITE_STRING_FILE_NOFOLLOW) ? O_NOFOLLOW : 0) |
-                  (FLAGS_SET(flags, WRITE_STRING_FILE_CREATE) ? O_CREAT : 0),
+                  (FLAGS_SET(flags, WRITE_STRING_FILE_CREATE) ? O_CREAT : 0) |
+                  (FLAGS_SET(flags, WRITE_STRING_FILE_TRUNCATE) ? O_TRUNC : 0),
                   (FLAGS_SET(flags, WRITE_STRING_FILE_MODE_0600) ? 0600 : 0666));
         if (fd < 0) {
                 r = -errno;
@@ -601,7 +602,13 @@ finalize:
         return r;
 }
 
-int read_full_file_full(int dir_fd, const char *filename, ReadFullFileFlags flags, char **contents, size_t *size) {
+int read_full_file_full(
+                int dir_fd,
+                const char *filename,
+                ReadFullFileFlags flags,
+                const char *bind_name,
+                char **contents, size_t *size) {
+
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
@@ -643,6 +650,20 @@ int read_full_file_full(int dir_fd, const char *filename, ReadFullFileFlags flag
                 sk = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
                 if (sk < 0)
                         return -errno;
+
+                if (bind_name) {
+                        /* If the caller specified a socket name to bind to, do so before connecting. This is
+                         * useful to communicate some minor, short meta-information token from the client to
+                         * the server. */
+                        union sockaddr_union bsa;
+
+                        r = sockaddr_un_set_path(&bsa.un, bind_name);
+                        if (r < 0)
+                                return r;
+
+                        if (bind(sk, &bsa.sa, r) < 0)
+                                return r;
+                }
 
                 if (connect(sk, &sa.sa, SOCKADDR_UN_LEN(sa.un)) < 0)
                         return errno == ENOTSOCK ? -ENXIO : -errno; /* propagate original error if this is
@@ -938,6 +959,42 @@ int search_and_fopen_nulstr(const char *path, const char *mode, const char *root
                 return -ENOMEM;
 
         return search_and_fopen_internal(path, mode, root, s, _f);
+}
+
+int chase_symlinks_and_fopen_unlocked(
+                const char *path,
+                const char *root,
+                unsigned chase_flags,
+                const char *open_flags,
+                FILE **ret_file,
+                char **ret_path) {
+
+        _cleanup_close_ int fd = -1;
+        _cleanup_free_ char *final_path = NULL;
+        int mode_flags, r;
+        FILE *f;
+
+        assert(path);
+        assert(open_flags);
+        assert(ret_file);
+
+        mode_flags = mode_to_flags(open_flags);
+        if (mode_flags < 0)
+                return mode_flags;
+
+        fd = chase_symlinks_and_open(path, root, chase_flags, mode_flags, ret_path ? &final_path : NULL);
+        if (fd < 0)
+                return fd;
+
+        r = fdopen_unlocked(fd, open_flags, &f);
+        if (r < 0)
+                return r;
+        TAKE_FD(fd);
+
+        *ret_file = f;
+        if (ret_path)
+                *ret_path = TAKE_PTR(final_path);
+        return 0;
 }
 
 int fflush_and_check(FILE *f) {

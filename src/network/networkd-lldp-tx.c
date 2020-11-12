@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <endian.h>
 #include <inttypes.h>
@@ -267,7 +267,7 @@ static int lldp_send_packet(
 
         memcpy(sa.ll.sll_addr, address, ETH_ALEN);
 
-        fd = socket(PF_PACKET, SOCK_RAW|SOCK_CLOEXEC, IPPROTO_RAW);
+        fd = socket(AF_PACKET, SOCK_RAW|SOCK_CLOEXEC, IPPROTO_RAW);
         if (fd < 0)
                 return -errno;
 
@@ -313,7 +313,7 @@ static int link_send_lldp(Link *link) {
                 SD_LLDP_SYSTEM_CAPABILITIES_STATION;
 
         r = lldp_make_packet(link->network->lldp_emit,
-                             &link->mac,
+                             &link->hw_addr.addr.ether,
                              sd_id128_to_string(machine_id, machine_id_string),
                              link->ifname,
                              (uint16_t) ttl,
@@ -332,7 +332,7 @@ static int link_send_lldp(Link *link) {
 
 static int on_lldp_timer(sd_event_source *s, usec_t t, void *userdata) {
         Link *link = userdata;
-        usec_t current, delay, next;
+        usec_t delay;
         int r;
 
         assert(s);
@@ -347,12 +347,10 @@ static int on_lldp_timer(sd_event_source *s, usec_t t, void *userdata) {
         if (link->lldp_tx_fast > 0)
                 link->lldp_tx_fast--;
 
-        assert_se(sd_event_now(sd_event_source_get_event(s), clock_boottime_or_monotonic(), &current) >= 0);
-
         delay = link->lldp_tx_fast > 0 ? LLDP_FAST_TX_USEC : LLDP_TX_INTERVAL_USEC;
-        next = usec_add(usec_add(current, delay), (usec_t) random_u64() % LLDP_JITTER_USEC);
+        delay = usec_add(delay, (usec_t) random_u64() % LLDP_JITTER_USEC);
 
-        r = sd_event_source_set_time(s, next);
+        r = sd_event_source_set_time_relative(s, delay);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to restart LLDP timer: %m");
 
@@ -369,7 +367,7 @@ int link_lldp_emit_start(Link *link) {
 
         assert(link);
 
-        if (!link->network || link->network->lldp_emit == LLDP_EMIT_NO) {
+        if (!link_lldp_emit_enabled(link)) {
                 link_lldp_emit_stop(link);
                 return 0;
         }

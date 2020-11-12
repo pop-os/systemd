@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #if HAVE_LIBFIDO2
 #include <fido.h>
@@ -70,15 +70,8 @@ static int add_fido2_salt(
                 size_t secret_size) {
 
         _cleanup_(json_variant_unrefp) JsonVariant *l = NULL, *w = NULL, *e = NULL;
-        _cleanup_(erase_and_freep) char *base64_encoded = NULL;
-        _cleanup_free_ char *unix_salt = NULL;
-        struct crypt_data cd = {};
-        char *k;
+        _cleanup_(erase_and_freep) char *base64_encoded = NULL, *hashed = NULL;
         int r;
-
-        r = make_salt(&unix_salt);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate salt: %m");
 
         /* Before using UNIX hashing on the supplied key we base64 encode it, since crypt_r() and friends
          * expect a NUL terminated string, and we use a binary key */
@@ -86,15 +79,14 @@ static int add_fido2_salt(
         if (r < 0)
                 return log_error_errno(r, "Failed to base64 encode secret key: %m");
 
-        errno = 0;
-        k = crypt_r(base64_encoded, unix_salt, &cd);
-        if (!k)
+        r = hash_password(base64_encoded, &hashed);
+        if (r < 0)
                 return log_error_errno(errno_or_else(EINVAL), "Failed to UNIX hash secret key: %m");
 
         r = json_build(&e, JSON_BUILD_OBJECT(
                                        JSON_BUILD_PAIR("credential", JSON_BUILD_BASE64(cid, cid_size)),
                                        JSON_BUILD_PAIR("salt", JSON_BUILD_BASE64(fido2_salt, fido2_salt_size)),
-                                       JSON_BUILD_PAIR("hashedPassword", JSON_BUILD_STRING(k))));
+                                       JSON_BUILD_PAIR("hashedPassword", JSON_BUILD_STRING(hashed))));
         if (r < 0)
                 return log_error_errno(r, "Failed to build FIDO2 salt JSON key object: %m");
 
@@ -409,7 +401,8 @@ int identity_add_fido2_parameters(
 
         return 0;
 #else
-        return log_error_errno(EOPNOTSUPP, "FIDO2 tokens not supported on this build.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "FIDO2 tokens not supported on this build.");
 #endif
 }
 
@@ -475,7 +468,8 @@ finish:
         fido_dev_info_free(&di, allocated);
         return r;
 #else
-        return log_error_errno(EOPNOTSUPP, "FIDO2 tokens not supported on this build.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "FIDO2 tokens not supported on this build.");
 #endif
 }
 
@@ -534,6 +528,7 @@ finish:
         fido_dev_info_free(&di, di_size);
         return r;
 #else
-        return log_error_errno(EOPNOTSUPP, "FIDO2 tokens not supported on this build.");
+        return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                               "FIDO2 tokens not supported on this build.");
 #endif
 }

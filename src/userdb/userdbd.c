@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -11,7 +11,7 @@
 
 /* This service offers two Varlink services, both implementing io.systemd.UserDatabase:
  *
- *         → io.systemd.NameServiceSwitch: this is a compatibility interface for glibc NSS: it response to
+ *         → io.systemd.NameServiceSwitch: this is a compatibility interface for glibc NSS: it responds to
  *           name lookups by checking the classic NSS interfaces and responding that.
  *
  *         → io.systemd.Multiplexer: this multiplexes lookup requests to all Varlink services that have a

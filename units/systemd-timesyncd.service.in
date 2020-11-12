@@ -1,4 +1,4 @@
-#  SPDX-License-Identifier: LGPL-2.1+
+#  SPDX-License-Identifier: LGPL-2.1-or-later
 #
 #  This file is part of systemd.
 #
@@ -20,6 +20,7 @@ Wants=time-set.target time-sync.target
 
 [Service]
 AmbientCapabilities=CAP_SYS_TIME
+BusName=org.freedesktop.timesync1
 CapabilityBoundingSet=CAP_SYS_TIME
 ExecStart=!!@rootlibexecdir@/systemd-timesyncd
 LockPersonality=yes
@@ -27,12 +28,13 @@ MemoryDenyWriteExecute=yes
 NoNewPrivileges=yes
 PrivateDevices=yes
 PrivateTmp=yes
+ProtectProc=invisible
 ProtectControlGroups=yes
 ProtectHome=yes
 ProtectHostname=yes
+ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
-ProtectKernelLogs=yes
 ProtectSystem=strict
 Restart=always
 RestartSec=0

@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # Call built systemd-hwdb update on our hwdb files to ensure that they parse
 # without error
@@ -18,7 +18,7 @@ if [ ! -x "$SYSTEMD_HWDB" ]; then
     exit 1
 fi
 
-D=$(mktemp --directory)
+D=$(mktemp --tmpdir --directory "hwdb-test.XXXXXXXXXX")
 trap "rm -rf '$D'" EXIT INT QUIT PIPE
 mkdir -p "$D/etc/udev"
 ln -s "$ROOTDIR/hwdb.d" "$D/etc/udev/hwdb.d"

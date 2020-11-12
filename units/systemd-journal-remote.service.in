@@ -1,4 +1,4 @@
-#  SPDX-License-Identifier: LGPL-2.1+
+#  SPDX-License-Identifier: LGPL-2.1-or-later
 #
 #  This file is part of systemd.
 #
@@ -21,13 +21,14 @@ NoNewPrivileges=yes
 PrivateDevices=yes
 PrivateNetwork=yes
 PrivateTmp=yes
+ProtectProc=invisible
 ProtectClock=yes
 ProtectControlGroups=yes
 ProtectHome=yes
 ProtectHostname=yes
+ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
-ProtectKernelLogs=yes
 ProtectSystem=strict
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes

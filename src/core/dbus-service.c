@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 
@@ -42,7 +42,6 @@ static int property_get_exit_status_set(
 
         const ExitStatusSet *status_set = userdata;
         unsigned n;
-        Iterator i;
         int r;
 
         assert(bus);
@@ -57,7 +56,7 @@ static int property_get_exit_status_set(
         if (r < 0)
                 return r;
 
-        BITMAP_FOREACH(n, &status_set->status, i) {
+        BITMAP_FOREACH(n, &status_set->status) {
                 assert(n < 256);
 
                 r = sd_bus_message_append_basic(reply, 'i', &n);
@@ -73,7 +72,7 @@ static int property_get_exit_status_set(
         if (r < 0)
                 return r;
 
-        BITMAP_FOREACH(n, &status_set->signal, i) {
+        BITMAP_FOREACH(n, &status_set->signal) {
                 const char *str;
 
                 str = signal_to_string(n);
@@ -457,7 +456,6 @@ int bus_service_set_property(
 int bus_service_commit_properties(Unit *u) {
         assert(u);
 
-        unit_invalidate_cgroup_members_masks(u);
         unit_realize_cgroup(u);
 
         return 0;

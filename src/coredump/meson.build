@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 systemd_coredump_sources = files('''
         coredump.c
@@ -13,7 +13,7 @@ endif
 
 coredumpctl_sources = files('coredumpctl.c')
 
-if conf.get('ENABLE_COREDUMP') == 1
+if conf.get('ENABLE_COREDUMP') == 1 and install_sysconfdir
         install_data('coredump.conf',
                      install_dir : pkgsysconfdir)
 endif

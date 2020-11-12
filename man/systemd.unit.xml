@@ -4,7 +4,7 @@
 <!ENTITY % entities SYSTEM "custom-entities.ent" >
 %entities;
 ]>
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd.unit"
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -60,12 +60,14 @@
 <filename>$XDG_RUNTIME_DIR/systemd/user.control/*</filename>
 <filename>$XDG_RUNTIME_DIR/systemd/transient/*</filename>
 <filename>$XDG_RUNTIME_DIR/systemd/generator.early/*</filename>
-<filename>~/.config/systemd/user/*</filename>
+<filename>$XDG_CONFIG_HOME/systemd/user/*</filename>
+<filename>$XDG_CONFIG_DIRS/systemd/user/*</filename>
 <filename>/etc/systemd/user/*</filename>
 <filename>$XDG_RUNTIME_DIR/systemd/user/*</filename>
 <filename>/run/systemd/user/*</filename>
 <filename>$XDG_RUNTIME_DIR/systemd/generator/*</filename>
-<filename>~/.local/share/systemd/user/*</filename>
+<filename>$XDG_DATA_HOME/systemd/user/*</filename>
+<filename>$XDG_DATA_DIRS/systemd/user/*</filename>
 <filename index='false'>…</filename>
 <filename>/usr/lib/systemd/user/*</filename>
 <filename>$XDG_RUNTIME_DIR/systemd/generator.late/*</filename></literallayout></para>
@@ -211,9 +213,9 @@
 
     <para>In addition to <filename>/etc/systemd/system</filename>, the drop-in <literal>.d/</literal>
     directories for system services can be placed in <filename>/usr/lib/systemd/system</filename> or
-    <filename>/run/systemd/system</filename> directories. Drop-in files in <filename>/etc</filename>
-    take precedence over those in <filename>/run</filename> which in turn take precedence over those
-    in <filename>/usr/lib</filename>. Drop-in files under any of these directories take precedence
+    <filename>/run/systemd/system</filename> directories. Drop-in files in <filename>/etc/</filename>
+    take precedence over those in <filename>/run/</filename> which in turn take precedence over those
+    in <filename>/usr/lib/</filename>. Drop-in files under any of these directories take precedence
     over unit files wherever located. Multiple drop-in files with different names are applied in
     lexicographic order, regardless of which of the directories they reside in.</para>
 
@@ -255,9 +257,8 @@
     start it even manually.</para>
 
     <para>The unit file format is covered by the
-    <ulink
-    url="https://www.freedesktop.org/wiki/Software/systemd/InterfaceStabilityPromise">Interface
-    Stability Promise</ulink>.</para>
+    <ulink url="https://systemd.io/PORTABILITY_AND_STABILITY/">Interface
+    Portability and Stability Promise</ulink>.</para>
 
   </refsect1>
 
@@ -265,10 +266,10 @@
     <title>String Escaping for Inclusion in Unit Names</title>
 
     <para>Sometimes it is useful to convert arbitrary strings into unit names. To facilitate this, a method of string
-    escaping is used, in order to map strings containing arbitrary byte values (except NUL) into valid unit names and
-    their restricted character set. A common special case are unit names that reflect paths to objects in the file
-    system hierarchy. Example: a device unit <filename>dev-sda.device</filename> refers to a device with the device
-    node <filename index="false">/dev/sda</filename> in the file system.</para>
+    escaping is used, in order to map strings containing arbitrary byte values (except <constant>NUL</constant>) into
+    valid unit names and their restricted character set. A common special case are unit names that reflect paths to
+    objects in the file system hierarchy. Example: a device unit <filename>dev-sda.device</filename> refers to a device
+    with the device node <filename index="false">/dev/sda</filename> in the file system.</para>
 
     <para>The escaping algorithm operates as follows: given a string, any <literal>/</literal> character is replaced by
     <literal>-</literal>, and all other characters which are not ASCII alphanumerics or <literal>_</literal> are
@@ -278,7 +279,7 @@
     <para>When the input qualifies as absolute file system path, this algorithm is extended slightly: the path to the
     root directory <literal>/</literal> is encoded as single dash <literal>-</literal>. In addition, any leading,
     trailing or duplicate <literal>/</literal> characters are removed from the string before transformation. Example:
-    <filename>/foo//bar/baz/</filename> becomes <literal>foo-bar-baz</literal>.</para>
+    <filename index="false">/foo//bar/baz/</filename> becomes <literal>foo-bar-baz</literal>.</para>
 
     <para>This escaping is fully reversible, as long as it is known whether the escaped string was a path (the
     unescaping results are different for paths and non-path strings). The
@@ -436,6 +437,10 @@
             <entry>User configuration (<varname>$XDG_CONFIG_HOME</varname> is used if set, <filename>~/.config</filename> otherwise)</entry>
           </row>
           <row>
+            <entry><filename>$XDG_CONFIG_DIRS/systemd/user</filename> or <filename>/etc/xdg/systemd/user</filename></entry>
+            <entry>Additional configuration directories as specified by the XDG base directory specification (<varname>$XDG_CONFIG_DIRS</varname> is used if set, <filename>/etc/xdg</filename> otherwise)</entry>
+          </row>
+          <row>
             <entry><filename>/etc/systemd/user</filename></entry>
             <entry>User units created by the administrator</entry>
           </row>
@@ -455,6 +460,10 @@
           <row>
             <entry><filename>$XDG_DATA_HOME/systemd/user</filename> or <filename>$HOME/.local/share/systemd/user</filename></entry>
             <entry>Units of packages that have been installed in the home directory (<varname>$XDG_DATA_HOME</varname> is used if set, <filename>~/.local/share</filename> otherwise)</entry>
+          </row>
+          <row>
+            <entry><filename>$XDG_DATA_DIRS/systemd/user</filename> or <filename>/usr/local/share/systemd/user</filename> and <filename>/usr/share/systemd/user</filename></entry>
+            <entry>Additional data directories as specified by the XDG base directory specification (<varname>$XDG_DATA_DIRS</varname> is used if set, <filename>/usr/local/share</filename> and <filename>/usr/share</filename> otherwise)</entry>
           </row>
           <row>
             <entry><filename>$dir/systemd/user</filename> for each <varname index="false">$dir</varname> in <varname>$XDG_DATA_DIRS</varname></entry>
@@ -794,9 +803,9 @@
         <varname>PrivateTmp=</varname> directives (see
         <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
         details). If a unit that has this setting set is started, its processes will see the same
-        <filename>/tmp</filename>, <filename>/var/tmp</filename> and network namespace as one listed unit
+        <filename>/tmp/</filename>, <filename>/var/tmp/</filename> and network namespace as one listed unit
         that is started. If multiple listed units are already started, it is not defined which namespace is
-        joined.  Note that this setting only has an effect if
+        joined. Note that this setting only has an effect if
         <varname>PrivateNetwork=</varname>/<varname>NetworkNamespacePath=</varname> and/or
         <varname>PrivateTmp=</varname> is enabled for both the unit that joins the namespace and the unit
         whose namespace is joined.</para></listitem>
@@ -1091,9 +1100,6 @@
       <para>Except for <varname>ConditionPathIsSymbolicLink=</varname>, all path checks follow symlinks.</para>
 
       <variablelist class='unit-directives'>
-        <!-- We do not document ConditionNull= here, as it is not particularly useful and probably just
-             confusing. -->
-
         <varlistentry>
           <term><varname>ConditionArchitecture=</varname></term>
 
@@ -1154,6 +1160,7 @@
           <literal>vmware</literal>,
           <literal>microsoft</literal>,
           <literal>oracle</literal>,
+          <literal>powervm</literal>,
           <literal>xen</literal>,
           <literal>bochs</literal>,
           <literal>uml</literal>,
@@ -1168,6 +1175,7 @@
           <literal>rkt</literal>,
           <literal>wsl</literal>,
           <literal>proot</literal>,
+          <literal>pouch</literal>,
           <literal>acrn</literal> to test
           against a specific implementation, or
           <literal>private-users</literal> to check whether we are running in a user namespace. See
@@ -1199,7 +1207,10 @@
           argument must either be a single word, or an assignment (i.e. two words, separated by
           <literal>=</literal>). In the former case the kernel command line is searched for the word
           appearing as is, or as left hand side of an assignment. In the latter case, the exact assignment is
-          looked for with right and left hand side matching.</para>
+          looked for with right and left hand side matching. This operates on the kernel command line
+          communicated to userspace via <filename>/proc/cmdline</filename>, except when the service manager
+          is invoked as payload of a container manager, in which case the command line of <filename>PID
+          1</filename> is used instead (i.e. <filename>/proc/1/cmdline</filename>).</para>
           </listitem>
         </varlistentry>
 
@@ -1279,13 +1290,13 @@
         <varlistentry>
           <term><varname>ConditionNeedsUpdate=</varname></term>
 
-          <listitem><para>Takes one of <filename>/var</filename> or <filename>/etc</filename> as argument,
+          <listitem><para>Takes one of <filename>/var/</filename> or <filename>/etc/</filename> as argument,
           possibly prefixed with a <literal>!</literal> (to invert the condition). This condition may be
           used to conditionalize units on whether the specified directory requires an update because
-          <filename>/usr</filename>'s modification time is newer than the stamp file
+          <filename>/usr/</filename>'s modification time is newer than the stamp file
           <filename>.updated</filename> in the specified directory. This is useful to implement offline
-          updates of the vendor operating system resources in <filename>/usr</filename> that require updating
-          of <filename>/etc</filename> or <filename>/var</filename> on the next following boot. Units making
+          updates of the vendor operating system resources in <filename>/usr/</filename> that require updating
+          of <filename>/etc/</filename> or <filename>/var/</filename> on the next following boot. Units making
           use of this condition should order themselves before
           <citerefentry><refentrytitle>systemd-update-done.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
           to make sure they run before the stamp file's modification time gets reset indicating a completed
@@ -1304,10 +1315,16 @@
           <term><varname>ConditionFirstBoot=</varname></term>
 
           <listitem><para>Takes a boolean argument. This condition may be used to conditionalize units on
-          whether the system is booting up with an unpopulated <filename>/etc</filename> directory
-          (specifically: an <filename>/etc</filename> with no <filename>/etc/machine-id</filename>). This may
-          be used to populate <filename>/etc</filename> on the first boot after factory reset, or when a new
-          system instance boots up for the first time.</para>
+          whether the system is booting up for the first time.  This roughly means that <filename>/etc/</filename>
+          is unpopulated (for details, see "First Boot Semantics" in
+          <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry>).
+          This may be used to populate <filename>/etc/</filename> on the first boot after factory reset, or
+          when a new system instance boots up for the first time.</para>
+
+          <para>For robustness, units with <varname>ConditionFirstBoot=yes</varname> should order themselves
+          before <filename>first-boot-complete.target</filename> and pull in this passive target with
+          <varname>Wants=</varname>.  This ensures that in a case of an aborted first boot, these units will
+          be re-run during the next system startup.</para>
 
           <para>If the <varname>systemd.condition-first-boot=</varname> option is specified on the kernel
           command line (taking a boolean), it will override the result of this condition check, taking
@@ -1763,7 +1780,7 @@
           <row>
             <entry><literal>%E</literal></entry>
             <entry>Configuration directory root</entry>
-            <entry>This is either <filename>/etc</filename> (for the system manager) or the path <literal>$XDG_CONFIG_HOME</literal> resolves to (for user managers).</entry>
+            <entry>This is either <filename>/etc/</filename> (for the system manager) or the path <literal>$XDG_CONFIG_HOME</literal> resolves to (for user managers).</entry>
           </row>
           <row>
             <entry><literal>%f</literal></entry>
@@ -1849,13 +1866,9 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
           <row>
             <entry><literal>%t</literal></entry>
             <entry>Runtime directory root</entry>
-            <entry>This is either <filename>/run</filename> (for the system manager) or the path <literal>$XDG_RUNTIME_DIR</literal> resolves to (for user managers).</entry>
+            <entry>This is either <filename>/run/</filename> (for the system manager) or the path <literal>$XDG_RUNTIME_DIR</literal> resolves to (for user managers).</entry>
           </row>
-          <row>
-            <entry><literal>%T</literal></entry>
-            <entry>Directory for temporary files</entry>
-            <entry>This is either <filename>/tmp</filename> or the path <literal>$TMPDIR</literal>, <literal>$TEMP</literal> or <literal>$TMP</literal> are set to.</entry>
-          </row>
+          <xi:include href="standard-specifiers.xml" xpointer="T"/>
           <row>
             <entry><literal>%g</literal></entry>
             <entry>User group</entry>
@@ -1881,11 +1894,7 @@ Note that this setting is <emphasis>not</emphasis> influenced by the <varname>Us
 Note that this setting is <emphasis>not</emphasis> influenced by the <varname>User=</varname> setting configurable in the [Service] section of the service unit.</entry>
           </row>
           <xi:include href="standard-specifiers.xml" xpointer="v"/>
-          <row>
-            <entry><literal>%V</literal></entry>
-            <entry>Directory for larger and persistent temporary files</entry>
-            <entry>This is either <filename>/var/tmp</filename> or the path <literal>$TMPDIR</literal>, <literal>$TEMP</literal> or <literal>$TMP</literal> are set to.</entry>
-          </row>
+          <xi:include href="standard-specifiers.xml" xpointer="V"/>
           <xi:include href="standard-specifiers.xml" xpointer="w"/>
           <xi:include href="standard-specifiers.xml" xpointer="W"/>
           <xi:include href="standard-specifiers.xml" xpointer="percent"/>
@@ -1915,7 +1924,7 @@ ExecStart=/usr/sbin/foo-daemon
 
       <para>After running <command>systemctl enable</command>, a
       symlink
-      <filename>/etc/systemd/system/multi-user.target.wants/foo.service</filename>
+      <filename index="false">/etc/systemd/system/multi-user.target.wants/foo.service</filename>
       linking to the actual unit will be created. It tells systemd to
       pull in the unit when starting
       <filename>multi-user.target</filename>. The inverse

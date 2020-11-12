@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <openssl/evp.h>
@@ -45,6 +45,7 @@ struct Manager {
         Home *gc_focus;
 
         VarlinkServer *varlink_server;
+        char *userdb_service;
 
         EVP_PKEY *private_key; /* actually a pair of private and public key */
         Hashmap *public_keys; /* key name [char*] → publick key [EVP_PKEY*] */

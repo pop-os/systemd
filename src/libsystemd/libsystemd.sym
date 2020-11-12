@@ -1,5 +1,5 @@
 /***
-  SPDX-License-Identifier: LGPL-2.1+
+  SPDX-License-Identifier: LGPL-2.1-or-later
 
   systemd is free software; you can redistribute it and/or modify it
   under the terms of the GNU Lesser General Public License as published by
@@ -721,3 +721,18 @@ global:
         sd_journal_enumerate_available_data;
         sd_journal_enumerate_available_unique;
 } LIBSYSTEMD_245;
+
+LIBSYSTEMD_247 {
+global:
+        sd_event_add_time_relative;
+        sd_event_source_set_time_relative;
+        sd_event_source_get_exit_on_failure;
+        sd_event_source_set_exit_on_failure;
+
+        sd_bus_error_has_names_sentinel;
+
+        sd_device_get_current_tag_first;
+        sd_device_get_current_tag_next;
+        sd_device_has_current_tag;
+        sd_device_set_sysattr_valuef;
+} LIBSYSTEMD_246;

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <getopt.h>
 #include <utmp.h>
@@ -8,7 +8,6 @@
 #include "fd-util.h"
 #include "format-table.h"
 #include "format-util.h"
-#include "group-record-show.h"
 #include "main-func.h"
 #include "pager.h"
 #include "parse-util.h"
@@ -232,6 +231,7 @@ static int show_group(GroupRecord *gr, Table *table) {
                                 TABLE_STRING, gr->group_name,
                                 TABLE_STRING, user_disposition_to_string(group_record_disposition(gr)),
                                 TABLE_GID, gr->gid,
+                                TABLE_STRING, gr->description,
                                 TABLE_INT, (int) group_record_disposition(gr));
                 if (r < 0)
                         return table_log_add_error(r);
@@ -255,13 +255,14 @@ static int display_group(int argc, char *argv[], void *userdata) {
                 arg_output = argc > 1 ? OUTPUT_FRIENDLY : OUTPUT_TABLE;
 
         if (arg_output == OUTPUT_TABLE) {
-                table = table_new("name", "disposition", "gid", "disposition-numeric");
+                table = table_new("name", "disposition", "gid", "description", "disposition-numeric");
                 if (!table)
                         return log_oom();
 
                 (void) table_set_align_percent(table, table_get_cell(table, 0, 2), 100);
+                (void) table_set_empty_string(table, "-");
                 (void) table_set_sort(table, (size_t) 3, (size_t) 2, (size_t) -1);
-                (void) table_set_display(table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) -1);
+                (void) table_set_display(table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 3, (size_t) -1);
         }
 
         if (argc > 1) {
@@ -779,10 +780,8 @@ static int run(int argc, char *argv[]) {
                         return log_error_errno(r, "Failed to set $SYSTEMD_ONLY_USERDB: %m");
 
                 log_info("Enabled services: %s", e);
-        } else {
-                if (unsetenv("SYSTEMD_ONLY_USERDB") < 0)
-                        return log_error_errno(r, "Failed to unset $SYSTEMD_ONLY_USERDB: %m");
-        }
+        } else
+                assert_se(unsetenv("SYSTEMD_ONLY_USERDB") == 0);
 
         return dispatch_verb(argc, argv, verbs, NULL);
 }

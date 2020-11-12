@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sched.h>
 #include <sys/prctl.h>
@@ -81,6 +81,7 @@ int import_fork_tar_x(const char *path, pid_t *ret) {
         if (r == 0) {
                 const char *cmdline[] = {
                        "tar",
+                       "--ignore-zeros",
                        "--numeric-owner",
                        "-C", path,
                        "-px",

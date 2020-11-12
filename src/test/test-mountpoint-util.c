@@ -1,5 +1,6 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <sched.h>
 #include <sys/mount.h>
 #include <unistd.h>
 
@@ -38,7 +39,6 @@ static void test_mount_propagation_flags(const char *name, int ret, unsigned lon
 static void test_mnt_id(void) {
         _cleanup_fclose_ FILE *f = NULL;
         _cleanup_hashmap_free_free_ Hashmap *h = NULL;
-        Iterator i;
         char *p;
         void *k;
         int r;
@@ -72,7 +72,7 @@ static void test_mnt_id(void) {
                 path = NULL;
         }
 
-        HASHMAP_FOREACH_KEY(p, k, h, i) {
+        HASHMAP_FOREACH_KEY(p, k, h) {
                 int mnt_id = PTR_TO_INT(k), mnt_id2;
 
                 r = path_get_mnt_id(p, &mnt_id2);
@@ -258,6 +258,16 @@ static void test_path_is_mount_point(void) {
 
 int main(int argc, char *argv[]) {
         test_setup_logging(LOG_DEBUG);
+
+        /* let's move into our own mount namespace with all propagation from the host turned off, so that
+         * /proc/self/mountinfo is static and constant for the whole time our test runs. */
+        if (unshare(CLONE_NEWNS) < 0) {
+                if (!ERRNO_IS_PRIVILEGE(errno))
+                        return log_error_errno(errno, "Failed to detach mount namespace: %m");
+
+                log_notice("Lacking privilege to create separate mount namespace, proceeding in originating mount namespace.");
+        } else
+                assert_se(mount(NULL, "/", NULL, MS_PRIVATE | MS_REC, NULL) >= 0);
 
         test_mount_propagation_flags("shared", 0, MS_SHARED);
         test_mount_propagation_flags("slave", 0, MS_SLAVE);

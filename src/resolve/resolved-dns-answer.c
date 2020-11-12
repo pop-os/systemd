@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <stdio.h>
 
@@ -10,6 +10,9 @@
 
 DnsAnswer *dns_answer_new(size_t n) {
         DnsAnswer *a;
+
+        if (n > UINT16_MAX) /* We can only place 64K RRs in an answer at max */
+                n = UINT16_MAX;
 
         a = malloc0(offsetof(DnsAnswer, items) + sizeof(DnsAnswerItem) * n);
         if (!a)
@@ -318,6 +321,11 @@ int dns_answer_merge(DnsAnswer *a, DnsAnswer *b, DnsAnswer **ret) {
 
         assert(ret);
 
+        if (a == b) {
+                *ret = dns_answer_ref(a);
+                return 0;
+        }
+
         if (dns_answer_size(a) <= 0) {
                 *ret = dns_answer_ref(b);
                 return 0;
@@ -624,12 +632,16 @@ int dns_answer_reserve(DnsAnswer **a, size_t n_free) {
                         return -EBUSY;
 
                 ns = (*a)->n_rrs + n_free;
+                if (ns > UINT16_MAX) /* Maximum number of RRs we can stick into a DNS packet section */
+                        ns = UINT16_MAX;
 
                 if ((*a)->n_allocated >= ns)
                         return 0;
 
                 /* Allocate more than we need */
                 ns *= 2;
+                if (ns > UINT16_MAX)
+                        ns = UINT16_MAX;
 
                 n = realloc(*a, offsetof(DnsAnswer, items) + sizeof(DnsAnswerItem) * ns);
                 if (!n)
@@ -702,17 +714,21 @@ void dns_answer_dump(DnsAnswer *answer, FILE *f) {
 
                 fputs(t, f);
 
-                if (ifindex != 0 || flags & (DNS_ANSWER_AUTHENTICATED|DNS_ANSWER_CACHEABLE|DNS_ANSWER_SHARED_OWNER))
+                if (ifindex != 0 || flags != 0)
                         fputs("\t;", f);
 
                 if (ifindex != 0)
-                        printf(" ifindex=%i", ifindex);
+                        fprintf(f, " ifindex=%i", ifindex);
                 if (flags & DNS_ANSWER_AUTHENTICATED)
                         fputs(" authenticated", f);
                 if (flags & DNS_ANSWER_CACHEABLE)
                         fputs(" cacheable", f);
                 if (flags & DNS_ANSWER_SHARED_OWNER)
                         fputs(" shared-owner", f);
+                if (flags & DNS_ANSWER_CACHE_FLUSH)
+                        fputs(" cache-flush", f);
+                if (flags & DNS_ANSWER_GOODBYE)
+                        fputs(" goodbye", f);
 
                 fputc('\n', f);
         }

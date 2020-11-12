@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <security/pam_ext.h>
 #include <security/pam_modules.h>
@@ -7,6 +7,7 @@
 
 #include "bus-common-errors.h"
 #include "bus-locator.h"
+#include "bus-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "home-util.h"
@@ -141,7 +142,7 @@ static int acquire_user_record(
         if (r == PAM_SUCCESS && json) {
                 /* We determined earlier that this is not a homed user? Then exit early. (We use -1 as
                  * negative cache indicator) */
-                if (json == (void*) -1)
+                if (json == POINTER_MAX)
                         return PAM_USER_UNKNOWN;
         } else {
                 _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -153,9 +154,7 @@ static int acquire_user_record(
 
                 r = bus_call_method(bus, bus_home_mgr, "GetUserRecordByName", &error, &reply, "s", username);
                 if (r < 0) {
-                        if (sd_bus_error_has_name(&error, SD_BUS_ERROR_SERVICE_UNKNOWN) ||
-                            sd_bus_error_has_name(&error, SD_BUS_ERROR_NAME_HAS_NO_OWNER) ||
-                            sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT)) {
+                        if (bus_error_is_unknown_service(&error)) {
                                 pam_syslog(handle, LOG_DEBUG, "systemd-homed is not available: %s", bus_error_message(&error, r));
                                 goto user_unknown;
                         }
@@ -236,7 +235,7 @@ static int acquire_user_record(
 
 user_unknown:
         /* Cache this, so that we don't check again */
-        r = pam_set_data(handle, homed_field, (void*) -1, NULL);
+        r = pam_set_data(handle, homed_field, POINTER_MAX, NULL);
         if (r != PAM_SUCCESS)
                 pam_syslog(handle, LOG_ERR, "Failed to set PAM user record data '%s' to invalid, ignoring: %s",
                            homed_field, pam_strerror(handle, r));
@@ -834,8 +833,6 @@ _public_ PAM_EXTERN int pam_sm_acct_mgmt(
                 pam_syslog(handle, LOG_DEBUG, "pam-systemd-homed account management");
 
         r = acquire_home(handle, /* please_authenticate = */ false, please_suspend, debug);
-        if (r == PAM_USER_UNKNOWN)
-                return PAM_SUCCESS; /* we don't have anything to say about users we don't manage */
         if (r != PAM_SUCCESS)
                 return r;
 
@@ -847,8 +844,8 @@ _public_ PAM_EXTERN int pam_sm_acct_mgmt(
         switch (r) {
 
         case -ESTALE:
-                (void) pam_prompt(handle, PAM_ERROR_MSG, NULL, "User record is newer than current system time, prohibiting access.");
-                return PAM_ACCT_EXPIRED;
+                pam_syslog(handle, LOG_WARNING, "User record for '%s' is newer than current system time, assuming incorrect system clock, allowing access.", ur->user_name);
+                break;
 
         case -ENOLCK:
                 (void) pam_prompt(handle, PAM_ERROR_MSG, NULL, "User record is blocked, prohibiting access.");
@@ -903,6 +900,11 @@ _public_ PAM_EXTERN int pam_sm_acct_mgmt(
 
         case -EKEYEXPIRED:
                 (void) pam_prompt(handle, PAM_ERROR_MSG, NULL, "Password will expire soon, please change.");
+                break;
+
+        case -ESTALE:
+                /* If the system clock is wrong, let's log but continue */
+                pam_syslog(handle, LOG_WARNING, "Couldn't check if password change is required, last change is in the future, system clock likely wrong.");
                 break;
 
         case -EROFS:

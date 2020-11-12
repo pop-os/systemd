@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 
@@ -351,11 +351,10 @@ static void slice_enumerate_perpetual(Manager *m) {
 static bool slice_freezer_action_supported_by_children(Unit *s) {
         Unit *member;
         void *v;
-        Iterator i;
 
         assert(s);
 
-        HASHMAP_FOREACH_KEY(v, member, s->dependencies[UNIT_BEFORE], i) {
+        HASHMAP_FOREACH_KEY(v, member, s->dependencies[UNIT_BEFORE]) {
                 int r;
 
                 if (UNIT_DEREF(member->slice) != s)
@@ -377,7 +376,6 @@ static bool slice_freezer_action_supported_by_children(Unit *s) {
 static int slice_freezer_action(Unit *s, FreezerAction action) {
         Unit *member;
         void *v;
-        Iterator i;
         int r;
 
         assert(s);
@@ -388,7 +386,7 @@ static int slice_freezer_action(Unit *s, FreezerAction action) {
                 return 0;
         }
 
-        HASHMAP_FOREACH_KEY(v, member, s->dependencies[UNIT_BEFORE], i) {
+        HASHMAP_FOREACH_KEY(v, member, s->dependencies[UNIT_BEFORE]) {
                 if (UNIT_DEREF(member->slice) != s)
                         continue;
 
@@ -437,6 +435,7 @@ const UnitVTable slice_vtable = {
         .private_section = "Slice",
 
         .can_transient = true,
+        .can_set_managed_oom = true,
 
         .init = slice_init,
         .load = slice_load,

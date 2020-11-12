@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <nss.h>
 #include <pthread.h>
@@ -6,13 +6,13 @@
 #include "env-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
-#include "group-record-nss.h"
 #include "macro.h"
 #include "nss-systemd.h"
 #include "nss-util.h"
 #include "pthread-util.h"
 #include "signal-util.h"
 #include "strv.h"
+#include "user-record-nss.h"
 #include "user-util.h"
 #include "userdb-glue.h"
 #include "userdb.h"
@@ -595,7 +595,7 @@ enum nss_status _nss_systemd_initgroups_dyn(
                                 new_size = limit;
 
                         /* Enlarge buffer */
-                        new_groups = realloc(*groupsp, new_size * sizeof(**groupsp));
+                        new_groups = reallocarray(*groupsp, new_size, sizeof(**groupsp));
                         if (!new_groups) {
                                 UNPROTECT_ERRNO;
                                 *errnop = ENOMEM;

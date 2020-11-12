@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <stdio.h>
 #include <sys/types.h>
@@ -31,6 +31,7 @@
 #include "strv.h"
 #include "tests.h"
 #include "tomoyo-util.h"
+#include "user-record.h"
 #include "user-util.h"
 #include "virt.h"
 
@@ -433,20 +434,6 @@ static void test_condition_test_kernel_version(void) {
 
         v = strjoina("<   ", u.release);
         condition = condition_new(CONDITION_KERNEL_VERSION, v, false, false);
-        assert_se(condition);
-        assert_se(condition_test(condition, environ) == 0);
-        condition_free(condition);
-}
-
-static void test_condition_test_null(void) {
-        Condition *condition;
-
-        condition = condition_new(CONDITION_NULL, NULL, false, false);
-        assert_se(condition);
-        assert_se(condition_test(condition, environ) > 0);
-        condition_free(condition);
-
-        condition = condition_new(CONDITION_NULL, NULL, false, true);
         assert_se(condition);
         assert_se(condition_test(condition, environ) == 0);
         condition_free(condition);
@@ -868,7 +855,6 @@ int main(int argc, char *argv[]) {
         test_condition_test_architecture();
         test_condition_test_kernel_command_line();
         test_condition_test_kernel_version();
-        test_condition_test_null();
         test_condition_test_security();
         print_securities();
         test_condition_test_virtualization();

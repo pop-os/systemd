@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="resolved.conf" conditional='ENABLE_RESOLVE'
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -63,7 +63,7 @@
       <varlistentry>
         <term><varname>FallbackDNS=</varname></term>
         <listitem><para>A space-separated list of IPv4 and IPv6 addresses to use as the fallback DNS servers. Please see
-        <varname>DNS=</varname> for acceptable format of adddresses. Any per-link DNS servers obtained from
+        <varname>DNS=</varname> for acceptable format of addresses. Any per-link DNS servers obtained from
         <citerefentry><refentrytitle>systemd-networkd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
         take precedence over this setting, as do any servers set via <varname>DNS=</varname> above or
         <filename>/etc/resolv.conf</filename>. This setting is hence only used if no other DNS server information is
@@ -267,6 +267,31 @@
 
         <para>Note that the DNS stub listener is turned off implicitly when its listening address and port are already
         in use.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>DNSStubListenerExtra=</varname></term>
+        <listitem><para>Takes an IPv4 or IPv6 address to listen on. The address may be optionally
+        prefixed with a protocol name (<literal>udp</literal> or <literal>tcp</literal>) separated with
+        <literal>:</literal>. If the protocol is not specified, the service will listen on both UDP and
+        TCP. It may be also optionally suffixed by a numeric port number with separator
+        <literal>:</literal>. When an IPv6 address is specified with a port number, then the address
+        must be in the square brackets. If the port is not specified, then the service uses port 53.
+        Note that this is independent of the primary DNS stub configured with
+        <varname>DNSStubListener=</varname>, and only configures <emphasis>additional</emphasis>
+        sockets to listen on. This option can be specified multiple times. If an empty string is
+        assigned, then the all previous assignments are cleared. Defaults to unset.</para>
+
+        <para>Examples:
+        <programlisting>DNSStubListenerExtra=192.168.10.10
+DNSStubListenerExtra=2001:db8:0:f102::10
+DNSStubListenerExtra=192.168.10.11:9953
+DNSStubListenerExtra=[2001:db8:0:f102::11]:9953
+DNSStubListenerExtra=tcp:192.168.10.12
+DNSStubListenerExtra=udp:2001:db8:0:f102::12
+DNSStubListenerExtra=tcp:192.168.10.13:9953
+DNSStubListenerExtra=udp:[2001:db8:0:f102::13]:9953</programlisting>
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>

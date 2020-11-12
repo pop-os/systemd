@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <fcntl.h>
@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include "sd-id128.h"
 
 #include "macro.h"
 #include "string-util.h"
@@ -65,6 +67,7 @@ int json_variant_new_array_bytes(JsonVariant **ret, const void *p, size_t n);
 int json_variant_new_array_strv(JsonVariant **ret, char **l);
 int json_variant_new_object(JsonVariant **ret, JsonVariant **array, size_t n);
 int json_variant_new_null(JsonVariant **ret);
+int json_variant_new_id128(JsonVariant **ret, sd_id128_t id);
 
 static inline int json_variant_new_string(JsonVariant **ret, const char *s) {
         return json_variant_new_stringn(ret, s, (size_t) -1);
@@ -183,6 +186,7 @@ int json_variant_set_field_string(JsonVariant **v, const char *field, const char
 int json_variant_set_field_integer(JsonVariant **v, const char *field, intmax_t value);
 int json_variant_set_field_unsigned(JsonVariant **v, const char *field, uintmax_t value);
 int json_variant_set_field_boolean(JsonVariant **v, const char *field, bool b);
+int json_variant_set_field_strv(JsonVariant **v, const char *field, char **l);
 
 int json_variant_append_array(JsonVariant **v, JsonVariant *element);
 
@@ -223,6 +227,8 @@ enum {
         _JSON_BUILD_LITERAL,
         _JSON_BUILD_STRV,
         _JSON_BUILD_BASE64,
+        _JSON_BUILD_ID128,
+        _JSON_BUILD_BYTE_ARRAY,
         _JSON_BUILD_MAX,
 };
 
@@ -243,6 +249,8 @@ enum {
 #define JSON_BUILD_LITERAL(l) _JSON_BUILD_LITERAL, ({ const char *_x = l; _x; })
 #define JSON_BUILD_STRV(l) _JSON_BUILD_STRV, ({ char **_x = l; _x; })
 #define JSON_BUILD_BASE64(p, n) _JSON_BUILD_BASE64, ({ const void *_x = p; _x; }), ({ size_t _y = n; _y; })
+#define JSON_BUILD_ID128(id) _JSON_BUILD_ID128, ({ sd_id128_t _x = id; _x; })
+#define JSON_BUILD_BYTE_ARRAY(v, n) _JSON_BUILD_BYTE_ARRAY, ({ const void *_x = v; _x; }), ({ size_t _y = n; _y; })
 
 int json_build(JsonVariant **ret, ...);
 int json_buildv(JsonVariant **ret, va_list ap);
@@ -295,6 +303,12 @@ assert_cc(sizeof(uintmax_t) == sizeof(uint64_t));
 
 assert_cc(sizeof(intmax_t) == sizeof(int64_t));
 #define json_dispatch_int64 json_dispatch_integer
+
+assert_cc(sizeof(uint32_t) == sizeof(unsigned));
+#define json_dispatch_uint json_dispatch_uint32
+
+assert_cc(sizeof(int32_t) == sizeof(int));
+#define json_dispatch_int json_dispatch_int32
 
 static inline int json_dispatch_level(JsonDispatchFlags flags) {
 

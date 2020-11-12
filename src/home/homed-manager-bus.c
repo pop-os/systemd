@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/capability.h>
 
@@ -25,7 +25,6 @@ static int property_get_auto_login(
                 sd_bus_error *error) {
 
         Manager *m = userdata;
-        Iterator i;
         Home *h;
         int r;
 
@@ -37,7 +36,7 @@ static int property_get_auto_login(
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(h, m->homes_by_name, i) {
+        HASHMAP_FOREACH(h, m->homes_by_name) {
                 _cleanup_(strv_freep) char **seats = NULL;
                 _cleanup_free_ char *home_path = NULL;
                 char **s;
@@ -151,7 +150,6 @@ static int method_list_homes(
 
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
-        Iterator i;
         Home *h;
         int r;
 
@@ -166,7 +164,7 @@ static int method_list_homes(
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(h, m->homes_by_uid, i) {
+        HASHMAP_FOREACH(h, m->homes_by_uid) {
                 _cleanup_free_ char *path = NULL;
 
                 r = bus_home_path(h, &path);
@@ -560,7 +558,6 @@ static int method_lock_all_homes(sd_bus_message *message, void *userdata, sd_bus
         _cleanup_(operation_unrefp) Operation *o = NULL;
         bool waiting = false;
         Manager *m = userdata;
-        Iterator i;
         Home *h;
         int r;
 
@@ -570,7 +567,7 @@ static int method_lock_all_homes(sd_bus_message *message, void *userdata, sd_bus
          * for every suitable home we have and only when all of them completed we send a reply indicating
          * completion. */
 
-        HASHMAP_FOREACH(h, m->homes_by_name, i) {
+        HASHMAP_FOREACH(h, m->homes_by_name) {
 
                 /* Automatically suspend all homes that have at least one client referencing it that asked
                  * for "please suspend", and no client that asked for "please do not suspend". */
@@ -594,7 +591,45 @@ static int method_lock_all_homes(sd_bus_message *message, void *userdata, sd_bus
         }
 
         if (waiting) /* At least one lock operation was enqeued, let's leave here without a reply: it will
-                        * be sent as soon as the last of the lock operations completed. */
+                      * be sent as soon as the last of the lock operations completed. */
+                return 1;
+
+        return sd_bus_reply_method_return(message, NULL);
+}
+
+static int method_deactivate_all_homes(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_(operation_unrefp) Operation *o = NULL;
+        bool waiting = false;
+        Manager *m = userdata;
+        Home *h;
+        int r;
+
+        assert(m);
+
+        /* This is called from systemd-homed-activate.service's ExecStop= command to ensure that all home
+         * directories are shutdown before the system goes down. Note that we don't do this from
+         * systemd-homed.service itself since we want to allow restarting of it without tearing down all home
+         * directories. */
+
+        HASHMAP_FOREACH(h, m->homes_by_name) {
+
+                if (!o) {
+                        o = operation_new(OPERATION_DEACTIVATE_ALL, message);
+                        if (!o)
+                                return -ENOMEM;
+                }
+
+                log_info("Automatically deactivating home of user %s.", h->user_name);
+
+                r = home_schedule_operation(h, o, error);
+                if (r < 0)
+                        return r;
+
+                waiting = true;
+        }
+
+        if (waiting) /* At least one lock operation was enqeued, let's leave here without a reply: it will be
+                      * sent as soon as the last of the deactivation operations completed. */
                 return 1;
 
         return sd_bus_reply_method_return(message, NULL);
@@ -807,6 +842,7 @@ static const sd_bus_vtable manager_vtable[] = {
 
         /* An operation that acts on all homes that allow it */
         SD_BUS_METHOD("LockAllHomes", NULL, NULL, method_lock_all_homes, 0),
+        SD_BUS_METHOD("DeactivateAllHomes", NULL, NULL, method_deactivate_all_homes, 0),
 
         SD_BUS_VTABLE_END
 };

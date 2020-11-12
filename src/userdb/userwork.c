@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <poll.h>
 #include <sys/wait.h>
@@ -7,7 +7,6 @@
 
 #include "env-util.h"
 #include "fd-util.h"
-#include "group-record-nss.h"
 #include "group-record.h"
 #include "io-util.h"
 #include "main-func.h"

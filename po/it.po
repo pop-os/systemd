@@ -1,23 +1,22 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # Italian translation for systemd package
 # Traduzione in italiano per il pacchetto systemd
 # Daniele Medri <dmedri@gmail.com>, 2013-2020.
-#
 msgid ""
 msgstr ""
 "Project-Id-Version: systemd\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2020-02-27 17:10+0100\n"
-"PO-Revision-Date: 2020-02-27 17:22+0100\n"
+"Report-Msgid-Bugs-To: https://github.com/systemd/systemd/issues\n"
+"POT-Creation-Date: 2020-08-19 18:02+0200\n"
+"PO-Revision-Date: 2020-10-03 09:52+0200\n"
 "Last-Translator: Daniele Medri <dmedri@gmail.com>\n"
-"Language-Team: Italian\n"
 "Language: it\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
 "X-Generator: Poedit 2.2.1\n"
+"Language-Team: \n"
 
 #: src/core/org.freedesktop.systemd1.policy.in:22
 msgid "Send passphrase back to system"
@@ -27,8 +26,7 @@ msgstr "Invia la frase segreta (passphrase) al sistema"
 msgid ""
 "Authentication is required to send the entered passphrase back to the system."
 msgstr ""
-"Autenticazione richiesta per inviare la frase segreta (passphrase) al "
-"sistema."
+"Autenticazione richiesta per inviare la frase segreta (passphrase) al sistema."
 
 #: src/core/org.freedesktop.systemd1.policy.in:33
 msgid "Manage system services or other units"
@@ -75,16 +73,16 @@ msgid "Create a home area"
 msgstr "Crea un'area home"
 
 #: src/home/org.freedesktop.home1.policy:14
-msgid "Authentication is required to creat a user's home area."
-msgstr "Autenticazione richiesta per creare un'area home per l'utente."
+msgid "Authentication is required to create a user's home area."
+msgstr "Autenticazione richiesta per creare l'area home di un utente."
 
 #: src/home/org.freedesktop.home1.policy:23
 msgid "Remove a home area"
 msgstr "Rimuovi un'area home"
 
 #: src/home/org.freedesktop.home1.policy:24
-msgid "Authentication is required to remov a user's home area."
-msgstr "Autenticazione richiesta per rimuovere un'area home per l'utente."
+msgid "Authentication is required to remove a user's home area."
+msgstr "Autenticazione richiesta per rimuovere l'area home di un utente."
 
 #: src/home/org.freedesktop.home1.policy:33
 msgid "Check credentials of a home area"
@@ -102,26 +100,26 @@ msgid "Update a home area"
 msgstr "Aggiorna un'area home"
 
 #: src/home/org.freedesktop.home1.policy:44
-msgid "Authentication is required to updat a user's home area."
-msgstr "Autenticazione richiesta per aggiornare un'area home per l'utente."
+msgid "Authentication is required to update a user's home area."
+msgstr "Autenticazione richiesta per aggiornare l'area home di un l'utente."
 
 #: src/home/org.freedesktop.home1.policy:53
 msgid "Resize a home area"
 msgstr "Ridimensiona un'area home"
 
 #: src/home/org.freedesktop.home1.policy:54
-msgid "Authentication is required to resiz a user's home area."
-msgstr "Autenticazione richiesta per ridimensionare l'area home dell'utente."
+msgid "Authentication is required to resize a user's home area."
+msgstr "Autenticazione richiesta per ridimensionare l'area home di un'utente."
 
 #: src/home/org.freedesktop.home1.policy:63
 msgid "Change password of a home area"
-msgstr "Cambia password di un'area home"
+msgstr "Modifica password di un'area home"
 
 #: src/home/org.freedesktop.home1.policy:64
-msgid "Authentication is required to chang the password of a user's home area."
+msgid "Authentication is required to change the password of a user's home area."
 msgstr ""
-"Autenticazione richiesta per cambiare le password per l'area home "
-"dell'utente."
+"Autenticazione richiesta per modificare la password dell'area home di un "
+"utente."
 
 #: src/hostname/org.freedesktop.hostname1.policy:20
 msgid "Set hostname"
@@ -159,7 +157,7 @@ msgstr "Ottieni UUID del prodotto"
 
 #: src/hostname/org.freedesktop.hostname1.policy:52
 msgid "Authentication is required to get product UUID."
-msgstr "Autenticazione richiesta per ottenere UUID del prodotto."
+msgstr "Autenticazione richiesta per ottenere lo UUID del prodotto."
 
 #: src/import/org.freedesktop.import1.policy:22
 msgid "Import a VM or container image"
@@ -192,8 +190,7 @@ msgstr "Configura le impostazioni regionali di sistema"
 #: src/locale/org.freedesktop.locale1.policy:23
 msgid "Authentication is required to set the system locale."
 msgstr ""
-"Autenticazione richiesta per configurare le impostazioni regionali di "
-"sistema."
+"Autenticazione richiesta per configurare le impostazioni regionali di sistema."
 
 #: src/locale/org.freedesktop.locale1.policy:33
 msgid "Set system keyboard settings"
@@ -226,49 +223,50 @@ msgstr ""
 
 #: src/login/org.freedesktop.login1.policy:44
 msgid "Allow applications to inhibit system sleep"
-msgstr "Consenti alle applicazioni di inibire il sistema in pausa"
+msgstr "Consenti alle applicazioni di inibire la pausa del sistema"
 
 #: src/login/org.freedesktop.login1.policy:45
 msgid "Authentication is required for an application to inhibit system sleep."
 msgstr ""
-"Autenticazione richiesta ad un'applicazione per inibire il sistema in pausa."
+"Autenticazione richiesta affinché un'applicazione possa inibire la pausa del "
+"sistema."
 
 #: src/login/org.freedesktop.login1.policy:55
 msgid "Allow applications to delay system sleep"
-msgstr "Consenti alle applicazioni di ritardare il sistema in pausa"
+msgstr "Consenti alle applicazioni di ritardare la pausa del sistema"
 
 #: src/login/org.freedesktop.login1.policy:56
 msgid "Authentication is required for an application to delay system sleep."
 msgstr ""
-"Autenticazione richiesta ad un'applicazione per ritardare il sistema in "
-"pausa."
+"Autenticazione richiesta affinché un'applicazione possa ritardare la pausa "
+"del sistema."
 
 #: src/login/org.freedesktop.login1.policy:65
 msgid "Allow applications to inhibit automatic system suspend"
 msgstr ""
-"Consenti alle applicazioni di inibire la sospesione automatica del sistema"
+"Consenti alle applicazioni di inibire la sospensione automatica del sistema"
 
 #: src/login/org.freedesktop.login1.policy:66
 msgid ""
 "Authentication is required for an application to inhibit automatic system "
 "suspend."
 msgstr ""
-"Autenticazione richiesta ad un'applicazione per inibire la sospensione "
-"automatica del sistema."
+"Autenticazione richiesta affinché un'applicazione possa inibire la "
+"sospensione automatica del sistema."
 
 #: src/login/org.freedesktop.login1.policy:75
 msgid "Allow applications to inhibit system handling of the power key"
 msgstr ""
-"Consenti alle applicazioni di inibire la gestione di sistema del "
-"tastoaccensione"
+"Consenti alle applicazioni di inibire la gestione di sistema del tasto "
+"accensione"
 
 #: src/login/org.freedesktop.login1.policy:76
 msgid ""
 "Authentication is required for an application to inhibit system handling of "
 "the power key."
 msgstr ""
-"Autenticazione richiesta per un'applicazione per inibire la gestione di "
-"sistema del tasto accensione."
+"Autenticazione richiesta affinché un'applicazione possa inibire la gestione "
+"di sistema del tasto accensione."
 
 #: src/login/org.freedesktop.login1.policy:86
 msgid "Allow applications to inhibit system handling of the suspend key"
@@ -281,8 +279,8 @@ msgid ""
 "Authentication is required for an application to inhibit system handling of "
 "the suspend key."
 msgstr ""
-"Autenticazione richiesta ad un'applicazione per inibire la gestione di "
-"sistema del tasto di sospensione."
+"Autenticazione richiesta affinché un'applicazione possa inibire la gestione "
+"di sistema del tasto di sospensione."
 
 #: src/login/org.freedesktop.login1.policy:97
 msgid "Allow applications to inhibit system handling of the hibernate key"
@@ -295,8 +293,8 @@ msgid ""
 "Authentication is required for an application to inhibit system handling of "
 "the hibernate key."
 msgstr ""
-"Autenticazione richiesta ad un'applicazione per inibire la gestione di "
-"sistema del tasto di ibernazione."
+"Autenticazione richiesta affinché un'applicazione possa inibire la gestione "
+"di sistema del tasto di ibernazione."
 
 #: src/login/org.freedesktop.login1.policy:107
 msgid "Allow applications to inhibit system handling of the lid switch"
@@ -309,7 +307,7 @@ msgid ""
 "Authentication is required for an application to inhibit system handling of "
 "the lid switch."
 msgstr ""
-"Autenticazione richiesta per consentire ad un'applicazione di inibire la "
+"Autenticazione richiesta per consentire a un'applicazione di inibire la "
 "gestione di sistema alla apertura/chiusura del portatile."
 
 #: src/login/org.freedesktop.login1.policy:117
@@ -319,7 +317,7 @@ msgstr "Consenti agli utenti non connessi di eseguire programmi"
 #: src/login/org.freedesktop.login1.policy:118
 msgid "Explicit request is required to run programs as a non-logged-in user."
 msgstr ""
-"E' necessaria un'esplicita richiesta per eseguire programmi come utenti non "
+"È necessaria una richiesta esplicita per eseguire programmi come utenti non "
 "connessi."
 
 #: src/login/org.freedesktop.login1.policy:127
@@ -429,8 +427,7 @@ msgstr "Ferma il sistema mentre altri utenti sono connessi"
 
 #: src/login/org.freedesktop.login1.policy:236
 msgid ""
-"Authentication is required to halt the system while other users are logged "
-"in."
+"Authentication is required to halt the system while other users are logged in."
 msgstr ""
 "Autenticazione richiesta per fermare il sistema mentre altri utenti sono "
 "connessi."
@@ -461,8 +458,8 @@ msgstr "Sospendi il sistema mentre altri utenti sono connessi"
 
 #: src/login/org.freedesktop.login1.policy:268
 msgid ""
-"Authentication is required to suspend the system while other users are "
-"logged in."
+"Authentication is required to suspend the system while other users are logged "
+"in."
 msgstr ""
 "Autenticazione richiesta per sospendere il sistema mentre altri utenti sono "
 "connessi."
@@ -536,8 +533,7 @@ msgstr "Indica il \"motivo\" del riavvio nel kernel"
 #: src/login/org.freedesktop.login1.policy:342
 msgid "Authentication is required to set the reboot \"reason\" in the kernel."
 msgstr ""
-"Autenticazione richiesta per configurare il \"motivo\" del riavvio nel "
-"kernel."
+"Autenticazione richiesta per configurare il \"motivo\" del riavvio nel kernel."
 
 #: src/login/org.freedesktop.login1.policy:352
 msgid "Indicate to the firmware to boot to setup interface"
@@ -557,11 +553,11 @@ msgstr "Indicate al boot loader di avviare un menu"
 
 #: src/login/org.freedesktop.login1.policy:364
 msgid ""
-"Authentication is required to indicate to the boot loader to boot to the "
-"boot loader menu."
+"Authentication is required to indicate to the boot loader to boot to the boot "
+"loader menu."
 msgstr ""
-"Autenticazione richiesta per indicate al boot loader l'avvio di uno "
-"specifico menu."
+"Autenticazione richiesta per indicate al boot loader l'avvio di uno specifico "
+"menu."
 
 #: src/login/org.freedesktop.login1.policy:374
 msgid "Indicate to the boot loader to boot a specific entry"
@@ -572,8 +568,8 @@ msgid ""
 "Authentication is required to indicate to the boot loader to boot into a "
 "specific boot loader entry."
 msgstr ""
-"Autenticazione richiesta per indicare al boot loader l'avvio di una "
-"specifica voce in elenco."
+"Autenticazione richiesta per indicare al boot loader l'avvio di una specifica "
+"voce in elenco."
 
 #: src/login/org.freedesktop.login1.policy:385
 msgid "Set a wall message"
@@ -628,8 +624,7 @@ msgid "Acquire a pseudo TTY in a local container"
 msgstr "Apri un pseudo TTY in un container locale"
 
 #: src/machine/org.freedesktop.machine1.policy:65
-msgid ""
-"Authentication is required to acquire a pseudo TTY in a local container."
+msgid "Authentication is required to acquire a pseudo TTY in a local container."
 msgstr ""
 "Autenticazione richiesta per aprire un pseudo TTY in un container locale."
 
@@ -751,8 +746,7 @@ msgstr "Configura DNSSEC Negative Trust Anchors"
 #: src/network/org.freedesktop.network1.policy:111
 #: src/resolve/org.freedesktop.resolve1.policy:122
 msgid "Authentication is required to set DNSSEC Negative Trust Anchors."
-msgstr ""
-"Autenticazione richiesta per configurare DNSSEC Negative Trust Anchors."
+msgstr "Autenticazione richiesta per configurare DNSSEC Negative Trust Anchors."
 
 #: src/network/org.freedesktop.network1.policy:121
 msgid "Revert NTP settings"
@@ -771,26 +765,34 @@ msgid "Authentication is required to reset DNS settings."
 msgstr "Autenticazione richiesta per ripristinare le configurazioni DNS."
 
 #: src/network/org.freedesktop.network1.policy:143
+msgid "DHCP server sends force renew message"
+msgstr "Il server DHCP invia messaggi di rinnovo forzato"
+
+#: src/network/org.freedesktop.network1.policy:144
+msgid "Authentication is required to send force renew message."
+msgstr "Autenticazione richiesta per inviare messaggi di rinnovo forzato."
+
+#: src/network/org.freedesktop.network1.policy:154
 msgid "Renew dynamic addresses"
 msgstr "Rinnova indirizzi dinamici"
 
-#: src/network/org.freedesktop.network1.policy:144
+#: src/network/org.freedesktop.network1.policy:155
 msgid "Authentication is required to renew dynamic addresses."
 msgstr "Autenticazione richiesta per rinnovare gli indirizzi dinamici."
 
-#: src/network/org.freedesktop.network1.policy:154
+#: src/network/org.freedesktop.network1.policy:165
 msgid "Reload network settings"
 msgstr "Ricarica configurazioni di rete"
 
-#: src/network/org.freedesktop.network1.policy:155
+#: src/network/org.freedesktop.network1.policy:166
 msgid "Authentication is required to reload network settings."
 msgstr "Autenticazione richiesta per ricaricare le configurazioni di rete."
 
-#: src/network/org.freedesktop.network1.policy:165
+#: src/network/org.freedesktop.network1.policy:176
 msgid "Reconfigure network interface"
 msgstr "Riconfigura interfaccia di rete"
 
-#: src/network/org.freedesktop.network1.policy:166
+#: src/network/org.freedesktop.network1.policy:177
 msgid "Authentication is required to reconfigure network interface."
 msgstr "Autenticazione richiesta per riconfigurare l'interfaccia di rete."
 
@@ -808,8 +810,7 @@ msgid "Attach or detach a portable service image"
 msgstr "Collega o meno un'immagine di servizio portabile"
 
 #: src/portable/org.freedesktop.portable1.policy:24
-msgid ""
-"Authentication is required to attach or detach a portable service image."
+msgid "Authentication is required to attach or detach a portable service image."
 msgstr ""
 "Autenticazione richiesta per collegare o meno un'immagine di servizio "
 "portabile."
@@ -819,8 +820,7 @@ msgid "Delete or modify portable service image"
 msgstr "Elimina o modifica un'immagine di servizio portabile"
 
 #: src/portable/org.freedesktop.portable1.policy:35
-msgid ""
-"Authentication is required to delete or modify a portable service image."
+msgid "Authentication is required to delete or modify a portable service image."
 msgstr ""
 "Autenticazione richiesta per eliminare o modificare un'immagine di servizio "
 "portabile."
@@ -854,83 +854,89 @@ msgstr ""
 
 #: src/timedate/org.freedesktop.timedate1.policy:22
 msgid "Set system time"
-msgstr "Configura l'orario di sistema"
+msgstr "Imposta l'orario di sistema"
 
 #: src/timedate/org.freedesktop.timedate1.policy:23
 msgid "Authentication is required to set the system time."
-msgstr "Autenticazione richiesta per configurare l'orario di sistema."
+msgstr "Autenticazione richiesta per impostare l'orario di sistema."
 
 #: src/timedate/org.freedesktop.timedate1.policy:33
 msgid "Set system timezone"
-msgstr "Configura il fuso orario di sistema"
+msgstr "Imposta il fuso orario di sistema"
 
 #: src/timedate/org.freedesktop.timedate1.policy:34
 msgid "Authentication is required to set the system timezone."
-msgstr "Autenticazione richiesta per configurare il fuso orario di sistema."
+msgstr "Autenticazione richiesta per impostare il fuso orario di sistema."
 
 #: src/timedate/org.freedesktop.timedate1.policy:43
 msgid "Set RTC to local timezone or UTC"
 msgstr ""
-"Configura l'orologio di sistema (RTC) al fuso orario locale o al tempo "
-"civile (UTC)"
+"Imposta l'orologio di sistema (RTC) al fuso orario locale o al tempo civile "
+"(UTC)"
 
 #: src/timedate/org.freedesktop.timedate1.policy:44
 msgid ""
-"Authentication is required to control whether the RTC stores the local or "
-"UTC time."
+"Authentication is required to control whether the RTC stores the local or UTC "
+"time."
 msgstr ""
 "Autenticazione richiesta per verificare se l'orologio di sistema (RTC) è "
 "configurato all'orario locale o al tempo civile (UTC)."
 
 #: src/timedate/org.freedesktop.timedate1.policy:53
 msgid "Turn network time synchronization on or off"
-msgstr "Abilita o meno la sincronizzazione dell'orario in rete"
+msgstr "Attiva/Disattiva la sincronizzazione dell'orario in rete"
 
 #: src/timedate/org.freedesktop.timedate1.policy:54
 msgid ""
 "Authentication is required to control whether network time synchronization "
 "shall be enabled."
 msgstr ""
-"Autenticazione richiesta per verificare se la sincronizzazione dell'orario "
-"in rete deve essere attivata."
+"Autenticazione richiesta per verificare se la sincronizzazione dell'orario in "
+"rete deve essere attivata."
 
-#: src/core/dbus-unit.c:356
+#: src/core/dbus-unit.c:362
 msgid "Authentication is required to start '$(unit)'."
-msgstr "Autenticazione richiesta per avviare '$(unit)'."
+msgstr "Autenticazione richiesta per avviare '${unit}'."
 
-#: src/core/dbus-unit.c:357
+#: src/core/dbus-unit.c:363
 msgid "Authentication is required to stop '$(unit)'."
-msgstr "Autenticazione richiesta per fermare '$(unit)'."
+msgstr "Autenticazione richiesta per fermare '${unit}'."
 
-#: src/core/dbus-unit.c:358
+#: src/core/dbus-unit.c:364
 msgid "Authentication is required to reload '$(unit)'."
-msgstr "Autenticazione richiesta per ricaricare '$(unit)'."
+msgstr "Autenticazione richiesta per ricaricare '${unit}'."
 
-#: src/core/dbus-unit.c:359 src/core/dbus-unit.c:360
+#: src/core/dbus-unit.c:365 src/core/dbus-unit.c:366
 msgid "Authentication is required to restart '$(unit)'."
-msgstr "Autenticazione richiesta per riavviare '$(unit)'."
+msgstr "Autenticazione richiesta per riavviare '${unit}'."
 
-#: src/core/dbus-unit.c:532
+#: src/core/dbus-unit.c:538
 msgid ""
 "Authentication is required to send a UNIX signal to the processes of "
 "'$(unit)'."
 msgstr ""
-"Autenticazione richiesta per inviare un segnale UNIX ai processi di "
-"'$(unit)'."
+"Autenticazione richiesta per inviare un segnale UNIX ai processi di '${unit}'."
 
-#: src/core/dbus-unit.c:563
+#: src/core/dbus-unit.c:569
 msgid "Authentication is required to reset the \"failed\" state of '$(unit)'."
 msgstr ""
-"Autenticazione richiesta per riconfigurare lo stato \"fallito\" di '$(unit)'."
+"Autenticazione richiesta per riconfigurare lo stato \"fallito\" di '${unit}'."
 
-#: src/core/dbus-unit.c:596
+#: src/core/dbus-unit.c:602
 msgid "Authentication is required to set properties on '$(unit)'."
-msgstr "Autenticazione richiesta per configurare le proprietà di '$(unit)'."
+msgstr "Autenticazione richiesta per configurare le proprietà di '${unit}'."
 
-#: src/core/dbus-unit.c:705
+#: src/core/dbus-unit.c:711
 msgid ""
 "Authentication is required to delete files and directories associated with "
 "'$(unit)'."
 msgstr ""
 "Autenticazione richiesta per eliminare i file e le directory associate a "
+"'${unit}'."
+
+#: src/core/dbus-unit.c:760
+msgid ""
+"Authentication is required to freeze or thaw the processes of '$(unit)' unit."
+msgstr ""
+"Autenticazione richiesta per bloccare/sbloccare il processo dell'unità "
 "'$(unit)'."

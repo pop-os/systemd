@@ -1,7 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="loginctl" conditional='ENABLE_LOGIND'
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -238,7 +238,7 @@
 
         <listitem><para>Persistently attach one or more devices to a
         seat. The devices should be specified via device paths in the
-        <filename>/sys</filename> file system. To create a new seat,
+        <filename>/sys/</filename> file system. To create a new seat,
         attach at least one graphics card to a previously unused seat
         name. Seat names may consist only of a–z, A–Z, 0–9,
         <literal>-</literal> and <literal>_</literal> and must be

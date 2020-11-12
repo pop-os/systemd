@@ -1,7 +1,8 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <netinet/in.h>
 #include <linux/if_addrlabel.h>
+#include <linux/if_bridge.h>
 #include <linux/nexthop.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -436,7 +437,7 @@ int sd_rtnl_message_new_neigh(sd_netlink *rtnl, sd_netlink_message **ret, uint16
         int r;
 
         assert_return(rtnl_message_type_is_neigh(nlmsg_type), -EINVAL);
-        assert_return(IN_SET(ndm_family, AF_UNSPEC, AF_INET, AF_INET6, PF_BRIDGE), -EINVAL);
+        assert_return(IN_SET(ndm_family, AF_UNSPEC, AF_INET, AF_INET6, AF_BRIDGE), -EINVAL);
         assert_return(ret, -EINVAL);
 
         r = message_new(rtnl, ret, nlmsg_type);
@@ -1117,6 +1118,27 @@ int sd_rtnl_message_set_tclass_handle(sd_netlink_message *m, uint32_t handle) {
 
         tcm = NLMSG_DATA(m->hdr);
         tcm->tcm_handle = handle;
+
+        return 0;
+}
+
+int sd_rtnl_message_new_mdb(sd_netlink *rtnl, sd_netlink_message **ret, uint16_t nlmsg_type, int mdb_ifindex) {
+        struct br_port_msg *bpm;
+        int r;
+
+        assert_return(rtnl_message_type_is_mdb(nlmsg_type), -EINVAL);
+        assert_return(ret, -EINVAL);
+
+        r = message_new(rtnl, ret, nlmsg_type);
+        if (r < 0)
+                return r;
+
+        if (nlmsg_type == RTM_NEWMDB)
+                (*ret)->hdr->nlmsg_flags |= NLM_F_CREATE | NLM_F_EXCL;
+
+        bpm = NLMSG_DATA((*ret)->hdr);
+        bpm->family = AF_BRIDGE;
+        bpm->ifindex = mdb_ifindex;
 
         return 0;
 }

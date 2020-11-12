@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -21,6 +21,7 @@
 #include "parse-util.h"
 #include "path-util.h"
 #include "process-util.h"
+#include "stdio-util.h"
 #include "strv.h"
 #include "terminal-util.h"
 #include "udev-util.h"
@@ -43,10 +44,12 @@ void manager_reset_config(Manager *m) {
         m->handle_lid_switch = HANDLE_SUSPEND;
         m->handle_lid_switch_ep = _HANDLE_ACTION_INVALID;
         m->handle_lid_switch_docked = HANDLE_IGNORE;
+        m->handle_reboot_key = HANDLE_REBOOT;
         m->power_key_ignore_inhibited = false;
         m->suspend_key_ignore_inhibited = false;
         m->hibernate_key_ignore_inhibited = false;
         m->lid_switch_ignore_inhibited = true;
+        m->reboot_key_ignore_inhibited = false;
 
         m->holdoff_timeout_usec = 30 * USEC_PER_SEC;
 
@@ -243,7 +246,8 @@ int manager_process_seat_device(Manager *m, sd_device *d) {
 
         assert(m);
 
-        if (device_for_action(d, DEVICE_ACTION_REMOVE)) {
+        if (device_for_action(d, DEVICE_ACTION_REMOVE) ||
+            sd_device_has_current_tag(d, "seat") <= 0) {
                 const char *syspath;
 
                 r = sd_device_get_syspath(d, &syspath);
@@ -271,7 +275,7 @@ int manager_process_seat_device(Manager *m, sd_device *d) {
                 }
 
                 seat = hashmap_get(m->seats, sn);
-                master = sd_device_has_tag(d, "master-of-seat") > 0;
+                master = sd_device_has_current_tag(d, "master-of-seat") > 0;
 
                 /* Ignore non-master devices for unknown seats */
                 if (!master && !seat)
@@ -313,7 +317,8 @@ int manager_process_button_device(Manager *m, sd_device *d) {
         if (r < 0)
                 return r;
 
-        if (device_for_action(d, DEVICE_ACTION_REMOVE)) {
+        if (device_for_action(d, DEVICE_ACTION_REMOVE) ||
+            sd_device_has_current_tag(d, "power-switch") <= 0) {
 
                 b = hashmap_get(m->buttons, sysname);
                 if (!b)
@@ -389,13 +394,12 @@ int manager_get_idle_hint(Manager *m, dual_timestamp *t) {
         Session *s;
         bool idle_hint;
         dual_timestamp ts = DUAL_TIMESTAMP_NULL;
-        Iterator i;
 
         assert(m);
 
         idle_hint = !manager_is_inhibited(m, INHIBIT_IDLE, INHIBIT_BLOCK, t, false, false, 0, NULL);
 
-        HASHMAP_FOREACH(s, m->sessions, i) {
+        HASHMAP_FOREACH(s, m->sessions) {
                 dual_timestamp k;
                 int ih;
 
@@ -463,12 +467,14 @@ int config_parse_n_autovts(
 
         r = safe_atou(rvalue, &o);
         if (r < 0) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "Failed to parse number of autovts, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse number of autovts, ignoring: %s", rvalue);
                 return 0;
         }
 
         if (o > 15) {
-                log_syntax(unit, LOG_ERR, filename, line, r, "A maximum of 15 autovts are supported, ignoring: %s", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "A maximum of 15 autovts are supported, ignoring: %s", rvalue);
                 return 0;
         }
 
@@ -478,7 +484,7 @@ int config_parse_n_autovts(
 
 static int vt_is_busy(unsigned vtnr) {
         struct vt_stat vt_stat;
-        int r = 0;
+        int r;
         _cleanup_close_ int fd;
 
         assert(vtnr >= 1);
@@ -528,7 +534,7 @@ int manager_spawn_autovt(Manager *m, unsigned vtnr) {
                         return -EBUSY;
         }
 
-        snprintf(name, sizeof(name), "autovt@tty%u.service", vtnr);
+        xsprintf(name, "autovt@tty%u.service", vtnr);
         r = sd_bus_call_method(
                         m->bus,
                         "org.freedesktop.systemd1",
@@ -545,10 +551,9 @@ int manager_spawn_autovt(Manager *m, unsigned vtnr) {
 }
 
 bool manager_is_lid_closed(Manager *m) {
-        Iterator i;
         Button *b;
 
-        HASHMAP_FOREACH(b, m->buttons, i)
+        HASHMAP_FOREACH(b, m->buttons)
                 if (b->lid_closed)
                         return true;
 
@@ -556,10 +561,9 @@ bool manager_is_lid_closed(Manager *m) {
 }
 
 static bool manager_is_docked(Manager *m) {
-        Iterator i;
         Button *b;
 
-        HASHMAP_FOREACH(b, m->buttons, i)
+        HASHMAP_FOREACH(b, m->buttons)
                 if (b->docked)
                         return true;
 
@@ -675,6 +679,8 @@ bool manager_all_buttons_ignored(Manager *m) {
         if (!IN_SET(m->handle_lid_switch_ep, _HANDLE_ACTION_INVALID, HANDLE_IGNORE))
                 return false;
         if (m->handle_lid_switch_docked != HANDLE_IGNORE)
+                return false;
+        if (m->handle_reboot_key != HANDLE_IGNORE)
                 return false;
 
         return true;

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <inttypes.h>
@@ -16,6 +16,35 @@
 
 /* The default disk size to use when nothing else is specified, relative to free disk space */
 #define USER_DISK_SIZE_DEFAULT_PERCENT 85
+
+bool uid_is_system(uid_t uid);
+bool gid_is_system(gid_t gid);
+
+static inline bool uid_is_dynamic(uid_t uid) {
+        return DYNAMIC_UID_MIN <= uid && uid <= DYNAMIC_UID_MAX;
+}
+
+static inline bool gid_is_dynamic(gid_t gid) {
+        return uid_is_dynamic((uid_t) gid);
+}
+
+static inline bool uid_is_container(uid_t uid) {
+        return CONTAINER_UID_BASE_MIN <= uid && uid <= CONTAINER_UID_BASE_MAX;
+}
+
+static inline bool gid_is_container(gid_t gid) {
+        return uid_is_container((uid_t) gid);
+}
+
+typedef struct UGIDAllocationRange {
+        uid_t system_alloc_uid_min;
+        uid_t system_uid_max;
+        gid_t system_alloc_gid_min;
+        gid_t system_gid_max;
+} UGIDAllocationRange;
+
+int read_login_defs(UGIDAllocationRange *ret_defs, const char *path, const char *root);
+const UGIDAllocationRange *acquire_ugid_allocation_range(void);
 
 typedef enum UserDisposition {
         USER_INTRINSIC,   /* root and nobody */
@@ -206,6 +235,14 @@ typedef struct Fido2HmacSalt {
         char *hashed_password;
 } Fido2HmacSalt;
 
+typedef struct RecoveryKey {
+        /* The type of recovery key, must be "modhex64" right now */
+        char *type;
+
+        /* A UNIX password hash of the normalized form of modhex64 */
+        char *hashed_password;
+} RecoveryKey;
+
 typedef struct UserRecord {
         /* The following three fields are not part of the JSON record */
         unsigned n_ref;
@@ -332,6 +369,10 @@ typedef struct UserRecord {
         size_t n_fido2_hmac_salt;
         int fido2_user_presence_permitted;
 
+        char **recovery_key_type;
+        RecoveryKey *recovery_key;
+        size_t n_recovery_key;
+
         JsonVariant *json;
 } UserRecord;
 
@@ -388,6 +429,7 @@ int user_record_test_password_change_required(UserRecord *h);
 
 /* The following six are user by group-record.c, that's why we export them here */
 int json_dispatch_realm(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+int json_dispatch_gecos(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 int json_dispatch_user_group_list(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 int json_dispatch_user_disposition(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
 

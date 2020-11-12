@@ -4,6 +4,9 @@ Bugfixes:
   manager or system manager can be always set. It would be better to reject
   them when parsing config.
 
+* userdbctl: "Password OK: yes" is shown even when there are no passwords
+  or the password is locked.
+
 External:
 
 * Fedora: add an rpmlint check that verifies that all unit files in the RPM are listed in %systemd_post macros.
@@ -17,12 +20,55 @@ Janitorial Clean-ups:
 
 Features:
 
-* nspawn: move "incoming mount" directory to /run/host, move "inaccessible"
-  nodes to /run/host, move notify socket (for sd_notify() between payload and
-  container manager)
+* homed: try to unmount in regular intervals when home dir was busy when we
+  tried because idle.
+
+* sd-bus: when connecting to some dbus server socker, set originating AF_UNIX
+  socket name in abstract namespace to include "description" string, and pick
+  it up from there in sd_bus_creds logic. i.e. we can use the socket peer
+  address as conduit for some minimal connection metainfo, and use it to
+  restore the "description" logic that kdbus used to have.
+
+* teach LoadCredential= the ability to load all files from a specified dir as
+  individual creds
+
+* systemd-analyze netif that explains predictable interface (or networkctl)
+
+* port selinux code from mallinfo() to mallinfo2() once added to glibc
+
+* Add service setting to run a service within the specified VRF. i.e. do the
+  equivalent of "ip vrf exec".
+
+* export action of device object on sd-device, so that monitor becomes useful
+
+* add root=tmpfs that mounts a tmpfs to /sysroot (to be used in combination
+  with usr=…, for a similar effect as systemd.volatile=yes but without the
+  "hide-out" effect). Also, add root=gpt-auto-late support or so, that is like
+  root=gpt-auto but initially mounts a tmpfs to /sysroot, and then revisits
+  later after systemd-repart ran. Usecase: let's ship images with only /usr
+  partition, then on first boot create the root partition. In this case we want
+  to read the repart data from /usr before the root partition exists. Add
+  usr=gpt-auto that automatically finds a /usr partition.
+
+* change SwitchRoot() implementation in PID 1 to use pivot_root(".", "."), as
+  documented in the pivot_root(2) man page, so that we can drop the /oldroot
+  temporary dir.
+
+* special case some calls of chase_symlinks() to use openat2() internally, so
+  that the kernel does what we otherwise do.
+
+* homed: keep an fd to the homedir open at all times, to keep the fs pinned
+  (autofs and such) while user is logged in.
+
+* nss-systemd: also synthesize shadow records for users/groups
+
+* make use of new glibc 2.32 APIs sigabbrev_np() and strerrorname_np().
 
 * cryptsetup: if keyfile specified in crypttab is AF_UNIX socket, connect to it
   and read from it (like we do elsewhere with READ_FULL_FILE_CONNECT_SOCKET)
+
+* when main nspawn supervisor process gets suspended due to SIGSTOP/SIGTTOU or
+  so, freeze the payload too.
 
 * repart: support setting up dm-integrity with HMAC
 
@@ -33,11 +79,6 @@ Features:
 * complement root=, rootflags=, rootfstype= with rootsubdir= which allows
   mounting a subdir of the root fs as actual root. This can be used as
   fstype-agnostic version of btrfs' rootflags=subvol=foobar.
-
-* add --copy-from and --copy-to command to systemd-dissect which copies stuff
-  in and out of a disk image
-
-* Support ProtectProc= or so, using: https://patchwork.kernel.org/cover/11310197/
 
 * if /usr/bin/swapoff fails due to OOM, log a friendly explanatory message about it
 
@@ -58,9 +99,6 @@ Features:
   often for one, let's turn it off entirely for a while. Use that for the
   /proc/self/mountinfo logic.
 
-* move our systemd-user PAM snippet to /usr/, which PAM appears to support
-  these days
-
 * nspawn: support time namespaces
 
 * systemd-firstboot: make sure to always use chase_symlinks() before
@@ -80,15 +118,10 @@ Features:
 
 * make us use dynamically fewer deps for containers in general purpose distros:
   o turn into dlopen() deps:
-    - pcre2 (always)               — irrelevant on Fedora, since dep by
-                                     libselinux, but should benefit Debian
-    - libpwquality (always)        - only relevant for homed, and maybe soon
-                                     firstboot
     - elfutils (always)
     - p11-kit-trust (always)
     - kmod-libs (only when called from PID 1)
-    - cryptsetup-libs (only in RootImage= handling in PID 1, but not in systemd-cryptsetup)
-    - similar: libblkid
+    - libblkid (only in RootImage= handling in PID 1, but not elsewhere)
     - libpam (only when called from PID 1)
     - bzip2, xz, lz4 (always — gzip and zstd should probably stay static deps the way they are,
       since they are so basic and our defaults)
@@ -106,14 +139,10 @@ Features:
 * systemd-path: add ESP and XBOOTLDR path. Add "private" runtime/state/cache dir enum,
   mapping to $RUNTIME_DIRECTORY, $STATE_DIRECTORY and such
 
-* make "systemd-dissect" an official supported tool, i.e. move to /usr/bin/ and
-  provide man page. Given that we now have a tool that can generate images like
-  this, it's useful to have one that can dump contents of them, too.
-
 * All tools that support --root= should also learn --image= so that they can
-  operate on disk images directly. Specifically: bootctl, tmpfiles, sysusers,
-  systemctl, repart, journalctl, coredumpctl. (Already done: systemd-nspawn,
-  systemd-firstboot)
+  operate on disk images directly. Specifically: bootctl, systemctl,
+  coredumpctl. (Already done: systemd-nspawn, systemd-firstboot,
+  systemd-repart, systemd-tmpfiles, systemd-sysusers, journalctl)
 
 * seccomp: by default mask x32 ABI system wide on x86-64. it's on its way out
 
@@ -122,20 +151,18 @@ Features:
 
 * seccomp: maybe merge all filters we install into one with that libseccomp API that allows merging.
 
-* per-service credential system. Specifically: add LoadCredential= (for loading
-  cred from file), AcquireCredential= (for asking user for cred, via
-  ask-password), PassCredential= (for passing on credential systemd itself
-  got). Then, place credentials in a per-service, immutable ramfs instance (so
-  that it cannot be swapped out), destroy after use. Also pass via keyring
-  (with graceful fallback to cover for containers). Define CredentialPath= for
-  defining subdir of /run/credentials/ where to place it. Set $CREDENTIAL_PATH
-  env var for services to the result. Also pass via fd passing (optionally).
-
-* homed: add native recovery key support. use 48 lowercase modhex characters
-  (192bit), show qr code of it, include pattern expression in user record.
-
-* homed: introduce "degraded" state for home directories that weren't cleanly
-  unmounted (use xattr we add and remove on the loop back file)
+* credentials system:
+  - maybe add AcquireCredential= for querying a cred via ask-password
+  - maybe try to acquire creds via keyring?
+  - maybe try to pass creds via keyring?
+  - maybe optionally pass creds via memfd
+  - maybe add support for decrypting creds via TPM
+  - maybe add support for decrypting/importing creds via pkcs11
+  - make systemd-cryptsetup acquire pw via creds logic
+  - make PAMName= acquire pw via creds logic
+  - make macsec/wireguard code in networkd read key via creds logic
+  - make gatwayd/remote read key via creds logic
+  - add sd_notify() command for flushing out creds not needed anymore
 
 * homed: during login resize fs automatically towards size goal. Specifically,
   resize to diskSize if possible, but leave a certain amount (configured by a
@@ -174,11 +201,6 @@ Features:
 * systemd-gpt-auto should probably set x-systemd.growfs on the mounts it
   creates
 
-* homed/userdb: distinguish passwords and recovery keys in the records, since
-  we probably want to use different PBKDF algorithms/settings for them:
-  passwords have low entropy but recovery keys should have good entropy key
-  hence we can make them quicker to work.
-
 * bootctl:
   - teach it to prepare an ESP wholesale, i.e. with mkfs.vfat invocation
   - teach it to copy in unified kernel images and maybe type #1 boot loader spec entries from host
@@ -209,8 +231,6 @@ Features:
   - when that's done: kill khash.c
   - when that's done: kill gnutls support in resolved
 
-* kill zenata, all hail weblate?
-
 * when we resize disks (homed?) always round up to 4K sectors, not 512K
 
 * add growvol and makevol options for /etc/crypttab, similar to
@@ -237,9 +257,6 @@ Features:
 * systemd-repart: allow sizing partitions as factor of available RAM, so that
   we can reasonably size swap partitions for hibernation.
 
-* systemd-repart: allow running mkfs before making partitions pop up +
-  encryption via LUKS to allow booting into an empty root with only /usr mounted in
-
 * systemd-repart: allow managing the gpt read-only partition flag + auto-mount flag
 
 * systemd-repart: allow boolean option that ensures that if existing partition
@@ -254,10 +271,6 @@ Features:
 
 * systemd-repart: add per-partition option to fail if partition already exist,
   i.e. is not added new. Similar, add option to fail if partition does not exist yet.
-
-* systemd-repart: add --size=auto for generating/resizing images of minimal
-  size, i.e. where the image file is sized exactly as large as necessary taking
-  SizeMin= into account, but not a single byte larger.
 
 * systemd-repart: allow disabling growing of specific partitions, or making
   them (think ESP: we don't ever want to grow it, since we cannot resize vfat)
@@ -328,9 +341,6 @@ Features:
   right) become genuine first class citizens, and we gain automatic, sane JSON
   output for them.
 
-* systemd-firstboot: teach it dissector magic, so that you can point it to some
-  disk image and it will just set everything in it all behind the scenes.
-
 * We should probably replace /var/log/README, /etc/rc.d/README with symlinks
   that are linked to these places instead of copied. After all they are
   constant vendor data.
@@ -366,9 +376,7 @@ Features:
   - in systemd's PAMName= logic: query passwords with ssh-askpassword, so that we can make "loginctl set-linger" mode work
   - fingerprint authentication, pattern authentication, …
   - make sure "classic" user records can also be managed by homed
-  - description field for groups
   - make size of $XDG_RUNTIME_DIR configurable in user record
-  - reuse pwquality magic in firstboot
   - query password from kernel keyring first
   - update even if record is "absent"
   - add a "access mode" + "fstype" field to the "status" section of json identity records reflecting the actually used access mode and fstype, even on non-luks backends
@@ -549,7 +557,7 @@ Features:
   directory trees from the host to the services RootImage= and RootDirectory=
   environment. Which we can use for /etc/machine-id and in particular
   /etc/resolv.conf. Should be smart and do something useful on read-only
-  images, for example fallback to read-only bind mounting the file instead.
+  images, for example fall back to read-only bind mounting the file instead.
 
 * show invocation ID in systemd-run output
 
@@ -663,11 +671,6 @@ Features:
 * hostnamed: populate form factor data from a new hwdb database, so that old
   yogas can be recognized as "convertible" too, even if they predate the DMI
   "convertible" form factor
-
-* Maybe add PrivatePIDs= as new unit setting, and do minimal PID namespacing
-  after all. Be strict however, only support the equivalent of nspawn's
-  --as-pid2 switch, and sanely proxy sd_notify() messages dropping stuff such
-  as MAINPID.
 
 * Add ExecMonitor= setting. May be used multiple times. Forks off a process in
   the service cgroup, which is supposed to monitor the service, and when it
@@ -822,9 +825,6 @@ Features:
 
 * systemctl: if some operation fails, show log output?
 
-* systemctl edit: use equivalent of cat() to insert existing config as a comment, prepended with #.
-  Upon editor exit, lines with one # are removed, lines with two # are left with one #, etc.
-
 * exponential backoff in timesyncd when we cannot reach a server
 
 * timesyncd: add ugly bus calls to set NTP servers per-interface, for usage by NM
@@ -852,9 +852,6 @@ Features:
 
 * add new gpt type for btrfs volumes
 
-* support empty /etc boots nicely:
-  - nspawn/gpt-generator: introduce new gpt partition type for /usr
-
 * generator that automatically discovers btrfs subvolumes, identifies their purpose based on some xattr on them.
 
 * a way for container managers to turn off getty starting via $container_headless= or so...
@@ -879,13 +876,6 @@ Features:
 * implement Distribute= in socket units to allow running multiple
   service instances processing the listening socket, and open this up
   for ReusePort=
-
-* introduce bus call FreezeUnit(s, b), as well as "systemctl freeze
-  $UNIT" and "systemctl thaw $UNIT" as wrappers around this. The calls
-  should SIGSTOP all unit processes in a loop until all processes of
-  it are fully stopped. This can later be used for app management by
-  desktop UIs such as gnome-shell to freeze apps that are not visible
-  on screen, not unlike how job control works on the shell
 
 * cgroups:
   - implement per-slice CPUFairScheduling=1 switch
@@ -936,6 +926,10 @@ Features:
   - allow multiple signal handlers per signal?
   - document chaining of signal handler for SIGCHLD and child handlers
   - define more intervals where we will shift wakeup intervals around in, 1h, 6h, 24h, ...
+  - maybe support iouring as backend, so that we allow hooking read and write
+    operations instead of IO ready events into event loops. See considerations
+    here:
+    http://blog.vmsplice.net/2020/07/rethinking-event-loop-integration-for.html
 
 * investigate endianness issues of UUID vs. GUID
 
@@ -1025,7 +1019,7 @@ Features:
   - journald: also get thread ID from client, plus thread name
   - journal: when waiting for journal additions in the client always sleep at least 1s or so, in order to minimize wakeups
   - add API to close/reopen/get fd for journal client fd in libsystemd-journal.
-  - fallback to /dev/log based logging in libsystemd-journal, if we cannot log natively?
+  - fall back to /dev/log based logging in libsystemd-journal, if we cannot log natively?
   - declare the local journal protocol stable in the wiki interface chart
   - sd-journal: speed up sd_journal_get_data() with transparent hash table in bg
   - journald: when dropping msgs due to ratelimit make sure to write
@@ -1149,10 +1143,6 @@ Features:
     PID 1...
   - optionally automatically add FORWARD rules to iptables whenever nspawn is
     running, remove them when shut down.
-
-* dissect
-  - refuse mounting over a mount point
-  - automatically discover .roothash files in dissect, similarly to nspawn
 
 * machined:
   - add an API so that libvirt-lxc can inform us about network interfaces being

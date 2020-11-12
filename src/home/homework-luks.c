@@ -1,10 +1,12 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <libfdisk.h>
 #include <linux/loop.h>
 #include <poll.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/mount.h>
+#include <sys/xattr.h>
 
 #include "blkid-util.h"
 #include "blockdev-util.h"
@@ -24,6 +26,7 @@
 #include "memory-util.h"
 #include "missing_magic.h"
 #include "mkdir.h"
+#include "mkfs-util.h"
 #include "mount-util.h"
 #include "openssl-util.h"
 #include "parse-util.h"
@@ -39,6 +42,53 @@
  * but actually doesn't accept uneven numbers in many cases. To avoid any confusion around this we'll
  * strictly round disk sizes down to the next 1K boundary.*/
 #define DISK_SIZE_ROUND_DOWN(x) ((x) & ~UINT64_C(1023))
+
+int run_mark_dirty(int fd, bool b) {
+        char x = '1';
+        int r, ret;
+
+        /* Sets or removes the 'user.home-dirty' xattr on the specified file. We use this to detect when a
+         * home directory was not properly unmounted. */
+
+        assert(fd >= 0);
+
+        r = fd_verify_regular(fd);
+        if (r < 0)
+                return r;
+
+        if (b) {
+                ret = fsetxattr(fd, "user.home-dirty", &x, 1, XATTR_CREATE);
+                if (ret < 0 && errno != EEXIST)
+                        return log_debug_errno(errno, "Could not mark home directory as dirty: %m");
+
+        } else {
+                r = fsync_full(fd);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to synchronize image before marking it clean: %m");
+
+                ret = fremovexattr(fd, "user.home-dirty");
+                if (ret < 0 && errno != ENODATA)
+                        return log_debug_errno(errno, "Could not mark home directory as clean: %m");
+        }
+
+        r = fsync_full(fd);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to synchronize dirty flag to disk: %m");
+
+        return ret >= 0;
+}
+
+int run_mark_dirty_by_path(const char *path, bool b) {
+        _cleanup_close_ int fd = -1;
+
+        assert(path);
+
+        fd = open(path, O_RDWR|O_CLOEXEC|O_NOCTTY);
+        if (fd < 0)
+                return log_debug_errno(errno, "Failed to open %s to mark dirty or clean: %m", path);
+
+        return run_mark_dirty(fd, b);
+}
 
 static int probe_file_system_by_fd(
                 int fd,
@@ -238,7 +288,7 @@ static int luks_setup(
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate libcryptsetup context: %m");
 
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+        cryptsetup_enable_logging(cd);
 
         r = crypt_load(cd, CRYPT_LUKS2, NULL);
         if (r < 0)
@@ -338,7 +388,7 @@ static int luks_open(
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize cryptsetup context for %s: %m", dm_name);
 
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+        cryptsetup_enable_logging(cd);
 
         r = crypt_load(cd, CRYPT_LUKS2, NULL);
         if (r < 0)
@@ -997,9 +1047,10 @@ int home_prepare_luks(
         _cleanup_(loop_device_unrefp) LoopDevice *loop = NULL;
         _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         _cleanup_(erase_and_freep) void *volume_key = NULL;
+        _cleanup_close_ int root_fd = -1, image_fd = -1;
         bool dm_activated = false, mounted = false;
-        _cleanup_close_ int root_fd = -1;
         size_t volume_key_size = 0;
+        bool marked_dirty = false;
         uint64_t offset, size;
         int r;
 
@@ -1093,7 +1144,6 @@ int home_prepare_luks(
                 }
         } else {
                 _cleanup_free_ char *fstype = NULL, *subdir = NULL;
-                _cleanup_close_ int fd = -1;
                 const char *ip;
                 struct stat st;
 
@@ -1103,28 +1153,32 @@ int home_prepare_luks(
                 if (!subdir)
                         return log_oom();
 
-                fd = open(ip, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
-                if (fd < 0)
+                image_fd = open(ip, O_RDWR|O_CLOEXEC|O_NOCTTY|O_NONBLOCK);
+                if (image_fd < 0)
                         return log_error_errno(errno, "Failed to open image file %s: %m", ip);
 
-                if (fstat(fd, &st) < 0)
+                if (fstat(image_fd, &st) < 0)
                         return log_error_errno(errno, "Failed to fstat() image file: %m");
                 if (!S_ISREG(st.st_mode) && !S_ISBLK(st.st_mode))
                         return log_error_errno(
                                         S_ISDIR(st.st_mode) ? SYNTHETIC_ERRNO(EISDIR) : SYNTHETIC_ERRNO(EBADFD),
                                         "Image file %s is not a regular file or block device: %m", ip);
 
-                r = luks_validate(fd, user_record_user_name_and_realm(h), h->partition_uuid, &found_partition_uuid, &offset, &size);
+                r = luks_validate(image_fd, user_record_user_name_and_realm(h), h->partition_uuid, &found_partition_uuid, &offset, &size);
                 if (r < 0)
                         return log_error_errno(r, "Failed to validate disk label: %m");
 
+                /* Everything before this point left the image untouched. We are now starting to make
+                 * changes, hence mark the image dirty */
+                marked_dirty = run_mark_dirty(image_fd, true) > 0;
+
                 if (!user_record_luks_discard(h)) {
-                        r = run_fallocate(fd, &st);
+                        r = run_fallocate(image_fd, &st);
                         if (r < 0)
                                 return r;
                 }
 
-                r = loop_device_make(fd, O_RDWR, offset, size, 0, &loop);
+                r = loop_device_make(image_fd, O_RDWR, offset, size, 0, &loop);
                 if (r == -ENOENT) {
                         log_error_errno(r, "Loopback block device support is not available on this system.");
                         return -ENOLINK; /* make recognizable */
@@ -1179,8 +1233,9 @@ int home_prepare_luks(
                 if (user_record_luks_discard(h))
                         (void) run_fitrim(root_fd);
 
-                setup->image_fd = TAKE_FD(fd);
+                setup->image_fd = TAKE_FD(image_fd);
                 setup->do_offline_fallocate = !(setup->do_offline_fitrim = user_record_luks_offline_discard(h));
+                setup->do_mark_clean = marked_dirty;
         }
 
         setup->loop = TAKE_PTR(loop);
@@ -1204,10 +1259,13 @@ int home_prepare_luks(
 
 fail:
         if (mounted)
-                (void) umount_verbose("/run/systemd/user-home-mount");
+                (void) umount_verbose(LOG_ERR, "/run/systemd/user-home-mount", UMOUNT_NOFOLLOW);
 
         if (dm_activated)
                 (void) crypt_deactivate(cd, setup->dm_name);
+
+        if (image_fd >= 0 && marked_dirty)
+                (void) run_mark_dirty(image_fd, false);
 
         return r;
 }
@@ -1303,6 +1361,7 @@ int home_activate_luks(
 
         setup.undo_dm = false;
         setup.do_offline_fallocate = false;
+        setup.do_mark_clean = false;
 
         log_info("Everything completed.");
 
@@ -1337,7 +1396,7 @@ int home_deactivate_luks(UserRecord *h) {
         else {
                 log_info("Discovered used LUKS device %s.", dm_node);
 
-                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+                cryptsetup_enable_logging(cd);
 
                 r = crypt_deactivate(cd, dm_name);
                 if (IN_SET(r, -ENODEV, -EINVAL, -ENOENT)) {
@@ -1356,6 +1415,7 @@ int home_deactivate_luks(UserRecord *h) {
         else
                 (void) run_fallocate_by_path(user_record_image_path(h));
 
+        run_mark_dirty_by_path(user_record_image_path(h), false);
         return we_detached;
 }
 
@@ -1368,71 +1428,6 @@ int home_trim_luks(UserRecord *h) {
         }
 
         (void) run_fitrim_by_path(user_record_home_directory(h));
-        return 0;
-}
-
-static int run_mkfs(
-                const char *node,
-                const char *fstype,
-                const char *label,
-                sd_id128_t uuid,
-                bool discard) {
-
-        int r;
-
-        assert(node);
-        assert(fstype);
-        assert(label);
-
-        r = mkfs_exists(fstype);
-        if (r < 0)
-                return log_error_errno(r, "Failed to check if mkfs for file system %s exists: %m", fstype);
-        if (r == 0)
-                return log_error_errno(SYNTHETIC_ERRNO(EPROTONOSUPPORT), "No mkfs for file system %s installed.", fstype);
-
-        r = safe_fork("(mkfs)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR, NULL);
-        if (r < 0)
-                return r;
-        if (r == 0) {
-                const char *mkfs;
-                char suuid[37];
-
-                /* Child */
-
-                mkfs = strjoina("mkfs.", fstype);
-                id128_to_uuid_string(uuid, suuid);
-
-                if (streq(fstype, "ext4"))
-                        execlp(mkfs, mkfs,
-                               "-L", label,
-                               "-U", suuid,
-                               "-I", "256",
-                               "-O", "has_journal",
-                               "-m", "0",
-                               "-E", discard ? "lazy_itable_init=1,discard" : "lazy_itable_init=1,nodiscard",
-                               node, NULL);
-                else if (streq(fstype, "btrfs")) {
-                        if (discard)
-                                execlp(mkfs, mkfs, "-L", label, "-U", suuid, node, NULL);
-                        else
-                                execlp(mkfs, mkfs, "-L", label, "-U", suuid, "--nodiscard", node, NULL);
-                } else if (streq(fstype, "xfs")) {
-                        const char *j;
-
-                        j = strjoina("uuid=", suuid);
-                        if (discard)
-                                execlp(mkfs, mkfs, "-L", label, "-m", j, "-m", "reflink=1", node, NULL);
-                        else
-                                execlp(mkfs, mkfs, "-L", label, "-m", j, "-m", "reflink=1", "-K", node, NULL);
-                } else {
-                        log_error("Cannot make file system: %s", fstype);
-                        _exit(EXIT_FAILURE);
-                }
-
-                log_error_errno(errno, "Failed to execute %s: %m", mkfs);
-                _exit(EXIT_FAILURE);
-        }
-
         return 0;
 }
 
@@ -1482,9 +1477,9 @@ static int luks_format(
         _cleanup_(crypt_freep) struct crypt_device *cd = NULL;
         _cleanup_(erase_and_freep) void *volume_key = NULL;
         struct crypt_pbkdf_type good_pbkdf, minimal_pbkdf;
+        char suuid[ID128_UUID_STRING_MAX], **pp;
         _cleanup_free_ char *text = NULL;
         size_t volume_key_size;
-        char suuid[37], **pp;
         int slot = 0, r;
 
         assert(node);
@@ -1496,7 +1491,7 @@ static int luks_format(
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate libcryptsetup context: %m");
 
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+        cryptsetup_enable_logging(cd);
 
         /* Normally we'd, just leave volume key generation to libcryptsetup. However, we can't, since we
          * can't extract the volume key from the library again, but we need it in order to encrypt the JSON
@@ -1616,7 +1611,7 @@ static int make_partition_table(
         _cleanup_free_ char *path = NULL, *disk_uuid_as_string = NULL;
         uint64_t offset, size;
         sd_id128_t disk_uuid;
-        char uuids[37];
+        char uuids[ID128_UUID_STRING_MAX];
         int r;
 
         assert(fd >= 0);
@@ -1891,7 +1886,24 @@ int home_create_luks(
 
         fstype = user_record_file_system_type(h);
         if (!supported_fstype(fstype))
-                return log_error_errno(SYNTHETIC_ERRNO(EPROTONOSUPPORT), "Unsupported file system type: %s", h->file_system_type);
+                return log_error_errno(SYNTHETIC_ERRNO(EPROTONOSUPPORT), "Unsupported file system type: %s", fstype);
+
+        r = mkfs_exists(fstype);
+        if (r < 0)
+                return log_error_errno(r, "Failed to check if mkfs binary for %s exists: %m", fstype);
+        if (r == 0) {
+                if (h->file_system_type || streq(fstype, "ext4") || !supported_fstype("ext4"))
+                        return log_error_errno(SYNTHETIC_ERRNO(EPROTONOSUPPORT), "mkfs binary for file system type %s does not exist.", fstype);
+
+                /* If the record does not explicitly declare a file system to use, and the compiled-in
+                 * default does not actually exist, than do an automatic fallback onto ext4, as the baseline
+                 * fs of Linux. We won't search for a working fs type here beyond ext4, i.e. nothing fancier
+                 * than a single, conservative fallback to baseline. This should be useful in minimal
+                 * environments where mkfs.btrfs or so are not made available, but mkfs.ext4 as Linux' most
+                 * boring, most basic fs is. */
+                log_info("Formatting tool for compiled-in default file system %s not available, falling back to ext4 instead.", fstype);
+                fstype = "ext4";
+        }
 
         if (sd_id128_is_null(h->partition_uuid)) {
                 r = sd_id128_randomize(&partition_uuid);
@@ -1970,7 +1982,8 @@ int home_create_luks(
                         host_size = DISK_SIZE_ROUND_DOWN(h->disk_size);
 
                 if (!supported_fs_size(fstype, host_size))
-                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Selected file system size too small for %s.", h->file_system_type);
+                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE),
+                                               "Selected file system size too small for %s.", fstype);
 
                 /* After creation we should reference this partition by its UUID instead of the block
                  * device. That's preferable since the user might have specified a device node such as
@@ -2003,7 +2016,7 @@ int home_create_luks(
                         return r;
 
                 if (!supported_fs_size(fstype, host_size))
-                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Selected file system size too small for %s.", h->file_system_type);
+                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Selected file system size too small for %s.", fstype);
 
                 r = tempfn_random(ip, "homework", &temporary_image_path);
                 if (r < 0)
@@ -2083,7 +2096,7 @@ int home_create_luks(
 
         log_info("Setting up LUKS device %s completed.", dm_node);
 
-        r = run_mkfs(dm_node, fstype, user_record_user_name_and_realm(h), fs_uuid, user_record_luks_discard(h));
+        r = make_filesystem(dm_node, fstype, user_record_user_name_and_realm(h), fs_uuid, user_record_luks_discard(h));
         if (r < 0)
                 goto fail;
 
@@ -2155,7 +2168,7 @@ int home_create_luks(
 
         root_fd = safe_close(root_fd);
 
-        r = umount_verbose("/run/systemd/user-home-mount");
+        r = umount_verbose(LOG_ERR, "/run/systemd/user-home-mount", UMOUNT_NOFOLLOW);
         if (r < 0)
                 goto fail;
 
@@ -2189,7 +2202,7 @@ int home_create_luks(
         if (disk_uuid_path)
                 (void) ioctl(image_fd, BLKRRPART, 0);
         else {
-                /* If we operate on a file, sync the contaning directory too. */
+                /* If we operate on a file, sync the containing directory too. */
                 r = fsync_directory_of_file(image_fd);
                 if (r < 0) {
                         log_error_errno(r, "Failed to synchronize directory of image file to disk: %m");
@@ -2225,7 +2238,7 @@ fail:
         root_fd = safe_close(root_fd);
 
         if (mounted)
-                (void) umount_verbose("/run/systemd/user-home-mount");
+                (void) umount_verbose(LOG_WARNING, "/run/systemd/user-home-mount", UMOUNT_NOFOLLOW);
 
         if (dm_activated)
                 (void) crypt_deactivate(cd, dm_name);
@@ -2327,7 +2340,7 @@ static int ext4_offline_resize_fs(HomeSetup *setup, uint64_t new_size, bool disc
         }
 
         if (setup->undo_mount) {
-                r = umount_verbose("/run/systemd/user-home-mount");
+                r = umount_verbose(LOG_ERR, "/run/systemd/user-home-mount", UMOUNT_NOFOLLOW);
                 if (r < 0)
                         return r;
 
@@ -2991,7 +3004,7 @@ int home_lock_luks(UserRecord *h) {
                 return log_error_errno(r, "Failed to initialize cryptsetup context for %s: %m", dm_name);
 
         log_info("Discovered used LUKS device %s.", dm_node);
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+        cryptsetup_enable_logging(cd);
 
         if (syncfs(root_fd) < 0) /* Snake oil, but let's better be safe than sorry */
                 return log_error_errno(errno, "Failed to synchronize file system %s: %m", p);
@@ -3056,7 +3069,7 @@ int home_unlock_luks(UserRecord *h, PasswordCache *cache) {
                 return log_error_errno(r, "Failed to initialize cryptsetup context for %s: %m", dm_name);
 
         log_info("Discovered used LUKS device %s.", dm_node);
-        crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+        cryptsetup_enable_logging(cd);
 
         r = -ENOKEY;
         FOREACH_POINTER(list, cache->pkcs11_passwords, cache->fido2_passwords, h->password) {

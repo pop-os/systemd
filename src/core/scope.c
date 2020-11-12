@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <unistd.h>
@@ -487,6 +487,11 @@ static void scope_notify_cgroup_empty_event(Unit *u) {
 
         if (IN_SET(s->state, SCOPE_RUNNING, SCOPE_ABANDONED, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
                 scope_enter_dead(s, SCOPE_SUCCESS);
+
+        /* If the cgroup empty notification comes when the unit is not active, we must have failed to clean
+         * up the cgroup earlier and should do it now. */
+        if (IN_SET(s->state, SCOPE_DEAD, SCOPE_FAILED))
+                unit_prune_cgroup(u);
 }
 
 static void scope_sigchld_event(Unit *u, pid_t pid, int code, int status) {
@@ -621,6 +626,7 @@ const UnitVTable scope_vtable = {
         .can_delegate = true,
         .can_fail = true,
         .once_only = true,
+        .can_set_managed_oom = true,
 
         .init = scope_init,
         .load = scope_load,

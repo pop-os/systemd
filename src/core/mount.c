@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <signal.h>
@@ -281,7 +281,6 @@ static int update_parameters_proc_self_mountinfo(
 static int mount_add_mount_dependencies(Mount *m) {
         MountParameters *pm;
         Unit *other;
-        Iterator i;
         Set *s;
         int r;
 
@@ -315,7 +314,7 @@ static int mount_add_mount_dependencies(Mount *m) {
 
         /* Adds in dependencies to other units that use this path or paths further down in the hierarchy */
         s = manager_get_units_requiring_mounts_for(UNIT(m)->manager, m->where);
-        SET_FOREACH(other, s, i) {
+        SET_FOREACH(other, s) {
 
                 if (other->load_state != UNIT_LOADED)
                         continue;
@@ -413,8 +412,9 @@ static int mount_add_quota_dependencies(Mount *m) {
         return 0;
 }
 
-static bool mount_is_extrinsic(Mount *m) {
+static bool mount_is_extrinsic(Unit *u) {
         MountParameters *p;
+        Mount *m = MOUNT(u);
         assert(m);
 
         /* Returns true for all units that are "magic" and should be excluded from the usual
@@ -423,10 +423,7 @@ static bool mount_is_extrinsic(Mount *m) {
          * ourselves but it's fine if the user operates on them with us. */
 
         /* We only automatically manage mounts if we are in system mode */
-        if (!MANAGER_IS_SYSTEM(UNIT(m)->manager))
-                return true;
-
-        if (UNIT(m)->perpetual) /* All perpetual units never change state */
+        if (MANAGER_IS_USER(u->manager))
                 return true;
 
         p = get_mount_parameters(m);
@@ -494,7 +491,7 @@ static int mount_add_default_dependencies(Mount *m) {
          * guaranteed to stay mounted the whole time, since our system is on it.  Also, don't
          * bother with anything mounted below virtual file systems, it's also going to be virtual,
          * and hence not worth the effort. */
-        if (mount_is_extrinsic(m))
+        if (mount_is_extrinsic(UNIT(m)))
                 return 0;
 
         p = get_mount_parameters(m);
@@ -791,7 +788,7 @@ static void mount_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, p ? strna(p->options) : "n/a",
                 prefix, yes_no(m->from_proc_self_mountinfo),
                 prefix, yes_no(m->from_fragment),
-                prefix, yes_no(mount_is_extrinsic(m)),
+                prefix, yes_no(mount_is_extrinsic(u)),
                 prefix, m->directory_mode,
                 prefix, yes_no(m->sloppy_options),
                 prefix, yes_no(m->lazy_unmount),
@@ -869,7 +866,7 @@ static void mount_enter_dead(Mount *m, MountResult f) {
 
         m->exec_runtime = exec_runtime_unref(m->exec_runtime, true);
 
-        unit_destroy_runtime_directory(UNIT(m), &m->exec_context);
+        unit_destroy_runtime_data(UNIT(m), &m->exec_context);
 
         unit_unref_uid_gid(UNIT(m), true);
 
@@ -1903,7 +1900,6 @@ static int drain_libmount(Manager *m) {
 static int mount_process_proc_self_mountinfo(Manager *m) {
         _cleanup_set_free_free_ Set *around = NULL, *gone = NULL;
         const char *what;
-        Iterator i;
         Unit *u;
         int r;
 
@@ -2001,7 +1997,7 @@ static int mount_process_proc_self_mountinfo(Manager *m) {
                 mount->proc_flags = 0;
         }
 
-        SET_FOREACH(what, gone, i) {
+        SET_FOREACH(what, gone) {
                 if (set_contains(around, what))
                         continue;
 
@@ -2163,6 +2159,7 @@ const UnitVTable mount_vtable = {
         .will_restart = unit_will_restart_default,
 
         .may_gc = mount_may_gc,
+        .is_extrinsic = mount_is_extrinsic,
 
         .sigchld_event = mount_sigchld_event,
 

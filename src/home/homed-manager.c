@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <grp.h>
 #include <linux/fs.h>
@@ -159,7 +159,7 @@ static int on_home_inotify(sd_event_source *s, const struct inotify_event *event
                 (void) bus_manager_emit_auto_login_changed(m);
         }
 
-        if ((event->mask & (IN_DELETE|IN_MOVED_FROM|IN_DELETE)) != 0) {
+        if ((event->mask & (IN_DELETE | IN_CLOSE_WRITE | IN_MOVED_FROM)) != 0) {
                 Home *h;
 
                 if (FLAGS_SET(event->mask, IN_DELETE))
@@ -233,11 +233,10 @@ int manager_new(Manager **ret) {
 
 Manager* manager_free(Manager *m) {
         Home *h;
-        Iterator i;
 
         assert(m);
 
-        HASHMAP_FOREACH(h, m->homes_by_worker_pid, i)
+        HASHMAP_FOREACH(h, m->homes_by_worker_pid)
                 (void) home_wait_for_worker(h);
 
         hashmap_free(m->homes_by_uid);
@@ -265,6 +264,7 @@ Manager* manager_free(Manager *m) {
         hashmap_free(m->public_keys);
 
         varlink_server_unref(m->varlink_server);
+        free(m->userdb_service);
 
         free(m->default_file_system_type);
 
@@ -273,7 +273,6 @@ Manager* manager_free(Manager *m) {
 
 int manager_verify_user_record(Manager *m, UserRecord *hr) {
         EVP_PKEY *pkey;
-        Iterator i;
         int r;
 
         assert(m);
@@ -304,7 +303,7 @@ int manager_verify_user_record(Manager *m, UserRecord *hr) {
                 }
         }
 
-        HASHMAP_FOREACH(pkey, m->public_keys, i) {
+        HASHMAP_FOREACH(pkey, m->public_keys) {
                 r = user_record_verify(hr, pkey);
                 switch (r) {
 
@@ -917,6 +916,7 @@ int manager_enumerate_images(Manager *m) {
 }
 
 static int manager_connect_bus(Manager *m) {
+        const char *suffix, *busname;
         int r;
 
         assert(m);
@@ -930,7 +930,13 @@ static int manager_connect_bus(Manager *m) {
         if (r < 0)
                 return r;
 
-        r = sd_bus_request_name_async(m->bus, NULL, "org.freedesktop.home1", 0, NULL, NULL);
+        suffix = getenv("SYSTEMD_HOME_DEBUG_SUFFIX");
+        if (suffix)
+                busname = strjoina("org.freedesktop.home1.", suffix);
+        else
+                busname = "org.freedesktop.home1";
+
+        r = sd_bus_request_name_async(m->bus, NULL, busname, 0, NULL, NULL);
         if (r < 0)
                 return log_error_errno(r, "Failed to request name: %m");
 
@@ -944,6 +950,7 @@ static int manager_connect_bus(Manager *m) {
 }
 
 static int manager_bind_varlink(Manager *m) {
+        const char *suffix, *socket_path;
         int r;
 
         assert(m);
@@ -965,13 +972,30 @@ static int manager_bind_varlink(Manager *m) {
 
         (void) mkdir_p("/run/systemd/userdb", 0755);
 
-        r = varlink_server_listen_address(m->varlink_server, "/run/systemd/userdb/io.systemd.Home", 0666);
+        /* To make things easier to debug, when working from a homed managed home directory, let's optionally
+         * use a different varlink socket name */
+        suffix = getenv("SYSTEMD_HOME_DEBUG_SUFFIX");
+        if (suffix)
+                socket_path = strjoina("/run/systemd/userdb/io.systemd.Home.", suffix);
+        else
+                socket_path = "/run/systemd/userdb/io.systemd.Home";
+
+        r = varlink_server_listen_address(m->varlink_server, socket_path, 0666);
         if (r < 0)
                 return log_error_errno(r, "Failed to bind to varlink socket: %m");
 
         r = varlink_server_attach_event(m->varlink_server, m->event, SD_EVENT_PRIORITY_NORMAL);
         if (r < 0)
                 return log_error_errno(r, "Failed to attach varlink connection to event loop: %m");
+
+        assert(!m->userdb_service);
+        m->userdb_service = strdup(basename(socket_path));
+        if (!m->userdb_service)
+                return log_oom();
+
+        /* Avoid recursion */
+        if (setenv("SYSTEMD_BYPASS_USERDB", m->userdb_service, 1) < 0)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to set $SYSTEMD_BYPASS_USERDB: %m");
 
         return 0;
 }
@@ -1093,10 +1117,21 @@ static int manager_listen_notify(Manager *m) {
                 .un.sun_family = AF_UNIX,
                 .un.sun_path = "/run/systemd/home/notify",
         };
+        const char *suffix;
         int r;
 
         assert(m);
         assert(!m->notify_socket_event_source);
+
+        suffix = getenv("SYSTEMD_HOME_DEBUG_SUFFIX");
+        if (suffix) {
+                const char *unix_path;
+
+                unix_path = strjoina("/run/systemd/home/notify.", suffix);
+                r = sockaddr_un_set_path(&sa.un, unix_path);
+                if (r < 0)
+                        return log_error_errno(r, "Socket path %s does not fit in sockaddr_un: %m", unix_path);
+        }
 
         fd = socket(AF_UNIX, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0);
         if (fd < 0)
@@ -1612,9 +1647,8 @@ int manager_gc_images(Manager *m) {
                 manager_revalidate_image(m, h);
         } else {
                 /* Gc all */
-                Iterator i;
 
-                HASHMAP_FOREACH(h, m->homes_by_name, i)
+                HASHMAP_FOREACH(h, m->homes_by_name)
                         manager_revalidate_image(m, h);
         }
 

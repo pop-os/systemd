@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <unistd.h>
@@ -185,7 +185,6 @@ static int method_list_machines(sd_bus_message *message, void *userdata, sd_bus_
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         Machine *machine;
-        Iterator i;
         int r;
 
         assert(message);
@@ -199,7 +198,7 @@ static int method_list_machines(sd_bus_message *message, void *userdata, sd_bus_
         if (r < 0)
                 return sd_bus_error_set_errno(error, r);
 
-        HASHMAP_FOREACH(machine, m->machines, i) {
+        HASHMAP_FOREACH(machine, m->machines) {
                 _cleanup_free_ char *p = NULL;
 
                 p = machine_bus_path(machine);
@@ -474,7 +473,6 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
         _cleanup_hashmap_free_ Hashmap *images = NULL;
         _unused_ Manager *m = userdata;
         Image *image;
-        Iterator i;
         int r;
 
         assert(message);
@@ -496,7 +494,7 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(image, images, i) {
+        HASHMAP_FOREACH(image, images) {
                 _cleanup_free_ char *p = NULL;
 
                 p = image_bus_path(image->name);
@@ -749,7 +747,6 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
                 _cleanup_hashmap_free_ Hashmap *images = NULL;
                 bool success = true;
                 Image *image;
-                Iterator i;
                 ssize_t l;
 
                 errno_pipe_fd[0] = safe_close(errno_pipe_fd[0]);
@@ -770,7 +767,7 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
                         goto child_fail;
                 }
 
-                HASHMAP_FOREACH(image, images, i) {
+                HASHMAP_FOREACH(image, images) {
 
                         /* We can't remove vendor images (i.e. those in /usr) */
                         if (IMAGE_IS_VENDOR(image))
@@ -1421,7 +1418,6 @@ int match_unit_removed(sd_bus_message *message, void *userdata, sd_bus_error *er
 int match_reloading(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Manager *m = userdata;
         Machine *machine;
-        Iterator i;
         int b, r;
 
         assert(message);
@@ -1438,7 +1434,7 @@ int match_reloading(sd_bus_message *message, void *userdata, sd_bus_error *error
         /* systemd finished reloading, let's recheck all our machines */
         log_debug("System manager has been reloaded, rechecking machines...");
 
-        HASHMAP_FOREACH(machine, m->machines, i)
+        HASHMAP_FOREACH(machine, m->machines)
                 machine_add_to_gc_queue(machine);
 
         return 0;
@@ -1464,8 +1460,8 @@ int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, c
 
         r = bus_call_method(manager->bus, bus_systemd_mgr, "StopUnit", error, &reply, "ss", unit, "fail");
         if (r < 0) {
-                if (sd_bus_error_has_name(error, BUS_ERROR_NO_SUCH_UNIT) ||
-                    sd_bus_error_has_name(error, BUS_ERROR_LOAD_FAILED)) {
+                if (sd_bus_error_has_names(error, BUS_ERROR_NO_SUCH_UNIT,
+                                                  BUS_ERROR_LOAD_FAILED)) {
 
                         if (job)
                                 *job = NULL;
@@ -1526,12 +1522,12 @@ int manager_unit_is_active(Manager *manager, const char *unit) {
                         &reply,
                         "s");
         if (r < 0) {
-                if (sd_bus_error_has_name(&error, SD_BUS_ERROR_NO_REPLY) ||
-                    sd_bus_error_has_name(&error, SD_BUS_ERROR_DISCONNECTED))
+                if (sd_bus_error_has_names(&error, SD_BUS_ERROR_NO_REPLY,
+                                                   SD_BUS_ERROR_DISCONNECTED))
                         return true;
 
-                if (sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT) ||
-                    sd_bus_error_has_name(&error, BUS_ERROR_LOAD_FAILED))
+                if (sd_bus_error_has_names(&error, BUS_ERROR_NO_SUCH_UNIT,
+                                                   BUS_ERROR_LOAD_FAILED))
                         return false;
 
                 return r;
@@ -1562,8 +1558,8 @@ int manager_job_is_active(Manager *manager, const char *path) {
                         &reply,
                         "s");
         if (r < 0) {
-                if (sd_bus_error_has_name(&error, SD_BUS_ERROR_NO_REPLY) ||
-                    sd_bus_error_has_name(&error, SD_BUS_ERROR_DISCONNECTED))
+                if (sd_bus_error_has_names(&error, SD_BUS_ERROR_NO_REPLY,
+                                                   SD_BUS_ERROR_DISCONNECTED))
                         return true;
 
                 if (sd_bus_error_has_name(&error, SD_BUS_ERROR_UNKNOWN_OBJECT))

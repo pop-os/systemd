@@ -1,5 +1,5 @@
 #pragma once
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
@@ -60,6 +60,7 @@ struct sd_event_source {
         bool pending:1;
         bool dispatching:1;
         bool floating:1;
+        bool exit_on_failure:1;
 
         int64_t priority;
         unsigned pending_index;

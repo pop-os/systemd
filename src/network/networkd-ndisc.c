@@ -1,18 +1,20 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2014 Intel Corporation. All rights reserved.
 ***/
 
-#include <netinet/icmp6.h>
 #include <arpa/inet.h>
+#include <netinet/icmp6.h>
+#include <net/if_arp.h>
+#include <linux/if.h>
 
 #include "sd-ndisc.h"
 
 #include "missing_network.h"
+#include "networkd-address.h"
 #include "networkd-dhcp6.h"
 #include "networkd-manager.h"
 #include "networkd-ndisc.h"
-#include "networkd-route.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
@@ -35,17 +37,50 @@
 
 #define NDISC_APP_ID SD_ID128_MAKE(13,ac,81,a7,d5,3f,49,78,92,79,5d,0c,29,3a,bc,7e)
 
+bool link_ipv6_accept_ra_enabled(Link *link) {
+        assert(link);
+
+        if (!socket_ipv6_is_supported())
+                return false;
+
+        if (link->flags & IFF_LOOPBACK)
+                return false;
+
+        if (!link->network)
+                return false;
+
+        if (!link_ipv6ll_enabled(link))
+                return false;
+
+        assert(link->network->ipv6_accept_ra >= 0);
+        return link->network->ipv6_accept_ra;
+}
+
+void network_adjust_ipv6_accept_ra(Network *network) {
+        assert(network);
+
+        if (!FLAGS_SET(network->link_local, ADDRESS_FAMILY_IPV6)) {
+                if (network->ipv6_accept_ra > 0)
+                        log_warning("%s: IPv6AcceptRA= is enabled but IPv6 link local addressing is disabled or not supported. "
+                                    "Disabling IPv6AcceptRA=.", network->filename);
+                network->ipv6_accept_ra = false;
+        }
+
+        if (network->ipv6_accept_ra < 0)
+                /* default to accept RA if ip_forward is disabled and ignore RA if ip_forward is enabled */
+                network->ipv6_accept_ra = !FLAGS_SET(network->ip_forward, ADDRESS_FAMILY_IPV6);
+}
+
 static int ndisc_remove_old_one(Link *link, const struct in6_addr *router, bool force);
 
 static int ndisc_address_callback(Address *address) {
         struct in6_addr router = {};
         NDiscAddress *n;
-        Iterator i;
 
         assert(address);
         assert(address->link);
 
-        SET_FOREACH(n, address->link->ndisc_addresses, i)
+        SET_FOREACH(n, address->link->ndisc_addresses)
                 if (n->address == address) {
                         router = n->router;
                         break;
@@ -61,7 +96,7 @@ static int ndisc_address_callback(Address *address) {
         }
 
         /* Make this called only once */
-        SET_FOREACH(n, address->link->ndisc_addresses, i)
+        SET_FOREACH(n, address->link->ndisc_addresses)
                 if (IN6_ARE_ADDR_EQUAL(&n->router, &router))
                         n->address->callback = NULL;
 
@@ -73,7 +108,6 @@ static int ndisc_remove_old_one(Link *link, const struct in6_addr *router, bool 
         NDiscRoute *nr;
         NDiscDNSSL *dnssl;
         NDiscRDNSS *rdnss;
-        Iterator i;
         int k, r = 0;
 
         assert(link);
@@ -85,21 +119,21 @@ static int ndisc_remove_old_one(Link *link, const struct in6_addr *router, bool 
                 if (!link->ndisc_addresses_configured || !link->ndisc_routes_configured)
                         return 0;
 
-                SET_FOREACH(na, link->ndisc_addresses, i)
+                SET_FOREACH(na, link->ndisc_addresses)
                         if (!na->marked && IN6_ARE_ADDR_EQUAL(&na->router, router)) {
                                 set_callback = true;
                                 break;
                         }
 
                 if (set_callback)
-                        SET_FOREACH(na, link->ndisc_addresses, i)
+                        SET_FOREACH(na, link->ndisc_addresses)
                                 if (!na->marked && address_is_ready(na->address)) {
                                         set_callback = false;
                                         break;
                                 }
 
                 if (set_callback) {
-                        SET_FOREACH(na, link->ndisc_addresses, i)
+                        SET_FOREACH(na, link->ndisc_addresses)
                                 if (!na->marked && IN6_ARE_ADDR_EQUAL(&na->router, router))
                                         na->address->callback = ndisc_address_callback;
 
@@ -124,25 +158,25 @@ static int ndisc_remove_old_one(Link *link, const struct in6_addr *router, bool 
 
         link_dirty(link);
 
-        SET_FOREACH(na, link->ndisc_addresses, i)
+        SET_FOREACH(na, link->ndisc_addresses)
                 if (na->marked && IN6_ARE_ADDR_EQUAL(&na->router, router)) {
                         k = address_remove(na->address, link, NULL);
                         if (k < 0)
                                 r = k;
                 }
 
-        SET_FOREACH(nr, link->ndisc_routes, i)
+        SET_FOREACH(nr, link->ndisc_routes)
                 if (nr->marked && IN6_ARE_ADDR_EQUAL(&nr->router, router)) {
-                        k = route_remove(nr->route, link, NULL);
+                        k = route_remove(nr->route, NULL, link, NULL);
                         if (k < 0)
                                 r = k;
                 }
 
-        SET_FOREACH(rdnss, link->ndisc_rdnss, i)
+        SET_FOREACH(rdnss, link->ndisc_rdnss)
                 if (rdnss->marked && IN6_ARE_ADDR_EQUAL(&rdnss->router, router))
                         free(set_remove(link->ndisc_rdnss, rdnss));
 
-        SET_FOREACH(dnssl, link->ndisc_dnssl, i)
+        SET_FOREACH(dnssl, link->ndisc_dnssl)
                 if (dnssl->marked && IN6_ARE_ADDR_EQUAL(&dnssl->router, router))
                         free(set_remove(link->ndisc_dnssl, dnssl));
 
@@ -157,7 +191,6 @@ static int ndisc_remove_old(Link *link) {
         NDiscRoute *nr;
         NDiscDNSSL *dnssl;
         NDiscRDNSS *rdnss;
-        Iterator i;
         int k, r;
 
         assert(link);
@@ -166,7 +199,7 @@ static int ndisc_remove_old(Link *link) {
         if (!routers)
                 return -ENOMEM;
 
-        SET_FOREACH(na, link->ndisc_addresses, i)
+        SET_FOREACH(na, link->ndisc_addresses)
                 if (!set_contains(routers, &na->router)) {
                         router = newdup(struct in6_addr, &na->router, 1);
                         if (!router)
@@ -180,7 +213,7 @@ static int ndisc_remove_old(Link *link) {
                         TAKE_PTR(router);
                 }
 
-        SET_FOREACH(nr, link->ndisc_routes, i)
+        SET_FOREACH(nr, link->ndisc_routes)
                 if (!set_contains(routers, &nr->router)) {
                         router = newdup(struct in6_addr, &nr->router, 1);
                         if (!router)
@@ -194,7 +227,7 @@ static int ndisc_remove_old(Link *link) {
                         TAKE_PTR(router);
                 }
 
-        SET_FOREACH(rdnss, link->ndisc_rdnss, i)
+        SET_FOREACH(rdnss, link->ndisc_rdnss)
                 if (!set_contains(routers, &rdnss->router)) {
                         router = newdup(struct in6_addr, &rdnss->router, 1);
                         if (!router)
@@ -208,7 +241,7 @@ static int ndisc_remove_old(Link *link) {
                         TAKE_PTR(router);
                 }
 
-        SET_FOREACH(dnssl, link->ndisc_dnssl, i)
+        SET_FOREACH(dnssl, link->ndisc_dnssl)
                 if (!set_contains(routers, &dnssl->router)) {
                         router = newdup(struct in6_addr, &dnssl->router, 1);
                         if (!router)
@@ -223,7 +256,7 @@ static int ndisc_remove_old(Link *link) {
                 }
 
         r = 0;
-        SET_FOREACH(a, routers, i) {
+        SET_FOREACH(a, routers) {
                 k = ndisc_remove_old_one(link, a, false);
                 if (k < 0)
                         r = k;
@@ -371,7 +404,7 @@ static int ndisc_address_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *
                         return 1;
                 }
 
-                r = link_request_set_routes(link);
+                r = link_set_routes(link);
                 if (r < 0) {
                         link_enter_failed(link);
                         return 1;
@@ -432,7 +465,7 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         union in_addr_union gateway;
         uint16_t lifetime;
         unsigned preference;
-        uint32_t mtu;
+        uint32_t table, mtu;
         usec_t time_now;
         int r;
 
@@ -475,15 +508,18 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
         else if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get default router MTU from RA: %m");
 
+        table = link_get_ipv6_accept_ra_route_table(link);
+
         r = route_new(&route);
         if (r < 0)
                 return log_oom();
 
         route->family = AF_INET6;
-        route->table = link_get_ipv6_accept_ra_route_table(link);
+        route->table = table;
         route->priority = link->network->dhcp6_route_metric;
         route->protocol = RTPROT_RA;
         route->pref = preference;
+        route->gw_family = AF_INET6;
         route->gw = gateway;
         route->lifetime = time_now + lifetime * USEC_PER_SEC;
         route->mtu = mtu;
@@ -493,14 +529,25 @@ static int ndisc_router_process_default(Link *link, sd_ndisc_router *rt) {
                 return log_link_error_errno(link, r, "Could not set default route: %m");
 
         Route *route_gw;
-        LIST_FOREACH(routes, route_gw, link->network->static_routes) {
-                if (!route_gw->gateway_from_dhcp)
+        HASHMAP_FOREACH(route_gw, link->network->routes_by_section) {
+                if (!route_gw->gateway_from_dhcp_or_ra)
                         continue;
 
-                if (route_gw->family != AF_INET6)
+                if (route_gw->gw_family != AF_INET6)
                         continue;
 
                 route_gw->gw = gateway;
+                if (!route_gw->table_set)
+                        route_gw->table = table;
+                if (!route_gw->priority_set)
+                        route_gw->priority = link->network->dhcp6_route_metric;
+                if (!route_gw->protocol_set)
+                        route_gw->protocol = RTPROT_RA;
+                if (!route_gw->pref_set)
+                        route->pref = preference;
+                route_gw->lifetime = time_now + lifetime * USEC_PER_SEC;
+                if (route_gw->mtu == 0)
+                        route_gw->mtu = mtu;
 
                 r = ndisc_route_configure(route_gw, link, rt);
                 if (r < 0)
@@ -547,7 +594,11 @@ static int make_stableprivate_address(Link *link, const struct in6_addr *prefix,
         l = MAX(DIV_ROUND_UP(prefix_len, 8), 8);
         siphash24_compress(prefix, l, &state);
         siphash24_compress_string(link->ifname, &state);
-        siphash24_compress(&link->mac, sizeof(struct ether_addr), &state);
+        /* Only last 8 bytes of IB MAC are stable */
+        if (link->iftype == ARPHRD_INFINIBAND)
+                siphash24_compress(&link->hw_addr.addr.infiniband[12], 8, &state);
+        else
+                siphash24_compress(link->hw_addr.addr.bytes, link->hw_addr.length, &state);
         siphash24_compress(&dad_counter, sizeof(uint8_t), &state);
 
         rid = htole64(siphash24_finalize(&state));
@@ -571,7 +622,6 @@ static int make_stableprivate_address(Link *link, const struct in6_addr *prefix,
 static int ndisc_router_generate_addresses(Link *link, struct in6_addr *address, uint8_t prefixlen, Set **ret) {
         _cleanup_set_free_free_ Set *addresses = NULL;
         IPv6Token *j;
-        Iterator i;
         int r;
 
         assert(link);
@@ -582,18 +632,18 @@ static int ndisc_router_generate_addresses(Link *link, struct in6_addr *address,
         if (!addresses)
                 return log_oom();
 
-        ORDERED_SET_FOREACH(j, link->network->ipv6_tokens, i) {
+        ORDERED_SET_FOREACH(j, link->network->ipv6_tokens) {
                 _cleanup_free_ struct in6_addr *new_address = NULL;
 
                 if (j->address_generation_type == IPV6_TOKEN_ADDRESS_GENERATION_PREFIXSTABLE
-                    && IN6_ARE_ADDR_EQUAL(&j->prefix, address)) {
+                    && (IN6_IS_ADDR_UNSPECIFIED(&j->prefix) || IN6_ARE_ADDR_EQUAL(&j->prefix, address))) {
                         /* While this loop uses dad_counter and a retry limit as specified in RFC 7217, the loop
                            does not actually attempt Duplicate Address Detection; the counter will be incremented
                            only when the address generation algorithm produces an invalid address, and the loop
                            may exit with an address which ends up being unusable due to duplication on the link.
                         */
                         for (; j->dad_counter < DAD_CONFLICTS_IDGEN_RETRIES_RFC7217; j->dad_counter++) {
-                                r = make_stableprivate_address(link, &j->prefix, prefixlen, j->dad_counter, &new_address);
+                                r = make_stableprivate_address(link, address, prefixlen, j->dad_counter, &new_address);
                                 if (r < 0)
                                         return r;
                                 if (r > 0)
@@ -650,7 +700,6 @@ static int ndisc_router_process_autonomous_prefix(Link *link, sd_ndisc_router *r
         struct in6_addr addr, *a;
         unsigned prefixlen;
         usec_t time_now;
-        Iterator i;
         int r;
 
         assert(link);
@@ -693,11 +742,13 @@ static int ndisc_router_process_autonomous_prefix(Link *link, sd_ndisc_router *r
         address->flags = IFA_F_NOPREFIXROUTE|IFA_F_MANAGETEMPADDR;
         address->cinfo.ifa_prefered = lifetime_preferred;
 
-        SET_FOREACH(a, addresses, i) {
+        SET_FOREACH(a, addresses) {
                 Address *existing_address;
 
+                address->in_addr.in6 = *a;
+
                 /* see RFC4862 section 5.5.3.e */
-                r = address_get(link, AF_INET6, (union in_addr_union *) a, prefixlen, &existing_address);
+                r = address_get(link, address, &existing_address);
                 if (r > 0) {
                         lifetime_remaining = existing_address->cinfo.tstamp / 100 + existing_address->cinfo.ifa_valid - time_now / USEC_PER_SEC;
                         if (lifetime_valid > NDISC_PREFIX_LFT_MIN || lifetime_valid > lifetime_remaining)
@@ -713,8 +764,6 @@ static int ndisc_router_process_autonomous_prefix(Link *link, sd_ndisc_router *r
 
                 if (address->cinfo.ifa_valid == 0)
                         continue;
-
-                address->in_addr.in6 = *a;
 
                 r = ndisc_address_configure(address, link, rt);
                 if (r < 0)
@@ -812,6 +861,7 @@ static int ndisc_router_process_route(Link *link, sd_ndisc_router *rt) {
         route->protocol = RTPROT_RA;
         route->pref = preference;
         route->gw.in6 = gateway;
+        route->gw_family = AF_INET6;
         route->dst_prefixlen = prefixlen;
         route->lifetime = time_now + lifetime * USEC_PER_SEC;
 
@@ -847,7 +897,6 @@ static int ndisc_router_process_rdnss(Link *link, sd_ndisc_router *rt) {
         struct in6_addr router;
         NDiscRDNSS *rdnss;
         usec_t time_now;
-        Iterator i;
         int n, r;
 
         assert(link);
@@ -869,7 +918,7 @@ static int ndisc_router_process_rdnss(Link *link, sd_ndisc_router *rt) {
         if (n < 0)
                 return log_link_error_errno(link, n, "Failed to get RDNSS addresses: %m");
 
-        SET_FOREACH(rdnss, link->ndisc_rdnss, i)
+        SET_FOREACH(rdnss, link->ndisc_rdnss)
                 if (IN6_ARE_ADDR_EQUAL(&rdnss->router, &router))
                         rdnss->marked = true;
 
@@ -935,7 +984,6 @@ static int ndisc_router_process_dnssl(Link *link, sd_ndisc_router *rt) {
         uint32_t lifetime;
         usec_t time_now;
         NDiscDNSSL *dnssl;
-        Iterator i;
         char **j;
         int r;
 
@@ -958,7 +1006,7 @@ static int ndisc_router_process_dnssl(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get DNSSL addresses: %m");
 
-        SET_FOREACH(dnssl, link->ndisc_dnssl, i)
+        SET_FOREACH(dnssl, link->ndisc_dnssl)
                 if (IN6_ARE_ADDR_EQUAL(&dnssl->router, &router))
                         dnssl->marked = true;
 
@@ -1087,7 +1135,6 @@ static int ndisc_router_handler(Link *link, sd_ndisc_router *rt) {
         uint64_t flags;
         NDiscAddress *na;
         NDiscRoute *nr;
-        Iterator i;
         int r;
 
         assert(link);
@@ -1104,11 +1151,11 @@ static int ndisc_router_handler(Link *link, sd_ndisc_router *rt) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to get router address from RA: %m");
 
-        SET_FOREACH(na, link->ndisc_addresses, i)
+        SET_FOREACH(na, link->ndisc_addresses)
                 if (IN6_ARE_ADDR_EQUAL(&na->router, &router))
                         na->marked = true;
 
-        SET_FOREACH(nr, link->ndisc_routes, i)
+        SET_FOREACH(nr, link->ndisc_routes)
                 if (IN6_ARE_ADDR_EQUAL(&nr->router, &router))
                         nr->marked = true;
 
@@ -1141,9 +1188,9 @@ static int ndisc_router_handler(Link *link, sd_ndisc_router *rt) {
         else {
                 log_link_debug(link, "Setting SLAAC addresses.");
 
-                /* address_handler calls link_request_set_routes() and link_request_set_nexthop().
-                 * Before they are called, the related flags must be cleared. Otherwise, the link
-                 * becomes configured state before routes are configured. */
+                /* address_handler calls link_set_routes() and link_set_nexthop(). Before they are
+                 * called, the related flags must be cleared. Otherwise, the link becomes configured
+                 * state before routes are configured. */
                 link->static_routes_configured = false;
                 link->static_nexthops_configured = false;
         }
@@ -1202,15 +1249,20 @@ int ndisc_configure(Link *link) {
 
         assert(link);
 
-        r = sd_ndisc_new(&link->ndisc);
-        if (r < 0)
-                return r;
+        if (!link_ipv6_accept_ra_enabled(link))
+                return 0;
 
-        r = sd_ndisc_attach_event(link->ndisc, NULL, 0);
-        if (r < 0)
-                return r;
+        if (!link->ndisc) {
+                r = sd_ndisc_new(&link->ndisc);
+                if (r < 0)
+                        return r;
 
-        r = sd_ndisc_set_mac(link->ndisc, &link->mac);
+                r = sd_ndisc_attach_event(link->ndisc, link->manager->event, 0);
+                if (r < 0)
+                        return r;
+        }
+
+        r = sd_ndisc_set_mac(link->ndisc, &link->hw_addr.addr.ether);
         if (r < 0)
                 return r;
 
@@ -1228,7 +1280,6 @@ int ndisc_configure(Link *link) {
 void ndisc_vacuum(Link *link) {
         NDiscRDNSS *r;
         NDiscDNSSL *d;
-        Iterator i;
         usec_t time_now;
         bool updated = false;
 
@@ -1238,13 +1289,13 @@ void ndisc_vacuum(Link *link) {
 
         time_now = now(clock_boottime_or_monotonic());
 
-        SET_FOREACH(r, link->ndisc_rdnss, i)
+        SET_FOREACH(r, link->ndisc_rdnss)
                 if (r->valid_until < time_now) {
                         free(set_remove(link->ndisc_rdnss, r));
                         updated = true;
                 }
 
-        SET_FOREACH(d, link->ndisc_dnssl, i)
+        SET_FOREACH(d, link->ndisc_dnssl)
                 if (d->valid_until < time_now) {
                         free(set_remove(link->ndisc_dnssl, d));
                         updated = true;
@@ -1396,29 +1447,42 @@ int config_parse_address_generation_type(
         if (r < 0)
                 return log_oom();
 
-        if ((p = startswith(rvalue, "static:")))
-                token->address_generation_type = IPV6_TOKEN_ADDRESS_GENERATION_STATIC;
-        else if ((p = startswith(rvalue, "prefixstable:")))
+        if ((p = startswith(rvalue, "prefixstable"))) {
                 token->address_generation_type = IPV6_TOKEN_ADDRESS_GENERATION_PREFIXSTABLE;
-        else {
+                if (*p == ':')
+                        p++;
+                else if (*p == '\0')
+                        p = NULL;
+                else {
+                        log_syntax(unit, LOG_WARNING, filename, line, 0,
+                                   "Invalid IPv6 token mode in %s=, ignoring assignment: %s",
+                                   lvalue, rvalue);
+                        return 0;
+                }
+        } else {
                 token->address_generation_type = IPV6_TOKEN_ADDRESS_GENERATION_STATIC;
-                p = rvalue;
+                p = startswith(rvalue, "static:");
+                if (!p)
+                        p = rvalue;
         }
 
-        r = in_addr_from_string(AF_INET6, p, &buffer);
-        if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Failed to parse IPv6 %s, ignoring: %s", lvalue, rvalue);
-                return 0;
+        if (p) {
+                r = in_addr_from_string(AF_INET6, p, &buffer);
+                if (r < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Failed to parse IP address in %s=, ignoring assignment: %s",
+                                   lvalue, rvalue);
+                        return 0;
+                }
+                if (token->address_generation_type == IPV6_TOKEN_ADDRESS_GENERATION_STATIC &&
+                    in_addr_is_null(AF_INET6, &buffer)) {
+                        log_syntax(unit, LOG_WARNING, filename, line, 0,
+                                   "IPv6 address in %s= cannot be the ANY address, ignoring assignment: %s",
+                                   lvalue, rvalue);
+                        return 0;
+                }
+                token->prefix = buffer.in6;
         }
-
-        if (in_addr_is_null(AF_INET6, &buffer)) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0,
-                           "IPv6 %s cannot be the ANY address, ignoring: %s", lvalue, rvalue);
-                return 0;
-        }
-
-        token->prefix = buffer.in6;
 
         r = ordered_set_ensure_allocated(&network->ipv6_tokens, &ipv6_token_hash_ops);
         if (r < 0)

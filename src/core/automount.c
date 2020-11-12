@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -94,7 +94,7 @@ static void unmount_autofs(Automount *a) {
                 automount_send_ready(a, a->expire_tokens, -EHOSTDOWN);
 
                 if (a->where) {
-                        r = repeat_unmount(a->where, MNT_DETACH);
+                        r = repeat_unmount(a->where, MNT_DETACH|UMOUNT_NOFOLLOW);
                         if (r < 0)
                                 log_error_errno(r, "Failed to unmount: %m");
                 }
@@ -540,10 +540,8 @@ static void automount_trigger_notify(Unit *u, Unit *other) {
                    MOUNT_MOUNTED, MOUNT_REMOUNTING,
                    MOUNT_REMOUNTING_SIGTERM, MOUNT_REMOUNTING_SIGKILL,
                    MOUNT_UNMOUNTING_SIGTERM, MOUNT_UNMOUNTING_SIGKILL,
-                   MOUNT_FAILED)) {
-
+                   MOUNT_FAILED))
                 (void) automount_send_ready(a, a->expire_tokens, -ENODEV);
-        }
 
         if (MOUNT(other)->state == MOUNT_DEAD)
                 (void) automount_send_ready(a, a->expire_tokens, 0);
@@ -601,10 +599,9 @@ static void automount_enter_waiting(Automount *a) {
 
         xsprintf(options, "fd=%i,pgrp="PID_FMT",minproto=5,maxproto=5,direct", p[1], getpgrp());
         xsprintf(name, "systemd-"PID_FMT, getpid_cached());
-        if (mount(name, a->where, "autofs", 0, options) < 0) {
-                r = -errno;
+        r = mount_nofollow(name, a->where, "autofs", 0, options);
+        if (r < 0)
                 goto fail;
-        }
 
         mounted = true;
 
@@ -648,7 +645,7 @@ fail:
         safe_close_pair(p);
 
         if (mounted) {
-                r = repeat_unmount(a->where, MNT_DETACH);
+                r = repeat_unmount(a->where, MNT_DETACH|UMOUNT_NOFOLLOW);
                 if (r < 0)
                         log_error_errno(r, "Failed to unmount, ignoring: %m");
         }
@@ -709,25 +706,25 @@ static int automount_dispatch_expire(sd_event_source *source, usec_t usec, void 
 }
 
 static int automount_start_expire(Automount *a) {
-        int r;
         usec_t timeout;
+        int r;
 
         assert(a);
 
         if (a->timeout_idle_usec == 0)
                 return 0;
 
-        timeout = now(CLOCK_MONOTONIC) + MAX(a->timeout_idle_usec/3, USEC_PER_SEC);
+        timeout = MAX(a->timeout_idle_usec/3, USEC_PER_SEC);
 
         if (a->expire_event_source) {
-                r = sd_event_source_set_time(a->expire_event_source, timeout);
+                r = sd_event_source_set_time_relative(a->expire_event_source, timeout);
                 if (r < 0)
                         return r;
 
                 return sd_event_source_set_enabled(a->expire_event_source, SD_EVENT_ONESHOT);
         }
 
-        r = sd_event_add_time(
+        r = sd_event_add_time_relative(
                         UNIT(a)->manager->event,
                         &a->expire_event_source,
                         CLOCK_MONOTONIC, timeout, 0,
@@ -850,7 +847,6 @@ static int automount_stop(Unit *u) {
 
 static int automount_serialize(Unit *u, FILE *f, FDSet *fds) {
         Automount *a = AUTOMOUNT(u);
-        Iterator i;
         void *p;
         int r;
 
@@ -862,9 +858,9 @@ static int automount_serialize(Unit *u, FILE *f, FDSet *fds) {
         (void) serialize_item(f, "result", automount_result_to_string(a->result));
         (void) serialize_item_format(f, "dev-id", "%lu", (unsigned long) a->dev_id);
 
-        SET_FOREACH(p, a->tokens, i)
+        SET_FOREACH(p, a->tokens)
                 (void) serialize_item_format(f, "token", "%u", PTR_TO_UINT(p));
-        SET_FOREACH(p, a->expire_tokens, i)
+        SET_FOREACH(p, a->expire_tokens)
                 (void) serialize_item_format(f, "expire-token", "%u", PTR_TO_UINT(p));
 
         r = serialize_fd(f, fds, "pipe-fd", a->pipe_fd);
@@ -975,6 +971,12 @@ static int automount_dispatch_io(sd_event_source *s, int fd, uint32_t events, vo
         assert(a);
         assert(fd == a->pipe_fd);
 
+        if (events & (EPOLLHUP|EPOLLERR)) {
+                log_unit_error(UNIT(a), "Got hangup/error on autofs pipe from kernel. Likely our automount point has been unmounted by someone or something else?");
+                automount_enter_dead(a, AUTOMOUNT_FAILURE_UNMOUNTED);
+                return 0;
+        }
+
         if (events != EPOLLIN) {
                 log_unit_error(UNIT(a), "Got invalid poll event %"PRIu32" on pipe (fd=%d)", events, fd);
                 goto fail;
@@ -993,7 +995,7 @@ static int automount_dispatch_io(sd_event_source *s, int fd, uint32_t events, vo
                 if (packet.v5_packet.pid > 0) {
                         _cleanup_free_ char *p = NULL;
 
-                        get_process_comm(packet.v5_packet.pid, &p);
+                        (void) get_process_comm(packet.v5_packet.pid, &p);
                         log_unit_info(UNIT(a), "Got automount request for %s, triggered by %"PRIu32" (%s)", a->where, packet.v5_packet.pid, strna(p));
                 } else
                         log_unit_debug(UNIT(a), "Got direct mount request on %s", a->where);
@@ -1074,6 +1076,7 @@ static const char* const automount_result_table[_AUTOMOUNT_RESULT_MAX] = {
         [AUTOMOUNT_FAILURE_RESOURCES] = "resources",
         [AUTOMOUNT_FAILURE_START_LIMIT_HIT] = "start-limit-hit",
         [AUTOMOUNT_FAILURE_MOUNT_START_LIMIT_HIT] = "mount-start-limit-hit",
+        [AUTOMOUNT_FAILURE_UNMOUNTED] = "unmounted",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(automount_result, AutomountResult);

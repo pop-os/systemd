@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/oom.h>
 #if HAVE_SECCOMP
@@ -660,10 +660,9 @@ static int oci_namespaces(const char *name, JsonVariant *v, JsonDispatchFlags fl
                         s->network_namespace_path = data.path;
                 }
 
-                if (FLAGS_SET(n, data.type)) {
+                if (FLAGS_SET(n, data.type))
                         return json_log(e, flags, SYNTHETIC_ERRNO(EINVAL),
                                         "Duplicate namespace specification, refusing.");
-                }
 
                 n |= data.type;
         }
@@ -1695,6 +1694,9 @@ static int oci_seccomp_arch_from_string(const char *name, uint32_t *ret) {
                 { "SCMP_ARCH_PPC",         SCMP_ARCH_PPC         },
                 { "SCMP_ARCH_PPC64",       SCMP_ARCH_PPC64       },
                 { "SCMP_ARCH_PPC64LE",     SCMP_ARCH_PPC64LE     },
+#ifdef SCMP_ARCH_RISCV64
+                { "SCMP_ARCH_RISCV64",     SCMP_ARCH_RISCV64     },
+#endif
                 { "SCMP_ARCH_S390",        SCMP_ARCH_S390        },
                 { "SCMP_ARCH_S390X",       SCMP_ARCH_S390X       },
                 { "SCMP_ARCH_X32",         SCMP_ARCH_X32         },
@@ -2213,14 +2215,14 @@ int oci_load(FILE *f, const char *bundle, Settings **ret) {
         }
 
         v = json_variant_by_key(oci, "ociVersion");
-        if (!v) {
-                log_error("JSON file '%s' is not an OCI bundle configuration file. Refusing.", path);
-                return -EINVAL;
-        }
-        if (!streq_ptr(json_variant_string(v), "1.0.0")) {
-                log_error("OCI bundle version not supported: %s", strna(json_variant_string(v)));
-                return -EINVAL;
-        }
+        if (!v)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "JSON file '%s' is not an OCI bundle configuration file. Refusing.",
+                                       path);
+        if (!streq_ptr(json_variant_string(v), "1.0.0"))
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "OCI bundle version not supported: %s",
+                                       strna(json_variant_string(v)));
 
         // {
         //         _cleanup_free_ char *formatted = NULL;

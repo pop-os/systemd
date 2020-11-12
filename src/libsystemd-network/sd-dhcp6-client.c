@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2014-2015 Intel Corporation. All rights reserved.
 ***/
@@ -270,7 +270,7 @@ static int dhcp6_client_set_duid_internal(
         assert_return(duid_len == 0 || duid != NULL, -EINVAL);
         assert_return(IN_SET(client->state, DHCP6_STATE_STOPPED), -EBUSY);
 
-        if (duid != NULL) {
+        if (duid) {
                 r = dhcp_validate_duid_len(duid_type, duid_len, true);
                 if (r < 0) {
                         r = dhcp_validate_duid_len(duid_type, duid_len, false);
@@ -624,7 +624,6 @@ static int client_send_message(sd_dhcp6_client *client, usec_t time_now) {
                 IN6ADDR_ALL_DHCP6_RELAY_AGENTS_AND_SERVERS_INIT;
         struct sd_dhcp6_option *j;
         size_t len, optlen = 512;
-        Iterator i;
         uint8_t *opt;
         int r;
         usec_t elapsed_usec;
@@ -729,7 +728,7 @@ static int client_send_message(sd_dhcp6_client *client, usec_t time_now) {
                 if (r < 0)
                         return r;
 
-                if (FLAGS_SET(client->request, DHCP6_REQUEST_IA_NA)) {
+                if (FLAGS_SET(client->request, DHCP6_REQUEST_IA_NA) && client->lease->ia.addresses) {
                         r = dhcp6_option_append_ia(&opt, &optlen,
                                                    &client->lease->ia);
                         if (r < 0)
@@ -768,7 +767,7 @@ static int client_send_message(sd_dhcp6_client *client, usec_t time_now) {
                                 return r;
                 }
 
-                if (FLAGS_SET(client->request, DHCP6_REQUEST_IA_PD)) {
+                if (FLAGS_SET(client->request, DHCP6_REQUEST_IA_PD) && client->lease->pd.addresses) {
                         r = dhcp6_option_append_pd(opt, optlen, &client->lease->pd, NULL);
                         if (r < 0)
                                 return r;
@@ -859,7 +858,7 @@ static int client_send_message(sd_dhcp6_client *client, usec_t time_now) {
         if (r < 0)
                 return r;
 
-        ORDERED_HASHMAP_FOREACH(j, client->extra_options, i) {
+        ORDERED_HASHMAP_FOREACH(j, client->extra_options) {
                 r = dhcp6_option_append(&opt, &optlen, j->option, j->length, j->data);
                 if (r < 0)
                         return r;
@@ -1282,6 +1281,13 @@ static int client_parse_message(
 
                         break;
 
+                case SD_DHCP6_OPTION_FQDN:
+                        r = dhcp6_lease_set_fqdn(lease, optval, optlen);
+                        if (r < 0)
+                                return r;
+
+                        break;
+
                 case SD_DHCP6_OPTION_INFORMATION_REFRESH_TIME:
                         if (optlen != 4)
                                 return -EINVAL;
@@ -1414,12 +1420,11 @@ static int client_receive_message(
         assert(client->event);
 
         buflen = next_datagram_size_fd(fd);
-        if (buflen == -ENETDOWN) {
+        if (buflen == -ENETDOWN)
                 /* the link is down. Don't return an error or the I/O event
                    source will be disconnected and we won't be able to receive
                    packets again when the link comes back. */
                 return 0;
-        }
         if (buflen < 0)
                 return buflen;
 
@@ -1671,7 +1676,8 @@ static int client_start(sd_dhcp6_client *client, enum DHCP6State state) {
 }
 
 int sd_dhcp6_client_stop(sd_dhcp6_client *client) {
-        assert_return(client, -EINVAL);
+        if (!client)
+                return 0;
 
         client_stop(client, SD_DHCP6_CLIENT_EVENT_STOP);
 
@@ -1688,7 +1694,7 @@ int sd_dhcp6_client_is_running(sd_dhcp6_client *client) {
 
 int sd_dhcp6_client_start(sd_dhcp6_client *client) {
         enum DHCP6State state = DHCP6_STATE_SOLICITATION;
-        int r = 0;
+        int r;
 
         assert_return(client, -EINVAL);
         assert_return(client->event, -EINVAL);

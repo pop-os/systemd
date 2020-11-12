@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/auxv.h>
 
@@ -6,7 +6,6 @@
 #include "dlfcn-util.h"
 #include "errno-util.h"
 #include "fd-util.h"
-#include "group-record-nss.h"
 #include "missing_syscall.h"
 #include "parse-util.h"
 #include "set.h"

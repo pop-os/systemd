@@ -1,10 +1,11 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <net/if.h>
 #include <netinet/in.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "bareudp.h"
 #include "bond.h"
 #include "bridge.h"
 #include "conf-files.h"
@@ -77,9 +78,11 @@ const NetDevVTable * const netdev_vtable[_NETDEV_KIND_MAX] = {
         [NETDEV_KIND_NLMON] = &nlmon_vtable,
         [NETDEV_KIND_XFRM] = &xfrm_vtable,
         [NETDEV_KIND_IFB] = &ifb_vtable,
+        [NETDEV_KIND_BAREUDP] = &bare_udp_vtable,
 };
 
 static const char* const netdev_kind_table[_NETDEV_KIND_MAX] = {
+        [NETDEV_KIND_BAREUDP] = "bareudp",
         [NETDEV_KIND_BRIDGE] = "bridge",
         [NETDEV_KIND_BOND] = "bond",
         [NETDEV_KIND_VLAN] = "vlan",
@@ -822,6 +825,9 @@ int netdev_load_one(Manager *manager, const char *filename) {
                 break;
         case NETDEV_KIND_XFRM:
                 independent = XFRM(netdev)->independent;
+                break;
+        case NETDEV_KIND_VXLAN:
+                independent = VXLAN(netdev)->independent;
                 break;
         default:
                 break;

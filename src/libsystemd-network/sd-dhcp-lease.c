@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2013 Intel Corporation. All rights reserved.
 ***/
@@ -779,7 +779,7 @@ int dhcp_lease_parse_search_domains(const uint8_t *option, size_t len, char ***d
                                         return r;
 
                                 n += r;
-                        } else if ((c & 0xc0) == 0xc0) {
+                        } else if (FLAGS_SET(c, 0xc0)) {
                                 /* Pointer */
 
                                 uint8_t d;
@@ -1233,10 +1233,8 @@ int dhcp_lease_load(sd_dhcp_lease **ret, const char *lease_file) {
                 if (!a)
                         return -ENOMEM;
 
-                if (!strv_isempty(a)) {
-                        lease->search_domains = a;
-                        a = NULL;
-                }
+                if (!strv_isempty(a))
+                        lease->search_domains = TAKE_PTR(a);
         }
 
         if (routes) {

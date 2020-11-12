@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 fuzzers += [
         [['src/fuzz/fuzz-bus-message.c'],
@@ -151,5 +151,9 @@ fuzzers += [
           'src/xdg-autostart-generator/xdg-autostart-service.h',
           'src/xdg-autostart-generator/xdg-autostart-service.c'],
          [],
+         []],
+
+        [['src/fuzz/fuzz-udev-rule-parse-value.c'],
+         [libshared],
          []],
 ]

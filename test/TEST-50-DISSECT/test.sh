@@ -28,19 +28,19 @@ test_create_image() {
         instmods dm_verity =md
         install_dmevent
         generate_module_dependencies
-        inst_binary sfdisk
         inst_binary losetup
 
         BASICTOOLS=(
             bash
             cat
+            mount
         )
         oldinitdir=$initdir
         export initdir=$TESTDIR/minimal
-        mkdir -p $initdir
+        mkdir -p $initdir/usr/lib $initdir/etc
         setup_basic_dirs
         install_basic_tools
-        inst /usr/lib/os-release
+        cp $os_release $initdir/usr/lib/os-release
         ln -s ../usr/lib/os-release $initdir/etc/os-release
         echo MARKER=1 >> $initdir/usr/lib/os-release
         mksquashfs $initdir $oldinitdir/usr/share/minimal.raw

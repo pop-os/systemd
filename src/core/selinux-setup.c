@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdio.h>
@@ -50,7 +50,10 @@ int mac_selinux_setup(bool *loaded_policy) {
 
         /* Already initialized by somebody else? */
         r = getcon_raw(&con);
-        /* getcon_raw can return 0, and still give us a NULL pointer. */
+        /* getcon_raw can return 0, and still give us a NULL pointer if
+         * /proc/self/attr/current is empty. SELinux guarantees this won't
+         * happen, but that file isn't specific to SELinux, and may be provided
+         * by some other arbitrary LSM with different semantics. */
         if (r == 0 && con) {
                 initialized = !streq(con, "kernel");
                 freecon(con);
@@ -93,10 +96,9 @@ int mac_selinux_setup(bool *loaded_policy) {
                 log_open();
 
                 if (enforce > 0) {
-                        if (!initialized) {
-                                log_emergency("Failed to load SELinux policy.");
-                                return -EIO;
-                        }
+                        if (!initialized)
+                                return log_emergency_errno(SYNTHETIC_ERRNO(EIO),
+                                                           "Failed to load SELinux policy.");
 
                         log_warning("Failed to load new SELinux policy. Continuing with old policy.");
                 } else

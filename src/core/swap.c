@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <sys/epoll.h>
@@ -54,6 +54,35 @@ static bool SWAP_STATE_WITH_PROCESS(SwapState state) {
                       SWAP_DEACTIVATING_SIGTERM,
                       SWAP_DEACTIVATING_SIGKILL,
                       SWAP_CLEANING);
+}
+
+_pure_ static UnitActiveState swap_active_state(Unit *u) {
+        assert(u);
+
+        return state_translation_table[SWAP(u)->state];
+}
+
+_pure_ static const char *swap_sub_state_to_string(Unit *u) {
+        assert(u);
+
+        return swap_state_to_string(SWAP(u)->state);
+}
+
+_pure_ static bool swap_may_gc(Unit *u) {
+        Swap *s = SWAP(u);
+
+        assert(s);
+
+        if (s->from_proc_swaps)
+                return false;
+
+        return true;
+}
+
+_pure_ static bool swap_is_extrinsic(Unit *u) {
+        assert(SWAP(u));
+
+        return MANAGER_IS_USER(u->manager);
 }
 
 static void swap_unset_proc_swaps(Swap *s) {
@@ -610,13 +639,15 @@ static void swap_dump(Unit *u, FILE *f, const char *prefix) {
                 "%sClean Result: %s\n"
                 "%sWhat: %s\n"
                 "%sFrom /proc/swaps: %s\n"
-                "%sFrom fragment: %s\n",
+                "%sFrom fragment: %s\n"
+                "%sExtrinsic: %s\n",
                 prefix, swap_state_to_string(s->state),
                 prefix, swap_result_to_string(s->result),
                 prefix, swap_result_to_string(s->clean_result),
                 prefix, s->what,
                 prefix, yes_no(s->from_proc_swaps),
-                prefix, yes_no(s->from_fragment));
+                prefix, yes_no(s->from_fragment),
+                prefix, yes_no(swap_is_extrinsic(u)));
 
         if (s->devnode)
                 fprintf(f, "%sDevice Node: %s\n", prefix, s->devnode);
@@ -706,7 +737,7 @@ static void swap_enter_dead(Swap *s, SwapResult f) {
 
         s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
 
-        unit_destroy_runtime_directory(UNIT(s), &s->exec_context);
+        unit_destroy_runtime_data(UNIT(s), &s->exec_context);
 
         unit_unref_uid_gid(UNIT(s), true);
 
@@ -1026,29 +1057,6 @@ static int swap_deserialize_item(Unit *u, const char *key, const char *value, FD
                 log_unit_debug(u, "Unknown serialization key: %s", key);
 
         return 0;
-}
-
-_pure_ static UnitActiveState swap_active_state(Unit *u) {
-        assert(u);
-
-        return state_translation_table[SWAP(u)->state];
-}
-
-_pure_ static const char *swap_sub_state_to_string(Unit *u) {
-        assert(u);
-
-        return swap_state_to_string(SWAP(u)->state);
-}
-
-_pure_ static bool swap_may_gc(Unit *u) {
-        Swap *s = SWAP(u);
-
-        assert(s);
-
-        if (s->from_proc_swaps)
-                return false;
-
-        return true;
 }
 
 static void swap_sigchld_event(Unit *u, pid_t pid, int code, int status) {
@@ -1425,7 +1433,7 @@ int swap_process_device_new(Manager *m, sd_device *dev) {
         _cleanup_free_ char *e = NULL;
         const char *dn, *devlink;
         Unit *u;
-        int r = 0;
+        int r;
 
         assert(m);
         assert(dev);
@@ -1463,7 +1471,7 @@ int swap_process_device_new(Manager *m, sd_device *dev) {
 
 int swap_process_device_remove(Manager *m, sd_device *dev) {
         const char *dn;
-        int r = 0;
+        int r;
         Swap *s;
 
         r = sd_device_get_devname(dev, &dn);
@@ -1649,6 +1657,7 @@ const UnitVTable swap_vtable = {
         .will_restart = unit_will_restart_default,
 
         .may_gc = swap_may_gc,
+        .is_extrinsic = swap_is_extrinsic,
 
         .sigchld_event = swap_sigchld_event,
 

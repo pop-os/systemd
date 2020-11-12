@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <stdint.h>
 #include <sys/mount.h>
@@ -13,6 +13,7 @@
 #include "limits-util.h"
 #include "main-func.h"
 #include "mkdir.h"
+#include "mount-util.h"
 #include "mountpoint-util.h"
 #include "path-util.h"
 #include "rm-rf.h"
@@ -81,14 +82,14 @@ static int user_mkdir_runtime_path(
 
                 (void) mkdir_label(runtime_path, 0700);
 
-                r = mount("tmpfs", runtime_path, "tmpfs", MS_NODEV|MS_NOSUID, options);
+                r = mount_nofollow_verbose(LOG_DEBUG, "tmpfs", runtime_path, "tmpfs", MS_NODEV|MS_NOSUID, options);
                 if (r < 0) {
-                        if (!ERRNO_IS_PRIVILEGE(errno)) {
-                                r = log_error_errno(errno, "Failed to mount per-user tmpfs directory %s: %m", runtime_path);
+                        if (!ERRNO_IS_PRIVILEGE(r)) {
+                                log_error_errno(r, "Failed to mount per-user tmpfs directory %s: %m", runtime_path);
                                 goto fail;
                         }
 
-                        log_debug_errno(errno,
+                        log_debug_errno(r,
                                         "Failed to mount per-user tmpfs directory %s.\n"
                                         "Assuming containerized execution, ignoring: %m", runtime_path);
 
@@ -166,7 +167,7 @@ static int do_umount(const char *user) {
         int r;
 
         /* The user may be already removed. So, first try to parse the string by parse_uid(),
-         * and if it fails, fallback to get_user_creds().*/
+         * and if it fails, fall back to get_user_creds().*/
         if (parse_uid(user, &uid) < 0) {
                 r = get_user_creds(&user, &uid, NULL, NULL, NULL, 0);
                 if (r < 0)

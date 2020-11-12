@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -20,11 +20,14 @@
 #include "path-util.h"
 #include "selinux-util.h"
 #include "smack-util.h"
+#include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "strxcpyx.h"
 #include "udev-node.h"
 #include "user-util.h"
+
+#define LINK_UPDATE_MAX_RETRIES 128
 
 static int node_symlink(sd_device *dev, const char *node, const char *slink) {
         _cleanup_free_ char *slink_dirname = NULL, *target = NULL;
@@ -99,7 +102,9 @@ static int node_symlink(sd_device *dev, const char *node, const char *slink) {
         if (rename(slink_tmp, slink) < 0) {
                 r = log_device_error_errno(dev, errno, "Failed to rename '%s' to '%s': %m", slink_tmp, slink);
                 (void) unlink(slink_tmp);
-        }
+        } else
+                /* Tell caller that we replaced already existing symlink. */
+                r = 1;
 
         return r;
 }
@@ -192,7 +197,7 @@ static int link_update(sd_device *dev, const char *slink, bool add) {
         _cleanup_free_ char *target = NULL, *filename = NULL, *dirname = NULL;
         char name_enc[PATH_MAX];
         const char *id_filename;
-        int r;
+        int i, r, retries;
 
         assert(dev);
         assert(slink);
@@ -212,14 +217,6 @@ static int link_update(sd_device *dev, const char *slink, bool add) {
         if (!add && unlink(filename) == 0)
                 (void) rmdir(dirname);
 
-        r = link_find_prioritized(dev, add, dirname, &target);
-        if (r < 0) {
-                log_device_debug(dev, "No reference left, removing '%s'", slink);
-                if (unlink(slink) == 0)
-                        (void) rmdir_parents(slink, "/");
-        } else
-                (void) node_symlink(dev, target, slink);
-
         if (add)
                 do {
                         _cleanup_close_ int fd = -1;
@@ -232,7 +229,49 @@ static int link_update(sd_device *dev, const char *slink, bool add) {
                                 r = -errno;
                 } while (r == -ENOENT);
 
-        return r;
+        /* If the database entry is not written yet we will just do one iteration and possibly wrong symlink
+         * will be fixed in the second invocation. */
+        retries = sd_device_get_is_initialized(dev) > 0 ? LINK_UPDATE_MAX_RETRIES : 1;
+
+        for (i = 0; i < retries; i++) {
+                struct stat st1 = {}, st2 = {};
+
+                r = stat(dirname, &st1);
+                if (r < 0 && errno != ENOENT)
+                        return -errno;
+
+                r = link_find_prioritized(dev, add, dirname, &target);
+                if (r == -ENOENT) {
+                        log_device_debug(dev, "No reference left, removing '%s'", slink);
+                        if (unlink(slink) == 0)
+                                (void) rmdir_parents(slink, "/");
+
+                        break;
+                } else if (r < 0)
+                        return log_device_error_errno(dev, r, "Failed to determine highest priority symlink: %m");
+
+                r = node_symlink(dev, target, slink);
+                if (r < 0) {
+                        (void) unlink(filename);
+                        break;
+                } else if (r == 1)
+                        /* We have replaced already existing symlink, possibly there is some other device trying
+                         * to claim the same symlink. Let's do one more iteration to give us a chance to fix
+                         * the error if other device actually claims the symlink with higher priority. */
+                        continue;
+
+                /* Skip the second stat() if the first failed, stat_inode_unmodified() would return false regardless. */
+                if ((st1.st_mode & S_IFMT) != 0) {
+                        r = stat(dirname, &st2);
+                        if (r < 0 && errno != ENOENT)
+                                return -errno;
+
+                        if (stat_inode_unmodified(&st1, &st2))
+                                break;
+                }
+        }
+
+        return i < LINK_UPDATE_MAX_RETRIES ? 0 : -ELOOP;
 }
 
 int udev_node_update_old_links(sd_device *dev, sd_device *dev_old) {
@@ -273,9 +312,10 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
                                   mode_t mode, uid_t uid, gid_t gid,
                                   OrderedHashmap *seclabel_list) {
         const char *devnode, *subsystem, *id_filename = NULL;
+        bool apply_mode, apply_uid, apply_gid;
+        _cleanup_close_ int node_fd = -1;
         struct stat stats;
         dev_t devnum;
-        bool apply_mode, apply_uid, apply_gid;
         int r;
 
         assert(dev);
@@ -296,16 +336,25 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
         else
                 mode |= S_IFCHR;
 
-        if (lstat(devnode, &stats) < 0) {
-                if (errno == ENOENT)
-                        return 0; /* this is necessarily racey, so ignore missing the device */
-                return log_device_debug_errno(dev, errno, "cannot stat() node %s: %m", devnode);
+        node_fd = open(devnode, O_PATH|O_NOFOLLOW|O_CLOEXEC);
+        if (node_fd < 0) {
+                if (errno == ENOENT) {
+                        log_device_debug_errno(dev, errno, "Device node %s is missing, skipping handling.", devnode);
+                        return 0; /* This is necessarily racey, so ignore missing the device */
+                }
+
+                return log_device_debug_errno(dev, errno, "Cannot open node %s: %m", devnode);
         }
 
-        if ((mode != MODE_INVALID && (stats.st_mode & S_IFMT) != (mode & S_IFMT)) || stats.st_rdev != devnum)
-                return log_device_debug_errno(dev, SYNTHETIC_ERRNO(EEXIST),
-                                              "Found node '%s' with non-matching devnum %s, skip handling",
-                                              devnode, id_filename);
+        if (fstat(node_fd, &stats) < 0)
+                return log_device_debug_errno(dev, errno, "cannot stat() node %s: %m", devnode);
+
+        if ((mode != MODE_INVALID && (stats.st_mode & S_IFMT) != (mode & S_IFMT)) || stats.st_rdev != devnum) {
+                log_device_debug(dev, "Found node '%s' with non-matching devnum %s, skipping handling.",
+                                 devnode, id_filename);
+                return 0; /* We might process a device that already got replaced by the time we have a look
+                           * at it, handle this gracefully and step away. */
+        }
 
         apply_mode = mode != MODE_INVALID && (stats.st_mode & 0777) != (mode & 0777);
         apply_uid = uid_is_valid(uid) && stats.st_uid != uid;
@@ -314,7 +363,6 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
         if (apply_mode || apply_uid || apply_gid || apply_mac) {
                 bool selinux = false, smack = false;
                 const char *name, *label;
-                Iterator i;
 
                 if (apply_mode || apply_uid || apply_gid) {
                         log_device_debug(dev, "Setting permissions %s, uid=" UID_FMT ", gid=" GID_FMT ", mode=%#o",
@@ -323,7 +371,7 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
                                          gid_is_valid(gid) ? gid : stats.st_gid,
                                          mode != MODE_INVALID ? mode & 0777 : stats.st_mode & 0777);
 
-                        r = chmod_and_chown(devnode, mode, uid, gid);
+                        r = fchmod_and_chown(node_fd, mode, uid, gid);
                         if (r < 0)
                                 log_device_full_errno(dev, r == -ENOENT ? LOG_DEBUG : LOG_ERR, r,
                                                       "Failed to set owner/mode of %s to uid=" UID_FMT
@@ -340,13 +388,13 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
                                          mode != MODE_INVALID ? mode & 0777 : stats.st_mode & 0777);
 
                 /* apply SECLABEL{$module}=$label */
-                ORDERED_HASHMAP_FOREACH_KEY(label, name, seclabel_list, i) {
+                ORDERED_HASHMAP_FOREACH_KEY(label, name, seclabel_list) {
                         int q;
 
                         if (streq(name, "selinux")) {
                                 selinux = true;
 
-                                q = mac_selinux_apply(devnode, label);
+                                q = mac_selinux_apply_fd(node_fd, devnode, label);
                                 if (q < 0)
                                         log_device_full_errno(dev, q == -ENOENT ? LOG_DEBUG : LOG_ERR, q,
                                                               "SECLABEL: failed to set SELinux label '%s': %m", label);
@@ -356,7 +404,7 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
                         } else if (streq(name, "smack")) {
                                 smack = true;
 
-                                q = mac_smack_apply(devnode, SMACK_ATTR_ACCESS, label);
+                                q = mac_smack_apply_fd(node_fd, SMACK_ATTR_ACCESS, label);
                                 if (q < 0)
                                         log_device_full_errno(dev, q == -ENOENT ? LOG_DEBUG : LOG_ERR, q,
                                                               "SECLABEL: failed to set SMACK label '%s': %m", label);
@@ -369,13 +417,15 @@ static int node_permissions_apply(sd_device *dev, bool apply_mac,
 
                 /* set the defaults */
                 if (!selinux)
-                        (void) mac_selinux_fix(devnode, LABEL_IGNORE_ENOENT);
+                        (void) mac_selinux_fix_fd(node_fd, devnode, LABEL_IGNORE_ENOENT);
                 if (!smack)
-                        (void) mac_smack_apply(devnode, SMACK_ATTR_ACCESS, NULL);
+                        (void) mac_smack_apply_fd(node_fd, SMACK_ATTR_ACCESS, NULL);
         }
 
         /* always update timestamp when we re-use the node, like on media change events */
-        (void) utimensat(AT_FDCWD, devnode, NULL, 0);
+        r = futimens_opath(node_fd, NULL);
+        if (r < 0)
+                log_device_debug_errno(dev, r, "Failed to adjust timestamp of node %s: %m", devnode);
 
         return r;
 }
@@ -440,8 +490,11 @@ int udev_node_add(sd_device *dev, bool apply,
         (void) node_symlink(dev, devnode, filename);
 
         /* create/update symlinks, add symlinks to name index */
-        FOREACH_DEVICE_DEVLINK(dev, devlink)
-                (void) link_update(dev, devlink, true);
+        FOREACH_DEVICE_DEVLINK(dev, devlink) {
+                r = link_update(dev, devlink, true);
+                if (r < 0)
+                        log_device_info_errno(dev, r, "Failed to update device symlinks: %m");
+        }
 
         return 0;
 }
@@ -454,8 +507,11 @@ int udev_node_remove(sd_device *dev) {
         assert(dev);
 
         /* remove/update symlinks, remove symlinks from name index */
-        FOREACH_DEVICE_DEVLINK(dev, devlink)
-                (void) link_update(dev, devlink, false);
+        FOREACH_DEVICE_DEVLINK(dev, devlink) {
+                r = link_update(dev, devlink, false);
+                if (r < 0)
+                        log_device_info_errno(dev, r, "Failed to update device symlinks: %m");
+        }
 
         r = xsprintf_dev_num_path_from_sd_device(dev, &filename);
         if (r < 0)

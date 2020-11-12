@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -12,6 +12,7 @@ typedef enum TableDataType {
         TABLE_EMPTY,
         TABLE_STRING,
         TABLE_STRV,
+        TABLE_STRV_WRAPPED,
         TABLE_PATH,
         TABLE_BOOLEAN,
         TABLE_TIMESTAMP,

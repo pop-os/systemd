@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright © IBM Corp. 2003
  * Copyright © SUSE Linux Products GmbH, 2006
@@ -236,7 +236,7 @@ static int get_file_options(const char *vendor, const char *model,
                         retval = -1;
                         break;
                 }
-                if (vendor == NULL) {
+                if (!vendor) {
                         if (!vendor_in)
                                 break;
                 } else if (vendor_in &&

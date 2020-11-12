@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/capability.h>
 
@@ -669,6 +669,7 @@ int bus_home_method_ref(
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_ABSENT, "Home %s is currently missing or not plugged in.", h->user_name);
         case HOME_UNFIXATED:
         case HOME_INACTIVE:
+        case HOME_DIRTY:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_NOT_ACTIVE, "Home %s not active.", h->user_name);
         case HOME_LOCKED:
                 return sd_bus_error_setf(error, BUS_ERROR_HOME_LOCKED, "Home %s is currently locked.", h->user_name);
@@ -757,7 +758,6 @@ static int bus_home_node_enumerator(
         _cleanup_strv_free_ char **l = NULL;
         Manager *m = userdata;
         size_t k = 0;
-        Iterator i;
         Home *h;
         int r;
 
@@ -767,7 +767,7 @@ static int bus_home_node_enumerator(
         if (!l)
                 return -ENOMEM;
 
-        HASHMAP_FOREACH(h, m->homes_by_uid, i) {
+        HASHMAP_FOREACH(h, m->homes_by_uid) {
                 r = bus_home_path(h, l + k);
                 if (r < 0)
                         return r;

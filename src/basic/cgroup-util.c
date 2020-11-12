@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <ftw.h>
@@ -652,14 +652,13 @@ int cg_remove_xattr(const char *controller, const char *path, const char *name) 
         return 0;
 }
 
-int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
+int cg_pid_get_path(const char *controller, pid_t pid, char **ret_path) {
         _cleanup_fclose_ FILE *f = NULL;
         const char *fs, *controller_str;
         int unified, r;
-        size_t cs = 0;
 
-        assert(path);
         assert(pid >= 0);
+        assert(ret_path);
 
         if (controller) {
                 if (!cg_controller_is_valid(controller))
@@ -675,8 +674,6 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
                         controller_str = SYSTEMD_CGROUP_CONTROLLER_LEGACY;
                 else
                         controller_str = controller;
-
-                cs = strlen(controller_str);
         }
 
         fs = procfs_file_alloca(pid, "cgroup");
@@ -688,13 +685,13 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
 
         for (;;) {
                 _cleanup_free_ char *line = NULL;
-                char *e, *p;
+                char *e;
 
                 r = read_line(f, LONG_LINE_MAX, &line);
                 if (r < 0)
                         return r;
                 if (r == 0)
-                        break;
+                        return -ENODATA;
 
                 if (unified) {
                         e = startswith(line, "0:");
@@ -706,9 +703,6 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
                                 continue;
                 } else {
                         char *l;
-                        size_t k;
-                        const char *word, *state;
-                        bool found = false;
 
                         l = strchr(line, ':');
                         if (!l)
@@ -718,31 +712,27 @@ int cg_pid_get_path(const char *controller, pid_t pid, char **path) {
                         e = strchr(l, ':');
                         if (!e)
                                 continue;
-
                         *e = 0;
-                        FOREACH_WORD_SEPARATOR(word, k, l, ",", state)
-                                if (k == cs && memcmp(word, controller_str, cs) == 0) {
-                                        found = true;
-                                        break;
-                                }
-                        if (!found)
+
+                        r = string_contains_word(l, ",", controller_str);
+                        if (r < 0)
+                                return r;
+                        if (r == 0)
                                 continue;
                 }
 
-                p = strdup(e + 1);
-                if (!p)
+                char *path = strdup(e + 1);
+                if (!path)
                         return -ENOMEM;
 
                 /* Truncate suffix indicating the process is a zombie */
-                e = endswith(p, " (deleted)");
+                e = endswith(path, " (deleted)");
                 if (e)
                         *e = 0;
 
-                *path = p;
+                *ret_path = path;
                 return 0;
         }
-
-        return -ENODATA;
 }
 
 int cg_install_release_agent(const char *controller, const char *agent) {
@@ -1695,6 +1685,26 @@ int cg_get_attribute_as_uint64(const char *controller, const char *path, const c
         return 0;
 }
 
+int cg_get_attribute_as_bool(const char *controller, const char *path, const char *attribute, bool *ret) {
+        _cleanup_free_ char *value = NULL;
+        int r;
+
+        assert(ret);
+
+        r = cg_get_attribute(controller, path, attribute, &value);
+        if (r == -ENOENT)
+                return -ENODATA;
+        if (r < 0)
+                return r;
+
+        r = parse_boolean(value);
+        if (r < 0)
+                return r;
+
+        *ret = r;
+        return 0;
+}
+
 int cg_get_keyed_attribute_full(
                 const char *controller,
                 const char *path,
@@ -2171,3 +2181,10 @@ CGroupMask get_cpu_accounting_mask(void) {
 bool cpu_accounting_is_cheap(void) {
         return get_cpu_accounting_mask() == 0;
 }
+
+static const char* const managed_oom_mode_table[_MANAGED_OOM_MODE_MAX] = {
+        [MANAGED_OOM_AUTO] = "auto",
+        [MANAGED_OOM_KILL] = "kill",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(managed_oom_mode, ManagedOOMMode);

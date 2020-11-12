@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -33,6 +33,12 @@ static inline bool streq_ptr(const char *a, const char *b) {
         return strcmp_ptr(a, b) == 0;
 }
 
+static inline char* strstr_ptr(const char *haystack, const char *needle) {
+        if (!haystack || !needle)
+                return NULL;
+        return strstr(haystack, needle);
+}
+
 static inline const char* strempty(const char *s) {
         return s ?: "";
 }
@@ -51,6 +57,10 @@ static inline const char* yes_no(bool b) {
 
 static inline const char* true_false(bool b) {
         return b ? "true" : "false";
+}
+
+static inline const char* plus_minus(bool b) {
+        return b ? "+" : "-";
 }
 
 static inline const char* one_zero(bool b) {
@@ -108,24 +118,6 @@ char *endswith_no_case(const char *s, const char *postfix) _pure_;
 
 char *first_word(const char *s, const char *word) _pure_;
 
-typedef enum SplitFlags {
-        SPLIT_QUOTES                     = 0x01 << 0,
-        SPLIT_RELAX                      = 0x01 << 1,
-} SplitFlags;
-
-/* Smelly. Do not use this anymore. Use extract_first_word() instead! */
-const char* split(const char **state, size_t *l, const char *separator, SplitFlags flags);
-
-/* Similar, don't use this anymore */
-#define FOREACH_WORD(word, length, s, state)                            \
-        _FOREACH_WORD(word, length, s, WHITESPACE, 0, state)
-
-#define FOREACH_WORD_SEPARATOR(word, length, s, separator, state)       \
-        _FOREACH_WORD(word, length, s, separator, 0, state)
-
-#define _FOREACH_WORD(word, length, s, separator, flags, state)         \
-        for ((state) = (s), (word) = split(&(state), &(length), (separator), (flags)); (word); (word) = split(&(state), &(length), (separator), (flags)))
-
 char *strnappend(const char *s, const char *suffix, size_t length);
 
 char *strjoin_real(const char *x, ...) _sentinel_;
@@ -135,8 +127,8 @@ char *strjoin_real(const char *x, ...) _sentinel_;
         ({                                                              \
                 const char *_appendees_[] = { a, __VA_ARGS__ };         \
                 char *_d_, *_p_;                                        \
-                size_t _len_ = 0;                                          \
-                size_t _i_;                                           \
+                size_t _len_ = 0;                                       \
+                size_t _i_;                                             \
                 for (_i_ = 0; _i_ < ELEMENTSOF(_appendees_) && _appendees_[_i_]; _i_++) \
                         _len_ += strlen(_appendees_[_i_]);              \
                 _p_ = _d_ = newa(char, _len_ + 1);                      \
@@ -152,7 +144,6 @@ char *delete_trailing_chars(char *s, const char *bad);
 char *truncate_nl(char *s);
 
 static inline char *skip_leading_chars(const char *s, const char *bad) {
-
         if (!s)
                 return NULL;
 
@@ -231,11 +222,9 @@ REENABLE_WARNING;
 
 /* Like startswith(), but operates on arbitrary memory blocks */
 static inline void *memory_startswith(const void *p, size_t sz, const char *token) {
-        size_t n;
-
         assert(token);
 
-        n = strlen(token);
+        size_t n = strlen(token);
         if (sz < n)
                 return NULL;
 
@@ -251,20 +240,17 @@ static inline void *memory_startswith(const void *p, size_t sz, const char *toke
  * It works only for ASCII strings.
  */
 static inline void *memory_startswith_no_case(const void *p, size_t sz, const char *token) {
-        size_t n, i;
-
         assert(token);
 
-        n = strlen(token);
+        size_t n = strlen(token);
         if (sz < n)
                 return NULL;
 
         assert(p);
 
-        for (i = 0; i < n; i++) {
+        for (size_t i = 0; i < n; i++)
                 if (ascii_tolower(((char *)p)[i]) != ascii_tolower(token[i]))
                         return NULL;
-        }
 
         return (uint8_t*) p + n;
 }
@@ -286,3 +272,8 @@ char* string_erase(char *x);
 
 int string_truncate_lines(const char *s, size_t n_lines, char **ret);
 int string_extract_line(const char *s, size_t i, char **ret);
+
+int string_contains_word_strv(const char *string, const char *separators, char **words, const char **ret_word);
+static inline int string_contains_word(const char *string, const char *separators, const char *word) {
+        return string_contains_word_strv(string, separators, STRV_MAKE(word), NULL);
+}

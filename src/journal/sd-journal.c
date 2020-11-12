@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -105,7 +105,6 @@ static int journal_put_error(sd_journal *j, int r, const char *path) {
 }
 
 static void detach_location(sd_journal *j) {
-        Iterator i;
         JournalFile *f;
 
         assert(j);
@@ -113,7 +112,7 @@ static void detach_location(sd_journal *j) {
         j->current_file = NULL;
         j->current_field = 0;
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i)
+        ORDERED_HASHMAP_FOREACH(f, j->files)
                 journal_file_reset_location(f);
 }
 
@@ -884,6 +883,7 @@ static int real_journal_next_skip(sd_journal *j, direction_t direction, uint64_t
 
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
+        assert_return(skip <= INT_MAX, -ERANGE);
 
         if (skip == 0) {
                 /* If this is not a discrete skip, then at least
@@ -951,74 +951,69 @@ _public_ int sd_journal_get_cursor(sd_journal *j, char **cursor) {
 }
 
 _public_ int sd_journal_seek_cursor(sd_journal *j, const char *cursor) {
-        const char *word, *state;
-        size_t l;
         unsigned long long seqnum, monotonic, realtime, xor_hash;
-        bool
-                seqnum_id_set = false,
-                seqnum_set = false,
-                boot_id_set = false,
-                monotonic_set = false,
-                realtime_set = false,
-                xor_hash_set = false;
+        bool seqnum_id_set = false,
+             seqnum_set = false,
+             boot_id_set = false,
+             monotonic_set = false,
+             realtime_set = false,
+             xor_hash_set = false;
         sd_id128_t seqnum_id, boot_id;
+        int r;
 
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
         assert_return(!isempty(cursor), -EINVAL);
 
-        FOREACH_WORD_SEPARATOR(word, l, cursor, ";", state) {
-                char *item;
-                int k = 0;
+        for (const char *p = cursor;;) {
+                _cleanup_free_ char *word = NULL;
 
-                if (l < 2 || word[1] != '=')
+                r = extract_first_word(&p, &word, ";", EXTRACT_DONT_COALESCE_SEPARATORS);
+                if (r < 0)
+                        return r;
+                if (r == 0)
+                        break;
+
+                if (word[0] == '\0' || word[1] != '=')
                         return -EINVAL;
 
-                item = strndup(word, l);
-                if (!item)
-                        return -ENOMEM;
-
                 switch (word[0]) {
-
                 case 's':
                         seqnum_id_set = true;
-                        k = sd_id128_from_string(item+2, &seqnum_id);
+                        r = sd_id128_from_string(word + 2, &seqnum_id);
+                        if (r < 0)
+                                return r;
                         break;
 
                 case 'i':
                         seqnum_set = true;
-                        if (sscanf(item+2, "%llx", &seqnum) != 1)
-                                k = -EINVAL;
+                        if (sscanf(word + 2, "%llx", &seqnum) != 1)
+                                return -EINVAL;
                         break;
 
                 case 'b':
                         boot_id_set = true;
-                        k = sd_id128_from_string(item+2, &boot_id);
+                        r = sd_id128_from_string(word + 2, &boot_id);
                         break;
 
                 case 'm':
                         monotonic_set = true;
-                        if (sscanf(item+2, "%llx", &monotonic) != 1)
-                                k = -EINVAL;
+                        if (sscanf(word + 2, "%llx", &monotonic) != 1)
+                                return -EINVAL;
                         break;
 
                 case 't':
                         realtime_set = true;
-                        if (sscanf(item+2, "%llx", &realtime) != 1)
-                                k = -EINVAL;
+                        if (sscanf(word + 2, "%llx", &realtime) != 1)
+                                return -EINVAL;
                         break;
 
                 case 'x':
                         xor_hash_set = true;
-                        if (sscanf(item+2, "%llx", &xor_hash) != 1)
-                                k = -EINVAL;
+                        if (sscanf(word + 2, "%llx", &xor_hash) != 1)
+                                return -EINVAL;
                         break;
                 }
-
-                free(item);
-
-                if (k < 0)
-                        return k;
         }
 
         if ((!seqnum_set || !seqnum_id_set) &&
@@ -1859,7 +1854,6 @@ static int add_search_paths(sd_journal *j) {
 }
 
 static int add_current_paths(sd_journal *j) {
-        Iterator i;
         JournalFile *f;
 
         assert(j);
@@ -1868,7 +1862,7 @@ static int add_current_paths(sd_journal *j) {
         /* Simply adds all directories for files we have open as directories. We don't expect errors here, so we
          * treat them as fatal. */
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+        ORDERED_HASHMAP_FOREACH(f, j->files) {
                 _cleanup_free_ char *dir;
                 int r;
 
@@ -2103,7 +2097,6 @@ _public_ int sd_journal_open_directory_fd(sd_journal **ret, int fd, int flags) {
 }
 
 _public_ int sd_journal_open_files_fd(sd_journal **ret, int fds[], unsigned n_fds, int flags) {
-        Iterator iterator;
         JournalFile *f;
         _cleanup_(sd_journal_closep) sd_journal *j = NULL;
         unsigned i;
@@ -2148,7 +2141,7 @@ _public_ int sd_journal_open_files_fd(sd_journal **ret, int fds[], unsigned n_fd
 fail:
         /* If we fail, make sure we don't take possession of the files we managed to make use of successfully, and they
          * remain open */
-        ORDERED_HASHMAP_FOREACH(f, j->files, iterator)
+        ORDERED_HASHMAP_FOREACH(f, j->files)
                 f->close_fd = false;
 
         return r;
@@ -2219,7 +2212,6 @@ _public_ int sd_journal_get_monotonic_usec(sd_journal *j, uint64_t *ret, sd_id12
         Object *o;
         JournalFile *f;
         int r;
-        sd_id128_t id;
 
         assert_return(j, -EINVAL);
         assert_return(!journal_pid_changed(j), -ECHILD);
@@ -2238,6 +2230,8 @@ _public_ int sd_journal_get_monotonic_usec(sd_journal *j, uint64_t *ret, sd_id12
         if (ret_boot_id)
                 *ret_boot_id = o->entry.boot_id;
         else {
+                sd_id128_t id;
+
                 r = sd_id128_get_boot(&id);
                 if (r < 0)
                         return r;
@@ -2565,7 +2559,6 @@ _public_ int sd_journal_get_timeout(sd_journal *j, uint64_t *timeout_usec) {
 static void process_q_overflow(sd_journal *j) {
         JournalFile *f;
         Directory *m;
-        Iterator i;
 
         assert(j);
 
@@ -2579,7 +2572,7 @@ static void process_q_overflow(sd_journal *j) {
         j->generation++;
         (void) reiterate_all_paths(j);
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+        ORDERED_HASHMAP_FOREACH(f, j->files) {
 
                 if (f->last_seen_generation == j->generation)
                         continue;
@@ -2588,7 +2581,7 @@ static void process_q_overflow(sd_journal *j) {
                 remove_file_real(j, f);
         }
 
-        HASHMAP_FOREACH(m, j->directories_by_path, i) {
+        HASHMAP_FOREACH(m, j->directories_by_path) {
 
                 if (m->last_seen_generation == j->generation)
                         continue;
@@ -2703,7 +2696,6 @@ _public_ int sd_journal_wait(sd_journal *j, uint64_t timeout_usec) {
         assert_return(!journal_pid_changed(j), -ECHILD);
 
         if (j->inotify_fd < 0) {
-                Iterator i;
                 JournalFile *f;
 
                 /* This is the first invocation, hence create the
@@ -2714,7 +2706,7 @@ _public_ int sd_journal_wait(sd_journal *j, uint64_t timeout_usec) {
 
                 /* Server might have done some vacuuming while we weren't watching.
                    Get rid of the deleted files now so they don't stay around indefinitely. */
-                ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+                ORDERED_HASHMAP_FOREACH(f, j->files) {
                         r = journal_file_fstat(f);
                         if (r == -EIDRM)
                                 remove_file_real(j, f);
@@ -2756,7 +2748,6 @@ _public_ int sd_journal_wait(sd_journal *j, uint64_t timeout_usec) {
 }
 
 _public_ int sd_journal_get_cutoff_realtime_usec(sd_journal *j, uint64_t *from, uint64_t *to) {
-        Iterator i;
         JournalFile *f;
         bool first = true;
         uint64_t fmin = 0, tmax = 0;
@@ -2767,7 +2758,7 @@ _public_ int sd_journal_get_cutoff_realtime_usec(sd_journal *j, uint64_t *from, 
         assert_return(from || to, -EINVAL);
         assert_return(from != to, -EINVAL);
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+        ORDERED_HASHMAP_FOREACH(f, j->files) {
                 usec_t fr, t;
 
                 r = journal_file_get_cutoff_realtime_usec(f, &fr, &t);
@@ -2797,7 +2788,6 @@ _public_ int sd_journal_get_cutoff_realtime_usec(sd_journal *j, uint64_t *from, 
 }
 
 _public_ int sd_journal_get_cutoff_monotonic_usec(sd_journal *j, sd_id128_t boot_id, uint64_t *from, uint64_t *to) {
-        Iterator i;
         JournalFile *f;
         bool found = false;
         int r;
@@ -2807,7 +2797,7 @@ _public_ int sd_journal_get_cutoff_monotonic_usec(sd_journal *j, sd_id128_t boot
         assert_return(from || to, -EINVAL);
         assert_return(from != to, -EINVAL);
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+        ORDERED_HASHMAP_FOREACH(f, j->files) {
                 usec_t fr, t;
 
                 r = journal_file_get_cutoff_monotonic_usec(f, boot_id, &fr, &t);
@@ -2836,13 +2826,12 @@ _public_ int sd_journal_get_cutoff_monotonic_usec(sd_journal *j, sd_id128_t boot
 }
 
 void journal_print_header(sd_journal *j) {
-        Iterator i;
         JournalFile *f;
         bool newline = false;
 
         assert(j);
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+        ORDERED_HASHMAP_FOREACH(f, j->files) {
                 if (newline)
                         putchar('\n');
                 else
@@ -2853,7 +2842,6 @@ void journal_print_header(sd_journal *j) {
 }
 
 _public_ int sd_journal_get_usage(sd_journal *j, uint64_t *bytes) {
-        Iterator i;
         JournalFile *f;
         uint64_t sum = 0;
 
@@ -2861,7 +2849,7 @@ _public_ int sd_journal_get_usage(sd_journal *j, uint64_t *bytes) {
         assert_return(!journal_pid_changed(j), -ECHILD);
         assert_return(bytes, -EINVAL);
 
-        ORDERED_HASHMAP_FOREACH(f, j->files, i) {
+        ORDERED_HASHMAP_FOREACH(f, j->files) {
                 struct stat st;
 
                 if (fstat(f->fd, &st) < 0)
@@ -2919,7 +2907,6 @@ _public_ int sd_journal_enumerate_unique(sd_journal *j, const void **data, size_
 
         for (;;) {
                 JournalFile *of;
-                Iterator i;
                 Object *o;
                 const void *odata;
                 size_t ol;
@@ -2987,7 +2974,7 @@ _public_ int sd_journal_enumerate_unique(sd_journal *j, const void **data, size_
                  * object by checking if it exists in the earlier
                  * traversed files. */
                 found = false;
-                ORDERED_HASHMAP_FOREACH(of, j->files, i) {
+                ORDERED_HASHMAP_FOREACH(of, j->files) {
                         if (of == j->unique_file)
                                 break;
 
@@ -3059,7 +3046,6 @@ _public_ int sd_journal_enumerate_fields(sd_journal *j, const char **field) {
 
         for (;;) {
                 JournalFile *f, *of;
-                Iterator i;
                 uint64_t m;
                 Object *o;
                 size_t sz;
@@ -3136,7 +3122,7 @@ _public_ int sd_journal_enumerate_fields(sd_journal *j, const char **field) {
 
                 /* Let's see if we already returned this field name before. */
                 found = false;
-                ORDERED_HASHMAP_FOREACH(of, j->files, i) {
+                ORDERED_HASHMAP_FOREACH(of, j->files) {
                         if (of == f)
                                 break;
 

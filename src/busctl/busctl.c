@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <getopt.h>
 
@@ -129,11 +129,11 @@ static int acquire_bus(bool set_monitor, sd_bus **ret) {
                 }
         }
         if (r < 0)
-                return log_error_errno(r, "Failed to set address: %m");
+                return bus_log_address_error(r);
 
         r = sd_bus_start(bus);
         if (r < 0)
-                return log_error_errno(r, "Failed to connect to bus: %m");
+                return bus_log_connect_error(r);
 
         *ret = TAKE_PTR(bus);
 
@@ -145,7 +145,6 @@ static int list_bus_names(int argc, char **argv, void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_hashmap_free_ Hashmap *names = NULL;
         _cleanup_(table_unrefp) Table *table = NULL;
-        Iterator iterator;
         char **i, *k;
         void *v;
         int r;
@@ -247,7 +246,7 @@ static int list_bus_names(int argc, char **argv, void *userdata) {
 
         table_set_header(table, arg_legend);
 
-        HASHMAP_FOREACH_KEY(v, k, names, iterator) {
+        HASHMAP_FOREACH_KEY(v, k, names) {
                 _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
 
                 if (v == NAME_IS_ACTIVATABLE) {
@@ -532,7 +531,7 @@ static int tree_one(sd_bus *bus, const char *service) {
 static int tree(int argc, char **argv, void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         char **i;
-        int r = 0;
+        int r;
 
         /* Do superficial verification of arguments before even opening the bus */
         STRV_FOREACH(i, strv_skip(argv, 1))
@@ -986,7 +985,6 @@ static int introspect(int argc, char **argv, void *userdata) {
         _cleanup_(member_set_freep) Set *members = NULL;
         unsigned name_width, type_width, signature_width, result_width, j, k = 0;
         Member *m, **sorted = NULL;
-        Iterator i;
         const char *xml;
         int r;
 
@@ -1022,7 +1020,7 @@ static int introspect(int argc, char **argv, void *userdata) {
                 return r;
 
         /* Second, find the current values for them */
-        SET_FOREACH(m, members, i) {
+        SET_FOREACH(m, members) {
                 _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
 
                 if (!streq(m->type, "property"))
@@ -1105,7 +1103,7 @@ static int introspect(int argc, char **argv, void *userdata) {
 
         sorted = newa(Member*, set_size(members));
 
-        SET_FOREACH(m, members, i) {
+        SET_FOREACH(m, members) {
                 if (argv[3] && !streq(argv[3], m->interface))
                         continue;
 
@@ -1132,14 +1130,13 @@ static int introspect(int argc, char **argv, void *userdata) {
 
         (void) pager_open(arg_pager_flags);
 
-        if (arg_legend) {
+        if (arg_legend)
                 printf("%-*s %-*s %-*s %-*s %s\n",
                        (int) name_width, "NAME",
                        (int) type_width, "TYPE",
                        (int) signature_width, "SIGNATURE",
                        (int) result_width, "RESULT/VALUE",
                        "FLAGS");
-        }
 
         for (j = 0; j < k; j++) {
                 _cleanup_free_ char *ellipsized = NULL;

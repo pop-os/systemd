@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -63,6 +63,7 @@
 #include "ratelimit.h"
 #include "rlimit-util.h"
 #include "rm-rf.h"
+#include "selinux-util.h"
 #include "serialize.h"
 #include "signal-util.h"
 #include "socket-util.h"
@@ -197,7 +198,6 @@ static void manager_flip_auto_status(Manager *m, bool enable, const char *reason
 
 static void manager_print_jobs_in_progress(Manager *m) {
         _cleanup_free_ char *job_of_n = NULL;
-        Iterator i;
         Job *j;
         unsigned counter = 0, print_nr;
         char cylon[6 + CYLON_BUFFER_EXTRA + 1];
@@ -212,7 +212,7 @@ static void manager_print_jobs_in_progress(Manager *m) {
 
         print_nr = (m->jobs_in_progress_iteration / JOBS_IN_PROGRESS_PERIOD_DIVISOR) % m->n_running_jobs;
 
-        HASHMAP_FOREACH(j, m->jobs, i)
+        HASHMAP_FOREACH(j, m->jobs)
                 if (j->state == JOB_RUNNING && counter++ == print_nr)
                         break;
 
@@ -591,6 +591,7 @@ static char** sanitize_environment(char **l) {
                         l,
                         "CACHE_DIRECTORY",
                         "CONFIGURATION_DIRECTORY",
+                        "CREDENTIALS_DIRECTORY",
                         "EXIT_CODE",
                         "EXIT_STATUS",
                         "INVOCATION_ID",
@@ -670,19 +671,19 @@ static int manager_setup_prefix(Manager *m) {
         };
 
         static const struct table_entry paths_system[_EXEC_DIRECTORY_TYPE_MAX] = {
-                [EXEC_DIRECTORY_RUNTIME] = { SD_PATH_SYSTEM_RUNTIME, NULL },
-                [EXEC_DIRECTORY_STATE] = { SD_PATH_SYSTEM_STATE_PRIVATE, NULL },
-                [EXEC_DIRECTORY_CACHE] = { SD_PATH_SYSTEM_STATE_CACHE, NULL },
-                [EXEC_DIRECTORY_LOGS] = { SD_PATH_SYSTEM_STATE_LOGS, NULL },
+                [EXEC_DIRECTORY_RUNTIME] =       { SD_PATH_SYSTEM_RUNTIME,       NULL },
+                [EXEC_DIRECTORY_STATE] =         { SD_PATH_SYSTEM_STATE_PRIVATE, NULL },
+                [EXEC_DIRECTORY_CACHE] =         { SD_PATH_SYSTEM_STATE_CACHE,   NULL },
+                [EXEC_DIRECTORY_LOGS] =          { SD_PATH_SYSTEM_STATE_LOGS,    NULL },
                 [EXEC_DIRECTORY_CONFIGURATION] = { SD_PATH_SYSTEM_CONFIGURATION, NULL },
         };
 
         static const struct table_entry paths_user[_EXEC_DIRECTORY_TYPE_MAX] = {
-                [EXEC_DIRECTORY_RUNTIME] = { SD_PATH_USER_RUNTIME, NULL },
-                [EXEC_DIRECTORY_STATE] = { SD_PATH_USER_CONFIGURATION, NULL },
-                [EXEC_DIRECTORY_CACHE] = { SD_PATH_USER_STATE_CACHE, NULL },
-                [EXEC_DIRECTORY_LOGS] = { SD_PATH_USER_CONFIGURATION, "log" },
-                [EXEC_DIRECTORY_CONFIGURATION] = { SD_PATH_USER_CONFIGURATION, NULL },
+                [EXEC_DIRECTORY_RUNTIME] =       { SD_PATH_USER_RUNTIME,       NULL  },
+                [EXEC_DIRECTORY_STATE] =         { SD_PATH_USER_CONFIGURATION, NULL  },
+                [EXEC_DIRECTORY_CACHE] =         { SD_PATH_USER_STATE_CACHE,   NULL  },
+                [EXEC_DIRECTORY_LOGS] =          { SD_PATH_USER_CONFIGURATION, "log" },
+                [EXEC_DIRECTORY_CONFIGURATION] = { SD_PATH_USER_CONFIGURATION, NULL  },
         };
 
         assert(m);
@@ -754,6 +755,7 @@ static int manager_setup_sigchld_event_source(Manager *m) {
 
 int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager **_m) {
         _cleanup_(manager_freep) Manager *m = NULL;
+        const char *e;
         int r;
 
         assert(_m);
@@ -857,6 +859,13 @@ int manager_new(UnitFileScope scope, ManagerTestRunFlags test_run_flags, Manager
         if (r < 0)
                 return r;
 
+        e = secure_getenv("CREDENTIALS_DIRECTORY");
+        if (e) {
+                m->received_credentials = strdup(e);
+                if (!m->received_credentials)
+                        return -ENOMEM;
+        }
+
         r = sd_event_default(&m->event);
         if (r < 0)
                 return r;
@@ -954,9 +963,9 @@ static int manager_setup_notify(Manager *m) {
                 (void) mkdir_parents_label(m->notify_socket, 0755);
                 (void) sockaddr_un_unlink(&sa.un);
 
-                r = bind(fd, &sa.sa, sa_len);
+                r = mac_selinux_bind(fd, &sa.sa, sa_len);
                 if (r < 0)
-                        return log_error_errno(errno, "bind(%s) failed: %m", m->notify_socket);
+                        return log_error_errno(r, "bind(%s) failed: %m", m->notify_socket);
 
                 r = setsockopt_int(fd, SOL_SOCKET, SO_PASSCRED, true);
                 if (r < 0)
@@ -1137,13 +1146,12 @@ enum {
 
 static void unit_gc_mark_good(Unit *u, unsigned gc_marker) {
         Unit *other;
-        Iterator i;
         void *v;
 
         u->gc_marker = gc_marker + GC_OFFSET_GOOD;
 
         /* Recursively mark referenced units as GOOD as well */
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REFERENCES], i)
+        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REFERENCES])
                 if (other->gc_marker == gc_marker + GC_OFFSET_UNSURE)
                         unit_gc_mark_good(other, gc_marker);
 }
@@ -1151,7 +1159,6 @@ static void unit_gc_mark_good(Unit *u, unsigned gc_marker) {
 static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
         Unit *other;
         bool is_bad;
-        Iterator i;
         void *v;
 
         assert(u);
@@ -1170,7 +1177,7 @@ static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
 
         is_bad = true;
 
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REFERENCED_BY], i) {
+        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REFERENCED_BY]) {
                 unit_gc_sweep(other, gc_marker);
 
                 if (other->gc_marker == gc_marker + GC_OFFSET_GOOD)
@@ -1420,6 +1427,7 @@ Manager* manager_free(Manager *m) {
 
         for (ExecDirectoryType dt = 0; dt < _EXEC_DIRECTORY_TYPE_MAX; dt++)
                 m->prefix[dt] = mfree(m->prefix[dt]);
+        free(m->received_credentials);
 
         return mfree(m);
 }
@@ -1463,7 +1471,6 @@ static void manager_enumerate(Manager *m) {
 }
 
 static void manager_coldplug(Manager *m) {
-        Iterator i;
         Unit *u;
         char *k;
         int r;
@@ -1473,7 +1480,7 @@ static void manager_coldplug(Manager *m) {
         log_debug("Invoking unit coldplug() handlers…");
 
         /* Let's place the units back into their deserialized state */
-        HASHMAP_FOREACH_KEY(u, k, m->units, i) {
+        HASHMAP_FOREACH_KEY(u, k, m->units) {
 
                 /* ignore aliases */
                 if (u->id != k)
@@ -1486,7 +1493,6 @@ static void manager_coldplug(Manager *m) {
 }
 
 static void manager_catchup(Manager *m) {
-        Iterator i;
         Unit *u;
         char *k;
 
@@ -1495,7 +1501,7 @@ static void manager_catchup(Manager *m) {
         log_debug("Invoking unit catchup() handlers…");
 
         /* Let's catch up on any state changes that happened while we were reloading/reexecing */
-        HASHMAP_FOREACH_KEY(u, k, m->units, i) {
+        HASHMAP_FOREACH_KEY(u, k, m->units) {
 
                 /* ignore aliases */
                 if (u->id != k)
@@ -1506,12 +1512,11 @@ static void manager_catchup(Manager *m) {
 }
 
 static void manager_distribute_fds(Manager *m, FDSet *fds) {
-        Iterator i;
         Unit *u;
 
         assert(m);
 
-        HASHMAP_FOREACH(u, m->units, i) {
+        HASHMAP_FOREACH(u, m->units) {
 
                 if (fdset_size(fds) <= 0)
                         break;
@@ -1872,7 +1877,6 @@ Unit *manager_get_unit(Manager *m, const char *name) {
 
 static int manager_dispatch_target_deps_queue(Manager *m) {
         Unit *u;
-        unsigned k;
         int r = 0;
 
         static const UnitDependency deps[] = {
@@ -1890,12 +1894,11 @@ static int manager_dispatch_target_deps_queue(Manager *m) {
                 LIST_REMOVE(target_deps_queue, u->manager->target_deps_queue, u);
                 u->in_target_deps_queue = false;
 
-                for (k = 0; k < ELEMENTSOF(deps); k++) {
+                for (size_t k = 0; k < ELEMENTSOF(deps); k++) {
                         Unit *target;
-                        Iterator i;
                         void *v;
 
-                        HASHMAP_FOREACH_KEY(v, target, u->dependencies[deps[k]], i) {
+                        HASHMAP_FOREACH_KEY(v, target, u->dependencies[deps[k]]) {
                                 r = unit_add_default_target_dependency(u, target);
                                 if (r < 0)
                                         return r;
@@ -1970,10 +1973,9 @@ int manager_load_unit_prepare(
         assert(m);
         assert(_ret);
 
-        /* This will prepare the unit for loading, but not actually
-         * load anything from disk. */
+        /* This will prepare the unit for loading, but not actually load anything from disk. */
 
-        if (path && !is_path(path))
+        if (path && !path_is_absolute(path))
                 return sd_bus_error_setf(e, SD_BUS_ERROR_INVALID_ARGS, "Path %s is not absolute.", path);
 
         if (!name) {
@@ -2088,36 +2090,32 @@ int manager_load_startable_unit_or_warn(
 }
 
 void manager_dump_jobs(Manager *s, FILE *f, const char *prefix) {
-        Iterator i;
         Job *j;
 
         assert(s);
         assert(f);
 
-        HASHMAP_FOREACH(j, s->jobs, i)
+        HASHMAP_FOREACH(j, s->jobs)
                 job_dump(j, f, prefix);
 }
 
 void manager_dump_units(Manager *s, FILE *f, const char *prefix) {
-        Iterator i;
         Unit *u;
         const char *t;
 
         assert(s);
         assert(f);
 
-        HASHMAP_FOREACH_KEY(u, t, s->units, i)
+        HASHMAP_FOREACH_KEY(u, t, s->units)
                 if (u->id == t)
                         unit_dump(u, f, prefix);
 }
 
 void manager_dump(Manager *m, FILE *f, const char *prefix) {
-        ManagerTimestamp q;
-
         assert(m);
         assert(f);
 
-        for (q = 0; q < _MANAGER_TIMESTAMP_MAX; q++) {
+        for (ManagerTimestamp q = 0; q < _MANAGER_TIMESTAMP_MAX; q++) {
                 const dual_timestamp *t = m->timestamps + q;
                 char buf[CONST_MAX(FORMAT_TIMESPAN_MAX, FORMAT_TIMESTAMP_MAX)];
 
@@ -2580,6 +2578,11 @@ static int manager_dispatch_sigchld(sd_event_source *source, void *userdata) {
                          * We only do this for the cgroup the PID belonged to. */
                         (void) unit_check_oom(u1);
 
+                        /* This only logs for now. In the future when the interface for kills/notifications
+                         * is more stable we can extend service results table similar to how kernel oom kills
+                         * are managed. */
+                        (void) unit_check_oomd_kill(u1);
+
                         manager_invoke_sigchld_event(m, u1, &si);
                 }
                 if (u2)
@@ -2829,7 +2832,6 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t 
 
 static int manager_dispatch_time_change_fd(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
         Manager *m = userdata;
-        Iterator i;
         Unit *u;
 
         assert(m);
@@ -2842,7 +2844,7 @@ static int manager_dispatch_time_change_fd(sd_event_source *source, int fd, uint
         /* Restart the watch */
         (void) manager_setup_time_change(m);
 
-        HASHMAP_FOREACH(u, m->units, i)
+        HASHMAP_FOREACH(u, m->units)
                 if (UNIT_VTABLE(u)->time_change)
                         UNIT_VTABLE(u)->time_change(u);
 
@@ -2856,7 +2858,6 @@ static int manager_dispatch_timezone_change(
 
         Manager *m = userdata;
         int changed;
-        Iterator i;
         Unit *u;
 
         assert(m);
@@ -2875,7 +2876,7 @@ static int manager_dispatch_timezone_change(
 
         log_debug("Timezone has been changed (now: %s).", tzname[daylight]);
 
-        HASHMAP_FOREACH(u, m->units, i)
+        HASHMAP_FOREACH(u, m->units)
                 if (UNIT_VTABLE(u)->timezone_change)
                         UNIT_VTABLE(u)->timezone_change(u);
 
@@ -2905,15 +2906,13 @@ static int manager_dispatch_idle_pipe_fd(sd_event_source *source, int fd, uint32
 static int manager_dispatch_jobs_in_progress(sd_event_source *source, usec_t usec, void *userdata) {
         Manager *m = userdata;
         int r;
-        uint64_t next;
 
         assert(m);
         assert(source);
 
         manager_print_jobs_in_progress(m);
 
-        next = now(CLOCK_MONOTONIC) + JOBS_IN_PROGRESS_PERIOD_USEC;
-        r = sd_event_source_set_time(source, next);
+        r = sd_event_source_set_time_relative(source, JOBS_IN_PROGRESS_PERIOD_USEC);
         if (r < 0)
                 return r;
 
@@ -2939,7 +2938,7 @@ int manager_loop(Manager *m) {
 
                 watchdog_usec = manager_get_watchdog(m, WATCHDOG_RUNTIME);
                 if (timestamp_is_set(watchdog_usec))
-                        watchdog_ping();
+                        (void) watchdog_ping();
 
                 if (!ratelimit_below(&rl)) {
                         /* Yay, something is going seriously wrong, pause a little */
@@ -3180,7 +3179,6 @@ static void manager_serialize_uid_refs_internal(
                 Hashmap **uid_refs,
                 const char *field_name) {
 
-        Iterator i;
         void *p, *k;
 
         assert(m);
@@ -3191,7 +3189,7 @@ static void manager_serialize_uid_refs_internal(
         /* Serialize the UID reference table. Or actually, just the IPC destruction flag of it, as
          * the actual counter of it is better rebuild after a reload/reexec. */
 
-        HASHMAP_FOREACH_KEY(p, k, *uid_refs, i) {
+        HASHMAP_FOREACH_KEY(p, k, *uid_refs) {
                 uint32_t c;
                 uid_t uid;
 
@@ -3219,9 +3217,7 @@ int manager_serialize(
                 FDSet *fds,
                 bool switching_root) {
 
-        ManagerTimestamp q;
         const char *t;
-        Iterator i;
         Unit *u;
         int r;
 
@@ -3255,7 +3251,7 @@ int manager_serialize(
         (void) serialize_usec(f, "reboot-watchdog-overridden", m->watchdog_overridden[WATCHDOG_REBOOT]);
         (void) serialize_usec(f, "kexec-watchdog-overridden", m->watchdog_overridden[WATCHDOG_KEXEC]);
 
-        for (q = 0; q < _MANAGER_TIMESTAMP_MAX; q++) {
+        for (ManagerTimestamp q = 0; q < _MANAGER_TIMESTAMP_MAX; q++) {
                 _cleanup_free_ char *joined = NULL;
 
                 if (!manager_timestamp_shall_serialize(q))
@@ -3314,7 +3310,7 @@ int manager_serialize(
 
         (void) fputc('\n', f);
 
-        HASHMAP_FOREACH_KEY(u, t, m->units, i) {
+        HASHMAP_FOREACH_KEY(u, t, m->units) {
                 if (u->id != t)
                         continue;
 
@@ -3500,6 +3496,24 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
 
         assert(m);
         assert(f);
+
+        if (DEBUG_LOGGING) {
+                if (fdset_isempty(fds))
+                        log_debug("No file descriptors passed");
+                else {
+                        int fd;
+
+                        FDSET_FOREACH(fd, fds) {
+                                _cleanup_free_ char *fn = NULL;
+
+                                r = fd_get_path(fd, &fn);
+                                if (r < 0)
+                                        log_debug_errno(r, "Received serialized fd %i → %m", fd);
+                                else
+                                        log_debug("Received serialized fd %i → %s", fd, strna(fn));
+                        }
+                }
+        }
 
         log_debug("Deserializing state...");
 
@@ -3817,11 +3831,10 @@ int manager_reload(Manager *m) {
 
 void manager_reset_failed(Manager *m) {
         Unit *u;
-        Iterator i;
 
         assert(m);
 
-        HASHMAP_FOREACH(u, m->units, i)
+        HASHMAP_FOREACH(u, m->units)
                 unit_reset_failed(u);
 }
 
@@ -4184,11 +4197,9 @@ int manager_get_effective_environment(Manager *m, char ***ret) {
 }
 
 int manager_set_default_rlimits(Manager *m, struct rlimit **default_rlimit) {
-        int i;
-
         assert(m);
 
-        for (i = 0; i < _RLIMIT_MAX; i++) {
+        for (unsigned i = 0; i < _RLIMIT_MAX; i++) {
                 m->rlimit[i] = mfree(m->rlimit[i]);
 
                 if (!default_rlimit[i])
@@ -4376,11 +4387,11 @@ const char *manager_get_confirm_spawn(Manager *m) {
          *
          * If the console suddenly disappear at the time our children will really it
          * then they will simply fail to acquire it and a positive answer will be
-         * assumed. New children will fallback to /dev/console though.
+         * assumed. New children will fall back to /dev/console though.
          *
          * Note: TTYs are devices that can come and go any time, and frequently aren't
          * available yet during early boot (consider a USB rs232 dongle...). If for any
-         * reason the configured console is not ready, we fallback to the default
+         * reason the configured console is not ready, we fall back to the default
          * console. */
 
         if (!m->confirm_spawn || path_equal(m->confirm_spawn, "/dev/console"))
@@ -4654,14 +4665,13 @@ static void manager_vacuum_uid_refs_internal(
                 Hashmap **uid_refs,
                 int (*_clean_ipc)(uid_t uid)) {
 
-        Iterator i;
         void *p, *k;
 
         assert(m);
         assert(uid_refs);
         assert(_clean_ipc);
 
-        HASHMAP_FOREACH_KEY(p, k, *uid_refs, i) {
+        HASHMAP_FOREACH_KEY(p, k, *uid_refs) {
                 uint32_t c, n;
                 uid_t uid;
 

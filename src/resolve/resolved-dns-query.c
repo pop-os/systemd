@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
 #include "dns-domain.h"
@@ -21,12 +21,14 @@ static int dns_query_candidate_new(DnsQueryCandidate **ret, DnsQuery *q, DnsScop
         assert(q);
         assert(s);
 
-        c = new0(DnsQueryCandidate, 1);
+        c = new(DnsQueryCandidate, 1);
         if (!c)
                 return -ENOMEM;
 
-        c->query = q;
-        c->scope = s;
+        *c = (DnsQueryCandidate) {
+                .query = q,
+                .scope = s,
+        };
 
         LIST_PREPEND(candidates_by_query, q->candidates, c);
         LIST_PREPEND(candidates_by_scope, s->query_candidates, c);
@@ -129,14 +131,13 @@ static int dns_query_candidate_add_transaction(DnsQueryCandidate *c, DnsResource
 
 static int dns_query_candidate_go(DnsQueryCandidate *c) {
         DnsTransaction *t;
-        Iterator i;
         int r;
         unsigned n = 0;
 
         assert(c);
 
         /* Start the transactions that are not started yet */
-        SET_FOREACH(t, c->transactions, i) {
+        SET_FOREACH(t, c->transactions) {
                 if (t->state != DNS_TRANSACTION_NULL)
                         continue;
 
@@ -157,14 +158,13 @@ static int dns_query_candidate_go(DnsQueryCandidate *c) {
 static DnsTransactionState dns_query_candidate_state(DnsQueryCandidate *c) {
         DnsTransactionState state = DNS_TRANSACTION_NO_SERVERS;
         DnsTransaction *t;
-        Iterator i;
 
         assert(c);
 
         if (c->error_code != 0)
                 return DNS_TRANSACTION_ERRNO;
 
-        SET_FOREACH(t, c->transactions, i) {
+        SET_FOREACH(t, c->transactions) {
 
                 switch (t->state) {
 
@@ -338,8 +338,13 @@ DnsQuery *dns_query_free(DnsQuery *q) {
 
         dns_query_reset_answer(q);
 
-        sd_bus_message_unref(q->request);
+        sd_bus_message_unref(q->bus_request);
         sd_bus_track_unref(q->bus_track);
+
+        if (q->varlink_request) {
+                varlink_set_userdata(q->varlink_request, NULL);
+                varlink_unref(q->varlink_request);
+        }
 
         dns_packet_unref(q->request_dns_packet);
         dns_packet_unref(q->reply_dns_packet);
@@ -410,17 +415,19 @@ int dns_query_new(
         if (m->n_dns_queries >= QUERIES_MAX)
                 return -EBUSY;
 
-        q = new0(DnsQuery, 1);
+        q = new(DnsQuery, 1);
         if (!q)
                 return -ENOMEM;
 
-        q->question_utf8 = dns_question_ref(question_utf8);
-        q->question_idna = dns_question_ref(question_idna);
-        q->ifindex = ifindex;
-        q->flags = flags;
-        q->answer_dnssec_result = _DNSSEC_RESULT_INVALID;
-        q->answer_protocol = _DNS_PROTOCOL_INVALID;
-        q->answer_family = AF_UNSPEC;
+        *q = (DnsQuery) {
+                .question_utf8 = dns_question_ref(question_utf8),
+                .question_idna = dns_question_ref(question_idna),
+                .ifindex = ifindex,
+                .flags = flags,
+                .answer_dnssec_result = _DNSSEC_RESULT_INVALID,
+                .answer_protocol = _DNS_PROTOCOL_INVALID,
+                .answer_family = AF_UNSPEC,
+        };
 
         /* First dump UTF8  question */
         DNS_QUESTION_FOREACH(key, question_utf8)
@@ -473,14 +480,13 @@ int dns_query_make_auxiliary(DnsQuery *q, DnsQuery *auxiliary_for) {
         return 0;
 }
 
-static void dns_query_complete(DnsQuery *q, DnsTransactionState state) {
+void dns_query_complete(DnsQuery *q, DnsTransactionState state) {
         assert(q);
         assert(!DNS_TRANSACTION_IS_LIVE(state));
         assert(DNS_TRANSACTION_IS_LIVE(q->state));
 
-        /* Note that this call might invalidate the query. Callers
-         * should hence not attempt to access the query or transaction
-         * after calling this function. */
+        /* Note that this call might invalidate the query. Callers should hence not attempt to access the
+         * query or transaction after calling this function. */
 
         q->state = state;
 
@@ -687,11 +693,11 @@ int dns_query_go(DnsQuery *q) {
 
         dns_query_reset_answer(q);
 
-        r = sd_event_add_time(
+        r = sd_event_add_time_relative(
                         q->manager->event,
                         &q->timeout_event_source,
                         clock_boottime_or_monotonic(),
-                        now(clock_boottime_or_monotonic()) + SD_RESOLVED_QUERY_TIMEOUT_USEC,
+                        SD_RESOLVED_QUERY_TIMEOUT_USEC,
                         0, on_query_timeout, q);
         if (r < 0)
                 goto fail;
@@ -725,7 +731,6 @@ static void dns_query_accept(DnsQuery *q, DnsQueryCandidate *c) {
         bool has_authenticated = false, has_non_authenticated = false;
         DnssecResult dnssec_result_authenticated = _DNSSEC_RESULT_INVALID, dnssec_result_non_authenticated = _DNSSEC_RESULT_INVALID;
         DnsTransaction *t;
-        Iterator i;
         int r;
 
         assert(q);
@@ -749,7 +754,7 @@ static void dns_query_accept(DnsQuery *q, DnsQueryCandidate *c) {
                 q->answer_errno = c->error_code;
         }
 
-        SET_FOREACH(t, c->transactions, i) {
+        SET_FOREACH(t, c->transactions) {
 
                 switch (t->state) {
 
@@ -907,13 +912,11 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
         if (r == 0 && k == 0) /* No actual cname happened? */
                 return -ELOOP;
 
-        if (q->answer_protocol == DNS_PROTOCOL_DNS) {
+        if (q->answer_protocol == DNS_PROTOCOL_DNS)
                 /* Don't permit CNAME redirects from unicast DNS to LLMNR or MulticastDNS, so that global resources
                  * cannot invade the local namespace. The opposite way we permit: local names may redirect to global
                  * ones. */
-
                 q->flags &= ~(SD_RESOLVED_LLMNR|SD_RESOLVED_MDNS); /* mask away the local protocols */
-        }
 
         /* Turn off searching for the new name */
         q->flags |= SD_RESOLVED_NO_SEARCH;
@@ -985,36 +988,6 @@ int dns_query_process_cname(DnsQuery *q) {
                 return r;
 
         return DNS_QUERY_RESTARTED; /* We restarted the query for a new cname */
-}
-
-static int on_bus_track(sd_bus_track *t, void *userdata) {
-        DnsQuery *q = userdata;
-
-        assert(t);
-        assert(q);
-
-        log_debug("Client of active query vanished, aborting query.");
-        dns_query_complete(q, DNS_TRANSACTION_ABORTED);
-        return 0;
-}
-
-int dns_query_bus_track(DnsQuery *q, sd_bus_message *m) {
-        int r;
-
-        assert(q);
-        assert(m);
-
-        if (!q->bus_track) {
-                r = sd_bus_track_new(sd_bus_message_get_bus(m), &q->bus_track, on_bus_track, q);
-                if (r < 0)
-                        return r;
-        }
-
-        r = sd_bus_track_add_sender(q->bus_track, m);
-        if (r < 0)
-                return r;
-
-        return 0;
 }
 
 DnsQuestion* dns_query_question_for_protocol(DnsQuery *q, DnsProtocol protocol) {
