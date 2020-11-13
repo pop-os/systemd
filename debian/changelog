@@ -1,3 +1,9 @@
+systemd (247~rc2-2) experimental; urgency=medium
+
+  * missing: define several syscall numbers for MIPS arch (Closes: #974619)
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 13 Nov 2020 19:22:04 +0100
+
 systemd (247~rc2-1) experimental; urgency=medium
 
   [ Michael Biebl ]
