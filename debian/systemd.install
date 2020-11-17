@@ -68,4 +68,4 @@ var/lib
 ../../extra/systemd-sysv-install lib/systemd/
 ../../extra/units/* lib/systemd/system/
 ../../extra/kernel-install.d/* usr/lib/kernel/install.d
-../../extra/pam.d etc/
+../../extra/pam.d/* usr/lib/pam.d/
