@@ -1,3 +1,23 @@
+systemd (246.6-3) unstable; urgency=medium
+
+  * pam: include pam_keyinit session module in systemd-user.
+    We want that systemd --user gets its own keyring, not the basic keyring
+    set up by systemd --system.
+  * pam: move systemd-user PAM config from /etc/pam.d to /usr/lib/pam.d.
+    This is supported since PAM 1.2 and we want as little files in /etc as
+    possible.
+  * init-functions: update LSB hook to not use ignore-dependencies
+    job-mode=ignore-dependencies, as currently used in the LSB hook during
+    bootup and shutdown, can have undesired side-effects, like changing the
+    ordering of services and ultimately causing them to fail, due to unmet
+    dependencies.
+    So simplify that, and only apply --no-block on reload requests during
+    bootup and shutdown. (Closes: #960594)
+  * d/t/timedated: use /bin/bash to work around job handling issue in dash.
+    See: #975010
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 17 Nov 2020 23:34:07 +0100
+
 systemd (246.6-2) unstable; urgency=medium
 
   * XDG autostart improvements
