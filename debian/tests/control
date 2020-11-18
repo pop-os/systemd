@@ -112,7 +112,7 @@ Depends: systemd-tests,
 Restrictions: needs-root, allow-stderr, isolation-container, breaks-testbed
 
 Tests: upstream
-Depends: libsystemd-dev,
+Depends: @,
   attr,
   tree,
   perl,
@@ -139,9 +139,6 @@ Depends: libsystemd-dev,
   libc6-dev | libc-dev,
   make,
   quota,
-  systemd-journal-remote,
-  systemd-container,
-  systemd-coredump,
   fdisk | util-linux (<< 2.29.2-3~),
   netcat-openbsd,
   socat,
