@@ -12,19 +12,9 @@ _update_catalog() {
     journalctl --update-catalog || true
 }
 
-# Update Message Catalogs database and reload in response to dpkg triggers
+# Update Message Catalogs database in response to dpkg trigger
 if [ "$1" = "triggered" ]; then
-    shift
-    for trigger in $@; do
-        case $trigger in
-            /usr/lib/systemd/catalog)
-                _update_catalog
-                ;;
-            /etc/init.d)
-                _systemctl daemon-reload || true
-                ;;
-        esac
-    done
+    _update_catalog
     exit 0
 fi
 
