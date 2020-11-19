@@ -1,3 +1,14 @@
+systemd (246.6-4) unstable; urgency=medium
+
+  * Revert "Trigger a systemctl daemon-reload when init scripts are installed
+    or removed"
+    Remove the dpkg file trigger which called systemctl daemon-reload whenever
+    a SysV init script was installed. We have proper support in debhelper
+    nowadays which makes this superfluous and we want to avoid unnecessary
+    systemctl daemon-reload calls.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 19 Nov 2020 22:35:48 +0100
+
 systemd (246.6-3) unstable; urgency=medium
 
   * pam: include pam_keyinit session module in systemd-user.
