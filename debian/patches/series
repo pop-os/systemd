@@ -88,3 +88,6 @@ lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 lp1882596-man-fix-some-manvolnum.patch
 lp1895418-correct-resolved-conf-cache-default.patch
 lp1897744-resolve-enable-RES_TRUSTAD-towards-the-127.0.0.53-st.patch
+lp1905245/0001-basic-cap-list-parse-print-numerical-capabilities.patch
+lp1905245/0002-basic-capability-util-let-cap_last_cap-return-unsign.patch
+lp1905245/0003-basic-cap-list-reduce-scope-of-variables.patch
