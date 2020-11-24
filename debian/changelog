@@ -1,3 +1,18 @@
+systemd (246.6-5) unstable; urgency=medium
+
+  * Drop non-functional DefaultTasksMax patch.
+    This patch was supposed to remove the DefaultTasksMax limit, but lost
+    its actual logic over 4 years ago, when the patches were rebased for the
+    v231 release. Since nobody has complained so far, we can assume it is
+    safe to drop this patch. (Closes: #975335)
+  * test-seccomp: accept ENOSYS from sysctl(2) too.
+    It seems that kernel 5.9 started returning that.
+  * test/test-functions: copy /usr/lib/pam.d into $initdir.
+    The systemd-user file has been moved from /etc/pam.d into /usr/lib/pam.d,
+    so test-functions needs to copy it from /usr/lib/pam.d instead.
+
+ -- Michael Biebl <biebl@debian.org>  Tue, 24 Nov 2020 21:53:25 +0100
+
 systemd (246.6-4) unstable; urgency=medium
 
   * Revert "Trigger a systemctl daemon-reload when init scripts are installed
