@@ -1,8 +1,3 @@
-missing-define-several-syscall-numbers-for-MIPS-arch.patch
-test-test-functions-copy-usr-lib-pam.d-into-initdir.patch
-sd-device-make-device_add_property_internal-inline.patch
-sd-device-introduce-database-version-and-save-it-in-udev-.patch
-sd-device-make-sd_device_has_current_tag-and-friends-comp.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
