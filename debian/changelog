@@ -1,8 +1,10 @@
-systemd (247-1) UNRELEASED; urgency=medium
+systemd (247-1) experimental; urgency=medium
 
   * New upstream version 247
+  * Rebase patches
+  * Update symbol versions for the v247 release
 
- -- Michael Biebl <biebl@debian.org>  Thu, 26 Nov 2020 19:13:01 +0100
+ -- Michael Biebl <biebl@debian.org>  Thu, 26 Nov 2020 19:46:41 +0100
 
 systemd (247~rc2-3) experimental; urgency=medium
 
