@@ -1,3 +1,9 @@
+systemd (247-1) UNRELEASED; urgency=medium
+
+  * New upstream version 247
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 26 Nov 2020 19:13:01 +0100
+
 systemd (247~rc2-3) experimental; urgency=medium
 
   * Merge changes from unstable
