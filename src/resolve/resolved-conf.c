@@ -229,7 +229,20 @@ int config_parse_dnssd_service_name(
                 void *data,
                 void *userdata) {
 
+        static const Specifier specifier_table[] = {
+                { 'a', specifier_architecture,    NULL },
+                { 'b', specifier_boot_id,         NULL },
+                { 'B', specifier_os_build_id,     NULL },
+                { 'H', specifier_host_name,       NULL }, /* We will use specifier_dnssd_host_name(). */
+                { 'm', specifier_machine_id,      NULL },
+                { 'o', specifier_os_id,           NULL },
+                { 'v', specifier_kernel_release,  NULL },
+                { 'w', specifier_os_version_id,   NULL },
+                { 'W', specifier_os_variant_id,   NULL },
+                {}
+        };
         DnssdService *s = userdata;
+        _cleanup_free_ char *name = NULL;
         int r;
 
         assert(filename);
@@ -242,20 +255,21 @@ int config_parse_dnssd_service_name(
                 return 0;
         }
 
-        r = dnssd_render_instance_name(rvalue, NULL);
-        if (r == -ENOMEM)
-                return log_oom();
+        r = specifier_printf(rvalue, specifier_table, NULL, &name);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
-                           "Invalid service instance name template '%s', ignoring: %m", rvalue);
+                           "Invalid service instance name template '%s', ignoring assignment: %m", rvalue);
                 return 0;
         }
 
-        r = free_and_strdup(&s->name_template, rvalue);
-        if (r < 0)
-                return log_oom();
+        if (!dns_service_name_is_valid(name)) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Service instance name template '%s' renders to invalid name '%s'. Ignoring assignment.",
+                           rvalue, name);
+                return 0;
+        }
 
-        return 0;
+        return free_and_strdup_warn(&s->name_template, rvalue);
 }
 
 int config_parse_dnssd_service_type(

@@ -58,17 +58,21 @@ if add_languages('cpp', required : false)
         opts += [['c++'],
                  ['c++', '-std=c++98'],
                  ['c++', '-std=c++11']]
-        if cc.has_argument('-std=c++14')
+        if cxx.has_argument('-std=c++14')
                 opts += [['c++', '-std=c++14']]
         endif
-        if cc.has_argument('-std=c++17')
+        if cxx.has_argument('-std=c++17')
                 opts += [['c++', '-std=c++17']]
+        endif
+        if cxx.has_argument('-std=c++20')
+                opts += [['c++', '-std=c++20']]
         endif
 endif
 
-foreach header : _systemd_headers + _not_installed_headers + ['../libudev/libudev.h']
+foreach header : _systemd_headers + _not_installed_headers + [libudev_h_path]
         foreach opt : opts
-                name = ''.join(['cc-', header.split('/')[-1], '_'] + opt)
+                std_name = opt.length() == 2 ? '_'.join(opt[1].split(':')) : ''
+                name = ''.join(['cc-', header.split('/')[-1], '_', opt[0], std_name])
                 if want_tests != 'false'
                         test(name,
                              check_compilation_sh,

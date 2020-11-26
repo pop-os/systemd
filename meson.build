@@ -1074,6 +1074,7 @@ else
         libcurl = []
 endif
 conf.set10('HAVE_LIBCURL', have)
+conf.set10('CURL_NO_OLDIES', get_option('mode') == 'developer')
 
 want_libidn = get_option('libidn')
 want_libidn2 = get_option('libidn2')
@@ -1419,7 +1420,7 @@ if have == 'auto'
 else
         have = have == 'true'
         if have and get_option('mode') != 'developer'
-                error('oomd is not available in release mode (yet)')
+                warning('oomd is not ready for release mode (yet)')
         endif
 endif
 conf.set10('ENABLE_OOMD', have)
@@ -1594,6 +1595,7 @@ generate_gperfs = find_program('tools/generate-gperfs.py')
 
 subdir('po')
 subdir('catalog')
+subdir('src/libudev')
 subdir('src/systemd')
 subdir('src/basic')
 subdir('src/libsystemd')
@@ -1673,7 +1675,6 @@ update_dbus_docs_py = find_program('tools/update-dbus-docs.py')
 # usually, but not always, installed in /bin.
 public_programs = []
 
-subdir('src/libudev')
 subdir('src/shared')
 subdir('src/core')
 subdir('src/shutdown')
@@ -3438,7 +3439,7 @@ endif
 
 fuzzer_exes = []
 
-if get_option('tests') != 'false'
+if fuzz_tests or fuzzer_build
         foreach tuple : fuzzers
                 sources = tuple[0]
                 link_with = tuple[1].length() > 0 ? tuple[1] : [libshared]
@@ -3560,7 +3561,7 @@ foreach tuple : sanitizers
                         if name != prev
                                 if want_tests == 'false'
                                         message('Not compiling @0@ because tests is set to false'.format(name))
-                                elif slow_tests or fuzz_tests
+                                elif fuzz_tests
                                         exe = custom_target(
                                                 name,
                                                 output : name,
@@ -3570,12 +3571,12 @@ foreach tuple : sanitizers
                                                            '@OUTPUT@'],
                                                 build_by_default : true)
                                 else
-                                        message('Not compiling @0@ because slow-tests/fuzz-tests is set to false'.format(name))
+                                        message('Not compiling @0@ because fuzz-tests is set to false'.format(name))
                                 endif
                         endif
                         prev = name
 
-                        if want_tests != 'false' and (slow_tests or fuzz_tests)
+                        if fuzz_tests
                                 test('@0@:@1@:@2@'.format(b, c, sanitizer),
                                      env,
                                      env : ['UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1'],

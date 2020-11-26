@@ -353,7 +353,8 @@ static char *disk_mount_point(const char *label) {
 
         /* Yeah, we don't support native systemd unit files here for now */
 
-        if (asprintf(&device, "/dev/mapper/%s", label) < 0)
+        device = strjoin("/dev/mapper/", label);
+        if (!device)
                 return NULL;
 
         f = setmntent(fstab_path(), "re");
@@ -447,10 +448,9 @@ static int get_password(
 
                 assert(strv_length(passwords2) == 1);
 
-                if (!streq(passwords[0], passwords2[0])) {
-                        log_warning("Passwords did not match, retrying.");
-                        return -EAGAIN;
-                }
+                if (!streq(passwords[0], passwords2[0]))
+                        return log_warning_errno(SYNTHETIC_ERRNO(EAGAIN),
+                                                 "Passwords did not match, retrying.");
         }
 
         strv_uniq(passwords);

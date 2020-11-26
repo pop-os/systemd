@@ -1,8 +1,8 @@
 systemd System and Service Manager
 
-CHANGES WITH 247 in spe:
+CHANGES WITH 247:
 
-        * KERNEL API INCOMPATIBILITY: Linux 4.12 introduced two new uevents
+        * KERNEL API INCOMPATIBILITY: Linux 4.14 introduced two new uevents
           "bind" and "unbind" to the Linux device model. When this kernel
           change was made, systemd-udevd was only minimally updated to handle
           and propagate these new event types. The introduction of these new
@@ -85,6 +85,33 @@ CHANGES WITH 247 in spe:
           packages using these interfaces. We'd again like to underline that
           this is not caused by systemd/udev changes, but result of a kernel
           behaviour change.
+
+        * UPCOMING INCOMPATIBILITY: So far most downstream distribution
+          packages have not retriggered devices once the udev package (or any
+          auxiliary package installing additional udev rules) is updated. We
+          intend to work with major distributions to change this, so that
+          "udevadm trigger -a change" is issued on such upgrades, ensuring that
+          the updated ruleset is applied to the devices already discovered, so
+          that (asynchronously) after the upgrade completed the udev database
+          is consistent with the updated rule set. This means udev rules must
+          be ready to be retriggered with a "change" action any time, and
+          result in correct and complete udev database entries. While the
+          majority of udev rule files known to us currently get this right,
+          some don't. Specifically, there are udev rules files included in
+          various packages that only set udev properties on the "add" action,
+          but do not handle the "change" action. If a device matching those
+          rules is retriggered with the "change" action (as is intended here)
+          it would suddenly lose the relevant properties. This always has been
+          problematic, but as soon as all udev devices are triggered on relevant
+          package upgrades this will become particularly so. It is strongly
+          recommended to fix offending rules so that they can handle a "change"
+          action at any time, and acquire all necessary udev properties even
+          then. Or in other words: the header guard mentioned above
+          (ACTION=="remove",GOTO="xyz_end") is the correct approach to handle
+          this, as it makes sure rules are rerun on "change" correctly, and
+          accumulate the correct and complete set of udev properties. udev rule
+          definitions that cannot handle "change" events being triggered at
+          arbitrary times should be considered buggy.
 
         * The MountAPIVFS= service file setting now defaults to on if
           RootImage= and RootDirectory= are used, which means that with those
@@ -457,19 +484,31 @@ CHANGES WITH 247 in spe:
           discipline in the [FlowQueuePIE] sections.
 
         * systemd-networkd's .netdev files may now be used to create "BareUDP"
-          tunnels, configured in the new [BareUDP] setting. VXLAN tunnels may
-          now be marked to be independent of any underlying network interface
-          via the new Independent= boolean setting.
+          tunnels, configured in the new [BareUDP] setting.
 
         * systemd-networkd's Gateway= setting in .network files now accepts the
-          special values _dhcp4 and _ipv6ra to configure additional, locally
-          defined, explicit routes to the gateway acquired via DHCP or IPv6
-          Router Advertisements.
+          special values "_dhcp4" and "_ipv6ra" to configure additional,
+          locally defined, explicit routes to the gateway acquired via DHCP or
+          IPv6 Router Advertisements. The old setting "_dhcp" is deprecated,
+          but still accepted for backwards compatibility.
 
         * systemd-networkd's [IPv6PrefixDelegation] section and
           IPv6PrefixDelegation= options have been renamed as [IPv6SendRA] and
           IPv6SendRA= (the old names are still accepted for backwards
           compatibility).
+
+        * systemd-networkd's .network files gained the DHCPv6PrefixDelegation=
+          boolean setting in [Network] section. If enabled, the delegated prefix
+          gained by another link will be configured, and an address within the
+          prefix will be assigned.
+
+        * systemd-networkd's .network files gained the Announce= boolean setting
+          in [DHCPv6PrefixDelegation] section. When enabled, the delegated
+          prefix will be announced through IPv6 router advertisement (IPv6 RA).
+          The setting is enabled by default.
+
+        * VXLAN tunnels may now be marked as independent of any underlying
+          network interface via the new Independent= boolean setting.
 
         * systemctl gained support for two new verbs: "service-log-level" and
           "service-log-target" may be used on services that implement the
@@ -481,8 +520,8 @@ CHANGES WITH 247 in spe:
 
         * The SystemCallErrorNumber= unit file setting now accepts the new
           "kill" and "log" actions, in addition to arbitrary error number
-          specifications as before. If "kill" the the processes are killed on
-          the event, if "log" the offending system call is audit logged.
+          specifications as before. If "kill" the processes are killed on the
+          event, if "log" the offending system call is audit logged.
 
         * A new SystemCallLog= unit file setting has been added that accepts a
           list of system calls that shall be logged about (audit).
@@ -530,13 +569,15 @@ CHANGES WITH 247 in spe:
           contention for selected parts of the unit hierarchy using the PSI
           information reported by the kernel, and kills processes when memory
           or swap pressure is above configured limits. This service is only
-          enabled in developer mode (see below) and should be considered a
-          preview in this release. Behaviour details and option names are
-          subject to change without the usual backwards-compatibility promises.
+          enabled by default in developer mode (see below) and should be
+          considered a preview in this release. Behaviour details and option
+          names are subject to change without the usual backwards-compatibility
+          promises.
 
         * A new helper oomctl has been added to introspect systemd-oomd state.
-          If also is only available in developer mode and should be considered
-          a preview without the usual backwards-compatibility promises.
+          It is only enabled by default in developer mode and should be
+          considered a preview without the usual backwards-compatibility
+          promises.
 
         * New meson option -Dcompat-mutable-uid-boundaries= has been added. If
           enabled, systemd reads the system UID boundaries from /etc/login.defs
@@ -598,39 +639,53 @@ CHANGES WITH 247 in spe:
         * "systemctl edit" has been updated to show the original effective unit
           contents in commented form in the text editor.
 
+        * Units in user mode are now segregated into three new slices:
+          session.slice (units that form the core of graphical session),
+          app.slice ("normal" user applications), and background.slice
+          (low-priority tasks). Unless otherwise configured, user units are
+          placed in app.slice. The plan is to add resource limits and
+          protections for the different slices in the future.
+
+        * New GPT partition types for RISCV32/64 for the root and /usr
+          partitions, and their associated Verity partitions have been defined,
+          and are now understood by systemd-gpt-auto-generator, and the OS
+          image dissection logic.
+
         Contributions from: Adolfo Jayme Barrientos, afg, Alec Moskvin, Alyssa
         Ross, Amitanand Chikorde, Andrew Hangsleben, Anita Zhang, Ansgar
         Burchardt, Arian van Putten, Aurelien Jarno, Axel Rasmussen, bauen1,
         Beniamino Galvani, Benjamin Berg, Bjørn Mork, brainrom, Chandradeep
-        Dey, Charles Lee, Chris Down, Christian Göttsche, Clemens Gruber, Daan
-        De Meyer, Daniele Medri, Daniel Mack, Daniel Rusek, Dan Streetman,
-        David Tardon, Dimitri John Ledkov, Dmitry Borodaenko, Elias Probst,
-        Elisei Roca, ErrantSpore, Etienne Doms, Fabrice Fontaine, fangxiuning,
-        Felix Riemann, Florian Klink, Franck Bui, Frantisek Sumsal, fwSmit,
-        George Rawlinson, germanztz, Gibeom Gwon, Glen Whitney, Gogo Gogsi,
-        Göran Uddeborg, Grant Mathews, Hans de Goede, Hans Ulrich Niedermann,
-        Haochen Tong, Harald Seiler, huangyong, Hubert Kario, Ikey Doherty, Jan
-        Chren, Jan Schlüter, Jérémy Nouhaud, Jian-Hong Pan, Joerg Behrmann,
-        Jonathan Lebon, Josh Brobst, Juergen Hoetzel, Julien Humbert, Kai-Chuan
-        Hsieh, Kairui Song, Kamil Dudka, Kir Kolyshkin, Kristijan Gjoshev, Kyle
-        Huey, Kyle Russell, Lennart Poettering, lichangze, Luca Boccassi, Lucas
-        Werkmeister, Luca Weiss, Marc Kleine-Budde, Marco Wang, Martin Wilck,
-        Marti Raudsepp, masmullin2000, Máté Pozsgay, Matt Fenwick, Michael
-        Biebl, Michael Scherer, Michal Koutný, Michal Sekletár, Michal
-        Suchanek, Mikael Szreder, Milo Casagrande, mirabilos, Mitsuha_QuQ,
-        mog422, Muhammet Kara, Nazar Vinnichuk, Nicholas Narsing, Nicolas
-        Fella, Njibhu, nl6720, Oğuz Ersen, Olivier Le Moal, Ondrej Kozina,
-        onlybugreports, Pass Automated Testing Suite, Pat Coulthard, Pedro
-        Ruiz, Peter Hutterer, Phaedrus Leeds, PhoenixDiscord, Piotr Drąg, Plan
-        C, Purushottam choudhary, Rasmus Villemoes, Renaud Métrich, Robert
-        Marko, Ronan Pigott, Roy Chen (陳彥廷), RussianNeuroMancer, Samanta
-        Navarro, Samuel BF, scootergrisen, Sorin Ionescu, Steve Dodd, Susant
-        Sahani, Timo Rothenpieler, Tobias Hunger, Tobias Kaufmann, Topi
-        Miettinen, Vito Caputo, Weblate, Wen Yang, williamvds, Yu, Li-Yu, Yuri
-        Chornoivan, Yu Watanabe, Zbigniew Jędrzejewski-Szmek, Zmicer Turok,
-        Дамјан Георгиевски
+        Dey, Charles Lee, Chris Down, Christian Göttsche, Christof Efkemann,
+        Christoph Ruegge, Clemens Gruber, Daan De Meyer, Daniele Medri, Daniel
+        Mack, Daniel Rusek, Dan Streetman, David Tardon, Dimitri John Ledkov,
+        Dmitry Borodaenko, Elias Probst, Elisei Roca, ErrantSpore, Etienne
+        Doms, Fabrice Fontaine, fangxiuning, Felix Riemann, Florian Klink,
+        Franck Bui, Frantisek Sumsal, fwSmit, George Rawlinson, germanztz,
+        Gibeom Gwon, Glen Whitney, Gogo Gogsi, Göran Uddeborg, Grant Mathews,
+        Hans de Goede, Hans Ulrich Niedermann, Haochen Tong, Harald Seiler,
+        huangyong, Hubert Kario, igo95862, Ikey Doherty, Insun Pyo, Jan Chren,
+        Jan Schlüter, Jérémy Nouhaud, Jian-Hong Pan, Joerg Behrmann, Jonathan
+        Lebon, Jörg Thalheim, Josh Brobst, Juergen Hoetzel, Julien Humbert,
+        Kai-Chuan Hsieh, Kairui Song, Kamil Dudka, Kir Kolyshkin, Kristijan
+        Gjoshev, Kyle Huey, Kyle Russell, Lee Whalen, Lennart Poettering,
+        lichangze, Luca Boccassi, Lucas Werkmeister, Luca Weiss, Marc
+        Kleine-Budde, Marco Wang, Martin Wilck, Marti Raudsepp, masmullin2000,
+        Máté Pozsgay, Matt Fenwick, Michael Biebl, Michael Scherer, Michal
+        Koutný, Michal Sekletár, Michal Suchanek, Mikael Szreder, Milo
+        Casagrande, mirabilos, Mitsuha_QuQ, mog422, Muhammet Kara, Nazar
+        Vinnichuk, Nicholas Narsing, Nicolas Fella, Njibhu, nl6720, Oğuz Ersen,
+        Olivier Le Moal, Ondrej Kozina, onlybugreports, Pass Automated Testing
+        Suite, Pat Coulthard, Pavel Sapezhko, Pedro Ruiz, perry_yuan, Peter
+        Hutterer, Phaedrus Leeds, PhoenixDiscord, Piotr Drąg, Plan C,
+        Purushottam choudhary, Rasmus Villemoes, Renaud Métrich, Robert Marko,
+        Roman Beranek, Ronan Pigott, Roy Chen (陳彥廷), RussianNeuroMancer,
+        Samanta Navarro, Samuel BF, scootergrisen, Sorin Ionescu, Steve Dodd,
+        Susant Sahani, Timo Rothenpieler, Tobias Hunger, Tobias Kaufmann, Topi
+        Miettinen, vanou, Vito Caputo, Weblate, Wen Yang, Whired Planck,
+        williamvds, Yu, Li-Yu, Yuri Chornoivan, Yu Watanabe, Zbigniew
+        Jędrzejewski-Szmek, Zmicer Turok, Дамјан Георгиевски
 
-        – Warsaw, 2020-11-10
+        – Warsaw, 2020-11-26
 
 CHANGES WITH 246:
 
