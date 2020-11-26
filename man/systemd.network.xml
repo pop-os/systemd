@@ -825,7 +825,7 @@ IPv6Token=prefixstable:2002:da8:1::</programlisting></para>
           configured on another link. By default, an address within each delegated prefix will be
           assigned, and the prefixes will be announced through IPv6 Router Advertisement when
           <varname>IPv6SendRA=</varname> is enabled. Such default settings can be configured in
-          [DHCPv6PrefixDelegation] section.</para></listitem>
+          [DHCPv6PrefixDelegation] section. Defaults to disabled.</para></listitem>
         </varlistentry>
         <varlistentry>
           <term><varname>IPv6MTUBytes=</varname></term>
@@ -1170,7 +1170,9 @@ IPv6Token=prefixstable:2002:da8:1::</programlisting></para>
         <varlistentry>
           <term><varname>FirewallMark=</varname></term>
           <listitem>
-            <para>Specifies the iptables firewall mark value to match (a number between 1 and 4294967295).</para>
+            <para>Specifies the iptables firewall mark value to match (a number between 1 and
+            4294967295). Optionally, the firewall mask (also a number between 1 and 4294967295) can be
+            suffixed with a slash (<literal>/</literal>), e.g., <literal>7/255</literal>.</para>
           </listitem>
         </varlistentry>
         <varlistentry>
@@ -2086,9 +2088,11 @@ IPv6Token=prefixstable:2002:da8:1::</programlisting></para>
         <varlistentry>
           <term><varname>DHCPv6Client=</varname></term>
           <listitem>
-            <para>Takes a boolean, or the special value <literal>always</literal>. When true (the default), the DHCPv6 client will be started when the
-            RA has the managed or other information flag. If set to <literal>always</literal>, the DHCPv6 client will be started even if there is no
-            managed or other information flag in the RA.</para>
+            <para>Takes a boolean, or the special value <literal>always</literal>. When true or
+            <literal>always</literal>, the DHCPv6 client will be started when the RA has the managed or
+            other information flag. If set to <literal>always</literal>, the DHCPv6 client will also be
+            started in managed mode when neither managed nor other information flag is set in the RA.
+            Defaults to true.</para>
           </listitem>
         </varlistentry>
       </variablelist>

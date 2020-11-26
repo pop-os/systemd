@@ -188,29 +188,27 @@ static int specifier_machine_id_safe(char specifier, const void *data, const voi
 static int specifier_directory(char specifier, const void *data, const void *userdata, char **ret);
 
 static const Specifier specifier_table[] = {
-        { 'm', specifier_machine_id_safe, NULL },
+        { 'a', specifier_architecture,    NULL },
         { 'b', specifier_boot_id,         NULL },
+        { 'B', specifier_os_build_id,     NULL },
         { 'H', specifier_host_name,       NULL },
         { 'l', specifier_short_host_name, NULL },
-        { 'v', specifier_kernel_release,  NULL },
-        { 'a', specifier_architecture,    NULL },
+        { 'm', specifier_machine_id_safe, NULL },
         { 'o', specifier_os_id,           NULL },
+        { 'v', specifier_kernel_release,  NULL },
         { 'w', specifier_os_version_id,   NULL },
-        { 'B', specifier_os_build_id,     NULL },
         { 'W', specifier_os_variant_id,   NULL },
 
-        { 'g', specifier_group_name,      NULL },
-        { 'G', specifier_group_id,        NULL },
-        { 'U', specifier_user_id,         NULL },
-        { 'u', specifier_user_name,       NULL },
         { 'h', specifier_user_home,       NULL },
 
-        { 't', specifier_directory,       UINT_TO_PTR(DIRECTORY_RUNTIME) },
-        { 'S', specifier_directory,       UINT_TO_PTR(DIRECTORY_STATE) },
         { 'C', specifier_directory,       UINT_TO_PTR(DIRECTORY_CACHE) },
         { 'L', specifier_directory,       UINT_TO_PTR(DIRECTORY_LOGS) },
-        { 'T', specifier_tmp_dir,         NULL },
-        { 'V', specifier_var_tmp_dir,     NULL },
+        { 'S', specifier_directory,       UINT_TO_PTR(DIRECTORY_STATE) },
+        { 't', specifier_directory,       UINT_TO_PTR(DIRECTORY_RUNTIME) },
+
+        COMMON_CREDS_SPECIFIERS,
+
+        COMMON_TMP_SPECIFIERS,
         {}
 };
 

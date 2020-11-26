@@ -18,11 +18,19 @@
 
 use warnings;
 use strict;
-use POSIX qw(WIFEXITED WEXITSTATUS);
-use IPC::SysV qw(IPC_PRIVATE S_IRUSR S_IWUSR IPC_CREAT);
-use IPC::Semaphore;
-use Time::HiRes qw(usleep);
-use Cwd qw(getcwd abs_path);
+
+BEGIN {
+    my $EXIT_TEST_SKIP = 77;
+
+    unless (eval "use POSIX qw(WIFEXITED WEXITSTATUS);
+                  use Cwd qw(getcwd abs_path);
+                  use IPC::Semaphore;
+                  use IPC::SysV qw(IPC_PRIVATE S_IRUSR S_IWUSR IPC_CREAT);
+                  use Time::HiRes qw(usleep); 1") {
+        warn "Failed to import dependencies, skipping the test: $@";
+        exit($EXIT_TEST_SKIP);
+    }
+}
 
 my $udev_bin            = "./test-udev";
 my $valgrind            = 0;
@@ -415,7 +423,7 @@ KERNEL=="ttyACM0", SYMLINK+="modem"
 EOF
         },
         {
-                desc            => "sustitution of sysfs value (%s{file})",
+                desc            => "substitution of sysfs value (%s{file})",
                 devices => [
                         {
                                 devpath         => "/devices/pci0000:00/0000:00:1f.2/host0/target0:0:0/0:0:0:0/block/sda",
