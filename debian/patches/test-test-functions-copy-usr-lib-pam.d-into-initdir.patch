@@ -1,0 +1,39 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Date: Fri, 20 Nov 2020 13:41:03 -0500
+Subject: test/test-functions: copy /usr/lib/pam.d into $initdir
+
+The systemd-user file has been moved from /etc/pam.d into /usr/lib/pam.d,
+so test-functions needs to copy it from /usr/lib/pam.d instead.
+
+This will copy it from either location.
+
+(cherry picked from commit 3965279c67b3b7b49d29e257b347fa4aee75b60a)
+---
+ test/test-functions | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 863cc18..75b5230 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1058,7 +1058,9 @@ install_pam() {
+     else
+         find /lib*/security -xtype f
+     fi
+-    find /etc/pam.d /etc/security -xtype f
++    for d in /etc/pam.d /etc/security /usr/lib/pam.d; do
++        [ -d "$d" ] && find $d -xtype f
++    done
+     ) | while read file; do
+         inst $file
+     done
+@@ -1067,9 +1069,6 @@ install_pam() {
+     # see http://www.linux-pam.org/Linux-PAM-html/sag-pam_unix.html
+     dracut_install -o unix_chkpwd
+ 
+-    [[ "$LOOKS_LIKE_DEBIAN" ]] &&
+-        cp /etc/pam.d/systemd-user $initdir/etc/pam.d/
+-
+     # set empty root password for easy debugging
+     sed -i 's/^root:x:/root::/' $initdir/etc/passwd
+ }
