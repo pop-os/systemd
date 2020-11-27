@@ -1,3 +1,13 @@
+systemd (246.6-5ubuntu1) hirsute; urgency=medium
+
+  * Merge from Debian unstable
+  * debian/control: Make udev break systemd (<< ${binary:Version})
+    This ensures upgrading systemd as well when upgrading udev
+    File: debian/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9e52d28054c2c1ba118014ad9442189d7039f871
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 27 Nov 2020 15:55:01 +0100
+
 systemd (246.6-5) unstable; urgency=medium
 
   * Drop non-functional DefaultTasksMax patch.
