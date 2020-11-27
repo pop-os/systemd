@@ -1,3 +1,17 @@
+systemd (247-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+  * Refresh patches
+    - Dropped changes:
+      * debian/patches/dhcp-Allow-setting-request-options-again.patch
+        (Upstream code has been changed in a similar way)
+      * debian/patches/Revert-network-do-not-drop-foreign-config-if-interface-is.patch
+        debian/patches/network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
+        (Revert-network-prevent-interfaces-to-be-initialized-multi.patch is still kept)
+      * debian/patches/lp1845909/0002-network-add-link-setting_genmode-flag.patch
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Fri, 27 Nov 2020 16:49:13 +0100
+
 systemd (247-1) experimental; urgency=medium
 
   * New upstream version 247
