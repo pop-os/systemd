@@ -37,8 +37,6 @@ debian/UBUNTU-resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
 debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch
 Skip-falling-back-to-device-name-when-net_get_name-device.patch
 debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
-Revert-network-fix-assertion-when-link-get-carrier.patch
-Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
