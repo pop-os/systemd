@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 install_data(
         '50-default.conf',
@@ -26,5 +26,7 @@ foreach file : in_files
                      install_dir : sysctldir)
 endforeach
 
-meson.add_install_script('sh', '-c',
-                         mkdir_p.format(join_paths(sysconfdir, 'sysctl.d')))
+if install_sysconfdir
+        meson.add_install_script('sh', '-c',
+                                 mkdir_p.format(join_paths(sysconfdir, 'sysctl.d')))
+endif

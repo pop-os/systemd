@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include "version.h"
@@ -161,3 +161,8 @@
         _IDN_FEATURE_ " "                                               \
         _PCRE2_FEATURE_ " "                                             \
         _CGROUP_HIERARCHY_
+
+enum {
+        BUILD_MODE_DEVELOPER,
+        BUILD_MODE_RELEASE,
+};

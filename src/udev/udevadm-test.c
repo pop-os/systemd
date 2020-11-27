@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0+ */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright © 2003-2004 Greg Kroah-Hartman <greg@kroah.com>
  */
@@ -17,6 +17,7 @@
 #include "device-private.h"
 #include "device-util.h"
 #include "libudev-util.h"
+#include "path-util.h"
 #include "string-util.h"
 #include "strxcpyx.h"
 #include "udev-builtin.h"
@@ -90,7 +91,7 @@ static int parse_argv(int argc, char *argv[]) {
                                        "syspath parameter missing.");
 
         /* add /sys if needed */
-        if (!startswith(argv[optind], "/sys"))
+        if (!path_startswith(argv[optind], "/sys"))
                 strscpyl(arg_syspath, sizeof(arg_syspath), "/sys", argv[optind], NULL);
         else
                 strscpy(arg_syspath, sizeof(arg_syspath), argv[optind]);
@@ -104,7 +105,6 @@ int test_main(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
         const char *cmd, *key, *value;
         sigset_t mask, sigmask_orig;
-        Iterator i;
         void *val;
         int r;
 
@@ -148,7 +148,7 @@ int test_main(int argc, char *argv[], void *userdata) {
         FOREACH_DEVICE_PROPERTY(dev, key, value)
                 printf("%s=%s\n", key, value);
 
-        ORDERED_HASHMAP_FOREACH_KEY(val, cmd, event->run_list, i) {
+        ORDERED_HASHMAP_FOREACH_KEY(val, cmd, event->run_list) {
                 char program[UTIL_PATH_SIZE];
 
                 (void) udev_event_apply_format(event, cmd, program, sizeof(program), false);

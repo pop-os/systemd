@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <arpa/inet.h>
 #include <sys/param.h>
@@ -7,6 +7,7 @@
 
 #include "alloc-util.h"
 #include "dhcp-lease-internal.h"
+#include "ether-addr-util.h"
 #include "hostname-util.h"
 #include "network-internal.h"
 #include "networkd-manager.h"
@@ -158,8 +159,10 @@ static void test_address_equality(void) {
         assert_se(in_addr_from_string(AF_INET, "192.168.3.9", &a2->in_addr) >= 0);
         assert_se(address_equal(a1, a2));
         assert_se(in_addr_from_string(AF_INET, "192.168.3.10", &a1->in_addr_peer) >= 0);
-        assert_se(address_equal(a1, a2));
+        assert_se(!address_equal(a1, a2));
         assert_se(in_addr_from_string(AF_INET, "192.168.3.11", &a2->in_addr_peer) >= 0);
+        assert_se(!address_equal(a1, a2));
+        a2->in_addr_peer = a1->in_addr_peer;
         assert_se(address_equal(a1, a2));
         a1->prefixlen = 10;
         assert_se(!address_equal(a1, a2));
@@ -170,10 +173,13 @@ static void test_address_equality(void) {
         assert_se(!address_equal(a1, a2));
 
         a2->family = AF_INET6;
+        a1->in_addr_peer = a2->in_addr_peer = IN_ADDR_NULL;
         assert_se(in_addr_from_string(AF_INET6, "2001:4ca0:4f01::2", &a1->in_addr) >= 0);
         assert_se(in_addr_from_string(AF_INET6, "2001:4ca0:4f01::2", &a2->in_addr) >= 0);
         assert_se(address_equal(a1, a2));
 
+        a1->prefixlen = 8;
+        assert_se(!address_equal(a1, a2));
         a2->prefixlen = 8;
         assert_se(address_equal(a1, a2));
 
@@ -252,6 +258,6 @@ int main(void) {
 
         test_network_get(manager, loopback);
 
-        assert_se(manager_rtnl_enumerate_links(manager) >= 0);
+        assert_se(manager_enumerate(manager) >= 0);
         return 0;
 }

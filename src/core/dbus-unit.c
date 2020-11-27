@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "sd-bus.h"
 
@@ -103,7 +103,6 @@ static int property_get_names(
                 sd_bus_error *error) {
 
         Unit *u = userdata;
-        Iterator i;
         const char *t;
         int r;
 
@@ -119,7 +118,7 @@ static int property_get_names(
         if (r < 0)
                 return r;
 
-        SET_FOREACH(t, u->aliases, i) {
+        SET_FOREACH(t, u->aliases) {
                 r = sd_bus_message_append(reply, "s", t);
                 if (r < 0)
                         return r;
@@ -157,7 +156,6 @@ static int property_get_dependencies(
                 sd_bus_error *error) {
 
         Hashmap **h = userdata;
-        Iterator j;
         Unit *u;
         void *v;
         int r;
@@ -170,7 +168,7 @@ static int property_get_dependencies(
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH_KEY(v, u, *h, j) {
+        HASHMAP_FOREACH_KEY(v, u, *h) {
                 r = sd_bus_message_append(reply, "s", u->id);
                 if (r < 0)
                         return r;
@@ -190,7 +188,6 @@ static int property_get_requires_mounts_for(
 
         Hashmap **h = userdata;
         const char *p;
-        Iterator j;
         void *v;
         int r;
 
@@ -202,7 +199,7 @@ static int property_get_requires_mounts_for(
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH_KEY(v, p, *h, j) {
+        HASHMAP_FOREACH_KEY(v, p, *h) {
                 r = sd_bus_message_append(reply, "s", p);
                 if (r < 0)
                         return r;
@@ -1729,7 +1726,6 @@ int bus_unit_queue_job(
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ char *job_path = NULL, *unit_path = NULL;
         _cleanup_set_free_ Set *affected = NULL;
-        Iterator i;
         Job *j, *a;
         int r;
 
@@ -1808,7 +1804,7 @@ int bus_unit_queue_job(
         if (r < 0)
                 return r;
 
-        SET_FOREACH(a, affected, i) {
+        SET_FOREACH(a, affected) {
 
                 if (a->id == j->id)
                         continue;
@@ -1974,14 +1970,11 @@ static int bus_set_transient_conditions(
                 if (t < 0)
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid condition type: %s", type_name);
 
-                if (t != CONDITION_NULL) {
-                        if (isempty(param))
-                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Condition parameter in %s is empty", type_name);
+                if (isempty(param))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Condition parameter in %s is empty", type_name);
 
-                        if (condition_takes_path(t) && !path_is_absolute(param))
-                                return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Path in condition %s is not absolute: %s", type_name, param);
-                } else
-                        param = NULL;
+                if (condition_takes_path(t) && !path_is_absolute(param))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Path in condition %s is not absolute: %s", type_name, param);
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         Condition *c;
@@ -1992,14 +1985,9 @@ static int bus_set_transient_conditions(
 
                         LIST_PREPEND(conditions, *list, c);
 
-                        if (t != CONDITION_NULL)
-                                unit_write_settingf(u, flags|UNIT_ESCAPE_SPECIFIERS, name,
-                                                    "%s=%s%s%s", type_name,
-                                                    trigger ? "|" : "", negate ? "!" : "", param);
-                        else
-                                unit_write_settingf(u, flags, name,
-                                                    "%s=%s%s", type_name,
-                                                    trigger ? "|" : "", yes_no(!negate));
+                        unit_write_settingf(u, flags|UNIT_ESCAPE_SPECIFIERS, name,
+                                            "%s=%s%s%s", type_name,
+                                            trigger ? "|" : "", negate ? "!" : "", param);
                 }
 
                 empty = false;

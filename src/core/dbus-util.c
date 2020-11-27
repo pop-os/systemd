@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "bus-util.h"
 #include "dbus-util.h"
@@ -86,6 +86,35 @@ int bus_set_transient_bool(
         if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                 *p = v;
                 unit_write_settingf(u, flags, name, "%s=%s", name, yes_no(v));
+        }
+
+        return 1;
+}
+
+int bus_set_transient_percent(
+                Unit *u,
+                const char *name,
+                int *p,
+                sd_bus_message *message,
+                UnitWriteFlags flags,
+                sd_bus_error *error) {
+
+        const char *v;
+        int r;
+
+        assert(p);
+
+        r = sd_bus_message_read(message, "s", &v);
+        if (r < 0)
+                return r;
+
+        r = parse_percent(v);
+        if (r < 0)
+                return r;
+
+        if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                *p = r;
+                unit_write_settingf(u, flags, name, "%s=%d%%", name, r);
         }
 
         return 1;

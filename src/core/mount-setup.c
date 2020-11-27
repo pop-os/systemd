@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <ftw.h>
@@ -38,6 +38,7 @@ typedef enum MountMode {
         MNT_FATAL          = 1 << 0,
         MNT_IN_CONTAINER   = 1 << 1,
         MNT_CHECK_WRITABLE = 1 << 2,
+        MNT_FOLLOW_SYMLINK = 1 << 3,
 } MountMode;
 
 typedef struct MountPoint {
@@ -61,9 +62,9 @@ typedef struct MountPoint {
 #endif
 
 static const MountPoint mount_table[] = {
-        { "sysfs",       "/sys",                      "sysfs",      NULL,                                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
-          NULL,          MNT_FATAL|MNT_IN_CONTAINER },
         { "proc",        "/proc",                     "proc",       NULL,                                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          NULL,          MNT_FATAL|MNT_IN_CONTAINER|MNT_FOLLOW_SYMLINK },
+        { "sysfs",       "/sys",                      "sysfs",      NULL,                                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
           NULL,          MNT_FATAL|MNT_IN_CONTAINER },
         { "devtmpfs",    "/dev",                      "devtmpfs",   "mode=755" TMPFS_LIMITS_DEV,               MS_NOSUID|MS_NOEXEC|MS_STRICTATIME,
           NULL,          MNT_FATAL|MNT_IN_CONTAINER },
@@ -85,6 +86,8 @@ static const MountPoint mount_table[] = {
 #endif
         { "tmpfs",       "/run",                      "tmpfs",      "mode=755" TMPFS_LIMITS_RUN,               MS_NOSUID|MS_NODEV|MS_STRICTATIME,
           NULL,          MNT_FATAL|MNT_IN_CONTAINER },
+        { "cgroup2",     "/sys/fs/cgroup",            "cgroup2",    "nsdelegate,memory_recursiveprot",         MS_NOSUID|MS_NOEXEC|MS_NODEV,
+          cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup2",     "/sys/fs/cgroup",            "cgroup2",    "nsdelegate",                              MS_NOSUID|MS_NOEXEC|MS_NODEV,
           cg_is_unified_wanted, MNT_IN_CONTAINER|MNT_CHECK_WRITABLE },
         { "cgroup2",     "/sys/fs/cgroup",            "cgroup2",    NULL,                                      MS_NOSUID|MS_NOEXEC|MS_NODEV,
@@ -109,17 +112,6 @@ static const MountPoint mount_table[] = {
           NULL,          MNT_NONE,                  },
 };
 
-/* These are API file systems that might be mounted by other software,
- * we just list them here so that we know that we should ignore them */
-
-static const char ignore_paths[] =
-        /* SELinux file systems */
-        "/sys/fs/selinux\0"
-        /* Container bind mounts */
-        "/proc/sys\0"
-        "/dev/console\0"
-        "/proc/kmsg\0";
-
 bool mount_point_is_api(const char *path) {
         unsigned i;
 
@@ -134,11 +126,25 @@ bool mount_point_is_api(const char *path) {
 }
 
 bool mount_point_ignore(const char *path) {
+
         const char *i;
 
-        NULSTR_FOREACH(i, ignore_paths)
+        /* These are API file systems that might be mounted by other software, we just list them here so that
+         * we know that we should ignore them. */
+        FOREACH_STRING(i,
+                       /* SELinux file systems */
+                       "/sys/fs/selinux",
+                       /* Container bind mounts */
+                       "/dev/console",
+                       "/proc/kmsg",
+                       "/proc/sys",
+                       "/proc/sys/kernel/random/boot_id")
                 if (path_equal(path, i))
                         return true;
+
+        if (path_startswith(path, "/run/host")) /* All mounts passed in from the container manager are
+                                                 * something we better ignore. */
+                return true;
 
         return false;
 }
@@ -182,13 +188,13 @@ static int mount_one(const MountPoint *p, bool relabel) {
                   p->type,
                   strna(p->options));
 
-        if (mount(p->what,
-                  p->where,
-                  p->type,
-                  p->flags,
-                  p->options) < 0) {
-                log_full_errno(priority, errno, "Failed to mount %s at %s: %m", p->type, p->where);
-                return (p->mode & MNT_FATAL) ? -errno : 0;
+        if (FLAGS_SET(p->mode, MNT_FOLLOW_SYMLINK))
+                r = mount(p->what, p->where, p->type, p->flags, p->options) < 0 ? -errno : 0;
+        else
+                r = mount_nofollow(p->what, p->where, p->type, p->flags, p->options);
+        if (r < 0) {
+                log_full_errno(priority, r, "Failed to mount %s at %s: %m", p->type, p->where);
+                return (p->mode & MNT_FATAL) ? r : 0;
         }
 
         /* Relabel again, since we now mounted something fresh here */
@@ -199,7 +205,7 @@ static int mount_one(const MountPoint *p, bool relabel) {
                 if (access(p->where, W_OK) < 0) {
                         r = -errno;
 
-                        (void) umount(p->where);
+                        (void) umount2(p->where, UMOUNT_NOFOLLOW);
                         (void) rmdir(p->where);
 
                         log_full_errno(priority, r, "Mount point %s not writable after mounting: %m", p->where);
@@ -353,7 +359,7 @@ int mount_cgroup_controllers(void) {
         }
 
         /* Now that we mounted everything, let's make the tmpfs the cgroup file systems are mounted into read-only. */
-        (void) mount("tmpfs", "/sys/fs/cgroup", "tmpfs", MS_REMOUNT|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME|MS_RDONLY, "mode=755" TMPFS_LIMITS_SYS_FS_CGROUP);
+        (void) mount_nofollow("tmpfs", "/sys/fs/cgroup", "tmpfs", MS_REMOUNT|MS_NOSUID|MS_NOEXEC|MS_NODEV|MS_STRICTATIME|MS_RDONLY, "mode=755" TMPFS_LIMITS_SYS_FS_CGROUP);
 
         return 0;
 }
@@ -395,13 +401,13 @@ static int relabel_cgroup_filesystems(void) {
                         return log_error_errno(errno, "Failed to determine mount flags for /sys/fs/cgroup: %m");
 
                 if (st.f_flags & ST_RDONLY)
-                        (void) mount(NULL, "/sys/fs/cgroup", NULL, MS_REMOUNT, NULL);
+                        (void) mount_nofollow(NULL, "/sys/fs/cgroup", NULL, MS_REMOUNT, NULL);
 
                 (void) label_fix("/sys/fs/cgroup", 0);
                 (void) nftw("/sys/fs/cgroup", nftw_cb, 64, FTW_MOUNT|FTW_PHYS|FTW_ACTIONRETVAL);
 
                 if (st.f_flags & ST_RDONLY)
-                        (void) mount(NULL, "/sys/fs/cgroup", NULL, MS_REMOUNT|MS_RDONLY, NULL);
+                        (void) mount_nofollow(NULL, "/sys/fs/cgroup", NULL, MS_REMOUNT|MS_RDONLY, NULL);
 
         } else if (r < 0)
                 return log_error_errno(r, "Failed to determine whether we are in all unified mode: %m");
@@ -480,7 +486,7 @@ static int relabel_extra(void) {
 #endif
 
 int mount_setup(bool loaded_policy, bool leave_propagation) {
-        int r = 0;
+        int r;
 
         r = mount_points_setup(ELEMENTSOF(mount_table), loaded_policy);
         if (r < 0)
@@ -535,9 +541,12 @@ int mount_setup(bool loaded_policy, bool leave_propagation) {
         (void) mkdir_label("/run/systemd", 0755);
         (void) mkdir_label("/run/systemd/system", 0755);
 
+        /* Make sure we have a mount point to hide in sandboxes */
+        (void) mkdir_label("/run/credentials", 0755);
+
         /* Also create /run/systemd/inaccessible nodes, so that we always have something to mount
          * inaccessible nodes from. If we run in a container the host might have created these for us already
-         * in /run/host/inaccessible/. Use those if we can, since tht way we likely get access to block/char
+         * in /run/host/inaccessible/. Use those if we can, since that way we likely get access to block/char
          * device nodes that are inaccessible, and if userns is used to nodes that are on mounts owned by a
          * userns outside the container and thus nicely read-only and not remountable. */
         if (access("/run/host/inaccessible/", F_OK) < 0) {

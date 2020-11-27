@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # -*- mode: shell-script; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
 # ex: ts=8 sw=4 sts=4 et filetype=sh
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # This file is part of systemd.
 #
@@ -85,8 +85,13 @@ fi
 KERNEL_VERSION="$1"
 KERNEL_IMAGE="$2"
 
-if [[ -f /etc/machine-id ]]; then
+# Reuse directory created without a machine ID present if it exists.
+if [[ -d /efi/Default ]] || [[ -d /boot/Default ]] || [[ -d /boot/efi/Default ]]; then
+    MACHINE_ID="Default"
+elif [[ -f /etc/machine-id ]]; then
     read MACHINE_ID < /etc/machine-id
+else
+    MACHINE_ID="Default"
 fi
 
 if [[ ! $COMMAND ]] || [[ ! $KERNEL_VERSION ]]; then
@@ -94,10 +99,7 @@ if [[ ! $COMMAND ]] || [[ ! $KERNEL_VERSION ]]; then
     exit 1
 fi
 
-if ! [[ $MACHINE_ID ]]; then
-    ENTRY_DIR_ABS=$(mktemp -d /tmp/kernel-install.XXXXX) || exit 1
-    trap "rm -rf '$ENTRY_DIR_ABS'" EXIT INT QUIT PIPE
-elif [[ -d /efi/loader/entries ]] || [[ -d /efi/$MACHINE_ID ]]; then
+if [[ -d /efi/loader/entries ]] || [[ -d /efi/$MACHINE_ID ]]; then
     ENTRY_DIR_ABS="/efi/$MACHINE_ID/$KERNEL_VERSION"
 elif [[ -d /boot/loader/entries ]] || [[ -d /boot/$MACHINE_ID ]]; then
     ENTRY_DIR_ABS="/boot/$MACHINE_ID/$KERNEL_VERSION"
@@ -146,14 +148,6 @@ case $COMMAND in
                 ((ret+=$x))
             fi
         done
-
-        if ! [[ $MACHINE_ID ]] && ! rmdir "$ENTRY_DIR_ABS"; then
-            echo "Warning: In kernel-install plugins, requiring ENTRY_DIR_ABS to be preset is deprecated." >&2
-            echo "         All plugins should not put anything in ENTRY_DIR_ABS if the environment" >&2
-            echo "         variable KERNEL_INSTALL_MACHINE_ID is empty." >&2
-            rm -rf "$ENTRY_DIR_ABS"
-            ((ret+=$?))
-        fi
         ;;
 
     remove)

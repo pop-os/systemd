@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
 #include "string-util.h"
@@ -16,6 +16,25 @@ static void test_utf8_is_printable(void) {
         assert_se(!utf8_is_printable("\r", 1));
         assert_se(utf8_is_printable("\n", 1));
         assert_se(utf8_is_printable("\t", 1));
+}
+
+static void test_utf8_n_is_valid(void) {
+        log_info("/* %s */", __func__);
+
+        assert_se( utf8_is_valid_n("ascii is valid unicode", 21));
+        assert_se( utf8_is_valid_n("ascii is valid unicode", 22));
+        assert_se(!utf8_is_valid_n("ascii is valid unicode", 23));
+        assert_se( utf8_is_valid_n("\342\204\242", 0));
+        assert_se(!utf8_is_valid_n("\342\204\242", 1));
+        assert_se(!utf8_is_valid_n("\342\204\242", 2));
+        assert_se( utf8_is_valid_n("\342\204\242", 3));
+        assert_se(!utf8_is_valid_n("\342\204\242", 4));
+        assert_se( utf8_is_valid_n("<ZZ>", 0));
+        assert_se( utf8_is_valid_n("<ZZ>", 1));
+        assert_se( utf8_is_valid_n("<ZZ>", 2));
+        assert_se( utf8_is_valid_n("<ZZ>", 3));
+        assert_se( utf8_is_valid_n("<ZZ>", 4));
+        assert_se(!utf8_is_valid_n("<ZZ>", 5));
 }
 
 static void test_utf8_is_valid(void) {
@@ -216,6 +235,7 @@ static void test_utf8_to_utf16(void) {
 }
 
 int main(int argc, char *argv[]) {
+        test_utf8_n_is_valid();
         test_utf8_is_valid();
         test_utf8_is_printable();
         test_ascii_is_valid();

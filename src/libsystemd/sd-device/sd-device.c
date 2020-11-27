@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <ctype.h>
 #include <net/if.h>
@@ -69,7 +69,8 @@ static sd_device *device_free(sd_device *device) {
         ordered_hashmap_free_free_free(device->properties_db);
         hashmap_free_free_free(device->sysattr_values);
         set_free(device->sysattrs);
-        set_free(device->tags);
+        set_free(device->all_tags);
+        set_free(device->current_tags);
         set_free(device->devlinks);
 
         return mfree(device);
@@ -125,10 +126,6 @@ int device_add_property_aux(sd_device *device, const char *_key, const char *_va
         }
 
         return 0;
-}
-
-int device_add_property_internal(sd_device *device, const char *key, const char *value) {
-        return device_add_property_aux(device, key, value, false);
 }
 
 int device_set_syspath(sd_device *device, const char *_syspath, bool verify) {
@@ -1062,8 +1059,8 @@ static bool is_valid_tag(const char *tag) {
         return !strchr(tag, ':') && !strchr(tag, ' ');
 }
 
-int device_add_tag(sd_device *device, const char *tag) {
-        int r;
+int device_add_tag(sd_device *device, const char *tag, bool both) {
+        int r, added;
 
         assert(device);
         assert(tag);
@@ -1071,9 +1068,21 @@ int device_add_tag(sd_device *device, const char *tag) {
         if (!is_valid_tag(tag))
                 return -EINVAL;
 
-        r = set_put_strdup(&device->tags, tag);
-        if (r < 0)
-                return r;
+        /* Definitely add to the "all" list of tags (i.e. the sticky list) */
+        added = set_put_strdup(&device->all_tags, tag);
+        if (added < 0)
+                return added;
+
+        /* And optionally, also add it to the current list of tags */
+        if (both) {
+                r = set_put_strdup(&device->current_tags, tag);
+                if (r < 0) {
+                        if (added > 0)
+                                (void) set_remove(device->all_tags, tag);
+
+                        return r;
+                }
+        }
 
         device->tags_generation++;
         device->property_tags_outdated = true;
@@ -1151,8 +1160,9 @@ static int handle_db_line(sd_device *device, char key, const char *value) {
         assert(value);
 
         switch (key) {
-        case 'G':
-                r = device_add_tag(device, value);
+        case 'G': /* Any tag */
+        case 'Q': /* Current tag */
+                r = device_add_tag(device, value, key == 'Q');
                 if (r < 0)
                         return r;
 
@@ -1191,6 +1201,12 @@ static int handle_db_line(sd_device *device, char key, const char *value) {
                 break;
         case 'W':
                 r = safe_atoi(value, &device->watch_handle);
+                if (r < 0)
+                        return r;
+
+                break;
+        case 'V':
+                r = safe_atou(value, &device->database_version);
                 if (r < 0)
                         return r;
 
@@ -1407,10 +1423,10 @@ _public_ const char *sd_device_get_tag_first(sd_device *device) {
 
         (void) device_read_db(device);
 
-        device->tags_iterator_generation = device->tags_generation;
-        device->tags_iterator = ITERATOR_FIRST;
+        device->all_tags_iterator_generation = device->tags_generation;
+        device->all_tags_iterator = ITERATOR_FIRST;
 
-        (void) set_iterate(device->tags, &device->tags_iterator, &v);
+        (void) set_iterate(device->all_tags, &device->all_tags_iterator, &v);
         return v;
 }
 
@@ -1421,10 +1437,56 @@ _public_ const char *sd_device_get_tag_next(sd_device *device) {
 
         (void) device_read_db(device);
 
-        if (device->tags_iterator_generation != device->tags_generation)
+        if (device->all_tags_iterator_generation != device->tags_generation)
                 return NULL;
 
-        (void) set_iterate(device->tags, &device->tags_iterator, &v);
+        (void) set_iterate(device->all_tags, &device->all_tags_iterator, &v);
+        return v;
+}
+
+static bool device_database_supports_current_tags(sd_device *device) {
+        assert(device);
+
+        (void) device_read_db(device);
+
+        /* The current tags (saved in Q field) feature is implemented in database version 1.
+         * If the database version is 0, then the tags (NOT current tags, saved in G field) are not
+         * sticky. Thus, we can safely bypass the operations for the current tags (Q) to tags (G). */
+
+        return device->database_version >= 1;
+}
+
+_public_ const char *sd_device_get_current_tag_first(sd_device *device) {
+        void *v;
+
+        assert_return(device, NULL);
+
+        if (!device_database_supports_current_tags(device))
+                return sd_device_get_tag_first(device);
+
+        (void) device_read_db(device);
+
+        device->current_tags_iterator_generation = device->tags_generation;
+        device->current_tags_iterator = ITERATOR_FIRST;
+
+        (void) set_iterate(device->current_tags, &device->current_tags_iterator, &v);
+        return v;
+}
+
+_public_ const char *sd_device_get_current_tag_next(sd_device *device) {
+        void *v;
+
+        assert_return(device, NULL);
+
+        if (!device_database_supports_current_tags(device))
+                return sd_device_get_tag_next(device);
+
+        (void) device_read_db(device);
+
+        if (device->current_tags_iterator_generation != device->tags_generation)
+                return NULL;
+
+        (void) set_iterate(device->current_tags, &device->current_tags_iterator, &v);
         return v;
 }
 
@@ -1454,6 +1516,30 @@ _public_ const char *sd_device_get_devlink_next(sd_device *device) {
 
         (void) set_iterate(device->devlinks, &device->devlinks_iterator, &v);
         return v;
+}
+
+static char *join_string_set(Set *s) {
+        size_t ret_allocated = 0, ret_len;
+        _cleanup_free_ char *ret = NULL;
+        const char *tag;
+
+        if (!GREEDY_REALLOC(ret, ret_allocated, 2))
+                return NULL;
+
+        strcpy(ret, ":");
+        ret_len = 1;
+
+        SET_FOREACH(tag, s) {
+                char *e;
+
+                if (!GREEDY_REALLOC(ret, ret_allocated, ret_len + strlen(tag) + 2))
+                        return NULL;
+
+                e = stpcpy(stpcpy(ret + ret_len, tag), ":");
+                ret_len = e - ret;
+        }
+
+        return TAKE_PTR(ret);
 }
 
 int device_properties_prepare(sd_device *device) {
@@ -1494,26 +1580,27 @@ int device_properties_prepare(sd_device *device) {
 
         if (device->property_tags_outdated) {
                 _cleanup_free_ char *tags = NULL;
-                size_t tags_allocated = 0, tags_len = 0;
-                const char *tag;
 
-                if (!GREEDY_REALLOC(tags, tags_allocated, 2))
+                tags = join_string_set(device->all_tags);
+                if (!tags)
                         return -ENOMEM;
-                stpcpy(tags, ":");
-                tags_len++;
 
-                for (tag = sd_device_get_tag_first(device); tag; tag = sd_device_get_tag_next(device)) {
-                        char *e;
-
-                        if (!GREEDY_REALLOC(tags, tags_allocated, tags_len + strlen(tag) + 2))
-                                return -ENOMEM;
-                        e = stpcpy(stpcpy(tags + tags_len, tag), ":");
-                        tags_len = e - tags;
+                if (!streq(tags, ":")) {
+                        r = device_add_property_internal(device, "TAGS", tags);
+                        if (r < 0)
+                                return r;
                 }
 
-                r = device_add_property_internal(device, "TAGS", tags);
-                if (r < 0)
-                        return r;
+                free(tags);
+                tags = join_string_set(device->current_tags);
+                if (!tags)
+                        return -ENOMEM;
+
+                if (!streq(tags, ":")) {
+                        r = device_add_property_internal(device, "CURRENT_TAGS", tags);
+                        if (r < 0)
+                                return r;
+                }
 
                 device->property_tags_outdated = false;
         }
@@ -1689,7 +1776,19 @@ _public_ int sd_device_has_tag(sd_device *device, const char *tag) {
 
         (void) device_read_db(device);
 
-        return !!set_contains(device->tags, tag);
+        return set_contains(device->all_tags, tag);
+}
+
+_public_ int sd_device_has_current_tag(sd_device *device, const char *tag) {
+        assert_return(device, -EINVAL);
+        assert_return(tag, -EINVAL);
+
+        if (!device_database_supports_current_tags(device))
+                return sd_device_has_tag(device, tag);
+
+        (void) device_read_db(device);
+
+        return set_contains(device->current_tags, tag);
 }
 
 _public_ int sd_device_get_property_value(sd_device *device, const char *key, const char **_value) {
@@ -1902,4 +2001,27 @@ _public_ int sd_device_set_sysattr_value(sd_device *device, const char *sysattr,
         TAKE_PTR(value);
 
         return 0;
+}
+
+_public_ int sd_device_set_sysattr_valuef(sd_device *device, const char *sysattr, const char *format, ...) {
+        _cleanup_free_ char *value = NULL;
+        va_list ap;
+        int r;
+
+        assert_return(device, -EINVAL);
+        assert_return(sysattr, -EINVAL);
+
+        if (!format) {
+                device_remove_sysattr_value(device, sysattr);
+                return 0;
+        }
+
+        va_start(ap, format);
+        r = vasprintf(&value, format, ap);
+        va_end(ap);
+
+        if (r < 0)
+                return -ENOMEM;
+
+        return sd_device_set_sysattr_value(device, sysattr, value);
 }

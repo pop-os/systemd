@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="portablectl" conditional='ENABLE_PORTABLED'
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -147,7 +147,7 @@
         <command>attach</command> command above, and removes the unit file copies, drop-ins and image symlink
         again. This command expects an image name or path as parameter. Note that if a path is specified only the last
         component of it (i.e. the file or directory name itself, not the path to it) is used for finding matching unit
-        files. This is a convencience feature to allow all arguments passed as <command>attach</command> also to
+        files. This is a convenience feature to allow all arguments passed as <command>attach</command> also to
         <command>detach</command>.</para></listitem>
 
         <para>If <option>--now</option> and/or <option>--enable</option> are passed, the portable service(s) are

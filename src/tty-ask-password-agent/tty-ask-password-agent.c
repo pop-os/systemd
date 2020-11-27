@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2015 Werner Fink
 ***/
@@ -583,7 +583,6 @@ static void terminate_agents(Set *pids) {
         struct timespec ts;
         siginfo_t status = {};
         sigset_t set;
-        Iterator i;
         void *p;
         int r, signum;
 
@@ -591,7 +590,7 @@ static void terminate_agents(Set *pids) {
          * Request termination of the remaining processes as those
          * are not required anymore.
          */
-        SET_FOREACH(p, pids, i)
+        SET_FOREACH(p, pids)
                 (void) kill(PTR_TO_PID(p), SIGTERM);
 
         /*
@@ -625,7 +624,7 @@ static void terminate_agents(Set *pids) {
         /*
          * Kill hanging processes.
          */
-        SET_FOREACH(p, pids, i) {
+        SET_FOREACH(p, pids) {
                 log_warning("Failed to terminate child %d, killing it", PTR_TO_PID(p));
                 (void) kill(PTR_TO_PID(p), SIGKILL);
         }

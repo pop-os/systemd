@@ -15,7 +15,7 @@ Bug-Ubuntu: https://launchpad.net/bugs/1227520
  2 files changed, 49 insertions(+), 10 deletions(-)
 
 diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
-index 7f6607a..4e17da3 100644
+index a1794bd..99dd4ed 100644
 --- a/src/hostname/hostnamed.c
 +++ b/src/hostname/hostnamed.c
 @@ -25,6 +25,7 @@
@@ -52,7 +52,7 @@ index 7f6607a..4e17da3 100644
  static void context_read_etc_hostname(Context *c) {
          struct stat current_stat = {};
          int r;
-@@ -347,12 +367,12 @@ static int context_write_data_static_hostname(Context *c) {
+@@ -364,12 +384,12 @@ static int context_write_data_static_hostname(Context *c) {
  
          if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
  
@@ -67,7 +67,7 @@ index 7f6607a..4e17da3 100644
  }
  
  static int context_write_data_machine_info(Context *c) {
-@@ -397,13 +417,13 @@ static int context_write_data_machine_info(Context *c) {
+@@ -414,13 +434,13 @@ static int context_write_data_machine_info(Context *c) {
          }
  
          if (strv_isempty(l)) {
@@ -84,7 +84,7 @@ index 7f6607a..4e17da3 100644
  
  static int property_get_hostname(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index ca065d4..93cb5c2 100644
+index 0f429a2..bc1672e 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -280,6 +280,25 @@ static int context_read_data(Context *c) {

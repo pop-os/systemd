@@ -15,12 +15,12 @@ supported until 2028.
  1 file changed, 7 insertions(+)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index ea513ef..dc2de79 100644
+index 0ec1bd6..823db9c 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
-@@ -2719,6 +2719,13 @@ static int apply_mount_namespace(
-         }
+@@ -3234,6 +3234,13 @@ static int apply_mount_namespace(
  
+ finalize:
          bind_mount_free_many(bind_mounts, n_bind_mounts);
 +
 +        /* If we couldn't set up the namespace this is probably due to a

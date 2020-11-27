@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
 #include "dns-domain.h"
@@ -231,13 +231,15 @@ int dns_zone_put(DnsZone *z, DnsScope *s, DnsResourceRecord *rr, bool probe) {
         if (r < 0)
                 return r;
 
-        i = new0(DnsZoneItem, 1);
+        i = new(DnsZoneItem, 1);
         if (!i)
                 return -ENOMEM;
 
-        i->scope = s;
-        i->rr = dns_resource_record_ref(rr);
-        i->probing_enabled = probe;
+        *i = (DnsZoneItem) {
+                .scope = s,
+                .rr = dns_resource_record_ref(rr),
+                .probing_enabled = probe,
+        };
 
         r = dns_zone_link_item(z, i);
         if (r < 0)
@@ -630,11 +632,10 @@ int dns_zone_verify_conflicts(DnsZone *zone, DnsResourceKey *key) {
 
 void dns_zone_verify_all(DnsZone *zone) {
         DnsZoneItem *i;
-        Iterator iterator;
 
         assert(zone);
 
-        HASHMAP_FOREACH(i, zone->by_key, iterator) {
+        HASHMAP_FOREACH(i, zone->by_key) {
                 DnsZoneItem *j;
 
                 LIST_FOREACH(by_key, j, i)
@@ -643,7 +644,6 @@ void dns_zone_verify_all(DnsZone *zone) {
 }
 
 void dns_zone_dump(DnsZone *zone, FILE *f) {
-        Iterator iterator;
         DnsZoneItem *i;
 
         if (!zone)
@@ -652,7 +652,7 @@ void dns_zone_dump(DnsZone *zone, FILE *f) {
         if (!f)
                 f = stdout;
 
-        HASHMAP_FOREACH(i, zone->by_key, iterator) {
+        HASHMAP_FOREACH(i, zone->by_key) {
                 DnsZoneItem *j;
 
                 LIST_FOREACH(by_key, j, i) {

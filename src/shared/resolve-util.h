@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include "conf-parser.h"
@@ -53,7 +53,7 @@ enum DnsOverTlsMode {
         DNS_OVER_TLS_NO,
 
         /* Try to connect using DNS-over-TLS, but if connection fails,
-         * fallback to using an unencrypted connection */
+         * fall back to using an unencrypted connection */
         DNS_OVER_TLS_OPPORTUNISTIC,
 
         /* Enforce DNS-over-TLS and require valid server certificates */

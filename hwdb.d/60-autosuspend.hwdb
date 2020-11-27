@@ -25,7 +25,6 @@
 # Allowed properties are:
 #    ID_AUTOSUSPEND=1
 
-#
 # Sort by brand, model
 
 #########################################
@@ -34,6 +33,16 @@
 
 # AU9540 Smartcard Reader
 usb:v058Fp9540*
+ ID_AUTOSUSPEND=1
+
+#########################################
+# Lenovo
+#########################################
+
+# X1C8 Touchscreen
+usb:v04F3p2B7C*
+# T14 Gen 1 Touchscreen
+usb:v04F3p2ACC*
  ID_AUTOSUSPEND=1
 
 #########################################

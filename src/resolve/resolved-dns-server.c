@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "sd-messages.h"
 
@@ -535,7 +535,7 @@ int dns_server_adjust_opt(DnsServer *server, DnsPacket *packet, DnsServerFeature
         else
                 packet_size = server->received_udp_packet_max;
 
-        return dns_packet_append_opt(packet, packet_size, edns_do, 0, NULL);
+        return dns_packet_append_opt(packet, packet_size, edns_do, /* include_rfc6975 = */ true, 0, NULL);
 }
 
 int dns_server_ifindex(const DnsServer *s) {
@@ -753,13 +753,12 @@ DnsServer *manager_get_dns_server(Manager *m) {
 
         if (!m->current_dns_server) {
                 bool found = false;
-                Iterator i;
 
                 /* No DNS servers configured, let's see if there are
                  * any on any links. If not, we use the fallback
                  * servers */
 
-                HASHMAP_FOREACH(l, m->links, i)
+                HASHMAP_FOREACH(l, m->links)
                         if (l->dns_servers) {
                                 found = true;
                                 break;

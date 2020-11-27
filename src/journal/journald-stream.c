@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <stddef.h>
 #include <unistd.h>
@@ -834,13 +834,12 @@ int server_restore_streams(Server *s, FDSet *fds) {
         FOREACH_DIRENT(de, d, goto fail) {
                 unsigned long st_dev, st_ino;
                 bool found = false;
-                Iterator i;
                 int fd;
 
                 if (sscanf(de->d_name, "%lu:%lu", &st_dev, &st_ino) != 2)
                         continue;
 
-                FDSET_FOREACH(fd, fds, i) {
+                FDSET_FOREACH(fd, fds) {
                         struct stat st;
 
                         if (fstat(fd, &st) < 0)

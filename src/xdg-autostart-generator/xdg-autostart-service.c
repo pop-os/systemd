@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdio.h>
@@ -28,6 +28,7 @@ XdgAutostartService* xdg_autostart_service_free(XdgAutostartService *s) {
 
         free(s->type);
         free(s->exec_string);
+        free(s->working_directory);
 
         strv_free(s->only_show_in);
         strv_free(s->not_show_in);
@@ -166,7 +167,7 @@ static int xdg_config_parse_string(
 
         /* XDG does not allow duplicate definitions. */
         if (*out) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Key %s was defined multiple times, ignoring.", lvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Key %s was defined multiple times, ignoring.", lvalue);
                 return 0;
         }
 
@@ -238,7 +239,7 @@ static int xdg_config_parse_strv(
 
         /* XDG does not allow duplicate definitions. */
         if (*ret_sv) {
-                log_syntax(unit, LOG_ERR, filename, line, 0, "Key %s was already defined, ignoring.", lvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Key %s was already defined, ignoring.", lvalue);
                 return 0;
         }
 
@@ -256,7 +257,7 @@ static int xdg_config_parse_strv(
                         /* Move forward, and ensure it is a valid escape. */
                         end++;
                         if (!strchr("sntr\\;", *end)) {
-                                log_syntax(unit, LOG_ERR, filename, line, 0, "Undefined escape sequence \\%c.", *end);
+                                log_syntax(unit, LOG_WARNING, filename, line, 0, "Undefined escape sequence \\%c.", *end);
                                 return 0;
                         }
                         continue;
@@ -321,6 +322,7 @@ XdgAutostartService *xdg_autostart_service_parse_desktop(const char *path) {
         const ConfigTableItem items[] = {
                 { "Desktop Entry", "Name",                      xdg_config_parse_string, 0, &service->description},
                 { "Desktop Entry", "Exec",                      xdg_config_parse_string, 0, &service->exec_string},
+                { "Desktop Entry", "Path",                      xdg_config_parse_string, 0, &service->working_directory},
                 { "Desktop Entry", "TryExec",                   xdg_config_parse_string, 0, &service->try_exec},
                 { "Desktop Entry", "Type",                      xdg_config_parse_string, 0, &service->type},
                 { "Desktop Entry", "OnlyShowIn",                xdg_config_parse_strv, 0,   &service->only_show_in},
@@ -338,9 +340,12 @@ XdgAutostartService *xdg_autostart_service_parse_desktop(const char *path) {
                 { "Desktop Entry", "GenericName", NULL, 0, NULL},
                 { "Desktop Entry", "Icon", NULL, 0, NULL},
                 { "Desktop Entry", "Keywords", NULL, 0, NULL},
+                { "Desktop Entry", "MimeType", NULL, 0, NULL},
                 { "Desktop Entry", "NoDisplay", NULL, 0, NULL},
                 { "Desktop Entry", "StartupNotify", NULL, 0, NULL},
+                { "Desktop Entry", "StartupWMClass", NULL, 0, NULL},
                 { "Desktop Entry", "Terminal", NULL, 0, NULL},
+                { "Desktop Entry", "URL", NULL, 0, NULL},
                 { "Desktop Entry", "Version", NULL, 0, NULL},
                 {}
         };
@@ -385,9 +390,9 @@ int xdg_autostart_format_exec_start(
          * NOTE: Technically, XDG only specifies " as quotes, while this also
          *       accepts '.
          */
-        exec_split = strv_split_full(exec, WHITESPACE, SPLIT_QUOTES | SPLIT_RELAX);
-        if (!exec_split)
-                return -ENOMEM;
+        r = strv_split_full(&exec_split, exec, NULL, EXTRACT_UNQUOTE | EXTRACT_RELAX);
+        if (r < 0)
+                return r;
 
         if (strv_isempty(exec_split))
                 return log_warning_errno(SYNTHETIC_ERRNO(EINVAL), "Exec line is empty");
@@ -405,7 +410,7 @@ int xdg_autostart_format_exec_start(
 
                         /* This is the executable, find it in $PATH */
                         first_arg = false;
-                        r = find_binary(c, &executable);
+                        r = find_executable(c, &executable);
                         if (r < 0)
                                 return log_info_errno(r, "Exec binary '%s' does not exist: %m", c);
 
@@ -481,9 +486,9 @@ static int xdg_autostart_generate_desktop_condition(
         if (!isempty(condition)) {
                 _cleanup_free_ char *gnome_autostart_condition_path = NULL, *e_autostart_condition = NULL;
 
-                r = find_binary(test_binary, &gnome_autostart_condition_path);
+                r = find_executable(test_binary, &gnome_autostart_condition_path);
                 if (r < 0) {
-                        log_full_errno(r == -ENOENT ? LOG_INFO : LOG_WARNING, r,
+                        log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
                                        "%s not found: %m", test_binary);
                         fprintf(f, "# ExecCondition using %s skipped due to missing binary.\n", test_binary);
                         return r;
@@ -514,18 +519,18 @@ int xdg_autostart_service_generate_unit(
 
         /* Nothing to do for hidden services. */
         if (service->hidden) {
-                log_info("Not generating service for XDG autostart %s, it is hidden.", service->name);
+                log_debug("Not generating service for XDG autostart %s, it is hidden.", service->name);
                 return 0;
         }
 
         if (service->systemd_skip) {
-                log_info("Not generating service for XDG autostart %s, should be skipped by generator.", service->name);
+                log_debug("Not generating service for XDG autostart %s, should be skipped by generator.", service->name);
                 return 0;
         }
 
         /* Nothing to do if type is not Application. */
         if (!streq_ptr(service->type, "Application")) {
-                log_info("Not generating service for XDG autostart %s, only Type=Application is supported.", service->name);
+                log_debug("Not generating service for XDG autostart %s, only Type=Application is supported.", service->name);
                 return 0;
         }
 
@@ -536,12 +541,12 @@ int xdg_autostart_service_generate_unit(
 
         /*
          * The TryExec key cannot be checked properly from the systemd unit,
-         * it is trivial to check using find_binary though.
+         * it is trivial to check using find_executable though.
          */
         if (service->try_exec) {
-                r = find_binary(service->try_exec, NULL);
+                r = find_executable(service->try_exec, NULL);
                 if (r < 0) {
-                        log_full_errno(r == -ENOENT ? LOG_INFO : LOG_WARNING, r,
+                        log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
                                        "Not generating service for XDG autostart %s, could not find TryExec= binary %s: %m",
                                        service->name, service->try_exec);
                         return 0;
@@ -558,8 +563,8 @@ int xdg_autostart_service_generate_unit(
 
         if (service->gnome_autostart_phase) {
                 /* There is no explicit value for the "Application" phase. */
-                log_info("Not generating service for XDG autostart %s, startup phases are not supported.",
-                         service->name);
+                log_debug("Not generating service for XDG autostart %s, startup phases are not supported.",
+                          service->name);
                 return 0;
         }
 
@@ -599,12 +604,22 @@ int xdg_autostart_service_generate_unit(
 
         fprintf(f,
                 "\n[Service]\n"
-                "Type=simple\n"
+                "Type=exec\n"
                 "ExecStart=:%s\n"
                 "Restart=no\n"
                 "TimeoutSec=5s\n"
                 "Slice=app.slice\n",
                 exec_start);
+
+        if (service->working_directory) {
+                _cleanup_free_ char *e_working_directory = NULL;
+
+                e_working_directory = cescape(service->working_directory);
+                if (!e_working_directory)
+                        return log_oom();
+
+                fprintf(f, "WorkingDirectory=-%s\n", e_working_directory);
+        }
 
         /* Generate an ExecCondition to check $XDG_CURRENT_DESKTOP */
         if (!strv_isempty(service->only_show_in) || !strv_isempty(service->not_show_in)) {

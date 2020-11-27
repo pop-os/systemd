@@ -1,11 +1,11 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>
 
 #include "alloc-util.h"
-#include "crypt-util.h"
+#include "cryptsetup-util.h"
 #include "fileio.h"
 #include "hexdecoct.h"
 #include "log.h"
@@ -73,7 +73,7 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "Failed to open verity device %s: %m", argv[4]);
 
-                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+                cryptsetup_enable_logging(cd);
 
                 status = crypt_status(cd, argv[2]);
                 if (IN_SET(status, CRYPT_ACTIVE, CRYPT_BUSY)) {
@@ -100,7 +100,7 @@ static int run(int argc, char *argv[]) {
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to parse root hash signature '%s': %m", argv[6]);
                         } else {
-                                r = read_full_file_full(AT_FDCWD, argv[6], READ_FULL_FILE_CONNECT_SOCKET, &hash_sig, &hash_sig_size);
+                                r = read_full_file_full(AT_FDCWD, argv[6], READ_FULL_FILE_CONNECT_SOCKET, NULL, &hash_sig, &hash_sig_size);
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to read root hash signature: %m");
                         }
@@ -124,7 +124,7 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         return log_error_errno(r, "crypt_init_by_name() failed: %m");
 
-                crypt_set_log_callback(cd, cryptsetup_log_glue, NULL);
+                cryptsetup_enable_logging(cd);
 
                 r = crypt_deactivate(cd, argv[2]);
                 if (r < 0)

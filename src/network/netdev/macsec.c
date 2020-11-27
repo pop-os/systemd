@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <netinet/in.h>
 #include <linux/if_ether.h>
@@ -13,7 +13,6 @@
 #include "memory-util.h"
 #include "netlink-util.h"
 #include "network-internal.h"
-#include "networkd-address.h"
 #include "networkd-manager.h"
 #include "path-util.h"
 #include "socket-util.h"
@@ -494,7 +493,6 @@ static int netdev_macsec_configure_transmit_association(NetDev *netdev, Transmit
 static int netdev_macsec_configure(NetDev *netdev, Link *link, sd_netlink_message *m) {
         TransmitAssociation *a;
         ReceiveChannel *c;
-        Iterator i;
         MACsec *s;
         int r;
 
@@ -502,13 +500,13 @@ static int netdev_macsec_configure(NetDev *netdev, Link *link, sd_netlink_messag
         s = MACSEC(netdev);
         assert(s);
 
-        ORDERED_HASHMAP_FOREACH(a, s->transmit_associations_by_section, i) {
+        ORDERED_HASHMAP_FOREACH(a, s->transmit_associations_by_section) {
                 r = netdev_macsec_configure_transmit_association(netdev, a);
                 if (r < 0)
                         return r;
         }
 
-        ORDERED_HASHMAP_FOREACH(c, s->receive_channels, i) {
+        ORDERED_HASHMAP_FOREACH(c, s->receive_channels) {
                 r = netdev_macsec_configure_receive_channel(netdev, c);
                 if (r < 0)
                         return r;
@@ -848,13 +846,16 @@ int config_parse_macsec_key_id(
                 return log_oom();
 
         r = unhexmem(rvalue, strlen(rvalue), &p, &l);
+        if (r == -ENOMEM)
+                return log_oom();
         if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse KeyId \"%s\": %m", rvalue);
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to parse KeyId=%s, ignoring assignment: %m", rvalue);
                 return 0;
         }
         if (l > MACSEC_KEYID_LEN) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
-                           "Specified KeyId is larger then the allowed maximum (%zu > %u), ignoring: %s",
+                           "Specified KeyId= is larger then the allowed maximum (%zu > %u), ignoring: %s",
                            l, MACSEC_KEYID_LEN, rvalue);
                 return 0;
         }
@@ -988,7 +989,7 @@ static int macsec_read_key_file(NetDev *netdev, SecurityAssociation *sa) {
         r = read_full_file_full(
                         AT_FDCWD, sa->key_file,
                         READ_FULL_FILE_SECURE | READ_FULL_FILE_UNHEX | READ_FULL_FILE_WARN_WORLD_READABLE | READ_FULL_FILE_CONNECT_SOCKET,
-                        (char **) &key, &key_len);
+                        NULL, (char **) &key, &key_len);
         if (r < 0)
                 return log_netdev_error_errno(netdev, r,
                                               "Failed to read key from '%s', ignoring: %m",
@@ -1150,7 +1151,6 @@ static int netdev_macsec_verify(NetDev *netdev, const char *filename) {
         TransmitAssociation *a;
         ReceiveAssociation *n;
         ReceiveChannel *c;
-        Iterator i;
         uint8_t an, encoding_an;
         bool use_for_encoding;
         int r;
@@ -1159,7 +1159,7 @@ static int netdev_macsec_verify(NetDev *netdev, const char *filename) {
         assert(v);
         assert(filename);
 
-        ORDERED_HASHMAP_FOREACH(c, v->receive_channels_by_section, i) {
+        ORDERED_HASHMAP_FOREACH(c, v->receive_channels_by_section) {
                 r = macsec_receive_channel_verify(c);
                 if (r < 0)
                         macsec_receive_channel_free(c);
@@ -1168,7 +1168,7 @@ static int netdev_macsec_verify(NetDev *netdev, const char *filename) {
         an = 0;
         use_for_encoding = false;
         encoding_an = 0;
-        ORDERED_HASHMAP_FOREACH(a, v->transmit_associations_by_section, i) {
+        ORDERED_HASHMAP_FOREACH(a, v->transmit_associations_by_section) {
                 r = macsec_transmit_association_verify(a);
                 if (r < 0) {
                         macsec_transmit_association_free(a);
@@ -1203,7 +1203,7 @@ static int netdev_macsec_verify(NetDev *netdev, const char *filename) {
         assert(encoding_an < MACSEC_MAX_ASSOCIATION_NUMBER);
         v->encoding_an = encoding_an;
 
-        ORDERED_HASHMAP_FOREACH(n, v->receive_associations_by_section, i) {
+        ORDERED_HASHMAP_FOREACH(n, v->receive_associations_by_section) {
                 r = macsec_receive_association_verify(n);
                 if (r < 0)
                         macsec_receive_association_free(n);

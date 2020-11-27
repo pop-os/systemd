@@ -15,15 +15,15 @@ file so it matches the actual default
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
-index 082ad71..e9bf138 100644
+index 93279b3..a96113e 100644
 --- a/src/resolve/resolved.conf.in
 +++ b/src/resolve/resolved.conf.in
-@@ -19,7 +19,7 @@
+@@ -23,7 +23,7 @@
  #DNSOverTLS=@DEFAULT_DNS_OVER_TLS_MODE@
  #MulticastDNS=@DEFAULT_MDNS_MODE@
  #LLMNR=@DEFAULT_LLMNR_MODE@
 -#Cache=yes
 +#Cache=no-negative
  #DNSStubListener=yes
+ #DNSStubListenerExtra=
  #ReadEtcHosts=yes
- #ResolveUnicastSingleLabel=no

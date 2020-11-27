@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdlib.h>
@@ -19,9 +19,59 @@
 #include "parse-util.h"
 #include "path-util.h"
 #include "set.h"
+#include "stat-util.h"
 #include "stdio-util.h"
 #include "string-util.h"
 #include "strv.h"
+
+int mount_fd(const char *source,
+             int target_fd,
+             const char *filesystemtype,
+             unsigned long mountflags,
+             const void *data) {
+
+        char path[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(int)];
+
+        xsprintf(path, "/proc/self/fd/%i", target_fd);
+        if (mount(source, path, filesystemtype, mountflags, data) < 0) {
+                if (errno != ENOENT)
+                        return -errno;
+
+                /* ENOENT can mean two things: either that the source is missing, or that /proc/ isn't
+                 * mounted. Check for the latter to generate better error messages. */
+                if (proc_mounted() == 0)
+                        return -ENOSYS;
+
+                return -ENOENT;
+        }
+
+        return 0;
+}
+
+int mount_nofollow(
+                const char *source,
+                const char *target,
+                const char *filesystemtype,
+                unsigned long mountflags,
+                const void *data) {
+
+        _cleanup_close_ int fd = -1;
+
+        /* In almost all cases we want to manipulate the mount table without following symlinks, hence
+         * mount_nofollow() is usually the way to go. The only exceptions are environments where /proc/ is
+         * not available yet, since we need /proc/self/fd/ for this logic to work. i.e. during the early
+         * initialization of namespacing/container stuff where /proc is not yet mounted (and maybe even the
+         * fs to mount) we can only use traditional mount() directly.
+         *
+         * Note that this disables following only for the final component of the target, i.e symlinks within
+         * the path of the target are honoured, as are symlinks in the source path everywhere. */
+
+        fd = open(target, O_PATH|O_CLOEXEC|O_NOFOLLOW);
+        if (fd < 0)
+                return -errno;
+
+        return mount_fd(source, fd, filesystemtype, mountflags, data);
+}
 
 int umount_recursive(const char *prefix, int flags) {
         int n = 0, r;
@@ -79,14 +129,18 @@ static int get_mount_flags(
                 struct libmnt_table *table,
                 const char *path,
                 unsigned long *ret) {
+
+        _cleanup_close_ int fd = -1;
         struct libmnt_fs *fs;
         struct statvfs buf;
         const char *opts;
-        int r = 0;
+        int r;
 
         /* Get the mount flags for the mountpoint at "path" from "table". We have a fallback using statvfs()
          * in place (which provides us with mostly the same info), but it's just a fallback, since using it
-         * means triggering autofs or NFS mounts, which we'd rather avoid needlessly. */
+         * means triggering autofs or NFS mounts, which we'd rather avoid needlessly.
+         *
+         * This generally doesn't follow symlinks. */
 
         fs = mnt_table_find_target(table, path, MNT_ITER_FORWARD);
         if (!fs) {
@@ -111,7 +165,11 @@ static int get_mount_flags(
         return 0;
 
 fallback:
-        if (statvfs(path, &buf) < 0)
+        fd = open(path, O_PATH|O_CLOEXEC|O_NOFOLLOW);
+        if (fd < 0)
+                return -errno;
+
+        if (fstatvfs(fd, &buf) < 0)
                 return -errno;
 
         /* The statvfs() flags and the mount flags mostly have the same values, but for some cases do
@@ -254,14 +312,16 @@ int bind_remount_recursive_with_mountinfo(
                 if (!set_contains(done, simplified) &&
                     !set_contains(todo, simplified)) {
                         /* The prefix directory itself is not yet a mount, make it one. */
-                        if (mount(simplified, simplified, NULL, MS_BIND|MS_REC, NULL) < 0)
-                                return -errno;
+                        r = mount_nofollow(simplified, simplified, NULL, MS_BIND|MS_REC, NULL);
+                        if (r < 0)
+                                return r;
 
                         orig_flags = 0;
                         (void) get_mount_flags(table, simplified, &orig_flags);
 
-                        if (mount(NULL, simplified, NULL, (orig_flags & ~flags_mask)|MS_BIND|MS_REMOUNT|new_flags, NULL) < 0)
-                                return -errno;
+                        r = mount_nofollow(NULL, simplified, NULL, (orig_flags & ~flags_mask)|MS_BIND|MS_REMOUNT|new_flags, NULL);
+                        if (r < 0)
+                                return r;
 
                         log_debug("Made top-level directory %s a mount point.", prefix);
 
@@ -282,7 +342,10 @@ int bind_remount_recursive_with_mountinfo(
                         r = path_is_mount_point(x, NULL, 0);
                         if (IN_SET(r, 0, -ENOENT))
                                 continue;
-                        if (IN_SET(r, -EACCES, -EPERM)) {
+                        if (r < 0) {
+                                if (!ERRNO_IS_PRIVILEGE(r))
+                                        return r;
+
                                 /* Even if root user invoke this, submounts under private FUSE or NFS mount points
                                  * may not be acceessed. E.g.,
                                  *
@@ -294,15 +357,14 @@ int bind_remount_recursive_with_mountinfo(
                                 log_debug_errno(r, "Failed to determine '%s' is mount point or not, ignoring: %m", x);
                                 continue;
                         }
-                        if (r < 0)
-                                return r;
 
                         /* Try to reuse the original flag set */
                         orig_flags = 0;
                         (void) get_mount_flags(table, x, &orig_flags);
 
-                        if (mount(NULL, x, NULL, (orig_flags & ~flags_mask)|MS_BIND|MS_REMOUNT|new_flags, NULL) < 0)
-                                return -errno;
+                        r = mount_nofollow(NULL, x, NULL, (orig_flags & ~flags_mask)|MS_BIND|MS_REMOUNT|new_flags, NULL);
+                        if (r < 0)
+                                return r;
 
                         log_debug("Remounted %s read-only.", x);
                 }
@@ -351,8 +413,9 @@ int bind_remount_one_with_mountinfo(
         /* Try to reuse the original flag set */
         (void) get_mount_flags(table, path, &orig_flags);
 
-        if (mount(NULL, path, NULL, (orig_flags & ~flags_mask)|MS_BIND|MS_REMOUNT|new_flags, NULL) < 0)
-                return -errno;
+        r = mount_nofollow(NULL, path, NULL, (orig_flags & ~flags_mask)|MS_BIND|MS_REMOUNT|new_flags, NULL);
+        if (r < 0)
+                return r;
 
         return 0;
 }
@@ -414,7 +477,6 @@ int mode_to_inaccessible_node(
 
         _cleanup_free_ char *d = NULL;
         const char *node = NULL;
-        bool fallback = false;
 
         assert(ret);
 
@@ -432,12 +494,10 @@ int mode_to_inaccessible_node(
 
                 case S_IFCHR:
                         node = "/systemd/inaccessible/chr";
-                        fallback = true;
                         break;
 
                 case S_IFBLK:
                         node = "/systemd/inaccessible/blk";
-                        fallback = true;
                         break;
 
                 case S_IFIFO:
@@ -455,7 +515,24 @@ int mode_to_inaccessible_node(
         if (!d)
                 return -ENOMEM;
 
-        if (fallback && access(d, F_OK) < 0) {
+        /* On new kernels unprivileged users are permitted to create 0:0 char device nodes (because they also
+         * act as whiteout inode for overlayfs), but no other char or block device nodes. On old kernels no
+         * device node whatsoever may be created by unprivileged processes. Hence, if the caller asks for the
+         * inaccessible block device node let's see if the block device node actually exists, and if not,
+         * fall back to the character device node. From there fall back to the socket device node. This means
+         * in the best case we'll get the right device node type — but if not we'll hopefully at least get a
+         * device node at all. */
+
+        if (S_ISBLK(mode) &&
+            access(d, F_OK) < 0 && errno == ENOENT) {
+                free(d);
+                d = path_join(runtime_dir, "/systemd/inaccessible/chr");
+                if (!d)
+                        return -ENOMEM;
+        }
+
+        if (IN_SET(mode & S_IFMT, S_IFBLK, S_IFCHR) &&
+            access(d, F_OK) < 0 && errno == ENOENT) {
                 free(d);
                 d = path_join(runtime_dir, "/systemd/inaccessible/sock");
                 if (!d)
@@ -533,13 +610,14 @@ static char* mount_flags_to_string(long unsigned flags) {
         return x;
 }
 
-int mount_verbose(
+int mount_verbose_full(
                 int error_log_level,
                 const char *what,
                 const char *where,
                 const char *type,
                 unsigned long flags,
-                const char *options) {
+                const char *options,
+                bool follow_symlink) {
 
         _cleanup_free_ char *fl = NULL, *o = NULL;
         unsigned long f;
@@ -566,19 +644,33 @@ int mount_verbose(
                 log_debug("Moving mount %s → %s (%s \"%s\")...",
                           what, where, strnull(fl), strempty(o));
         else
-                log_debug("Mounting %s on %s (%s \"%s\")...",
-                          strna(type), where, strnull(fl), strempty(o));
-        if (mount(what, where, type, f, o) < 0)
-                return log_full_errno(error_log_level, errno,
+                log_debug("Mounting %s (%s) on %s (%s \"%s\")...",
+                          strna(what), strna(type), where, strnull(fl), strempty(o));
+
+        if (follow_symlink)
+                r = mount(what, where, type, f, o) < 0 ? -errno : 0;
+        else
+                r = mount_nofollow(what, where, type, f, o);
+        if (r < 0)
+                return log_full_errno(error_log_level, r,
                                       "Failed to mount %s (type %s) on %s (%s \"%s\"): %m",
                                       strna(what), strna(type), where, strnull(fl), strempty(o));
         return 0;
 }
 
-int umount_verbose(const char *what) {
+int umount_verbose(
+                int error_log_level,
+                const char *what,
+                int flags) {
+
+        assert(what);
+
         log_debug("Umounting %s...", what);
-        if (umount(what) < 0)
-                return log_error_errno(errno, "Failed to unmount %s: %m", what);
+
+        if (umount2(what, flags) < 0)
+                return log_full_errno(error_log_level, errno,
+                                      "Failed to unmount %s: %m", what);
+
         return 0;
 }
 

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #if HAVE_BLKID
 #endif
@@ -11,10 +11,12 @@
 #endif
 #include <stdlib.h>
 #include <sys/file.h>
+#include <sys/ioctl.h>
 #include <sys/personality.h>
 #include <sys/prctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "sd-bus.h"
@@ -36,6 +38,7 @@
 #include "dev-setup.h"
 #include "dissect-image.h"
 #include "env-util.h"
+#include "escape.h"
 #include "fd-util.h"
 #include "fdset.h"
 #include "fileio.h"
@@ -45,6 +48,7 @@
 #include "hexdecoct.h"
 #include "hostname-util.h"
 #include "id128-util.h"
+#include "io-util.h"
 #include "log.h"
 #include "loop-util.h"
 #include "loopback-setup.h"
@@ -58,6 +62,7 @@
 #include "namespace-util.h"
 #include "netlink-util.h"
 #include "nspawn-cgroup.h"
+#include "nspawn-creds.h"
 #include "nspawn-def.h"
 #include "nspawn-expose-ports.h"
 #include "nspawn-mount.h"
@@ -101,10 +106,8 @@
 #include "user-util.h"
 #include "util.h"
 
-/* nspawn is listening on the socket at the path in the constant nspawn_notify_socket_path
- * nspawn_notify_socket_path is relative to the container
- * the init process in the container pid can send messages to nspawn following the sd_notify(3) protocol */
-#define NSPAWN_NOTIFY_SOCKET_PATH "/run/systemd/nspawn/notify"
+/* The notify socket inside the container it can use to talk to nspawn using the sd_notify(3) protocol */
+#define NSPAWN_NOTIFY_SOCKET_PATH "/run/host/notify"
 
 #define EXIT_FORCE_RESTART 133
 
@@ -198,12 +201,7 @@ static bool arg_notify_ready = false;
 static bool arg_use_cgns = true;
 static unsigned long arg_clone_ns_flags = CLONE_NEWIPC|CLONE_NEWPID|CLONE_NEWUTS;
 static MountSettingsMask arg_mount_settings = MOUNT_APPLY_APIVFS_RO|MOUNT_APPLY_TMPFS_TMP;
-static void *arg_root_hash = NULL;
-static char *arg_verity_data = NULL;
-static char *arg_root_hash_sig_path = NULL;
-static void *arg_root_hash_sig = NULL;
-static size_t arg_root_hash_sig_size = 0;
-static size_t arg_root_hash_size = 0;
+static VeritySettings arg_verity_settings = VERITY_SETTINGS_DEFAULT;
 static char **arg_syscall_allow_list = NULL;
 static char **arg_syscall_deny_list = NULL;
 #if HAVE_SECCOMP
@@ -221,6 +219,8 @@ static DeviceNode* arg_extra_nodes = NULL;
 static size_t arg_n_extra_nodes = 0;
 static char **arg_sysctl = NULL;
 static ConsoleMode arg_console_mode = _CONSOLE_MODE_INVALID;
+static Credential *arg_credentials = NULL;
+static size_t arg_n_credentials = 0;
 
 STATIC_DESTRUCTOR_REGISTER(arg_directory, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_template, freep);
@@ -245,10 +245,7 @@ STATIC_DESTRUCTOR_REGISTER(arg_oci_bundle, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_property, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_property_message, sd_bus_message_unrefp);
 STATIC_DESTRUCTOR_REGISTER(arg_parameters, strv_freep);
-STATIC_DESTRUCTOR_REGISTER(arg_root_hash, freep);
-STATIC_DESTRUCTOR_REGISTER(arg_verity_data, freep);
-STATIC_DESTRUCTOR_REGISTER(arg_root_hash_sig_path, freep);
-STATIC_DESTRUCTOR_REGISTER(arg_root_hash_sig, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_verity_settings, verity_settings_done);
 STATIC_DESTRUCTOR_REGISTER(arg_syscall_allow_list, strv_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_syscall_deny_list, strv_freep);
 #if HAVE_SECCOMP
@@ -259,10 +256,11 @@ STATIC_DESTRUCTOR_REGISTER(arg_sysctl, strv_freep);
 
 static int handle_arg_console(const char *arg) {
         if (streq(arg, "help")) {
-                puts("interactive\n"
-                     "read-only\n"
+                puts("autopipe\n"
+                     "interactive\n"
                      "passive\n"
-                     "pipe");
+                     "pipe\n"
+                     "read-only");
                 return 0;
         }
 
@@ -272,9 +270,20 @@ static int handle_arg_console(const char *arg) {
                 arg_console_mode = CONSOLE_READ_ONLY;
         else if (streq(arg, "passive"))
                 arg_console_mode = CONSOLE_PASSIVE;
-        else if (streq(arg, "pipe"))
+        else if (streq(arg, "pipe")) {
+                if (isatty(STDIN_FILENO) > 0 && isatty(STDOUT_FILENO) > 0)
+                        log_full(arg_quiet ? LOG_DEBUG : LOG_NOTICE,
+                                 "Console mode 'pipe' selected, but standard input/output are connected to an interactive TTY. "
+                                 "Most likely you want to use 'interactive' console mode for proper interactivity and shell job control. "
+                                 "Proceeding anyway.");
+
                 arg_console_mode = CONSOLE_PIPE;
-        else
+        } else if (streq(arg, "autopipe")) {
+                if (isatty(STDIN_FILENO) > 0 && isatty(STDOUT_FILENO) > 0)
+                        arg_console_mode = CONSOLE_INTERACTIVE;
+                else
+                        arg_console_mode = CONSOLE_PIPE;
+        } else
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown console mode: %s", optarg);
 
         arg_settings_mask |= SETTING_CONSOLE_MODE;
@@ -408,7 +417,13 @@ static int help(void) {
                "%3$sInput/Output:%4$s\n"
                "     --console=MODE         Select how stdin/stdout/stderr and /dev/console are\n"
                "                            set up for the container.\n"
-               "  -P --pipe                 Equivalent to --console=pipe\n"
+               "  -P --pipe                 Equivalent to --console=pipe\n\n"
+               "%3$sCredentials:%4$s\n"
+               "     --set-credential=ID:VALUE\n"
+               "                            Pass a credential with literal value to container.\n"
+               "     --load-credential=ID:PATH\n"
+               "                            Load credential to pass to container from file or\n"
+               "                            AF_UNIX stream socket.\n"
                "\nSee the %2$s for details.\n"
                , program_invocation_short_name
                , link
@@ -663,6 +678,8 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_PRIVATE_USERS_CHOWN,
                 ARG_NOTIFY_READY,
                 ARG_ROOT_HASH,
+                ARG_ROOT_HASH_SIG,
+                ARG_VERITY_DATA,
                 ARG_SYSTEM_CALL_FILTER,
                 ARG_RLIMIT,
                 ARG_HOSTNAME,
@@ -675,8 +692,8 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_PIPE,
                 ARG_OCI_BUNDLE,
                 ARG_NO_PAGER,
-                ARG_VERITY_DATA,
-                ARG_ROOT_HASH_SIG,
+                ARG_SET_CREDENTIAL,
+                ARG_LOAD_CREDENTIAL,
         };
 
         static const struct option options[] = {
@@ -732,6 +749,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "pivot-root",             required_argument, NULL, ARG_PIVOT_ROOT             },
                 { "notify-ready",           required_argument, NULL, ARG_NOTIFY_READY           },
                 { "root-hash",              required_argument, NULL, ARG_ROOT_HASH              },
+                { "root-hash-sig",          required_argument, NULL, ARG_ROOT_HASH_SIG          },
+                { "verity-data",            required_argument, NULL, ARG_VERITY_DATA            },
                 { "system-call-filter",     required_argument, NULL, ARG_SYSTEM_CALL_FILTER     },
                 { "rlimit",                 required_argument, NULL, ARG_RLIMIT                 },
                 { "oom-score-adjust",       required_argument, NULL, ARG_OOM_SCORE_ADJUST       },
@@ -742,8 +761,8 @@ static int parse_argv(int argc, char *argv[]) {
                 { "pipe",                   no_argument,       NULL, ARG_PIPE                   },
                 { "oci-bundle",             required_argument, NULL, ARG_OCI_BUNDLE             },
                 { "no-pager",               no_argument,       NULL, ARG_NO_PAGER               },
-                { "verity-data",            required_argument, NULL, ARG_VERITY_DATA            },
-                { "root-hash-sig",          required_argument, NULL, ARG_ROOT_HASH_SIG          },
+                { "set-credential",         required_argument, NULL, ARG_SET_CREDENTIAL         },
+                { "load-credential",        required_argument, NULL, ARG_LOAD_CREDENTIAL        },
                 {}
         };
 
@@ -1315,53 +1334,46 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_ROOT_HASH: {
-                        void *k;
+                        _cleanup_free_ void *k = NULL;
                         size_t l;
 
                         r = unhexmem(optarg, strlen(optarg), &k, &l);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to parse root hash: %s", optarg);
-                        if (l < sizeof(sd_id128_t)) {
-                                free(k);
+                        if (l < sizeof(sd_id128_t))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Root hash must be at least 128bit long: %s", optarg);
-                        }
 
-                        free(arg_root_hash);
-                        arg_root_hash = k;
-                        arg_root_hash_size = l;
+                        free_and_replace(arg_verity_settings.root_hash, k);
+                        arg_verity_settings.root_hash_size = l;
                         break;
                 }
 
-                case ARG_VERITY_DATA:
-                        r = parse_path_argument_and_warn(optarg, false, &arg_verity_data);
-                        if (r < 0)
-                                return r;
-                        break;
-
                 case ARG_ROOT_HASH_SIG: {
                         char *value;
+                        size_t l;
+                        void *p;
 
                         if ((value = startswith(optarg, "base64:"))) {
-                                void *p;
-                                size_t l;
-
                                 r = unbase64mem(value, strlen(value), &p, &l);
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to parse root hash signature '%s': %m", optarg);
 
-                                free_and_replace(arg_root_hash_sig, p);
-                                arg_root_hash_sig_size = l;
-                                arg_root_hash_sig_path = mfree(arg_root_hash_sig_path);
                         } else {
-                                r = parse_path_argument_and_warn(optarg, false, &arg_root_hash_sig_path);
+                                r = read_full_file(optarg, (char**) &p, &l);
                                 if (r < 0)
-                                        return r;
-                                arg_root_hash_sig = mfree(arg_root_hash_sig);
-                                arg_root_hash_sig_size = 0;
+                                        return log_error_errno(r, "Failed parse root hash signature file '%s': %m", optarg);
                         }
 
+                        free_and_replace(arg_verity_settings.root_hash_sig, p);
+                        arg_verity_settings.root_hash_sig_size = l;
                         break;
                 }
+
+                case ARG_VERITY_DATA:
+                        r = parse_path_argument_and_warn(optarg, false, &arg_verity_settings.data_path);
+                        if (r < 0)
+                                return r;
+                        break;
 
                 case ARG_SYSTEM_CALL_FILTER: {
                         bool negative;
@@ -1497,6 +1509,105 @@ static int parse_argv(int argc, char *argv[]) {
                 case ARG_NO_PAGER:
                         arg_pager_flags |= PAGER_DISABLE;
                         break;
+
+                case ARG_SET_CREDENTIAL: {
+                        _cleanup_free_ char *word = NULL, *data = NULL;
+                        const char *p = optarg;
+                        Credential *a;
+                        size_t i;
+                        int l;
+
+                        r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                        if (r == -ENOMEM)
+                                return log_oom();
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --set-credential= parameter: %m");
+                        if (r == 0 || !p)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Missing value for --set-credential=: %s", optarg);
+
+                        if (!credential_name_valid(word))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Credential name is not valid: %s", word);
+
+                        for (i = 0; i < arg_n_credentials; i++)
+                                if (streq(arg_credentials[i].id, word))
+                                        return log_error_errno(SYNTHETIC_ERRNO(EEXIST), "Duplicate credential '%s', refusing.", word);
+
+                        l = cunescape(p, UNESCAPE_ACCEPT_NUL, &data);
+                        if (l < 0)
+                                return log_error_errno(l, "Failed to unescape credential data: %s", p);
+
+                        a = reallocarray(arg_credentials, arg_n_credentials + 1, sizeof(Credential));
+                        if (!a)
+                                return log_oom();
+
+                        a[arg_n_credentials++] = (Credential) {
+                                .id = TAKE_PTR(word),
+                                .data = TAKE_PTR(data),
+                                .size = l,
+                        };
+
+                        arg_credentials = a;
+
+                        arg_settings_mask |= SETTING_CREDENTIALS;
+                        break;
+                }
+
+                case ARG_LOAD_CREDENTIAL: {
+                        ReadFullFileFlags flags = READ_FULL_FILE_SECURE;
+                        _cleanup_(erase_and_freep) char *data = NULL;
+                        _cleanup_free_ char *word = NULL, *j = NULL;
+                        const char *p = optarg;
+                        Credential *a;
+                        size_t size, i;
+
+                        r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
+                        if (r == -ENOMEM)
+                                return log_oom();
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --set-credential= parameter: %m");
+                        if (r == 0 || !p)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Missing value for --set-credential=: %s", optarg);
+
+                        if (!credential_name_valid(word))
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Credential name is not valid: %s", word);
+
+                        for (i = 0; i < arg_n_credentials; i++)
+                                if (streq(arg_credentials[i].id, word))
+                                        return log_error_errno(SYNTHETIC_ERRNO(EEXIST), "Duplicate credential '%s', refusing.", word);
+
+                        if (path_is_absolute(p))
+                                flags |= READ_FULL_FILE_CONNECT_SOCKET;
+                        else {
+                                const char *e;
+
+                                e = getenv("CREDENTIALS_DIRECTORY");
+                                if (!e)
+                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Credential not available (no credentials passed at all): %s", word);
+
+                                j = path_join(e, p);
+                                if (!j)
+                                        return log_oom();
+                        }
+
+                        r = read_full_file_full(AT_FDCWD, j ?: p, flags, NULL, &data, &size);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to read credential '%s': %m", j ?: p);
+
+                        a = reallocarray(arg_credentials, arg_n_credentials + 1, sizeof(Credential));
+                        if (!a)
+                                return log_oom();
+
+                        a[arg_n_credentials++] = (Credential) {
+                                .id = TAKE_PTR(word),
+                                .data = TAKE_PTR(data),
+                                .size = size,
+                        };
+
+                        arg_credentials = a;
+
+                        arg_settings_mask |= SETTING_CREDENTIALS;
+                        break;
+                }
 
                 case '?':
                         return -EINVAL;
@@ -1807,9 +1918,9 @@ static int setup_timezone(const char *dest) {
                 if (found == 0) /* missing? */
                         (void) touch(resolved);
 
-                r = mount_verbose(LOG_WARNING, "/etc/localtime", resolved, NULL, MS_BIND, NULL);
+                r = mount_nofollow_verbose(LOG_WARNING, "/etc/localtime", resolved, NULL, MS_BIND, NULL);
                 if (r >= 0)
-                        return mount_verbose(LOG_ERR, NULL, resolved, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NODEV, NULL);
+                        return mount_nofollow_verbose(LOG_ERR, NULL, resolved, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NODEV, NULL);
 
                 _fallthrough_;
         }
@@ -1942,9 +2053,9 @@ static int setup_resolv_conf(const char *dest) {
                 if (found == 0) /* missing? */
                         (void) touch(resolved);
 
-                r = mount_verbose(LOG_WARNING, what, resolved, NULL, MS_BIND, NULL);
+                r = mount_nofollow_verbose(LOG_WARNING, what, resolved, NULL, MS_BIND, NULL);
                 if (r >= 0)
-                        return mount_verbose(LOG_ERR, NULL, resolved, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NODEV, NULL);
+                        return mount_nofollow_verbose(LOG_ERR, NULL, resolved, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NODEV, NULL);
 
                 /* If that didn't work, let's copy the file */
         }
@@ -1996,11 +2107,11 @@ static int setup_boot_id(void) {
         from = TAKE_PTR(path);
         to = "/proc/sys/kernel/random/boot_id";
 
-        r = mount_verbose(LOG_ERR, from, to, NULL, MS_BIND, NULL);
+        r = mount_nofollow_verbose(LOG_ERR, from, to, NULL, MS_BIND, NULL);
         if (r < 0)
                 return r;
 
-        return mount_verbose(LOG_ERR, NULL, to, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
+        return mount_nofollow_verbose(LOG_ERR, NULL, to, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
 }
 
 static int copy_devnodes(const char *dest) {
@@ -2059,7 +2170,7 @@ static int copy_devnodes(const char *dest) {
                                 r = touch(to);
                                 if (r < 0)
                                         return log_error_errno(r, "touch (%s) failed: %m", to);
-                                r = mount_verbose(LOG_DEBUG, from, to, NULL, MS_BIND, NULL);
+                                r = mount_nofollow_verbose(LOG_DEBUG, from, to, NULL, MS_BIND, NULL);
                                 if (r < 0)
                                         return log_error_errno(r, "Both mknod and bind mount (%s) failed: %m", to);
                         }
@@ -2147,7 +2258,7 @@ static int setup_pts(const char *dest) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create /dev/pts: %m");
 
-        r = mount_verbose(LOG_ERR, "devpts", p, "devpts", MS_NOSUID|MS_NOEXEC, options);
+        r = mount_nofollow_verbose(LOG_ERR, "devpts", p, "devpts", MS_NOSUID|MS_NOEXEC, options);
         if (r < 0)
                 return r;
         r = userns_lchown(p, 0, 0);
@@ -2175,7 +2286,9 @@ static int setup_stdio_as_dev_console(void) {
         _cleanup_close_ int terminal = -1;
         int r;
 
-        terminal = open_terminal("/dev/console", O_RDWR);
+        /* We open the TTY in O_NOCTTY mode, so that we do not become controller yet. We'll do that later
+         * explicitly, if we are configured to. */
+        terminal = open_terminal("/dev/console", O_RDWR|O_NOCTTY);
         if (terminal < 0)
                 return log_error_errno(terminal, "Failed to open console: %m");
 
@@ -2222,13 +2335,73 @@ static int setup_keyring(void) {
         if (keyring == -1) {
                 if (errno == ENOSYS)
                         log_debug_errno(errno, "Kernel keyring not supported, ignoring.");
-                else if (IN_SET(errno, EACCES, EPERM))
+                else if (ERRNO_IS_PRIVILEGE(errno))
                         log_debug_errno(errno, "Kernel keyring access prohibited, ignoring.");
                 else
                         return log_error_errno(errno, "Setting up kernel keyring failed: %m");
         }
 
         return 0;
+}
+
+static int setup_credentials(const char *root) {
+        const char *q;
+        int r;
+
+        if (arg_n_credentials <= 0)
+                return 0;
+
+        r = userns_mkdir(root, "/run/host", 0755, 0, 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create /run/host: %m");
+
+        r = userns_mkdir(root, "/run/host/credentials", 0700, 0, 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create /run/host/credentials: %m");
+
+        q = prefix_roota(root, "/run/host/credentials");
+        r = mount_nofollow_verbose(LOG_ERR, NULL, q, "ramfs", MS_NOSUID|MS_NOEXEC|MS_NODEV, "mode=0700");
+        if (r < 0)
+                return r;
+
+        for (size_t i = 0; i < arg_n_credentials; i++) {
+                _cleanup_free_ char *j = NULL;
+                _cleanup_close_ int fd = -1;
+
+                j = path_join(q, arg_credentials[i].id);
+                if (!j)
+                        return log_oom();
+
+                fd = open(j, O_CREAT|O_EXCL|O_WRONLY|O_CLOEXEC|O_NOFOLLOW, 0600);
+                if (fd < 0)
+                        return log_error_errno(errno, "Failed to create credential file %s: %m", j);
+
+                r = loop_write(fd, arg_credentials[i].data, arg_credentials[i].size, /* do_poll= */ false);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to write credential to file %s: %m", j);
+
+                if (fchmod(fd, 0400) < 0)
+                        return log_error_errno(errno, "Failed to adjust access mode of %s: %m", j);
+
+                if (arg_userns_mode != USER_NAMESPACE_NO) {
+                        if (fchown(fd, arg_uid_shift, arg_uid_shift) < 0)
+                                return log_error_errno(errno, "Failed to adjust ownership of %s: %m", j);
+                }
+        }
+
+        if (chmod(q, 0500) < 0)
+                return log_error_errno(errno, "Failed to adjust access mode of %s: %m", q);
+
+        r = userns_lchown(q, 0, 0);
+        if (r < 0)
+                return r;
+
+        /* Make both mount and superblock read-only now */
+        r = mount_nofollow_verbose(LOG_ERR, NULL, q, NULL, MS_REMOUNT|MS_BIND|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, NULL);
+        if (r < 0)
+                return r;
+
+        return mount_nofollow_verbose(LOG_ERR, NULL, q, NULL, MS_REMOUNT|MS_RDONLY|MS_NOSUID|MS_NOEXEC|MS_NODEV, "mode=0500");
 }
 
 static int setup_kmsg(int kmsg_socket) {
@@ -2256,7 +2429,7 @@ static int setup_kmsg(int kmsg_socket) {
 
         from = TAKE_PTR(fifo);
 
-        r = mount_verbose(LOG_ERR, from, "/proc/kmsg", NULL, MS_BIND, NULL);
+        r = mount_nofollow_verbose(LOG_ERR, from, "/proc/kmsg", NULL, MS_BIND, NULL);
         if (r < 0)
                 return r;
 
@@ -2422,7 +2595,7 @@ static int setup_journal(const char *directory) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create %s: %m", q);
 
-        r = mount_verbose(LOG_DEBUG, p, q, NULL, MS_BIND, NULL);
+        r = mount_nofollow_verbose(LOG_DEBUG, p, q, NULL, MS_BIND, NULL);
         if (r < 0)
                 return log_error_errno(errno, "Failed to bind mount journal from host into guest: %m");
 
@@ -2518,30 +2691,25 @@ static int setup_propagate(const char *root) {
         p = strjoina("/run/systemd/nspawn/propagate/", arg_machine);
         (void) mkdir_p(p, 0600);
 
-        r = userns_mkdir(root, "/run/systemd", 0755, 0, 0);
+        r = userns_mkdir(root, "/run/host", 0755, 0, 0);
         if (r < 0)
-                return log_error_errno(r, "Failed to create /run/systemd: %m");
+                return log_error_errno(r, "Failed to create /run/host: %m");
 
-        r = userns_mkdir(root, "/run/systemd/nspawn", 0755, 0, 0);
+        r = userns_mkdir(root, "/run/host/incoming", 0600, 0, 0);
         if (r < 0)
-                return log_error_errno(r, "Failed to create /run/systemd/nspawn: %m");
+                return log_error_errno(r, "Failed to create /run/host/incoming: %m");
 
-        r = userns_mkdir(root, "/run/systemd/nspawn/incoming", 0600, 0, 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to create /run/systemd/nspawn/incoming: %m");
-
-        q = prefix_roota(root, "/run/systemd/nspawn/incoming");
-        r = mount_verbose(LOG_ERR, p, q, NULL, MS_BIND, NULL);
+        q = prefix_roota(root, "/run/host/incoming");
+        r = mount_nofollow_verbose(LOG_ERR, p, q, NULL, MS_BIND, NULL);
         if (r < 0)
                 return r;
 
-        r = mount_verbose(LOG_ERR, NULL, q, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY, NULL);
+        r = mount_nofollow_verbose(LOG_ERR, NULL, q, NULL, MS_BIND|MS_REMOUNT|MS_RDONLY, NULL);
         if (r < 0)
                 return r;
 
-        /* machined will MS_MOVE into that directory, and that's only
-         * supported for non-shared mounts. */
-        return mount_verbose(LOG_ERR, NULL, q, NULL, MS_SLAVE, NULL);
+        /* machined will MS_MOVE into that directory, and that's only supported for non-shared mounts. */
+        return mount_nofollow_verbose(LOG_ERR, NULL, q, NULL, MS_SLAVE, NULL);
 }
 
 static int setup_machine_id(const char *directory) {
@@ -2558,7 +2726,7 @@ static int setup_machine_id(const char *directory) {
 
         etc_machine_id = prefix_roota(directory, "/etc/machine-id");
 
-        r = id128_read(etc_machine_id, ID128_PLAIN, &id);
+        r = id128_read(etc_machine_id, ID128_PLAIN_OR_UNINIT, &id);
         if (r < 0) {
                 if (!IN_SET(r, -ENOENT, -ENOMEDIUM)) /* If the file is missing or empty, we don't mind */
                         return log_error_errno(r, "Failed to read machine ID from container image: %m");
@@ -2949,6 +3117,7 @@ static int inner_child(
                 NULL, /* LISTEN_FDS */
                 NULL, /* LISTEN_PID */
                 NULL, /* NOTIFY_SOCKET */
+                NULL, /* CREDENTIALS_DIRECTORY */
                 NULL
         };
         const char *exec_target;
@@ -2988,7 +3157,7 @@ static int inner_child(
                 /* Creating a new user namespace means all MS_SHARED mounts become MS_SLAVE. Let's put them
                  * back to MS_SHARED here, since that's what we want as defaults. (This will not reconnect
                  * propagation, but simply create new peer groups for all our mounts). */
-                r = mount_verbose(LOG_ERR, NULL, "/", NULL, MS_SHARED|MS_REC, NULL);
+                r = mount_follow_verbose(LOG_ERR, NULL, "/", NULL, MS_SHARED|MS_REC, NULL);
                 if (r < 0)
                         return r;
         }
@@ -3152,9 +3321,9 @@ static int inner_child(
                 return log_error_errno(errno, "Failed to set PR_SET_KEEPCAPS: %m");
 
         if (uid_is_valid(arg_uid) || gid_is_valid(arg_gid))
-                r = change_uid_gid_raw(arg_uid, arg_gid, arg_supplementary_gids, arg_n_supplementary_gids);
+                r = change_uid_gid_raw(arg_uid, arg_gid, arg_supplementary_gids, arg_n_supplementary_gids, arg_console_mode != CONSOLE_PIPE);
         else
-                r = change_uid_gid(arg_user, &home);
+                r = change_uid_gid(arg_user, arg_console_mode != CONSOLE_PIPE, &home);
         if (r < 0)
                 return r;
 
@@ -3199,6 +3368,13 @@ static int inner_child(
         if (asprintf((char **)(envp + n_env++), "NOTIFY_SOCKET=%s", NSPAWN_NOTIFY_SOCKET_PATH) < 0)
                 return log_oom();
 
+        if (arg_n_credentials > 0) {
+                envp[n_env] = strdup("CREDENTIALS_DIRECTORY=/run/host/credentials");
+                if (!envp[n_env])
+                        return log_oom();
+                n_env++;
+        }
+
         env_use = strv_env_merge(3, envp, os_release_pairs, arg_setenv);
         if (!env_use)
                 return log_oom();
@@ -3207,8 +3383,7 @@ static int inner_child(
          * wait until the parent is ready with the
          * setup, too... */
         if (!barrier_place_and_sync(barrier)) /* #5 */
-                return log_error_errno(SYNTHETIC_ERRNO(ESRCH),
-                                       "Parent died too early");
+                return log_error_errno(SYNTHETIC_ERRNO(ESRCH), "Parent died too early");
 
         if (arg_chdir)
                 if (chdir(arg_chdir) < 0)
@@ -3218,6 +3393,13 @@ static int inner_child(
                 r = stub_pid1(arg_uuid);
                 if (r < 0)
                         return r;
+        }
+
+        if (arg_console_mode != CONSOLE_PIPE) {
+                /* So far our pty wasn't controlled by any process. Finally, it's time to change that, if we
+                 * are configured for that. Acquire it as controlling tty. */
+                if (ioctl(STDIN_FILENO, TIOCSCTTY) < 0)
+                        return log_error_errno(errno, "Failed to acquire controlling TTY: %m");
         }
 
         log_debug("Inner child completed, invoking payload.");
@@ -3279,7 +3461,7 @@ static int inner_child(
         return log_error_errno(errno, "execv(%s) failed: %m", exec_target);
 }
 
-static int setup_sd_notify_child(void) {
+static int setup_notify_child(void) {
         _cleanup_close_ int fd = -1;
         union sockaddr_union sa = {
                 .un.sun_family = AF_UNIX,
@@ -3360,7 +3542,7 @@ static int outer_child(
 
         /* Mark everything as slave, so that we still receive mounts from the real root, but don't propagate
          * mounts to the real root. */
-        r = mount_verbose(LOG_ERR, NULL, "/", NULL, MS_SLAVE|MS_REC, NULL);
+        r = mount_follow_verbose(LOG_ERR, NULL, "/", NULL, MS_SLAVE|MS_REC, NULL);
         if (r < 0)
                 return r;
 
@@ -3370,14 +3552,13 @@ static int outer_child(
                  * uid shift known. That way we can mount VFAT file systems shifted to the right place right away. This
                  * makes sure ESP partitions and userns are compatible. */
 
-                r = dissected_image_mount(dissected_image, directory, arg_uid_shift,
-                                          DISSECT_IMAGE_MOUNT_ROOT_ONLY|DISSECT_IMAGE_DISCARD_ON_LOOP|
-                                          (arg_read_only ? DISSECT_IMAGE_READ_ONLY : DISSECT_IMAGE_FSCK)|
-                                          (arg_start_mode == START_BOOT ? DISSECT_IMAGE_VALIDATE_OS : 0));
-                if (r == -EUCLEAN)
-                        return log_error_errno(r, "File system check for image failed: %m");
+                r = dissected_image_mount_and_warn(
+                                dissected_image, directory, arg_uid_shift,
+                                DISSECT_IMAGE_MOUNT_ROOT_ONLY|DISSECT_IMAGE_DISCARD_ON_LOOP|
+                                (arg_read_only ? DISSECT_IMAGE_READ_ONLY : DISSECT_IMAGE_FSCK)|
+                                (arg_start_mode == START_BOOT ? DISSECT_IMAGE_VALIDATE_OS : 0));
                 if (r < 0)
-                        return log_error_errno(r, "Failed to mount image root file system: %m");
+                        return r;
         }
 
         r = determine_uid_shift(directory);
@@ -3419,7 +3600,7 @@ static int outer_child(
                  * already, and thus don't need to be afraid of colliding with anyone else's mounts).*/
                 (void) mkdir_p("/run/systemd/nspawn-root", 0755);
 
-                r = mount_verbose(LOG_ERR, "/", "/run/systemd/nspawn-root", NULL, MS_BIND|MS_REC, NULL);
+                r = mount_nofollow_verbose(LOG_ERR, "/", "/run/systemd/nspawn-root", NULL, MS_BIND|MS_REC, NULL);
                 if (r < 0)
                         return r;
 
@@ -3453,7 +3634,7 @@ static int outer_child(
 
         /* Make sure we always have a mount that we can move to root later on. */
         if (!path_is_mount_point(directory, NULL, 0)) {
-                r = mount_verbose(LOG_ERR, directory, directory, NULL, MS_BIND|MS_REC, NULL);
+                r = mount_nofollow_verbose(LOG_ERR, directory, directory, NULL, MS_BIND|MS_REC, NULL);
                 if (r < 0)
                         return r;
         }
@@ -3496,7 +3677,7 @@ static int outer_child(
          * enable moving the root directory mount to root later on.
          * https://github.com/systemd/systemd/issues/3847#issuecomment-562735251
          */
-        r = mount_verbose(LOG_ERR, NULL, directory, NULL, MS_SHARED|MS_REC, NULL);
+        r = mount_nofollow_verbose(LOG_ERR, NULL, directory, NULL, MS_SHARED|MS_REC, NULL);
         if (r < 0)
                 return r;
 
@@ -3547,6 +3728,10 @@ static int outer_child(
         if (r < 0)
                 return r;
 
+        r = setup_credentials(directory);
+        if (r < 0)
+                return r;
+
         r = mount_custom(
                         directory,
                         arg_custom_mounts,
@@ -3573,6 +3758,14 @@ static int outer_child(
         if (r < 0)
                 return r;
 
+        /* The same stuff as the $container env var, but nicely readable for the entire payload */
+        p = prefix_roota(directory, "/run/host/container-manager");
+        (void) write_string_file(p, arg_container_service_name, WRITE_STRING_FILE_CREATE);
+
+        /* The same stuff as the $container_uuid env var */
+        p = prefix_roota(directory, "/run/host/container-uuid");
+        (void) write_string_filef(p, WRITE_STRING_FILE_CREATE, SD_ID128_UUID_FORMAT_STR, SD_ID128_FORMAT_VAL(arg_uuid));
+
         if (!arg_use_cgns) {
                 r = mount_cgroups(
                                 directory,
@@ -3590,7 +3783,7 @@ static int outer_child(
         if (r < 0)
                 return log_error_errno(r, "Failed to move root directory: %m");
 
-        fd = setup_sd_notify_child();
+        fd = setup_notify_child();
         if (fd < 0)
                 return fd;
 
@@ -3803,7 +3996,7 @@ static int nspawn_dispatch_notify_fd(sd_event_source *source, int fd, uint32_t r
         return 0;
 }
 
-static int setup_sd_notify_parent(sd_event *event, int fd, pid_t *inner_child_pid, sd_event_source **notify_event_source) {
+static int setup_notify_parent(sd_event *event, int fd, pid_t *inner_child_pid, sd_event_source **notify_event_source) {
         int r;
 
         r = sd_event_add_io(event, notify_event_source, fd, EPOLLIN, nspawn_dispatch_notify_fd, inner_child_pid);
@@ -4149,7 +4342,7 @@ static int load_settings(void) {
 
         /* If all settings are masked, there's no point in looking for
          * the settings file */
-        if ((arg_settings_mask & _SETTINGS_MASK_ALL) == _SETTINGS_MASK_ALL)
+        if (FLAGS_SET(arg_settings_mask, _SETTINGS_MASK_ALL))
                 return 0;
 
         fn = strjoina(arg_machine, ".nspawn");
@@ -4634,7 +4827,7 @@ static int run_container(
                         return log_error_errno(r, "Failed to attach bus to event loop: %m");
         }
 
-        r = setup_sd_notify_parent(event, notify_socket, PID_TO_PTR(*pid), &notify_event_source);
+        r = setup_notify_parent(event, notify_socket, PID_TO_PTR(*pid), &notify_event_source);
         if (r < 0)
                 return r;
 
@@ -4941,9 +5134,12 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 goto finish;
 
-        r = must_be_root();
-        if (r < 0)
+        if (geteuid() != 0) {
+                r = log_warning_errno(SYNTHETIC_ERRNO(EPERM),
+                                      argc >= 2 ? "Need to be root." :
+                                      "Need to be root (and some arguments are usually required).\nHint: try --help");
                 goto finish;
+        }
 
         r = cant_be_in_netns();
         if (r < 0)
@@ -5190,14 +5386,16 @@ static int run(int argc, char *argv[]) {
                                 goto finish;
                         }
 
-                        r = verity_metadata_load(arg_image, NULL, arg_root_hash ? NULL : &arg_root_hash, &arg_root_hash_size,
-                                        arg_verity_data ? NULL : &arg_verity_data,
-                                        arg_root_hash_sig_path || arg_root_hash_sig ? NULL : &arg_root_hash_sig_path);
+                        r = verity_settings_load(
+                                        &arg_verity_settings,
+                                        arg_image, NULL, NULL);
                         if (r < 0) {
                                 log_error_errno(r, "Failed to read verity artefacts for %s: %m", arg_image);
                                 goto finish;
                         }
-                        dissect_image_flags |= arg_verity_data ? DISSECT_IMAGE_NO_PARTITION_TABLE : 0;
+
+                        if (arg_verity_settings.data_path)
+                                dissect_image_flags |= DISSECT_IMAGE_NO_PARTITION_TABLE;
                 }
 
                 if (!mkdtemp(tmprootdir)) {
@@ -5213,7 +5411,11 @@ static int run(int argc, char *argv[]) {
                         goto finish;
                 }
 
-                r = loop_device_make_by_path(arg_image, arg_read_only ? O_RDONLY : O_RDWR, LO_FLAGS_PARTSCAN, &loop);
+                r = loop_device_make_by_path(
+                                arg_image,
+                                arg_read_only ? O_RDONLY : O_RDWR,
+                                FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                                &loop);
                 if (r < 0) {
                         log_error_errno(r, "Failed to set up loopback block device: %m");
                         goto finish;
@@ -5222,8 +5424,8 @@ static int run(int argc, char *argv[]) {
                 r = dissect_image_and_warn(
                                 loop->fd,
                                 arg_image,
-                                arg_root_hash, arg_root_hash_size,
-                                arg_verity_data,
+                                &arg_verity_settings,
+                                NULL,
                                 dissect_image_flags,
                                 &dissected_image);
                 if (r == -ENOPKG) {
@@ -5239,10 +5441,15 @@ static int run(int argc, char *argv[]) {
                 if (r < 0)
                         goto finish;
 
-                if (!arg_root_hash && dissected_image->can_verity)
+                if (!arg_verity_settings.root_hash && dissected_image->can_verity)
                         log_notice("Note: image %s contains verity information, but no root hash specified! Proceeding without integrity checking.", arg_image);
 
-                r = dissected_image_decrypt_interactively(dissected_image, NULL, arg_root_hash, arg_root_hash_size, arg_verity_data, arg_root_hash_sig_path, arg_root_hash_sig, arg_root_hash_sig_size, 0, &decrypted_image);
+                r = dissected_image_decrypt_interactively(
+                                dissected_image,
+                                NULL,
+                                &arg_verity_settings,
+                                0,
+                                &decrypted_image);
                 if (r < 0)
                         goto finish;
 
@@ -5339,6 +5546,7 @@ finish:
         expose_port_free_all(arg_expose_ports);
         rlimit_free_all(arg_rlimit);
         device_node_array_free(arg_extra_nodes, arg_n_extra_nodes);
+        credential_free_all(arg_credentials, arg_n_credentials);
 
         if (r < 0)
                 return r;

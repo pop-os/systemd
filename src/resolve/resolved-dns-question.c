@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
 #include "dns-domain.h"
@@ -8,7 +8,8 @@
 DnsQuestion *dns_question_new(size_t n) {
         DnsQuestion *q;
 
-        assert(n > 0);
+        if (n > UINT16_MAX) /* We can only place 64K key in an question section at max */
+                n = UINT16_MAX;
 
         q = malloc0(offsetof(DnsQuestion, keys) + sizeof(DnsResourceKey*) * n);
         if (!q)

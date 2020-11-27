@@ -9,7 +9,7 @@ upstream commit 6d36464065601f79a352367cf099be8907d8f9aa
  1 file changed, 2 deletions(-)
 
 diff --git a/src/libsystemd-network/network-internal.c b/src/libsystemd-network/network-internal.c
-index 459d13a..6e1aa46 100644
+index e4a0741..54a6b2f 100644
 --- a/src/libsystemd-network/network-internal.c
 +++ b/src/libsystemd-network/network-internal.c
 @@ -53,8 +53,6 @@ int net_get_unique_predictable_data(sd_device *device, bool use_sysname, uint64_

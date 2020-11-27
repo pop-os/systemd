@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef foosdnetlinkhfoo
 #define foosdnetlinkhfoo
 
@@ -103,6 +103,7 @@ int sd_netlink_message_open_container_union(sd_netlink_message *m, unsigned shor
 int sd_netlink_message_close_container(sd_netlink_message *m);
 
 int sd_netlink_message_read(sd_netlink_message *m, unsigned short type, size_t size, void *data);
+int sd_netlink_message_read_data(sd_netlink_message *m, unsigned short type, size_t *ret_size, void **ret_data);
 int sd_netlink_message_read_string_strdup(sd_netlink_message *m, unsigned short type, char **data);
 int sd_netlink_message_read_string(sd_netlink_message *m, unsigned short type, const char **data);
 int sd_netlink_message_read_strv(sd_netlink_message *m, unsigned short container_type, unsigned short type_id, char ***ret);
@@ -215,6 +216,8 @@ int sd_rtnl_message_set_qdisc_handle(sd_netlink_message *m, uint32_t handle);
 int sd_rtnl_message_new_tclass(sd_netlink *rtnl, sd_netlink_message **ret, uint16_t nlmsg_type, int tcm_family, int tcm_ifindex);
 int sd_rtnl_message_set_tclass_parent(sd_netlink_message *m, uint32_t parent);
 int sd_rtnl_message_set_tclass_handle(sd_netlink_message *m, uint32_t handle);
+
+int sd_rtnl_message_new_mdb(sd_netlink *rtnl, sd_netlink_message **ret, uint16_t nlmsg_type, int mdb_ifindex);
 
 /* genl */
 int sd_genl_socket_open(sd_netlink **nl);

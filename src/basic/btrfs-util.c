@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1393,13 +1393,12 @@ static int copy_quota_hierarchy(int fd, uint64_t old_subvol_id, uint64_t new_sub
                 }
 
                 for (j = 0; j < n_old_parent_qgroups; j++)
-                        if (old_parent_qgroups[j] == old_qgroups[i]) {
+                        if (old_parent_qgroups[j] == old_qgroups[i])
                                 /* The old subvolume shared a common
                                  * parent qgroup with its parent
                                  * subvolume. Let's set up something
                                  * similar in the destination. */
                                 copy_from_parent = true;
-                        }
         }
 
         if (!insert_intermediary_qgroup && !copy_from_parent)
@@ -1654,7 +1653,10 @@ int btrfs_subvol_snapshot_fd_full(
                 } else if (r < 0)
                         return r;
 
-                r = copy_directory_fd_full(old_fd, new_path, COPY_MERGE|COPY_REFLINK|COPY_SAME_MOUNT|(FLAGS_SET(flags, BTRFS_SNAPSHOT_SIGINT) ? COPY_SIGINT : 0), progress_path, progress_bytes, userdata);
+                r = copy_directory_fd_full(
+                                old_fd, new_path,
+                                COPY_MERGE|COPY_REFLINK|COPY_SAME_MOUNT|COPY_HARDLINKS|(FLAGS_SET(flags, BTRFS_SNAPSHOT_SIGINT) ? COPY_SIGINT : 0),
+                                progress_path, progress_bytes, userdata);
                 if (r < 0)
                         goto fallback_fail;
 

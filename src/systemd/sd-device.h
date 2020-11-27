@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #ifndef foosddevicehfoo
 #define foosddevicehfoo
 
@@ -64,6 +64,8 @@ int sd_device_get_usec_since_initialized(sd_device *device, uint64_t *usec);
 
 const char *sd_device_get_tag_first(sd_device *device);
 const char *sd_device_get_tag_next(sd_device *device);
+const char *sd_device_get_current_tag_first(sd_device *device);
+const char *sd_device_get_current_tag_next(sd_device *device);
 const char *sd_device_get_devlink_first(sd_device *device);
 const char *sd_device_get_devlink_next(sd_device *device);
 const char *sd_device_get_property_first(sd_device *device, const char **value);
@@ -72,10 +74,12 @@ const char *sd_device_get_sysattr_first(sd_device *device);
 const char *sd_device_get_sysattr_next(sd_device *device);
 
 int sd_device_has_tag(sd_device *device, const char *tag);
+int sd_device_has_current_tag(sd_device *device, const char *tag);
 int sd_device_get_property_value(sd_device *device, const char *key, const char **value);
 int sd_device_get_sysattr_value(sd_device *device, const char *sysattr, const char **_value);
 
 int sd_device_set_sysattr_value(sd_device *device, const char *sysattr, const char *value);
+int sd_device_set_sysattr_valuef(sd_device *device, const char *sysattr, const char *format, ...) _sd_printf_(3, 4);
 
 /* device enumerator */
 

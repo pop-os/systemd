@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <stddef.h>
 #include <sys/epoll.h>
@@ -483,13 +483,11 @@ int server_open_native_socket(Server *s, const char *native_socket) {
         if (r < 0)
                 return log_error_errno(r, "SO_PASSCRED failed: %m");
 
-#if HAVE_SELINUX
         if (mac_selinux_use()) {
                 r = setsockopt_int(s->native_fd, SOL_SOCKET, SO_PASSSEC, true);
                 if (r < 0)
                         log_warning_errno(r, "SO_PASSSEC failed: %m");
         }
-#endif
 
         r = setsockopt_int(s->native_fd, SOL_SOCKET, SO_TIMESTAMP, true);
         if (r < 0)

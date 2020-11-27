@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <endian.h>
 #include <netdb.h>
@@ -597,7 +597,6 @@ static int bus_send_hello(sd_bus *bus) {
 
 int bus_start_running(sd_bus *bus) {
         struct reply_callback *c;
-        Iterator i;
         usec_t n;
         int r;
 
@@ -609,7 +608,7 @@ int bus_start_running(sd_bus *bus) {
          * adding a fixed value to all entries should not alter the internal order. */
 
         n = now(CLOCK_MONOTONIC);
-        ORDERED_HASHMAP_FOREACH(c, bus->reply_callbacks, i) {
+        ORDERED_HASHMAP_FOREACH(c, bus->reply_callbacks) {
                 if (c->timeout_usec == 0)
                         continue;
 
@@ -1156,6 +1155,16 @@ static int bus_start_fd(sd_bus *b) {
         assert(b->input_fd >= 0);
         assert(b->output_fd >= 0);
 
+        if (DEBUG_LOGGING) {
+                _cleanup_free_ char *pi = NULL, *po = NULL;
+                (void) fd_get_path(b->input_fd, &pi);
+                (void) fd_get_path(b->output_fd, &po);
+                log_debug("sd-bus: starting bus%s%s on fds %d/%d (%s, %s)...",
+                          b->description ? " " : "", strempty(b->description),
+                          b->input_fd, b->output_fd,
+                          pi ?: "???", po ?: "???");
+        }
+
         r = fd_nonblock(b->input_fd, true);
         if (r < 0)
                 return r;
@@ -1331,7 +1340,8 @@ int bus_set_address_user(sd_bus *b) {
 
                 e = secure_getenv("XDG_RUNTIME_DIR");
                 if (!e)
-                        return -ENOENT;
+                        return log_debug_errno(SYNTHETIC_ERRNO(ENOMEDIUM),
+                                               "sd-bus: $XDG_RUNTIME_DIR not set, cannot connect to user bus.");
 
                 ee = bus_address_escape(e);
                 if (!ee)
@@ -2121,12 +2131,13 @@ int bus_ensure_running(sd_bus *bus) {
 
         assert(bus);
 
-        if (IN_SET(bus->state, BUS_UNSET, BUS_CLOSED, BUS_CLOSING))
-                return -ENOTCONN;
         if (bus->state == BUS_RUNNING)
                 return 1;
 
         for (;;) {
+                if (IN_SET(bus->state, BUS_UNSET, BUS_CLOSED, BUS_CLOSING))
+                        return -ENOTCONN;
+
                 r = sd_bus_process(bus, NULL);
                 if (r < 0)
                         return r;

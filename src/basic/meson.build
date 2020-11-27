@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 basic_sources = files('''
         MurmurHash2.c
@@ -39,6 +39,7 @@ basic_sources = files('''
         device-nodes.h
         dirent-util.c
         dirent-util.h
+        dlfcn-util.c
         dlfcn-util.h
         efivars.c
         efivars.h
@@ -90,9 +91,11 @@ basic_sources = files('''
         limits-util.h
         linux/btrfs.h
         linux/btrfs_tree.h
+        linux/can/netlink.h
         linux/can/vxcan.h
         linux/fib_rules.h
         linux/fou.h
+        linux/hdlc/ioctl.h
         linux/if.h
         linux/if_addr.h
         linux/if_arp.h
@@ -105,8 +108,10 @@ basic_sources = files('''
         linux/if_tunnel.h
         linux/in.h
         linux/in6.h
+        linux/ipv6_route.h
         linux/l2tp.h
         linux/libc-compat.h
+        linux/loadavg.h
         linux/netdevice.h
         linux/netlink.h
         linux/rtnetlink.h
@@ -328,6 +333,7 @@ libbasic = static_library(
         dependencies : [versiondep,
                         threads,
                         libcap,
+                        libseccomp,
                         libselinux,
                         libm,
                         libdl],

@@ -15,7 +15,7 @@ Closes: #810748
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index 6c560d5..867379f 100644
+index 15f5892..e38d9a9 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
 @@ -357,6 +357,7 @@ static int add_mount(
@@ -44,7 +44,7 @@ index 6c560d5..867379f 100644
  
          r = generator_write_blockdev_dependency(f, what);
 diff --git a/units/systemd-fsck-root.service.in b/units/systemd-fsck-root.service.in
-index bea6c16..49df031 100644
+index 1dce176..908d931 100644
 --- a/units/systemd-fsck-root.service.in
 +++ b/units/systemd-fsck-root.service.in
 @@ -16,6 +16,7 @@ Before=local-fs.target shutdown.target

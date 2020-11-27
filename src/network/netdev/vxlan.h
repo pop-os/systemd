@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 typedef struct VxLan VxLan;
@@ -56,6 +56,7 @@ struct VxLan {
         bool group_policy;
         bool generic_protocol_extension;
         bool inherit;
+        bool independent;
 
         struct ifla_vxlan_port_range port_range;
 };

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <string.h>
@@ -50,6 +50,9 @@ int capability_from_name(const char *name) {
         return sc->id;
 }
 
+/* This is the number of capability names we are *compiled* with.
+ * For the max capability number of the currently-running kernel,
+ * use cap_last_cap(). */
 int capability_list_length(void) {
         return (int) ELEMENTSOF(capability_names);
 }

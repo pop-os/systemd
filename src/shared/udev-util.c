@@ -1,16 +1,21 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "device-util.h"
 #include "env-file.h"
+#include "escape.h"
 #include "log.h"
+#include "macro.h"
 #include "parse-util.h"
+#include "path-util.h"
 #include "signal-util.h"
 #include "string-table.h"
 #include "string-util.h"
 #include "udev-util.h"
+#include "utf8.h"
 
 static const char* const resolve_name_timing_table[_RESOLVE_NAME_TIMING_MAX] = {
         [RESOLVE_NAME_NEVER] = "never",
@@ -108,10 +113,40 @@ int udev_parse_config_full(
         return 0;
 }
 
+/* Note that if -ENOENT is returned, it will be logged at debug level rather than error,
+ * because it's an expected, common occurrence that the caller will handle with a fallback */
+static int device_new_from_dev_path(const char *devlink, sd_device **ret_device) {
+        struct stat st;
+        int r;
+
+        assert(devlink);
+
+        if (stat(devlink, &st) < 0)
+                return log_full_errno(errno == ENOENT ? LOG_DEBUG : LOG_ERR, errno,
+                                      "Failed to stat() %s: %m", devlink);
+
+        if (!S_ISBLK(st.st_mode))
+                return log_error_errno(SYNTHETIC_ERRNO(ENOTBLK),
+                                       "%s does not point to a block device: %m", devlink);
+
+        r = sd_device_new_from_devnum(ret_device, 'b', st.st_rdev);
+        if (r < 0)
+                return log_error_errno(r, "Failed to initialize device from %s: %m", devlink);
+
+        return 0;
+}
+
 struct DeviceMonitorData {
         const char *sysname;
+        const char *devlink;
         sd_device *device;
 };
+
+static void device_monitor_data_free(struct DeviceMonitorData *d) {
+        assert(d);
+
+        sd_device_unref(d->device);
+}
 
 static int device_monitor_handler(sd_device_monitor *monitor, sd_device *device, void *userdata) {
         struct DeviceMonitorData *data = userdata;
@@ -119,37 +154,81 @@ static int device_monitor_handler(sd_device_monitor *monitor, sd_device *device,
 
         assert(device);
         assert(data);
-        assert(data->sysname);
+        assert(data->sysname || data->devlink);
         assert(!data->device);
 
-        if (sd_device_get_sysname(device, &sysname) >= 0 && streq(sysname, data->sysname)) {
-                data->device = sd_device_ref(device);
-                return sd_event_exit(sd_device_monitor_get_event(monitor), 0);
+        /* Ignore REMOVE events here. We are waiting for initialization after all, not de-initialization. We
+         * might see a REMOVE event from an earlier use of the device (devices by the same name are recycled
+         * by the kernel after all), which we should not get confused by. After all we cannot distinguish use
+         * cycles of the devices, as the udev queue is entirely asynchronous.
+         *
+         * If we see a REMOVE event here for the use cycle we actually care about then we won't notice of
+         * course, but that should be OK, given the timeout logic used on the wait loop: this will be noticed
+         * by means of -ETIMEDOUT. Thus we won't notice immediately, but eventually, and that should be
+         * sufficient for an error path that should regularly not happen.
+         *
+         * (And yes, we only need to special case REMOVE. It's the only "negative" event type, where a device
+         * ceases to exist. All other event types are "positive": the device exists and is registered in the
+         * udev database, thus whenever we see the event, we can consider it initialized.) */
+        if (device_for_action(device, DEVICE_ACTION_REMOVE))
+                return 0;
+
+        if (data->sysname && sd_device_get_sysname(device, &sysname) >= 0 && streq(sysname, data->sysname))
+                goto found;
+
+        if (data->devlink) {
+                const char *devlink;
+
+                FOREACH_DEVICE_DEVLINK(device, devlink)
+                        if (path_equal(devlink, data->devlink))
+                                goto found;
+
+                if (sd_device_get_devname(device, &devlink) >= 0 && path_equal(devlink, data->devlink))
+                        goto found;
         }
 
         return 0;
+
+found:
+        data->device = sd_device_ref(device);
+        return sd_event_exit(sd_device_monitor_get_event(monitor), 0);
 }
 
-static int device_timeout_handler(sd_event_source *s, uint64_t usec, void *userdata) {
-        return sd_event_exit(sd_event_source_get_event(s), -ETIMEDOUT);
-}
+static int device_wait_for_initialization_internal(
+                sd_device *_device,
+                const char *devlink,
+                const char *subsystem,
+                usec_t deadline,
+                sd_device **ret) {
 
-int device_wait_for_initialization(sd_device *device, const char *subsystem, usec_t timeout, sd_device **ret) {
         _cleanup_(sd_device_monitor_unrefp) sd_device_monitor *monitor = NULL;
         _cleanup_(sd_event_source_unrefp) sd_event_source *timeout_source = NULL;
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
-        struct DeviceMonitorData data = {};
+        /* Ensure that if !_device && devlink, device gets unrefd on errors since it will be new */
+        _cleanup_(sd_device_unrefp) sd_device *device = sd_device_ref(_device);
+        _cleanup_(device_monitor_data_free) struct DeviceMonitorData data = {
+                .devlink = devlink,
+        };
         int r;
 
-        assert(device);
+        assert(device || (subsystem && devlink));
 
-        if (sd_device_get_is_initialized(device) > 0) {
-                if (ret)
-                        *ret = sd_device_ref(device);
-                return 0;
+        /* Devlink might already exist, if it does get the device to use the sysname filtering */
+        if (!device && devlink) {
+                r = device_new_from_dev_path(devlink, &device);
+                if (r < 0 && r != -ENOENT)
+                        return r;
         }
 
-        assert_se(sd_device_get_sysname(device, &data.sysname) >= 0);
+        if (device) {
+                if (sd_device_get_is_initialized(device) > 0) {
+                        if (ret)
+                                *ret = sd_device_ref(device);
+                        return 0;
+                }
+                /* We need either the sysname or the devlink for filtering */
+                assert_se(sd_device_get_sysname(device, &data.sysname) >= 0 || devlink);
+        }
 
         /* Wait until the device is initialized, so that we can get access to the ID_PATH property */
 
@@ -161,7 +240,7 @@ int device_wait_for_initialization(sd_device *device, const char *subsystem, use
         if (r < 0)
                 return log_error_errno(r, "Failed to acquire monitor: %m");
 
-        if (!subsystem) {
+        if (device && !subsystem) {
                 r = sd_device_get_subsystem(device, &subsystem);
                 if (r < 0 && r != -ENOENT)
                         return log_device_error_errno(device, r, "Failed to get subsystem: %m");
@@ -181,17 +260,23 @@ int device_wait_for_initialization(sd_device *device, const char *subsystem, use
         if (r < 0)
                 return log_error_errno(r, "Failed to start device monitor: %m");
 
-        if (timeout != USEC_INFINITY) {
-                r = sd_event_add_time(event, &timeout_source,
-                                      CLOCK_MONOTONIC, now(CLOCK_MONOTONIC) + timeout, 0,
-                                      device_timeout_handler, NULL);
+        if (deadline != USEC_INFINITY) {
+                r = sd_event_add_time(
+                                event, &timeout_source,
+                                CLOCK_MONOTONIC, deadline, 0,
+                                NULL, INT_TO_PTR(-ETIMEDOUT));
                 if (r < 0)
                         return log_error_errno(r, "Failed to add timeout event source: %m");
         }
 
         /* Check again, maybe things changed. Udev will re-read the db if the device wasn't initialized
          * yet. */
-        if (sd_device_get_is_initialized(device) > 0) {
+        if (!device && devlink) {
+                r = device_new_from_dev_path(devlink, &device);
+                if (r < 0 && r != -ENOENT)
+                        return r;
+        }
+        if (device && sd_device_get_is_initialized(device) > 0) {
                 if (ret)
                         *ret = sd_device_ref(device);
                 return 0;
@@ -206,16 +291,26 @@ int device_wait_for_initialization(sd_device *device, const char *subsystem, use
         return 0;
 }
 
+int device_wait_for_initialization(sd_device *device, const char *subsystem, usec_t deadline, sd_device **ret) {
+        return device_wait_for_initialization_internal(device, NULL, subsystem, deadline, ret);
+}
+
+int device_wait_for_devlink(const char *devlink, const char *subsystem, usec_t deadline, sd_device **ret) {
+        return device_wait_for_initialization_internal(NULL, devlink, subsystem, deadline, ret);
+}
+
 int device_is_renaming(sd_device *dev) {
         int r;
 
         assert(dev);
 
         r = sd_device_get_property_value(dev, "ID_RENAMING", NULL);
-        if (r < 0 && r != -ENOENT)
+        if (r == -ENOENT)
+                return false;
+        if (r < 0)
                 return r;
 
-        return r >= 0;
+        return true;
 }
 
 bool device_for_action(sd_device *dev, DeviceAction action) {
@@ -227,4 +322,50 @@ bool device_for_action(sd_device *dev, DeviceAction action) {
                 return false;
 
         return a == action;
+}
+
+int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos) {
+        char *i, *j;
+        int r;
+        bool is_escaped;
+
+        /* value must be double quotated */
+        is_escaped = str[0] == 'e';
+        str += is_escaped;
+        if (str[0] != '"')
+                return -EINVAL;
+        str++;
+
+        if (!is_escaped) {
+                /* unescape double quotation '\"'->'"' */
+                for (i = j = str; *i != '"'; i++, j++) {
+                        if (*i == '\0')
+                                return -EINVAL;
+                        if (i[0] == '\\' && i[1] == '"')
+                                i++;
+                        *j = *i;
+                }
+                j[0] = '\0';
+        } else {
+                _cleanup_free_ char *unescaped = NULL;
+
+                /* find the end position of value */
+                for (i = str; *i != '"'; i++) {
+                        if (i[0] == '\\')
+                                i++;
+                        if (*i == '\0')
+                                return -EINVAL;
+                }
+                i[0] = '\0';
+
+                r = cunescape_length(str, i - str, 0, &unescaped);
+                if (r < 0)
+                        return r;
+                assert(r <= i - str);
+                memcpy(str, unescaped, r + 1);
+        }
+
+        *ret_value = str;
+        *ret_endpos = i + 1;
+        return 0;
 }

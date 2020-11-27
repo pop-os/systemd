@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "sd-bus.h"
 
@@ -164,14 +164,13 @@ static int bus_job_enumerate(sd_bus *bus, const char *path, void *userdata, char
         _cleanup_strv_free_ char **l = NULL;
         Manager *m = userdata;
         unsigned k = 0;
-        Iterator i;
         Job *j;
 
         l = new0(char*, hashmap_size(m->jobs)+1);
         if (!l)
                 return -ENOMEM;
 
-        HASHMAP_FOREACH(j, m->jobs, i) {
+        HASHMAP_FOREACH(j, m->jobs) {
                 l[k] = job_dbus_path(j);
                 if (!l[k])
                         return -ENOMEM;
@@ -340,7 +339,7 @@ static int bus_job_allocate_bus_track(Job *j) {
 }
 
 int bus_job_coldplug_bus_track(Job *j) {
-        int r = 0;
+        int r;
         _cleanup_strv_free_ char **deserialized_clients = NULL;
 
         assert(j);

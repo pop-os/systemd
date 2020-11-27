@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd" >
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="org.freedesktop.machine1" conditional='ENABLE_MACHINED'
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -368,7 +368,7 @@ node /org/freedesktop/machine1 {
 
       <para><function>OpenMachinePTY()</function> allocates a pseudo TTY in the container and returns a file
       descriptor and its path. This is equivalent to transitioning into the container and invoking
-      <citerefentry project='man-pages'><refentrytitle>posix_openpt</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
+      <citerefentry project="man-pages"><refentrytitle>posix_openpt</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
       </para>
 
       <para><function>OpenMachineLogin()</function> allocates a pseudo TTY in the container and ensures that

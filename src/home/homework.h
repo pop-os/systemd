@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <linux/fs.h>
@@ -31,6 +31,7 @@ typedef struct HomeSetup {
         bool undo_mount;
         bool do_offline_fitrim;
         bool do_offline_fallocate;
+        bool do_mark_clean;
 
         uint64_t partition_offset;
         uint64_t partition_size;

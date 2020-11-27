@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <getopt.h>
@@ -89,6 +89,15 @@ static Group *group_free(Group *g) {
 
         free(g->path);
         return mfree(g);
+}
+
+
+static const char *maybe_format_timespan(char *buf, size_t l, usec_t t, usec_t accuracy) {
+        if (arg_raw) {
+               snprintf(buf, l, USEC_FMT, t);
+               return buf;
+        }
+        return format_timespan(buf, l, t, accuracy);
 }
 
 static const char *maybe_format_bytes(char *buf, size_t l, bool is_valid, uint64_t t) {
@@ -582,12 +591,11 @@ static int group_compare(Group * const *a, Group * const *b) {
 }
 
 static void display(Hashmap *a) {
-        Iterator i;
         Group *g;
         Group **array;
         signed path_columns;
         unsigned rows, n = 0, j, maxtcpu = 0, maxtpath = 3; /* 3 for ellipsize() to work properly */
-        char buffer[MAX3(21, FORMAT_BYTES_MAX, FORMAT_TIMESPAN_MAX)];
+        char buffer[MAX4(21U, FORMAT_BYTES_MAX, FORMAT_TIMESPAN_MAX, DECIMAL_STR_MAX(usec_t))];
 
         assert(a);
 
@@ -596,7 +604,7 @@ static void display(Hashmap *a) {
 
         array = newa(Group*, hashmap_size(a));
 
-        HASHMAP_FOREACH(g, a, i)
+        HASHMAP_FOREACH(g, a)
                 if (g->n_tasks_valid || g->cpu_valid || g->memory_valid || g->io_valid)
                         array[n++] = g;
 
@@ -606,7 +614,7 @@ static void display(Hashmap *a) {
         for (j = 0; j < n; j++) {
                 unsigned cputlen, pathtlen;
 
-                format_timespan(buffer, sizeof(buffer), (usec_t) (array[j]->cpu_usage / NSEC_PER_USEC), 0);
+                maybe_format_timespan(buffer, sizeof(buffer), (usec_t) (array[j]->cpu_usage / NSEC_PER_USEC), 0);
                 cputlen = strlen(buffer);
                 maxtcpu = MAX(maxtcpu, cputlen);
 
@@ -675,7 +683,7 @@ static void display(Hashmap *a) {
                         else
                                 fputs("      -", stdout);
                 } else
-                        printf(" %*s", maxtcpu, format_timespan(buffer, sizeof(buffer), (usec_t) (g->cpu_usage / NSEC_PER_USEC), 0));
+                        printf(" %*s", maxtcpu, maybe_format_timespan(buffer, sizeof(buffer), (usec_t) (g->cpu_usage / NSEC_PER_USEC), 0));
 
                 printf(" %8s", maybe_format_bytes(buffer, sizeof(buffer), g->memory_valid, g->memory));
                 printf(" %8s", maybe_format_bytes(buffer, sizeof(buffer), g->io_valid, g->io_input_bps));

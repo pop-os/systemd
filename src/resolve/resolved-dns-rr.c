@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <math.h>
 
@@ -97,14 +97,16 @@ DnsResourceKey* dns_resource_key_new_consume(uint16_t class, uint16_t type, char
 
         assert(name);
 
-        k = new0(DnsResourceKey, 1);
+        k = new(DnsResourceKey, 1);
         if (!k)
                 return NULL;
 
-        k->n_ref = 1;
-        k->class = class;
-        k->type = type;
-        k->_name = name;
+        *k = (DnsResourceKey) {
+                .n_ref = 1,
+                .class = class,
+                .type = type,
+                ._name = name,
+        };
 
         return k;
 }
@@ -372,14 +374,17 @@ bool dns_resource_key_reduce(DnsResourceKey **a, DnsResourceKey **b) {
 DnsResourceRecord* dns_resource_record_new(DnsResourceKey *key) {
         DnsResourceRecord *rr;
 
-        rr = new0(DnsResourceRecord, 1);
+        rr = new(DnsResourceRecord, 1);
         if (!rr)
                 return NULL;
 
-        rr->n_ref = 1;
-        rr->key = dns_resource_key_ref(key);
-        rr->expiry = USEC_INFINITY;
-        rr->n_skip_labels_signer = rr->n_skip_labels_source = (unsigned) -1;
+        *rr = (DnsResourceRecord) {
+                .n_ref = 1,
+                .key = dns_resource_key_ref(key),
+                .expiry = USEC_INFINITY,
+                .n_skip_labels_signer = (unsigned) -1,
+                .n_skip_labels_source = (unsigned) -1,
+        };
 
         return rr;
 }
@@ -750,11 +755,10 @@ static int format_timestamp_dns(char *buf, size_t l, time_t sec) {
 static char *format_types(Bitmap *types) {
         _cleanup_strv_free_ char **strv = NULL;
         _cleanup_free_ char *str = NULL;
-        Iterator i;
         unsigned type;
         int r;
 
-        BITMAP_FOREACH(type, types, i) {
+        BITMAP_FOREACH(type, types) {
                 if (dns_type_to_string(type)) {
                         r = strv_extend(&strv, dns_type_to_string(type));
                         if (r < 0)
@@ -1646,7 +1650,7 @@ DnsResourceRecord *dns_resource_record_copy(DnsResourceRecord *rr) {
                         return NULL;
                 copy->nsec3.salt_size = rr->nsec3.salt_size;
                 copy->nsec3.next_hashed_name = memdup(rr->nsec3.next_hashed_name, rr->nsec3.next_hashed_name_size);
-                if (!copy->nsec3.next_hashed_name_size)
+                if (!copy->nsec3.next_hashed_name)
                         return NULL;
                 copy->nsec3.next_hashed_name_size = rr->nsec3.next_hashed_name_size;
                 copy->nsec3.types = bitmap_copy(rr->nsec3.types);

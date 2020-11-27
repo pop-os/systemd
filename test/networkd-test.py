@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 #
 # networkd integration test
 # This uses temporary configuration in /run and temporary veth devices, and
@@ -223,7 +223,8 @@ Gateway=192.168.250.1''')
         subprocess.check_call(['systemctl', 'start', 'systemd-networkd'])
 
     def tearDown(self):
-        subprocess.check_call(['systemctl', 'stop', 'systemd-networkd'])
+        subprocess.check_call(['systemctl', 'stop', 'systemd-networkd.socket'])
+        subprocess.check_call(['systemctl', 'stop', 'systemd-networkd.service'])
         subprocess.check_call(['ip', 'link', 'del', 'mybridge'])
         subprocess.check_call(['ip', 'link', 'del', 'port1'])
         subprocess.check_call(['ip', 'link', 'del', 'port2'])
@@ -309,7 +310,8 @@ class ClientTestBase(NetworkdTestingUtilities):
 
     def tearDown(self):
         self.shutdown_iface()
-        subprocess.call(['systemctl', 'stop', 'systemd-networkd'])
+        subprocess.call(['systemctl', 'stop', 'systemd-networkd.socket'])
+        subprocess.call(['systemctl', 'stop', 'systemd-networkd.service'])
         subprocess.call(['ip', 'link', 'del', 'dummy0'],
                         stderr=subprocess.DEVNULL)
 
@@ -917,40 +919,7 @@ Domains= one two three four five six seven eight nine ten''')
             if ' one' in contents:
                 break
             time.sleep(0.1)
-        self.assertRegex(contents, 'search .*one two three four')
-        self.assertNotIn('seven\n', contents)
-        self.assertIn('# Too many search domains configured, remaining ones ignored.\n', contents)
-
-    def test_search_domains_too_long(self):
-
-        # we don't use this interface for this test
-        self.if_router = None
-
-        name_prefix = 'a' * 60
-
-        self.write_network('test.netdev', '''\
-[NetDev]
-Name=dummy0
-Kind=dummy
-MACAddress=12:34:56:78:9a:bc''')
-        self.write_network('test.network', '''\
-[Match]
-Name=dummy0
-[Network]
-Address=192.168.42.100/24
-DNS=192.168.42.1
-Domains={p}0 {p}1 {p}2 {p}3 {p}4'''.format(p=name_prefix))
-
-        self.start_unit('systemd-networkd')
-
-        for timeout in range(50):
-            with open(RESOLV_CONF) as f:
-                contents = f.read()
-            if ' one' in contents:
-                break
-            time.sleep(0.1)
-        self.assertRegex(contents, 'search .*{p}0 {p}1 {p}2'.format(p=name_prefix))
-        self.assertIn('# Total length of all search domains is too long, remaining ones ignored.', contents)
+        self.assertRegex(contents, 'search .*one two three four five six seven eight nine ten')
 
     def test_dropin(self):
         # we don't use this interface for this test
@@ -1020,7 +989,8 @@ class MatchClientTest(unittest.TestCase, NetworkdTestingUtilities):
 
     def tearDown(self):
         """Stop networkd."""
-        subprocess.call(['systemctl', 'stop', 'systemd-networkd'])
+        subprocess.call(['systemctl', 'stop', 'systemd-networkd.socket'])
+        subprocess.call(['systemctl', 'stop', 'systemd-networkd.service'])
 
     def test_basic_matching(self):
         """Verify the Name= line works throughout this class."""
@@ -1070,7 +1040,8 @@ class UnmanagedClientTest(unittest.TestCase, NetworkdTestingUtilities):
 
     def tearDown(self):
         """Stop networkd."""
-        subprocess.call(['systemctl', 'stop', 'systemd-networkd'])
+        subprocess.call(['systemctl', 'stop', 'systemd-networkd.socket'])
+        subprocess.call(['systemctl', 'stop', 'systemd-networkd.service'])
 
     def create_iface(self):
         """Create temporary veth pairs for interface matching."""

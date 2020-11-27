@@ -1,4 +1,4 @@
-#  SPDX-License-Identifier: LGPL-2.1+
+#  SPDX-License-Identifier: LGPL-2.1-or-later
 #
 #  This file is part of systemd.
 #
@@ -10,11 +10,13 @@
 [Unit]
 Description=Home Area Manager
 Documentation=man:systemd-homed.service(8)
+Documentation=man:org.freedesktop.home1(5)
+
 After=home.mount
 
 [Service]
 BusName=org.freedesktop.home1
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_SETGID CAP_SETUID
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_SETGID CAP_SETUID CAP_SYS_RESOURCE
 DeviceAllow=/dev/loop-control rw
 DeviceAllow=/dev/mapper/control rw
 DeviceAllow=block-* rw
@@ -37,4 +39,4 @@ SystemCallFilter=@system-service @mount
 [Install]
 WantedBy=multi-user.target
 Alias=dbus-org.freedesktop.home1.service
-Also=systemd-userdbd.service
+Also=systemd-homed-activate.service systemd-userdbd.service

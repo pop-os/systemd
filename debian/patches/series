@@ -1,13 +1,3 @@
-networkd-use-socket-activation-when-starting-networkd.patch
-test-network-stop-networkd-and-its-socket.patch
-seccomp-add-support-for-riscv64.patch
-xdg-autostart-Add-support-for-Path-in-XDG-Desktop-File.patch
-xdg-autostart-Ignore-more-common-XDG-Desktop-Entry-fields.patch
-xdg-autostart-Lower-most-info-messages-to-debug-level.patch
-units-update-serial-getty-.service-to-support-57600-baud-.patch
-bootspec-don-t-fail-with-EIO-if-searching-for-ESP-and-fin.patch
-test-seccomp-accept-ENOSYS-from-sysctl-2-too.patch
-test-test-functions-copy-usr-lib-pam.d-into-initdir.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
@@ -22,8 +12,8 @@ debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
 debian/Drop-seccomp-system-call-filter-for-udev.patch
-debian/blacklist-upstream-test-25.patch
-debian/blacklist-upstream-test-24-ppc64el.patch
+debian/deny-list-upstream-test-25.patch
+debian/deny-list-upstream-test-02-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Keep-journal-files-compatible-with-older-versions.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
@@ -46,10 +36,6 @@ debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
 Revert-network-fix-assertion-when-link-get-carrier.patch
 Revert-network-prevent-interfaces-to-be-initialized-multi.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
-Revert-network-do-not-drop-foreign-config-if-interface-is.patch
-lp1845909/0002-network-add-link-setting_genmode-flag.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
-network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
-dhcp-Allow-setting-request-options-again.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 lp1895418.patch

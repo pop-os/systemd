@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/if.h>
 #include <unistd.h>
@@ -818,14 +818,16 @@ int link_address_new(Link *l, LinkAddress **ret, int family, const union in_addr
         assert(l);
         assert(in_addr);
 
-        a = new0(LinkAddress, 1);
+        a = new(LinkAddress, 1);
         if (!a)
                 return -ENOMEM;
 
-        a->family = family;
-        a->in_addr = *in_addr;
+        *a = (LinkAddress) {
+                .family = family,
+                .in_addr = *in_addr,
+                .link = l,
+        };
 
-        a->link = l;
         LIST_PREPEND(addresses, l->addresses, a);
         l->n_addresses++;
 
@@ -1250,11 +1252,10 @@ int link_save_user(Link *l) {
 
         if (!set_isempty(l->dnssec_negative_trust_anchors)) {
                 bool space = false;
-                Iterator i;
                 char *nta;
 
                 fputs("NTAS=", f);
-                SET_FOREACH(nta, l->dnssec_negative_trust_anchors, i) {
+                SET_FOREACH(nta, l->dnssec_negative_trust_anchors) {
 
                         if (space)
                                 fputc(' ', f);

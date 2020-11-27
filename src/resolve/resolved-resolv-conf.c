@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <resolv.h>
 #include <sys/stat.h>
@@ -15,6 +15,7 @@
 #include "resolved-dns-server.h"
 #include "resolved-resolv-conf.h"
 #include "stat-util.h"
+#include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
 #include "tmpfile-util-label.h"
@@ -155,6 +156,8 @@ int manager_read_resolv_conf(Manager *m) {
                         r = manager_parse_search_domains_and_warn(m, a);
                         if (r < 0)
                                 log_warning_errno(r, "Failed to parse search domain string '%s', ignoring.", a);
+
+                        continue;
                 }
 
                 log_syntax(NULL, LOG_DEBUG, "/etc/resolv.conf", n, 0, "Ignoring resolv.conf line: %s", l);
@@ -231,8 +234,6 @@ static void write_resolv_conf_server(DnsServer *s, FILE *f, unsigned *count) {
 static void write_resolv_conf_search(
                 OrderedSet *domains,
                 FILE *f) {
-        unsigned length = 0, count = 0;
-        Iterator i;
         char *domain;
 
         assert(domains);
@@ -240,16 +241,7 @@ static void write_resolv_conf_search(
 
         fputs("search", f);
 
-        ORDERED_SET_FOREACH(domain, domains, i) {
-                if (++count > MAXDNSRCH) {
-                        fputs("\n# Too many search domains configured, remaining ones ignored.", f);
-                        break;
-                }
-                length += strlen(domain) + 1;
-                if (length > 256) {
-                        fputs("\n# Total length of all search domains is too long, remaining ones ignored.", f);
-                        break;
-                }
+        ORDERED_SET_FOREACH(domain, domains) {
                 fputc(' ', f);
                 fputs(domain, f);
         }
@@ -258,7 +250,6 @@ static void write_resolv_conf_search(
 }
 
 static int write_uplink_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *domains) {
-        Iterator i;
 
         fputs("# This file is managed by man:systemd-resolved(8). Do not edit.\n"
               "#\n"
@@ -279,11 +270,14 @@ static int write_uplink_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSe
                 unsigned count = 0;
                 DnsServer *s;
 
-                ORDERED_SET_FOREACH(s, dns, i)
+                ORDERED_SET_FOREACH(s, dns)
                         write_resolv_conf_server(s, f, &count);
         }
 
-        if (!ordered_set_isempty(domains))
+        if (ordered_set_isempty(domains))
+                fputs("search .\n", f); /* Make sure that if the local hostname is chosen as fqdn this does not
+                                         * imply a search domain */
+        else
                 write_resolv_conf_search(domains, f);
 
         return fflush_and_check(f);
@@ -309,7 +303,10 @@ static int write_stub_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet 
               "nameserver 127.0.0.53\n"
               "options edns0 trust-ad\n", f);
 
-        if (!ordered_set_isempty(domains))
+        if (ordered_set_isempty(domains))
+                fputs("search .\n", f); /* Make sure that if the local hostname is chosen as fqdn this does not
+                                         * imply a search domain */
+        else
                 write_resolv_conf_search(domains, f);
 
         return fflush_and_check(f);
@@ -383,3 +380,49 @@ int manager_write_resolv_conf(Manager *m) {
 
         return r;
 }
+
+int resolv_conf_mode(void) {
+        static const char * const table[_RESOLV_CONF_MODE_MAX] = {
+                [RESOLV_CONF_UPLINK] = PRIVATE_UPLINK_RESOLV_CONF,
+                [RESOLV_CONF_STUB] = PRIVATE_STUB_RESOLV_CONF,
+                [RESOLV_CONF_STATIC] = PRIVATE_STATIC_RESOLV_CONF,
+        };
+
+        struct stat system_st;
+
+        if (stat("/etc/resolv.conf", &system_st) < 0) {
+                if (errno == ENOENT)
+                        return RESOLV_CONF_MISSING;
+
+                return -errno;
+        }
+
+        for (ResolvConfMode m = 0; m < _RESOLV_CONF_MODE_MAX; m++) {
+                struct stat our_st;
+
+                if (!table[m])
+                        continue;
+
+                if (stat(table[m], &our_st) < 0) {
+                        if (errno != ENOENT)
+                                log_debug_errno(errno, "Failed to stat() %s, ignoring: %m", table[m]);
+
+                        continue;
+                }
+
+                if (system_st.st_dev == our_st.st_dev &&
+                    system_st.st_ino == our_st.st_ino)
+                        return m;
+        }
+
+        return RESOLV_CONF_FOREIGN;
+}
+
+static const char* const resolv_conf_mode_table[_RESOLV_CONF_MODE_MAX] = {
+        [RESOLV_CONF_UPLINK] = "uplink",
+        [RESOLV_CONF_STUB] = "stub",
+        [RESOLV_CONF_STATIC] = "static",
+        [RESOLV_CONF_MISSING] = "missing",
+        [RESOLV_CONF_FOREIGN] = "foreign",
+};
+DEFINE_STRING_TABLE_LOOKUP(resolv_conf_mode, ResolvConfMode);

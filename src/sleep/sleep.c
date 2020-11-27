@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2010-2017 Canonical
   Copyright © 2018 Dell Inc.
@@ -17,7 +17,6 @@
 #include "sd-messages.h"
 
 #include "btrfs-util.h"
-#include "bus-common-errors.h"
 #include "bus-error.h"
 #include "def.h"
 #include "exec-util.h"
@@ -161,16 +160,13 @@ static int lock_all_homes(void) {
 
         r = sd_bus_call(bus, m, DEFAULT_TIMEOUT_USEC, &error, NULL);
         if (r < 0) {
-                if (sd_bus_error_has_name(&error, SD_BUS_ERROR_SERVICE_UNKNOWN) ||
-                    sd_bus_error_has_name(&error, SD_BUS_ERROR_NAME_HAS_NO_OWNER) ||
-                    sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT))
-                        return log_debug("systemd-homed is not running, skipping locking of home directories.");
+                if (!bus_error_is_unknown_service(&error))
+                        return log_error_errno(r, "Failed to lock home directories: %s", bus_error_message(&error, r));
 
-                return log_error_errno(r, "Failed to lock home directories: %s", bus_error_message(&error, r));
+                return log_debug("systemd-homed is not running, locking of home directories skipped.");
         }
 
-        log_debug("Successfully requested for all home directories to be locked.");
-        return 0;
+        return log_debug("Successfully requested locking of all home directories.");
 }
 
 static int execute(char **modes, char **states) {

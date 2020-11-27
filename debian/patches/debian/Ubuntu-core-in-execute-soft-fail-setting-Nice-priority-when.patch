@@ -11,10 +11,10 @@ environments. This is similar to how OOMScoreAdjust is treated.
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/src/core/execute.c b/src/core/execute.c
-index 7b3de25..ea513ef 100644
+index c992b8d..0ec1bd6 100644
 --- a/src/core/execute.c
 +++ b/src/core/execute.c
-@@ -3388,7 +3388,11 @@ static int exec_child(
+@@ -3898,7 +3898,11 @@ static int exec_child(
  
          if (context->nice_set) {
                  r = setpriority_closest(context->nice);

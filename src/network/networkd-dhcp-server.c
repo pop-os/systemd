@@ -1,9 +1,14 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+
+#include <netinet/in.h>
+#include <linux/if_arp.h>
+#include <linux/if.h>
 
 #include "sd-dhcp-server.h"
 
 #include "fd-util.h"
 #include "fileio.h"
+#include "networkd-address.h"
 #include "networkd-dhcp-server.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -14,6 +19,24 @@
 #include "string-util.h"
 #include "strv.h"
 
+static bool link_dhcp4_server_enabled(Link *link) {
+        assert(link);
+
+        if (link->flags & IFF_LOOPBACK)
+                return false;
+
+        if (!link->network)
+                return false;
+
+        if (link->network->bond)
+                return false;
+
+        if (link->iftype == ARPHRD_CAN)
+                return false;
+
+        return link->network->dhcp_server;
+}
+
 static Address* link_find_dhcp_server_address(Link *link) {
         Address *address;
 
@@ -21,13 +44,13 @@ static Address* link_find_dhcp_server_address(Link *link) {
         assert(link->network);
 
         /* The first statically configured address if there is any */
-        LIST_FOREACH(addresses, address, link->network->static_addresses)
+        ORDERED_HASHMAP_FOREACH(address, link->network->addresses_by_section)
                 if (address->family == AF_INET &&
                     !in_addr_is_null(address->family, &address->in_addr))
                         return address;
 
         /* If that didn't work, find a suitable address we got from the pool */
-        LIST_FOREACH(addresses, address, link->pool_addresses)
+        SET_FOREACH(address, link->pool_addresses)
                 if (address->family == AF_INET)
                         return address;
 
@@ -228,8 +251,25 @@ int dhcp4_server_configure(Link *link) {
         sd_dhcp_option *p;
         Link *uplink = NULL;
         Address *address;
-        Iterator i;
         int r;
+
+        assert(link);
+
+        if (!link_dhcp4_server_enabled(link))
+                return 0;
+
+        if (!(link->flags & IFF_UP))
+                return 0;
+
+        if (!link->dhcp_server) {
+                r = sd_dhcp_server_new(&link->dhcp_server, link->ifindex);
+                if (r < 0)
+                        return r;
+
+                r = sd_dhcp_server_attach_event(link->dhcp_server, link->manager->event, 0);
+                if (r < 0)
+                        return r;
+        }
 
         address = link_find_dhcp_server_address(link);
         if (!address)
@@ -322,7 +362,7 @@ int dhcp4_server_configure(Link *link) {
                         return log_link_error_errno(link, r, "Failed to set timezone for DHCP server: %m");
         }
 
-        ORDERED_HASHMAP_FOREACH(p, link->network->dhcp_server_send_options, i) {
+        ORDERED_HASHMAP_FOREACH(p, link->network->dhcp_server_send_options) {
                 r = sd_dhcp_server_add_option(link->dhcp_server, p);
                 if (r == -EEXIST)
                         continue;
@@ -330,7 +370,7 @@ int dhcp4_server_configure(Link *link) {
                         return log_link_error_errno(link, r, "Failed to set DHCPv4 option: %m");
         }
 
-        ORDERED_HASHMAP_FOREACH(p, link->network->dhcp_server_send_vendor_options, i) {
+        ORDERED_HASHMAP_FOREACH(p, link->network->dhcp_server_send_vendor_options) {
                 r = sd_dhcp_server_add_vendor_option(link->dhcp_server, p);
                 if (r == -EEXIST)
                         continue;
@@ -342,6 +382,8 @@ int dhcp4_server_configure(Link *link) {
                 r = sd_dhcp_server_start(link->dhcp_server);
                 if (r < 0)
                         return log_link_error_errno(link, r, "Could not start DHCPv4 server instance: %m");
+
+                log_link_debug(link, "Offering DHCPv4 leases");
         }
 
         return 0;

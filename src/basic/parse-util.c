@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <inttypes.h>
@@ -16,6 +16,9 @@
 #include "missing_network.h"
 #include "parse-util.h"
 #include "process-util.h"
+#if HAVE_SECCOMP
+#include "seccomp-util.h"
+#endif
 #include "stat-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -314,6 +317,7 @@ int parse_errno(const char *t) {
         return e;
 }
 
+#if HAVE_SECCOMP
 int parse_syscall_and_errno(const char *in, char **name, int *error) {
         _cleanup_free_ char *n = NULL;
         char *p;
@@ -332,7 +336,7 @@ int parse_syscall_and_errno(const char *in, char **name, int *error) {
 
         p = strchr(in, ':');
         if (p) {
-                e = parse_errno(p + 1);
+                e = seccomp_parse_errno_or_action(p + 1);
                 if (e < 0)
                         return e;
 
@@ -351,6 +355,7 @@ int parse_syscall_and_errno(const char *in, char **name, int *error) {
 
         return 0;
 }
+#endif
 
 static const char *mangle_base(const char *s, unsigned *base) {
         const char *k;
@@ -856,4 +861,46 @@ int parse_oom_score_adjust(const char *s, int *ret) {
 
         *ret = v;
         return 0;
+}
+
+int store_loadavg_fixed_point(unsigned long i, unsigned long f, loadavg_t *ret) {
+        assert(ret);
+
+        if (i >= (~0UL << FSHIFT))
+                return -ERANGE;
+
+        i = i << FSHIFT;
+        f = DIV_ROUND_UP((f << FSHIFT), 100);
+
+        if (f >= FIXED_1)
+                return -ERANGE;
+
+        *ret = i | f;
+        return 0;
+}
+
+int parse_loadavg_fixed_point(const char *s, loadavg_t *ret) {
+        const char *d, *f_str, *i_str;
+        unsigned long i, f;
+        int r;
+
+        assert(s);
+        assert(ret);
+
+        d = strchr(s, '.');
+        if (!d)
+                return -EINVAL;
+
+        i_str = strndupa(s, d - s);
+        f_str = d + 1;
+
+        r = safe_atolu_full(i_str, 10, &i);
+        if (r < 0)
+                return r;
+
+        r = safe_atolu_full(f_str, 10, &f);
+        if (r < 0)
+                return r;
+
+        return store_loadavg_fixed_point(i, f, ret);
 }

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <sys/wait.h>
 
@@ -548,10 +548,9 @@ static void test_pidfd(void) {
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGCHLD, -1) >= 0);
 
         pid = fork();
-        if (pid == 0) {
+        if (pid == 0)
                 /* child */
                 _exit(66);
-        }
 
         assert_se(pid > 1);
 

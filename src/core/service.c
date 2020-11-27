@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -589,9 +589,6 @@ static int service_verify(Service *s) {
                 return -ENOEXEC;
         }
 
-        if (s->bus_name && s->type != SERVICE_DBUS)
-                log_unit_warning(UNIT(s), "Service has a D-Bus service name specified, but is not of type dbus. Ignoring.");
-
         if (s->exec_context.pam_name && !IN_SET(s->kill_context.kill_mode, KILL_CONTROL_GROUP, KILL_MIXED)) {
                 log_unit_error(UNIT(s), "Service has PAM enabled. Kill mode must be set to 'control-group' or 'mixed'. Refusing.");
                 return -ENOEXEC;
@@ -687,7 +684,7 @@ static int service_setup_bus_name(Service *s) {
 
         assert(s);
 
-        if (!s->bus_name)
+        if (s->type != SERVICE_DBUS)
                 return 0;
 
         r = unit_add_dependency_by_name(UNIT(s), UNIT_REQUIRES, SPECIAL_DBUS_SOCKET, true, UNIT_DEPENDENCY_FILE);
@@ -1034,7 +1031,7 @@ static void service_search_main_pid(Service *s) {
 
         assert(s);
 
-        /* If we know it anyway, don't ever fallback to unreliable
+        /* If we know it anyway, don't ever fall back to unreliable
          * heuristics */
         if (s->main_pid_known)
                 return;
@@ -1273,13 +1270,12 @@ static int service_collect_fds(
 
                 rn_socket_fds = 1;
         } else {
-                Iterator i;
                 void *v;
                 Unit *u;
 
                 /* Pass all our configured sockets for singleton services */
 
-                HASHMAP_FOREACH_KEY(v, u, UNIT(s)->dependencies[UNIT_TRIGGERED_BY], i) {
+                HASHMAP_FOREACH_KEY(v, u, UNIT(s)->dependencies[UNIT_TRIGGERED_BY]) {
                         _cleanup_free_ int *cfds = NULL;
                         Socket *sock;
                         int cn_fds;
@@ -1801,7 +1797,7 @@ static void service_enter_dead(Service *s, ServiceResult f, bool allow_restart) 
         s->exec_runtime = exec_runtime_unref(s->exec_runtime, true);
 
         /* Also, remove the runtime directory */
-        unit_destroy_runtime_directory(UNIT(s), &s->exec_context);
+        unit_destroy_runtime_data(UNIT(s), &s->exec_context);
 
         /* Get rid of the IPC bits of the user */
         unit_unref_uid_gid(UNIT(s), true);
@@ -2156,7 +2152,7 @@ static void service_enter_start(Service *s) {
         r = service_spawn(s,
                           c,
                           timeout,
-                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG,
+                          EXEC_PASS_FDS|EXEC_APPLY_SANDBOXING|EXEC_APPLY_CHROOT|EXEC_APPLY_TTY_STDIN|EXEC_SET_WATCHDOG|EXEC_WRITE_CREDENTIALS,
                           &pid);
         if (r < 0)
                 goto fail;
@@ -2314,7 +2310,7 @@ static void service_enter_restart(Service *s) {
         return;
 
 fail:
-        log_unit_warning(UNIT(s), "Failed to schedule restart job: %s", bus_error_message(&error, -r));
+        log_unit_warning(UNIT(s), "Failed to schedule restart job: %s", bus_error_message(&error, r));
         service_enter_dead(s, SERVICE_FAILURE_RESOURCES, false);
 }
 
@@ -2330,7 +2326,7 @@ static void service_enter_reload_by_notify(Service *s) {
         /* service_enter_reload_by_notify is never called during a reload, thus no loops are possible. */
         r = manager_propagate_reload(UNIT(s)->manager, UNIT(s), JOB_FAIL, &error);
         if (r < 0)
-                log_unit_warning(UNIT(s), "Failed to schedule propagation of reload: %s", bus_error_message(&error, -r));
+                log_unit_warning(UNIT(s), "Failed to schedule propagation of reload: %s", bus_error_message(&error, r));
 }
 
 static void service_enter_reload(Service *s) {
@@ -3334,6 +3330,13 @@ static void service_notify_cgroup_empty_event(Unit *u) {
 
                 break;
 
+        /* If the cgroup empty notification comes when the unit is not active, we must have failed to clean
+         * up the cgroup earlier and should do it now. */
+        case SERVICE_DEAD:
+        case SERVICE_FAILED:
+                unit_prune_cgroup(u);
+                break;
+
         default:
                 ;
         }
@@ -4205,7 +4208,7 @@ static void service_bus_name_owner_change(Unit *u, const char *new_owner) {
         else
                 log_unit_debug(u, "D-Bus name %s now not owned by anyone.", s->bus_name);
 
-        s->bus_name_good = !!new_owner;
+        s->bus_name_good = new_owner;
 
         /* Track the current owner, so we can reconstruct changes after a daemon reload */
         r = free_and_strdup(&s->bus_name_owner, new_owner);
@@ -4537,6 +4540,7 @@ const UnitVTable service_vtable = {
         .can_transient = true,
         .can_delegate = true,
         .can_fail = true,
+        .can_set_managed_oom = true,
 
         .init = service_init,
         .done = service_done,

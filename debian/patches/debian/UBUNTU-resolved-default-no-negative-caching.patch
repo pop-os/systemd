@@ -10,10 +10,10 @@ Thanks: Dimitri John Ledkov for the suggestion
  3 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
-index 535a23f..e1632df 100644
+index 35a5740..03f2e5e 100644
 --- a/man/resolved.conf.xml
 +++ b/man/resolved.conf.xml
-@@ -248,10 +248,10 @@
+@@ -246,10 +246,10 @@
        <varlistentry>
          <term><varname>Cache=</varname></term>
          <listitem><para>Takes a boolean or <literal>no-negative</literal> as argument. If
@@ -27,23 +27,23 @@ index 535a23f..e1632df 100644
          <para>Note that caching is turned off implicitly if the configured DNS server is on a host-local IP address
          (such as 127.0.0.1 or ::1), in order to avoid duplicate local caching.</para></listitem>
 diff --git a/src/resolve/resolved-gperf.gperf b/src/resolve/resolved-gperf.gperf
-index 553da8d..4fb3711 100644
+index b54fa1b..26293c9 100644
 --- a/src/resolve/resolved-gperf.gperf
 +++ b/src/resolve/resolved-gperf.gperf
-@@ -25,7 +25,7 @@ Resolve.LLMNR,                     config_parse_resolve_support,        0,
- Resolve.MulticastDNS,              config_parse_resolve_support,        0,                   offsetof(Manager, mdns_support)
- Resolve.DNSSEC,                    config_parse_dnssec_mode,            0,                   offsetof(Manager, dnssec_mode)
- Resolve.DNSOverTLS,                config_parse_dns_over_tls_mode,      0,                   offsetof(Manager, dns_over_tls_mode)
--Resolve.Cache,                     config_parse_dns_cache_mode,         DNS_CACHE_MODE_YES,  offsetof(Manager, enable_cache)
-+Resolve.Cache,                     config_parse_dns_cache_mode,         DNS_CACHE_MODE_NO_NEGATIVE,  offsetof(Manager, enable_cache)
- Resolve.DNSStubListener,           config_parse_dns_stub_listener_mode, 0,                   offsetof(Manager, dns_stub_listener_mode)
- Resolve.ReadEtcHosts,              config_parse_bool,                   0,                   offsetof(Manager, read_etc_hosts)
- Resolve.ResolveUnicastSingleLabel, config_parse_bool,                   0,                   offsetof(Manager, resolve_unicast_single_label)
+@@ -25,7 +25,7 @@ Resolve.LLMNR,                     config_parse_resolve_support,         0,
+ Resolve.MulticastDNS,              config_parse_resolve_support,         0,                   offsetof(Manager, mdns_support)
+ Resolve.DNSSEC,                    config_parse_dnssec_mode,             0,                   offsetof(Manager, dnssec_mode)
+ Resolve.DNSOverTLS,                config_parse_dns_over_tls_mode,       0,                   offsetof(Manager, dns_over_tls_mode)
+-Resolve.Cache,                     config_parse_dns_cache_mode,          DNS_CACHE_MODE_YES,  offsetof(Manager, enable_cache)
++Resolve.Cache,                     config_parse_dns_cache_mode,          DNS_CACHE_MODE_NO_NEGATIVE,  offsetof(Manager, enable_cache)
+ Resolve.DNSStubListener,           config_parse_dns_stub_listener_mode,  0,                   offsetof(Manager, dns_stub_listener_mode)
+ Resolve.ReadEtcHosts,              config_parse_bool,                    0,                   offsetof(Manager, read_etc_hosts)
+ Resolve.ResolveUnicastSingleLabel, config_parse_bool,                    0,                   offsetof(Manager, resolve_unicast_single_label)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index b197457..dacc9f2 100644
+index 7690eac..d4fc73d 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
-@@ -586,7 +586,7 @@ int manager_new(Manager **ret) {
+@@ -589,7 +589,7 @@ int manager_new(Manager **ret) {
                  .mdns_support = DEFAULT_MDNS_MODE,
                  .dnssec_mode = DEFAULT_DNSSEC_MODE,
                  .dns_over_tls_mode = DEFAULT_DNS_OVER_TLS_MODE,

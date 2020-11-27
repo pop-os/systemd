@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 
@@ -152,7 +152,7 @@ int bus_seat_method_terminate(sd_bus_message *message, void *userdata, sd_bus_er
         if (r == 0)
                 return 1; /* Will call us back */
 
-        r = seat_stop_sessions(s, true);
+        r = seat_stop_sessions(s, /* force = */ true);
         if (r < 0)
                 return r;
 
@@ -345,14 +345,13 @@ static int seat_node_enumerator(sd_bus *bus, const char *path, void *userdata, c
         sd_bus_message *message;
         Manager *m = userdata;
         Seat *seat;
-        Iterator i;
         int r;
 
         assert(bus);
         assert(path);
         assert(nodes);
 
-        HASHMAP_FOREACH(seat, m->seats, i) {
+        HASHMAP_FOREACH(seat, m->seats) {
                 char *p;
 
                 p = seat_bus_path(seat);

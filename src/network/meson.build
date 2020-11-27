@@ -1,6 +1,8 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 sources = files('''
+        netdev/bareudp.c
+        netdev/bareudp.h
         netdev/bond.c
         netdev/bond.h
         netdev/bridge.c
@@ -87,6 +89,8 @@ sources = files('''
         networkd-manager-bus.h
         networkd-manager.c
         networkd-manager.h
+        networkd-mdb.c
+        networkd-mdb.h
         networkd-ndisc.c
         networkd-ndisc.h
         networkd-neighbor.c
@@ -107,6 +111,8 @@ sources = files('''
         networkd-speed-meter.h
         networkd-sriov.c
         networkd-sriov.h
+        networkd-sysctl.c
+        networkd-sysctl.h
         networkd-util.c
         networkd-util.h
         networkd-wifi.c
@@ -125,6 +131,8 @@ sources = files('''
         tc/fq.h
         tc/fq-codel.c
         tc/fq-codel.h
+        tc/fq-pie.c
+        tc/fq-pie.h
         tc/gred.c
         tc/gred.h
         tc/hhf.c
@@ -228,8 +236,10 @@ if conf.get('ENABLE_NETWORKD') == 1
                              install_dir : polkitpkladir)
         endif
 
-        install_data('networkd.conf',
-                     install_dir : pkgsysconfdir)
+        if install_sysconfdir
+                install_data('networkd.conf',
+                             install_dir : pkgsysconfdir)
+        endif
 
         fuzzers += [
     [['src/network/fuzz-netdev-parser.c',

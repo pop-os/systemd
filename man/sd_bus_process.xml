@@ -3,7 +3,7 @@
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
 
 <!--
-  SPDX-License-Identifier: LGPL-2.1+
+  SPDX-License-Identifier: LGPL-2.1-or-later
 
   Copyright © 2016 Julian Orth
 -->
@@ -56,10 +56,10 @@
     <parameter>ret</parameter> is not <constant>NULL</constant> and the call processed a message,
     <parameter>*ret</parameter> is set to this message.  The caller owns a reference to this message and should call
     <citerefentry><refentrytitle>sd_bus_message_unref</refentrytitle><manvolnum>3</manvolnum></citerefentry> when the
-    message is no longer needed. If <parameter>ret</parameter> is not NULL, progress was made, but no message was
+    message is no longer needed. If <parameter>ret</parameter> is not <constant>NULL</constant>, progress was made, but no message was
     processed, <parameter>*ret</parameter> is set to <constant>NULL</constant>.</para>
 
-    <para>If a the bus object is connected to an
+    <para>If the bus object is connected to an
     <citerefentry><refentrytitle>sd-event</refentrytitle><manvolnum>3</manvolnum></citerefentry> event loop (with
     <citerefentry><refentrytitle>sd_bus_attach_event</refentrytitle><manvolnum>3</manvolnum></citerefentry>), it is not
     necessary to call <function>sd_bus_process()</function> directly as it is invoked automatically when

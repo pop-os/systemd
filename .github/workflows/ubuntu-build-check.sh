@@ -19,7 +19,6 @@ PACKAGES=(
     expect
     fdisk
     gettext
-    iptables-dev
     iputils-ping
     isc-dhcp-client
     itstool
@@ -28,6 +27,7 @@ PACKAGES=(
     libcap-dev
     libcurl4-gnutls-dev
     libfdisk-dev
+    libfido2-dev
     libgpg-error-dev
     liblz4-dev
     liblzma-dev
@@ -38,6 +38,7 @@ PACKAGES=(
     libqrencode-dev
     libssl-dev
     libxkbcommon-dev
+    libxtables-dev
     libzstd-dev
     mount
     net-tools
@@ -102,7 +103,7 @@ for args in "${ARGS[@]}"; do
     SECONDS=0
 
     info "Checking build with $args"
-    if ! AR="$AR" CC="$CC" CXX="$CXX" CFLAGS="-Werror" CXXFLAGS="-Werror" meson -Dtests=unsafe -Dslow-tests=true --werror $args build; then
+    if ! AR="$AR" CC="$CC" CXX="$CXX" CFLAGS="-Werror" CXXFLAGS="-Werror" meson -Dtests=unsafe -Dslow-tests=true -Dfuzz-tests=true --werror $args build; then
         fatal "meson failed with $args"
     fi
 

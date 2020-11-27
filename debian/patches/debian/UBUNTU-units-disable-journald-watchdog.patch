@@ -9,14 +9,14 @@ LP: #1773148
  1 file changed, 1 deletion(-)
 
 diff --git a/units/systemd-journald.service.in b/units/systemd-journald.service.in
-index 7dd9528..0d2d4ba 100644
+index 3a6e566..3569a8c 100644
 --- a/units/systemd-journald.service.in
 +++ b/units/systemd-journald.service.in
-@@ -41,7 +41,6 @@ SystemCallArchitectures=native
+@@ -40,7 +40,6 @@ SystemCallArchitectures=native
  SystemCallErrorNumber=EPERM
  SystemCallFilter=@system-service
  Type=notify
 -@SERVICE_WATCHDOG@
  
- # If there are many split up journal files we need a lot of fds to access them
- # all in parallel.
+ # In case you're wondering why CAP_SYS_PTRACE is needed, access to
+ # /proc/<pid>/exe requires this capability. Thus if this capability is missing

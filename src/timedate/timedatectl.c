@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <getopt.h>
 #include <locale.h>
@@ -12,6 +12,7 @@
 #include "bus-locator.h"
 #include "bus-map-properties.h"
 #include "bus-print-properties.h"
+#include "env-util.h"
 #include "format-table.h"
 #include "in-addr-util.h"
 #include "main-func.h"
@@ -139,12 +140,9 @@ static int print_status_info(const StatusInfo *i) {
 
 
         /* Restore the $TZ */
-        if (old_tz)
-                r = setenv("TZ", old_tz, true);
-        else
-                r = unsetenv("TZ");
+        r = set_unset_env("TZ", old_tz, true);
         if (r < 0)
-                log_warning_errno(errno, "Failed to set TZ environment variable, ignoring: %m");
+                log_warning_errno(r, "Failed to set TZ environment variable, ignoring: %m");
         else
                 tzset();
 
@@ -1005,7 +1003,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 return log_oom();
 
                         /* If the user asked for a particular
-                         * property, show it to him, even if it is
+                         * property, show it to them, even if it is
                          * empty. */
                         arg_all = true;
                         break;

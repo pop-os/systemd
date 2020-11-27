@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -17,8 +17,10 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(char*, freecon);
 
 bool mac_selinux_use(void);
 void mac_selinux_retest(void);
+bool mac_selinux_enforcing(void);
 
 int mac_selinux_init(void);
+void mac_selinux_maybe_reload(void);
 void mac_selinux_finish(void);
 
 int mac_selinux_fix_container(const char *path, const char *inside_path, LabelFixFlags flags);
@@ -26,7 +28,13 @@ static inline int mac_selinux_fix(const char *path, LabelFixFlags flags) {
         return mac_selinux_fix_container(path, path, flags);
 }
 
+int mac_selinux_fix_container_fd(int fd, const char *path, const char *inside_path, LabelFixFlags flags);
+static inline int mac_selinux_fix_fd(int fd, const char *path, LabelFixFlags flags) {
+        return mac_selinux_fix_container_fd(fd, path, path, flags);
+}
+
 int mac_selinux_apply(const char *path, const char *label);
+int mac_selinux_apply_fd(int fd, const char *path, const char *label);
 
 int mac_selinux_get_create_label_from_exe(const char *exe, char **label);
 int mac_selinux_get_our_label(char **label);

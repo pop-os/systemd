@@ -8,10 +8,10 @@ This reverts commit b9ea3d2e47b3741f3f46ba9c5e19640136933b71.
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index ea3ff55..c4953d0 100644
+index ced18de..d8ae2cd 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -3881,7 +3881,7 @@ int link_ipv6ll_gained(Link *link, const struct in6_addr *address) {
+@@ -2556,7 +2556,7 @@ int link_ipv6ll_gained(Link *link, const struct in6_addr *address) {
          link->ipv6ll_address = *address;
          link_check_ready(link);
  
@@ -20,7 +20,7 @@ index ea3ff55..c4953d0 100644
                  r = link_acquire_ipv6_conf(link);
                  if (r < 0) {
                          link_enter_failed(link);
-@@ -3908,7 +3908,7 @@ static int link_carrier_gained(Link *link) {
+@@ -2583,7 +2583,7 @@ static int link_carrier_gained(Link *link) {
                  }
          }
  
