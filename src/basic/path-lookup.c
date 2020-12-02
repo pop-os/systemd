@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stdio.h>
@@ -27,7 +27,7 @@ int xdg_user_runtime_dir(char **ret, const char *suffix) {
         if (!e)
                 return -ENXIO;
 
-        j = strjoin(e, suffix);
+        j = path_join(e, suffix);
         if (!j)
                 return -ENOMEM;
 
@@ -44,7 +44,7 @@ int xdg_user_config_dir(char **ret, const char *suffix) {
 
         e = getenv("XDG_CONFIG_HOME");
         if (e)
-                j = strjoin(e, suffix);
+                j = path_join(e, suffix);
         else {
                 _cleanup_free_ char *home = NULL;
 
@@ -52,7 +52,7 @@ int xdg_user_config_dir(char **ret, const char *suffix) {
                 if (r < 0)
                         return r;
 
-                j = strjoin(home, "/.config", suffix);
+                j = path_join(home, "/.config", suffix);
         }
 
         if (!j)
@@ -76,7 +76,7 @@ int xdg_user_data_dir(char **ret, const char *suffix) {
 
         e = getenv("XDG_DATA_HOME");
         if (e)
-                j = strjoin(e, suffix);
+                j = path_join(e, suffix);
         else {
                 _cleanup_free_ char *home = NULL;
 
@@ -84,7 +84,7 @@ int xdg_user_data_dir(char **ret, const char *suffix) {
                 if (r < 0)
                         return r;
 
-                j = strjoin(home, "/.local/share", suffix);
+                j = path_join(home, "/.local/share", suffix);
         }
         if (!j)
                 return -ENOMEM;
@@ -181,10 +181,10 @@ static char** user_dirs(
         if (strv_extend(&res, generator_early) < 0)
                 return NULL;
 
-        if (strv_extend_strv_concat(&res, config_dirs, "/systemd/user") < 0)
+        if (strv_extend(&res, persistent_config) < 0)
                 return NULL;
 
-        if (strv_extend(&res, persistent_config) < 0)
+        if (strv_extend_strv_concat(&res, config_dirs, "/systemd/user") < 0)
                 return NULL;
 
         /* global config has lower priority than the user config of the same type */

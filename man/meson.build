@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 # This is lame, I know, but meson has no other include mechanism
 subdir('rules')
@@ -202,11 +202,17 @@ if dbus_docs.length() > 0
         custom_target(
                 'update-dbus-docs',
                 output : 'update-dbus-docs',
-                command : ['python3',
-                           '@0@/tools/update-dbus-docs.py'.format(project_source_root),
+                command : [update_dbus_docs_py,
                            '--build-dir=@0@'.format(project_build_root),
                            '@INPUT@'],
                 input : dbus_docs)
+
+        if conf.get('BUILD_MODE') == 'BUILD_MODE_DEVELOPER'
+                test('dbus-docs-fresh',
+                     update_dbus_docs_py,
+                     args : ['--build-dir=@0@'.format(project_build_root),
+                             '--test'] + dbus_docs)
+        endif
 endif
 
 ############################################################

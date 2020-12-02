@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include "sd-event.h"
@@ -100,6 +100,7 @@ int varlink_replyb(Varlink *v, ...);
 int varlink_error(Varlink *v, const char *error_id, JsonVariant *parameters);
 int varlink_errorb(Varlink *v, const char *error_id, ...);
 int varlink_error_invalid_parameter(Varlink *v, JsonVariant *parameters);
+int varlink_error_errno(Varlink *v, int error);
 
 /* Enqueue a "more" reply */
 int varlink_notify(Varlink *v, JsonVariant *parameters);
@@ -170,3 +171,4 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(VarlinkServer *, varlink_server_unref);
 #define VARLINK_ERROR_METHOD_NOT_FOUND "org.varlink.service.MethodNotFound"
 #define VARLINK_ERROR_METHOD_NOT_IMPLEMENTED "org.varlink.service.MethodNotImplemented"
 #define VARLINK_ERROR_INVALID_PARAMETER "org.varlink.service.InvalidParameter"
+#define VARLINK_ERROR_SUBSCRIPTION_TAKEN "org.varlink.service.SubscriptionTaken"

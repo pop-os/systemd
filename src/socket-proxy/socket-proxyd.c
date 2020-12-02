@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -95,16 +95,14 @@ static int idle_time_cb(sd_event_source *s, uint64_t usec, void *userdata) {
 }
 
 static int connection_release(Connection *c) {
-        int r;
         Context *context = c->context;
-        usec_t idle_instant;
+        int r;
 
         connection_free(c);
 
         if (arg_exit_idle_time < USEC_INFINITY && set_isempty(context->connections)) {
-                idle_instant = usec_add(now(CLOCK_MONOTONIC), arg_exit_idle_time);
                 if (context->idle_time) {
-                        r = sd_event_source_set_time(context->idle_time, idle_instant);
+                        r = sd_event_source_set_time_relative(context->idle_time, arg_exit_idle_time);
                         if (r < 0)
                                 return log_error_errno(r, "Error while setting idle time: %m");
 
@@ -112,8 +110,9 @@ static int connection_release(Connection *c) {
                         if (r < 0)
                                 return log_error_errno(r, "Error while enabling idle time: %m");
                 } else {
-                        r = sd_event_add_time(context->event, &context->idle_time, CLOCK_MONOTONIC,
-                                              idle_instant, 0, idle_time_cb, context);
+                        r = sd_event_add_time_relative(
+                                        context->event, &context->idle_time, CLOCK_MONOTONIC,
+                                        arg_exit_idle_time, 0, idle_time_cb, context);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to create idle timer: %m");
                 }
@@ -523,17 +522,14 @@ static int accept_cb(sd_event_source *s, int fd, uint32_t revents, void *userdat
 
                 r = add_connection_socket(context, nfd);
                 if (r < 0) {
-                        log_error_errno(r, "Failed to accept connection, ignoring: %m");
-                        safe_close(fd);
+                        log_warning_errno(r, "Failed to accept connection, ignoring: %m");
+                        safe_close(nfd);
                 }
         }
 
         r = sd_event_source_set_enabled(s, SD_EVENT_ONESHOT);
-        if (r < 0) {
-                log_error_errno(r, "Error while re-enabling listener with ONESHOT: %m");
-                sd_event_exit(context->event, r);
-                return r;
-        }
+        if (r < 0)
+                return log_error_errno(r, "Error while re-enabling listener with ONESHOT: %m");
 
         return 1;
 }
@@ -562,10 +558,13 @@ static int add_listen_socket(Context *context, int fd) {
 
         r = set_ensure_put(&context->listen, NULL, source);
         if (r < 0) {
-                log_error_errno(r, "Failed to add source to set: %m");
                 sd_event_source_unref(source);
-                return r;
+                return log_error_errno(r, "Failed to add source to set: %m");
         }
+
+        r = sd_event_source_set_exit_on_failure(source, true);
+        if (r < 0)
+                return log_error_errno(r, "Failed to enable exit-on-failure logic: %m");
 
         /* Set the watcher to oneshot in case other processes are also
          * watching to accept(). */

@@ -196,8 +196,8 @@ The currently used part of the file is the **header_size** plus the
 **arena_size** field of the header. If a writer needs to write to a file where
 the actual file size on disk is smaller than the reported value it shall
 immediately rotate the file and start a new one. If a writer is asked to write
-to a file with a header that is shorter than his own definition of the struct
-Header, he shall immediately rotate the file and start a new one.
+to a file with a header that is shorter than its own definition of the struct
+Header, it shall immediately rotate the file and start a new one.
 
 The **n_objects** field contains a counter for objects currently available in
 this file. As objects are appended to the end of the file this counter is
@@ -517,7 +517,7 @@ _packed_ struct HashTableObject {
 ```
 
 The structure of both DATA_HASH_TABLE and FIELD_HASH_TABLE objects are
-identical. They implement a simple hash table, which each cell containing
+identical. They implement a simple hash table, with each cell containing
 offsets to the head and tail of the singly linked list of the DATA and FIELD
 objects, respectively. DATA's and FIELD's next_hash_offset field are used to
 chain up the objects. Empty cells have both offsets set to 0.
@@ -651,15 +651,15 @@ look up the FIELD object and follow the chain of links to all DATA it includes.
 
 ### Writing
 
-When an entry is appended to the journal for each of its data fields the data
-hash table should be checked. If the data field does not yet exist in the file
-it should be appended and added to the data hash table. When a field data
-object is added the field hash table should be checked for the field name of
+When an entry is appended to the journal, for each of its data fields the data
+hash table should be checked. If the data field does not yet exist in the file,
+it should be appended and added to the data hash table. When a data field's data
+object is added, the field hash table should be checked for the field name of
 the data field, and a field object be added if necessary. After all data fields
 (and recursively all field names) of the new entry are appended and linked up
-in the hashtables the entry object should be appended and linked up too.
+in the hashtables, the entry object should be appended and linked up too.
 
-In regular intervals a tag object should be written if sealing is enabled (see
+At regular intervals a tag object should be written if sealing is enabled (see
 above). Before the file is closed a tag should be written too, to seal it off.
 
 Before writing an object, time and disk space limits should be checked and

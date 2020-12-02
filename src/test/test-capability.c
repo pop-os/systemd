@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <netinet/in.h>
 #include <pwd.h>
@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#define TEST_CAPABILITY_C
 
 #include "alloc-util.h"
 #include "capability-util.h"

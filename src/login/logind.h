@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -107,11 +107,13 @@ struct Manager {
         HandleAction handle_lid_switch;
         HandleAction handle_lid_switch_ep;
         HandleAction handle_lid_switch_docked;
+        HandleAction handle_reboot_key;
 
         bool power_key_ignore_inhibited;
         bool suspend_key_ignore_inhibited;
         bool hibernate_key_ignore_inhibited;
         bool lid_switch_ignore_inhibited;
+        bool reboot_key_ignore_inhibited;
 
         bool remove_ipc;
 

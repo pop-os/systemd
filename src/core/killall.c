@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2010 ProFUSION embedded systems
 ***/
@@ -79,10 +79,9 @@ static bool ignore_proc(pid_t pid, bool warn_rootfs) {
 
 static void log_children_no_yet_killed(Set *pids) {
         _cleanup_free_ char *lst_child = NULL;
-        Iterator i;
         void *p;
 
-        SET_FOREACH(p, pids, i) {
+        SET_FOREACH(p, pids) {
                 _cleanup_free_ char *s = NULL;
 
                 if (get_process_comm(PTR_TO_PID(p), &s) < 0)
@@ -121,7 +120,6 @@ static int wait_for_children(Set *pids, sigset_t *mask, usec_t timeout) {
                 struct timespec ts;
                 int k;
                 void *p;
-                Iterator i;
 
                 /* First, let the kernel inform us about killed
                  * children. Most processes will probably be our
@@ -145,7 +143,7 @@ static int wait_for_children(Set *pids, sigset_t *mask, usec_t timeout) {
 
                 /* Now explicitly check who might be remaining, who
                  * might not be our child. */
-                SET_FOREACH(p, pids, i) {
+                SET_FOREACH(p, pids) {
 
                         /* kill(pid, 0) sends no signal, but it tells
                          * us whether the process still exists. */
@@ -216,7 +214,7 @@ static int killall(int sig, Set *pids, bool send_sighup) {
                 if (sig == SIGKILL) {
                         _cleanup_free_ char *s = NULL;
 
-                        get_process_comm(pid, &s);
+                        (void) get_process_comm(pid, &s);
                         log_notice("Sending SIGKILL to PID "PID_FMT" (%s).", pid, strna(s));
                 }
 

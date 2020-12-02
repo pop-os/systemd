@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2013 Intel Corporation. All rights reserved.
 ***/
@@ -225,7 +225,8 @@ sd_event *sd_dhcp_server_get_event(sd_dhcp_server *server) {
 }
 
 int sd_dhcp_server_stop(sd_dhcp_server *server) {
-        assert_return(server, -EINVAL);
+        if (!server)
+                return 0;
 
         server->receive_message =
                 sd_event_source_unref(server->receive_message);
@@ -479,7 +480,6 @@ static int server_send_ack(
         _cleanup_free_ DHCPPacket *packet = NULL;
         be32_t lease_time;
         sd_dhcp_option *j;
-        Iterator i;
         size_t offset;
         int r;
 
@@ -531,7 +531,7 @@ static int server_send_ack(
                         return r;
         }
 
-        ORDERED_HASHMAP_FOREACH(j, server->extra_options, i) {
+        ORDERED_HASHMAP_FOREACH(j, server->extra_options) {
                 r = dhcp_option_append(&packet->dhcp, req->max_optlen, &offset, 0,
                                        j->option, j->length, j->data);
                 if (r < 0)
@@ -567,7 +567,7 @@ static int server_send_nak(sd_dhcp_server *server, DHCPRequest *req) {
 }
 
 static int server_send_forcerenew(sd_dhcp_server *server, be32_t address,
-                                  be32_t gateway, uint8_t chaddr[]) {
+                                  be32_t gateway, const uint8_t chaddr[]) {
         _cleanup_free_ DHCPPacket *packet = NULL;
         size_t optoffset = 0;
         int r;

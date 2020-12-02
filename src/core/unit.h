@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -260,7 +260,10 @@ typedef struct Unit {
         nsec_t cpu_usage_base;
         nsec_t cpu_usage_last; /* the most recently read value */
 
-        /* The  current counter of the oom_kill field in the memory.events cgroup attribute */
+        /* The current counter of processes sent SIGKILL by systemd-oomd */
+        uint64_t managed_oom_kill_last;
+
+        /* The current counter of the oom_kill field in the memory.events cgroup attribute */
         uint64_t oom_kill_last;
 
         /* Where the io.stat data was at the time the unit was started */
@@ -528,6 +531,9 @@ typedef struct UnitVTable {
          * even though nothing references it and it isn't active in any way. */
         bool (*may_gc)(Unit *u);
 
+        /* Return true when the unit is not controlled by the manager (e.g. extrinsic mounts). */
+        bool (*is_extrinsic)(Unit *u);
+
         /* When the unit is not running and no job for it queued we shall release its runtime resources */
         void (*release_resources)(Unit *u);
 
@@ -625,6 +631,9 @@ typedef struct UnitVTable {
 
         /* True if queued jobs of this type should be GC'ed if no other job needs them anymore */
         bool gc_jobs:1;
+
+        /* True if systemd-oomd can monitor and act on this unit's recursive children's cgroup(s)  */
+        bool can_set_managed_oom:1;
 } UnitVTable;
 
 extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
@@ -677,6 +686,11 @@ int unit_choose_id(Unit *u, const char *name);
 int unit_set_description(Unit *u, const char *description);
 
 bool unit_may_gc(Unit *u);
+
+static inline bool unit_is_extrinsic(Unit *u) {
+        return u->perpetual ||
+                (UNIT_VTABLE(u)->is_extrinsic && UNIT_VTABLE(u)->is_extrinsic(u));
+}
 
 void unit_add_to_load_queue(Unit *u);
 void unit_add_to_dbus_queue(Unit *u);
@@ -884,7 +898,7 @@ int unit_failure_action_exit_status(Unit *u);
 
 int unit_test_trigger_loaded(Unit *u);
 
-void unit_destroy_runtime_directory(Unit *u, const ExecContext *context);
+void unit_destroy_runtime_data(Unit *u, const ExecContext *context);
 int unit_clean(Unit *u, ExecCleanMask mask);
 int unit_can_clean(Unit *u, ExecCleanMask *ret_mask);
 

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <stdbool.h>
@@ -33,8 +33,6 @@ typedef enum ConditionType {
         CONDITION_DIRECTORY_NOT_EMPTY,
         CONDITION_FILE_NOT_EMPTY,
         CONDITION_FILE_IS_EXECUTABLE,
-
-        CONDITION_NULL,
 
         CONDITION_USER,
         CONDITION_GROUP,

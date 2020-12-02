@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/loop.h>
 
@@ -103,7 +103,6 @@ static int compare_metadata(PortableMetadata *const *x, PortableMetadata *const 
 int portable_metadata_hashmap_to_sorted_array(Hashmap *unit_files, PortableMetadata ***ret) {
 
         _cleanup_free_ PortableMetadata **sorted = NULL;
-        Iterator iterator;
         PortableMetadata *item;
         size_t k = 0;
 
@@ -111,7 +110,7 @@ int portable_metadata_hashmap_to_sorted_array(Hashmap *unit_files, PortableMetad
         if (!sorted)
                 return -ENOMEM;
 
-        HASHMAP_FOREACH(item, unit_files, iterator)
+        HASHMAP_FOREACH(item, unit_files)
                 sorted[k++] = item;
 
         assert(k == hashmap_size(unit_files));
@@ -380,7 +379,7 @@ static int portable_extract_by_path(
                 if (r < 0)
                         return log_debug_errno(r, "Failed to create temporary directory: %m");
 
-                r = dissect_image(d->fd, NULL, 0, NULL, DISSECT_IMAGE_READ_ONLY|DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_DISCARD_ON_LOOP|DISSECT_IMAGE_RELAX_VAR_CHECK, &m);
+                r = dissect_image(d->fd, NULL, NULL, DISSECT_IMAGE_READ_ONLY|DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_DISCARD_ON_LOOP|DISSECT_IMAGE_RELAX_VAR_CHECK, &m);
                 if (r == -ENOPKG)
                         sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Couldn't identify a suitable partition table or file system in '%s'.", path);
                 else if (r == -EADDRNOTAVAIL)
@@ -435,10 +434,9 @@ static int portable_extract_by_path(
                         if (isempty(name) && fd < 0)
                                 break;
 
-                        if (isempty(name) || fd < 0) {
-                                log_debug("Invalid item sent from child.");
-                                return -EINVAL;
-                        }
+                        if (isempty(name) || fd < 0)
+                                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Invalid item sent from child.");
 
                         add = portable_metadata_new(name, fd);
                         if (!add)
@@ -987,7 +985,6 @@ int portable_attach(
         _cleanup_(lookup_paths_free) LookupPaths paths = {};
         _cleanup_(image_unrefp) Image *image = NULL;
         PortableMetadata *item;
-        Iterator iterator;
         int r;
 
         assert(name_or_path);
@@ -1004,7 +1001,7 @@ int portable_attach(
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(item, unit_files, iterator) {
+        HASHMAP_FOREACH(item, unit_files) {
                 r = unit_file_exists(UNIT_FILE_SYSTEM, &paths, item->name);
                 if (r < 0)
                         return sd_bus_error_set_errnof(error, r, "Failed to determine whether unit '%s' exists on the host: %m", item->name);
@@ -1018,7 +1015,7 @@ int portable_attach(
                         return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS, "Unit file '%s' is active already, refusing.", item->name);
         }
 
-        HASHMAP_FOREACH(item, unit_files, iterator) {
+        HASHMAP_FOREACH(item, unit_files) {
                 r = attach_unit_file(&paths, image->path, image->type, item, profile, flags, changes, n_changes);
                 if (r < 0)
                         return r;
@@ -1140,7 +1137,6 @@ int portable_detach(
         _cleanup_set_free_ Set *unit_files = NULL, *markers = NULL;
         _cleanup_closedir_ DIR *d = NULL;
         const char *where, *item;
-        Iterator iterator;
         struct dirent *de;
         int ret = 0;
         int r;
@@ -1210,7 +1206,7 @@ int portable_detach(
         if (set_isempty(unit_files))
                 goto not_found;
 
-        SET_FOREACH(item, unit_files, iterator) {
+        SET_FOREACH(item, unit_files) {
                 _cleanup_free_ char *md = NULL;
                 const char *suffix;
 
@@ -1252,7 +1248,7 @@ int portable_detach(
         }
 
         /* Now, also drop any image symlink, for images outside of the sarch path */
-        SET_FOREACH(item, markers, iterator) {
+        SET_FOREACH(item, markers) {
                 _cleanup_free_ char *sl = NULL;
                 struct stat st;
 

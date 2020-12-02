@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <linux/if_infiniband.h>
 #include <net/if_arp.h>
@@ -26,11 +26,10 @@ int dhcp_validate_duid_len(uint16_t duid_type, size_t duid_len, bool strict) {
         if (duid_len > MAX_DUID_LEN)
                 return -EINVAL;
 
-        if (!strict) {
+        if (!strict)
                 /* Strict validation is not requested. We only ensure that the
                  * DUID is not too long. */
                 return 0;
-        }
 
         switch (duid_type) {
         case DUID_TYPE_LLT:

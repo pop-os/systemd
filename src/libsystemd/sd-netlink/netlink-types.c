@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <netinet/in.h>
 #include <stdint.h>
@@ -351,6 +351,12 @@ static const NLType rtnl_link_info_data_xfrm_types[] = {
         [IFLA_XFRM_IF_ID]        = { .type = NETLINK_TYPE_U32 }
 };
 
+static const NLType rtnl_link_info_data_bareudp_types[] = {
+        [IFLA_BAREUDP_PORT]            = { .type = NETLINK_TYPE_U16 },
+        [IFLA_BAREUDP_ETHERTYPE]       = { .type = NETLINK_TYPE_U16 },
+        [IFLA_BAREUDP_SRCPORT_MIN]     = { .type = NETLINK_TYPE_U16 },
+        [IFLA_BAREUDP_MULTIPROTO_MODE] = { .type = NETLINK_TYPE_FLAG },
+};
 /* these strings must match the .kind entries in the kernel */
 static const char* const nl_union_link_info_data_table[] = {
         [NL_UNION_LINK_INFO_DATA_BOND] = "bond",
@@ -384,6 +390,7 @@ static const char* const nl_union_link_info_data_table[] = {
         [NL_UNION_LINK_INFO_DATA_NLMON] = "nlmon",
         [NL_UNION_LINK_INFO_DATA_XFRM] = "xfrm",
         [NL_UNION_LINK_INFO_DATA_IFB] = "ifb",
+        [NL_UNION_LINK_INFO_DATA_BAREUDP] = "bareudp",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(nl_union_link_info_data, NLUnionLinkInfoData);
@@ -439,6 +446,8 @@ static const NLTypeSystem rtnl_link_info_data_type_systems[] = {
                                                        .types = rtnl_link_info_data_macsec_types },
         [NL_UNION_LINK_INFO_DATA_XFRM] =             { .count = ELEMENTSOF(rtnl_link_info_data_xfrm_types),
                                                        .types = rtnl_link_info_data_xfrm_types },
+        [NL_UNION_LINK_INFO_DATA_BAREUDP] =          { .count = ELEMENTSOF(rtnl_link_info_data_bareudp_types),
+                                                       .types = rtnl_link_info_data_bareudp_types },
 };
 
 static const NLTypeSystemUnion rtnl_link_info_data_type_system_union = {
@@ -707,7 +716,7 @@ static const NLType rtnl_route_types[] = {
         [RTA_TABLE]             = { .type = NETLINK_TYPE_U32 },
         [RTA_MARK]              = { .type = NETLINK_TYPE_U32 },
         [RTA_MFC_STATS]         = { .type = NETLINK_TYPE_U64 },
-        [RTA_VIA]               = { .type = NETLINK_TYPE_U32 },
+        [RTA_VIA]               = { /* See struct rtvia */ },
         [RTA_NEWDST]            = { .type = NETLINK_TYPE_U32 },
         [RTA_PREF]              = { .type = NETLINK_TYPE_U8 },
         [RTA_EXPIRES]           = { .type = NETLINK_TYPE_U32 },
@@ -861,6 +870,10 @@ static const NLType rtnl_tca_option_data_fq_codel_types[] = {
         [TCA_FQ_CODEL_MEMORY_LIMIT]    = { .type = NETLINK_TYPE_U32 },
 };
 
+static const NLType rtnl_tca_option_data_fq_pie_types[] = {
+        [TCA_FQ_PIE_LIMIT]   = { .type = NETLINK_TYPE_U32 },
+};
+
 static const NLType rtnl_tca_option_data_gred_types[] = {
         [TCA_GRED_DPS] = { .size = sizeof(struct tc_gred_sopt) },
 };
@@ -908,6 +921,7 @@ static const char* const nl_union_tca_option_data_table[] = {
         [NL_UNION_TCA_OPTION_DATA_ETS] = "ets",
         [NL_UNION_TCA_OPTION_DATA_FQ] = "fq",
         [NL_UNION_TCA_OPTION_DATA_FQ_CODEL] = "fq_codel",
+        [NL_UNION_TCA_OPTION_DATA_FQ_PIE] = "fq_pie",
         [NL_UNION_TCA_OPTION_DATA_GRED] = "gred",
         [NL_UNION_TCA_OPTION_DATA_HHF] = "hhf",
         [NL_UNION_TCA_OPTION_DATA_HTB] = "htb",
@@ -932,6 +946,8 @@ static const NLTypeSystem rtnl_tca_option_data_type_systems[] = {
                                                    .types = rtnl_tca_option_data_fq_types },
         [NL_UNION_TCA_OPTION_DATA_FQ_CODEL] =    { .count = ELEMENTSOF(rtnl_tca_option_data_fq_codel_types),
                                                    .types = rtnl_tca_option_data_fq_codel_types },
+        [NL_UNION_TCA_OPTION_DATA_FQ_PIE] =      { .count = ELEMENTSOF(rtnl_tca_option_data_fq_pie_types),
+                                                   .types = rtnl_tca_option_data_fq_pie_types },
         [NL_UNION_TCA_OPTION_DATA_GRED] =        { .count = ELEMENTSOF(rtnl_tca_option_data_gred_types),
                                                    .types = rtnl_tca_option_data_gred_types },
         [NL_UNION_TCA_OPTION_DATA_HHF] =         { .count = ELEMENTSOF(rtnl_tca_option_data_hhf_types),
@@ -966,6 +982,15 @@ static const NLType rtnl_tca_types[] = {
 static const NLTypeSystem rtnl_tca_type_system = {
         .count = ELEMENTSOF(rtnl_tca_types),
         .types = rtnl_tca_types,
+};
+
+static const NLType mdb_types[] = {
+        [MDBA_SET_ENTRY]     = { .size = sizeof(struct br_port_msg) },
+};
+
+static const NLTypeSystem rtnl_mdb_type_system = {
+        .count = ELEMENTSOF(mdb_types),
+        .types = mdb_types,
 };
 
 static const NLType error_types[] = {
@@ -1012,6 +1037,9 @@ static const NLType rtnl_types[] = {
         [RTM_NEWTCLASS]    = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
         [RTM_DELTCLASS]    = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
         [RTM_GETTCLASS]    = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_tca_type_system, .size = sizeof(struct tcmsg) },
+        [RTM_NEWMDB]       = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_mdb_type_system, .size = sizeof(struct br_port_msg) },
+        [RTM_DELMDB]       = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_mdb_type_system, .size = sizeof(struct br_port_msg) },
+        [RTM_GETMDB]       = { .type = NETLINK_TYPE_NESTED, .type_system = &rtnl_mdb_type_system, .size = sizeof(struct br_port_msg) },
 };
 
 const NLTypeSystem rtnl_type_system_root = {

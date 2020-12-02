@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include "macro.h"
@@ -26,3 +26,4 @@ void loop_device_relinquish(LoopDevice *d);
 int loop_device_refresh_size(LoopDevice *d, uint64_t offset, uint64_t size);
 
 int loop_device_flock(LoopDevice *d, int operation);
+int loop_device_sync(LoopDevice *d);

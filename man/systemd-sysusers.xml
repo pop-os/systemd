@@ -1,7 +1,7 @@
 <?xml version='1.0'?> <!--*-nxml-*-->
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-sysusers"
     xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -66,6 +66,19 @@
         paths will be prefixed with the given alternate
         <replaceable>root</replaceable> path, including config search
         paths. </para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><option>--image=<replaceable>image</replaceable></option></term>
+
+        <listitem><para>Takes a path to a disk image file or block device node. If specified all operations
+        are applied to file system in the indicated disk image. This is similar to <option>--root=</option>
+        but operates on file systems stored in disk images or block devices. The disk image should either
+        contain just a file system or a set of file systems within a GPT partition table, following the
+        <ulink url="https://systemd.io/DISCOVERABLE_PARTITIONS">Discoverable Partitions
+        Specification</ulink>. For further information on supported disk images, see
+        <citerefentry><refentrytitle>systemd-nspawn</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
+        switch of the same name.</para></listitem>
       </varlistentry>
 
       <varlistentry>

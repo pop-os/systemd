@@ -74,9 +74,6 @@ ForEachMacros:
   - FOREACH_INOTIFY_EVENT
   - FOREACH_STRING
   - FOREACH_SUBSYSTEM
-  - _FOREACH_WORD
-  - FOREACH_WORD
-  - FOREACH_WORD_SEPARATOR
   - HASHMAP_FOREACH
   - HASHMAP_FOREACH_IDX
   - HASHMAP_FOREACH_KEY
@@ -121,6 +118,7 @@ PenaltyBreakString: 0
 PenaltyExcessCharacter: 10
 PenaltyReturnTypeOnItsOwnLine: 100
 SpaceAfterCStyleCast: true
+SpaceBeforeParens: ControlStatementsExceptForEachMacros
 SpacesInAngles:  true
 TabWidth:        8
 UseCRLF:         false

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <stddef.h>
@@ -105,7 +105,7 @@ int cpu_set_realloc(CPUSet *cpu_set, unsigned ncpus) {
         return 0;
 }
 
-static int cpu_set_add(CPUSet *cpu_set, unsigned cpu) {
+int cpu_set_add(CPUSet *cpu_set, unsigned cpu) {
         int r;
 
         if (cpu >= 8192)

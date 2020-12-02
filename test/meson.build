@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 if install_tests
         testdata_dir = testsdir + '/testdata/'
@@ -55,6 +55,21 @@ if install_tests
 endif
 
 test_network_generator_conversion_sh = find_program('test-network-generator-conversion.sh')
+
+############################################################
+
+test_sysusers_dir = join_paths(meson.current_source_dir(), 'test-sysusers')
+
+test_sysusers_sh = configure_file(
+        input : 'test-sysusers.sh.in',
+        output : 'test-sysusers.sh',
+        configuration : substs)
+if install_tests and conf.get('ENABLE_SYSUSERS') == 1
+        install_data(test_sysusers_sh,
+                     install_dir : testsdir)
+        install_subdir('test-sysusers',
+                       install_dir : testdata_dir)
+endif
 
 ############################################################
 

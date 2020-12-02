@@ -19,21 +19,25 @@ sed -i 's_/usr/libexec/selinux/hll/pp_/usr/lib/selinux/hll/pp_' test/TEST-06-SEL
 
 FAILED=""
 
-# Because this test is used both by upstream and by Debian, we use different blacklist filenames.
+# Because this test is used both by upstream and by Debian, we use different deny-list filenames.
 # For more details see https://salsa.debian.org/systemd-team/systemd/merge_requests/52
+# The naming is transitioning from blacklist to deny-list, so currently both are supported
+# More details in https://github.com/systemd/systemd/pull/16262
 if [ -n "$TEST_UPSTREAM" ]; then
+    DENY_LIST="deny-list-ubuntu-ci"
     BLACKLIST="blacklist-ubuntu-ci"
 else
+    DENY_LIST="deny-list-upstream-ci"
     BLACKLIST="blacklist-upstream-ci"
 fi
 
 for t in test/TEST*; do
     testname=$(basename $t)
-    if [ -f "$t/$BLACKLIST" ]; then
-        echo "========== BLACKLISTED: $testname =========="
+    if [ -f "$t/${DENY_LIST}" -o -f "$t/${BLACKLIST}" ]; then
+        echo "========== DENY-LISTED: $testname =========="
         continue
-    elif [ -f "$t/$BLACKLIST-$DPKGARCH" ]; then
-        echo "========== BLACKLISTED (for arch $DPKGARCH): $testname =========="
+    elif [ -f "$t/${DENY_LIST}-$DPKGARCH" -o -f "$t/${BLACKLIST}-$DPKGARCH" ]; then
+        echo "========== DENY-LISTED (for arch $DPKGARCH): $testname =========="
         continue
     fi
     echo "========== START: $testname =========="

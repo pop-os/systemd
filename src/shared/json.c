@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <locale.h>
@@ -405,6 +405,9 @@ int json_variant_new_stringn(JsonVariant **ret, const char *s, size_t n) {
                 return 0;
         }
 
+        if (!utf8_is_valid_n(s, n)) /* JSON strings must be valid UTF-8 */
+                return -EUCLEAN;
+
         r = json_variant_new(&v, JSON_VARIANT_STRING, n + 1);
         if (r < 0)
                 return r;
@@ -428,6 +431,12 @@ int json_variant_new_base64(JsonVariant **ret, const void *p, size_t n) {
                 return k;
 
         return json_variant_new_stringn(ret, s, k);
+}
+
+int json_variant_new_id128(JsonVariant **ret, sd_id128_t id) {
+        char s[SD_ID128_STRING_MAX];
+
+        return json_variant_new_string(ret, sd_id128_to_string(id, s));
 }
 
 static void json_variant_set(JsonVariant *a, JsonVariant *b) {
@@ -630,8 +639,12 @@ int json_variant_new_array_strv(JsonVariant **ret, char **l) {
                                 return r;
 
                         w->is_reference = true;
-                } else
+                } else {
+                        if (!utf8_is_valid_n(l[v->n_elements], k)) /* JSON strings must be valid UTF-8 */
+                                return -EUCLEAN;
+
                         memcpy(w->string, l[v->n_elements], k+1);
+                }
         }
 
         v->normalized = true;
@@ -1476,6 +1489,58 @@ static int print_source(FILE *f, JsonVariant *v, JsonFormatFlags flags, bool whi
         return 0;
 }
 
+static void json_format_string(FILE *f, const char *q, JsonFormatFlags flags) {
+        assert(q);
+
+        fputc('"', f);
+
+        if (flags & JSON_FORMAT_COLOR)
+                fputs(ANSI_GREEN, f);
+
+        for (; *q; q++)
+                switch (*q) {
+                case '"':
+                        fputs("\\\"", f);
+                        break;
+
+                case '\\':
+                        fputs("\\\\", f);
+                        break;
+
+                case '\b':
+                        fputs("\\b", f);
+                        break;
+
+                case '\f':
+                        fputs("\\f", f);
+                        break;
+
+                case '\n':
+                        fputs("\\n", f);
+                        break;
+
+                case '\r':
+                        fputs("\\r", f);
+                        break;
+
+                case '\t':
+                        fputs("\\t", f);
+                        break;
+
+                default:
+                        if ((signed char) *q >= 0 && *q < ' ')
+                                fprintf(f, "\\u%04x", *q);
+                        else
+                                fputc(*q, f);
+                        break;
+                }
+
+        if (flags & JSON_FORMAT_COLOR)
+                fputs(ANSI_NORMAL, f);
+
+        fputc('"', f);
+}
+
 static int json_format(FILE *f, JsonVariant *v, JsonFormatFlags flags, const char *prefix) {
         int r;
 
@@ -1548,61 +1613,9 @@ static int json_format(FILE *f, JsonVariant *v, JsonFormatFlags flags, const cha
                         fputs(ANSI_NORMAL, f);
                 break;
 
-        case JSON_VARIANT_STRING: {
-                const char *q;
-
-                fputc('"', f);
-
-                if (flags & JSON_FORMAT_COLOR)
-                        fputs(ANSI_GREEN, f);
-
-                for (q = json_variant_string(v); *q; q++) {
-
-                        switch (*q) {
-
-                        case '"':
-                                fputs("\\\"", f);
-                                break;
-
-                        case '\\':
-                                fputs("\\\\", f);
-                                break;
-
-                        case '\b':
-                                fputs("\\b", f);
-                                break;
-
-                        case '\f':
-                                fputs("\\f", f);
-                                break;
-
-                        case '\n':
-                                fputs("\\n", f);
-                                break;
-
-                        case '\r':
-                                fputs("\\r", f);
-                                break;
-
-                        case '\t':
-                                fputs("\\t", f);
-                                break;
-
-                        default:
-                                if ((signed char) *q >= 0 && *q < ' ')
-                                        fprintf(f, "\\u%04x", *q);
-                                else
-                                        fputc(*q, f);
-                                break;
-                        }
-                }
-
-                if (flags & JSON_FORMAT_COLOR)
-                        fputs(ANSI_NORMAL, f);
-
-                fputc('"', f);
+        case JSON_VARIANT_STRING:
+                json_format_string(f, json_variant_string(v), flags);
                 break;
-        }
 
         case JSON_VARIANT_ARRAY: {
                 size_t i, n;
@@ -1958,6 +1971,17 @@ int json_variant_set_field_boolean(JsonVariant **v, const char *field, bool b) {
         int r;
 
         r = json_variant_new_boolean(&m, b);
+        if (r < 0)
+                return r;
+
+        return json_variant_set_field(v, field, m);
+}
+
+int json_variant_set_field_strv(JsonVariant **v, const char *field, char **l) {
+        _cleanup_(json_variant_unrefp) JsonVariant *m = NULL;
+        int r;
+
+        r = json_variant_new_array_strv(&m, l);
         if (r < 0)
                 return r;
 
@@ -3171,7 +3195,7 @@ int json_parse_file_at(FILE *f, int dir_fd, const char *path, JsonParseFlags fla
         if (f)
                 r = read_full_stream(f, &text, NULL);
         else if (path)
-                r = read_full_file_full(dir_fd, path, 0, &text, NULL);
+                r = read_full_file_full(dir_fd, path, 0, NULL, &text, NULL);
         else
                 return -EINVAL;
         if (r < 0)
@@ -3579,6 +3603,64 @@ int json_buildv(JsonVariant **ret, va_list ap) {
                         break;
                 }
 
+                case _JSON_BUILD_ID128: {
+                        sd_id128_t id;
+
+                        if (!IN_SET(current->expect, EXPECT_TOPLEVEL, EXPECT_OBJECT_VALUE, EXPECT_ARRAY_ELEMENT)) {
+                                r = -EINVAL;
+                                goto finish;
+                        }
+
+                        id = va_arg(ap, sd_id128_t);
+
+                        if (current->n_suppress == 0) {
+                                r = json_variant_new_id128(&add, id);
+                                if (r < 0)
+                                        goto finish;
+                        }
+
+                        n_subtract = 1;
+
+                        if (current->expect == EXPECT_TOPLEVEL)
+                                current->expect = EXPECT_END;
+                        else if (current->expect == EXPECT_OBJECT_VALUE)
+                                current->expect = EXPECT_OBJECT_KEY;
+                        else
+                                assert(current->expect == EXPECT_ARRAY_ELEMENT);
+
+                        break;
+                }
+
+                case _JSON_BUILD_BYTE_ARRAY: {
+                        const void *array;
+                        size_t n;
+
+                        if (!IN_SET(current->expect, EXPECT_TOPLEVEL, EXPECT_OBJECT_VALUE, EXPECT_ARRAY_ELEMENT)) {
+                                r = -EINVAL;
+                                goto finish;
+                        }
+
+                        array = va_arg(ap, const void*);
+                        n = va_arg(ap, size_t);
+
+                        if (current->n_suppress == 0) {
+                                r = json_variant_new_array_bytes(&add, array, n);
+                                if (r < 0)
+                                        goto finish;
+                        }
+
+                        n_subtract = 1;
+
+                        if (current->expect == EXPECT_TOPLEVEL)
+                                current->expect = EXPECT_END;
+                        else if (current->expect == EXPECT_OBJECT_VALUE)
+                                current->expect = EXPECT_OBJECT_KEY;
+                        else
+                                assert(current->expect == EXPECT_ARRAY_ELEMENT);
+
+                        break;
+                }
+
                 case _JSON_BUILD_OBJECT_BEGIN:
 
                         if (!IN_SET(current->expect, EXPECT_TOPLEVEL, EXPECT_OBJECT_VALUE, EXPECT_ARRAY_ELEMENT)) {
@@ -3810,7 +3892,7 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
                 assert_se(value = json_variant_by_index(v, i+1));
 
                 for (p = table; p->name; p++)
-                        if (p->name == (const char*) -1 ||
+                        if (p->name == POINTER_MAX ||
                             streq_ptr(json_variant_string(key), p->name))
                                 break;
 

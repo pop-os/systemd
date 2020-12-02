@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include "macro.h"
@@ -88,6 +88,7 @@ typedef enum NLUnionLinkInfoData {
         NL_UNION_LINK_INFO_DATA_NLMON,
         NL_UNION_LINK_INFO_DATA_XFRM,
         NL_UNION_LINK_INFO_DATA_IFB,
+        NL_UNION_LINK_INFO_DATA_BAREUDP,
         _NL_UNION_LINK_INFO_DATA_MAX,
         _NL_UNION_LINK_INFO_DATA_INVALID = -1
 } NLUnionLinkInfoData;
@@ -102,6 +103,7 @@ typedef enum NLUnionTCAOptionData {
         NL_UNION_TCA_OPTION_DATA_ETS,
         NL_UNION_TCA_OPTION_DATA_FQ,
         NL_UNION_TCA_OPTION_DATA_FQ_CODEL,
+        NL_UNION_TCA_OPTION_DATA_FQ_PIE,
         NL_UNION_TCA_OPTION_DATA_GRED,
         NL_UNION_TCA_OPTION_DATA_HHF,
         NL_UNION_TCA_OPTION_DATA_HTB,

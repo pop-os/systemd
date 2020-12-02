@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <sys/epoll.h>
@@ -441,10 +441,7 @@ static int device_add_udev_wants(Unit *u, sd_device *dev) {
                 }
         }
 
-        strv_free(d->wants_property);
-        d->wants_property = TAKE_PTR(added);
-
-        return 0;
+        return strv_free_and_replace(d->wants_property, added);
 }
 
 static bool device_is_bound_by_mounts(Device *d, sd_device *dev) {
@@ -468,13 +465,12 @@ static bool device_is_bound_by_mounts(Device *d, sd_device *dev) {
 
 static void device_upgrade_mount_deps(Unit *u) {
         Unit *other;
-        Iterator i;
         void *v;
         int r;
 
         /* Let's upgrade Requires= to BindsTo= on us. (Used when SYSTEMD_MOUNT_DEVICE_BOUND is set) */
 
-        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REQUIRED_BY], i) {
+        HASHMAP_FOREACH_KEY(v, other, u->dependencies[UNIT_REQUIRED_BY]) {
                 if (other->type != UNIT_MOUNT)
                         continue;
 
@@ -736,6 +732,10 @@ static bool device_is_ready(sd_device *dev) {
         if (device_is_renaming(dev) > 0)
                 return false;
 
+        /* Is it really tagged as 'systemd' right now? */
+        if (sd_device_has_current_tag(dev, "systemd") <= 0)
+                return false;
+
         if (sd_device_get_property_value(dev, "SYSTEMD_READY", &ready) < 0)
                 return true;
 
@@ -894,6 +894,29 @@ static void device_propagate_reload_by_sysfs(Manager *m, const char *sysfs) {
         }
 }
 
+static int device_remove_old(Manager *m, sd_device *dev) {
+        _cleanup_free_ char *syspath_old = NULL, *e = NULL;
+        const char *devpath_old;
+        int r;
+
+        r = sd_device_get_property_value(dev, "DEVPATH_OLD", &devpath_old);
+        if (r < 0) {
+                log_device_debug_errno(dev, r, "Failed to get DEVPATH_OLD= property on 'move' uevent, ignoring: %m");
+                return 0;
+        }
+
+        syspath_old = path_join("/sys", devpath_old);
+        if (!syspath_old)
+                return log_oom();
+
+        r = unit_name_from_path(syspath_old, ".device", &e);
+        if (r < 0)
+                return log_device_error_errno(dev, r, "Failed to generate unit name from old device path: %m");
+
+        device_update_found_by_sysfs(m, syspath_old, 0, DEVICE_FOUND_UDEV|DEVICE_FOUND_MOUNT|DEVICE_FOUND_SWAP);
+        return 0;
+}
+
 static int device_dispatch_io(sd_device_monitor *monitor, sd_device *dev, void *userdata) {
         Manager *m = userdata;
         DeviceAction action;
@@ -915,20 +938,22 @@ static int device_dispatch_io(sd_device_monitor *monitor, sd_device *dev, void *
                 return 0;
         }
 
-        if (action == DEVICE_ACTION_CHANGE)
+        if (!IN_SET(action, DEVICE_ACTION_ADD, DEVICE_ACTION_REMOVE, DEVICE_ACTION_MOVE))
                 device_propagate_reload_by_sysfs(m, sysfs);
 
-        /* A change event can signal that a device is becoming ready, in particular if
-         * the device is using the SYSTEMD_READY logic in udev
-         * so we need to reach the else block of the following if, even for change events */
+        if (action == DEVICE_ACTION_MOVE)
+                (void) device_remove_old(m, dev);
+
+        /* A change event can signal that a device is becoming ready, in particular if the device is using
+         * the SYSTEMD_READY logic in udev so we need to reach the else block of the following if, even for
+         * change events */
         if (action == DEVICE_ACTION_REMOVE) {
                 r = swap_process_device_remove(m, dev);
                 if (r < 0)
                         log_device_warning_errno(dev, r, "Failed to process swap device remove event, ignoring: %m");
 
-                /* If we get notified that a device was removed by
-                 * udev, then it's completely gone, hence unset all
-                 * found bits */
+                /* If we get notified that a device was removed by udev, then it's completely gone, hence
+                 * unset all found bits */
                 device_update_found_by_sysfs(m, sysfs, 0, DEVICE_FOUND_UDEV|DEVICE_FOUND_MOUNT|DEVICE_FOUND_SWAP);
 
         } else if (device_is_ready(dev)) {
@@ -944,13 +969,10 @@ static int device_dispatch_io(sd_device_monitor *monitor, sd_device *dev, void *
                 /* The device is found now, set the udev found bit */
                 device_update_found_by_sysfs(m, sysfs, DEVICE_FOUND_UDEV, DEVICE_FOUND_UDEV);
 
-        } else {
-                /* The device is nominally around, but not ready for
-                 * us. Hence unset the udev bit, but leave the rest
-                 * around. */
-
+        } else
+                /* The device is nominally around, but not ready for us. Hence unset the udev bit, but leave
+                 * the rest around. */
                 device_update_found_by_sysfs(m, sysfs, 0, DEVICE_FOUND_UDEV);
-        }
 
         return 0;
 }

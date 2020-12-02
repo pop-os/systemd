@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 # Those files right now are not supported by the grammar. Also,
 # they are very long but quite repetitive and the parser is not very fast.
@@ -42,12 +42,14 @@ if conf.get('ENABLE_HWDB') == 1
                      hwdb_files_test,
                      install_dir : udevhwdbdir)
 
-        meson.add_install_script('sh', '-c',
-                                 mkdir_p.format(join_paths(sysconfdir, 'udev/hwdb.d')))
+        if install_sysconfdir
+                meson.add_install_script('sh', '-c',
+                                         mkdir_p.format(join_paths(sysconfdir, 'udev/hwdb.d')))
 
-        meson.add_install_script('sh', '-c',
-                                 'test -n "$DESTDIR" || @0@/systemd-hwdb update'
-                                 .format(rootbindir))
+                meson.add_install_script('sh', '-c',
+                                         'test -n "$DESTDIR" || @0@/systemd-hwdb update'
+                                         .format(rootbindir))
+        endif
 
         if want_tests != 'false'
                 parse_hwdb_py = find_program('parse_hwdb.py')

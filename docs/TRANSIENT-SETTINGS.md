@@ -151,9 +151,12 @@ All execution-related settings are available for transient units.
 ✓ TimerSlackNSec=
 ✓ NoNewPrivileges=
 ✓ KeyringMode=
+✓ ProtectProc=
+✓ ProcSubset=
 ✓ SystemCallFilter=
 ✓ SystemCallArchitectures=
 ✓ SystemCallErrorNumber=
+✓ SystemCallLog=
 ✓ MemoryDenyWriteExecute=
 ✓ RestrictNamespaces=
 ✓ RestrictRealtime=
@@ -267,6 +270,9 @@ All cgroup/resource control settings are available for transient units
 ✓ IPAccounting=
 ✓ IPAddressAllow=
 ✓ IPAddressDeny=
+✓ ManagedOOMSwap=
+✓ ManagedOOMMemoryPressure=
+✓ ManagedOOMMemoryPressureLimitPercent=
 ```
 
 ## Process Killing Settings
@@ -368,6 +374,7 @@ Most timer unit settings are available to transient units.
 ✓ RemainAfterElapse=
 ✓ AccuracySec=
 ✓ RandomizedDelaySec=
+✓ FixedRandomDelay=
   Unit=
 ```
 
@@ -413,6 +420,7 @@ Most socket unit settings are available to transient units.
 ✓ SocketMode=
 ✓ DirectoryMode=
 ✓ Accept=
+✓ FlushPending=
 ✓ Writable=
 ✓ MaxConnections=
 ✓ MaxConnectionsPerSource=

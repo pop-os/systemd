@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 #include <dirent.h>
@@ -92,6 +92,16 @@ static inline int make_null_stdio(void) {
                 (fd) = -1;                      \
                 _fd_;                           \
         })
+
+/* Like free_and_replace(), but for file descriptors */
+#define CLOSE_AND_REPLACE(a, b)                 \
+        ({                                      \
+                int *_fdp_ = &(a);              \
+                safe_close(*_fdp_);             \
+                *_fdp_ = TAKE_FD(b);            \
+                0;                              \
+        })
+
 
 int fd_reopen(int fd, int flags);
 

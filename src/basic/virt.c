@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
@@ -92,6 +92,11 @@ static int detect_vm_device_tree(void) {
         if (r == -ENOENT) {
                 _cleanup_closedir_ DIR *dir = NULL;
                 struct dirent *dent;
+
+                if (access("/proc/device-tree/ibm,partition-name", F_OK) == 0 &&
+                    access("/proc/device-tree/hmc-managed?", F_OK) == 0 &&
+                    access("/proc/device-tree/chosen/qemu,graphic-width", F_OK) != 0)
+                        return VIRTUALIZATION_POWERVM;
 
                 dir = opendir("/proc/device-tree");
                 if (!dir) {
@@ -442,6 +447,7 @@ static const char *const container_table[_VIRTUALIZATION_MAX] = {
         [VIRTUALIZATION_RKT]            = "rkt",
         [VIRTUALIZATION_WSL]            = "wsl",
         [VIRTUALIZATION_PROOT]          = "proot",
+        [VIRTUALIZATION_POUCH]          = "pouch",
 };
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(container, int);
@@ -489,6 +495,16 @@ int detect_container(void) {
                         }
                 }
         }
+
+        /* The container manager might have placed this in the /run/host hierarchy for us, which is best
+         * because we can be consumed just like that, without special privileges. */
+        r = read_one_line_file("/run/host/container-manager", &m);
+        if (r > 0) {
+                e = m;
+                goto translate_name;
+        }
+        if (!IN_SET(r, -ENOENT, 0))
+                return log_debug_errno(r, "Failed to read /run/systemd/container-manager: %m");
 
         if (getpid_cached() == 1) {
                 /* If we are PID 1 we can just check our own environment variable, and that's authoritative.
@@ -668,6 +684,7 @@ static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {
         [VIRTUALIZATION_BHYVE] = "bhyve",
         [VIRTUALIZATION_QNX] = "qnx",
         [VIRTUALIZATION_ACRN] = "acrn",
+        [VIRTUALIZATION_POWERVM] = "powervm",
         [VIRTUALIZATION_VM_OTHER] = "vm-other",
 
         [VIRTUALIZATION_SYSTEMD_NSPAWN] = "systemd-nspawn",
@@ -679,6 +696,7 @@ static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {
         [VIRTUALIZATION_RKT] = "rkt",
         [VIRTUALIZATION_WSL] = "wsl",
         [VIRTUALIZATION_PROOT] = "proot",
+        [VIRTUALIZATION_POUCH] = "pouch",
         [VIRTUALIZATION_CONTAINER_OTHER] = "container-other",
 };
 

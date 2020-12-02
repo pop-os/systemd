@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "conf-files.h"
 #include "conf-parser.h"
@@ -6,6 +6,7 @@
 #include "resolved-dnssd.h"
 #include "resolved-dns-rr.h"
 #include "resolved-manager.h"
+#include "resolved-conf.h"
 #include "specifier.h"
 #include "strv.h"
 
@@ -96,15 +97,15 @@ static int dnssd_service_load(Manager *manager, const char *filename) {
         if (r < 0)
                 return r;
 
-        if (!service->name_template) {
-                log_error("%s doesn't define service instance name", service->name);
-                return -EINVAL;
-        }
+        if (!service->name_template)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "%s doesn't define service instance name",
+                                       service->name);
 
-        if (!service->type) {
-                log_error("%s doesn't define service type", service->name);
-                return -EINVAL;
-        }
+        if (!service->type)
+                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                       "%s doesn't define service type",
+                                       service->name);
 
         if (LIST_IS_EMPTY(service->txt_data_items)) {
                 txt_data = new0(DnssdTxtData, 1);
@@ -156,14 +157,14 @@ static int specifier_dnssd_host_name(char specifier, const void *data, const voi
 
 int dnssd_render_instance_name(DnssdService *s, char **ret_name) {
         static const Specifier specifier_table[] = {
-                { 'm', specifier_machine_id,      NULL },
-                { 'b', specifier_boot_id,         NULL },
-                { 'H', specifier_dnssd_host_name, NULL },
-                { 'v', specifier_kernel_release,  NULL },
                 { 'a', specifier_architecture,    NULL },
-                { 'o', specifier_os_id,           NULL },
-                { 'w', specifier_os_version_id,   NULL },
+                { 'b', specifier_boot_id,         NULL },
                 { 'B', specifier_os_build_id,     NULL },
+                { 'H', specifier_dnssd_host_name, NULL },
+                { 'm', specifier_machine_id,      NULL },
+                { 'o', specifier_os_id,           NULL },
+                { 'v', specifier_kernel_release,  NULL },
+                { 'w', specifier_os_version_id,   NULL },
                 { 'W', specifier_os_variant_id,   NULL },
                 {}
         };
@@ -333,11 +334,10 @@ int dnssd_txt_item_new_from_data(const char *key, const void *data, const size_t
 }
 
 void dnssd_signal_conflict(Manager *manager, const char *name) {
-        Iterator i;
         DnssdService *s;
         int r;
 
-        HASHMAP_FOREACH(s, manager->dnssd_services, i) {
+        HASHMAP_FOREACH(s, manager->dnssd_services) {
                 if (s->withdrawn)
                         continue;
 

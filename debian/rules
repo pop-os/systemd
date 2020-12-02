@@ -38,6 +38,7 @@ endif
 CONFFLAGS = \
 	-Db_lto=true \
 	-Db_pie=true \
+	-Dmode=release \
 	-Drootlibdir=/lib/$(DEB_HOST_MULTIARCH) \
 	-Dsplit-usr=true \
 	-Dversion-tag="$(DEB_VERSION)" \
@@ -75,6 +76,7 @@ CONFFLAGS = \
 	-Dfdisk=false \
 	-Dpwquality=false \
 	-Dp11kit=false \
+	-Doomd=false \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
 	-Ddns-servers='' \
 	-Dlink-udev-shared=false \

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include "alloc-util.h"
 #include "dns-domain.h"
@@ -1380,7 +1380,7 @@ static int nsec3_hashed_domain_make(DnsResourceRecord *nsec3, const char *domain
  * matches the wildcard domain.
  *
  * Based on this we can prove either the existence of the record in @key, or NXDOMAIN or NODATA, or
- * that there is no proof either way. The latter is the case if a the proof of non-existence of a given
+ * that there is no proof either way. The latter is the case if a proof of non-existence of a given
  * name uses an NSEC3 record with the opt-out bit set. Lastly, if we are given insufficient NSEC3 records
  * to conclude anything we indicate this by returning NO_RR. */
 static int dnssec_test_nsec3(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecResult *result, bool *authenticated, uint32_t *ttl) {
@@ -1813,6 +1813,8 @@ int dnssec_nsec_test(DnsAnswer *answer, DnsResourceKey *key, DnssecNsecResult *r
 
                 /* The following checks only make sense for NSEC RRs that are not expanded from a wildcard */
                 r = dns_resource_record_is_synthetic(rr);
+                if (r == -ENODATA) /* No signing RR known. */
+                        continue;
                 if (r < 0)
                         return r;
                 if (r > 0)

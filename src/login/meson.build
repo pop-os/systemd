@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 systemd_logind_sources = files('''
         logind.c
@@ -74,8 +74,10 @@ if conf.get('ENABLE_LOGIND') == 1
                 input : 'logind.conf.in',
                 output : 'logind.conf',
                 configuration : substs)
-        install_data(logind_conf,
-                     install_dir : pkgsysconfdir)
+        if install_sysconfdir
+                install_data(logind_conf,
+                             install_dir : pkgsysconfdir)
+        endif
 
         install_data('org.freedesktop.login1.conf',
                      install_dir : dbuspolicydir)

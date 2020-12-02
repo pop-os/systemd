@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2013 Simon Peeters
 ***/
@@ -21,6 +21,8 @@
 #include "bus-map-properties.h"
 #include "bus-unit-util.h"
 #include "calendarspec.h"
+#include "cap-list.h"
+#include "capability-util.h"
 #include "conf-files.h"
 #include "copy.h"
 #include "def.h"
@@ -899,7 +901,7 @@ static bool times_in_range(const struct unit_times *times, const struct boot_tim
 static int list_dependencies_one(sd_bus *bus, const char *name, unsigned level, char ***units, unsigned branches) {
         _cleanup_strv_free_ char **deps = NULL;
         char **c;
-        int r = 0;
+        int r;
         usec_t service_longest = 0;
         int to_print = 0;
         struct unit_times *times;
@@ -1246,8 +1248,7 @@ static int expand_patterns(sd_bus *bus, char **patterns, char ***ret) {
                 }
         }
 
-        *ret = expanded_patterns;
-        expanded_patterns = NULL; /* do not free */
+        *ret = TAKE_PTR(expanded_patterns); /* do not free */
 
         return 0;
 }
@@ -1498,7 +1499,6 @@ static int do_unit_files(int argc, char *argv[], void *userdata) {
         _cleanup_hashmap_free_ Hashmap *unit_ids = NULL;
         _cleanup_hashmap_free_ Hashmap *unit_names = NULL;
         char **patterns = strv_skip(argv, 1);
-        Iterator i;
         const char *k, *dst;
         char **v;
         int r;
@@ -1511,7 +1511,7 @@ static int do_unit_files(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return log_error_errno(r, "unit_file_build_name_map() failed: %m");
 
-        HASHMAP_FOREACH_KEY(dst, k, unit_ids, i) {
+        HASHMAP_FOREACH_KEY(dst, k, unit_ids) {
                 if (!strv_fnmatch_or_empty(patterns, k, FNM_NOESCAPE) &&
                     !strv_fnmatch_or_empty(patterns, dst, FNM_NOESCAPE))
                         continue;
@@ -1519,7 +1519,7 @@ static int do_unit_files(int argc, char *argv[], void *userdata) {
                 printf("ids: %s → %s\n", k, dst);
         }
 
-        HASHMAP_FOREACH_KEY(v, k, unit_names, i) {
+        HASHMAP_FOREACH_KEY(v, k, unit_names) {
                 if (!strv_fnmatch_or_empty(patterns, k, FNM_NOESCAPE) &&
                     !strv_fnmatch_strv_or_empty(patterns, v, FNM_NOESCAPE))
                         continue;
@@ -1592,6 +1592,51 @@ static int dump_exit_status(int argc, char *argv[], void *userdata) {
         return table_print(table, NULL);
 }
 
+static int dump_capabilities(int argc, char *argv[], void *userdata) {
+        _cleanup_(table_unrefp) Table *table = NULL;
+        unsigned last_cap;
+        int r;
+
+        table = table_new("name", "number");
+        if (!table)
+                return log_oom();
+
+        (void) table_set_align_percent(table, table_get_cell(table, 0, 1), 100);
+
+        /* Determine the maximum of the last cap known by the kernel and by us */
+        last_cap = MAX((unsigned) CAP_LAST_CAP, cap_last_cap());
+
+        if (strv_isempty(strv_skip(argv, 1)))
+                for (unsigned c = 0; c <= last_cap; c++) {
+                        r = table_add_many(table,
+                                           TABLE_STRING, capability_to_name(c) ?: "cap_???",
+                                           TABLE_UINT, c);
+                        if (r < 0)
+                                return table_log_add_error(r);
+                }
+        else {
+                for (int i = 1; i < argc; i++) {
+                        int c;
+
+                        c = capability_from_name(argv[i]);
+                        if (c < 0 || (unsigned) c > last_cap)
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Capability \"%s\" not known.", argv[i]);
+
+                        r = table_add_many(table,
+                                           TABLE_STRING, capability_to_name(c) ?: "cap_???",
+                                           TABLE_UINT, (unsigned) c);
+                        if (r < 0)
+                                return table_log_add_error(r);
+                }
+
+                (void) table_set_sort(table, (size_t) 1, (size_t) -1);
+        }
+
+        (void) pager_open(arg_pager_flags);
+
+        return table_print(table, NULL);
+}
+
 #if HAVE_SECCOMP
 
 static int load_kernel_syscalls(Set **ret) {
@@ -1640,7 +1685,7 @@ static int load_kernel_syscalls(Set **ret) {
         return 0;
 }
 
-static void kernel_syscalls_remove(Set *s, const SyscallFilterSet *set) {
+static void syscall_set_remove(Set *s, const SyscallFilterSet *set) {
         const char *syscall;
 
         NULSTR_FOREACH(syscall, set->value) {
@@ -1671,8 +1716,13 @@ static int dump_syscall_filters(int argc, char *argv[], void *userdata) {
         (void) pager_open(arg_pager_flags);
 
         if (strv_isempty(strv_skip(argv, 1))) {
-                _cleanup_set_free_ Set *kernel = NULL;
+                _cleanup_set_free_ Set *kernel = NULL, *known = NULL;
+                const char *sys;
                 int i, k;
+
+                NULSTR_FOREACH(sys, syscall_filter_sets[SYSCALL_FILTER_SET_KNOWN].value)
+                        if (set_put_strdup(&known, sys) < 0)
+                                return log_oom();
 
                 k = load_kernel_syscalls(&kernel);
 
@@ -1682,8 +1732,28 @@ static int dump_syscall_filters(int argc, char *argv[], void *userdata) {
                                 puts("");
 
                         dump_syscall_filter(set);
-                        kernel_syscalls_remove(kernel, set);
+                        syscall_set_remove(kernel, set);
+                        if (i != SYSCALL_FILTER_SET_KNOWN)
+                                syscall_set_remove(known, set);
                         first = false;
+                }
+
+                if (!set_isempty(known)) {
+                        _cleanup_free_ char **l = NULL;
+                        char **syscall;
+
+                        printf("\n"
+                               "# %sUngrouped System Calls%s (known but not included in any of the groups except @known):\n",
+                               ansi_highlight(), ansi_normal());
+
+                        l = set_get_strv(known);
+                        if (!l)
+                                return log_oom();
+
+                        strv_sort(l);
+
+                        STRV_FOREACH(syscall, l)
+                                printf("#   %s\n", *syscall);
                 }
 
                 if (k < 0) {
@@ -2126,6 +2196,7 @@ static int help(int argc, char *argv[], void *userdata) {
                "  unit-files               List files and symlinks for units\n"
                "  unit-paths               List load directories for units\n"
                "  exit-status [STATUS...]  List exit status definitions\n"
+               "  capability [CAP...]      List capability definitions\n"
                "  syscall-filter [NAME...] Print list of syscalls in seccomp filter\n"
                "  condition CONDITION...   Evaluate conditions and asserts\n"
                "  verify FILE...           Check unit files for correctness\n"
@@ -2363,6 +2434,7 @@ static int run(int argc, char *argv[]) {
                 { "unit-paths",        1,        1,        0,            dump_unit_paths        },
                 { "exit-status",       VERB_ANY, VERB_ANY, 0,            dump_exit_status       },
                 { "syscall-filter",    VERB_ANY, VERB_ANY, 0,            dump_syscall_filters   },
+                { "capability",        VERB_ANY, VERB_ANY, 0,            dump_capabilities      },
                 { "condition",         2,        VERB_ANY, 0,            do_condition           },
                 { "verify",            2,        VERB_ANY, 0,            do_verify              },
                 { "calendar",          2,        VERB_ANY, 0,            test_calendar          },

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <limits.h>
@@ -183,14 +183,12 @@ static int parse_line(
                 k = strlen(l);
                 assert(k > 0);
 
-                if (l[k-1] != ']') {
-                        log_syntax(unit, LOG_ERR, filename, line, 0, "Invalid section header '%s'", l);
-                        return -EBADMSG;
-                }
+                if (l[k-1] != ']')
+                        return log_syntax(unit, LOG_ERR, filename, line, SYNTHETIC_ERRNO(EBADMSG), "Invalid section header '%s'", l);
 
                 n = strndup(l+1, k-2);
                 if (!n)
-                        return -ENOMEM;
+                        return log_oom();
 
                 if (sections && !nulstr_contains(sections, n)) {
                         bool ignore = flags & CONFIG_PARSE_RELAXED;
@@ -705,7 +703,7 @@ int config_parse_tristate(
                 return 0;
         }
 
-        *t = !!k;
+        *t = k;
         return 0;
 }
 
@@ -1245,3 +1243,5 @@ int config_parse_vlanprotocol(const char* unit,
 
         return 0;
 }
+
+DEFINE_CONFIG_PARSE(config_parse_percent, parse_percent, "Failed to parse percent value");

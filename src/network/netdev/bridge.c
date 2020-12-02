@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <net/if.h>
 
@@ -192,7 +192,7 @@ int link_set_bridge(Link *link) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Could not allocate RTM_SETLINK message: %m");
 
-        r = sd_rtnl_message_link_set_family(req, PF_BRIDGE);
+        r = sd_rtnl_message_link_set_family(req, AF_BRIDGE);
         if (r < 0)
                 return log_link_error_errno(link, r, "Could not set message family: %m");
 

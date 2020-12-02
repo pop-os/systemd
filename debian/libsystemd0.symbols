@@ -27,6 +27,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_243@LIBSYSTEMD_243 243
  LIBSYSTEMD_245@LIBSYSTEMD_245 245
  LIBSYSTEMD_246@LIBSYSTEMD_246 246
+ LIBSYSTEMD_247@LIBSYSTEMD_247 247
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -107,6 +108,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_error_free@LIBSYSTEMD_221 221
  sd_bus_error_get_errno@LIBSYSTEMD_221 221
  sd_bus_error_has_name@LIBSYSTEMD_221 221
+ sd_bus_error_has_names_sentinel@LIBSYSTEMD_247 247
  sd_bus_error_is_set@LIBSYSTEMD_221 221
  sd_bus_error_move@LIBSYSTEMD_240 240
  sd_bus_error_set@LIBSYSTEMD_221 221
@@ -338,6 +340,8 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_enumerator_new@LIBSYSTEMD_240 240
  sd_device_enumerator_ref@LIBSYSTEMD_240 240
  sd_device_enumerator_unref@LIBSYSTEMD_240 240
+ sd_device_get_current_tag_first@LIBSYSTEMD_247 247
+ sd_device_get_current_tag_next@LIBSYSTEMD_247 247
  sd_device_get_devlink_first@LIBSYSTEMD_240 240
  sd_device_get_devlink_next@LIBSYSTEMD_240 240
  sd_device_get_devname@LIBSYSTEMD_240 240
@@ -362,6 +366,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_get_tag_first@LIBSYSTEMD_240 240
  sd_device_get_tag_next@LIBSYSTEMD_240 240
  sd_device_get_usec_since_initialized@LIBSYSTEMD_240 240
+ sd_device_has_current_tag@LIBSYSTEMD_247 247
  sd_device_has_tag@LIBSYSTEMD_240 240
  sd_device_monitor_attach_event@LIBSYSTEMD_240 240
  sd_device_monitor_detach_event@LIBSYSTEMD_240 240
@@ -383,6 +388,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_new_from_syspath@LIBSYSTEMD_240 240
  sd_device_ref@LIBSYSTEMD_240 240
  sd_device_set_sysattr_value@LIBSYSTEMD_240 240
+ sd_device_set_sysattr_valuef@LIBSYSTEMD_247 247
  sd_device_unref@LIBSYSTEMD_240 240
  sd_event_add_child@LIBSYSTEMD_221 221
  sd_event_add_child_pidfd@LIBSYSTEMD_245 245
@@ -393,6 +399,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_add_post@LIBSYSTEMD_221 221
  sd_event_add_signal@LIBSYSTEMD_221 221
  sd_event_add_time@LIBSYSTEMD_221 221
+ sd_event_add_time_relative@LIBSYSTEMD_247 247
  sd_event_default@LIBSYSTEMD_221 221
  sd_event_dispatch@LIBSYSTEMD_221 221
  sd_event_exit@LIBSYSTEMD_221 221
@@ -418,6 +425,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_get_destroy_callback@LIBSYSTEMD_239 239
  sd_event_source_get_enabled@LIBSYSTEMD_221 221
  sd_event_source_get_event@LIBSYSTEMD_221 221
+ sd_event_source_get_exit_on_failure@LIBSYSTEMD_247 247
  sd_event_source_get_floating@LIBSYSTEMD_240 240
  sd_event_source_get_inotify_mask@LIBSYSTEMD_239 239
  sd_event_source_get_io_events@LIBSYSTEMD_221 221
@@ -438,6 +446,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_set_description@LIBSYSTEMD_221 221
  sd_event_source_set_destroy_callback@LIBSYSTEMD_239 239
  sd_event_source_set_enabled@LIBSYSTEMD_221 221
+ sd_event_source_set_exit_on_failure@LIBSYSTEMD_247 247
  sd_event_source_set_floating@LIBSYSTEMD_240 240
  sd_event_source_set_io_events@LIBSYSTEMD_221 221
  sd_event_source_set_io_fd@LIBSYSTEMD_221 221
@@ -446,6 +455,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_set_priority@LIBSYSTEMD_221 221
  sd_event_source_set_time@LIBSYSTEMD_221 221
  sd_event_source_set_time_accuracy@LIBSYSTEMD_221 221
+ sd_event_source_set_time_relative@LIBSYSTEMD_247 247
  sd_event_source_set_userdata@LIBSYSTEMD_221 221
  sd_event_source_unref@LIBSYSTEMD_221 221
  sd_event_unref@LIBSYSTEMD_221 221

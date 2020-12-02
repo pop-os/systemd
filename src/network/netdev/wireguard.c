@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2015-2017 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
 ***/
@@ -395,14 +395,13 @@ static void resolve_endpoints(NetDev *netdev) {
         };
         WireguardPeer *peer;
         Wireguard *w;
-        Iterator i;
         int r;
 
         assert(netdev);
         w = WIREGUARD(netdev);
         assert(w);
 
-        SET_FOREACH(peer, w->peers_with_unresolved_endpoint, i) {
+        SET_FOREACH(peer, w->peers_with_unresolved_endpoint) {
                 r = resolve_getaddrinfo(netdev->manager->resolve,
                                         NULL,
                                         peer->endpoint_host,
@@ -493,6 +492,8 @@ static int wireguard_decode_key_and_warn(
                 (void) warn_file_is_world_accessible(filename, NULL, unit, line);
 
         r = unbase64mem_full(rvalue, strlen(rvalue), true, &key, &len);
+        if (r == -ENOMEM)
+                return log_oom();
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to decode wireguard key provided by %s=, ignoring assignment: %m", lvalue);
@@ -527,8 +528,7 @@ int config_parse_wireguard_private_key(
         w = WIREGUARD(data);
         assert(w);
 
-        (void) wireguard_decode_key_and_warn(rvalue, w->private_key, unit, filename, line, lvalue);
-        return 0;
+        return wireguard_decode_key_and_warn(rvalue, w->private_key, unit, filename, line, lvalue);
 }
 
 int config_parse_wireguard_private_key_file(
@@ -565,7 +565,7 @@ int config_parse_wireguard_private_key_file(
         return free_and_replace(w->private_key_file, path);
 }
 
-int config_parse_wireguard_preshared_key(
+int config_parse_wireguard_peer_key(
                 const char *unit,
                 const char *filename,
                 unsigned line,
@@ -577,7 +577,7 @@ int config_parse_wireguard_preshared_key(
                 void *data,
                 void *userdata) {
 
-        WireguardPeer *peer;
+        _cleanup_(wireguard_peer_free_or_set_invalidp) WireguardPeer *peer = NULL;
         Wireguard *w;
         int r;
 
@@ -589,7 +589,13 @@ int config_parse_wireguard_preshared_key(
         if (r < 0)
                 return log_oom();
 
-        (void) wireguard_decode_key_and_warn(rvalue, peer->preshared_key, unit, filename, line, lvalue);
+        r = wireguard_decode_key_and_warn(rvalue,
+                                          streq(lvalue, "PublicKey") ? peer->public_key : peer->preshared_key,
+                                          unit, filename, line, lvalue);
+        if (r < 0)
+                return r;
+
+        TAKE_PTR(peer);
         return 0;
 }
 
@@ -632,38 +638,6 @@ int config_parse_wireguard_preshared_key_file(
                 return 0;
 
         free_and_replace(peer->preshared_key_file, path);
-        TAKE_PTR(peer);
-        return 0;
-}
-
-int config_parse_wireguard_public_key(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-
-        _cleanup_(wireguard_peer_free_or_set_invalidp) WireguardPeer *peer = NULL;
-        Wireguard *w;
-        int r;
-
-        assert(data);
-        w = WIREGUARD(data);
-        assert(w);
-
-        r = wireguard_peer_new_static(w, filename, section_line, &peer);
-        if (r < 0)
-                return log_oom();
-
-        r = wireguard_decode_key_and_warn(rvalue, peer->public_key, unit, filename, line, lvalue);
-        if (r < 0)
-                return 0;
-
         TAKE_PTR(peer);
         return 0;
 }
@@ -822,7 +796,7 @@ int config_parse_wireguard_keepalive(
                 void *data,
                 void *userdata) {
 
-        WireguardPeer *peer;
+        _cleanup_(wireguard_peer_free_or_set_invalidp) WireguardPeer *peer = NULL;
         uint16_t keepalive = 0;
         Wireguard *w;
         int r;
@@ -850,6 +824,8 @@ int config_parse_wireguard_keepalive(
         }
 
         peer->persistent_keepalive_interval = keepalive;
+
+        TAKE_PTR(peer);
         return 0;
 }
 
@@ -895,7 +871,7 @@ static int wireguard_read_key_file(const char *filename, uint8_t dest[static WG_
         r = read_full_file_full(
                         AT_FDCWD, filename,
                         READ_FULL_FILE_SECURE | READ_FULL_FILE_UNBASE64 | READ_FULL_FILE_WARN_WORLD_READABLE | READ_FULL_FILE_CONNECT_SOCKET,
-                        &key, &key_len);
+                        NULL, &key, &key_len);
         if (r < 0)
                 return r;
 

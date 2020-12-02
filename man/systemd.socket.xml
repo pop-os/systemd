@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd.socket">
   <refentryinfo>
@@ -200,22 +200,24 @@
         </para>
 
         <para>If the address string is a string in the format
-        v.w.x.y:z, it is read as IPv4 specifier for listening on an
-        address v.w.x.y on a port z.</para>
-
-        <para>If the address string is a string in the format [x]:y,
-        it is read as IPv6 address x on a port y. Note that this might
-        make the service available via IPv4, too, depending on the
-        <varname>BindIPv6Only=</varname> setting (see below).
-        </para>
+        <literal><replaceable>v.w.x.y</replaceable>:<replaceable>z</replaceable></literal>, it is interpreted
+        as IPv4 address <replaceable>v.w.x.y</replaceable> and port <replaceable>z</replaceable>.</para>
 
         <para>If the address string is a string in the format
-        <literal>vsock:x:y</literal>, it is read as CID <literal>x</literal> on
-        a port <literal>y</literal> address in the
-        <constant>AF_VSOCK</constant> family.  The CID is a unique 32-bit
-        integer identifier in <constant>AF_VSOCK</constant> analogous to an IP
-        address.  Specifying the CID is optional, and may be set to the empty
-        string.</para>
+        <literal>[<replaceable>x</replaceable>]:<replaceable>y</replaceable></literal>, it is interpreted as
+        IPv6 address <replaceable>x</replaceable> and port <replaceable>y</replaceable>. An optional
+        interface scope (interface name or number) may be specified after a <literal>%</literal> symbol:
+        <literal>[<replaceable>x</replaceable>]:<replaceable>y</replaceable>%<replaceable>dev</replaceable></literal>.
+        Interface scopes are only useful with link-local addresses, because the kernel ignores them in other
+        cases. Note that if an address is specified as IPv6, it might still make the service available via
+        IPv4 too, depending on the <varname>BindIPv6Only=</varname> setting (see below).</para>
+
+        <para>If the address string is a string in the format
+        <literal>vsock:<replaceable>x</replaceable>:<replaceable>y</replaceable></literal>, it is read as CID
+        <replaceable>x</replaceable> on a port <replaceable>y</replaceable> address in the
+        <constant>AF_VSOCK</constant> family.  The CID is a unique 32-bit integer identifier in
+        <constant>AF_VSOCK</constant> analogous to an IP address.  Specifying the CID is optional, and may be
+        set to the empty string.</para>
 
         <para>Note that <constant>SOCK_SEQPACKET</constant> (i.e.
         <varname>ListenSequentialPacket=</varname>) is only available
@@ -251,11 +253,10 @@
 
       <varlistentry>
         <term><varname>ListenFIFO=</varname></term>
-        <listitem><para>Specifies a file system FIFO to listen on.
-        This expects an absolute file system path as argument.
-        Behavior otherwise is very similar to the
-        <varname>ListenDatagram=</varname> directive
-        above.</para></listitem>
+        <listitem><para>Specifies a file system FIFO (see <citerefentry
+        project='man-pages'><refentrytitle>fifo</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details) to listen on.  This expects an absolute file system path as argument.  Behavior otherwise is
+        very similar to the <varname>ListenDatagram=</varname> directive above.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -265,8 +266,8 @@
         argument. Behavior otherwise is very similar to the
         <varname>ListenFIFO=</varname> directive above. Use this to
         open character device nodes as well as special files in
-        <filename>/proc</filename> and
-        <filename>/sys</filename>.</para></listitem>
+        <filename>/proc/</filename> and
+        <filename>/sys/</filename>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -283,12 +284,12 @@
 
       <varlistentry>
         <term><varname>ListenMessageQueue=</varname></term>
-        <listitem><para>Specifies a POSIX message queue name to listen
-        on. This expects a valid message queue name (i.e. beginning
-        with /). Behavior otherwise is very similar to the
-        <varname>ListenFIFO=</varname> directive above. On Linux
-        message queue descriptors are actually file descriptors and
-        can be inherited between processes.</para></listitem>
+        <listitem><para>Specifies a POSIX message queue name to listen on (see <citerefentry
+        project='man-pages'><refentrytitle>mq_overview</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+        for details). This expects a valid message queue name (i.e. beginning with
+        <literal>/</literal>). Behavior otherwise is very similar to the <varname>ListenFIFO=</varname>
+        directive above. On Linux message queue descriptors are actually file descriptors and can be
+        inherited between processes.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -297,7 +298,7 @@
         url="https://www.kernel.org/doc/Documentation/usb/functionfs.txt">USB
         FunctionFS</ulink> endpoints location to listen on, for
         implementation of USB gadget functions. This expects an
-        absolute file system path of FunctionFS mount point as the argument.
+        absolute file system path of a FunctionFS mount point as the argument.
         Behavior otherwise is very similar to the <varname>ListenFIFO=</varname>
         directive above. Use this to open the FunctionFS endpoint
         <filename>ep0</filename>. When using this option, the
@@ -387,14 +388,14 @@
 
       <varlistentry>
         <term><varname>Accept=</varname></term>
-        <listitem><para>Takes a boolean argument. If true, a service
+        <listitem><para>Takes a boolean argument. If yes, a service
         instance is spawned for each incoming connection and only the
-        connection socket is passed to it. If false, all listening
+        connection socket is passed to it. If no, all listening
         sockets themselves are passed to the started service unit, and
         only one service unit is spawned for all connections (also see
         above). This value is ignored for datagram sockets and FIFOs
         where a single service unit unconditionally handles all
-        incoming traffic. Defaults to <option>false</option>. For
+        incoming traffic. Defaults to <option>no</option>. For
         performance reasons, it is recommended to write new daemons
         only in a way that is suitable for
         <option>Accept=no</option>. A daemon listening on an
@@ -425,6 +426,18 @@
         conjunction with <varname>ListenSpecial=</varname>. If true,
         the specified special file is opened in read-write mode, if
         false, in read-only mode. Defaults to false.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>FlushPending=</varname></term>
+        <listitem><para>Takes a boolean argument. May only be used when
+        <option>Accept=no</option>. If yes, the socket's buffers are cleared after the
+        triggered service exited. This causes any pending data to be
+        flushed and any pending incoming connections to be rejected. If no, the
+        socket's buffers won't be cleared, permitting the service to handle any
+        pending connections after restart, which is the usually expected behaviour.
+        Defaults to <option>no</option>.
+        </para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -554,26 +567,23 @@
 
       <varlistentry>
         <term><varname>IPTOS=</varname></term>
-        <listitem><para>Takes an integer argument controlling the IP
-        Type-Of-Service field for packets generated from this socket.
-        This controls the IP_TOS socket option (see
-        <citerefentry project='die-net'><refentrytitle>ip</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        for details.). Either a numeric string or one of
-        <option>low-delay</option>, <option>throughput</option>,
-        <option>reliability</option> or <option>low-cost</option> may
-        be specified.</para></listitem>
+        <listitem><para>Takes an integer argument controlling the IP Type-Of-Service field for packets
+        generated from this socket.  This controls the <constant>IP_TOS</constant> socket option (see
+        <citerefentry
+        project='die-net'><refentrytitle>ip</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details.). Either a numeric string or one of <option>low-delay</option>, <option>throughput</option>,
+        <option>reliability</option> or <option>low-cost</option> may be specified.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>IPTTL=</varname></term>
-        <listitem><para>Takes an integer argument controlling the IPv4
-        Time-To-Live/IPv6 Hop-Count field for packets generated from
-        this socket. This sets the IP_TTL/IPV6_UNICAST_HOPS socket
-        options (see
-        <citerefentry project='die-net'><refentrytitle>ip</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        and
-        <citerefentry project='die-net'><refentrytitle>ipv6</refentrytitle><manvolnum>7</manvolnum></citerefentry>
-        for details.)</para></listitem>
+        <listitem><para>Takes an integer argument controlling the IPv4 Time-To-Live/IPv6 Hop-Count field for
+        packets generated from this socket. This sets the
+        <constant>IP_TTL</constant>/<constant>IPV6_UNICAST_HOPS</constant> socket options (see <citerefentry
+        project='die-net'><refentrytitle>ip</refentrytitle><manvolnum>7</manvolnum></citerefentry> and
+        <citerefentry
+        project='die-net'><refentrytitle>ipv6</refentrytitle><manvolnum>7</manvolnum></citerefentry> for
+        details.)</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -621,7 +631,7 @@
          the value of the <varname>SELinuxContext=</varname> option.
          This configuration option only affects sockets with
          <varname>Accept=</varname> mode set to
-         <literal>true</literal>. Also note that this option is useful
+         <literal>yes</literal>. Also note that this option is useful
          only when MLS/MCS SELinux policy is deployed. Defaults to
          <literal>false</literal>. </para></listitem>
       </varlistentry>
@@ -648,20 +658,18 @@
 
       <varlistentry>
         <term><varname>FreeBind=</varname></term>
-        <listitem><para>Takes a boolean value. Controls whether the
-        socket can be bound to non-local IP addresses. This is useful
-        to configure sockets listening on specific IP addresses before
-        those IP addresses are successfully configured on a network
-        interface. This sets the IP_FREEBIND socket option. For
-        robustness reasons it is recommended to use this option
-        whenever you bind a socket to a specific IP address. Defaults
-        to <option>false</option>.</para></listitem>
+        <listitem><para>Takes a boolean value. Controls whether the socket can be bound to non-local IP
+        addresses. This is useful to configure sockets listening on specific IP addresses before those IP
+        addresses are successfully configured on a network interface. This sets the
+        <constant>IP_FREEBIND</constant>/<constant>IPV6_FREEBIND</constant> socket option. For robustness
+        reasons it is recommended to use this option whenever you bind a socket to a specific IP
+        address. Defaults to <option>false</option>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
         <term><varname>Transparent=</varname></term>
         <listitem><para>Takes a boolean value. Controls the
-        IP_TRANSPARENT socket option. Defaults to
+        <constant>IP_TRANSPARENT</constant>/<constant>IPV6_TRANSPARENT</constant> socket option. Defaults to
         <option>false</option>.</para></listitem>
       </varlistentry>
 
@@ -689,10 +697,20 @@
       <varlistentry>
         <term><varname>PassPacketInfo=</varname></term>
         <listitem><para>Takes a boolean value. This controls the <constant>IP_PKTINFO</constant>,
-        <constant>IPV6_RECVPKTINFO</constant> and <constant>NETLINK_PKTINFO</constant> socket options, which
-        enable reception of additional per-packet metadata as ancillary message, on
-        <constant>AF_INET</constant>, <constant>AF_INET6</constant> and <constant>AF_UNIX</constant> sockets.
-        Defaults to <option>false</option>.</para></listitem>
+        <constant>IPV6_RECVPKTINFO</constant>, <constant>NETLINK_PKTINFO</constant> or
+        <constant>PACKET_AUXDATA</constant> socket options, which enable reception of additional per-packet
+        metadata as ancillary message, on <constant>AF_INET</constant>, <constant>AF_INET6</constant>,
+        <constant>AF_UNIX</constant> and <constant>AF_PACKET</constant> sockets.  Defaults to
+        <option>false</option>.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>Timestamping=</varname></term>
+        <listitem><para>Takes one of <literal>off</literal>, <literal>us</literal> (alias:
+        <literal>usec</literal>, <literal>µs</literal>) or <literal>ns</literal> (alias:
+        <literal>nsec</literal>). This controls the <constant>SO_TIMESTAMP</constant> or
+        <constant>SO_TIMESTAMPNS</constant> socket options, and enables whether ingress network traffic shall
+        carry timestamping metadata. Defaults to <option>off</option>.</para></listitem>
       </varlistentry>
 
       <varlistentry>

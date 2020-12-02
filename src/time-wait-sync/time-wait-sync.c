@@ -1,11 +1,5 @@
-/*
- * systemd service to wait until kernel realtime clock is synchronized
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
- */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* systemd service to wait until kernel realtime clock is synchronized */
 
 #include <errno.h>
 #include <stdbool.h>
@@ -155,7 +149,7 @@ static int clock_state_update(
         if (tx.status & STA_NANO)
                 tx.time.tv_usec /= 1000;
         t = timeval_load(&tx.time);
-        ts = format_timestamp_us_utc(buf, sizeof(buf), t);
+        ts = format_timestamp_style(buf, sizeof(buf), t, TIMESTAMP_US_UTC);
         if (!ts)
                 strcpy(buf, "unrepresentable");
         log_info("adjtime state %d status %x time %s", sp->adjtime_state, tx.status, ts);

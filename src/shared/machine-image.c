@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1171,7 +1171,7 @@ int image_read_metadata(Image *i) {
                 if (r < 0)
                         return r;
 
-                r = dissect_image(d->fd, NULL, 0, NULL, DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_RELAX_VAR_CHECK, &m);
+                r = dissect_image(d->fd, NULL, NULL, DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_RELAX_VAR_CHECK, &m);
                 if (r < 0)
                         return r;
 

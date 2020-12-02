@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 
@@ -65,7 +65,7 @@ int procfs_tasks_set_limit(uint64_t limit) {
 
         if (limit == 0) /* This makes no sense, we are userspace and hence count as tasks too, and we want to live,
                          * hence the limit conceptually has to be above 0. Also, most likely if anyone asks for a zero
-                         * limit he/she probably means "no limit", hence let's better refuse this to avoid
+                         * limit they probably mean "no limit", hence let's better refuse this to avoid
                          * confusion. */
                 return -EINVAL;
 

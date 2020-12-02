@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <sys/stat.h>
@@ -516,7 +516,6 @@ static int method_list_sessions(sd_bus_message *message, void *userdata, sd_bus_
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         Session *session;
-        Iterator i;
         int r;
 
         assert(message);
@@ -530,7 +529,7 @@ static int method_list_sessions(sd_bus_message *message, void *userdata, sd_bus_
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(session, m->sessions, i) {
+        HASHMAP_FOREACH(session, m->sessions) {
                 _cleanup_free_ char *p = NULL;
 
                 p = session_bus_path(session);
@@ -558,7 +557,6 @@ static int method_list_users(sd_bus_message *message, void *userdata, sd_bus_err
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         User *user;
-        Iterator i;
         int r;
 
         assert(message);
@@ -572,7 +570,7 @@ static int method_list_users(sd_bus_message *message, void *userdata, sd_bus_err
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(user, m->users, i) {
+        HASHMAP_FOREACH(user, m->users) {
                 _cleanup_free_ char *p = NULL;
 
                 p = user_bus_path(user);
@@ -598,7 +596,6 @@ static int method_list_seats(sd_bus_message *message, void *userdata, sd_bus_err
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         Seat *seat;
-        Iterator i;
         int r;
 
         assert(message);
@@ -612,7 +609,7 @@ static int method_list_seats(sd_bus_message *message, void *userdata, sd_bus_err
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(seat, m->seats, i) {
+        HASHMAP_FOREACH(seat, m->seats) {
                 _cleanup_free_ char *p = NULL;
 
                 p = seat_bus_path(seat);
@@ -635,7 +632,6 @@ static int method_list_inhibitors(sd_bus_message *message, void *userdata, sd_bu
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         Manager *m = userdata;
         Inhibitor *inhibitor;
-        Iterator i;
         int r;
 
         assert(message);
@@ -649,7 +645,7 @@ static int method_list_inhibitors(sd_bus_message *message, void *userdata, sd_bu
         if (r < 0)
                 return r;
 
-        HASHMAP_FOREACH(inhibitor, m->inhibitors, i) {
+        HASHMAP_FOREACH(inhibitor, m->inhibitors) {
 
                 r = sd_bus_message_append(reply, "(ssssuu)",
                                           strempty(inhibit_what_to_string(inhibitor->what)),
@@ -1361,7 +1357,7 @@ static int attach_device(Manager *m, const char *seat, const char *sysfs) {
         if (r < 0)
                 return r;
 
-        if (sd_device_has_tag(d, "seat") <= 0)
+        if (sd_device_has_current_tag(d, "seat") <= 0)
                 return -ENODEV;
 
         if (sd_device_get_property_value(d, "ID_FOR_SEAT", &id_for_seat) < 0)
@@ -1499,13 +1495,12 @@ static int have_multiple_sessions(
                 uid_t uid) {
 
         Session *session;
-        Iterator i;
 
         assert(m);
 
         /* Check for other users' sessions. Greeter sessions do not
          * count, and non-login sessions do not count either. */
-        HASHMAP_FOREACH(session, m->sessions, i)
+        HASHMAP_FOREACH(session, m->sessions)
                 if (session->class == SESSION_USER &&
                     session->user->user_record->uid != uid)
                         return true;
@@ -1720,26 +1715,26 @@ static int delay_shutdown_or_sleep(
                 const char *unit_name) {
 
         int r;
-        usec_t timeout_val;
 
         assert(m);
         assert(w >= 0);
         assert(w < _INHIBIT_WHAT_MAX);
         assert(unit_name);
 
-        timeout_val = now(CLOCK_MONOTONIC) + m->inhibit_delay_max;
-
         if (m->inhibit_timeout_source) {
-                r = sd_event_source_set_time(m->inhibit_timeout_source, timeout_val);
+                r = sd_event_source_set_time_relative(m->inhibit_timeout_source, m->inhibit_delay_max);
                 if (r < 0)
-                        return log_error_errno(r, "sd_event_source_set_time() failed: %m");
+                        return log_error_errno(r, "sd_event_source_set_time_relative() failed: %m");
 
                 r = sd_event_source_set_enabled(m->inhibit_timeout_source, SD_EVENT_ONESHOT);
                 if (r < 0)
                         return log_error_errno(r, "sd_event_source_set_enabled() failed: %m");
         } else {
-                r = sd_event_add_time(m->event, &m->inhibit_timeout_source, CLOCK_MONOTONIC,
-                                      timeout_val, 0, manager_inhibit_timeout_handler, m);
+                r = sd_event_add_time_relative(
+                                m->event,
+                                &m->inhibit_timeout_source,
+                                CLOCK_MONOTONIC, m->inhibit_delay_max, 0,
+                                manager_inhibit_timeout_handler, m);
                 if (r < 0)
                         return r;
         }
@@ -3200,7 +3195,6 @@ static int method_inhibit(sd_bus_message *message, void *userdata, sd_bus_error 
         _cleanup_free_ char *id = NULL;
         _cleanup_close_ int fifo_fd = -1;
         Manager *m = userdata;
-        Inhibitor *i = NULL;
         InhibitMode mm;
         InhibitWhat w;
         pid_t pid;
@@ -3245,6 +3239,7 @@ static int method_inhibit(sd_bus_message *message, void *userdata, sd_bus_error 
                         w == INHIBIT_IDLE                 ? "org.freedesktop.login1.inhibit-block-idle" :
                         w == INHIBIT_HANDLE_POWER_KEY     ? "org.freedesktop.login1.inhibit-handle-power-key" :
                         w == INHIBIT_HANDLE_SUSPEND_KEY   ? "org.freedesktop.login1.inhibit-handle-suspend-key" :
+                        w == INHIBIT_HANDLE_REBOOT_KEY    ? "org.freedesktop.login1.inhibit-handle-reboot-key" :
                         w == INHIBIT_HANDLE_HIBERNATE_KEY ? "org.freedesktop.login1.inhibit-handle-hibernate-key" :
                                                             "org.freedesktop.login1.inhibit-handle-lid-switch",
                         NULL,
@@ -3282,6 +3277,7 @@ static int method_inhibit(sd_bus_message *message, void *userdata, sd_bus_error 
 
         } while (hashmap_get(m->inhibitors, id));
 
+        _cleanup_(inhibitor_freep) Inhibitor *i = NULL;
         r = manager_add_inhibitor(m, id, &i);
         if (r < 0)
                 return r;
@@ -3293,28 +3289,19 @@ static int method_inhibit(sd_bus_message *message, void *userdata, sd_bus_error 
         i->why = strdup(why);
         i->who = strdup(who);
 
-        if (!i->why || !i->who) {
-                r = -ENOMEM;
-                goto fail;
-        }
+        if (!i->why || !i->who)
+                return -ENOMEM;
 
         fifo_fd = inhibitor_create_fifo(i);
-        if (fifo_fd < 0) {
-                r = fifo_fd;
-                goto fail;
-        }
+        if (fifo_fd < 0)
+                return fifo_fd;
 
         r = inhibitor_start(i);
         if (r < 0)
-                goto fail;
+                return r;
+        TAKE_PTR(i);
 
         return sd_bus_reply_method_return(message, "h", fifo_fd);
-
-fail:
-        if (i)
-                inhibitor_free(i);
-
-        return r;
 }
 
 static const sd_bus_vtable manager_vtable[] = {
@@ -3900,7 +3887,6 @@ int match_properties_changed(sd_bus_message *message, void *userdata, sd_bus_err
 int match_reloading(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         Manager *m = userdata;
         Session *session;
-        Iterator i;
         int b, r;
 
         assert(message);
@@ -3918,7 +3904,7 @@ int match_reloading(sd_bus_message *message, void *userdata, sd_bus_error *error
         /* systemd finished reloading, let's recheck all our sessions */
         log_debug("System manager has been reloaded, rechecking sessions...");
 
-        HASHMAP_FOREACH(session, m->sessions, i)
+        HASHMAP_FOREACH(session, m->sessions)
                 session_add_to_gc_queue(session);
 
         return 0;
@@ -4077,13 +4063,13 @@ int manager_start_unit(Manager *manager, const char *unit, sd_bus_error *error, 
         return strdup_job(reply, job);
 }
 
-int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, char **job) {
+int manager_stop_unit(Manager *manager, const char *unit, const char *job_mode, sd_bus_error *error, char **ret_job) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         int r;
 
         assert(manager);
         assert(unit);
-        assert(job);
+        assert(ret_job);
 
         r = bus_call_method(
                         manager->bus,
@@ -4091,12 +4077,12 @@ int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, c
                         "StopUnit",
                         error,
                         &reply,
-                        "ss", unit, "fail");
+                        "ss", unit, job_mode ?: "fail");
         if (r < 0) {
-                if (sd_bus_error_has_name(error, BUS_ERROR_NO_SUCH_UNIT) ||
-                    sd_bus_error_has_name(error, BUS_ERROR_LOAD_FAILED)) {
+                if (sd_bus_error_has_names(error, BUS_ERROR_NO_SUCH_UNIT,
+                                                  BUS_ERROR_LOAD_FAILED)) {
 
-                        *job = NULL;
+                        *ret_job = NULL;
                         sd_bus_error_free(error);
                         return 0;
                 }
@@ -4104,7 +4090,7 @@ int manager_stop_unit(Manager *manager, const char *unit, sd_bus_error *error, c
                 return r;
         }
 
-        return strdup_job(reply, job);
+        return strdup_job(reply, ret_job);
 }
 
 int manager_abandon_scope(Manager *manager, const char *scope, sd_bus_error *ret_error) {
@@ -4129,9 +4115,9 @@ int manager_abandon_scope(Manager *manager, const char *scope, sd_bus_error *ret
                         NULL,
                         NULL);
         if (r < 0) {
-                if (sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT) ||
-                    sd_bus_error_has_name(&error, BUS_ERROR_LOAD_FAILED) ||
-                    sd_bus_error_has_name(&error, BUS_ERROR_SCOPE_NOT_RUNNING))
+                if (sd_bus_error_has_names(&error, BUS_ERROR_NO_SUCH_UNIT,
+                                                   BUS_ERROR_LOAD_FAILED,
+                                                   BUS_ERROR_SCOPE_NOT_RUNNING))
                         return 0;
 
                 sd_bus_error_move(ret_error, &error);
@@ -4180,14 +4166,14 @@ int manager_unit_is_active(Manager *manager, const char *unit, sd_bus_error *ret
         if (r < 0) {
                 /* systemd might have dropped off momentarily, let's
                  * not make this an error */
-                if (sd_bus_error_has_name(&error, SD_BUS_ERROR_NO_REPLY) ||
-                    sd_bus_error_has_name(&error, SD_BUS_ERROR_DISCONNECTED))
+                if (sd_bus_error_has_names(&error, SD_BUS_ERROR_NO_REPLY,
+                                                   SD_BUS_ERROR_DISCONNECTED))
                         return true;
 
                 /* If the unit is already unloaded then it's not
                  * active */
-                if (sd_bus_error_has_name(&error, BUS_ERROR_NO_SUCH_UNIT) ||
-                    sd_bus_error_has_name(&error, BUS_ERROR_LOAD_FAILED))
+                if (sd_bus_error_has_names(&error, BUS_ERROR_NO_SUCH_UNIT,
+                                                   BUS_ERROR_LOAD_FAILED))
                         return false;
 
                 sd_bus_error_move(ret_error, &error);
@@ -4219,8 +4205,8 @@ int manager_job_is_active(Manager *manager, const char *path, sd_bus_error *ret_
                         &reply,
                         "s");
         if (r < 0) {
-                if (sd_bus_error_has_name(&error, SD_BUS_ERROR_NO_REPLY) ||
-                    sd_bus_error_has_name(&error, SD_BUS_ERROR_DISCONNECTED))
+                if (sd_bus_error_has_names(&error, SD_BUS_ERROR_NO_REPLY,
+                                                   SD_BUS_ERROR_DISCONNECTED))
                         return true;
 
                 if (sd_bus_error_has_name(&error, SD_BUS_ERROR_UNKNOWN_OBJECT))

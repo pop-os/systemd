@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 bashcompletiondir = get_option('bashcompletiondir')
 if bashcompletiondir == ''
@@ -24,6 +24,7 @@ if bashcompletiondir != 'no'
                  ['systemd-cgtop',       ''],
                  ['systemd-delta',       ''],
                  ['systemd-detect-virt', ''],
+                 ['systemd-id128',       ''],
                  ['systemd-nspawn',      ''],
                  ['systemd-path',        ''],
                  ['systemd-run',         ''],
@@ -32,6 +33,7 @@ if bashcompletiondir != 'no'
                  [bash_systemctl,        ''],
                  ['bootctl',             'ENABLE_EFI'],
                  ['coredumpctl',         'ENABLE_COREDUMP'],
+                 ['homectl',             'ENABLE_HOMED'],
                  ['hostnamectl',         'ENABLE_HOSTNAMED'],
                  ['localectl',           'ENABLE_LOCALED'],
                  ['loginctl',            'ENABLE_LOGIND'],

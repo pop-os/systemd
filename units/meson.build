@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 with_runlevels = conf.get('HAVE_SYSV_COMPAT') == 1
 
@@ -17,11 +17,12 @@ units = [
         ['emergency.target',                    ''],
         ['exit.target',                         ''],
         ['final.target',                        ''],
+        ['first-boot-complete.target',          ''],
         ['getty.target',                        '',
          'multi-user.target.wants/'],
         ['getty-pre.target',                    ''],
         ['graphical.target',                    '',
-         (with_runlevels ? 'runlevel5.target default.target' : 'default.target')],
+         'default.target' + (with_runlevels ? ' runlevel5.target' : '')],
         ['halt.target',                         ''],
         ['hibernate.target',                    'ENABLE_HIBERNATE'],
         ['hybrid-sleep.target',                 'ENABLE_HIBERNATE'],
@@ -58,8 +59,9 @@ units = [
          'sysinit.target.wants/'],
         ['proc-sys-fs-binfmt_misc.mount',       'ENABLE_BINFMT'],
         ['reboot.target',                       '',
-         (with_runlevels ? 'runlevel6.target ctrl-alt-del.target' : 'ctrl-alt-del.target')],
-        ['remote-cryptsetup.target',            'HAVE_LIBCRYPTSETUP'],
+         'ctrl-alt-del.target' + (with_runlevels ? ' runlevel6.target' : '')],
+        ['remote-cryptsetup.target',            'HAVE_LIBCRYPTSETUP',
+         'initrd-root-device.target.wants/'],
         ['remote-fs-pre.target',                ''],
         ['remote-fs.target',                    ''],
         ['rescue.target',                       '',
@@ -102,6 +104,7 @@ units = [
         ['systemd-firstboot.service',           'ENABLE_FIRSTBOOT',
          'sysinit.target.wants/'],
         ['systemd-halt.service',                ''],
+        ['systemd-homed-activate.service',      'ENABLE_HOMED'],
         ['systemd-initctl.socket',              'HAVE_SYSV_COMPAT',
          'sockets.target.wants/'],
         ['systemd-journal-catalog-update.service', '',
@@ -200,6 +203,7 @@ in_units = [
         ['systemd-networkd.service',             'ENABLE_NETWORKD'],
         ['systemd-networkd-wait-online.service', 'ENABLE_NETWORKD'],
         ['systemd-nspawn@.service',              ''],
+        ['systemd-oomd.service',                 'ENABLE_OOMD'],
         ['systemd-portabled.service',            'ENABLE_PORTABLED',
          'dbus-org.freedesktop.portable1.service'],
         ['systemd-userdbd.service',              'ENABLE_USERDB'],
@@ -322,9 +326,11 @@ install_data('user-.slice.d/10-defaults.conf',
 
 ############################################################
 
-meson.add_install_script(meson_make_symlink,
-                         join_paths(pkgsysconfdir, 'user'),
-                         join_paths(sysconfdir, 'xdg/systemd/user'))
+if install_sysconfdir
+        meson.add_install_script(meson_make_symlink,
+                                 join_paths(pkgsysconfdir, 'user'),
+                                 join_paths(sysconfdir, 'xdg/systemd/user'))
+endif
 meson.add_install_script(meson_make_symlink,
                          join_paths(dbussystemservicedir, 'org.freedesktop.systemd1.service'),
                          join_paths(dbussessionservicedir, 'org.freedesktop.systemd1.service'))

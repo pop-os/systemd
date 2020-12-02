@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <net/if.h>
 #include <netinet/in.h>
@@ -727,7 +727,6 @@ int link_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***
         Manager *m = userdata;
         unsigned c = 0;
         Link *link;
-        Iterator i;
 
         assert(bus);
         assert(path);
@@ -738,7 +737,7 @@ int link_node_enumerator(sd_bus *bus, const char *path, void *userdata, char ***
         if (!l)
                 return -ENOMEM;
 
-        HASHMAP_FOREACH(link, m->links, i) {
+        HASHMAP_FOREACH(link, m->links) {
                 char *p;
 
                 p = link_bus_path(link);

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /***
   Copyright © 2014 Intel Corporation. All rights reserved.
 ***/
@@ -321,7 +321,8 @@ static int ndisc_timeout_no_ra(sd_event_source *s, uint64_t usec, void *userdata
 }
 
 _public_ int sd_ndisc_stop(sd_ndisc *nd) {
-        assert_return(nd, -EINVAL);
+        if (!nd)
+                return 0;
 
         if (nd->fd < 0)
                 return 0;

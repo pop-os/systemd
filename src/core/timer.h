@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 #pragma once
 
 typedef struct Timer Timer;
@@ -59,6 +59,7 @@ struct Timer {
         bool remain_after_elapse;
         bool on_clock_change;
         bool on_timezone_change;
+        bool fixed_random_delay;
 
         char *stamp_path;
 };

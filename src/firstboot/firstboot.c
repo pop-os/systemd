@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <fcntl.h>
 #include <getopt.h>
@@ -19,17 +19,16 @@
 #include "kbd-util.h"
 #include "libcrypt-util.h"
 #include "locale-util.h"
-#include "loop-util.h"
 #include "main-func.h"
 #include "memory-util.h"
 #include "mkdir.h"
 #include "mount-util.h"
-#include "namespace-util.h"
 #include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
 #include "proc-cmdline.h"
+#include "pwquality-util.h"
 #include "random-util.h"
 #include "string-util.h"
 #include "strv.h"
@@ -571,8 +570,11 @@ static int prompt_root_password(void) {
         msg1 = strjoina(special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET), " Please enter a new root password (empty to skip):");
         msg2 = strjoina(special_glyph(SPECIAL_GLYPH_TRIANGULAR_BULLET), " Please enter new root password again:");
 
+        suggest_passwords();
+
         for (;;) {
                 _cleanup_strv_free_erase_ char **a = NULL, **b = NULL;
+                _cleanup_free_ char *error = NULL;
 
                 r = ask_password_tty(-1, msg1, NULL, 0, 0, NULL, &a);
                 if (r < 0)
@@ -585,6 +587,12 @@ static int prompt_root_password(void) {
                         log_warning("No password entered, skipping.");
                         break;
                 }
+
+                r = quality_check_password(*a, "root", &error);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to check quality of password: %m");
+                if (r == 0)
+                        log_warning("Password is weak, accepting anyway: %s", error);
 
                 r = ask_password_tty(-1, msg2, NULL, 0, 0, NULL, &b);
                 if (r < 0)
@@ -794,7 +802,7 @@ static int write_root_shadow(const char *shadow_path, const char *hashed_passwor
 
 static int process_root_args(void) {
         _cleanup_close_ int lock = -1;
-        struct crypt_data cd = {};
+        _cleanup_(erase_and_freep) char *_hashed_password = NULL;
         const char *password, *hashed_password;
         const char *etc_passwd, *etc_shadow;
         int r;
@@ -806,6 +814,10 @@ static int process_root_args(void) {
          * tightly coupled and hence we make sure we have permission from the user to create/modify both
          * files. */
         if ((laccess(etc_passwd, F_OK) >= 0 || laccess(etc_shadow, F_OK) >= 0) && !arg_force)
+                return 0;
+        /* Don't create/modify passwd and shadow if not asked */
+        if (!(arg_root_password || arg_prompt_root_password || arg_copy_root_password || arg_delete_root_password ||
+              arg_root_shell || arg_prompt_root_shell || arg_copy_root_shell))
                 return 0;
 
         (void) mkdir_parents(etc_passwd, 0755);
@@ -854,20 +866,13 @@ static int process_root_args(void) {
                 password = "x";
                 hashed_password = arg_root_password;
         } else if (arg_root_password) {
-                _cleanup_free_ char *salt = NULL;
-                /* hashed_password points inside cd after crypt_r returns so cd has function scope. */
+                r = hash_password(arg_root_password, &_hashed_password);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to hash password: %m");
 
                 password = "x";
+                hashed_password = _hashed_password;
 
-                r = make_salt(&salt);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to get salt: %m");
-
-                errno = 0;
-                hashed_password = crypt_r(arg_root_password, salt, &cd);
-                if (!hashed_password)
-                        return log_error_errno(errno == 0 ? SYNTHETIC_ERRNO(EINVAL) : errno,
-                                        "Failed to encrypt password: %m");
         } else if (arg_delete_root_password)
                 password = hashed_password = "";
         else
@@ -906,75 +911,6 @@ static int process_kernel_cmdline(void) {
 
         log_info("%s written.", etc_kernel_cmdline);
         return 0;
-}
-
-static int setup_image(char **ret_mount_dir, LoopDevice **ret_loop_device, DecryptedImage **ret_decrypted_image) {
-        DissectImageFlags f = DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_VALIDATE_OS|DISSECT_IMAGE_RELAX_VAR_CHECK|DISSECT_IMAGE_FSCK;
-        _cleanup_(loop_device_unrefp) LoopDevice *d = NULL;
-        _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
-        _cleanup_(dissected_image_unrefp) DissectedImage *dissected_image = NULL;
-        _cleanup_(rmdir_and_freep) char *mount_dir = NULL;
-        _cleanup_free_ char *temp = NULL;
-        int r;
-
-        if (!arg_image) {
-                *ret_mount_dir = NULL;
-                *ret_decrypted_image = NULL;
-                *ret_loop_device = NULL;
-                return 0;
-        }
-
-        assert(!arg_root);
-
-        r = tempfn_random_child(NULL, "firstboot", &temp);
-        if (r < 0)
-                return log_error_errno(r, "Failed to generate temporary mount directory: %m");
-
-        r = loop_device_make_by_path(arg_image, O_RDWR, LO_FLAGS_PARTSCAN, &d);
-        if (r < 0)
-                return log_error_errno(r, "Failed to set up loopback device: %m");
-
-        r = dissect_image_and_warn(d->fd, arg_image, NULL, 0, NULL, f, &dissected_image);
-        if (r < 0)
-                return r;
-
-        r = dissected_image_decrypt_interactively(dissected_image, NULL, NULL, 0, NULL, NULL, NULL, 0, f, &decrypted_image);
-        if (r < 0)
-                return r;
-
-        r = detach_mount_namespace();
-        if (r < 0)
-                return log_error_errno(r, "Failed to detach mount namespace: %m");
-
-        mount_dir = strdup(temp);
-        if (!mount_dir)
-                return log_oom();
-
-        r = mkdir_p(mount_dir, 0700);
-        if (r < 0) {
-                mount_dir = mfree(mount_dir);
-                return log_error_errno(r, "Failed to create mount point: %m");
-        }
-
-        r = dissected_image_mount(dissected_image, mount_dir, UID_INVALID, f);
-        if (r < 0)
-                return log_error_errno(r, "Failed to mount image: %m");
-
-        if (decrypted_image) {
-                r = decrypted_image_relinquish(decrypted_image);
-                if (r < 0)
-                        return log_error_errno(r, "Failed to relinquish DM devices: %m");
-        }
-
-        loop_device_relinquish(d);
-
-        arg_root = TAKE_PTR(temp);
-
-        *ret_mount_dir = TAKE_PTR(mount_dir);
-        *ret_decrypted_image = TAKE_PTR(decrypted_image);
-        *ret_loop_device = TAKE_PTR(d);
-
-        return 1;
 }
 
 static int help(void) {
@@ -1354,9 +1290,22 @@ static int run(int argc, char *argv[]) {
                         return 0; /* disabled */
         }
 
-        r = setup_image(&unlink_dir, &loop_device, &decrypted_image);
-        if (r < 0)
-                return r;
+        if (arg_image) {
+                assert(!arg_root);
+
+                r = mount_image_privately_interactively(
+                                arg_image,
+                                DISSECT_IMAGE_REQUIRE_ROOT|DISSECT_IMAGE_VALIDATE_OS|DISSECT_IMAGE_RELAX_VAR_CHECK|DISSECT_IMAGE_FSCK,
+                                &unlink_dir,
+                                &loop_device,
+                                &decrypted_image);
+                if (r < 0)
+                        return r;
+
+                arg_root = strdup(unlink_dir);
+                if (!arg_root)
+                        return log_oom();
+        }
 
         r = process_locale();
         if (r < 0)

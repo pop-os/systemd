@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 
@@ -178,7 +178,7 @@ int bus_session_method_terminate(sd_bus_message *message, void *userdata, sd_bus
         if (r == 0)
                 return 1; /* Will call us back */
 
-        r = session_stop(s, true);
+        r = session_stop(s, /* force = */ true);
         if (r < 0)
                 return r;
 
@@ -635,14 +635,13 @@ static int session_node_enumerator(sd_bus *bus, const char *path, void *userdata
         sd_bus_message *message;
         Manager *m = userdata;
         Session *session;
-        Iterator i;
         int r;
 
         assert(bus);
         assert(path);
         assert(nodes);
 
-        HASHMAP_FOREACH(session, m->sessions, i) {
+        HASHMAP_FOREACH(session, m->sessions) {
                 char *p;
 
                 p = session_bus_path(session);
@@ -753,12 +752,11 @@ int session_send_lock(Session *s, bool lock) {
 
 int session_send_lock_all(Manager *m, bool lock) {
         Session *session;
-        Iterator i;
         int r = 0;
 
         assert(m);
 
-        HASHMAP_FOREACH(session, m->sessions, i) {
+        HASHMAP_FOREACH(session, m->sessions) {
                 int k;
 
                 k = session_send_lock(session, lock);

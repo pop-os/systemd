@@ -1,7 +1,7 @@
 <?xml version='1.0'?>
 <!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
   "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
-<!-- SPDX-License-Identifier: LGPL-2.1+ -->
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 
 <refentry id="systemd-udevd.service"
           xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -143,8 +143,8 @@
       <para>Parameters prefixed with "rd." will be read when <command>systemd-udevd</command> is used in an
       initrd, those without will be processed both in the initrd and on the host.</para>
       <varlistentry>
-        <term><varname>udev.log_priority=</varname></term>
-        <term><varname>rd.udev.log_priority=</varname></term>
+        <term><varname>udev.log_level=</varname></term>
+        <term><varname>rd.udev.log_level=</varname></term>
         <listitem>
           <para>Set the log level.</para>
         </listitem>

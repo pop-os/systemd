@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1+ */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <net/if.h>
 
@@ -436,20 +436,22 @@ static int dns_cache_put_positive(
 
         dns_cache_make_space(c, 1);
 
-        i = new0(DnsCacheItem, 1);
+        i = new(DnsCacheItem, 1);
         if (!i)
                 return -ENOMEM;
 
-        i->type = DNS_CACHE_POSITIVE;
-        i->key = dns_resource_key_ref(rr->key);
-        i->rr = dns_resource_record_ref(rr);
-        i->until = calculate_until(rr, (uint32_t) -1, timestamp, false);
-        i->authenticated = authenticated;
-        i->shared_owner = shared_owner;
-        i->ifindex = ifindex;
-        i->owner_family = owner_family;
-        i->owner_address = *owner_address;
-        i->prioq_idx = PRIOQ_IDX_NULL;
+        *i = (DnsCacheItem) {
+                .type = DNS_CACHE_POSITIVE,
+                .key = dns_resource_key_ref(rr->key),
+                .rr = dns_resource_record_ref(rr),
+                .until = calculate_until(rr, (uint32_t) -1, timestamp, false),
+                .authenticated = authenticated,
+                .shared_owner = shared_owner,
+                .ifindex = ifindex,
+                .owner_family = owner_family,
+                .owner_address = *owner_address,
+                .prioq_idx = PRIOQ_IDX_NULL,
+        };
 
         r = dns_cache_link_item(c, i);
         if (r < 0)
@@ -521,21 +523,24 @@ static int dns_cache_put_negative(
 
         dns_cache_make_space(c, 1);
 
-        i = new0(DnsCacheItem, 1);
+        i = new(DnsCacheItem, 1);
         if (!i)
                 return -ENOMEM;
 
-        i->type =
-                rcode == DNS_RCODE_SUCCESS ? DNS_CACHE_NODATA :
-                rcode == DNS_RCODE_NXDOMAIN ? DNS_CACHE_NXDOMAIN : DNS_CACHE_RCODE;
+        *i = (DnsCacheItem) {
+                .type =
+                        rcode == DNS_RCODE_SUCCESS ? DNS_CACHE_NODATA :
+                        rcode == DNS_RCODE_NXDOMAIN ? DNS_CACHE_NXDOMAIN : DNS_CACHE_RCODE,
+                .authenticated = authenticated,
+                .owner_family = owner_family,
+                .owner_address = *owner_address,
+                .prioq_idx = PRIOQ_IDX_NULL,
+                .rcode = rcode,
+        };
+
         i->until =
                 i->type == DNS_CACHE_RCODE ? timestamp + CACHE_TTL_STRANGE_RCODE_USEC :
                 calculate_until(soa, nsec_ttl, timestamp, true);
-        i->authenticated = authenticated;
-        i->owner_family = owner_family;
-        i->owner_address = *owner_address;
-        i->prioq_idx = PRIOQ_IDX_NULL;
-        i->rcode = rcode;
 
         if (i->type == DNS_CACHE_NXDOMAIN) {
                 /* NXDOMAIN entries should apply equally to all types, so we use ANY as
@@ -1015,14 +1020,13 @@ int dns_cache_check_conflicts(DnsCache *cache, DnsResourceRecord *rr, int owner_
 
 int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p) {
         unsigned ancount = 0;
-        Iterator iterator;
         DnsCacheItem *i;
         int r;
 
         assert(cache);
         assert(p);
 
-        HASHMAP_FOREACH(i, cache->by_key, iterator) {
+        HASHMAP_FOREACH(i, cache->by_key) {
                 DnsCacheItem *j;
 
                 LIST_FOREACH(by_key, j, i) {
@@ -1063,7 +1067,6 @@ int dns_cache_export_shared_to_packet(DnsCache *cache, DnsPacket *p) {
 }
 
 void dns_cache_dump(DnsCache *cache, FILE *f) {
-        Iterator iterator;
         DnsCacheItem *i;
 
         if (!cache)
@@ -1072,7 +1075,7 @@ void dns_cache_dump(DnsCache *cache, FILE *f) {
         if (!f)
                 f = stdout;
 
-        HASHMAP_FOREACH(i, cache->by_key, iterator) {
+        HASHMAP_FOREACH(i, cache->by_key) {
                 DnsCacheItem *j;
 
                 LIST_FOREACH(by_key, j, i) {

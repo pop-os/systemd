@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LGPL-2.1+
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 awkscript = 'test-hashmap-ordered.awk'
 test_hashmap_ordered_c = custom_target(
@@ -301,6 +301,11 @@ tests += [
          [],
          []],
 
+        [['src/test/test-libcrypt-util.c'],
+         [],
+         [],
+         '', 'timeout=120'],
+
         [['src/test/test-offline-passwd.c',
           'src/shared/offline-passwd.c',
           'src/shared/offline-passwd.h'],
@@ -329,9 +334,13 @@ tests += [
 
         [['src/test/test-parse-util.c'],
          [],
-         []],
+         [libseccomp]],
 
         [['src/test/test-sysctl-util.c'],
+         [],
+         []],
+
+        [['src/test/test-user-record.c'],
          [],
          []],
 
@@ -421,14 +430,20 @@ tests += [
          [],
          '', 'manual'],
 
-        [['src/test/test-dissect-image.c'],
-         [],
-         [libblkid],
-         '', 'manual'],
-
         [['src/test/test-signal-util.c'],
          [],
          []],
+
+        [['src/test/test-loop-block.c'],
+         [libcore,
+          libshared],
+         [threads,
+          libblkid],
+         '',
+         '',
+         [],
+         includes,
+         false],
 
         [['src/test/test-selinux.c'],
          [],
@@ -658,6 +673,10 @@ tests += [
          [],
          []],
 
+        [['src/test/test-rm-rf.c'],
+         [],
+         []],
+
         [['src/test/test-chase-symlinks.c'],
          [],
          [],
@@ -753,8 +772,13 @@ tests += [
           librt,
           libblkid,
           libkmod,
-          libacl],
+          libacl,
+          libselinux],
          '', 'manual', '-DLOG_REALM=LOG_REALM_UDEV'],
+
+        [['src/test/test-udev-util.c'],
+         [],
+         []],
 
         [['src/test/test-id128.c'],
          [],
@@ -796,6 +820,14 @@ tests += [
         [['src/test/test-local-addresses.c'],
          [],
          []],
+
+        [['src/test/test-psi-util.c'],
+         [],
+         []],
+
+        [['src/test/test-qrcode-util.c'],
+         [libshared],
+         [libdl]],
 ]
 
 ############################################################

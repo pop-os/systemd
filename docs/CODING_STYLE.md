@@ -25,6 +25,19 @@ layout: default
   note that emacs loads `.dir-locals.el` automatically, but vim needs to be
   configured to load `.vimrc`, see that file for instructions.
 
+- If you break a function declaration over multiple lines, do it like this:
+
+  ```c
+  void some_function(
+                  int foo,
+                  bool bar,
+                  char baz) {
+
+          int a, b, c;
+  ```
+
+  (i.e. use double indentation — 16 spaces — for the parameter list.)
+
 - Try to write this:
 
   ```c
@@ -73,7 +86,27 @@ layout: default
 
 - Do not write functions that clobber call-by-reference variables on
   failure. Use temporary variables for these cases and change the passed in
-  variables only on success.
+  variables only on success. The rule is: never clobber return parameters on
+  failure, always initialize return parameters on success.
+
+- Typically, function parameters fit into three categories: input parameters,
+  mutable objects, and call-by-reference return parameters. Input parameters
+  should always carry suitable "const" declarators if they are pointers, to
+  indicate they are input-only and not changed by the function. Return
+  parameters are best prefixed with "ret_", to clarify they are return
+  parameters. (Conversely, please do not prefix parameters that aren't
+  output-only with "ret_", in particular not mutable parameters that are both
+  input as well as output). Example:
+
+  ```c
+  static int foobar_frobnicate(
+                  Foobar* object,            /* the associated mutable object */
+                  const char *input,         /* immutable input parameter */
+                  char **ret_frobnicated) {  /* return parameter */
+          …
+          return 0;
+  }
+  ```
 
 - The order in which header files are included doesn't matter too
   much. systemd-internal headers must not rely on an include order, so it is
@@ -285,6 +318,14 @@ layout: default
   unlink("/foo/bar/baz");
   ```
 
+  When returning from a `void` function, you may also want to shorten the error
+  path boilerplate by returning a function invocation cast to `(void)` like so:
+
+  ```c
+  if (condition_not_met)
+          return (void) log_tests_skipped("Cannot run ...");
+  ```
+
   Don't cast function calls to `(void)` that return no error
   conditions. Specifically, the various `xyz_unref()` calls that return a
   `NULL` object shouldn't be cast to `(void)`, since not using the return value
@@ -296,13 +337,16 @@ layout: default
 ## Logging
 
 - For every function you add, think about whether it is a "logging" function or
-  a "non-logging" function. "Logging" functions do logging on their own,
-  "non-logging" function never log on their own and expect their callers to
-  log. All functions in "library" code, i.e. in `src/shared/` and suchlike must
-  be "non-logging". Every time a "logging" function calls a "non-logging"
-  function, it should log about the resulting errors. If a "logging" function
-  calls another "logging" function, then it should not generate log messages,
-  so that log messages are not generated twice for the same errors.
+  a "non-logging" function. "Logging" functions do (non-debug) logging on their
+  own, "non-logging" function never log on their own (except at debug level)
+  and expect their callers to log. All functions in "library" code, i.e. in
+  `src/shared/` and suchlike must be "non-logging". Every time a "logging"
+  function calls a "non-logging" function, it should log about the resulting
+  errors. If a "logging" function calls another "logging" function, then it
+  should not generate log messages, so that log messages are not generated
+  twice for the same errors. (Note that debug level logging — at syslog level
+  `LOG_DEBUG` — is not considered logging in this context, debug logging is
+  generally always fine and welcome.)
 
 - If possible, do a combined log & return operation:
 
@@ -372,7 +416,7 @@ layout: default
   broken on Linux).
 
 - When applying C-style unescaping as well as specifier expansion on the same
-  string, always apply the C-style unescaping fist, followed by the specifier
+  string, always apply the C-style unescaping first, followed by the specifier
   expansion. When doing the reverse, make sure to escape `%` in specifier-style
   first (i.e. `%` → `%%`), and then do C-style escaping where necessary.
 
@@ -529,7 +573,7 @@ layout: default
 
 - Don't use `fgets()`, it's too hard to properly handle errors such as overly
   long lines. Use `read_line()` instead, which is our own function that handles
-  this much nicer.
+  this much more nicely.
 
 - Don't invoke `exit()`, ever. It is not replacement for proper error
   handling. Please escalate errors up your call chain, and use normal `return`
