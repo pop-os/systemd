@@ -1,3 +1,17 @@
+systemd (247.1-2) unstable; urgency=medium
+
+  [ Michael Biebl ]
+  * Upload to unstable
+  * Revert "d/t/timedated: use /bin/bash to work around job handling issue in
+    dash"
+
+  [ Balint Reczey ]
+  * debian/tests/timedated: Wait for the killed child only.
+    There may be other children of the script due to autopkgtest machinery
+    and they exit after the script exited. (LP: #1904406)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 02 Dec 2020 23:25:32 +0100
+
 systemd (247.1-1) experimental; urgency=medium
 
   * New upstream version 247.1
