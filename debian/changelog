@@ -1,3 +1,21 @@
+systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
+
+  * d/t/boot-smoke: update test to avoid false negatives
+    (LP: #1892358)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=205c30ca53b0e421db28bb56afaf5f88650ce592
+  * d/t/boot-and-services: remove unneeded test lines
+    (LP: #1892358)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=71853082af4e668996db574915c5a156f9897fd3
+  * d/t/systemd-fsckd: rewrite test to try to fix false negatives
+    (LP: #1892358)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6ae6be039ec582410769d2d6d131e12bdcd19a68
+  * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch:
+    test: use cap_last_cap() instead of capability_list_length()
+    (LP: #1905044)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=84a4832f5f7d4f939c1c78c6be4c3f9e05cd7f59
+
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 10 Dec 2020 16:38:00 -0500
+
 systemd (246.6-1ubuntu1) groovy; urgency=medium
 
   [ Dan Streetman ]
