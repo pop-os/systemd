@@ -1,3 +1,11 @@
+systemd (246.6-5ubuntu2) UNRELEASED; urgency=medium
+
+  * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch:
+    Fix test use of new cap numbers with 5.8 kernel (LP: #1905044)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d55c6f8186cb2cb73f61d6ff5b2e0ded82ef265c
+
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 10 Dec 2020 16:20:20 -0500
+
 systemd (246.6-5ubuntu1) hirsute; urgency=medium
 
   * Merge from Debian unstable
