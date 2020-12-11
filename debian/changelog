@@ -6,6 +6,9 @@ systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
     - print number of unknown capabilities instead of failing
       (LP: #1905245)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5cd98102e16a6e4acc1444b10db3308d87930933
+  * d/p/lp1890448-hwdb-Add-EliteBook-to-use-micmute-hotkey.patch:
+    Add EliteBook to use micmute hotkey (LP: #1890448)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=238c8c1a7b9d75f69bdeafb1d55f1faf00acb063
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 23 Nov 2020 15:53:02 -0500
 
