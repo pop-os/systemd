@@ -9,6 +9,9 @@ systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
   * d/p/lp1890448-hwdb-Add-EliteBook-to-use-micmute-hotkey.patch:
     Add EliteBook to use micmute hotkey (LP: #1890448)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=238c8c1a7b9d75f69bdeafb1d55f1faf00acb063
+  * d/extra/dhclient-enter-resolved-hook:
+    suppress output of cmp command in dhclient hook (LP: #1878955)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=83df4fc182f8ffe87256f5d7c4b49cee5192529a
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 23 Nov 2020 15:53:02 -0500
 
