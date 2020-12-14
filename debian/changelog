@@ -1,5 +1,6 @@
 systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
 
+  [ Dan Streetman ]
   * d/t/boot-smoke: update test to avoid false negatives
     (LP: #1892358)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=205c30ca53b0e421db28bb56afaf5f88650ce592
@@ -13,6 +14,11 @@ systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
     test: use cap_last_cap() instead of capability_list_length()
     (LP: #1905044)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=84a4832f5f7d4f939c1c78c6be4c3f9e05cd7f59
+
+  [ Balint Reczey ]
+  * d/t/systemd-fsckd: Plymouth-start stays active in 20.10 and later
+    (LP: #1908067)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e3ddd09301c8bdaa59b4fe54d7906f609552370d
 
  -- Dan Streetman <ddstreet@canonical.com>  Thu, 10 Dec 2020 16:38:00 -0500
 
