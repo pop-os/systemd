@@ -14,6 +14,17 @@ systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
     test: use cap_last_cap() instead of capability_list_length()
     (LP: #1905044)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=84a4832f5f7d4f939c1c78c6be4c3f9e05cd7f59
+  * d/p/lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch,
+    d/p/lp1907306/0002-sd-dhcp-client-track-dhcp4-t1-t2-expire-times.patch,
+    d/p/lp1907306/0003-sd-dhcp-client-add-RFC2131-retransmission-details.patch,
+    d/p/lp1907306/0004-sd-dhcp-client-simplify-dhcp4-t1-t2-parsing.patch,
+    d/p/lp1907306/0005-sd-dhcp-client-correct-dhcpv4-renew-rebind-retransmi.patch,
+    d/p/lp1907306/0006-sd-dhcp-client-correct-retransmission-timeout-to-mat.patch,
+    d/p/lp1907306/0007-test-network-increase-wait_online-timeout-to-handle-.patch,
+    d/p/lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch:
+    Send correct number of dhcpv4 renew and rebind requests
+    (LP: #1907306)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0a96dc16ac00e90cd3904e6d490d676b9bb98f1f
 
   [ Balint Reczey ]
   * d/t/systemd-fsckd: Plymouth-start stays active in 20.10 and later
