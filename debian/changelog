@@ -21,6 +21,17 @@ systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
     d/p/lp1903300/0003-networkctl-Add-support-to-display-VXLan-remote-addre.patch:
     set vxlan multicast group when specified (LP: #1903300)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9deff4b7c5495dbe738561ca47daf3756df9fcde
+  * d/p/lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch,
+    d/p/lp1907306/0002-sd-dhcp-client-track-dhcp4-t1-t2-expire-times.patch,
+    d/p/lp1907306/0003-sd-dhcp-client-add-RFC2131-retransmission-details.patch,
+    d/p/lp1907306/0004-sd-dhcp-client-simplify-dhcp4-t1-t2-parsing.patch,
+    d/p/lp1907306/0005-sd-dhcp-client-correct-dhcpv4-renew-rebind-retransmi.patch,
+    d/p/lp1907306/0006-sd-dhcp-client-correct-retransmission-timeout-to-mat.patch,
+    d/p/lp1907306/0007-test-network-increase-wait_online-timeout-to-handle-.patch,
+    d/p/lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch:
+    Send correct number of dhcpv4 renew and rebind requests
+    (LP: #1907306)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a73c51d0df284dcc38e6924d40eed810554bab2e
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 23 Nov 2020 15:53:02 -0500
 
