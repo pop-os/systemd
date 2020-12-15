@@ -1,0 +1,26 @@
+From: Balint Reczey <balint.reczey@canonical.com>
+Date: Tue, 15 Dec 2020 18:55:47 +0100
+Subject: units: Don't start systemd-udev-trigger.service in a container
+
+/sys may seem to be writable, but the container may not have permission
+to write everything under it.
+The service fails to start in LXC on Ubuntu for example, with:
+Failed to write 'add' to '/sys/bus/acpi/uevent': Permission denied
+
+(cherry picked from commit 785fd76fef90bf48665b82edd678d0ac23301fd7)
+---
+ units/systemd-udev-trigger.service | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/units/systemd-udev-trigger.service b/units/systemd-udev-trigger.service
+index 8b2d88e..3cd692b 100644
+--- a/units/systemd-udev-trigger.service
++++ b/units/systemd-udev-trigger.service
+@@ -15,6 +15,7 @@ Wants=systemd-udevd.service
+ After=systemd-udevd-kernel.socket systemd-udevd-control.socket
+ Before=sysinit.target
+ ConditionPathIsReadWrite=/sys
++ConditionVirtualization=!container
+ 
+ [Service]
+ Type=oneshot
