@@ -96,3 +96,11 @@ lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch
 lp1903300/0001-network-VXLan-fix-adding-Group-address.patch
 lp1903300/0002-network-VXLan-Add-support-for-remote-address.patch
 lp1903300/0003-networkctl-Add-support-to-display-VXLan-remote-addre.patch
+lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch
+lp1907306/0002-sd-dhcp-client-track-dhcp4-t1-t2-expire-times.patch
+lp1907306/0003-sd-dhcp-client-add-RFC2131-retransmission-details.patch
+lp1907306/0004-sd-dhcp-client-simplify-dhcp4-t1-t2-parsing.patch
+lp1907306/0005-sd-dhcp-client-correct-dhcpv4-renew-rebind-retransmi.patch
+lp1907306/0006-sd-dhcp-client-correct-retransmission-timeout-to-mat.patch
+lp1907306/0007-test-network-increase-wait_online-timeout-to-handle-.patch
+lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch
