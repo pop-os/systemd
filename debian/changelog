@@ -16,6 +16,11 @@ systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
     test: use cap_last_cap() instead of capability_list_length()
     (LP: #1905044)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ff21f41e624d9e603f3be463846ce981a433842a
+  * d/p/lp1903300/0001-network-VXLan-fix-adding-Group-address.patch,
+    d/p/lp1903300/0002-network-VXLan-Add-support-for-remote-address.patch,
+    d/p/lp1903300/0003-networkctl-Add-support-to-display-VXLan-remote-addre.patch:
+    set vxlan multicast group when specified (LP: #1903300)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9deff4b7c5495dbe738561ca47daf3756df9fcde
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 23 Nov 2020 15:53:02 -0500
 
