@@ -1,3 +1,25 @@
+systemd (247.1-4ubuntu1) UNRELEASED; urgency=medium
+
+  [ Dan Streetman ]
+  * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch:
+    Fix test use of new cap numbers with 5.8 kernel (LP: #1905044)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d55c6f8186cb2cb73f61d6ff5b2e0ded82ef265c
+
+  [ Balint Reczey ]
+  * Merge to Ubuntu from Debian unstable
+  * Refresh patches
+    - Dropped changes:
+      * debian/patches/dhcp-Allow-setting-request-options-again.patch
+        (Upstream code has been changed in a similar way)
+      * debian/patches/Revert-network-do-not-drop-foreign-config-if-interface-is.patch
+        debian/patches/network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
+        (Revert-network-prevent-interfaces-to-be-initialized-multi.patch is still kept)
+      * debian/patches/lp1845909/0002-network-add-link-setting_genmode-flag.patch
+      * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch
+        (Present in upstream 247.)
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 15 Dec 2020 21:13:19 +0100
+
 systemd (247.1-4) unstable; urgency=medium
 
   [ наб ]
@@ -39,20 +61,6 @@ systemd (247.1-1) experimental; urgency=medium
   * New upstream version 247.1
 
  -- Michael Biebl <biebl@debian.org>  Tue, 01 Dec 2020 17:17:28 +0100
-
-systemd (247-1ubuntu1) UNRELEASED; urgency=medium
-
-  * Merge to Ubuntu from Debian unstable
-  * Refresh patches
-    - Dropped changes:
-      * debian/patches/dhcp-Allow-setting-request-options-again.patch
-        (Upstream code has been changed in a similar way)
-      * debian/patches/Revert-network-do-not-drop-foreign-config-if-interface-is.patch
-        debian/patches/network-Set-link-state-to-LINK_STATE_PENDING-instead-of-t.patch
-        (Revert-network-prevent-interfaces-to-be-initialized-multi.patch is still kept)
-      * debian/patches/lp1845909/0002-network-add-link-setting_genmode-flag.patch
-
- -- Balint Reczey <rbalint@ubuntu.com>  Fri, 27 Nov 2020 16:49:13 +0100
 
 systemd (247-1) experimental; urgency=medium
 
@@ -107,14 +115,6 @@ systemd (247~rc2-1) experimental; urgency=medium
     https://github.com/systemd/systemd/pull/16262
 
  -- Michael Biebl <biebl@debian.org>  Thu, 12 Nov 2020 21:23:22 +0100
-
-systemd (246.6-5ubuntu2) UNRELEASED; urgency=medium
-
-  * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch:
-    Fix test use of new cap numbers with 5.8 kernel (LP: #1905044)
-    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d55c6f8186cb2cb73f61d6ff5b2e0ded82ef265c
-
- -- Dan Streetman <ddstreet@canonical.com>  Thu, 10 Dec 2020 16:20:20 -0500
 
 systemd (246.6-5ubuntu1) hirsute; urgency=medium
 
