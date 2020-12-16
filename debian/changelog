@@ -1,4 +1,4 @@
-systemd (247.1-4ubuntu1) UNRELEASED; urgency=medium
+systemd (247.1-4ubuntu1) hirsute; urgency=medium
 
   [ Dan Streetman ]
   * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch:
@@ -17,8 +17,18 @@ systemd (247.1-4ubuntu1) UNRELEASED; urgency=medium
       * debian/patches/lp1845909/0002-network-add-link-setting_genmode-flag.patch
       * d/p/lp1905044-test-use-cap_last_cap-for-max-supported-cap-number-n.patch
         (Present in upstream 247.)
+  * debian/udev.NEWS: Mention udev rules changes in 247
+    File: debian/udev.NEWS
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9f33f19683c2b864384c2ae59b312b2c844ed633
+  * Don't start systemd-udev-trigger.service in containers.
+    It fails and is not likely to be useful.
+    File: debian/patches/units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7b04fe5f98a4d204f73a1ec22884b9b3053a9a82
+  * test: use modern qemu numa arguments (LP: #1908259)
+    File: debian/patches/test-use-modern-qemu-numa-arguments.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=158106e74d452cf6cd5cd737432cbe6b7d47286c
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 15 Dec 2020 21:13:19 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 16 Dec 2020 10:27:06 +0100
 
 systemd (247.1-4) unstable; urgency=medium
 
