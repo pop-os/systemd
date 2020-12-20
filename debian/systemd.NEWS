@@ -1,4 +1,4 @@
-systemd (247-5) unstable; urgency=medium
+systemd (247.2-1) unstable; urgency=medium
 
   KERNEL API INCOMPATIBILITY: Linux 4.14 introduced two new uevents
   "bind" and "unbind" to the Linux device model. When this kernel

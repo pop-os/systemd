@@ -1,3 +1,15 @@
+systemd (247.2-1) unstable; urgency=medium
+
+  [ Balint Reczey ]
+  * debian/systemd.NEWS: Mention udev rules changes in 247
+
+  [ Michael Biebl ]
+  * New upstream version 247.2
+  * Rebase patches
+  * test: fix fd_is_mount_point() check
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 20 Dec 2020 20:44:31 +0100
+
 systemd (247.1-4) unstable; urgency=medium
 
   [ наб ]
