@@ -1714,7 +1714,7 @@ int dns_transaction_go(DnsTransaction *t) {
                 if (r == -EMSGSIZE)
                         log_debug("Sending query via TCP since it is too large.");
                 else if (r == -EAGAIN)
-                        log_debug("Sending query via TCP since UDP isn't supported.");
+                        log_debug("Sending query via TCP since UDP isn't supported or DNS-over-TLS is selected.");
                 if (IN_SET(r, -EMSGSIZE, -EAGAIN))
                         r = dns_transaction_emit_tcp(t);
         }
@@ -1889,7 +1889,7 @@ static int dns_transaction_negative_trust_anchor_lookup(DnsTransaction *t, const
         if (!t->scope->link)
                 return 0;
 
-        return set_contains(t->scope->link->dnssec_negative_trust_anchors, name);
+        return link_negative_trust_anchor_lookup(t->scope->link, name);
 }
 
 static int dns_transaction_has_unsigned_negative_answer(DnsTransaction *t) {
