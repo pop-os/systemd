@@ -1,3 +1,9 @@
+systemd (247.2-2) unstable; urgency=medium
+
+  * Switch to "unified" cgroup hierarchy (i.e. cgroupv2) (Closes: #943981)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 21 Dec 2020 20:06:49 +0100
+
 systemd (247.2-1) unstable; urgency=medium
 
   [ Balint Reczey ]
