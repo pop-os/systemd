@@ -17,9 +17,7 @@ else
     CONFFLAGS_DISTRO =
 endif
 
-ifneq (, $(filter $(DEB_BUILD_ARCH), riscv64))
-    TEST_TIMEOUT_MULTIPLIER = "-t 10"
-endif
+TEST_TIMEOUT_MULTIPLIER = "-t 10"
 
 # fail on missing files and symbols changes on distro builds, but not if we
 # build/test upstream master
