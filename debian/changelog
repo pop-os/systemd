@@ -1,3 +1,24 @@
+systemd (247.2-3) unstable; urgency=medium
+
+  * test: use modern qemu numa arguments
+    This fixes TEST-36-NUMAPOLICY from the upstream autopkgtest when using
+    qemu >= 5.2.
+  * Increase timeout when running unit tests.
+    The default timeout for individual unit tests is 30s. On slower
+    architectures and environments like reproducible-builds, this sometimes
+    is not enough.
+    Instead of fine-tuning the timeout for each individual test, we instead
+    increase the timeouts by a factor of 10.
+  * init-functions, getty-static.service: Don't hard-code path to systemctl
+    binary.
+    This should simplify an eventual move of systemctl from /bin to
+    /usr/bin.
+  * getty-static.service: Skip if dbus-broker is installed.
+    Check for the binary in /usr/bin as this makes it easier to move the
+    service files from /lib/systemd to /usr/lib/systemd.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 26 Dec 2020 13:33:41 +0100
+
 systemd (247.2-2) unstable; urgency=medium
 
   * Switch to "unified" cgroup hierarchy (i.e. cgroupv2) (Closes: #943981)
