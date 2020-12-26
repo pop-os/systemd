@@ -150,6 +150,7 @@ Depends: libsystemd-dev,
   e2fsprogs,
   zstd,
   squashfs-tools,
+  vim-tiny,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
