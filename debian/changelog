@@ -1,3 +1,11 @@
+systemd (247.2-4) unstable; urgency=medium
+
+  * Move libraries and NSS modules from /lib to /usr/lib.
+    Keep libpam_systemd.so installed in /lib, as PAM doesn't support
+    loading PAM modules from /usr/lib on a split-usr system.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 02 Jan 2021 17:06:01 +0100
+
 systemd (247.2-3) unstable; urgency=medium
 
   * test: use modern qemu numa arguments
