@@ -516,7 +516,7 @@ foreach ident : [
                                  #include <sys/stat.h>
                                  #include <unistd.h>'''],
         ['explicit_bzero' ,   '''#include <string.h>'''],
-        ['reallocarray',      '''#include <malloc.h>'''],
+        ['reallocarray',      '''#include <stdlib.h>'''],
         ['set_mempolicy',     '''#include <stdlib.h>
                                  #include <unistd.h>'''],
         ['get_mempolicy',     '''#include <stdlib.h>
@@ -1115,6 +1115,7 @@ conf.set10('HAVE_LIBIPTC', have)
 want_qrencode = get_option('qrencode')
 if want_qrencode != 'false' and not skip_deps
         libqrencode = dependency('libqrencode',
+                                 version : '>= 4',
                                  required : want_qrencode == 'true')
         have = libqrencode.found()
 else
@@ -3577,7 +3578,7 @@ foreach tuple : sanitizers
                         prev = name
 
                         if fuzz_tests
-                                test('@0@:@1@:@2@'.format(b, c, sanitizer),
+                                test('@0@_@1@_@2@'.format(b, c, sanitizer),
                                      env,
                                      env : ['UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1'],
                                      timeout : 60,

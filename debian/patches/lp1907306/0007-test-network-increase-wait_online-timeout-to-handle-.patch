@@ -1,8 +1,9 @@
-From b226c15cfb993dc6e00ae6180bb287fc4dd93acd Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Wed, 9 Dec 2020 15:24:09 -0500
 Subject: [PATCH 7/7] test-network: increase wait_online timeout to handle
  longer dhcpv4 transient timeout
+
+From b226c15cfb993dc6e00ae6180bb287fc4dd93acd Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
@@ -20,9 +21,11 @@ the test interface to reach degraded state.
  test/test-network/systemd-networkd-tests.py | 4 +++-
  1 file changed, 3 insertions(+), 1 deletion(-)
 
+diff --git a/test/test-network/systemd-networkd-tests.py b/test/test-network/systemd-networkd-tests.py
+index 1062f93..ec42e5a 100755
 --- a/test/test-network/systemd-networkd-tests.py
 +++ b/test/test-network/systemd-networkd-tests.py
-@@ -4037,7 +4037,9 @@ class NetworkdDHCPClientTests(unittest.T
+@@ -4037,7 +4037,9 @@ class NetworkdDHCPClientTests(unittest.TestCase, Utilities):
          copy_unit_to_networkd_unit_path('25-veth.netdev', 'dhcp-server-veth-peer.network',
                                          'dhcp-client-with-ipv4ll-fallback-without-dhcp-server.network')
          start_networkd()

@@ -1,8 +1,9 @@
-From f3808b872f78b3224ecd0517f96f18a353bfba79 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Wed, 9 Dec 2020 14:32:06 -0500
 Subject: [PATCH 6/7] sd-dhcp-client: correct retransmission timeout to match
  RFC
+
+From f3808b872f78b3224ecd0517f96f18a353bfba79 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
@@ -30,9 +31,11 @@ failure timeout between 25 and 31 seconds.
 Additionally, if MaxAttempts= is set, it will take slightly longer to
 reach than with previous behavior.
 ---
- src/libsystemd-network/sd-dhcp-client.c | 3 +--
- 1 file changed, 1 insertion(+), 2 deletions(-)
+ src/libsystemd-network/sd-dhcp-client.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index 0d2fba2..4784113 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
 @@ -1269,9 +1269,7 @@ static int client_timeout_resend(

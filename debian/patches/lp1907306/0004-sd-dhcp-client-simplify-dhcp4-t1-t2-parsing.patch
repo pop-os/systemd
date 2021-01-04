@@ -1,7 +1,8 @@
-From b0d7d8063cb61bb204523f02fd45fb671a1f4d43 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 8 Dec 2020 15:36:19 -0500
 Subject: [PATCH 4/7] sd-dhcp-client: simplify dhcp4 t1/t2 parsing
+
+From b0d7d8063cb61bb204523f02fd45fb671a1f4d43 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
@@ -23,12 +24,14 @@ previously was adjusted by the random 'fuzz', but the RFC does not state
 that the lease expiration time should be adjusted, so now the code uses
 exactly the lease lifetime as provided by the server with no adjustment.
 ---
- src/libsystemd-network/sd-dhcp-client.c | 82 ++++++++-----------------
+ src/libsystemd-network/sd-dhcp-client.c | 82 ++++++++++-----------------------
  1 file changed, 25 insertions(+), 57 deletions(-)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index 7a1ec8d..d70e714 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -1656,20 +1656,6 @@ static int client_handle_ack(sd_dhcp_cli
+@@ -1656,20 +1656,6 @@ static int client_handle_ack(sd_dhcp_client *client, DHCPMessage *ack, size_t le
          return r;
  }
  
@@ -49,7 +52,7 @@ exactly the lease lifetime as provided by the server with no adjustment.
  static int client_set_lease_timeouts(sd_dhcp_client *client) {
          usec_t time_now;
          char time_string[FORMAT_TIMESPAN_MAX];
-@@ -1694,49 +1680,31 @@ static int client_set_lease_timeouts(sd_
+@@ -1694,49 +1680,31 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
                  return r;
          assert(client->request_sent <= time_now);
  

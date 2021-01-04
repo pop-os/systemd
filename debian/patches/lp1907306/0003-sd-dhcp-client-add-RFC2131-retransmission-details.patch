@@ -1,7 +1,8 @@
-From 3d75a443ee819c4b2df8bfd8caee5c3ebc76fae3 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 8 Dec 2020 15:33:29 -0500
 Subject: [PATCH 3/7] sd-dhcp-client: add RFC2131 retransmission details
+
+From 3d75a443ee819c4b2df8bfd8caee5c3ebc76fae3 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
@@ -10,9 +11,11 @@ RFC2131, providing the details for dhcpv4, has specific retransmission
 intervals that it outlines. This adds functions to compute the timeouts
 as the RFC describes.
 ---
- src/libsystemd-network/sd-dhcp-client.c | 32 +++++++++++++++++++++++++
+ src/libsystemd-network/sd-dhcp-client.c | 32 ++++++++++++++++++++++++++++++++
  1 file changed, 32 insertions(+)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index 6d8b1c6..7a1ec8d 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
 @@ -29,6 +29,7 @@
@@ -23,7 +26,7 @@ as the RFC describes.
  #include "utf8.h"
  #include "web-util.h"
  
-@@ -731,6 +732,37 @@ static int cmp_uint8(const uint8_t *a, c
+@@ -731,6 +732,37 @@ static int cmp_uint8(const uint8_t *a, const uint8_t *b) {
          return CMP(*a, *b);
  }
  

@@ -1,8 +1,9 @@
-From 8bc63a0b1355a8362e50b449b2ae9979122a2521 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 15 Dec 2020 17:59:12 -0500
-Subject: [PATCH] sd-dhcp-client: fix renew/rebind timeout calculation to avoid
- infinite loop
+Subject: [PATCH] sd-dhcp-client: fix renew/rebind timeout calculation to
+ avoid infinite loop
+
+From 8bc63a0b1355a8362e50b449b2ae9979122a2521 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/8bc63a0b1355a8362e50b449b2ae9979122a2521
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
 
@@ -14,9 +15,11 @@ Fixes: 3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
  src/libsystemd-network/sd-dhcp-client.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index 4784113..61bd1c1 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -760,7 +760,7 @@ static usec_t client_compute_request_tim
+@@ -760,7 +760,7 @@ static usec_t client_compute_request_timeout(usec_t now, uint64_t attempt) {
   * Note that while the default T1/T2 initial times do have random 'fuzz' applied,
   * the RFC sec 4.4.5 does not mention adding any fuzz to retries. */
  static usec_t client_compute_reacquisition_timeout(usec_t now, usec_t expire) {

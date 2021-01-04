@@ -1,8 +1,9 @@
-From c24288d21ee94856f5c60473191d41c77b71da91 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 8 Dec 2020 15:40:10 -0500
 Subject: [PATCH 5/7] sd-dhcp-client: correct dhcpv4 renew/rebind retransmit
  timeouts
+
+From c24288d21ee94856f5c60473191d41c77b71da91 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
@@ -18,9 +19,11 @@ down to a minimum of 60 seconds.
 
 Fixes: #17909
 ---
- src/libsystemd-network/sd-dhcp-client.c | 16 +++-------------
- 1 file changed, 3 insertions(+), 13 deletions(-)
+ src/libsystemd-network/sd-dhcp-client.c | 19 +++----------------
+ 1 file changed, 3 insertions(+), 16 deletions(-)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index d70e714..0d2fba2 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
 @@ -1224,7 +1224,6 @@ static int client_timeout_resend(

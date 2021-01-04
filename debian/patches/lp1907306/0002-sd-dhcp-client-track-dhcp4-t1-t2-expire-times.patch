@@ -1,16 +1,19 @@
-From 0c3c59783b127ec9a1c4860c6509d133cccffe10 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Tue, 8 Dec 2020 14:37:59 -0500
 Subject: [PATCH 2/7] sd-dhcp-client: track dhcp4 t1, t2, expire times
+
+From 0c3c59783b127ec9a1c4860c6509d133cccffe10 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
 
 Add fields to dhcp4 client to track t1, t2, and lease expiry times
 ---
- src/libsystemd-network/sd-dhcp-client.c | 54 ++++++++++++-------------
+ src/libsystemd-network/sd-dhcp-client.c | 54 ++++++++++++++++-----------------
  1 file changed, 27 insertions(+), 27 deletions(-)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index 465091e..6d8b1c6 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
 @@ -95,6 +95,9 @@ struct sd_dhcp_client {
@@ -23,7 +26,7 @@ Add fields to dhcp4 client to track t1, t2, and lease expiry times
          uint64_t attempt;
          uint64_t max_attempts;
          OrderedHashmap *extra_options;
-@@ -1637,9 +1640,6 @@ static uint64_t client_compute_timeout(s
+@@ -1637,9 +1640,6 @@ static uint64_t client_compute_timeout(sd_dhcp_client *client, uint32_t lifetime
  
  static int client_set_lease_timeouts(sd_dhcp_client *client) {
          usec_t time_now;
@@ -33,7 +36,7 @@ Add fields to dhcp4 client to track t1, t2, and lease expiry times
          char time_string[FORMAT_TIMESPAN_MAX];
          int r;
  
-@@ -1663,93 +1663,93 @@ static int client_set_lease_timeouts(sd_
+@@ -1663,93 +1663,93 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          assert(client->request_sent <= time_now);
  
          /* convert the various timeouts from relative (secs) to absolute (usecs) */

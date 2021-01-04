@@ -8,25 +8,25 @@ The change broke netplan.io's ethernets autopkgtest.
 This reverts commit bd08ce56156751d58584a44e766ef61340cdae2d.
 ---
  src/network/networkd-link-bus.c |  2 +-
- src/network/networkd-link.c     | 21 +++++++++------------
+ src/network/networkd-link.c     | 23 ++++++++++-------------
  src/network/networkd-link.h     | 13 ++++++-------
- 3 files changed, 16 insertions(+), 20 deletions(-)
+ 3 files changed, 17 insertions(+), 21 deletions(-)
 
 diff --git a/src/network/networkd-link-bus.c b/src/network/networkd-link-bus.c
-index 9f4c719..b139184 100644
+index 4df31df..684f2e4 100644
 --- a/src/network/networkd-link-bus.c
 +++ b/src/network/networkd-link-bus.c
 @@ -668,7 +668,7 @@ int bus_link_method_reconfigure(sd_bus_message *message, void *userdata, sd_bus_
          if (r < 0)
                  return r;
- 
--        link_set_state(l, LINK_STATE_INITIALIZED);
-+        link_set_state(l, LINK_STATE_PENDING);
-         r = link_save_and_clean(l);
-         if (r < 0)
-                 return r;
+         if (r > 0) {
+-                link_set_state(l, LINK_STATE_INITIALIZED);
++                link_set_state(l, LINK_STATE_PENDING);
+                 r = link_save_and_clean(l);
+                 if (r < 0)
+                         return r;
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index d8ae2cd..36dd4b9 100644
+index 4433884..d339296 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
 @@ -1011,7 +1011,7 @@ static int set_mtu_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link)
@@ -74,7 +74,7 @@ index d8ae2cd..36dd4b9 100644
  
          if (link->setting_mtu || link->setting_genmode)
                  return 0;
-@@ -2196,7 +2196,7 @@ static int link_reconfigure_internal(Link *link, sd_netlink_message *m, bool for
+@@ -2195,7 +2195,7 @@ static int link_reconfigure_internal(Link *link, sd_netlink_message *m, bool for
          if (r < 0)
                  return r;
  
@@ -83,7 +83,7 @@ index d8ae2cd..36dd4b9 100644
                  log_link_debug(link, "State is %s, dropping config", link_state_to_string(link->state));
                  r = link_drop_foreign_config(link);
                  if (r < 0)
-@@ -2216,7 +2216,7 @@ static int link_reconfigure_internal(Link *link, sd_netlink_message *m, bool for
+@@ -2215,7 +2215,7 @@ static int link_reconfigure_internal(Link *link, sd_netlink_message *m, bool for
          if (r < 0)
                  return r;
  
@@ -92,7 +92,16 @@ index d8ae2cd..36dd4b9 100644
          link_dirty(link);
  
          /* link_configure_duid() returns 0 if it requests product UUID. In that case,
-@@ -2285,11 +2285,10 @@ static int link_initialized_and_synced(Link *link) {
+@@ -2258,7 +2258,7 @@ int link_reconfigure(Link *link, bool force) {
+         /* When link in pending or initialized state, then link_configure() will be called. To prevent
+          * the function be called multiple times simultaneously, refuse to reconfigure the interface in
+          * these case. */
+-        if (IN_SET(link->state, LINK_STATE_PENDING, LINK_STATE_INITIALIZED, LINK_STATE_LINGER))
++        if (IN_SET(link->state, LINK_STATE_PENDING, LINK_STATE_LINGER))
+                 return 0; /* o means no-op. */
+ 
+         r = sd_rtnl_message_new_link(link->manager->rtnl, &req, RTM_GETLINK,
+@@ -2287,11 +2287,10 @@ static int link_initialized_and_synced(Link *link) {
  
          /* We may get called either from the asynchronous netlink callback,
           * or directly for link_add() if running in a container. See link_add(). */
@@ -105,7 +114,7 @@ index d8ae2cd..36dd4b9 100644
  
          r = link_new_bound_by_list(link);
          if (r < 0)
-@@ -2391,7 +2390,6 @@ int link_initialized(Link *link, sd_device *device) {
+@@ -2393,7 +2392,6 @@ int link_initialized(Link *link, sd_device *device) {
                  return 0;
  
          log_link_debug(link, "udev initialized link");
@@ -113,7 +122,7 @@ index d8ae2cd..36dd4b9 100644
  
          link->sd_device = sd_device_ref(device);
  
-@@ -2646,7 +2644,7 @@ static int link_carrier_lost(Link *link) {
+@@ -2648,7 +2646,7 @@ static int link_carrier_lost(Link *link) {
          if (r < 0)
                  return r;
  
@@ -122,7 +131,7 @@ index d8ae2cd..36dd4b9 100644
                  log_link_debug(link, "State is %s, dropping config", link_state_to_string(link->state));
                  r = link_drop_foreign_config(link);
                  if (r < 0)
-@@ -3238,7 +3236,6 @@ int link_save_and_clean(Link *link) {
+@@ -3240,7 +3238,6 @@ int link_save_and_clean(Link *link) {
  
  static const char* const link_state_table[_LINK_STATE_MAX] = {
          [LINK_STATE_PENDING] = "pending",

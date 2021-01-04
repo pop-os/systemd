@@ -1,18 +1,20 @@
-From f3bd46c657d9ffd4c34624fbbff23d21d5848ca4 Mon Sep 17 00:00:00 2001
 From: Dan Streetman <ddstreet@canonical.com>
 Date: Mon, 14 Dec 2020 15:50:11 -0500
 Subject: [PATCH 1/7] sd-dhcp-client: don't log timeouts if already expired
+
+From f3bd46c657d9ffd4c34624fbbff23d21d5848ca4 Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/commit/3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
 Bug: https://github.com/systemd/systemd/issues/17909
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
-
 ---
  src/libsystemd-network/sd-dhcp-client.c | 17 +++++++++--------
  1 file changed, 9 insertions(+), 8 deletions(-)
 
+diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
+index 3ce45b2..465091e 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -1715,13 +1715,13 @@ static int client_set_lease_timeouts(sd_
+@@ -1715,13 +1715,13 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          if (r < 0)
                  return r;
  
@@ -29,7 +31,7 @@ Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
          /* arm T2 timeout */
          r = event_reset_time(client->event, &client->timeout_t2,
                               clock_boottime_or_monotonic(),
-@@ -1731,13 +1731,13 @@ static int client_set_lease_timeouts(sd_
+@@ -1731,13 +1731,13 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          if (r < 0)
                  return r;
  
@@ -46,7 +48,7 @@ Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
          /* arm T1 timeout */
          r = event_reset_time(client->event, &client->timeout_t1,
                               clock_boottime_or_monotonic(),
-@@ -1747,8 +1747,9 @@ static int client_set_lease_timeouts(sd_
+@@ -1747,8 +1747,9 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          if (r < 0)
                  return r;
  
