@@ -32,6 +32,9 @@ systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
     Send correct number of dhcpv4 renew and rebind requests
     (LP: #1907306)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a73c51d0df284dcc38e6924d40eed810554bab2e
+  * d/p/lp1902960-udev-re-assign-ID_NET_DRIVER-ID_NET_LINK_FILE-ID_NET.patch:
+    Run net_setup_link on 'change' uevents (LP: #1902960)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ec7ba2358aa68d8d6276ed56ef91caafc287cecf
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 23 Nov 2020 15:53:02 -0500
 
