@@ -1,17 +1,3 @@
-systemd (247.2-2) unstable; urgency=medium
-
-  systemd now defaults to the "unified" cgroup hierarchy (i.e. cgroupv2).
-  This change reflects the fact that cgroupsv2 support has matured
-  substantially in both systemd and in the kernel.
-  All major container tools nowadays should support cgroupv2.
-  If you run into problems with cgroupv2, you can switch back to the previous,
-  hybrid setup by adding "systemd.unified_cgroup_hierarchy=false" to the
-  kernel command line.
-  You can read more about the benefits of cgroupv2 at
-  https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html
-
- -- Michael Biebl <biebl@debian.org>  Mon, 21 Dec 2020 18:40:10 +0100
-
 systemd (247.2-1) unstable; urgency=medium
 
   KERNEL API INCOMPATIBILITY: Linux 4.14 introduced two new uevents
