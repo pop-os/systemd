@@ -104,3 +104,4 @@ lp1907306/0005-sd-dhcp-client-correct-dhcpv4-renew-rebind-retransmi.patch
 lp1907306/0006-sd-dhcp-client-correct-retransmission-timeout-to-mat.patch
 lp1907306/0007-test-network-increase-wait_online-timeout-to-handle-.patch
 lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch
+lp1902960-udev-re-assign-ID_NET_DRIVER-ID_NET_LINK_FILE-ID_NET.patch
