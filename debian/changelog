@@ -23,8 +23,17 @@ systemd (247.2-4ubuntu1) UNRELEASED; urgency=medium
     - debian/rules
     - debian/systemd.NEWS
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4976b9474aa3b3b2587bb805472b8c37a4574346
+  * Drop reverts that used to keep netplan.io's autopkgtest happy
+    Files:
+    - debian/patches/Revert-network-fix-assertion-when-link-get-carrier.patch
+    - debian/patches/Revert-network-prevent-interfaces-to-be-initialized-multi.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=23340d4608eb9f281ecc47f7356b40f2ac8db540
+  * Fall back to device name when net_get_name(device) fails again, dropping
+    the patch to skip it
+    File: debian/patches/Skip-falling-back-to-device-name-when-net_get_name-device.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=34cfe66296463dcc8ad9ebe07add846dd955fedc
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 04 Jan 2021 12:46:01 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 04 Jan 2021 19:50:03 +0100
 
 systemd (247.2-4) unstable; urgency=medium
 
