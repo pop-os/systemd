@@ -1,3 +1,31 @@
+systemd (247.2-4ubuntu1) UNRELEASED; urgency=medium
+
+  [ Dan Streetman ]
+  * d/p/lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch,
+    d/p/lp1907306/0002-sd-dhcp-client-track-dhcp4-t1-t2-expire-times.patch,
+    d/p/lp1907306/0003-sd-dhcp-client-add-RFC2131-retransmission-details.patch,
+    d/p/lp1907306/0004-sd-dhcp-client-simplify-dhcp4-t1-t2-parsing.patch,
+    d/p/lp1907306/0005-sd-dhcp-client-correct-dhcpv4-renew-rebind-retransmi.patch,
+    d/p/lp1907306/0006-sd-dhcp-client-correct-retransmission-timeout-to-mat.patch,
+    d/p/lp1907306/0007-test-network-increase-wait_online-timeout-to-handle-.patch,
+    d/p/lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch:
+    Send correct number of dhcpv4 renew and rebind requests
+    (LP: #1907306)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9454c4cb1b85f6f6945a29b6860e0747432318a1
+
+  [ Balint Reczey ]
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes:
+      * test: use modern qemu numa arguments
+  * Switch default hierarchy (back) to hybrid again because snapd is not ready
+    yet (LP: 1850667)
+    Files:
+    - debian/rules
+    - debian/systemd.NEWS
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4976b9474aa3b3b2587bb805472b8c37a4574346
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 04 Jan 2021 12:46:01 +0100
+
 systemd (247.2-4) unstable; urgency=medium
 
   * Move libraries and NSS modules from /lib to /usr/lib.
@@ -44,22 +72,6 @@ systemd (247.2-1) unstable; urgency=medium
   * test: fix fd_is_mount_point() check
 
  -- Michael Biebl <biebl@debian.org>  Sun, 20 Dec 2020 20:44:31 +0100
-
-systemd (247.1-4ubuntu2) UNRELEASED; urgency=medium
-
-  * d/p/lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch,
-    d/p/lp1907306/0002-sd-dhcp-client-track-dhcp4-t1-t2-expire-times.patch,
-    d/p/lp1907306/0003-sd-dhcp-client-add-RFC2131-retransmission-details.patch,
-    d/p/lp1907306/0004-sd-dhcp-client-simplify-dhcp4-t1-t2-parsing.patch,
-    d/p/lp1907306/0005-sd-dhcp-client-correct-dhcpv4-renew-rebind-retransmi.patch,
-    d/p/lp1907306/0006-sd-dhcp-client-correct-retransmission-timeout-to-mat.patch,
-    d/p/lp1907306/0007-test-network-increase-wait_online-timeout-to-handle-.patch,
-    d/p/lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch:
-    Send correct number of dhcpv4 renew and rebind requests
-    (LP: #1907306)
-    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9454c4cb1b85f6f6945a29b6860e0747432318a1
-
- -- Dan Streetman <ddstreet@canonical.com>  Wed, 16 Dec 2020 07:41:30 -0500
 
 systemd (247.1-4ubuntu1) hirsute; urgency=medium
 
