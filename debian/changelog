@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.4) focal; urgency=medium
 
   * d/p/lp1905245/0001-basic-cap-list-parse-print-numerical-capabilities.patch,
     d/p/lp1905245/0002-basic-capability-util-let-cap_last_cap-return-unsign.patch,
@@ -35,8 +35,11 @@ systemd (245.4-4ubuntu3.4) UNRELEASED; urgency=medium
   * d/p/lp1902960-udev-re-assign-ID_NET_DRIVER-ID_NET_LINK_FILE-ID_NET.patch:
     Run net_setup_link on 'change' uevents (LP: #1902960)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ec7ba2358aa68d8d6276ed56ef91caafc287cecf
+  * d/t/root-unittests:
+    Remove any corrupt journal files (LP: #1881947)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5481fececdb3cb35ca7118598cad537681b5ff14
 
- -- Dan Streetman <ddstreet@canonical.com>  Mon, 23 Nov 2020 15:53:02 -0500
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 06 Jan 2021 15:47:39 -0500
 
 systemd (245.4-4ubuntu3.3) focal; urgency=medium
 
