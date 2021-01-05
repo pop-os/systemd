@@ -28,6 +28,9 @@ systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
   * d/p/lp1902960-udev-re-assign-ID_NET_DRIVER-ID_NET_LINK_FILE-ID_NET.patch:
     Run net_setup_link on 'change' uevents (LP: #1902960)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=7183e2ef4758ce47b152dec735e7d213d6003e37
+  * d/t/root-unittests:
+    Remove any corrupt journal files (LP: #1881947)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3d0ea66f0db4a204759fa0005f6f27579ee4195a
 
   [ Balint Reczey ]
   * d/t/systemd-fsckd: Plymouth-start stays active in 20.10 and later
