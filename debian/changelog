@@ -11,6 +11,9 @@ systemd (247.1-4ubuntu2) UNRELEASED; urgency=medium
     Send correct number of dhcpv4 renew and rebind requests
     (LP: #1907306)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9454c4cb1b85f6f6945a29b6860e0747432318a1
+  * d/t/root-unittests:
+    Remove any corrupt journal files (LP: #1881947)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c4f2a65d53972eec7d4cf46facb9f72e989e3af2
 
  -- Dan Streetman <ddstreet@canonical.com>  Wed, 16 Dec 2020 07:41:30 -0500
 
