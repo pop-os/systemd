@@ -1,4 +1,4 @@
-systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
+systemd (246.6-1ubuntu1.1) groovy; urgency=medium
 
   [ Dan Streetman ]
   * d/t/boot-smoke: update test to avoid false negatives
@@ -37,7 +37,7 @@ systemd (246.6-1ubuntu1.1) UNRELEASED; urgency=medium
     (LP: #1908067)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=e3ddd09301c8bdaa59b4fe54d7906f609552370d
 
- -- Dan Streetman <ddstreet@canonical.com>  Thu, 10 Dec 2020 16:38:00 -0500
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 06 Jan 2021 15:40:39 -0500
 
 systemd (246.6-1ubuntu1) groovy; urgency=medium
 
