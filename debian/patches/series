@@ -22,3 +22,4 @@ debian/deny-list-upstream-test-02-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Keep-journal-files-compatible-with-older-versions.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
+debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
