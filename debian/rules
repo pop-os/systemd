@@ -53,6 +53,7 @@ CONFFLAGS = \
 	-Dtelinit-path=/lib/sysvinit/telinit \
 	-Dsysvinit-path=/etc/init.d \
 	-Dsysvrcnd-path=/etc \
+	-Dlocalegen-path=/usr/sbin/locale-gen \
 	-Ddebug-shell=/bin/bash \
 	-Dzshcompletiondir=/usr/share/zsh/vendor-completions \
 	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
