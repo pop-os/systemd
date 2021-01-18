@@ -1,3 +1,31 @@
+systemd (247.2-5) unstable; urgency=medium
+
+  [ Matthias Klumpp ]
+  * Configure localed to run locale-gen to generate missing locale.
+    This applies an (upstreamed) patch to permit systemd-localed to run
+    locale-gen to generate missing locale when requested to switch the
+    system locale.
+    This makes localectl usable on Debian for changing locale without
+    breaking system localization or even prevent certain applications from
+    running at all after switching to a non-generated locale.
+
+  [ Michael Biebl ]
+  * systemctl: do not shutdown immediately on scheduled shutdown.
+    When, for whatever reason, a scheduled shutdown fails to be set, systemd
+    will proceed with immediate shutdown without allowing the user to react.
+    This is counterintuitive because when a scheduled shutdown is issued,
+    it means the user wants to shutdown at a specified time in the future,
+    not immediately. (Closes: #931235)
+  * test: disable DnsmasqClientTest.test_resolved_etc_hosts in
+    networkd-test.py.
+    This test appears to be flaky.
+    See: #979716
+  * Bump Standards-Version to 4.5.1
+  * Set upstream metadata fields: Bug-Submit, Bug-Database, Repository,
+    Repository-Browse
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 18 Jan 2021 13:45:15 +0100
+
 systemd (247.2-4) unstable; urgency=medium
 
   * Move libraries and NSS modules from /lib to /usr/lib.
