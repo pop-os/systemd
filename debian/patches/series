@@ -1,6 +1,8 @@
 sd-device-keep-escaped-strings-in-DEVLINK-property.patch
 test-fix-fd_is_mount_point-check.patch
 test-use-modern-qemu-numa-arguments.patch
+Add-helper-for-case-independent-string-equality-checks.patch
+localed-Run-locale-gen-if-available-to-generate-missing-l.patch
 units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
@@ -21,6 +23,8 @@ debian/deny-list-upstream-test-02-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
 debian/Keep-journal-files-compatible-with-older-versions.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
+debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
+debian/test-disable-DnsmasqClientTest.test_resolved_etc_hosts-in.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
