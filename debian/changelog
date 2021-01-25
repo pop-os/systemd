@@ -1,3 +1,11 @@
+systemd (245.4-4ubuntu3.5) UNRELEASED; urgency=medium
+
+  * d/p/lp1913189-test-accept-that-char-device-0-0-can-now-be-created-.patch:
+    - Fix failing test case under 5.8 kernel (LP: #1913189)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=782a382017ce188dbf9a40adabd265943d7db119
+
+ -- Dan Streetman <ddstreet@canonical.com>  Mon, 25 Jan 2021 13:48:29 -0500
+
 systemd (245.4-4ubuntu3.4) focal; urgency=medium
 
   * d/p/lp1905245/0001-basic-cap-list-parse-print-numerical-capabilities.patch,
