@@ -1,3 +1,9 @@
+systemd (245.4-4ubuntu3.4pop0) focal; urgency=medium
+
+  * Pop!_OS patches
+
+ -- Ian Douglas Scott <idscott@system76.com>  Fri, 29 Jan 2021 12:09:09 -0800
+
 systemd (245.4-4ubuntu3.4) focal; urgency=medium
 
   * d/p/lp1905245/0001-basic-cap-list-parse-print-numerical-capabilities.patch,
