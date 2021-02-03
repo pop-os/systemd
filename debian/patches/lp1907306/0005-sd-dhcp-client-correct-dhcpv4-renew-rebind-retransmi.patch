@@ -23,10 +23,10 @@ Fixes: #17909
  1 file changed, 3 insertions(+), 16 deletions(-)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index d70e714..0d2fba2 100644
+index aa43098..dbf744b 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -1224,7 +1224,6 @@ static int client_timeout_resend(
+@@ -1228,7 +1228,6 @@ static int client_timeout_resend(
          DHCP_CLIENT_DONT_DESTROY(client);
          usec_t next_timeout = 0;
          uint64_t time_now;
@@ -34,7 +34,7 @@ index d70e714..0d2fba2 100644
          int r;
  
          assert(s);
-@@ -1238,22 +1237,11 @@ static int client_timeout_resend(
+@@ -1242,22 +1241,11 @@ static int client_timeout_resend(
          switch (client->state) {
  
          case DHCP_STATE_RENEWING:
@@ -59,7 +59,7 @@ index d70e714..0d2fba2 100644
                  break;
  
          case DHCP_STATE_REBOOTING:
-@@ -1282,6 +1270,7 @@ static int client_timeout_resend(
+@@ -1286,6 +1274,7 @@ static int client_timeout_resend(
                          goto error;
  
                  next_timeout = time_now + ((UINT64_C(1) << MIN(client->attempt, (uint64_t) 6)) - 1) * USEC_PER_SEC;
@@ -67,7 +67,7 @@ index d70e714..0d2fba2 100644
  
                  break;
  
-@@ -1290,8 +1279,6 @@ static int client_timeout_resend(
+@@ -1294,8 +1283,6 @@ static int client_timeout_resend(
                  goto error;
          }
  

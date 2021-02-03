@@ -16,10 +16,10 @@ Fixes: 3a23834d6b0da391c1ba9cb79a7d7deea7125f4b
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index 4784113..61bd1c1 100644
+index 39d7f31..66e61d2 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -760,7 +760,7 @@ static usec_t client_compute_request_timeout(usec_t now, uint64_t attempt) {
+@@ -764,7 +764,7 @@ static usec_t client_compute_request_timeout(usec_t now, uint64_t attempt) {
   * Note that while the default T1/T2 initial times do have random 'fuzz' applied,
   * the RFC sec 4.4.5 does not mention adding any fuzz to retries. */
  static usec_t client_compute_reacquisition_timeout(usec_t now, usec_t expire) {

@@ -15,7 +15,7 @@ as the RFC describes.
  1 file changed, 32 insertions(+)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index 6d8b1c6..7a1ec8d 100644
+index c2411f9..f684e82 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
 @@ -29,6 +29,7 @@
@@ -26,7 +26,7 @@ index 6d8b1c6..7a1ec8d 100644
  #include "utf8.h"
  #include "web-util.h"
  
-@@ -731,6 +732,37 @@ static int cmp_uint8(const uint8_t *a, const uint8_t *b) {
+@@ -735,6 +736,37 @@ static int cmp_uint8(const uint8_t *a, const uint8_t *b) {
          return CMP(*a, *b);
  }
  

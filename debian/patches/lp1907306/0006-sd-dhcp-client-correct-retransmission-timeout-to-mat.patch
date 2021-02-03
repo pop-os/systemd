@@ -35,10 +35,10 @@ reach than with previous behavior.
  1 file changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index 0d2fba2..4784113 100644
+index dbf744b..39d7f31 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -1269,9 +1269,7 @@ static int client_timeout_resend(
+@@ -1273,9 +1273,7 @@ static int client_timeout_resend(
                  else
                          goto error;
  

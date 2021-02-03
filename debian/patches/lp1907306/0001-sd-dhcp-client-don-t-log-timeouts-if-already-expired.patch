@@ -11,10 +11,10 @@ Bug-Ubuntu: https://bugs.launchpad.net/bugs/1907306
  1 file changed, 9 insertions(+), 8 deletions(-)
 
 diff --git a/src/libsystemd-network/sd-dhcp-client.c b/src/libsystemd-network/sd-dhcp-client.c
-index 3ce45b2..465091e 100644
+index d472fcd..8fc3453 100644
 --- a/src/libsystemd-network/sd-dhcp-client.c
 +++ b/src/libsystemd-network/sd-dhcp-client.c
-@@ -1715,13 +1715,13 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
+@@ -1719,13 +1719,13 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          if (r < 0)
                  return r;
  
@@ -31,7 +31,7 @@ index 3ce45b2..465091e 100644
          /* arm T2 timeout */
          r = event_reset_time(client->event, &client->timeout_t2,
                               clock_boottime_or_monotonic(),
-@@ -1731,13 +1731,13 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
+@@ -1735,13 +1735,13 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          if (r < 0)
                  return r;
  
@@ -48,7 +48,7 @@ index 3ce45b2..465091e 100644
          /* arm T1 timeout */
          r = event_reset_time(client->event, &client->timeout_t1,
                               clock_boottime_or_monotonic(),
-@@ -1747,8 +1747,9 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
+@@ -1751,8 +1751,9 @@ static int client_set_lease_timeouts(sd_dhcp_client *client) {
          if (r < 0)
                  return r;
  

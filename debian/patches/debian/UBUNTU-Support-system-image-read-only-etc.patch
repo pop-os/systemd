@@ -84,7 +84,7 @@ index a1794bd..99dd4ed 100644
  
  static int property_get_hostname(
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 0f429a2..bc1672e 100644
+index 42c8277..2f8d294 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
 @@ -280,6 +280,25 @@ static int context_read_data(Context *c) {
