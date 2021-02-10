@@ -1,4 +1,4 @@
-systemd (247.3-1ubuntu1) UNRELEASED; urgency=medium
+systemd (247.3-1ubuntu1) hirsute; urgency=medium
 
   [ Dan Streetman ]
   * d/p/lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch,
@@ -35,8 +35,12 @@ systemd (247.3-1ubuntu1) UNRELEASED; urgency=medium
     the patch to skip it
     File: debian/patches/Skip-falling-back-to-device-name-when-net_get_name-device.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=34cfe66296463dcc8ad9ebe07add846dd955fedc
+  * Don't start udevd service and sockets in LXC.
+    LXC mounts /sys in read-write mode unlike other containers. (LP: #1914062)
+    File: debian/patches/debian/UBUNTU-Don-t-start-udevd-service-and-sockets-in-LXC.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fa63ef6891eff6762509b322429687d4d506bdb2
 
- -- Balint Reczey <rbalint@ubuntu.com>  Wed, 03 Feb 2021 20:25:38 +0100
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 10 Feb 2021 20:21:08 +0100
 
 systemd (247.3-1) unstable; urgency=medium
 
