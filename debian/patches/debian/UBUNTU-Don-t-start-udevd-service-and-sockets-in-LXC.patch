@@ -1,0 +1,52 @@
+From: Balint Reczey <balint.reczey@canonical.com>
+Date: Wed, 10 Feb 2021 19:58:19 +0100
+Subject: Don't start udevd service and sockets in LXC
+
+LXC mounts /sys in read-write mode unlike other containers.
+
+LP: #1914062
+---
+ units/systemd-udevd-control.socket | 2 ++
+ units/systemd-udevd-kernel.socket  | 2 ++
+ units/systemd-udevd.service.in     | 2 ++
+ 3 files changed, 6 insertions(+)
+
+diff --git a/units/systemd-udevd-control.socket b/units/systemd-udevd-control.socket
+index a9d5a4d..fb2b60f 100644
+--- a/units/systemd-udevd-control.socket
++++ b/units/systemd-udevd-control.socket
+@@ -13,6 +13,8 @@ Documentation=man:systemd-udevd.service(8) man:udev(7)
+ DefaultDependencies=no
+ Before=sockets.target
+ ConditionPathIsReadWrite=/sys
++# LXC mounts /sys rw
++ConditionVirtualization=!lxc
+ 
+ [Socket]
+ Service=systemd-udevd.service
+diff --git a/units/systemd-udevd-kernel.socket b/units/systemd-udevd-kernel.socket
+index f636aeb..20d556f 100644
+--- a/units/systemd-udevd-kernel.socket
++++ b/units/systemd-udevd-kernel.socket
+@@ -13,6 +13,8 @@ Documentation=man:systemd-udevd.service(8) man:udev(7)
+ DefaultDependencies=no
+ Before=sockets.target
+ ConditionPathIsReadWrite=/sys
++# LXC mounts /sys rw
++ConditionVirtualization=!lxc
+ 
+ [Socket]
+ Service=systemd-udevd.service
+diff --git a/units/systemd-udevd.service.in b/units/systemd-udevd.service.in
+index f541ff6..a87bfac 100644
+--- a/units/systemd-udevd.service.in
++++ b/units/systemd-udevd.service.in
+@@ -14,6 +14,8 @@ DefaultDependencies=no
+ After=systemd-sysusers.service systemd-hwdb-update.service
+ Before=sysinit.target
+ ConditionPathIsReadWrite=/sys
++# LXC mounts /sys rw
++ConditionVirtualization=!lxc
+ 
+ [Service]
+ DeviceAllow=block-* rwm
