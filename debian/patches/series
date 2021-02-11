@@ -39,7 +39,6 @@ debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch
 debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
 Revert-network-if-sys-is-rw-then-udev-should-be-around.patch
-debian/UBUNTU-Don-t-start-udevd-service-and-sockets-in-LXC.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 lp1895418.patch
 lp1907306/0001-sd-dhcp-client-don-t-log-timeouts-if-already-expired.patch
