@@ -26,7 +26,10 @@ else
     blacklist="blacklist-upstream-ci"
 fi
 
-BLACKLIST_MARKERS="$blacklist-$DPKGARCH $blacklist" \
+BLACKLIST_MARKERS="$blacklist-$DPKGARCH $blacklist $denylist-$DPKGARCH $denylist" \
+DENY_LIST_MARKERS="$blacklist-$DPKGARCH $blacklist $denylist-$DPKGARCH $denylist" \
 ARTIFACT_DIRECTORY=$AUTOPKGTEST_ARTIFACTS \
 TEST_SHOW_JOURNAL=warning \
+TEST_REQUIRE_INSTALL_TESTS=0 \
+TEST_PREFER_NSPAWN=1 \
 exec test/run-integration-tests.sh
