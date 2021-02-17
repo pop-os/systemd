@@ -2,8 +2,7 @@
 
 set -e
 
-adduser --quiet --system --group --no-create-home --home /run/systemd \
-    --gecos "systemd Userspace OOM Killer" systemd-oom
+#DEBHELPER#
 
 # reload dbus configuration to make the new org.freedesktop.oom1 API available
 # The org.freedesktop.oom1.conf policy references the 'systemd-oom' user, thus
@@ -11,5 +10,3 @@ adduser --quiet --system --group --no-create-home --home /run/systemd \
 if [ -d /run/systemd/system ]; then
     systemctl reload dbus || true
 fi
-
-#DEBHELPER#

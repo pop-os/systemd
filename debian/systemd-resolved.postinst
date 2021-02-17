@@ -20,8 +20,6 @@ _adopt_conffile() {
 
 
 if [ "$1" = configure ] && [ -z "$2" ]; then
-    adduser --quiet --system --group --no-create-home --home /run/systemd \
-        --gecos "systemd Resolver" systemd-resolve
     _adopt_conffile "${DPKG_ROOT}/etc/systemd/resolved.conf" systemd-resolved
 fi
 

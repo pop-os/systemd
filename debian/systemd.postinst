@@ -53,9 +53,6 @@ fi
 # Create /etc/machine-id
 systemd-machine-id-setup ${DPKG_ROOT:+--root="$DPKG_ROOT"}
 
-# Setup system users and groups
-systemd-sysusers ${DPKG_ROOT:+--root="$DPKG_ROOT"} systemd-journal.conf systemd-network.conf
-
 # Enable persistent journal, in auto-mode, by default on new installs and upgrades
 if dpkg --compare-versions "$2" lt "244.1-2~"; then
     mkdir -p "$DPKG_ROOT/var/log/journal"

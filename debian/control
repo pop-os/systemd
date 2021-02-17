@@ -16,6 +16,7 @@ Homepage: https://www.freedesktop.org/wiki/Software/systemd
 Build-Depends: debhelper-compat (= 13),
                dh-exec,
                dh-sequence-installnss,
+               dh-sequence-installsysusers,
                dh-sequence-package-notes,
                pkg-config,
                xsltproc <!nodoc>,
@@ -162,7 +163,6 @@ Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
-         adduser
 Description: tools for sending and receiving remote journal logs
  This package provides tools for sending and receiving remote journal logs:
   * systemd-journal-remote
@@ -175,7 +175,6 @@ Architecture: linux-any
 Multi-Arch: foreign
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          systemd
 Recommends: libdw1
 Conflicts: core-dump-handler
@@ -192,7 +191,6 @@ Multi-Arch: foreign
 Priority: standard
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          systemd
 Breaks: systemd (<< 245.4-2~),
 Conflicts: time-daemon
@@ -432,7 +430,6 @@ Package: systemd-oomd
 Architecture: linux-any
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
 Breaks: systemd (<< 250.2-2~)
 Replaces: systemd (<< 250.2-2~)
 Description: userspace out-of-memory (OOM) killer
@@ -506,7 +503,6 @@ Architecture: linux-any
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         adduser,
          systemd (= ${binary:Version}),
          default-dbus-system-bus | dbus-system-bus
 Recommends: libnss-myhostname,
