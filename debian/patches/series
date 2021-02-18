@@ -109,3 +109,4 @@ lp1902960-udev-re-assign-ID_NET_DRIVER-ID_NET_LINK_FILE-ID_NET.patch
 # Pop patches
 systemd-boot-id-compat.patch
 cryptswap-mount-fix.patch
+system76-usb.patch
