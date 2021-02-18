@@ -1,0 +1,17 @@
+diff --git a/hwdb.d/20-usb-vendor-model.hwdb b/hwdb.d/20-usb-vendor-model.hwdb
+index b459dc380..7ae9bfde3 100644
+--- a/hwdb.d/20-usb-vendor-model.hwdb
++++ b/hwdb.d/20-usb-vendor-model.hwdb
+@@ -69649,3 +69649,12 @@ usb:vFFEE*
+ 
+ usb:vFFEEp0100*
+  ID_MODEL_FROM_DATABASE=Card Reader Controller RTS5101/RTS5111/RTS5116
++
++usb:v3384*
++ ID_VENDOR_FROM_DATABASE=System76
++
++usb:v3384p0000*
++ ID_MODEL_FROM_DATABASE=Thelio Io (thelio-io)
++
++usb:v3384p0001*
++ ID_MODEL_FROM_DATABASE=Launch Configurable Keyboard (launch_1)
