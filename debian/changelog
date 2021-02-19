@@ -5,6 +5,11 @@ systemd (247.3-1ubuntu4) UNRELEASED; urgency=medium
     Patch updated to reduce log level to debug
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=299002546ec2d62e7f0dd7d614ba958fc9df83c2
 
+  [ Dan Streetman ]
+  * d/p/lp1906331-sd-event-ref-event-loop-while-in-sd_event_prepare-ot.patch:
+    Take event reference while processing (LP: #1906331)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=1bc38abcd3b62d317fcb62b72e26d9cb2e35ccf9
+
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 02 Mar 2021 07:27:14 -0500
 
 systemd (247.3-1ubuntu3) hirsute; urgency=medium
