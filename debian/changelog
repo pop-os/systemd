@@ -1,5 +1,11 @@
 systemd (245.4-4ubuntu3.5) UNRELEASED; urgency=medium
 
+  [ Ioanna Alifieraki ]
+  * d/p/lp1911187-systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch:
+    Do not shutdown immediately when scheduled shutdown fails (LP: #1911187)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3899c9d5c171e84fc503c6ab46aea7cc9def7235
+
+  [ Dan Streetman ]
   * d/p/lp1913189-test-accept-that-char-device-0-0-can-now-be-created-.patch:
     - Fix failing test case under 5.8 kernel (LP: #1913189)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=782a382017ce188dbf9a40adabd265943d7db119
@@ -10,7 +16,7 @@ systemd (245.4-4ubuntu3.5) UNRELEASED; urgency=medium
     Thread-safe init of hashmap shared key (LP: #1913423)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fc8dde7c4b1944d1583866f61c2314174b4dd06a
 
- -- Dan Streetman <ddstreet@canonical.com>  Mon, 25 Jan 2021 13:48:29 -0500
+ -- Ioanna Alifieraki <ioanna-maria.alifieraki@canonical.com>  Tue, 23 Feb 2021 00:18:57 +0000
 
 systemd (245.4-4ubuntu3.4) focal; urgency=medium
 
