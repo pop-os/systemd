@@ -108,3 +108,4 @@ lp1902960-udev-re-assign-ID_NET_DRIVER-ID_NET_LINK_FILE-ID_NET.patch
 lp1913189-test-accept-that-char-device-0-0-can-now-be-created-.patch
 lp1906331-sd-event-ref-event-loop-while-in-sd_event_prepare-ot.patch
 lp1913423-hashmap-make-sure-to-initialize-shared-hash-key-atom.patch
+lp1911187-systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
