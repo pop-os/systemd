@@ -15,6 +15,9 @@ systemd (245.4-4ubuntu3.5) UNRELEASED; urgency=medium
   * d/p/lp1913423-hashmap-make-sure-to-initialize-shared-hash-key-atom.patch:
     Thread-safe init of hashmap shared key (LP: #1913423)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=fc8dde7c4b1944d1583866f61c2314174b4dd06a
+  * d/p/lp1902236-nss-systemd-don-t-synthesize-root-nobody-when-iterat.patch:
+    Don't synthesize root/nobody when iterating (LP: #1902236)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=4d20e415ecd5b0fd032b4cf45bd9fd344cc434ac
 
  -- Ioanna Alifieraki <ioanna-maria.alifieraki@canonical.com>  Tue, 23 Feb 2021 00:18:57 +0000
 
