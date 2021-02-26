@@ -5,6 +5,12 @@ systemd (245.4-4ubuntu3.5) UNRELEASED; urgency=medium
     Do not shutdown immediately when scheduled shutdown fails (LP: #1911187)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3899c9d5c171e84fc503c6ab46aea7cc9def7235
 
+  [ Dimitri John Ledkov ]
+  * d/p/lp1878969-meson-initialize-time-epoch-to-reproducible-builds-compat.patch:
+    meson: initialize time-epoch to reproducible builds compatible value
+    (LP: #1878969)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=84212797d21ed08031e1d71fe5e118bdd9873c0f
+
   [ Dan Streetman ]
   * d/p/lp1913189-test-accept-that-char-device-0-0-can-now-be-created-.patch:
     - Fix failing test case under 5.8 kernel (LP: #1913189)
