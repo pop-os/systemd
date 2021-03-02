@@ -111,3 +111,4 @@ lp1913423-hashmap-make-sure-to-initialize-shared-hash-key-atom.patch
 lp1911187-systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 lp1902236-nss-systemd-don-t-synthesize-root-nobody-when-iterat.patch
 lp1878969-meson-initialize-time-epoch-to-reproducible-builds-compat.patch
+lp1880258-log-nxdomain-as-debug.patch
