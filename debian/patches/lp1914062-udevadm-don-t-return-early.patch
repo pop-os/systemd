@@ -1,0 +1,46 @@
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Tue, 2 Mar 2021 21:42:29 +0100
+Subject: udevadm: don't return early
+
+The previous logic to only error out on EROFS was immensely useful and
+very much appreciated as it allowed us to test various workloads.
+For example, when testing and developing udev with namespaced network
+devices under /sys/class/net/ which are properly namespaced and
+available to unprivileged users. On older kernels this was only the case
+for network devices that were created inside unprivileged environments
+but with newer kernels this is now even fixed for devices that are moved
+between network namespaces. For the curious more information is
+available under:
+
+https://git.kernel.org/torvalds/c/ebb4a4bf76f164457184a3f43ebc1552416bc823
+
+It would be very appreciated if we could restore that status quo. I'm
+happy to step up and help maintain this if that helps.
+
+(cherry picked from commit b001694cb0652e4d0c5b7171b7619ccf9abff51c
+from https://github.com/systemd/systemd/pull/18559)
+---
+ src/udev/udevadm-trigger.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/udev/udevadm-trigger.c b/src/udev/udevadm-trigger.c
+index 5c74184..8d9bd62 100644
+--- a/src/udev/udevadm-trigger.c
++++ b/src/udev/udevadm-trigger.c
+@@ -45,13 +45,13 @@ static int exec_list(sd_device_enumerator *e, const char *action, Set **settle_s
+ 
+                 r = write_string_file(filename, action, WRITE_STRING_FILE_DISABLE_BUFFER);
+                 if (r < 0) {
+-                        bool ignore = IN_SET(r, -ENOENT, -ENODEV);
++                        bool ignore = IN_SET(r, -ENOENT, -EACCES, -ENODEV);
+ 
+                         log_full_errno(ignore ? LOG_DEBUG : LOG_ERR, r,
+                                        "Failed to write '%s' to '%s'%s: %m",
+                                        action, filename, ignore ? ", ignoring" : "");
+-                        if (IN_SET(r, -EACCES, -EROFS))
+-                                /* Inovoked by unpriviledged user, or read only filesystem. Return earlier. */
++                        if (r == -EROFS)
++                                /* Read only filesystem. Return earlier. */
+                                 return r;
+                         if (ret == 0 && !ignore)
+                                 ret = r;
