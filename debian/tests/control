@@ -216,4 +216,4 @@ Tests: systemd-fsckd
 Depends: systemd-sysv,
   python3,
   plymouth
-Restrictions: needs-root, isolation-machine, breaks-testbed, skippable
+Restrictions: needs-root, isolation-machine, breaks-testbed, skippable, flaky
