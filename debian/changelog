@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.5) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.5) focal; urgency=medium
 
   [ Ioanna Alifieraki ]
   * d/p/lp1911187-systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch:
