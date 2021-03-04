@@ -1,4 +1,4 @@
-systemd (247.3-1ubuntu4) UNRELEASED; urgency=medium
+systemd (247.3-1ubuntu4) hirsute; urgency=medium
 
   [ Dimitri John Ledkov ]
   * d/p/debian/UBUNTU-resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch:
@@ -13,7 +13,16 @@ systemd (247.3-1ubuntu4) UNRELEASED; urgency=medium
     Create symlink for hyperv-provided ptp device (LP: #1917458)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8f1ee790ad66395457ca64cb5f8a01fdd8aabe47
 
- -- Dan Streetman <ddstreet@canonical.com>  Tue, 02 Mar 2021 07:27:14 -0500
+  [ Balint Reczey ]
+  * Pick proposed patch for not returning early in udevadm (LP: #1914062)
+    File: debian/patches/lp1914062-udevadm-don-t-return-early.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d8c80751a97b0c6c4df972f6f8325293aa1607c4
+  * debian/tests/control: Mark systemd-fsckd flaky again.
+    As promised in LP: 1915126, until further investigation.
+    File: debian/tests/control
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=68fbaab272af81aab29497f7c6a3e4e6e9aa091b
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 04 Mar 2021 12:19:05 +0100
 
 systemd (247.3-1ubuntu3) hirsute; urgency=medium
 
