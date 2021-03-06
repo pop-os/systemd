@@ -1,5 +1,6 @@
 Add-helper-for-case-independent-string-equality-checks.patch
 localed-Run-locale-gen-if-available-to-generate-missing-l.patch
+core-fix-mtime-calculation-of-dropin-files.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
