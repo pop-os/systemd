@@ -1,0 +1,36 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 5 Nov 2020 11:20:32 +0100
+Subject: units: turn off DNSSEC validation when timesyncd resolves hostnames
+
+We have a chicken and egg problem: validation of DNSSEC signatures
+doesn't work without a correct clock, but to set the correct clock we
+need to contact NTP servers which requires resolving a hostname, which
+would normally require DNSSEC validation.
+
+Let's break the cycle by excluding NTP hostname resolution from
+validation for now.
+
+Of course, this leaves NTP traffic unprotected. To cover that we need
+NTPSEC support, which we can add later.
+
+Fixes: #5873 #15607
+(cherry picked from commit abf4e5c1d3ad767bc0ed67883e8e4d916af095ec)
+---
+ units/systemd-timesyncd.service.in | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/units/systemd-timesyncd.service.in b/units/systemd-timesyncd.service.in
+index 62120d8..5e21834 100644
+--- a/units/systemd-timesyncd.service.in
++++ b/units/systemd-timesyncd.service.in
+@@ -22,6 +22,10 @@ Wants=time-set.target time-sync.target
+ AmbientCapabilities=CAP_SYS_TIME
+ BusName=org.freedesktop.timesync1
+ CapabilityBoundingSet=CAP_SYS_TIME
++# Turn off DNSSEC validation for hostname look-ups, since those need the
++# correct time to work, but we likely won't acquire that without NTP. Let's
++# break this chicken-and-egg cycle here.
++Environment=SYSTEMD_NSS_RESOLVE_VALIDATE=0
+ ExecStart=!!@rootlibexecdir@/systemd-timesyncd
+ LockPersonality=yes
+ MemoryDenyWriteExecute=yes

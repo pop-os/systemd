@@ -3,6 +3,7 @@ localed-Run-locale-gen-if-available-to-generate-missing-l.patch
 core-fix-mtime-calculation-of-dropin-files.patch
 analyze-slightly-reword-PrivateTmp-message.patch
 rules-Move-ID_SMARTCARD_READER-definition-to-a-70-configu.patch
+units-turn-off-DNSSEC-validation-when-timesyncd-resolves-.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch
