@@ -1,3 +1,25 @@
+systemd (247.3-2) unstable; urgency=medium
+
+  * Downgrade a couple of warnings to debug.
+    If a package still ships only a SysV init script or if a service file or
+    tmpfile uses /var/run, downgrade those messages to debug. We can use
+    lintian to detect those issues.
+    For service files and tmpfiles in /etc, keep the warning, as those files
+    are typically added locally and aren't checked by lintian.
+    (Closes: #981407)
+  * core: fix mtime calculation of dropin files
+    (Closes: #975289)
+  * analyze: slightly reword PrivateTmp= message
+    (Closes: #931753)
+  * rules: move ID_SMARTCARD_READER definition to a <70 configuration
+    (Closes: #978011)
+  * units: turn off DNSSEC validation when timesyncd resolves hostnames
+    (Closes: #898530)
+  * table: drop trailing white spaces of the last cell in row
+    (Closes: #980820)
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 06 Mar 2021 22:32:14 +0100
+
 systemd (247.3-1) unstable; urgency=medium
 
   [ Michael Biebl ]
