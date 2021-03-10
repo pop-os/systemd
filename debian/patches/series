@@ -1,5 +1,10 @@
 Add-helper-for-case-independent-string-equality-checks.patch
 localed-Run-locale-gen-if-available-to-generate-missing-l.patch
+core-fix-mtime-calculation-of-dropin-files.patch
+analyze-slightly-reword-PrivateTmp-message.patch
+rules-Move-ID_SMARTCARD_READER-definition-to-a-70-configu.patch
+units-turn-off-DNSSEC-validation-when-timesyncd-resolves-.patch
+table-drop-trailing-white-spaces-of-the-last-cell-in-row.patch
 units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
@@ -22,6 +27,7 @@ debian/Keep-journal-files-compatible-with-older-versions.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/test-disable-DnsmasqClientTest.test_resolved_etc_hosts-in.patch
+debian/Downgrade-a-couple-of-warnings-to-debug.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
