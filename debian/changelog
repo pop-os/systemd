@@ -1,3 +1,11 @@
+systemd (245.4-4ubuntu3.6) UNRELEASED; urgency=medium
+
+  * debian/patches/lp1916485-Newer-Glibc-use-faccessat2-to-implement-faccessat.patch:
+    Add support for faccessat2 (LP: #1916485)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=affb2c6507dccfeed02820a2267639648e2a2260
+
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 10 Mar 2021 16:03:13 -0500
+
 systemd (245.4-4ubuntu3.5) focal; urgency=medium
 
   [ Ioanna Alifieraki ]
