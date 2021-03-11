@@ -11,6 +11,10 @@ systemd (245.4-4ubuntu3.6) UNRELEASED; urgency=medium
     Add openat2() syscall to seccomp filter list
     (LP: #1891810)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=69c8a684e2513b2f6530e5a5cf15c83abfb7bc74
+  * d/p/lp1915887-Downgrade-a-couple-of-warnings-to-debug.patch:
+    Downgrade some log messages so they stop spamming logs
+    (LP: #1915887)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3c2c4731b90ed430ca1790270e69cd125643b94b
 
  -- Dan Streetman <ddstreet@canonical.com>  Wed, 10 Mar 2021 16:03:13 -0500
 
