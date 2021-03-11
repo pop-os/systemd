@@ -7,6 +7,10 @@ systemd (245.4-4ubuntu3.6) UNRELEASED; urgency=medium
     Stop attempting to restrict address families on ppc archs
     (LP: #1918696)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=daff4b6604362fcb5d305682216d5ca15a4c5738
+  * d/p/lp1891810-seccomp-util-add-new-syscalls-from-kernel-5.6-to-sys.patch:
+    Add openat2() syscall to seccomp filter list
+    (LP: #1891810)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=69c8a684e2513b2f6530e5a5cf15c83abfb7bc74
 
  -- Dan Streetman <ddstreet@canonical.com>  Wed, 10 Mar 2021 16:03:13 -0500
 
