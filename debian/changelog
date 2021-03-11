@@ -1,3 +1,15 @@
+systemd (247.3-3) unstable; urgency=medium
+
+  * pkg-config: make prefix overridable again (Closes: #984763)
+  * Revert "units: turn off DNSSEC validation when timesyncd resolves
+    hostnames"
+    Support for SYSTEMD_NSS_RESOLVE_VALIDATE=0 requires the changes from
+    https://github.com/systemd/systemd/pull/17823 for the dnssec bypass
+    logic. Those are rather invasive changes and not suitable for a stable
+    backport.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 11 Mar 2021 18:09:35 +0100
+
 systemd (247.3-2) unstable; urgency=medium
 
   * Downgrade a couple of warnings to debug.
