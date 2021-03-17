@@ -14,11 +14,11 @@ Closes: #971282
  2 files changed, 8 insertions(+), 8 deletions(-)
 
 diff --git a/src/core/systemd.pc.in b/src/core/systemd.pc.in
-index f2c0455..a009020 100644
+index b5cc8f9..21dbf30 100644
 --- a/src/core/systemd.pc.in
 +++ b/src/core/systemd.pc.in
 @@ -65,16 +65,16 @@ systemdshutdowndir=${systemd_shutdown_dir}
- tmpfiles_dir=/usr/lib/tmpfiles.d
+ tmpfiles_dir=${prefix}/lib/tmpfiles.d
  tmpfilesdir=${tmpfiles_dir}
  
 -sysusers_dir=${rootprefix}/lib/sysusers.d
@@ -37,7 +37,7 @@ index f2c0455..a009020 100644
 +modules_load_dir=${prefix}/lib/modules-load.d
  modulesloaddir=${modules_load_dir}
  
- catalog_dir=/usr/lib/systemd/catalog
+ catalog_dir=${prefix}/lib/systemd/catalog
 diff --git a/src/libsystemd/sd-path/sd-path.c b/src/libsystemd/sd-path/sd-path.c
 index 61ed7cb..682e3f1 100644
 --- a/src/libsystemd/sd-path/sd-path.c

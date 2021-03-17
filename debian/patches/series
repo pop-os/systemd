@@ -3,8 +3,8 @@ localed-Run-locale-gen-if-available-to-generate-missing-l.patch
 core-fix-mtime-calculation-of-dropin-files.patch
 analyze-slightly-reword-PrivateTmp-message.patch
 rules-Move-ID_SMARTCARD_READER-definition-to-a-70-configu.patch
-units-turn-off-DNSSEC-validation-when-timesyncd-resolves-.patch
 table-drop-trailing-white-spaces-of-the-last-cell-in-row.patch
+pkg-config-make-prefix-overridable-again.patch
 units-Don-t-start-systemd-udev-trigger.service-in-a-conta.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
