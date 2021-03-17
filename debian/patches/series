@@ -58,3 +58,4 @@ lp1907306/0008-sd-dhcp-client-fix-renew-rebind-timeout-calculation-.patch
 lp1906331-sd-event-ref-event-loop-while-in-sd_event_prepare-ot.patch
 lp1917458-udev-rules-add-rule-to-create-dev-ptp_hyperv.patch
 lp1914062-udevadm-don-t-return-early.patch
+lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch
