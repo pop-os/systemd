@@ -15,6 +15,9 @@ systemd (245.4-4ubuntu3.6) UNRELEASED; urgency=medium
     Downgrade some log messages so they stop spamming logs
     (LP: #1915887)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=3c2c4731b90ed430ca1790270e69cd125643b94b
+  * d/p/lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch:
+    Use src name, not dst name, of symlinked unit files (LP: #1887744)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03770601097cfdc09adeadf5593083da69345409
 
  -- Dan Streetman <ddstreet@canonical.com>  Wed, 10 Mar 2021 16:03:13 -0500
 
