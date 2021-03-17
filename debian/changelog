@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.6) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.6) focal; urgency=medium
 
   * debian/patches/lp1916485-Newer-Glibc-use-faccessat2-to-implement-faccessat.patch:
     Add support for faccessat2 (LP: #1916485)
@@ -19,7 +19,7 @@ systemd (245.4-4ubuntu3.6) UNRELEASED; urgency=medium
     Use src name, not dst name, of symlinked unit files (LP: #1887744)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=03770601097cfdc09adeadf5593083da69345409
 
- -- Dan Streetman <ddstreet@canonical.com>  Wed, 10 Mar 2021 16:03:13 -0500
+ -- Dan Streetman <ddstreet@canonical.com>  Wed, 17 Mar 2021 17:36:08 -0400
 
 systemd (245.4-4ubuntu3.5) focal; urgency=medium
 
