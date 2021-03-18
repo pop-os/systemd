@@ -76,6 +76,7 @@ CONFFLAGS = \
 	-Dfdisk=false \
 	-Dpwquality=false \
 	-Dp11kit=false \
+	-Dtpm2=false \
 	-Doomd=false \
 	-Dsysext=true \
 	-Dnscd=true \
