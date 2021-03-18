@@ -11,6 +11,7 @@ bin/systemd-machine-id-setup
 bin/systemd-tmpfiles
 bin/systemd-inhibit
 bin/systemd-escape
+bin/systemd-sysext
 bin/systemd-sysusers
 lib/modprobe.d/
 lib/systemd/

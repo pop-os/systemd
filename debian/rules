@@ -77,6 +77,7 @@ CONFFLAGS = \
 	-Dpwquality=false \
 	-Dp11kit=false \
 	-Doomd=false \
+	-Dsysext=true \
 	-Dntp-servers="$(DEFAULT_NTP_SERVERS)" \
 	-Ddns-servers='' \
 	-Dlink-udev-shared=false \
