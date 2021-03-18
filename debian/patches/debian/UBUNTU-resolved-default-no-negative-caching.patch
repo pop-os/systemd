@@ -2,12 +2,15 @@ From: Balint Reczey <balint.reczey@canonical.com>
 Date: Wed, 11 Dec 2019 22:01:13 +0100
 Subject: systemd-resolved: Default to Cache=no-negative
 
-Thanks: Dimitri John Ledkov for the suggestion
+LP: #1895418
+Thanks: Dimitri John Ledkov for the suggestion and
+Co-authored-by: Dan Streetman <ddstreet@canonical.com>
 ---
  man/resolved.conf.xml            | 4 ++--
  src/resolve/resolved-gperf.gperf | 2 +-
  src/resolve/resolved-manager.c   | 2 +-
- 3 files changed, 4 insertions(+), 4 deletions(-)
+ src/resolve/resolved.conf.in     | 2 +-
+ 4 files changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/man/resolved.conf.xml b/man/resolved.conf.xml
 index 3fdf5de..666275f 100644
@@ -52,3 +55,16 @@ index 21154a7..2b3e09a 100644
                  .dns_stub_listener_mode = DNS_STUB_LISTENER_YES,
                  .read_resolv_conf = true,
                  .need_builtin_fallbacks = true,
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index 0669135..0dc2289 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
+@@ -26,7 +26,7 @@
+ #DNSOverTLS=@DEFAULT_DNS_OVER_TLS_MODE@
+ #MulticastDNS=@DEFAULT_MDNS_MODE@
+ #LLMNR=@DEFAULT_LLMNR_MODE@
+-#Cache=yes
++#Cache=no-negative
+ #CacheFromLocalhost=no
+ #DNSStubListener=yes
+ #DNSStubListenerExtra=

@@ -9,7 +9,7 @@ Subject: test: Allow running only a subset of integration tests by setting
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/test/run-integration-tests.sh b/test/run-integration-tests.sh
-index 036c075..e9e0165 100755
+index 036c075..47cf8a8 100755
 --- a/test/run-integration-tests.sh
 +++ b/test/run-integration-tests.sh
 @@ -60,17 +60,19 @@ pass_deny_list() {
