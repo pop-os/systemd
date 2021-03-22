@@ -113,6 +113,7 @@ Restrictions: needs-root, allow-stderr, isolation-container, breaks-testbed
 
 Tests: upstream
 Depends: libsystemd-dev,
+  attr,
   tree,
   perl,
   xz-utils,
