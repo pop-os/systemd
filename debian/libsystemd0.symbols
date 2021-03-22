@@ -28,6 +28,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_245@LIBSYSTEMD_245 245
  LIBSYSTEMD_246@LIBSYSTEMD_246 246
  LIBSYSTEMD_247@LIBSYSTEMD_247 247
+ LIBSYSTEMD_248@LIBSYSTEMD_248 248
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -222,6 +223,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_message_ref@LIBSYSTEMD_221 221
  sd_bus_message_rewind@LIBSYSTEMD_221 221
  sd_bus_message_seal@LIBSYSTEMD_236 236
+ sd_bus_message_send@LIBSYSTEMD_248 248
  sd_bus_message_sensitive@LIBSYSTEMD_245 245
  sd_bus_message_set_allow_interactive_authorization@LIBSYSTEMD_221 221
  sd_bus_message_set_auto_start@LIBSYSTEMD_221 221
@@ -244,6 +246,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_bus_open_system_remote@LIBSYSTEMD_221 221
  sd_bus_open_system_with_description@LIBSYSTEMD_239 239
  sd_bus_open_user@LIBSYSTEMD_221 221
+ sd_bus_open_user_machine@LIBSYSTEMD_248 248
  sd_bus_open_user_with_description@LIBSYSTEMD_239 239
  sd_bus_open_with_description@LIBSYSTEMD_239 239
  sd_bus_path_decode@LIBSYSTEMD_221 221
@@ -340,6 +343,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_enumerator_new@LIBSYSTEMD_240 240
  sd_device_enumerator_ref@LIBSYSTEMD_240 240
  sd_device_enumerator_unref@LIBSYSTEMD_240 240
+ sd_device_get_action@LIBSYSTEMD_248 248
  sd_device_get_current_tag_first@LIBSYSTEMD_247 247
  sd_device_get_current_tag_next@LIBSYSTEMD_247 247
  sd_device_get_devlink_first@LIBSYSTEMD_240 240
@@ -356,6 +360,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_get_property_first@LIBSYSTEMD_240 240
  sd_device_get_property_next@LIBSYSTEMD_240 240
  sd_device_get_property_value@LIBSYSTEMD_240 240
+ sd_device_get_seqnum@LIBSYSTEMD_248 248
  sd_device_get_subsystem@LIBSYSTEMD_240 240
  sd_device_get_sysattr_first@LIBSYSTEMD_240 240
  sd_device_get_sysattr_next@LIBSYSTEMD_240 240
@@ -384,11 +389,13 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_monitor_unref@LIBSYSTEMD_240 240
  sd_device_new_from_device_id@LIBSYSTEMD_240 240
  sd_device_new_from_devnum@LIBSYSTEMD_240 240
+ sd_device_new_from_stat_rdev@LIBSYSTEMD_248 248
  sd_device_new_from_subsystem_sysname@LIBSYSTEMD_240 240
  sd_device_new_from_syspath@LIBSYSTEMD_240 240
  sd_device_ref@LIBSYSTEMD_240 240
  sd_device_set_sysattr_value@LIBSYSTEMD_240 240
  sd_device_set_sysattr_valuef@LIBSYSTEMD_247 247
+ sd_device_trigger@LIBSYSTEMD_248 248
  sd_device_unref@LIBSYSTEMD_240 240
  sd_event_add_child@LIBSYSTEMD_221 221
  sd_event_add_child_pidfd@LIBSYSTEMD_245 245
@@ -434,11 +441,13 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_get_io_revents@LIBSYSTEMD_221 221
  sd_event_source_get_pending@LIBSYSTEMD_221 221
  sd_event_source_get_priority@LIBSYSTEMD_221 221
+ sd_event_source_get_ratelimit@LIBSYSTEMD_248 248
  sd_event_source_get_signal@LIBSYSTEMD_221 221
  sd_event_source_get_time@LIBSYSTEMD_221 221
  sd_event_source_get_time_accuracy@LIBSYSTEMD_221 221
  sd_event_source_get_time_clock@LIBSYSTEMD_221 221
  sd_event_source_get_userdata@LIBSYSTEMD_221 221
+ sd_event_source_is_ratelimited@LIBSYSTEMD_248 248
  sd_event_source_ref@LIBSYSTEMD_221 221
  sd_event_source_send_child_signal@LIBSYSTEMD_245 245
  sd_event_source_set_child_pidfd_own@LIBSYSTEMD_245 245
@@ -453,6 +462,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_event_source_set_io_fd_own@LIBSYSTEMD_237 237
  sd_event_source_set_prepare@LIBSYSTEMD_221 221
  sd_event_source_set_priority@LIBSYSTEMD_221 221
+ sd_event_source_set_ratelimit@LIBSYSTEMD_248 248
  sd_event_source_set_time@LIBSYSTEMD_221 221
  sd_event_source_set_time_accuracy@LIBSYSTEMD_221 221
  sd_event_source_set_time_relative@LIBSYSTEMD_247 247
