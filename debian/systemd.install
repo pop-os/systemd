@@ -21,6 +21,7 @@ lib/udev/rules.d/71-seat.rules
 lib/udev/rules.d/99-systemd.rules
 usr/bin/systemd-cgls
 usr/bin/systemd-cgtop
+usr/bin/systemd-cryptenroll
 usr/bin/systemd-nspawn
 usr/bin/systemd-stdio-bridge
 usr/bin/systemd-analyze
