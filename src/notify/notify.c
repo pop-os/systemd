@@ -48,11 +48,11 @@ static int help(void) {
                "     --status=TEXT     Set status text\n"
                "     --booted          Check if the system was booted up with systemd\n"
                "     --no-block        Do not wait until operation finished\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight(), ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -241,11 +241,11 @@ static int run(int argc, char* argv[]) {
            ucred data, and sd_pid_notify() uses the real UID for filling in ucred. */
 
         if (arg_gid != GID_INVALID &&
-            setregid(arg_gid, (gid_t) -1) < 0)
+            setregid(arg_gid, GID_INVALID) < 0)
                 return log_error_errno(errno, "Failed to change GID: %m");
 
         if (arg_uid != UID_INVALID &&
-            setreuid(arg_uid, (uid_t) -1) < 0)
+            setreuid(arg_uid, UID_INVALID) < 0)
                 return log_error_errno(errno, "Failed to change UID: %m");
 
         if (arg_pid > 0)

@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "cgroup-util.h"
 #include "dirent-util.h"
 #include "env-util.h"
 #include "fd-util.h"
@@ -159,10 +160,9 @@ static int detect_vm_dmi(void) {
                 /* https://wiki.freebsd.org/bhyve */
                 { "BHYVE",               VIRTUALIZATION_BHYVE     },
         };
-        unsigned i;
         int r;
 
-        for (i = 0; i < ELEMENTSOF(dmi_vendors); i++) {
+        for (size_t i = 0; i < ELEMENTSOF(dmi_vendors); i++) {
                 _cleanup_free_ char *s = NULL;
                 unsigned j;
 
@@ -454,11 +454,103 @@ static const char *const container_table[_VIRTUALIZATION_MAX] = {
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_FROM_STRING(container, int);
 
+static int running_in_cgroupns(void) {
+        int r;
+
+        if (!cg_ns_supported())
+                return false;
+
+        r = cg_all_unified();
+        if (r < 0)
+                return r;
+
+        if (r) {
+                /* cgroup v2 */
+
+                r = access("/sys/fs/cgroup/cgroup.events", F_OK);
+                if (r < 0) {
+                        if (errno != ENOENT)
+                                return -errno;
+                        /* All kernel versions have cgroup.events in nested cgroups. */
+                        return false;
+                }
+
+                /* There's no cgroup.type in the root cgroup, and future kernel versions
+                 * are unlikely to add it since cgroup.type is something that makes no sense
+                 * whatsoever in the root cgroup. */
+                r = access("/sys/fs/cgroup/cgroup.type", F_OK);
+                if (r == 0)
+                        return true;
+                if (r < 0 && errno != ENOENT)
+                        return -errno;
+
+                /* On older kernel versions, there's no cgroup.type */
+                r = access("/sys/kernel/cgroup/features", F_OK);
+                if (r < 0) {
+                        if (errno != ENOENT)
+                                return -errno;
+                        /* This is an old kernel that we know for sure has cgroup.events
+                         * only in nested cgroups. */
+                        return true;
+                }
+
+                /* This is a recent kernel, and cgroup.type doesn't exist, so we must be
+                 * in the root cgroup. */
+                return false;
+        } else {
+                /* cgroup v1 */
+
+                /* If systemd controller is not mounted, do not even bother. */
+                r = access("/sys/fs/cgroup/systemd", F_OK);
+                if (r < 0) {
+                        if (errno != ENOENT)
+                                return -errno;
+                        return false;
+                }
+
+                /* release_agent only exists in the root cgroup. */
+                r = access("/sys/fs/cgroup/systemd/release_agent", F_OK);
+                if (r < 0) {
+                        if (errno != ENOENT)
+                                return -errno;
+                        return true;
+                }
+
+                return false;
+        }
+}
+
+static int detect_container_files(void) {
+        unsigned i;
+
+        static const struct {
+                const char *file_path;
+                int id;
+        } container_file_table[] = {
+                /* https://github.com/containers/podman/issues/6192 */
+                /* https://github.com/containers/podman/issues/3586#issuecomment-661918679 */
+                { "/run/.containerenv", VIRTUALIZATION_PODMAN },
+                /* https://github.com/moby/moby/issues/18355 */
+                /* Docker must be the last in this table, see below. */
+                { "/.dockerenv",        VIRTUALIZATION_DOCKER },
+        };
+
+        for (i = 0; i < ELEMENTSOF(container_file_table); i++) {
+                if (access(container_file_table[i].file_path, F_OK) >= 0)
+                        return container_file_table[i].id;
+
+                if (errno != ENOENT)
+                        log_debug_errno(errno,
+                                        "Checking if %s exists failed, ignoring: %m",
+                                        container_file_table[i].file_path);
+        }
+
+        return VIRTUALIZATION_NONE;
+}
+
 int detect_container(void) {
         static thread_local int cached_found = _VIRTUALIZATION_INVALID;
-        _cleanup_free_ char *m = NULL;
-        _cleanup_free_ char *o = NULL;
-        _cleanup_free_ char *p = NULL;
+        _cleanup_free_ char *m = NULL, *o = NULL, *p = NULL;
         const char *e = NULL;
         int r;
 
@@ -466,16 +558,23 @@ int detect_container(void) {
                 return cached_found;
 
         /* /proc/vz exists in container and outside of the container, /proc/bc only outside of the container. */
-        if (access("/proc/vz", F_OK) >= 0 &&
-            access("/proc/bc", F_OK) < 0) {
-                r = VIRTUALIZATION_OPENVZ;
-                goto finish;
+        if (access("/proc/vz", F_OK) < 0) {
+                if (errno != ENOENT)
+                        log_debug_errno(errno, "Failed to check if /proc/vz exists, ignoring: %m");
+        } else if (access("/proc/bc", F_OK) < 0) {
+                if (errno == ENOENT) {
+                        r = VIRTUALIZATION_OPENVZ;
+                        goto finish;
+                }
+
+                log_debug_errno(errno, "Failed to check if /proc/bc exists, ignoring: %m");
         }
 
         /* "Official" way of detecting WSL https://github.com/Microsoft/WSL/issues/423#issuecomment-221627364 */
         r = read_one_line_file("/proc/sys/kernel/osrelease", &o);
-        if (r >= 0 &&
-            (strstr(o, "Microsoft") || strstr(o, "WSL"))) {
+        if (r < 0)
+                log_debug_errno(r, "Failed to read /proc/sys/kernel/osrelease, ignoring: %m");
+        else if (strstr(o, "Microsoft") || strstr(o, "WSL")) {
                 r = VIRTUALIZATION_WSL;
                 goto finish;
         }
@@ -484,21 +583,30 @@ int detect_container(void) {
          * invocation without worrying about it being elsewhere.
          */
         r = get_proc_field("/proc/self/status", "TracerPid", WHITESPACE, &p);
-        if (r == 0 && !streq(p, "0")) {
+        if (r < 0)
+                log_debug_errno(r, "Failed to read our own trace PID, ignoring: %m");
+        else if (!streq(p, "0")) {
                 pid_t ptrace_pid;
+
                 r = parse_pid(p, &ptrace_pid);
-                if (r == 0) {
-                        const char *pf = procfs_file_alloca(ptrace_pid, "comm");
+                if (r < 0)
+                        log_debug_errno(r, "Failed to parse our own tracer PID, ignoring: %m");
+                else {
                         _cleanup_free_ char *ptrace_comm = NULL;
+                        const char *pf;
+
+                        pf = procfs_file_alloca(ptrace_pid, "comm");
                         r = read_one_line_file(pf, &ptrace_comm);
-                        if (r >= 0 && startswith(ptrace_comm, "proot")) {
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read %s, ignoring: %m", pf);
+                        else if (startswith(ptrace_comm, "proot")) {
                                 r = VIRTUALIZATION_PROOT;
                                 goto finish;
                         }
                 }
         }
 
-        /* The container manager might have placed this in the /run/host hierarchy for us, which is best
+        /* The container manager might have placed this in the /run/host/ hierarchy for us, which is best
          * because we can be consumed just like that, without special privileges. */
         r = read_one_line_file("/run/host/container-manager", &m);
         if (r > 0) {
@@ -506,7 +614,7 @@ int detect_container(void) {
                 goto translate_name;
         }
         if (!IN_SET(r, -ENOENT, 0))
-                return log_debug_errno(r, "Failed to read /run/systemd/container-manager: %m");
+                return log_debug_errno(r, "Failed to read /run/host/container-manager: %m");
 
         if (getpid_cached() == 1) {
                 /* If we are PID 1 we can just check our own environment variable, and that's authoritative.
@@ -517,7 +625,7 @@ int detect_container(void) {
                  */
                 e = getenv("container");
                 if (!e)
-                        goto check_sched;
+                        goto check_files;
                 if (isempty(e)) {
                         r = VIRTUALIZATION_NONE;
                         goto finish;
@@ -545,29 +653,36 @@ int detect_container(void) {
         if (r < 0) /* This only works if we have CAP_SYS_PTRACE, hence let's better ignore failures here */
                 log_debug_errno(r, "Failed to read $container of PID 1, ignoring: %m");
 
-        /* Interestingly /proc/1/sched actually shows the host's PID for what we see as PID 1. If the PID
-         * shown there is not 1, we know we are in a PID namespace and hence a container. */
- check_sched:
-        r = read_one_line_file("/proc/1/sched", &m);
-        if (r >= 0) {
-                const char *t;
+check_files:
+        /* Check for existence of some well-known files. We only do this after checking
+         * for other specific container managers, otherwise we risk mistaking another
+         * container manager for Docker: the /.dockerenv file could inadvertently end up
+         * in a file system image. */
+        r = detect_container_files();
+        if (r)
+                goto finish;
 
-                t = strrchr(m, '(');
-                if (!t)
-                        return -EIO;
+        r = running_in_cgroupns();
+        if (r > 0) {
+                r = VIRTUALIZATION_CONTAINER_OTHER;
+                goto finish;
+        }
+        if (r < 0)
+                log_debug_errno(r, "Failed to detect cgroup namespace: %m");
 
-                if (!startswith(t, "(1,")) {
-                        r = VIRTUALIZATION_CONTAINER_OTHER;
-                        goto finish;
-                }
-        } else if (r != -ENOENT)
-                return r;
-
-        /* If that didn't work, give up, assume no container manager. */
+        /* If none of that worked, give up, assume no container manager. */
         r = VIRTUALIZATION_NONE;
         goto finish;
 
 translate_name:
+        if (streq(e, "oci")) {
+                /* Some images hardcode container=oci, but OCI is not a specific container manager.
+                 * Try to detect one based on well-known files. */
+                r = detect_container_files();
+                if (!r)
+                        r = VIRTUALIZATION_CONTAINER_OTHER;
+                goto finish;
+        }
         r = container_from_string(e);
         if (r < 0)
                 r = VIRTUALIZATION_CONTAINER_OTHER;
@@ -669,6 +784,131 @@ int running_in_chroot(void) {
                 return r;
 
         return r == 0;
+}
+
+#if defined(__i386__) || defined(__x86_64__)
+struct cpuid_table_entry {
+        uint32_t flag_bit;
+        const char *name;
+};
+
+static const struct cpuid_table_entry leaf1_edx[] = {
+        {  0, "fpu" },
+        {  1, "vme" },
+        {  2, "de" },
+        {  3, "pse" },
+        {  4, "tsc" },
+        {  5, "msr" },
+        {  6, "pae" },
+        {  7, "mce" },
+        {  8, "cx8" },
+        {  9, "apic" },
+        { 11, "sep" },
+        { 12, "mtrr" },
+        { 13, "pge" },
+        { 14, "mca" },
+        { 15, "cmov" },
+        { 16, "pat" },
+        { 17, "pse36" },
+        { 19, "clflush" },
+        { 23, "mmx" },
+        { 24, "fxsr" },
+        { 25, "sse" },
+        { 26, "sse2" },
+        { 28, "ht" },
+};
+
+static const struct cpuid_table_entry leaf1_ecx[] = {
+        {  0, "pni" },
+        {  1, "pclmul" },
+        {  3, "monitor" },
+        {  9, "ssse3" },
+        { 12, "fma3" },
+        { 13, "cx16" },
+        { 19, "sse4_1" },
+        { 20, "sse4_2" },
+        { 22, "movbe" },
+        { 23, "popcnt" },
+        { 25, "aes" },
+        { 26, "xsave" },
+        { 27, "osxsave" },
+        { 28, "avx" },
+        { 29, "f16c" },
+        { 30, "rdrand" },
+};
+
+static const struct cpuid_table_entry leaf7_ebx[] = {
+        {  3, "bmi1" },
+        {  5, "avx2" },
+        {  8, "bmi2" },
+        { 18, "rdseed" },
+        { 19, "adx" },
+        { 29, "sha_ni" },
+};
+
+static const struct cpuid_table_entry leaf81_edx[] = {
+        { 11, "syscall" },
+        { 27, "rdtscp" },
+        { 29, "lm" },
+};
+
+static const struct cpuid_table_entry leaf81_ecx[] = {
+        {  0, "lahf_lm" },
+        {  5, "abm" },
+};
+
+static const struct cpuid_table_entry leaf87_edx[] = {
+        {  8, "constant_tsc" },
+};
+
+static bool given_flag_in_set(const char *flag, const struct cpuid_table_entry *set, size_t set_size, uint32_t val) {
+        for (size_t i = 0; i < set_size; i++) {
+                if ((UINT32_C(1) << set[i].flag_bit) & val &&
+                                streq(flag, set[i].name))
+                        return true;
+        }
+        return false;
+}
+
+static bool real_has_cpu_with_flag(const char *flag) {
+        uint32_t eax, ebx, ecx, edx;
+
+        if (__get_cpuid(1, &eax, &ebx, &ecx, &edx)) {
+                if (given_flag_in_set(flag, leaf1_ecx, ELEMENTSOF(leaf1_ecx), ecx))
+                        return true;
+
+                if (given_flag_in_set(flag, leaf1_edx, ELEMENTSOF(leaf1_edx), edx))
+                        return true;
+        }
+
+        if (__get_cpuid(7, &eax, &ebx, &ecx, &edx)) {
+                if (given_flag_in_set(flag, leaf7_ebx, ELEMENTSOF(leaf7_ebx), ebx))
+                        return true;
+        }
+
+        if (__get_cpuid(0x80000001U, &eax, &ebx, &ecx, &edx)) {
+                if (given_flag_in_set(flag, leaf81_ecx, ELEMENTSOF(leaf81_ecx), ecx))
+                        return true;
+
+                if (given_flag_in_set(flag, leaf81_edx, ELEMENTSOF(leaf81_edx), edx))
+                        return true;
+        }
+
+        if (__get_cpuid(0x80000007U, &eax, &ebx, &ecx, &edx))
+                if (given_flag_in_set(flag, leaf87_edx, ELEMENTSOF(leaf87_edx), edx))
+                        return true;
+
+        return false;
+}
+#endif
+
+bool has_cpu_with_flag(const char *flag) {
+        /* CPUID is an x86 specific interface. Assume on all others that no CPUs have those flags. */
+#if defined(__i386__) || defined(__x86_64__)
+        return real_has_cpu_with_flag(flag);
+#else
+        return false;
+#endif
 }
 
 static const char *const virtualization_table[_VIRTUALIZATION_MAX] = {

@@ -115,10 +115,9 @@ static int help(void) {
                "Loads statically configured kernel modules.\n\n"
                "  -h --help             Show this help\n"
                "     --version          Show package version\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -166,7 +165,7 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

@@ -263,11 +263,7 @@ int job_install_deserialized(Job *j) {
                 return log_unit_debug_errno(j->unit, SYNTHETIC_ERRNO(EEXIST),
                                             "Unit already has a job installed. Not installing deserialized job.");
 
-        r = hashmap_ensure_allocated(&j->manager->jobs, NULL);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(j->manager->jobs, UINT32_TO_PTR(j->id), j);
+        r = hashmap_ensure_put(&j->manager->jobs, NULL, UINT32_TO_PTR(j->id), j);
         if (r == -EEXIST)
                 return log_unit_debug_errno(j->unit, r, "Job ID %" PRIu32 " already used, cannot deserialize job.", j->id);
         if (r < 0)
@@ -882,8 +878,7 @@ static void job_log_done_status_message(Unit *u, uint32_t job_id, JobType t, Job
                 return;
 
         /* Show condition check message if the job did not actually do anything due to failed condition. */
-        if ((t == JOB_START && result == JOB_DONE && !u->condition_result) ||
-            (t == JOB_START && result == JOB_SKIPPED)) {
+        if (t == JOB_START && result == JOB_DONE && !u->condition_result) {
                 log_struct(LOG_INFO,
                            "MESSAGE=Condition check resulted in %s being skipped.", unit_status_string(u),
                            "JOB_ID=%" PRIu32, job_id,

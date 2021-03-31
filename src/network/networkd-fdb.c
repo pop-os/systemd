@@ -79,11 +79,7 @@ static int fdb_entry_new_static(
                 .fdb_ntf_flags = NEIGHBOR_CACHE_ENTRY_FLAGS_SELF,
         };
 
-        r = hashmap_ensure_allocated(&network->fdb_entries_by_section, &network_config_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(network->fdb_entries_by_section, fdb_entry->section, fdb_entry);
+        r = hashmap_ensure_put(&network->fdb_entries_by_section, &network_config_hash_ops, fdb_entry->section, fdb_entry);
         if (r < 0)
                 return r;
 
@@ -146,7 +142,7 @@ static int fdb_entry_configure(Link *link, FdbEntry *fdb_entry) {
                         return log_link_error_errno(link, r, "Could not append NDA_VLAN attribute: %m");
         }
 
-        if (!in_addr_is_null(fdb_entry->family, &fdb_entry->destination_addr)) {
+        if (in_addr_is_set(fdb_entry->family, &fdb_entry->destination_addr)) {
                 r = netlink_message_append_in_addr_union(req, NDA_DST, fdb_entry->family, &fdb_entry->destination_addr);
                 if (r < 0)
                         return log_link_error_errno(link, r, "Could not append NDA_DST attribute: %m");
@@ -381,7 +377,6 @@ int config_parse_fdb_ntf_flags(
 
         _cleanup_(fdb_entry_free_or_set_invalidp) FdbEntry *fdb_entry = NULL;
         Network *network = userdata;
-        NeighborCacheEntryFlags f;
         int r;
 
         assert(filename);
@@ -394,9 +389,9 @@ int config_parse_fdb_ntf_flags(
         if (r < 0)
                 return log_oom();
 
-        f = fdb_ntf_flags_from_string(rvalue);
+        NeighborCacheEntryFlags f = fdb_ntf_flags_from_string(rvalue);
         if (f < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, SYNTHETIC_ERRNO(EINVAL),
+                log_syntax(unit, LOG_WARNING, filename, line, f,
                            "FDB failed to parse AssociatedWith=, ignoring assignment: %s",
                            rvalue);
                 return 0;

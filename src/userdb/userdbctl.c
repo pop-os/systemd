@@ -10,6 +10,7 @@
 #include "format-util.h"
 #include "main-func.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "pretty-print.h"
 #include "socket-util.h"
@@ -25,7 +26,7 @@ static enum {
         OUTPUT_TABLE,
         OUTPUT_FRIENDLY,
         OUTPUT_JSON,
-        _OUTPUT_INVALID = -1
+        _OUTPUT_INVALID = -EINVAL,
 } arg_output = _OUTPUT_INVALID;
 
 static PagerFlags arg_pager_flags = 0;
@@ -111,8 +112,8 @@ static int display_user(int argc, char *argv[], void *userdata) {
                 (void) table_set_align_percent(table, table_get_cell(table, 0, 2), 100);
                 (void) table_set_align_percent(table, table_get_cell(table, 0, 3), 100);
                 (void) table_set_empty_string(table, "-");
-                (void) table_set_sort(table, (size_t) 7, (size_t) 2, (size_t) -1);
-                (void) table_set_display(table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 3, (size_t) 4, (size_t) 5, (size_t) 6, (size_t) -1);
+                (void) table_set_sort(table, (size_t) 7, (size_t) 2);
+                (void) table_set_display(table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 3, (size_t) 4, (size_t) 5, (size_t) 6);
         }
 
         if (argc > 1) {
@@ -261,8 +262,8 @@ static int display_group(int argc, char *argv[], void *userdata) {
 
                 (void) table_set_align_percent(table, table_get_cell(table, 0, 2), 100);
                 (void) table_set_empty_string(table, "-");
-                (void) table_set_sort(table, (size_t) 3, (size_t) 2, (size_t) -1);
-                (void) table_set_display(table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 3, (size_t) -1);
+                (void) table_set_sort(table, (size_t) 3, (size_t) 2);
+                (void) table_set_display(table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 3);
         }
 
         if (argc > 1) {
@@ -401,7 +402,7 @@ static int display_memberships(int argc, char *argv[], void *userdata) {
                 if (!table)
                         return log_oom();
 
-                (void) table_set_sort(table, (size_t) 0, (size_t) 1, (size_t) -1);
+                (void) table_set_sort(table, (size_t) 0, (size_t) 1);
         }
 
         if (argc > 1) {
@@ -490,7 +491,7 @@ static int display_services(int argc, char *argv[], void *userdata) {
         if (!t)
                 return log_oom();
 
-        (void) table_set_sort(t, (size_t) 0, (size_t) -1);
+        (void) table_set_sort(t, (size_t) 0);
 
         FOREACH_DIRENT(de, d, return -errno) {
                 _cleanup_free_ char *j = NULL, *no = NULL;
@@ -600,11 +601,11 @@ static int help(int argc, char *argv[], void *userdata) {
                "  -N                         Do not synthesize or include glibc NSS data\n"
                "                             (Same as --synthesize=no --with-nss=no)\n"
                "     --synthesize=BOOL       Synthesize root/nobody user\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight(), ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -720,17 +721,17 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_WITH_NSS:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--with-nss=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --with-nss= parameter: %s", optarg);
+                                return r;
 
                         SET_FLAG(arg_userdb_flags, USERDB_AVOID_NSS, !r);
                         break;
 
                 case ARG_SYNTHESIZE:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--synthesize=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --synthesize= parameter: %s", optarg);
+                                return r;
 
                         SET_FLAG(arg_userdb_flags, USERDB_DONT_SYNTHESIZE, !r);
                         break;
@@ -763,7 +764,7 @@ static int run(int argc, char *argv[]) {
 
         int r;
 
-        log_setup_cli();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

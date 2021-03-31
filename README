@@ -44,7 +44,7 @@ REQUIREMENTS:
           CONFIG_SIGNALFD
           CONFIG_TIMERFD
           CONFIG_EPOLL
-          CONFIG_NET
+          CONFIG_UNIX (it requires CONFIG_NET, but every other flag in it is not necessary)
           CONFIG_SYSFS
           CONFIG_PROC_FS
           CONFIG_FHANDLE (libudev, mount and bind mount handling)
@@ -126,6 +126,9 @@ REQUIREMENTS:
         Required for systemd-nspawn:
           CONFIG_DEVPTS_MULTIPLE_INSTANCES or Linux kernel >= 4.7
 
+        Required for systemd-oomd:
+          CONFIG_PSI
+
         Note that kernel auditing is broken when used with systemd's
         container code. When using systemd in conjunction with
         containers, please make sure to either turn off auditing at
@@ -187,7 +190,7 @@ REQUIREMENTS:
         polkit (optional)
 
         To build in directory build/:
-          meson build/ && ninja -C build
+          meson setup build/ && meson compile -C build/
 
         Any configuration options can be specified as -Darg=value... arguments
         to meson. After the build directory is initially configured, meson will
@@ -197,10 +200,10 @@ REQUIREMENTS:
         their current values.
 
         Useful commands:
-          ninja -v some/target
-          ninja test
-          sudo ninja install
-          DESTDIR=... ninja install
+          meson compile -v -C build/ some/target
+          meson test -C build/
+          sudo meson install -C build/
+          DESTDIR=... meson install -C build/
 
         A tarball can be created with:
           git archive --format=tar --prefix=systemd-222/ v222 | xz > systemd-222.tar.xz
@@ -219,9 +222,10 @@ REQUIREMENTS:
         Note that the build prefix for systemd must be /usr. (Moreover,
         packages systemd relies on — such as D-Bus — really should use the same
         prefix, otherwise you are on your own.) -Dsplit-usr=false (which is the
-        default and does not need to be specified) is the recommended setting,
-        and -Dsplit-usr=true should be used on systems which have /usr on a
-        separate partition.
+        default and does not need to be specified) is the recommended setting.
+        -Dsplit-usr=true can be used to give a semblance of support for systems
+        with programs installed split between / and /usr. Moving everything
+        under /usr is strongly encouraged.
 
         Additional packages are necessary to run some tests:
         - busybox            (used by test/TEST-13-NSPAWN-SMOKE)
@@ -273,7 +277,7 @@ NSS:
         with machined to their respective IP addresses.
 
         nss-systemd enables resolution of users/group registered via the
-        User/Group Record Lookup API (https://systemd.io/USER_GROUP_API/),
+        User/Group Record Lookup API (https://systemd.io/USER_GROUP_API),
         including all dynamically allocated service users. (See the
         DynamicUser= setting in unit files.)
 

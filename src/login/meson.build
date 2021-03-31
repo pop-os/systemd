@@ -12,7 +12,6 @@ logind_gperf_c = custom_target(
         command : [gperf, '@INPUT@', '--output-file', '@OUTPUT@'])
 
 liblogind_core_sources = files('''
-        logind-acl.h
         logind-action.c
         logind-action.h
         logind-brightness.c
@@ -26,6 +25,8 @@ liblogind_core_sources = files('''
         logind-device.h
         logind-inhibit.c
         logind-inhibit.h
+        logind-polkit.c
+        logind-polkit.h
         logind-seat-dbus.c
         logind-seat-dbus.h
         logind-seat.c
@@ -44,11 +45,6 @@ liblogind_core_sources = files('''
 '''.split())
 
 liblogind_core_sources += [logind_gperf_c]
-
-logind_acl_c = files('logind-acl.c')
-if conf.get('HAVE_ACL') == 1
-        liblogind_core_sources += logind_acl_c
-endif
 
 liblogind_core = static_library(
         'logind-core',
@@ -74,7 +70,7 @@ if conf.get('ENABLE_LOGIND') == 1
                 input : 'logind.conf.in',
                 output : 'logind.conf',
                 configuration : substs)
-        if install_sysconfdir
+        if install_sysconfdir_samples
                 install_data(logind_conf,
                              install_dir : pkgsysconfdir)
         endif
@@ -122,3 +118,17 @@ if conf.get('ENABLE_LOGIND') == 1
                 install : pamconfdir != 'no',
                 install_dir : pamconfdir)
 endif
+
+############################################################
+
+tests += [
+        [['src/login/test-login-shared.c']],
+
+        [['src/login/test-inhibit.c'],
+         [], [], [], '', 'manual'],
+
+        [['src/login/test-login-tables.c'],
+         [liblogind_core,
+          libshared],
+         [threads]],
+]

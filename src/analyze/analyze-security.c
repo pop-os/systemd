@@ -1528,11 +1528,11 @@ static int assess(const struct security_info *info, Table *overview_table, Analy
                 if (!details_table)
                         return log_oom();
 
-                (void) table_set_sort(details_table, (size_t) 3, (size_t) 1, (size_t) -1);
+                (void) table_set_sort(details_table, (size_t) 3, (size_t) 1);
                 (void) table_set_reverse(details_table, 3, true);
 
                 if (getenv_bool("SYSTEMD_ANALYZE_DEBUG") <= 0)
-                        (void) table_set_display(details_table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 6, (size_t) -1);
+                        (void) table_set_display(details_table, (size_t) 0, (size_t) 1, (size_t) 2, (size_t) 6);
         }
 
         for (i = 0; i < ELEMENTSOF(security_assessor_table); i++) {
@@ -1545,7 +1545,7 @@ static int assess(const struct security_info *info, Table *overview_table, Analy
 
                 if (a->default_dependencies_only && !info->default_dependencies) {
                         badness = UINT64_MAX;
-                        d = strdup("Service runs in special boot phase, option does not apply");
+                        d = strdup("Service runs in special boot phase, option is not appropriate");
                         if (!d)
                                 return log_oom();
                 } else {

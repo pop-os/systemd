@@ -471,7 +471,7 @@ static int compare_version(const char *a, const char *b) {
         b += strcspn(b, " ");
         b += strspn(b, " ");
 
-        return strverscmp(a, b);
+        return strverscmp_improved(a, b);
 }
 
 static int version_check(int fd_from, const char *from, int fd_to, const char *to) {
@@ -541,7 +541,7 @@ static int copy_file_with_version_check(const char *from, const char *to, bool f
                         return log_error_errno(errno, "Failed to open \"%s\" for writing: %m", t);
         }
 
-        r = copy_bytes(fd_from, fd_to, (uint64_t) -1, COPY_REFLINK);
+        r = copy_bytes(fd_from, fd_to, UINT64_MAX, COPY_REFLINK);
         if (r < 0) {
                 (void) unlink(t);
                 return log_error_errno(r, "Failed to copy data from \"%s\" to \"%s\": %m", from, t);
@@ -1043,12 +1043,13 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --no-pager        Do not pipe output into a pager\n"
                "     --graceful        Don't fail when the ESP cannot be found or EFI\n"
                "                       variables cannot be written\n"
-               "\nSee the %2$s for details.\n"
-               , program_invocation_short_name
-               , link
-               , ansi_underline(), ansi_normal()
-               , ansi_highlight(), ansi_normal()
-        );
+               "\nSee the %2$s for details.\n",
+               program_invocation_short_name,
+               link,
+               ansi_underline(),
+               ansi_normal(),
+               ansi_highlight(),
+               ansi_normal());
 
         return 0;
 }
@@ -1152,8 +1153,8 @@ static void read_loader_efi_var(const char *name, char **var) {
 static void print_yes_no_line(bool first, bool good, const char *name) {
         printf("%s%s%s%s %s\n",
                first ? "     Features: " : "               ",
-               good ? ansi_highlight_green() : ansi_highlight_red(),
-               good ? special_glyph(SPECIAL_GLYPH_CHECK_MARK) : special_glyph(SPECIAL_GLYPH_CROSS_MARK),
+               ansi_highlight_green_red(good),
+               special_glyph_check_mark(good),
                ansi_normal(),
                name);
 }
@@ -1232,6 +1233,7 @@ static int verb_status(int argc, char *argv[], void *userdata) {
                 printf("     Firmware: %s%s (%s)%s\n", ansi_highlight(), strna(fw_type), strna(fw_info), ansi_normal());
                 printf("  Secure Boot: %sd\n", enable_disable(is_efi_secure_boot()));
                 printf("   Setup Mode: %s\n", is_efi_secure_boot_setup_mode() ? "setup" : "user");
+                printf(" TPM2 Support: %s\n", yes_no(efi_has_tpm2()));
 
                 k = efi_get_reboot_to_firmware();
                 if (k > 0)
@@ -1257,7 +1259,7 @@ static int verb_status(int argc, char *argv[], void *userdata) {
 
                 print_yes_no_line(false, have_bootloader_esp_uuid, "Boot loader sets ESP partition information");
                 if (have_bootloader_esp_uuid && !sd_id128_equal(esp_uuid, bootloader_esp_uuid))
-                        printf("WARNING: The boot loader reports different ESP UUID then detected!\n");
+                        printf("WARNING: The boot loader reports a different ESP UUID than detected!\n");
 
                 if (stub)
                         printf("         Stub: %s\n", stub);

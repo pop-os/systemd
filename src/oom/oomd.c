@@ -17,13 +17,15 @@
 #include "signal-util.h"
 
 static bool arg_dry_run = false;
-static int arg_swap_used_limit = -1;
-static int arg_mem_pressure_limit = -1;
+static int arg_swap_used_limit_permyriad = -1;
+static int arg_mem_pressure_limit_permyriad = -1;
+static usec_t arg_mem_pressure_usec = 0;
 
 static int parse_config(void) {
         static const ConfigTableItem items[] = {
-                { "OOM", "SwapUsedLimitPercent",              config_parse_percent, 0, &arg_swap_used_limit    },
-                { "OOM", "DefaultMemoryPressureLimitPercent", config_parse_percent, 0, &arg_mem_pressure_limit },
+                { "OOM", "SwapUsedLimit",                    config_parse_permyriad, 0, &arg_swap_used_limit_permyriad    },
+                { "OOM", "DefaultMemoryPressureLimit",       config_parse_permyriad, 0, &arg_mem_pressure_limit_permyriad },
+                { "OOM", "DefaultMemoryPressureDurationSec", config_parse_sec,       0, &arg_mem_pressure_usec            },
                 {}
         };
 
@@ -51,10 +53,9 @@ static int help(void) {
                "     --version              Show package version\n"
                "     --dry-run              Only print destructive actions instead of doing them\n"
                "     --bus-introspect=PATH  Write D-Bus XML introspection data\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -121,7 +122,7 @@ static int run(int argc, char *argv[]) {
         unsigned long long s = 0;
         int r;
 
-        log_setup_service();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)
@@ -140,10 +141,8 @@ static int run(int argc, char *argv[]) {
                 return log_error_errno(r, "Failed to get SwapTotal from /proc/meminfo: %m");
 
         r = safe_atollu(swap, &s);
-        if (r < 0)
-                return log_error_errno(r, "Failed to parse SwapTotal from /proc/meminfo: %s: %m", swap);
-        if (s == 0)
-                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Requires swap to operate");
+        if (r < 0 || s == 0)
+                log_warning("Swap is currently not detected; memory pressure usage will be degraded");
 
         if (!is_pressure_supported())
                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Pressure Stall Information (PSI) is not supported");
@@ -160,13 +159,18 @@ static int run(int argc, char *argv[]) {
         if (r < 0)
                 return log_error_errno(r, "Failed to create manager: %m");
 
-        r = manager_start(m, arg_dry_run, arg_swap_used_limit, arg_mem_pressure_limit);
+        r = manager_start(
+                        m,
+                        arg_dry_run,
+                        arg_swap_used_limit_permyriad,
+                        arg_mem_pressure_limit_permyriad,
+                        arg_mem_pressure_usec);
         if (r < 0)
                 return log_error_errno(r, "Failed to start up daemon: %m");
 
         notify_msg = notify_start(NOTIFY_READY, NOTIFY_STOPPING);
 
-        log_info("systemd-oomd starting%s!", arg_dry_run ? " in dry run mode" : "");
+        log_debug("systemd-oomd started%s.", arg_dry_run ? " in dry run mode" : "");
 
         r = sd_event_loop(m->event);
         if (r < 0)

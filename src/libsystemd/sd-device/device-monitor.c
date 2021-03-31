@@ -627,8 +627,9 @@ _public_ int sd_device_monitor_filter_update(sd_device_monitor *m) {
         if (m->filter_uptodate)
                 return 0;
 
-        if (hashmap_isempty(m->subsystem_filter) &&
-            set_isempty(m->tag_filter)) {
+        if (m->snl.nl.nl_groups == MONITOR_GROUP_KERNEL ||
+            (hashmap_isempty(m->subsystem_filter) &&
+             set_isempty(m->tag_filter))) {
                 m->filter_uptodate = true;
                 return 0;
         }
@@ -732,15 +733,13 @@ _public_ int sd_device_monitor_filter_add_match_subsystem_devtype(sd_device_moni
                         return -ENOMEM;
         }
 
-        r = hashmap_ensure_allocated(&m->subsystem_filter, NULL);
+        r = hashmap_ensure_put(&m->subsystem_filter, NULL, s, d);
         if (r < 0)
                 return r;
 
-        r = hashmap_put(m->subsystem_filter, s, d);
-        if (r < 0)
-                return r;
+        TAKE_PTR(s);
+        TAKE_PTR(d);
 
-        s = d = NULL;
         m->filter_uptodate = false;
 
         return 0;

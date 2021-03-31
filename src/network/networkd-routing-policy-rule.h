@@ -23,7 +23,12 @@ typedef struct RoutingPolicyRule {
         bool invert_rule;
 
         uint8_t tos;
-        uint8_t protocol;
+        uint8_t type;
+        uint8_t ipproto; /* FRA_IP_PROTO */
+        uint8_t protocol; /* FRA_PROTOCOL */
+        uint8_t to_prefixlen;
+        uint8_t from_prefixlen;
+        uint8_t l3mdev; /* FRA_L3MDEV */
 
         uint32_t table;
         uint32_t fwmark;
@@ -32,8 +37,6 @@ typedef struct RoutingPolicyRule {
 
         AddressFamily address_family; /* Specified by Family= */
         int family; /* Automatically determined by From= or To= */
-        unsigned char to_prefixlen;
-        unsigned char from_prefixlen;
 
         char *iif;
         char *oif;
@@ -55,9 +58,13 @@ void network_drop_invalid_routing_policy_rules(Network *network);
 int link_set_routing_policy_rules(Link *link);
 
 int manager_rtnl_process_rule(sd_netlink *rtnl, sd_netlink_message *message, Manager *m);
-
-int routing_policy_serialize_rules(Set *rules, FILE *f);
-int routing_policy_load_rules(const char *state_file, Set **rules);
+int manager_drop_routing_policy_rules_internal(Manager *m, bool foreign, const Link *except);
+static inline int manager_drop_foreign_routing_policy_rules(Manager *m) {
+        return manager_drop_routing_policy_rules_internal(m, true, NULL);
+}
+static inline int manager_drop_routing_policy_rules(Manager *m, const Link *except) {
+        return manager_drop_routing_policy_rules_internal(m, false, except);
+}
 
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_tos);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_table);
@@ -71,3 +78,4 @@ CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_invert);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_family);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_uid_range);
 CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_suppress_prefixlen);
+CONFIG_PARSER_PROTOTYPE(config_parse_routing_policy_rule_type);

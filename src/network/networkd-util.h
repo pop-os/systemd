@@ -16,10 +16,8 @@ typedef enum AddressFamily {
         ADDRESS_FAMILY_IPV4           = 1 << 0,
         ADDRESS_FAMILY_IPV6           = 1 << 1,
         ADDRESS_FAMILY_YES            = ADDRESS_FAMILY_IPV4 | ADDRESS_FAMILY_IPV6,
-        ADDRESS_FAMILY_FALLBACK_IPV4  = 1 << 2,
-        ADDRESS_FAMILY_FALLBACK       = ADDRESS_FAMILY_FALLBACK_IPV4 | ADDRESS_FAMILY_IPV6,
         _ADDRESS_FAMILY_MAX,
-        _ADDRESS_FAMILY_INVALID = -1,
+        _ADDRESS_FAMILY_INVALID = -EINVAL,
 } AddressFamily;
 
 typedef struct NetworkConfigSection {
@@ -30,27 +28,35 @@ typedef struct NetworkConfigSection {
 
 CONFIG_PARSER_PROTOTYPE(config_parse_link_local_address_family);
 CONFIG_PARSER_PROTOTYPE(config_parse_address_family_with_kernel);
+CONFIG_PARSER_PROTOTYPE(config_parse_ip_masquerade);
 
 const char *address_family_to_string(AddressFamily b) _const_;
 AddressFamily address_family_from_string(const char *s) _pure_;
 
-const char *link_local_address_family_to_string(AddressFamily b) _const_;
 AddressFamily link_local_address_family_from_string(const char *s) _pure_;
 
 const char *routing_policy_rule_address_family_to_string(AddressFamily b) _const_;
 AddressFamily routing_policy_rule_address_family_from_string(const char *s) _pure_;
 
+const char *nexthop_address_family_to_string(AddressFamily b) _const_;
+AddressFamily nexthop_address_family_from_string(const char *s) _pure_;
+
 const char *duplicate_address_detection_address_family_to_string(AddressFamily b) _const_;
 AddressFamily duplicate_address_detection_address_family_from_string(const char *s) _pure_;
 
-const char *dhcp_lease_server_type_to_string(sd_dhcp_lease_server_type t) _const_;
-sd_dhcp_lease_server_type dhcp_lease_server_type_from_string(const char *s) _pure_;
+AddressFamily dhcp_deprecated_address_family_from_string(const char *s) _pure_;
+
+const char *dhcp_lease_server_type_to_string(sd_dhcp_lease_server_type_t t) _const_;
+sd_dhcp_lease_server_type_t dhcp_lease_server_type_from_string(const char *s) _pure_;
 
 int kernel_route_expiration_supported(void);
 
-int network_config_section_new(const char *filename, unsigned line, NetworkConfigSection **s);
-void network_config_section_free(NetworkConfigSection *network);
+static inline NetworkConfigSection* network_config_section_free(NetworkConfigSection *cs) {
+        return mfree(cs);
+}
 DEFINE_TRIVIAL_CLEANUP_FUNC(NetworkConfigSection*, network_config_section_free);
+
+int network_config_section_new(const char *filename, unsigned line, NetworkConfigSection **s);
 extern const struct hash_ops network_config_hash_ops;
 unsigned hashmap_find_free_section_line(Hashmap *hashmap);
 
@@ -64,13 +70,14 @@ static inline bool section_is_invalid(NetworkConfigSection *section) {
 }
 
 #define DEFINE_NETWORK_SECTION_FUNCTIONS(type, free_func)               \
-        static inline void free_func##_or_set_invalid(type *p) {        \
+        static inline type* free_func##_or_set_invalid(type *p) {       \
                 assert(p);                                              \
                                                                         \
                 if (p->section)                                         \
                         p->section->invalid = true;                     \
                 else                                                    \
                         free_func(p);                                   \
+                return NULL;                                            \
         }                                                               \
         DEFINE_TRIVIAL_CLEANUP_FUNC(type*, free_func);                  \
         DEFINE_TRIVIAL_CLEANUP_FUNC(type*, free_func##_or_set_invalid);

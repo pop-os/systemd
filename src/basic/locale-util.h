@@ -26,7 +26,7 @@ typedef enum LocaleVariable {
         VARIABLE_LC_MEASUREMENT,
         VARIABLE_LC_IDENTIFICATION,
         _VARIABLE_LC_MAX,
-        _VARIABLE_LC_INVALID = -1
+        _VARIABLE_LC_INVALID = -EINVAL,
 } LocaleVariable;
 
 int get_locales(char ***l);
@@ -46,6 +46,9 @@ typedef enum {
         SPECIAL_GLYPH_TREE_SPACE,
         SPECIAL_GLYPH_TRIANGULAR_BULLET,
         SPECIAL_GLYPH_BLACK_CIRCLE,
+        SPECIAL_GLYPH_WHITE_CIRCLE,
+        SPECIAL_GLYPH_MULTIPLICATION_SIGN,
+        SPECIAL_GLYPH_CIRCLE_ARROW,
         SPECIAL_GLYPH_BULLET,
         SPECIAL_GLYPH_MU,
         SPECIAL_GLYPH_CHECK_MARK,
@@ -86,4 +89,8 @@ static inline void freelocalep(locale_t *p) {
 void locale_variables_free(char* l[_VARIABLE_LC_MAX]);
 static inline void locale_variables_freep(char*(*l)[_VARIABLE_LC_MAX]) {
         locale_variables_free(*l);
+}
+
+static inline const char *special_glyph_check_mark(bool b) {
+        return b ? special_glyph(SPECIAL_GLYPH_CHECK_MARK) : special_glyph(SPECIAL_GLYPH_CROSS_MARK);
 }

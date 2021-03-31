@@ -20,64 +20,6 @@
 #include "utf8.h"
 #include "util.h"
 
-int strcmp_ptr(const char *a, const char *b) {
-        /* Like strcmp(), but tries to make sense of NULL pointers */
-
-        if (a && b)
-                return strcmp(a, b);
-        return CMP(a, b); /* Direct comparison of pointers, one of which is NULL */
-}
-
-int strcasecmp_ptr(const char *a, const char *b) {
-        /* Like strcasecmp(), but tries to make sense of NULL pointers */
-
-        if (a && b)
-                return strcasecmp(a, b);
-        return CMP(a, b); /* Direct comparison of pointers, one of which is NULL */
-}
-
-char* endswith(const char *s, const char *postfix) {
-        size_t sl, pl;
-
-        assert(s);
-        assert(postfix);
-
-        sl = strlen(s);
-        pl = strlen(postfix);
-
-        if (pl == 0)
-                return (char*) s + sl;
-
-        if (sl < pl)
-                return NULL;
-
-        if (memcmp(s + sl - pl, postfix, pl) != 0)
-                return NULL;
-
-        return (char*) s + sl - pl;
-}
-
-char* endswith_no_case(const char *s, const char *postfix) {
-        size_t sl, pl;
-
-        assert(s);
-        assert(postfix);
-
-        sl = strlen(s);
-        pl = strlen(postfix);
-
-        if (pl == 0)
-                return (char*) s + sl;
-
-        if (sl < pl)
-                return NULL;
-
-        if (strcasecmp(s + sl - pl, postfix) != 0)
-                return NULL;
-
-        return (char*) s + sl - pl;
-}
-
 char* first_word(const char *s, const char *word) {
         size_t sl, wl;
         const char *p;
@@ -129,7 +71,7 @@ char *strnappend(const char *s, const char *suffix, size_t b) {
         assert(suffix);
 
         a = strlen(s);
-        if (b > ((size_t) -1) - a)
+        if (b > SIZE_MAX - a)
                 return NULL;
 
         r = new(char, a+b+1);
@@ -365,7 +307,7 @@ static char *ascii_ellipsize_mem(const char *s, size_t old_length, size_t new_le
 
         assert(s);
         assert(percent <= 100);
-        assert(new_length != (size_t) -1);
+        assert(new_length != SIZE_MAX);
 
         if (old_length <= new_length)
                 return strndup(s, old_length);
@@ -436,7 +378,7 @@ char *ellipsize_mem(const char *s, size_t old_length, size_t new_length, unsigne
         assert(s);
         assert(percent <= 100);
 
-        if (new_length == (size_t) -1)
+        if (new_length == SIZE_MAX)
                 return strndup(s, old_length);
 
         if (new_length == 0)
@@ -791,10 +733,10 @@ char *strip_tab_ansi(char **ibuf, size_t *_isz, size_t highlight[2]) {
         return *ibuf;
 }
 
-char *strextend_with_separator(char **x, const char *separator, ...) {
-        bool need_separator;
+char *strextend_with_separator_internal(char **x, const char *separator, ...) {
         size_t f, l, l_separator;
-        char *r, *p;
+        bool need_separator;
+        char *nr, *p;
         va_list ap;
 
         assert(x);
@@ -818,7 +760,7 @@ char *strextend_with_separator(char **x, const char *separator, ...) {
                 if (need_separator)
                         n += l_separator;
 
-                if (n > ((size_t) -1) - l) {
+                if (n >= SIZE_MAX - l) {
                         va_end(ap);
                         return NULL;
                 }
@@ -830,11 +772,12 @@ char *strextend_with_separator(char **x, const char *separator, ...) {
 
         need_separator = !isempty(*x);
 
-        r = realloc(*x, l+1);
-        if (!r)
+        nr = realloc(*x, GREEDY_ALLOC_ROUND_UP(l+1));
+        if (!nr)
                 return NULL;
 
-        p = r + f;
+        *x = nr;
+        p = nr + f;
 
         va_start(ap, separator);
         for (;;) {
@@ -853,18 +796,16 @@ char *strextend_with_separator(char **x, const char *separator, ...) {
         }
         va_end(ap);
 
-        assert(p == r + l);
+        assert(p == nr + l);
 
         *p = 0;
-        *x = r;
 
-        return r + l;
+        return p;
 }
 
 char *strrep(const char *s, unsigned n) {
-        size_t l;
         char *r, *p;
-        unsigned i;
+        size_t l;
 
         assert(s);
 
@@ -873,7 +814,7 @@ char *strrep(const char *s, unsigned n) {
         if (!r)
                 return NULL;
 
-        for (i = 0; i < n; i++)
+        for (unsigned i = 0; i < n; i++)
                 p = stpcpy(p, s);
 
         *p = 0;

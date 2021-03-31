@@ -37,6 +37,16 @@ static bool EVENT_SOURCE_WATCH_PIDFD(sd_event_source *s) {
                 s->child.options == WEXITED;
 }
 
+static bool event_source_is_online(sd_event_source *s) {
+        assert(s);
+        return s->enabled != SD_EVENT_OFF && !s->ratelimited;
+}
+
+static bool event_source_is_offline(sd_event_source *s) {
+        assert(s);
+        return s->enabled == SD_EVENT_OFF || s->ratelimited;
+}
+
 static const char* const event_source_type_table[_SOURCE_EVENT_SOURCE_TYPE_MAX] = {
         [SOURCE_IO] = "io",
         [SOURCE_TIME_REALTIME] = "realtime",
@@ -55,7 +65,25 @@ static const char* const event_source_type_table[_SOURCE_EVENT_SOURCE_TYPE_MAX] 
 
 DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(event_source_type, int);
 
-#define EVENT_SOURCE_IS_TIME(t) IN_SET((t), SOURCE_TIME_REALTIME, SOURCE_TIME_BOOTTIME, SOURCE_TIME_MONOTONIC, SOURCE_TIME_REALTIME_ALARM, SOURCE_TIME_BOOTTIME_ALARM)
+#define EVENT_SOURCE_IS_TIME(t)                 \
+        IN_SET((t),                             \
+               SOURCE_TIME_REALTIME,            \
+               SOURCE_TIME_BOOTTIME,            \
+               SOURCE_TIME_MONOTONIC,           \
+               SOURCE_TIME_REALTIME_ALARM,      \
+               SOURCE_TIME_BOOTTIME_ALARM)
+
+#define EVENT_SOURCE_CAN_RATE_LIMIT(t)          \
+        IN_SET((t),                             \
+               SOURCE_IO,                       \
+               SOURCE_TIME_REALTIME,            \
+               SOURCE_TIME_BOOTTIME,            \
+               SOURCE_TIME_MONOTONIC,           \
+               SOURCE_TIME_REALTIME_ALARM,      \
+               SOURCE_TIME_BOOTTIME_ALARM,      \
+               SOURCE_SIGNAL,                   \
+               SOURCE_DEFER,                    \
+               SOURCE_INOTIFY)
 
 struct sd_event {
         unsigned n_ref;
@@ -81,7 +109,7 @@ struct sd_event {
         Hashmap *signal_data; /* indexed by priority */
 
         Hashmap *child_sources;
-        unsigned n_enabled_child_sources;
+        unsigned n_online_child_sources;
 
         Set *post_sources;
 
@@ -120,7 +148,7 @@ struct sd_event {
 
         LIST_HEAD(sd_event_source, sources);
 
-        usec_t last_run, last_log;
+        usec_t last_run_usec, last_log_usec;
         unsigned delays[sizeof(usec_t) * 8];
 };
 
@@ -146,6 +174,11 @@ static int pending_prioq_compare(const void *a, const void *b) {
         if (x->enabled == SD_EVENT_OFF && y->enabled != SD_EVENT_OFF)
                 return 1;
 
+        /* Non rate-limited ones first. */
+        r = CMP(!!x->ratelimited, !!y->ratelimited);
+        if (r != 0)
+                return r;
+
         /* Lower priority values first */
         r = CMP(x->priority, y->priority);
         if (r != 0)
@@ -168,6 +201,11 @@ static int prepare_prioq_compare(const void *a, const void *b) {
         if (x->enabled == SD_EVENT_OFF && y->enabled != SD_EVENT_OFF)
                 return 1;
 
+        /* Non rate-limited ones first. */
+        r = CMP(!!x->ratelimited, !!y->ratelimited);
+        if (r != 0)
+                return r;
+
         /* Move most recently prepared ones last, so that we can stop
          * preparing as soon as we hit one that has already been
          * prepared in the current iteration */
@@ -179,11 +217,29 @@ static int prepare_prioq_compare(const void *a, const void *b) {
         return CMP(x->priority, y->priority);
 }
 
+static usec_t time_event_source_next(const sd_event_source *s) {
+        assert(s);
+
+        /* We have two kinds of event sources that have elapsation times associated with them: the actual
+         * time based ones and the ones for which a ratelimit can be in effect (where we want to be notified
+         * once the ratelimit time window ends). Let's return the next elapsing time depending on what we are
+         * looking at here. */
+
+        if (s->ratelimited) { /* If rate-limited the next elapsation is when the ratelimit time window ends */
+                assert(s->rate_limit.begin != 0);
+                assert(s->rate_limit.interval != 0);
+                return usec_add(s->rate_limit.begin, s->rate_limit.interval);
+        }
+
+        /* Otherwise this must be a time event source, if not ratelimited */
+        if (EVENT_SOURCE_IS_TIME(s->type))
+                return s->time.next;
+
+        return USEC_INFINITY;
+}
+
 static int earliest_time_prioq_compare(const void *a, const void *b) {
         const sd_event_source *x = a, *y = b;
-
-        assert(EVENT_SOURCE_IS_TIME(x->type));
-        assert(x->type == y->type);
 
         /* Enabled ones first */
         if (x->enabled != SD_EVENT_OFF && y->enabled == SD_EVENT_OFF)
@@ -198,18 +254,29 @@ static int earliest_time_prioq_compare(const void *a, const void *b) {
                 return 1;
 
         /* Order by time */
-        return CMP(x->time.next, y->time.next);
+        return CMP(time_event_source_next(x), time_event_source_next(y));
 }
 
 static usec_t time_event_source_latest(const sd_event_source *s) {
-        return usec_add(s->time.next, s->time.accuracy);
+        assert(s);
+
+        if (s->ratelimited) { /* For ratelimited stuff the earliest and the latest time shall actually be the
+                               * same, as we should avoid adding additional inaccuracy on an inaccuracy time
+                               * window */
+                assert(s->rate_limit.begin != 0);
+                assert(s->rate_limit.interval != 0);
+                return usec_add(s->rate_limit.begin, s->rate_limit.interval);
+        }
+
+        /* Must be a time event source, if not ratelimited */
+        if (EVENT_SOURCE_IS_TIME(s->type))
+                return usec_add(s->time.next, s->time.accuracy);
+
+        return USEC_INFINITY;
 }
 
 static int latest_time_prioq_compare(const void *a, const void *b) {
         const sd_event_source *x = a, *y = b;
-
-        assert(EVENT_SOURCE_IS_TIME(x->type));
-        assert(x->type == y->type);
 
         /* Enabled ones first */
         if (x->enabled != SD_EVENT_OFF && y->enabled == SD_EVENT_OFF)
@@ -340,7 +407,7 @@ _public_ int sd_event_new(sd_event** ret) {
         e->epoll_fd = fd_move_above_stdio(e->epoll_fd);
 
         if (secure_getenv("SD_EVENT_PROFILE_DELAYS")) {
-                log_debug("Event loop profiling enabled. Logarithmic histogram of event loop iterations in the range 2^0 ... 2^63 us will be logged every 5s.");
+                log_debug("Event loop profiling enabled. Logarithmic histogram of event loop iterations in the range 2^0 … 2^63 us will be logged every 5s.");
                 e->profile_delays = true;
         }
 
@@ -380,7 +447,7 @@ static void source_io_unregister(sd_event_source *s) {
                 return;
 
         if (epoll_ctl(s->event->epoll_fd, EPOLL_CTL_DEL, s->io.fd, NULL) < 0)
-                log_debug_errno(errno, "Failed to remove source %s (type %s) from epoll: %m",
+                log_debug_errno(errno, "Failed to remove source %s (type %s) from epoll, ignoring: %m",
                                 strna(s->description), event_source_type_to_string(s->type));
 
         s->io.registered = false;
@@ -422,7 +489,7 @@ static void source_child_pidfd_unregister(sd_event_source *s) {
 
         if (EVENT_SOURCE_WATCH_PIDFD(s))
                 if (epoll_ctl(s->event->epoll_fd, EPOLL_CTL_DEL, s->child.pidfd, NULL) < 0)
-                        log_debug_errno(errno, "Failed to remove source %s (type %s) from epoll: %m",
+                        log_debug_errno(errno, "Failed to remove source %s (type %s) from epoll, ignoring: %m",
                                         strna(s->description), event_source_type_to_string(s->type));
 
         s->child.registered = false;
@@ -562,10 +629,6 @@ static int event_make_signal_data(
                         return 0;
                 }
         } else {
-                r = hashmap_ensure_allocated(&e->signal_data, &uint64_hash_ops);
-                if (r < 0)
-                        return r;
-
                 d = new(struct signal_data, 1);
                 if (!d)
                         return -ENOMEM;
@@ -576,7 +639,7 @@ static int event_make_signal_data(
                         .priority = priority,
                 };
 
-                r = hashmap_put(e->signal_data, &d->priority, d);
+                r = hashmap_ensure_put(&e->signal_data, &uint64_hash_ops, &d->priority, d);
                 if (r < 0) {
                         free(d);
                         return r;
@@ -661,12 +724,12 @@ static void event_gc_signal_data(sd_event *e, const int64_t *priority, int sig) 
          * and possibly drop the signalfd for it. */
 
         if (sig == SIGCHLD &&
-            e->n_enabled_child_sources > 0)
+            e->n_online_child_sources > 0)
                 return;
 
         if (e->signal_sources &&
             e->signal_sources[sig] &&
-            e->signal_sources[sig]->enabled != SD_EVENT_OFF)
+            event_source_is_online(e->signal_sources[sig]))
                 return;
 
         /*
@@ -713,13 +776,32 @@ static void event_source_time_prioq_reshuffle(sd_event_source *s) {
         struct clock_data *d;
 
         assert(s);
-        assert(EVENT_SOURCE_IS_TIME(s->type));
 
         /* Called whenever the event source's timer ordering properties changed, i.e. time, accuracy,
          * pending, enable state. Makes sure the two prioq's are ordered properly again. */
-        assert_se(d = event_get_clock_data(s->event, s->type));
-        prioq_reshuffle(d->earliest, s, &s->time.earliest_index);
-        prioq_reshuffle(d->latest, s, &s->time.latest_index);
+
+        if (s->ratelimited)
+                d = &s->event->monotonic;
+        else {
+                assert(EVENT_SOURCE_IS_TIME(s->type));
+                assert_se(d = event_get_clock_data(s->event, s->type));
+        }
+
+        prioq_reshuffle(d->earliest, s, &s->earliest_index);
+        prioq_reshuffle(d->latest, s, &s->latest_index);
+        d->needs_rearm = true;
+}
+
+static void event_source_time_prioq_remove(
+                sd_event_source *s,
+                struct clock_data *d) {
+
+        assert(s);
+        assert(d);
+
+        prioq_remove(d->earliest, s, &s->earliest_index);
+        prioq_remove(d->latest, s, &s->latest_index);
+        s->earliest_index = s->latest_index = PRIOQ_IDX_NULL;
         d->needs_rearm = true;
 }
 
@@ -745,17 +827,18 @@ static void source_disconnect(sd_event_source *s) {
         case SOURCE_TIME_BOOTTIME:
         case SOURCE_TIME_MONOTONIC:
         case SOURCE_TIME_REALTIME_ALARM:
-        case SOURCE_TIME_BOOTTIME_ALARM: {
-                struct clock_data *d;
+        case SOURCE_TIME_BOOTTIME_ALARM:
+                /* Only remove this event source from the time event source here if it is not ratelimited. If
+                 * it is ratelimited, we'll remove it below, separately. Why? Because the clock used might
+                 * differ: ratelimiting always uses CLOCK_MONOTONIC, but timer events might use any clock */
 
-                d = event_get_clock_data(s->event, s->type);
-                assert(d);
+                if (!s->ratelimited) {
+                        struct clock_data *d;
+                        assert_se(d = event_get_clock_data(s->event, s->type));
+                        event_source_time_prioq_remove(s, d);
+                }
 
-                prioq_remove(d->earliest, s, &s->time.earliest_index);
-                prioq_remove(d->latest, s, &s->time.latest_index);
-                d->needs_rearm = true;
                 break;
-        }
 
         case SOURCE_SIGNAL:
                 if (s->signal.sig > 0) {
@@ -770,9 +853,9 @@ static void source_disconnect(sd_event_source *s) {
 
         case SOURCE_CHILD:
                 if (s->child.pid > 0) {
-                        if (s->enabled != SD_EVENT_OFF) {
-                                assert(s->event->n_enabled_child_sources > 0);
-                                s->event->n_enabled_child_sources--;
+                        if (event_source_is_online(s)) {
+                                assert(s->event->n_online_child_sources > 0);
+                                s->event->n_online_child_sources--;
                         }
 
                         (void) hashmap_remove(s->event->child_sources, PID_TO_PTR(s->child.pid));
@@ -842,6 +925,9 @@ static void source_disconnect(sd_event_source *s) {
         if (s->prepare)
                 prioq_remove(s->event->prepare, s, &s->prepare_index);
 
+        if (s->ratelimited)
+                event_source_time_prioq_remove(s, &s->event->monotonic);
+
         event = TAKE_PTR(s->event);
         LIST_REMOVE(sources, event->sources, s);
         event->n_sources--;
@@ -853,7 +939,7 @@ static void source_disconnect(sd_event_source *s) {
                 sd_event_unref(event);
 }
 
-static void source_free(sd_event_source *s) {
+static sd_event_source* source_free(sd_event_source *s) {
         assert(s);
 
         source_disconnect(s);
@@ -903,7 +989,7 @@ static void source_free(sd_event_source *s) {
                 s->destroy_callback(s->userdata);
 
         free(s->description);
-        free(s);
+        return mfree(s);
 }
 DEFINE_TRIVIAL_CLEANUP_FUNC(sd_event_source*, source_free);
 
@@ -953,7 +1039,7 @@ static int source_set_pending(sd_event_source *s, bool b) {
                 }
         }
 
-        return 0;
+        return 1;
 }
 
 static sd_event_source *source_new(sd_event *e, bool floating, EventSourceType type) {
@@ -1088,6 +1174,52 @@ static int time_exit_callback(sd_event_source *s, uint64_t usec, void *userdata)
         return sd_event_exit(sd_event_source_get_event(s), PTR_TO_INT(userdata));
 }
 
+static int setup_clock_data(sd_event *e, struct clock_data *d, clockid_t clock) {
+        int r;
+
+        assert(d);
+
+        if (d->fd < 0) {
+                r = event_setup_timer_fd(e, d, clock);
+                if (r < 0)
+                        return r;
+        }
+
+        r = prioq_ensure_allocated(&d->earliest, earliest_time_prioq_compare);
+        if (r < 0)
+                return r;
+
+        r = prioq_ensure_allocated(&d->latest, latest_time_prioq_compare);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
+static int event_source_time_prioq_put(
+                sd_event_source *s,
+                struct clock_data *d) {
+
+        int r;
+
+        assert(s);
+        assert(d);
+
+        r = prioq_put(d->earliest, s, &s->earliest_index);
+        if (r < 0)
+                return r;
+
+        r = prioq_put(d->latest, s, &s->latest_index);
+        if (r < 0) {
+                assert_se(prioq_remove(d->earliest, s, &s->earliest_index) > 0);
+                s->earliest_index = PRIOQ_IDX_NULL;
+                return r;
+        }
+
+        d->needs_rearm = true;
+        return 0;
+}
+
 _public_ int sd_event_add_time(
                 sd_event *e,
                 sd_event_source **ret,
@@ -1104,7 +1236,7 @@ _public_ int sd_event_add_time(
 
         assert_return(e, -EINVAL);
         assert_return(e = event_resolve(e), -ENOPKG);
-        assert_return(accuracy != (uint64_t) -1, -EINVAL);
+        assert_return(accuracy != UINT64_MAX, -EINVAL);
         assert_return(e->state != SD_EVENT_FINISHED, -ESTALE);
         assert_return(!event_pid_changed(e), -ECHILD);
 
@@ -1118,22 +1250,11 @@ _public_ int sd_event_add_time(
         if (!callback)
                 callback = time_exit_callback;
 
-        d = event_get_clock_data(e, type);
-        assert(d);
+        assert_se(d = event_get_clock_data(e, type));
 
-        r = prioq_ensure_allocated(&d->earliest, earliest_time_prioq_compare);
+        r = setup_clock_data(e, d, clock);
         if (r < 0)
                 return r;
-
-        r = prioq_ensure_allocated(&d->latest, latest_time_prioq_compare);
-        if (r < 0)
-                return r;
-
-        if (d->fd < 0) {
-                r = event_setup_timer_fd(e, d, clock);
-                if (r < 0)
-                        return r;
-        }
 
         s = source_new(e, !ret, type);
         if (!s)
@@ -1142,17 +1263,11 @@ _public_ int sd_event_add_time(
         s->time.next = usec;
         s->time.accuracy = accuracy == 0 ? DEFAULT_ACCURACY_USEC : accuracy;
         s->time.callback = callback;
-        s->time.earliest_index = s->time.latest_index = PRIOQ_IDX_NULL;
+        s->earliest_index = s->latest_index = PRIOQ_IDX_NULL;
         s->userdata = userdata;
         s->enabled = SD_EVENT_ONESHOT;
 
-        d->needs_rearm = true;
-
-        r = prioq_put(d->earliest, s, &s->time.earliest_index);
-        if (r < 0)
-                return r;
-
-        r = prioq_put(d->latest, s, &s->time.latest_index);
+        r = event_source_time_prioq_put(s, d);
         if (r < 0)
                 return r;
 
@@ -1285,7 +1400,7 @@ _public_ int sd_event_add_child(
         if (!callback)
                 callback = child_exit_callback;
 
-        if (e->n_enabled_child_sources == 0) {
+        if (e->n_online_child_sources == 0) {
                 /* Caller must block SIGCHLD before using us to watch children, even if pidfd is available,
                  * for compatibility with pre-pidfd and because we don't want the reap the child processes
                  * ourselves, i.e. call waitid(), and don't want Linux' default internal logic for that to
@@ -1350,7 +1465,7 @@ _public_ int sd_event_add_child(
                 e->need_process_child = true;
         }
 
-        e->n_enabled_child_sources++;
+        e->n_online_child_sources++;
 
         if (ret)
                 *ret = s;
@@ -1382,7 +1497,7 @@ _public_ int sd_event_add_child_pidfd(
         if (!callback)
                 callback = child_exit_callback;
 
-        if (e->n_enabled_child_sources == 0) {
+        if (e->n_online_child_sources == 0) {
                 r = signal_is_blocked(SIGCHLD);
                 if (r < 0)
                         return r;
@@ -1432,7 +1547,7 @@ _public_ int sd_event_add_child_pidfd(
                 e->need_process_child = true;
         }
 
-        e->n_enabled_child_sources++;
+        e->n_online_child_sources++;
 
         if (ret)
                 *ret = s;
@@ -1608,10 +1723,6 @@ static int event_make_inotify_data(
 
         fd = fd_move_above_stdio(fd);
 
-        r = hashmap_ensure_allocated(&e->inotify_data, &uint64_hash_ops);
-        if (r < 0)
-                return r;
-
         d = new(struct inotify_data, 1);
         if (!d)
                 return -ENOMEM;
@@ -1622,7 +1733,7 @@ static int event_make_inotify_data(
                 .priority = priority,
         };
 
-        r = hashmap_put(e->inotify_data, &d->priority, d);
+        r = hashmap_ensure_put(&e->inotify_data, &uint64_hash_ops, &d->priority, d);
         if (r < 0) {
                 d->fd = safe_close(d->fd);
                 free(d);
@@ -2018,7 +2129,7 @@ _public_ int sd_event_source_set_io_fd(sd_event_source *s, int fd) {
         if (s->io.fd == fd)
                 return 0;
 
-        if (s->enabled == SD_EVENT_OFF) {
+        if (event_source_is_offline(s)) {
                 s->io.fd = fd;
                 s->io.registered = false;
         } else {
@@ -2085,7 +2196,7 @@ _public_ int sd_event_source_set_io_events(sd_event_source *s, uint32_t events) 
         if (r < 0)
                 return r;
 
-        if (s->enabled != SD_EVENT_OFF) {
+        if (event_source_is_online(s)) {
                 r = source_io_register(s, s->enabled, events);
                 if (r < 0)
                         return r;
@@ -2188,7 +2299,7 @@ _public_ int sd_event_source_set_priority(sd_event_source *s, int64_t priority) 
 
                 event_gc_inode_data(s->event, old_inode_data);
 
-        } else if (s->type == SOURCE_SIGNAL && s->enabled != SD_EVENT_OFF) {
+        } else if (s->type == SOURCE_SIGNAL && event_source_is_online(s)) {
                 struct signal_data *old, *d;
 
                 /* Move us from the signalfd belonging to the old
@@ -2225,29 +2336,39 @@ fail:
         return r;
 }
 
-_public_ int sd_event_source_get_enabled(sd_event_source *s, int *m) {
+_public_ int sd_event_source_get_enabled(sd_event_source *s, int *ret) {
         assert_return(s, -EINVAL);
         assert_return(!event_pid_changed(s->event), -ECHILD);
 
-        if (m)
-                *m = s->enabled;
+        if (ret)
+                *ret = s->enabled;
+
         return s->enabled != SD_EVENT_OFF;
 }
 
-static int event_source_disable(sd_event_source *s) {
+static int event_source_offline(
+                sd_event_source *s,
+                int enabled,
+                bool ratelimited) {
+
+        bool was_offline;
         int r;
 
         assert(s);
-        assert(s->enabled != SD_EVENT_OFF);
+        assert(enabled == SD_EVENT_OFF || ratelimited);
 
         /* Unset the pending flag when this event source is disabled */
-        if (!IN_SET(s->type, SOURCE_DEFER, SOURCE_EXIT)) {
+        if (s->enabled != SD_EVENT_OFF &&
+            enabled == SD_EVENT_OFF &&
+            !IN_SET(s->type, SOURCE_DEFER, SOURCE_EXIT)) {
                 r = source_set_pending(s, false);
                 if (r < 0)
                         return r;
         }
 
-        s->enabled = SD_EVENT_OFF;
+        was_offline = event_source_is_offline(s);
+        s->enabled = enabled;
+        s->ratelimited = ratelimited;
 
         switch (s->type) {
 
@@ -2268,8 +2389,10 @@ static int event_source_disable(sd_event_source *s) {
                 break;
 
         case SOURCE_CHILD:
-                assert(s->event->n_enabled_child_sources > 0);
-                s->event->n_enabled_child_sources--;
+                if (!was_offline) {
+                        assert(s->event->n_online_child_sources > 0);
+                        s->event->n_online_child_sources--;
+                }
 
                 if (EVENT_SOURCE_WATCH_PIDFD(s))
                         source_child_pidfd_unregister(s);
@@ -2290,26 +2413,42 @@ static int event_source_disable(sd_event_source *s) {
                 assert_not_reached("Wut? I shouldn't exist.");
         }
 
-        return 0;
+        return 1;
 }
 
-static int event_source_enable(sd_event_source *s, int enable) {
+static int event_source_online(
+                sd_event_source *s,
+                int enabled,
+                bool ratelimited) {
+
+        bool was_online;
         int r;
 
         assert(s);
-        assert(IN_SET(enable, SD_EVENT_ON, SD_EVENT_ONESHOT));
-        assert(s->enabled == SD_EVENT_OFF);
+        assert(enabled != SD_EVENT_OFF || !ratelimited);
 
         /* Unset the pending flag when this event source is enabled */
-        if (!IN_SET(s->type, SOURCE_DEFER, SOURCE_EXIT)) {
+        if (s->enabled == SD_EVENT_OFF &&
+            enabled != SD_EVENT_OFF &&
+            !IN_SET(s->type, SOURCE_DEFER, SOURCE_EXIT)) {
                 r = source_set_pending(s, false);
                 if (r < 0)
                         return r;
         }
 
+        /* Are we really ready for onlining? */
+        if (enabled == SD_EVENT_OFF || ratelimited) {
+                /* Nope, we are not ready for onlining, then just update the precise state and exit */
+                s->enabled = enabled;
+                s->ratelimited = ratelimited;
+                return 0;
+        }
+
+        was_online = event_source_is_online(s);
+
         switch (s->type) {
         case SOURCE_IO:
-                r = source_io_register(s, enable, s->io.events);
+                r = source_io_register(s, enabled, s->io.events);
                 if (r < 0)
                         return r;
                 break;
@@ -2327,7 +2466,7 @@ static int event_source_enable(sd_event_source *s, int enable) {
                 if (EVENT_SOURCE_WATCH_PIDFD(s)) {
                         /* yes, we have pidfd */
 
-                        r = source_child_pidfd_register(s, enable);
+                        r = source_child_pidfd_register(s, enabled);
                         if (r < 0)
                                 return r;
                 } else {
@@ -2340,8 +2479,8 @@ static int event_source_enable(sd_event_source *s, int enable) {
                         }
                 }
 
-                s->event->n_enabled_child_sources++;
-
+                if (!was_online)
+                        s->event->n_online_child_sources++;
                 break;
 
         case SOURCE_TIME_REALTIME:
@@ -2359,7 +2498,8 @@ static int event_source_enable(sd_event_source *s, int enable) {
                 assert_not_reached("Wut? I shouldn't exist.");
         }
 
-        s->enabled = enable;
+        s->enabled = enabled;
+        s->ratelimited = ratelimited;
 
         /* Non-failing operations below */
         switch (s->type) {
@@ -2379,7 +2519,7 @@ static int event_source_enable(sd_event_source *s, int enable) {
                 break;
         }
 
-        return 0;
+        return 1;
 }
 
 _public_ int sd_event_source_set_enabled(sd_event_source *s, int m) {
@@ -2397,7 +2537,7 @@ _public_ int sd_event_source_set_enabled(sd_event_source *s, int m) {
                 return 0;
 
         if (m == SD_EVENT_OFF)
-                r = event_source_disable(s);
+                r = event_source_offline(s, m, s->ratelimited);
         else {
                 if (s->enabled != SD_EVENT_OFF) {
                         /* Switching from "on" to "oneshot" or back? If that's the case, we can take a shortcut, the
@@ -2406,7 +2546,7 @@ _public_ int sd_event_source_set_enabled(sd_event_source *s, int m) {
                         return 0;
                 }
 
-                r = event_source_enable(s, m);
+                r = event_source_online(s, m, s->ratelimited);
         }
         if (r < 0)
                 return r;
@@ -2454,10 +2594,11 @@ _public_ int sd_event_source_set_time_relative(sd_event_source *s, uint64_t usec
         if (r < 0)
                 return r;
 
-        if (usec >= USEC_INFINITY - t)
+        usec = usec_add(t, usec);
+        if (usec == USEC_INFINITY)
                 return -EOVERFLOW;
 
-        return sd_event_source_set_time(s, t + usec);
+        return sd_event_source_set_time(s, usec);
 }
 
 _public_ int sd_event_source_get_time_accuracy(sd_event_source *s, uint64_t *usec) {
@@ -2474,7 +2615,7 @@ _public_ int sd_event_source_set_time_accuracy(sd_event_source *s, uint64_t usec
         int r;
 
         assert_return(s, -EINVAL);
-        assert_return(usec != (uint64_t) -1, -EINVAL);
+        assert_return(usec != UINT64_MAX, -EINVAL);
         assert_return(EVENT_SOURCE_IS_TIME(s->type), -EDOM);
         assert_return(s->event->state != SD_EVENT_FINISHED, -ESTALE);
         assert_return(!event_pid_changed(s->event), -ECHILD);
@@ -2663,6 +2804,96 @@ _public_ void *sd_event_source_set_userdata(sd_event_source *s, void *userdata) 
         return ret;
 }
 
+static int event_source_enter_ratelimited(sd_event_source *s) {
+        int r;
+
+        assert(s);
+
+        /* When an event source becomes ratelimited, we place it in the CLOCK_MONOTONIC priority queue, with
+         * the end of the rate limit time window, much as if it was a timer event source. */
+
+        if (s->ratelimited)
+                return 0; /* Already ratelimited, this is a NOP hence */
+
+        /* Make sure we can install a CLOCK_MONOTONIC event further down. */
+        r = setup_clock_data(s->event, &s->event->monotonic, CLOCK_MONOTONIC);
+        if (r < 0)
+                return r;
+
+        /* Timer event sources are already using the earliest/latest queues for the timer scheduling. Let's
+         * first remove them from the prioq appropriate for their own clock, so that we can use the prioq
+         * fields of the event source then for adding it to the CLOCK_MONOTONIC prioq instead. */
+        if (EVENT_SOURCE_IS_TIME(s->type))
+                event_source_time_prioq_remove(s, event_get_clock_data(s->event, s->type));
+
+        /* Now, let's add the event source to the monotonic clock instead */
+        r = event_source_time_prioq_put(s, &s->event->monotonic);
+        if (r < 0)
+                goto fail;
+
+        /* And let's take the event source officially offline */
+        r = event_source_offline(s, s->enabled, /* ratelimited= */ true);
+        if (r < 0) {
+                event_source_time_prioq_remove(s, &s->event->monotonic);
+                goto fail;
+        }
+
+        event_source_pp_prioq_reshuffle(s);
+
+        log_debug("Event source %p (%s) entered rate limit state.", s, strna(s->description));
+        return 0;
+
+fail:
+        /* Reinstall time event sources in the priority queue as before. This shouldn't fail, since the queue
+         * space for it should already be allocated. */
+        if (EVENT_SOURCE_IS_TIME(s->type))
+                assert_se(event_source_time_prioq_put(s, event_get_clock_data(s->event, s->type)) >= 0);
+
+        return r;
+}
+
+static int event_source_leave_ratelimit(sd_event_source *s) {
+        int r;
+
+        assert(s);
+
+        if (!s->ratelimited)
+                return 0;
+
+        /* Let's take the event source out of the monotonic prioq first. */
+        event_source_time_prioq_remove(s, &s->event->monotonic);
+
+        /* Let's then add the event source to its native clock prioq again — if this is a timer event source */
+        if (EVENT_SOURCE_IS_TIME(s->type)) {
+                r = event_source_time_prioq_put(s, event_get_clock_data(s->event, s->type));
+                if (r < 0)
+                        goto fail;
+        }
+
+        /* Let's try to take it online again.  */
+        r = event_source_online(s, s->enabled, /* ratelimited= */ false);
+        if (r < 0) {
+                /* Do something roughly sensible when this failed: undo the two prioq ops above */
+                if (EVENT_SOURCE_IS_TIME(s->type))
+                        event_source_time_prioq_remove(s, event_get_clock_data(s->event, s->type));
+
+                goto fail;
+        }
+
+        event_source_pp_prioq_reshuffle(s);
+        ratelimit_reset(&s->rate_limit);
+
+        log_debug("Event source %p (%s) left rate limit state.", s, strna(s->description));
+        return 0;
+
+fail:
+        /* Do something somewhat reasonable when we cannot move an event sources out of ratelimited mode:
+         * simply put it back in it, maybe we can then process it more successfully next iteration. */
+        assert_se(event_source_time_prioq_put(s, &s->event->monotonic) >= 0);
+
+        return r;
+}
+
 static usec_t sleep_between(sd_event *e, usec_t a, usec_t b) {
         usec_t c;
         assert(e);
@@ -2760,7 +2991,7 @@ static int event_arm_timer(
                 d->needs_rearm = false;
 
         a = prioq_peek(d->earliest);
-        if (!a || a->enabled == SD_EVENT_OFF || a->time.next == USEC_INFINITY) {
+        if (!a || a->enabled == SD_EVENT_OFF || time_event_source_next(a) == USEC_INFINITY) {
 
                 if (d->fd < 0)
                         return 0;
@@ -2779,7 +3010,7 @@ static int event_arm_timer(
         b = prioq_peek(d->latest);
         assert_se(b && b->enabled != SD_EVENT_OFF);
 
-        t = sleep_between(e, a->time.next, time_event_source_latest(b));
+        t = sleep_between(e, time_event_source_next(a), time_event_source_latest(b));
         if (d->next == t)
                 return 0;
 
@@ -2857,10 +3088,22 @@ static int process_timer(
 
         for (;;) {
                 s = prioq_peek(d->earliest);
-                if (!s ||
-                    s->time.next > n ||
-                    s->enabled == SD_EVENT_OFF ||
-                    s->pending)
+                if (!s || time_event_source_next(s) > n)
+                        break;
+
+                if (s->ratelimited) {
+                        /* This is an event sources whose ratelimit window has ended. Let's turn it on
+                         * again. */
+                        assert(s->ratelimited);
+
+                        r = event_source_leave_ratelimit(s);
+                        if (r < 0)
+                                return r;
+
+                        continue;
+                }
+
+                if (s->enabled == SD_EVENT_OFF || s->pending)
                         break;
 
                 r = source_set_pending(s, true);
@@ -2873,11 +3116,19 @@ static int process_timer(
         return 0;
 }
 
-static int process_child(sd_event *e) {
+static int process_child(sd_event *e, int64_t threshold, int64_t *ret_min_priority) {
+        int64_t min_priority = threshold;
+        bool something_new = false;
         sd_event_source *s;
         int r;
 
         assert(e);
+        assert(ret_min_priority);
+
+        if (!e->need_process_child) {
+                *ret_min_priority = min_priority;
+                return 0;
+        }
 
         e->need_process_child = false;
 
@@ -2902,10 +3153,13 @@ static int process_child(sd_event *e) {
         HASHMAP_FOREACH(s, e->child_sources) {
                 assert(s->type == SOURCE_CHILD);
 
+                if (s->priority > threshold)
+                        continue;
+
                 if (s->pending)
                         continue;
 
-                if (s->enabled == SD_EVENT_OFF)
+                if (event_source_is_offline(s))
                         continue;
 
                 if (s->child.exited)
@@ -2938,10 +3192,15 @@ static int process_child(sd_event *e) {
                         r = source_set_pending(s, true);
                         if (r < 0)
                                 return r;
+                        if (r > 0) {
+                                something_new = true;
+                                min_priority = MIN(min_priority, s->priority);
+                        }
                 }
         }
 
-        return 0;
+        *ret_min_priority = min_priority;
+        return something_new;
 }
 
 static int process_pidfd(sd_event *e, sd_event_source *s, uint32_t revents) {
@@ -2952,7 +3211,7 @@ static int process_pidfd(sd_event *e, sd_event_source *s, uint32_t revents) {
         if (s->pending)
                 return 0;
 
-        if (s->enabled == SD_EVENT_OFF)
+        if (event_source_is_offline(s))
                 return 0;
 
         if (!EVENT_SOURCE_WATCH_PIDFD(s))
@@ -2971,13 +3230,13 @@ static int process_pidfd(sd_event *e, sd_event_source *s, uint32_t revents) {
         return source_set_pending(s, true);
 }
 
-static int process_signal(sd_event *e, struct signal_data *d, uint32_t events) {
-        bool read_one = false;
+static int process_signal(sd_event *e, struct signal_data *d, uint32_t events, int64_t *min_priority) {
         int r;
 
         assert(e);
         assert(d);
         assert_return(events == EPOLLIN, -EIO);
+        assert(min_priority);
 
         /* If there's a signal queued on this priority and SIGCHLD is
            on this priority too, then make sure to recheck the
@@ -3003,7 +3262,7 @@ static int process_signal(sd_event *e, struct signal_data *d, uint32_t events) {
                 n = read(d->fd, &si, sizeof(si));
                 if (n < 0) {
                         if (IN_SET(errno, EAGAIN, EINTR))
-                                return read_one;
+                                return 0;
 
                         return -errno;
                 }
@@ -3012,8 +3271,6 @@ static int process_signal(sd_event *e, struct signal_data *d, uint32_t events) {
                         return -EIO;
 
                 assert(SIGNAL_VALID(si.ssi_signo));
-
-                read_one = true;
 
                 if (e->signal_sources)
                         s = e->signal_sources[si.ssi_signo];
@@ -3028,12 +3285,16 @@ static int process_signal(sd_event *e, struct signal_data *d, uint32_t events) {
                 r = source_set_pending(s, true);
                 if (r < 0)
                         return r;
+                if (r > 0 && *min_priority >= s->priority) {
+                        *min_priority = s->priority;
+                        return 1; /* an event source with smaller priority is queued. */
+                }
 
-                return 1;
+                return 0;
         }
 }
 
-static int event_inotify_data_read(sd_event *e, struct inotify_data *d, uint32_t revents) {
+static int event_inotify_data_read(sd_event *e, struct inotify_data *d, uint32_t revents, int64_t threshold) {
         ssize_t n;
 
         assert(e);
@@ -3047,6 +3308,9 @@ static int event_inotify_data_read(sd_event *e, struct inotify_data *d, uint32_t
 
         /* Is the read buffer non-empty? If so, let's not read more */
         if (d->buffer_filled > 0)
+                return 0;
+
+        if (d->priority > threshold)
                 return 0;
 
         n = read(d->fd, &d->buffer, sizeof(d->buffer));
@@ -3112,7 +3376,7 @@ static int event_inotify_data_process(sd_event *e, struct inotify_data *d) {
 
                                 LIST_FOREACH(inotify.by_inode_data, s, inode_data->event_sources) {
 
-                                        if (s->enabled == SD_EVENT_OFF)
+                                        if (event_source_is_offline(s))
                                                 continue;
 
                                         r = source_set_pending(s, true);
@@ -3148,7 +3412,7 @@ static int event_inotify_data_process(sd_event *e, struct inotify_data *d) {
                          * sources if IN_IGNORED or IN_UNMOUNT is set. */
                         LIST_FOREACH(inotify.by_inode_data, s, inode_data->event_sources) {
 
-                                if (s->enabled == SD_EVENT_OFF)
+                                if (event_source_is_offline(s))
                                         continue;
 
                                 if ((d->buffer.ev.mask & (IN_IGNORED|IN_UNMOUNT)) == 0 &&
@@ -3202,6 +3466,16 @@ static int source_dispatch(sd_event_source *s) {
          * callback might have invalidated/disconnected the event source. */
         saved_event = sd_event_ref(s->event);
 
+        /* Check if we hit the ratelimit for this event source, if so, let's disable it. */
+        assert(!s->ratelimited);
+        if (!ratelimit_below(&s->rate_limit)) {
+                r = event_source_enter_ratelimited(s);
+                if (r < 0)
+                        return r;
+
+                return 1;
+        }
+
         if (!IN_SET(s->type, SOURCE_DEFER, SOURCE_EXIT)) {
                 r = source_set_pending(s, false);
                 if (r < 0)
@@ -3215,7 +3489,7 @@ static int source_dispatch(sd_event_source *s) {
                  * post sources as pending */
 
                 SET_FOREACH(z, s->event->post_sources) {
-                        if (z->enabled == SD_EVENT_OFF)
+                        if (event_source_is_offline(z))
                                 continue;
 
                         r = source_set_pending(z, true);
@@ -3335,7 +3609,7 @@ static int event_prepare(sd_event *e) {
                 sd_event_source *s;
 
                 s = prioq_peek(e->prepare);
-                if (!s || s->prepare_iteration == e->iteration || s->enabled == SD_EVENT_OFF)
+                if (!s || s->prepare_iteration == e->iteration || event_source_is_offline(s))
                         break;
 
                 s->prepare_iteration = e->iteration;
@@ -3370,18 +3644,17 @@ static int event_prepare(sd_event *e) {
 
 static int dispatch_exit(sd_event *e) {
         sd_event_source *p;
-        _cleanup_(sd_event_unrefp) sd_event *ref = NULL;
         int r;
 
         assert(e);
 
         p = prioq_peek(e->exit);
-        if (!p || p->enabled == SD_EVENT_OFF) {
+        if (!p || event_source_is_offline(p)) {
                 e->state = SD_EVENT_FINISHED;
                 return 0;
         }
 
-        ref = sd_event_ref(e);
+        _unused_ _cleanup_(sd_event_unrefp) sd_event *ref = sd_event_ref(e);
         e->iteration++;
         e->state = SD_EVENT_EXITING;
         r = source_dispatch(p);
@@ -3398,7 +3671,7 @@ static sd_event_source* event_next_pending(sd_event *e) {
         if (!p)
                 return NULL;
 
-        if (p->enabled == SD_EVENT_OFF)
+        if (event_source_is_offline(p))
                 return NULL;
 
         return p;
@@ -3477,6 +3750,9 @@ _public_ int sd_event_prepare(sd_event *e) {
          * syscalls */
         assert_return(!e->default_event_ptr || e->tid == gettid(), -EREMOTEIO);
 
+        /* Make sure that none of the preparation callbacks ends up freeing the event source under our feet */
+        _unused_ _cleanup_(sd_event_unrefp) sd_event *ref = sd_event_ref(e);
+
         if (e->exit_requested)
                 goto pending;
 
@@ -3526,44 +3802,103 @@ pending:
         return r;
 }
 
-_public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
-        size_t event_queue_max;
-        int r, m, i;
+static int epoll_wait_usec(
+                int fd,
+                struct epoll_event *events,
+                int maxevents,
+                usec_t timeout) {
 
-        assert_return(e, -EINVAL);
-        assert_return(e = event_resolve(e), -ENOPKG);
-        assert_return(!event_pid_changed(e), -ECHILD);
-        assert_return(e->state != SD_EVENT_FINISHED, -ESTALE);
-        assert_return(e->state == SD_EVENT_ARMED, -EBUSY);
+        int r, msec;
+#if 0
+        static bool epoll_pwait2_absent = false;
 
-        if (e->exit_requested) {
-                e->state = SD_EVENT_PENDING;
-                return 1;
+        /* A wrapper that uses epoll_pwait2() if available, and falls back to epoll_wait() if not.
+         *
+         * FIXME: this is temporarily disabled until epoll_pwait2() becomes more widely available.
+         * See https://github.com/systemd/systemd/pull/18973 and
+         * https://github.com/systemd/systemd/issues/19052. */
+
+        if (!epoll_pwait2_absent && timeout != USEC_INFINITY) {
+                struct timespec ts;
+
+                r = epoll_pwait2(fd,
+                                 events,
+                                 maxevents,
+                                 timespec_store(&ts, timeout),
+                                 NULL);
+                if (r >= 0)
+                        return r;
+                if (!ERRNO_IS_NOT_SUPPORTED(errno) && !ERRNO_IS_PRIVILEGE(errno))
+                        return -errno; /* Only fallback to old epoll_wait() if the syscall is masked or not
+                                        * supported. */
+
+                epoll_pwait2_absent = true;
+        }
+#endif
+
+        if (timeout == USEC_INFINITY)
+                msec = -1;
+        else {
+                usec_t k;
+
+                k = DIV_ROUND_UP(timeout, USEC_PER_MSEC);
+                if (k >= INT_MAX)
+                        msec = INT_MAX; /* Saturate */
+                else
+                        msec = (int) k;
         }
 
-        event_queue_max = MAX(e->n_sources, 1u);
-        if (!GREEDY_REALLOC(e->event_queue, e->event_queue_allocated, event_queue_max))
+        r = epoll_wait(fd,
+                       events,
+                       maxevents,
+                       msec);
+        if (r < 0)
+                return -errno;
+
+        return r;
+}
+
+static int process_epoll(sd_event *e, usec_t timeout, int64_t threshold, int64_t *ret_min_priority) {
+        int64_t min_priority = threshold;
+        bool something_new = false;
+        size_t n_event_queue, m;
+        int r;
+
+        assert(e);
+        assert(ret_min_priority);
+
+        n_event_queue = MAX(e->n_sources, 1u);
+        if (!GREEDY_REALLOC(e->event_queue, e->event_queue_allocated, n_event_queue))
                 return -ENOMEM;
 
         /* If we still have inotify data buffered, then query the other fds, but don't wait on it */
         if (e->inotify_data_buffered)
                 timeout = 0;
 
-        m = epoll_wait(e->epoll_fd, e->event_queue, event_queue_max,
-                       timeout == (uint64_t) -1 ? -1 : (int) DIV_ROUND_UP(timeout, USEC_PER_MSEC));
-        if (m < 0) {
-                if (errno == EINTR) {
-                        e->state = SD_EVENT_PENDING;
-                        return 1;
-                }
+        for (;;) {
+                r = epoll_wait_usec(e->epoll_fd, e->event_queue, e->event_queue_allocated, timeout);
+                if (r < 0)
+                        return r;
 
-                r = -errno;
-                goto finish;
+                m = (size_t) r;
+
+                if (m < e->event_queue_allocated)
+                        break;
+
+                if (e->event_queue_allocated >= n_event_queue * 10)
+                        break;
+
+                if (!GREEDY_REALLOC(e->event_queue, e->event_queue_allocated, e->event_queue_allocated + n_event_queue))
+                        return -ENOMEM;
+
+                timeout = 0;
         }
 
-        triple_timestamp_get(&e->timestamp);
+        /* Set timestamp only when this is called first time. */
+        if (threshold == INT64_MAX)
+                triple_timestamp_get(&e->timestamp);
 
-        for (i = 0; i < m; i++) {
+        for (size_t i = 0; i < m; i++) {
 
                 if (e->event_queue[i].data.ptr == INT_TO_PTR(SOURCE_WATCHDOG))
                         r = flush_timer(e, e->watchdog_fd, e->event_queue[i].events, NULL);
@@ -3576,6 +3911,11 @@ _public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
                                 sd_event_source *s = e->event_queue[i].data.ptr;
 
                                 assert(s);
+
+                                if (s->priority > threshold)
+                                        continue;
+
+                                min_priority = MIN(min_priority, s->priority);
 
                                 switch (s->type) {
 
@@ -3604,11 +3944,11 @@ _public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
                         }
 
                         case WAKEUP_SIGNAL_DATA:
-                                r = process_signal(e, e->event_queue[i].data.ptr, e->event_queue[i].events);
+                                r = process_signal(e, e->event_queue[i].data.ptr, e->event_queue[i].events, &min_priority);
                                 break;
 
                         case WAKEUP_INOTIFY_DATA:
-                                r = event_inotify_data_read(e, e->event_queue[i].data.ptr, e->event_queue[i].events);
+                                r = event_inotify_data_read(e, e->event_queue[i].data.ptr, e->event_queue[i].events, threshold);
                                 break;
 
                         default:
@@ -3616,7 +3956,63 @@ _public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
                         }
                 }
                 if (r < 0)
+                        return r;
+                if (r > 0)
+                        something_new = true;
+        }
+
+        *ret_min_priority = min_priority;
+        return something_new;
+}
+
+_public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
+        int r;
+
+        assert_return(e, -EINVAL);
+        assert_return(e = event_resolve(e), -ENOPKG);
+        assert_return(!event_pid_changed(e), -ECHILD);
+        assert_return(e->state != SD_EVENT_FINISHED, -ESTALE);
+        assert_return(e->state == SD_EVENT_ARMED, -EBUSY);
+
+        if (e->exit_requested) {
+                e->state = SD_EVENT_PENDING;
+                return 1;
+        }
+
+        for (int64_t threshold = INT64_MAX; ; threshold--) {
+                int64_t epoll_min_priority, child_min_priority;
+
+                /* There may be a possibility that new epoll (especially IO) and child events are
+                 * triggered just after process_epoll() call but before process_child(), and the new IO
+                 * events may have higher priority than the child events. To salvage these events,
+                 * let's call epoll_wait() again, but accepts only events with higher priority than the
+                 * previous. See issue https://github.com/systemd/systemd/issues/18190 and comments
+                 * https://github.com/systemd/systemd/pull/18750#issuecomment-785801085
+                 * https://github.com/systemd/systemd/pull/18922#issuecomment-792825226 */
+
+                r = process_epoll(e, timeout, threshold, &epoll_min_priority);
+                if (r == -EINTR) {
+                        e->state = SD_EVENT_PENDING;
+                        return 1;
+                }
+                if (r < 0)
                         goto finish;
+                if (r == 0 && threshold < INT64_MAX)
+                        /* No new epoll event. */
+                        break;
+
+                r = process_child(e, threshold, &child_min_priority);
+                if (r < 0)
+                        goto finish;
+                if (r == 0)
+                        /* No new child event. */
+                        break;
+
+                threshold = MIN(epoll_min_priority, child_min_priority);
+                if (threshold == INT64_MIN)
+                        break;
+
+                timeout = 0;
         }
 
         r = process_watchdog(e);
@@ -3643,19 +4039,12 @@ _public_ int sd_event_wait(sd_event *e, uint64_t timeout) {
         if (r < 0)
                 goto finish;
 
-        if (e->need_process_child) {
-                r = process_child(e);
-                if (r < 0)
-                        goto finish;
-        }
-
         r = process_inotify(e);
         if (r < 0)
                 goto finish;
 
         if (event_next_pending(e)) {
                 e->state = SD_EVENT_PENDING;
-
                 return 1;
         }
 
@@ -3682,9 +4071,8 @@ _public_ int sd_event_dispatch(sd_event *e) {
 
         p = event_next_pending(e);
         if (p) {
-                _cleanup_(sd_event_unrefp) sd_event *ref = NULL;
+                _unused_ _cleanup_(sd_event_unrefp) sd_event *ref = sd_event_ref(e);
 
-                ref = sd_event_ref(e);
                 e->state = SD_EVENT_RUNNING;
                 r = source_dispatch(p);
                 e->state = SD_EVENT_INITIAL;
@@ -3718,21 +4106,24 @@ _public_ int sd_event_run(sd_event *e, uint64_t timeout) {
         assert_return(e->state != SD_EVENT_FINISHED, -ESTALE);
         assert_return(e->state == SD_EVENT_INITIAL, -EBUSY);
 
-        if (e->profile_delays && e->last_run) {
+        if (e->profile_delays && e->last_run_usec != 0) {
                 usec_t this_run;
                 unsigned l;
 
                 this_run = now(CLOCK_MONOTONIC);
 
-                l = u64log2(this_run - e->last_run);
+                l = u64log2(this_run - e->last_run_usec);
                 assert(l < ELEMENTSOF(e->delays));
                 e->delays[l]++;
 
-                if (this_run - e->last_log >= 5*USEC_PER_SEC) {
+                if (this_run - e->last_log_usec >= 5*USEC_PER_SEC) {
                         event_log_delays(e);
-                        e->last_log = this_run;
+                        e->last_log_usec = this_run;
                 }
         }
+
+        /* Make sure that none of the preparation callbacks ends up freeing the event source under our feet */
+        _unused_ _cleanup_(sd_event_unrefp) sd_event *ref = sd_event_ref(e);
 
         r = sd_event_prepare(e);
         if (r == 0)
@@ -3740,7 +4131,7 @@ _public_ int sd_event_run(sd_event *e, uint64_t timeout) {
                 r = sd_event_wait(e, timeout);
 
         if (e->profile_delays)
-                e->last_run = now(CLOCK_MONOTONIC);
+                e->last_run_usec = now(CLOCK_MONOTONIC);
 
         if (r > 0) {
                 /* There's something now, then let's dispatch it */
@@ -3755,7 +4146,6 @@ _public_ int sd_event_run(sd_event *e, uint64_t timeout) {
 }
 
 _public_ int sd_event_loop(sd_event *e) {
-        _cleanup_(sd_event_unrefp) sd_event *ref = NULL;
         int r;
 
         assert_return(e, -EINVAL);
@@ -3763,10 +4153,10 @@ _public_ int sd_event_loop(sd_event *e) {
         assert_return(!event_pid_changed(e), -ECHILD);
         assert_return(e->state == SD_EVENT_INITIAL, -EBUSY);
 
-        ref = sd_event_ref(e);
+        _unused_ _cleanup_(sd_event_unrefp) sd_event *ref = NULL;
 
         while (e->state != SD_EVENT_FINISHED) {
-                r = sd_event_run(e, (uint64_t) -1);
+                r = sd_event_run(e, UINT64_MAX);
                 if (r < 0)
                         return r;
         }
@@ -4007,4 +4397,54 @@ _public_ int sd_event_source_set_exit_on_failure(sd_event_source *s, int b) {
 
         s->exit_on_failure = b;
         return 1;
+}
+
+_public_ int sd_event_source_set_ratelimit(sd_event_source *s, uint64_t interval, unsigned burst) {
+        int r;
+
+        assert_return(s, -EINVAL);
+
+        /* Turning on ratelimiting on event source types that don't support it, is a loggable offense. Doing
+         * so is a programming error. */
+        assert_return(EVENT_SOURCE_CAN_RATE_LIMIT(s->type), -EDOM);
+
+        /* When ratelimiting is configured we'll always reset the rate limit state first and start fresh,
+         * non-ratelimited. */
+        r = event_source_leave_ratelimit(s);
+        if (r < 0)
+                return r;
+
+        s->rate_limit = (RateLimit) { interval, burst };
+        return 0;
+}
+
+_public_ int sd_event_source_get_ratelimit(sd_event_source *s, uint64_t *ret_interval, unsigned *ret_burst) {
+        assert_return(s, -EINVAL);
+
+        /* Querying whether an event source has ratelimiting configured is not a loggable offsense, hence
+         * don't use assert_return(). Unlike turning on ratelimiting it's not really a programming error */
+        if (!EVENT_SOURCE_CAN_RATE_LIMIT(s->type))
+                return -EDOM;
+
+        if (!ratelimit_configured(&s->rate_limit))
+                return -ENOEXEC;
+
+        if (ret_interval)
+                *ret_interval = s->rate_limit.interval;
+        if (ret_burst)
+                *ret_burst = s->rate_limit.burst;
+
+        return 0;
+}
+
+_public_ int sd_event_source_is_ratelimited(sd_event_source *s) {
+        assert_return(s, -EINVAL);
+
+        if (!EVENT_SOURCE_CAN_RATE_LIMIT(s->type))
+                return false;
+
+        if (!ratelimit_configured(&s->rate_limit))
+                return false;
+
+        return s->ratelimited;
 }

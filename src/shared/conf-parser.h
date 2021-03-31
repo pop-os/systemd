@@ -89,7 +89,7 @@ int config_parse(
                 const void *table,
                 ConfigParseFlags flags,
                 void *userdata,
-                usec_t *ret_mtime);         /* possibly NULL */
+                usec_t *latest_mtime);      /* input/output, possibly NULL */
 
 int config_parse_many_nulstr(
                 const char *conf_file,      /* possibly NULL */
@@ -102,7 +102,7 @@ int config_parse_many_nulstr(
                 usec_t *ret_mtime);         /* possibly NULL */
 
 int config_parse_many(
-                const char *conf_file,      /* possibly NULL */
+                const char* const* conf_files,  /* possibly empty */
                 const char* const* conf_file_dirs,
                 const char *dropin_dirname,
                 const char *sections,       /* nulstr */
@@ -147,7 +147,10 @@ CONFIG_PARSER_PROTOTYPE(config_parse_ip_port);
 CONFIG_PARSER_PROTOTYPE(config_parse_mtu);
 CONFIG_PARSER_PROTOTYPE(config_parse_rlimit);
 CONFIG_PARSER_PROTOTYPE(config_parse_vlanprotocol);
+CONFIG_PARSER_PROTOTYPE(config_parse_hwaddr);
+CONFIG_PARSER_PROTOTYPE(config_parse_hwaddrs);
 CONFIG_PARSER_PROTOTYPE(config_parse_percent);
+CONFIG_PARSER_PROTOTYPE(config_parse_permyriad);
 
 typedef enum Disabled {
         DISABLED_CONFIGURATION,
@@ -204,7 +207,7 @@ typedef enum Disabled {
                                                                         \
                 x = from_string(rvalue);                                \
                 if (x < 0) {                                            \
-                        log_syntax(unit, LOG_WARNING, filename, line, 0, \
+                        log_syntax(unit, LOG_WARNING, filename, line, x, \
                                    msg ", ignoring: %s", rvalue);       \
                         return 0;                                       \
                 }                                                       \
@@ -232,7 +235,7 @@ typedef enum Disabled {
                                                                         \
                 x = name##_from_string(rvalue);                         \
                 if (x < 0) {                                            \
-                        log_syntax(unit, LOG_WARNING, filename, line, 0, \
+                        log_syntax(unit, LOG_WARNING, filename, line, x, \
                                    msg ", ignoring: %s", rvalue);       \
                         return 0;                                       \
                 }                                                       \
@@ -266,14 +269,17 @@ typedef enum Disabled {
                         r = extract_first_word(&p, &en, NULL, 0);              \
                         if (r == -ENOMEM)                                      \
                                 return log_oom();                              \
-                        if (r < 0)                                             \
-                                return log_syntax(unit, LOG_ERR, filename, line, 0,   \
-                                                  msg ": %s", en);             \
+                        if (r < 0) {                                           \
+                                log_syntax(unit, LOG_WARNING, filename, line, r, \
+                                           msg ", ignoring: %s", en);          \
+                                return 0;                                      \
+                        }                                                      \
                         if (r == 0)                                            \
                                 break;                                         \
                                                                                \
-                        if ((x = name##_from_string(en)) < 0) {                \
-                                log_syntax(unit, LOG_WARNING, filename, line, 0,        \
+                        x = name##_from_string(en);                            \
+                        if (x < 0) {                                           \
+                                log_syntax(unit, LOG_WARNING, filename, line, x, \
                                            msg ", ignoring: %s", en);          \
                                 continue;                                      \
                         }                                                      \

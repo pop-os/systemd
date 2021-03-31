@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
+install_data(
+        'README',
+        install_dir : udevrulesdir)
+
 rules = files('''
         60-autosuspend.rules
         60-block.rules
@@ -26,6 +30,10 @@ rules = files('''
 
 if conf.get('HAVE_KMOD') == 1
         rules += files('80-drivers.rules')
+endif
+
+if dmi_arches.contains(host_machine.cpu_family())
+        rules += files('70-memory.rules')
 endif
 
 install_data(rules,

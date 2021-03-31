@@ -18,12 +18,15 @@
 #include "homectl-fido2.h"
 #include "homectl-pkcs11.h"
 #include "homectl-recovery-key.h"
+#include "libfido2-util.h"
 #include "locale-util.h"
 #include "main-func.h"
 #include "memory-util.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "percent-util.h"
 #include "pkcs11-util.h"
 #include "pretty-print.h"
 #include "process-util.h"
@@ -55,8 +58,7 @@ static uint64_t arg_disk_size_relative = UINT64_MAX;
 static char **arg_pkcs11_token_uri = NULL;
 static char **arg_fido2_device = NULL;
 static bool arg_recovery_key = false;
-static bool arg_json = false;
-static JsonFormatFlags arg_json_format_flags = 0;
+static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
 static bool arg_and_resize = false;
 static bool arg_and_change_password = false;
 static enum {
@@ -113,8 +115,6 @@ static int list_homes(int argc, char *argv[], void *userdata) {
         _cleanup_(table_unrefp) Table *table = NULL;
         int r;
 
-        (void) pager_open(arg_pager_flags);
-
         r = acquire_bus(&bus);
         if (r < 0)
                 return r;
@@ -170,22 +170,17 @@ static int list_homes(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 return bus_log_parse_error(r);
 
-        if (table_get_rows(table) > 1 || arg_json) {
-                r = table_set_sort(table, (size_t) 0, (size_t) -1);
+        if (table_get_rows(table) > 1 || !FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF)) {
+                r = table_set_sort(table, (size_t) 0);
                 if (r < 0)
                         return table_log_sort_error(r);
 
-                table_set_header(table, arg_legend);
-
-                if (arg_json)
-                        r = table_print_json(table, stdout, arg_json_format_flags);
-                else
-                        r = table_print(table, NULL);
+                r = table_print_with_pager(table, arg_json_format_flags, arg_pager_flags, arg_legend);
                 if (r < 0)
-                        return table_log_print_error(r);
+                        return r;
         }
 
-        if (arg_legend && !arg_json) {
+        if (arg_legend && (arg_json_format_flags & JSON_FORMAT_OFF)) {
                 if (table_get_rows(table) > 1)
                         printf("\n%zu home areas listed.\n", table_get_rows(table) - 1);
                 else
@@ -461,7 +456,9 @@ static void dump_home_record(UserRecord *hr) {
                 log_warning("Warning: lacking rights to acquire privileged fields of user record of '%s', output incomplete.", hr->user_name);
         }
 
-        if (arg_json) {
+        if (arg_json_format_flags & JSON_FORMAT_OFF)
+                user_record_show(hr, true);
+        else {
                 _cleanup_(user_record_unrefp) UserRecord *stripped = NULL;
 
                 if (arg_export_format == EXPORT_FORMAT_STRIPPED)
@@ -476,8 +473,7 @@ static void dump_home_record(UserRecord *hr) {
                         hr = stripped;
 
                 json_variant_dump(hr->json, arg_json_format_flags, stdout, NULL);
-        } else
-                user_record_show(hr, true);
+        }
 }
 
 static char **mangle_user_list(char **list, char ***ret_allocated) {
@@ -1572,7 +1568,7 @@ static int resize_home(int argc, char *argv[], void *userdata) {
         (void) polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         if (arg_disk_size_relative != UINT64_MAX ||
-            (argc > 2 && parse_percent(argv[2]) >= 0))
+            (argc > 2 && parse_permyriad(argv[2]) >= 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
                                                "Relative disk size specification currently not supported when resizing.");
 
@@ -2032,12 +2028,13 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --kill-processes=BOOL    Whether to kill user processes when sessions\n"
                "                              terminate\n"
                "     --auto-login=BOOL        Try to log this user in automatically\n"
-               "\nSee the %6$s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight(), ansi_normal()
-               , ansi_underline(), ansi_normal()
-               , link
-        );
+               "\nSee the %6$s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               ansi_underline(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -2265,7 +2262,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 break;
                         }
 
-                        r = parse_path_argument_and_warn(optarg, false, &hd);
+                        r = parse_path_argument(optarg, false, &hd);
                         if (r < 0)
                                 return r;
 
@@ -2398,7 +2395,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                         l = rlimit_from_string_harder(field);
                         if (l < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown resource limit type: %s", field);
+                                return log_error_errno(l, "Unknown resource limit type: %s", field);
 
                         if (isempty(eq + 1)) {
                                 /* Remove only the specific rlimit */
@@ -2486,7 +2483,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 break;
                         }
 
-                        r = parse_path_argument_and_warn(optarg, false, &v);
+                        r = parse_path_argument(optarg, false, &v);
                         if (r < 0)
                                 return r;
 
@@ -2516,7 +2513,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_SETENV: {
-                        _cleanup_free_ char **l = NULL, **k = NULL;
+                        _cleanup_free_ char **l = NULL;
                         _cleanup_(json_variant_unrefp) JsonVariant *ne = NULL;
                         JsonVariant *e;
 
@@ -2529,7 +2526,8 @@ static int parse_argv(int argc, char *argv[]) {
                         }
 
                         if (!env_assignment_is_valid(optarg))
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Environment assignment '%s' not valid.", optarg);
+                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                                       "Environment assignment '%s' not valid.", optarg);
 
                         e = json_variant_by_key(arg_identity_extra, "environment");
                         if (e) {
@@ -2538,13 +2536,13 @@ static int parse_argv(int argc, char *argv[]) {
                                         return log_error_errno(r, "Failed to parse JSON environment field: %m");
                         }
 
-                        k = strv_env_set(l, optarg);
-                        if (!k)
-                                return log_oom();
+                        r = strv_env_replace_strdup(&l, optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to replace JSON environment field: %m");
 
-                        strv_sort(k);
+                        strv_sort(l);
 
-                        r = json_variant_new_array_strv(&ne, k);
+                        r = json_variant_new_array_strv(&ne, l);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to allocate environment list JSON: %m");
 
@@ -2656,7 +2654,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 break;
                         }
 
-                        r = parse_permille(optarg);
+                        r = parse_permyriad(optarg);
                         if (r < 0) {
                                 r = parse_size(optarg, 1024, &arg_disk_size);
                                 if (r < 0)
@@ -2673,7 +2671,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 arg_disk_size_relative = UINT64_MAX;
                         } else {
                                 /* Normalize to UINT32_MAX == 100% */
-                                arg_disk_size_relative = (uint64_t) r * UINT32_MAX / 1000U;
+                                arg_disk_size_relative = UINT32_SCALE_FROM_PERMYRIAD(r);
 
                                 r = drop_from_identity("diskSize");
                                 if (r < 0)
@@ -3146,7 +3144,7 @@ static int parse_argv(int argc, char *argv[]) {
                         const char *p;
 
                         if (streq(optarg, "list"))
-                                return list_pkcs11_tokens();
+                                return pkcs11_list_tokens();
 
                         /* If --pkcs11-token-uri= is specified we always drop everything old */
                         FOREACH_STRING(p, "pkcs11TokenUri", "pkcs11EncryptedKey") {
@@ -3163,7 +3161,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (streq(optarg, "auto")) {
                                 _cleanup_free_ char *found = NULL;
 
-                                r = find_pkcs11_token_auto(&found);
+                                r = pkcs11_find_token_auto(&found);
                                 if (r < 0)
                                         return r;
                                 r = strv_consume(&arg_pkcs11_token_uri, TAKE_PTR(found));
@@ -3184,7 +3182,7 @@ static int parse_argv(int argc, char *argv[]) {
                         const char *p;
 
                         if (streq(optarg, "list"))
-                                return list_fido2_devices();
+                                return fido2_list_devices();
 
                         FOREACH_STRING(p, "fido2HmacCredential", "fido2HmacSalt") {
                                 r = drop_from_identity(p);
@@ -3200,7 +3198,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (streq(optarg, "auto")) {
                                 _cleanup_free_ char *found = NULL;
 
-                                r = find_fido2_auto(&found);
+                                r = fido2_find_device_auto(&found);
                                 if (r < 0)
                                         return r;
 
@@ -3234,27 +3232,13 @@ static int parse_argv(int argc, char *argv[]) {
                 }
 
                 case 'j':
-                        arg_json = true;
                         arg_json_format_flags = JSON_FORMAT_PRETTY_AUTO|JSON_FORMAT_COLOR_AUTO;
                         break;
 
                 case ARG_JSON:
-                        if (streq(optarg, "pretty")) {
-                                arg_json = true;
-                                arg_json_format_flags = JSON_FORMAT_PRETTY|JSON_FORMAT_COLOR_AUTO;
-                        } else if (streq(optarg, "short")) {
-                                arg_json = true;
-                                arg_json_format_flags = JSON_FORMAT_NEWLINE;
-                        } else if (streq(optarg, "off")) {
-                                arg_json = false;
-                                arg_json_format_flags = 0;
-                        } else if (streq(optarg, "help")) {
-                                puts("pretty\n"
-                                     "short\n"
-                                     "off");
-                                return 0;
-                        } else
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown argument to --json=: %s", optarg);
+                        r = parse_json_argument(optarg, &arg_json_format_flags);
+                        if (r <= 0)
+                                return r;
 
                         break;
 
@@ -3266,7 +3250,7 @@ static int parse_argv(int argc, char *argv[]) {
                         else
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Specifying -E more than twice is not supported.");
 
-                        arg_json = true;
+                        arg_json_format_flags &= ~JSON_FORMAT_OFF;
                         if (arg_json_format_flags == 0)
                                 arg_json_format_flags = JSON_FORMAT_PRETTY_AUTO|JSON_FORMAT_COLOR_AUTO;
                         break;
@@ -3365,7 +3349,7 @@ static int run(int argc, char *argv[]) {
 
         int r;
 
-        log_setup_cli();
+        log_setup();
 
         r = redirect_bus_mgr();
         if (r < 0)

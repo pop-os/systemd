@@ -66,26 +66,17 @@ static int print_catalog(FILE *f, sd_journal *j) {
         else
                 prefix = "--";
 
-        if (colors_enabled())
-                newline = strjoina(ANSI_NORMAL "\n" ANSI_GREY, prefix, ANSI_NORMAL " " ANSI_GREEN);
-        else
-                newline = strjoina("\n", prefix, " ");
+        newline = strjoina(ansi_normal(), "\n", ansi_grey(), prefix, ansi_normal(), " ", ansi_green());
 
         z = strreplace(strstrip(t), "\n", newline);
         if (!z)
                 return log_oom();
 
-        if (colors_enabled())
-                fprintf(f, ANSI_GREY "%s" ANSI_NORMAL " " ANSI_GREEN, prefix);
-        else
-                fprintf(f, "%s ", prefix);
+        fprintf(f, "%s%s %s%s", ansi_grey(), prefix, ansi_normal(), ansi_green());
 
         fputs(z, f);
 
-        if (colors_enabled())
-                fputs(ANSI_NORMAL "\n", f);
-        else
-                fputc('\n', f);
+        fprintf(f, "%s\n", ansi_normal());
 
         return 1;
 }
@@ -1332,7 +1323,7 @@ int show_journal(
         assert(mode >= 0);
         assert(mode < _OUTPUT_MODE_MAX);
 
-        if (how_many == (unsigned) -1)
+        if (how_many == UINT_MAX)
                 need_seek = true;
         else {
                 /* Seek to end */
@@ -1405,9 +1396,9 @@ int show_journal(
                         bool noaccess = journal_access_blocked(j);
 
                         if (line == 0 && noaccess)
-                                fprintf(f, "Warning: some journal files were not opened due to insufficient permissions.");
+                                fprintf(f, "Warning: some journal files were not opened due to insufficient permissions.\n");
                         else if (!noaccess)
-                                fprintf(f, "Warning: journal has been rotated since unit was started, output may be incomplete.\n");
+                                fprintf(f, "Notice: journal has been rotated since unit was started, output may be incomplete.\n");
                         else
                                 fprintf(f, "Warning: journal has been rotated since unit was started and some journal "
                                         "files were not opened due to insufficient permissions, output may be incomplete.\n");
@@ -1531,9 +1522,6 @@ static int get_boot_id_for_machine(const char *machine, sd_id128_t *boot_id) {
         assert(machine);
         assert(boot_id);
 
-        if (!machine_name_is_valid(machine))
-                return -EINVAL;
-
         r = container_get_leader(machine, &pid);
         if (r < 0)
                 return r;
@@ -1647,16 +1635,20 @@ int show_journal_by_unit(
         if (r < 0)
                 return log_error_errno(r, "Failed to open journal: %m");
 
-        r = add_match_this_boot(j, NULL);
-        if (r < 0)
-                return r;
-
         if (system_unit)
                 r = add_matches_for_unit(j, unit);
         else
                 r = add_matches_for_user_unit(j, unit, uid);
         if (r < 0)
                 return log_error_errno(r, "Failed to add unit matches: %m");
+
+        r = sd_journal_add_conjunction(j);
+        if (r < 0)
+                return log_error_errno(r, "Failed to add conjunction: %m");
+
+        r = add_match_this_boot(j, NULL);
+        if (r < 0)
+                return r;
 
         if (DEBUG_LOGGING) {
                 _cleanup_free_ char *filter;

@@ -57,10 +57,9 @@ static int help(void) {
                "  -l --full           Do not ellipsize output\n"
                "  -k                  Include kernel threads in output\n"
                "  -M --machine=       Show container\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -164,7 +163,7 @@ static void show_cg_info(const char *controller, const char *path) {
 static int run(int argc, char *argv[]) {
         int r, output_flags;
 
-        log_setup_cli();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

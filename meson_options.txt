@@ -44,6 +44,8 @@ option('initrd', type : 'boolean',
        description : 'install services for use when running systemd in initrd')
 option('compat-mutable-uid-boundaries', type : 'boolean', value : 'false',
        description : 'look at uid boundaries in /etc/login.defs for compatibility')
+option('nscd', type : 'boolean',
+       description : 'build support for flushing of the nscd caches')
 
 option('quotaon-path', type : 'string', description : 'path to quotaon')
 option('quotacheck-path', type : 'string', description : 'path to quotacheck')
@@ -97,7 +99,7 @@ option('coredump', type : 'boolean',
        description : 'install the coredump handler')
 option('pstore', type : 'boolean',
        description : 'install the pstore archival tool')
-option('oomd', type : 'combo', choices : ['auto', 'true', 'false'],
+option('oomd', type : 'boolean',
        description : 'install the userspace oom killer')
 option('logind', type : 'boolean',
        description : 'install the systemd-logind stack')
@@ -109,6 +111,8 @@ option('machined', type : 'boolean',
        description : 'install the systemd-machined stack')
 option('portabled', type : 'boolean',
        description : 'install the systemd-portabled stack')
+option('sysext', type : 'boolean',
+       description : 'install the systemd-sysext stack')
 option('userdb', type : 'boolean',
        description : 'install the systemd-userdbd stack')
 option('homed', type : 'combo', choices : ['auto', 'true', 'false'],
@@ -159,6 +163,8 @@ option('man', type : 'combo', choices : ['auto', 'true', 'false'],
 option('html', type : 'combo', choices : ['auto', 'true', 'false'],
        value : 'false',
        description : 'build and install html pages')
+option('translations', type : 'boolean', value : true,
+       description : 'build and install translations')
 
 option('certificate-root', type : 'string', value : '/etc/ssl',
        description : 'the prefix for TLS certificates')
@@ -172,6 +178,8 @@ option('pkgconfigdatadir', type : 'string', value : '',
        description : 'directory for arch-independent pkg-config files')
 option('pkgconfiglibdir', type : 'string', value : '',
        description : 'directory for standard pkg-config files')
+option('xinitrcdir', type : 'string', value : '',
+       description : 'directory for xinitrc files')
 option('rpmmacrosdir', type : 'string', value : 'lib/rpm/macros.d',
        description : 'directory for rpm macros ["no" disables]')
 option('pamlibdir', type : 'string',
@@ -180,13 +188,11 @@ option('pamconfdir', type : 'string',
        description : 'directory for PAM configuration ["no" disables]')
 option('docdir', type : 'string',
        description : 'documentation directory')
-option('install-sysconfdir', type : 'boolean', value : true,
-       description : 'install configuration files to $sysconfdir')
+option('install-sysconfdir', type : 'combo', choices : ['true', 'no-samples', 'false'], value : 'true',
+       description : 'install configuration files and directories to $sysconfdir')
 
 option('fallback-hostname', type : 'string', value : 'localhost',
        description : 'the hostname used if none configured')
-option('compat-gateway-hostname', type : 'boolean', value : 'false',
-       description : 'allow "gateway" as the symbolic name for default gateway')
 option('default-hierarchy', type : 'combo',
        choices : ['legacy', 'hybrid', 'unified'], value : 'unified',
        description : 'default cgroup hierarchy')
@@ -238,6 +244,8 @@ option('gshadow', type : 'boolean',
        description : 'support for shadow group')
 option('default-locale', type : 'string', value : '',
        description : 'default locale used when /etc/locale.conf does not exist')
+option('localegen-path', type : 'string', value : '',
+       description : 'absolute path to the locale-gen binary in case the system is using locale-gen')
 option('service-watchdog', type : 'string', value : '3min',
        description : 'default watchdog setting for systemd services')
 
@@ -327,6 +335,8 @@ option('p11kit', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'p11kit support')
 option('libfido2', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'FIDO2 support')
+option('tpm2', type : 'combo', choices : ['auto', 'true', 'false'],
+       description : 'TPM2 support')
 option('elfutils', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'elfutils support')
 option('zlib', type : 'combo', choices : ['auto', 'true', 'false'],
@@ -352,7 +362,7 @@ option('gnu-efi', type : 'combo', choices : ['auto', 'true', 'false'],
        description : 'gnu-efi support for sd-boot')
 option('efi-cc', type : 'array',
        description : 'the compiler to use for EFI modules')
-option('efi-ld', type : 'string',
+option('efi-ld', type : 'string', value : 'ld',
        description : 'the linker to use for EFI modules')
 option('efi-libdir', type : 'string',
        description : 'path to the EFI lib directory')
@@ -375,13 +385,15 @@ option('fuzz-tests', type : 'boolean', value : 'false',
 option('install-tests', type : 'boolean', value : 'false',
        description : 'install test executables')
 
-option('ok-color', type: 'combo',
+option('ok-color', type : 'combo',
        choices : ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
                   'white', 'highlight-black', 'highlight-red', 'highlight-green',
                   'highlight-yellow', 'highlight-blue', 'highlight-magenta',
                   'highlight-cyan', 'highlight-white'],
        value : 'green',
        description: 'color of the "OK" status message')
+option('fexecve', type : 'boolean', value : 'false',
+       description : 'use fexecve() to spawn children')
 
 option('oss-fuzz', type : 'boolean', value : 'false',
        description : 'build against oss-fuzz')

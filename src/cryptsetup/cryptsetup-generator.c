@@ -301,7 +301,9 @@ static int create_disk(
         netdev = fstab_test_option(options, "_netdev\0");
         attach_in_initrd = fstab_test_option(options, "x-initrd.attach\0");
 
-        keyfile_can_timeout = fstab_filter_options(options, "keyfile-timeout\0", NULL, &keyfile_timeout_value, NULL);
+        keyfile_can_timeout = fstab_filter_options(options,
+                                                   "keyfile-timeout\0",
+                                                   NULL, &keyfile_timeout_value, NULL, NULL);
         if (keyfile_can_timeout < 0)
                 return log_error_errno(keyfile_can_timeout, "Failed to parse keyfile-timeout= option value: %m");
 
@@ -310,11 +312,12 @@ static int create_disk(
                 "header\0",
                 NULL,
                 &header_path,
+                NULL,
                 headerdev ? &filtered_header : NULL);
         if (detached_header < 0)
                 return log_error_errno(detached_header, "Failed to parse header= option value: %m");
 
-        tmp = fstab_filter_options(options, "tmp\0", NULL, &tmp_fstype, NULL);
+        tmp = fstab_filter_options(options, "tmp\0", NULL, &tmp_fstype, NULL, NULL);
         if (tmp < 0)
                 return log_error_errno(tmp, "Failed to parse tmp= option value: %m");
 
@@ -445,14 +448,13 @@ static int create_disk(
                 fprintf(f, "After=%s\n"
                            "Requires=%s\n", unit, unit);
 
-                if (umount_unit) {
+                if (umount_unit)
                         fprintf(f,
                                 "Wants=%s\n"
                                 "Before=%s\n",
                                 umount_unit,
                                 umount_unit
                         );
-                }
         }
 
         if (!nofail)
@@ -603,7 +605,7 @@ static int filter_header_device(const char *options,
         assert(ret_headerdev);
         assert(ret_filtered_headerdev_options);
 
-        r = fstab_filter_options(options, "header\0", NULL, &headerspec, &filtered_headerspec);
+        r = fstab_filter_options(options, "header\0", NULL, &headerspec, NULL, &filtered_headerspec);
         if (r < 0)
                 return log_error_errno(r, "Failed to parse header= option value: %m");
 
@@ -668,7 +670,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
 
                 r = sscanf(value, "%m[0-9a-fA-F-]=%ms", &uuid, &uuid_value);
                 if (r != 2)
-                        return free_and_strdup(&arg_default_options, value) < 0 ? log_oom() : 0;
+                        return free_and_strdup_warn(&arg_default_options, value);
 
                 if (warn_uuid_invalid(uuid, key))
                         return 0;
@@ -692,11 +694,8 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                         return 0;
 
                 n = strspn(value, ALPHANUMERICAL "-");
-                if (value[n] != '=') {
-                        if (free_and_strdup(&arg_default_keyfile, value) < 0)
-                                 return log_oom();
-                        return 0;
-                }
+                if (value[n] != '=')
+                        return free_and_strdup_warn(&arg_default_keyfile, value);
 
                 uuid = strndup(value, n);
                 if (!uuid)

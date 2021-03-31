@@ -18,9 +18,10 @@
 #include "link-config.h"
 #include "log.h"
 #include "memory-util.h"
+#include "net-condition.h"
 #include "netif-naming-scheme.h"
 #include "netlink-util.h"
-#include "network-internal.h"
+#include "network-util.h"
 #include "parse-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
@@ -30,6 +31,7 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
+#include "utf8.h"
 
 struct link_config_ctx {
         LIST_HEAD(link_config, links);
@@ -43,19 +45,13 @@ struct link_config_ctx {
         usec_t network_dirs_ts_usec;
 };
 
-static void link_config_free(link_config *link) {
+static link_config* link_config_free(link_config *link) {
         if (!link)
-                return;
+                return NULL;
 
         free(link->filename);
 
-        set_free_free(link->match_mac);
-        set_free_free(link->match_permanent_mac);
-        strv_free(link->match_path);
-        strv_free(link->match_driver);
-        strv_free(link->match_type);
-        strv_free(link->match_name);
-        strv_free(link->match_property);
+        net_match_clear(&link->match);
         condition_free_list(link->conditions);
 
         free(link->description);
@@ -66,7 +62,7 @@ static void link_config_free(link_config *link) {
         free(link->alternative_names_policy);
         free(link->alias);
 
-        free(link);
+        return mfree(link);
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(link_config*, link_config_free);
@@ -81,19 +77,14 @@ static void link_configs_free(link_config_ctx *ctx) {
                 link_config_free(link);
 }
 
-void link_config_ctx_free(link_config_ctx *ctx) {
+link_config_ctx* link_config_ctx_free(link_config_ctx *ctx) {
         if (!ctx)
-                return;
+                return NULL;
 
         safe_close(ctx->ethtool_fd);
-
         sd_netlink_unref(ctx->rtnl);
-
         link_configs_free(ctx);
-
-        free(ctx);
-
-        return;
+        return mfree(ctx);
 }
 
 int link_config_ctx_new(link_config_ctx **ret) {
@@ -119,19 +110,20 @@ int link_config_ctx_new(link_config_ctx **ret) {
 
 int link_load_one(link_config_ctx *ctx, const char *filename) {
         _cleanup_(link_config_freep) link_config *link = NULL;
-        _cleanup_fclose_ FILE *file = NULL;
         _cleanup_free_ char *name = NULL;
+        const char *dropin_dirname;
         size_t i;
         int r;
 
         assert(ctx);
         assert(filename);
 
-        file = fopen(filename, "re");
-        if (!file)
-                return errno == ENOENT ? 0 : -errno;
-
-        if (null_or_empty_fd(fileno(file))) {
+        r = null_or_empty_path(filename);
+        if (r == -ENOENT)
+                return 0;
+        if (r < 0)
+                return r;
+        if (r > 0) {
                 log_debug("Skipping empty file: %s", filename);
                 return 0;
         }
@@ -154,22 +146,24 @@ int link_load_one(link_config_ctx *ctx, const char *filename) {
                 .rx_flow_control = -1,
                 .tx_flow_control = -1,
                 .autoneg_flow_control = -1,
+                .txqueuelen = UINT32_MAX,
         };
 
         for (i = 0; i < ELEMENTSOF(link->features); i++)
                 link->features[i] = -1;
 
-        r = config_parse(NULL, filename, file,
-                         "Match\0Link\0",
-                         config_item_perf_lookup, link_config_gperf_lookup,
-                         CONFIG_PARSE_WARN, link,
-                         NULL);
+        dropin_dirname = strjoina(basename(filename), ".d");
+        r = config_parse_many(
+                        STRV_MAKE_CONST(filename),
+                        (const char* const*) CONF_PATHS_STRV("systemd/network"),
+                        dropin_dirname,
+                        "Match\0Link\0",
+                        config_item_perf_lookup, link_config_gperf_lookup,
+                        CONFIG_PARSE_WARN, link, NULL);
         if (r < 0)
                 return r;
 
-        if (set_isempty(link->match_mac) && set_isempty(link->match_permanent_mac) &&
-            strv_isempty(link->match_path) && strv_isempty(link->match_driver) && strv_isempty(link->match_type) &&
-            strv_isempty(link->match_name) && strv_isempty(link->match_property) && !link->conditions) {
+        if (net_match_is_empty(&link->match) && !link->conditions) {
                 log_warning("%s: No valid settings found in the [Match] section, ignoring file. "
                             "To match all interfaces, add OriginalName=* in the [Match] section.",
                             filename);
@@ -279,11 +273,8 @@ int link_config_get(link_config_ctx *ctx, sd_device *device, link_config **ret) 
         (void) link_unsigned_attribute(device, "name_assign_type", &name_assign_type);
 
         LIST_FOREACH(links, link, ctx->links) {
-                if (net_match_config(link->match_mac, link->match_permanent_mac, link->match_path, link->match_driver,
-                                     link->match_type, link->match_name, link->match_property, NULL, NULL, NULL,
-                                     device, NULL, &permanent_mac, NULL, iftype, NULL, NULL, 0, NULL, NULL)) {
-
-                        if (link->match_name && !strv_contains(link->match_name, "*") && name_assign_type == NET_NAME_ENUM)
+                if (net_match_config(&link->match, device, NULL, &permanent_mac, NULL, iftype, NULL, NULL, 0, NULL, NULL)) {
+                        if (link->match.ifname && !strv_contains(link->match.ifname, "*") && name_assign_type == NET_NAME_ENUM)
                                 log_device_warning(device, "Config file %s is applied to device based on potentially unpredictable interface name.",
                                                    link->filename);
                         else
@@ -435,17 +426,21 @@ static int link_config_apply_rtnl_settings(sd_netlink **rtnl, const link_config 
         } else
                 mac = config->mac;
 
-        r = rtnl_set_link_properties(rtnl, ifindex, config->alias, mac, config->mtu);
+        r = rtnl_set_link_properties(rtnl, ifindex, config->alias, mac,
+                                     config->txqueues, config->rxqueues, config->txqueuelen,
+                                     config->mtu, config->gso_max_size, config->gso_max_segments);
         if (r < 0)
-                log_device_warning_errno(device, r, "Could not set Alias=, MACAddress= or MTU=, ignoring: %m");
+                log_device_warning_errno(device, r,
+                                         "Could not set Alias=, MACAddress=, "
+                                         "TransmitQueues=, ReceiveQueues=, TransmitQueueLength=, MTU=, "
+                                         "GenericSegmentOffloadMaxBytes= or GenericSegmentOffloadMaxSegments=, "
+                                         "ignoring: %m");
 
         return 0;
 }
 
 static int link_config_generate_new_name(const link_config_ctx *ctx, const link_config *config, sd_device *device, const char **ret_name) {
         unsigned name_type = NET_NAME_UNKNOWN;
-        const char *new_name = NULL;
-        NamePolicy policy;
         int r;
 
         assert(ctx);
@@ -463,7 +458,8 @@ static int link_config_generate_new_name(const link_config_ctx *ctx, const link_
 
         if (ctx->enable_name_policy && config->name_policy)
                 for (NamePolicy *p = config->name_policy; *p != _NAMEPOLICY_INVALID; p++) {
-                        policy = *p;
+                        const char *new_name = NULL;
+                        NamePolicy policy = *p;
 
                         switch (policy) {
                         case NAMEPOLICY_KERNEL:
@@ -499,15 +495,12 @@ static int link_config_generate_new_name(const link_config_ctx *ctx, const link_
                         default:
                                 assert_not_reached("invalid policy");
                         }
-                        if (ifname_valid(new_name))
-                                break;
+                        if (ifname_valid(new_name)) {
+                                log_device_debug(device, "Policy *%s* yields \"%s\".", name_policy_to_string(policy), new_name);
+                                *ret_name = new_name;
+                                return 0;
+                        }
                 }
-
-        if (new_name) {
-                log_device_debug(device, "Policy *%s* yields \"%s\".", name_policy_to_string(policy), new_name);
-                *ret_name = new_name;
-                return 0;
-        }
 
         if (config->name) {
                 log_device_debug(device, "Policies didn't yield a name, using specified Name=%s.", config->name);
@@ -601,7 +594,7 @@ static int link_config_apply_alternative_names(sd_netlink **rtnl, const link_con
 
 int link_config_apply(link_config_ctx *ctx, const link_config *config, sd_device *device, const char **ret_name) {
         const char *new_name;
-        DeviceAction a;
+        sd_device_action_t a;
         int r;
 
         assert(ctx);
@@ -609,11 +602,11 @@ int link_config_apply(link_config_ctx *ctx, const link_config *config, sd_device
         assert(device);
         assert(ret_name);
 
-        r = device_get_action(device, &a);
+        r = sd_device_get_action(device, &a);
         if (r < 0)
                 return log_device_error_errno(device, r, "Failed to get ACTION= property: %m");
 
-        if (!IN_SET(a, DEVICE_ACTION_ADD, DEVICE_ACTION_BIND, DEVICE_ACTION_MOVE)) {
+        if (!IN_SET(a, SD_DEVICE_ADD, SD_DEVICE_BIND, SD_DEVICE_MOVE)) {
                 log_device_debug(device, "Skipping to apply .link settings on '%s' uevent.", device_action_to_string(a));
 
                 r = sd_device_get_sysname(device, ret_name);
@@ -631,7 +624,7 @@ int link_config_apply(link_config_ctx *ctx, const link_config *config, sd_device
         if (r < 0)
                 return r;
 
-        if (a == DEVICE_ACTION_MOVE) {
+        if (a == SD_DEVICE_MOVE) {
                 log_device_debug(device, "Skipping to apply Name= and NamePolicy= on '%s' uevent.", device_action_to_string(a));
 
                 r = sd_device_get_sysname(device, &new_name);
@@ -665,6 +658,113 @@ int link_get_driver(link_config_ctx *ctx, sd_device *device, char **ret) {
                 return r;
 
         *ret = driver;
+        return 0;
+}
+
+int config_parse_ifalias(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        char **s = data;
+
+        assert(filename);
+        assert(lvalue);
+        assert(rvalue);
+        assert(data);
+
+        if (!isempty(rvalue)) {
+                *s = mfree(*s);
+                return 0;
+        }
+
+        if (!ascii_is_valid(rvalue)) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Interface alias is not ASCII clean, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        if (strlen(rvalue) >= IFALIASZ) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                           "Interface alias is too long, ignoring assignment: %s", rvalue);
+                return 0;
+        }
+
+        return free_and_strdup_warn(s, rvalue);
+}
+
+int config_parse_rx_tx_queues(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        uint32_t k, *v = data;
+        int r;
+
+        if (isempty(rvalue)) {
+                *v = 0;
+                return 0;
+        }
+
+        r = safe_atou32(rvalue, &k);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse %s=, ignoring assignment: %s.", lvalue, rvalue);
+                return 0;
+        }
+        if (k == 0 || k > 4096) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Invalid %s=, ignoring assignment: %s.", lvalue, rvalue);
+                return 0;
+        }
+
+        *v = k;
+        return 0;
+}
+
+int config_parse_txqueuelen(
+                const char *unit,
+                const char *filename,
+                unsigned line,
+                const char *section,
+                unsigned section_line,
+                const char *lvalue,
+                int ltype,
+                const char *rvalue,
+                void *data,
+                void *userdata) {
+
+        uint32_t k, *v = data;
+        int r;
+
+        if (isempty(rvalue)) {
+                *v = UINT32_MAX;
+                return 0;
+        }
+
+        r = safe_atou32(rvalue, &k);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse %s=, ignoring assignment: %s.", lvalue, rvalue);
+                return 0;
+        }
+        if (k == UINT32_MAX) {
+                log_syntax(unit, LOG_WARNING, filename, line, 0, "Invalid %s=, ignoring assignment: %s.", lvalue, rvalue);
+                return 0;
+        }
+
+        *v = k;
         return 0;
 }
 

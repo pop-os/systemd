@@ -12,6 +12,7 @@
 #include "bus-locator.h"
 #include "bus-polkit.h"
 #include "cgroup-util.h"
+#include "discover-image.h"
 #include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -20,10 +21,10 @@
 #include "image-dbus.h"
 #include "io-util.h"
 #include "machine-dbus.h"
-#include "machine-image.h"
 #include "machine-pool.h"
 #include "machined.h"
 #include "missing_capability.h"
+#include "os-util.h"
 #include "path-util.h"
 #include "process-util.h"
 #include "stdio-util.h"
@@ -44,7 +45,7 @@ static int property_get_pool_usage(
                 sd_bus_error *error) {
 
         _cleanup_close_ int fd = -1;
-        uint64_t usage = (uint64_t) -1;
+        uint64_t usage = UINT64_MAX;
 
         assert(bus);
         assert(reply);
@@ -70,7 +71,7 @@ static int property_get_pool_limit(
                 sd_bus_error *error) {
 
         _cleanup_close_ int fd = -1;
-        uint64_t size = (uint64_t) -1;
+        uint64_t size = UINT64_MAX;
 
         assert(bus);
         assert(reply);
@@ -124,7 +125,7 @@ static int method_get_image(sd_bus_message *message, void *userdata, sd_bus_erro
         if (r < 0)
                 return r;
 
-        r = image_find(IMAGE_MACHINE, name, NULL);
+        r = image_find(IMAGE_MACHINE, name, NULL, NULL);
         if (r == -ENOENT)
                 return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_IMAGE, "No image '%s' known", name);
         if (r < 0)
@@ -239,7 +240,7 @@ static int method_create_or_register_machine(Manager *manager, sd_bus_message *m
         r = sd_bus_message_read(message, "s", &name);
         if (r < 0)
                 return r;
-        if (!machine_name_is_valid(name))
+        if (!hostname_is_valid(name, 0))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid machine name");
 
         r = sd_bus_message_read_array(message, 'y', &v, &n);
@@ -257,15 +258,13 @@ static int method_create_or_register_machine(Manager *manager, sd_bus_message *m
                 return r;
 
         if (read_network) {
-                size_t i;
-
                 r = sd_bus_message_read_array(message, 'i', (const void**) &netif, &n_netif);
                 if (r < 0)
                         return r;
 
                 n_netif /= sizeof(int32_t);
 
-                for (i = 0; i < n_netif; i++) {
+                for (size_t i = 0; i < n_netif; i++) {
                         if (netif[i] <= 0)
                                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid network interface index %i", netif[i]);
                 }
@@ -482,7 +481,7 @@ static int method_list_images(sd_bus_message *message, void *userdata, sd_bus_er
         if (!images)
                 return -ENOMEM;
 
-        r = image_discover(IMAGE_MACHINE, images);
+        r = image_discover(IMAGE_MACHINE, NULL, images);
         if (r < 0)
                 return r;
 
@@ -564,7 +563,7 @@ static int redirect_method_to_image(sd_bus_message *message, Manager *m, sd_bus_
         if (!image_name_is_valid(name))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Image name '%s' is invalid.", name);
 
-        r = image_find(IMAGE_MACHINE, name, &i);
+        r = image_find(IMAGE_MACHINE, name, NULL, &i);
         if (r == -ENOENT)
                 return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_IMAGE, "No image '%s' known", name);
         if (r < 0)
@@ -757,7 +756,7 @@ static int method_clean_pool(sd_bus_message *message, void *userdata, sd_bus_err
                         goto child_fail;
                 }
 
-                r = image_discover(IMAGE_MACHINE, images);
+                r = image_discover(IMAGE_MACHINE, NULL, images);
                 if (r < 0)
                         goto child_fail;
 

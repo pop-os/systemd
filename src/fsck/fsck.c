@@ -172,7 +172,7 @@ static int process_progress(int fd, FILE* console) {
         }
 
         for (;;) {
-                int pass, m;
+                int pass;
                 unsigned long cur, max;
                 _cleanup_free_ char *device = NULL;
                 double p;
@@ -206,18 +206,17 @@ static int process_progress(int fd, FILE* console) {
                 last = t;
 
                 p = percent(pass, cur, max);
-                fprintf(console, "\r%s: fsck %3.1f%% complete...\r%n", device, p, &m);
-                fflush(console);
+                r = fprintf(console, "\r%s: fsck %3.1f%% complete...\r", device, p);
+                if (r < 0)
+                        return -EIO; /* No point in continuing if something happened to our output stream */
 
-                if (m > clear)
-                        clear = m;
+                fflush(console);
+                clear = MAX(clear, r);
         }
 
         if (clear > 0) {
-                unsigned j;
-
                 fputc('\r', console);
-                for (j = 0; j < (unsigned) clear; j++)
+                for (int j = 0; j < clear; j++)
                         fputc(' ', console);
                 fputc('\r', console);
                 fflush(console);
@@ -256,7 +255,7 @@ static int run(int argc, char *argv[]) {
         int r, exit_status;
         pid_t pid;
 
-        log_setup_service();
+        log_setup();
 
         if (argc > 2)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
@@ -288,7 +287,7 @@ static int run(int argc, char *argv[]) {
                                                "%s is not a block device.",
                                                device);
 
-                r = sd_device_new_from_devnum(&dev, 'b', st.st_rdev);
+                r = sd_device_new_from_stat_rdev(&dev, &st);
                 if (r < 0)
                         return log_error_errno(r, "Failed to detect device %s: %m", device);
 

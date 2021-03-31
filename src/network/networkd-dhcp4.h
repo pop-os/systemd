@@ -14,13 +14,11 @@ typedef enum DHCPClientIdentifier {
          * https://github.com/systemd/systemd/issues/7828 */
         DHCP_CLIENT_ID_DUID_ONLY,
         _DHCP_CLIENT_ID_MAX,
-        _DHCP_CLIENT_ID_INVALID = -1,
+        _DHCP_CLIENT_ID_INVALID = -EINVAL,
 } DHCPClientIdentifier;
 
 int dhcp4_configure(Link *link);
 int dhcp4_update_mac(Link *link);
-
-int link_deserialize_dhcp4(Link *link, const char *dhcp4_address);
 
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_client_identifier);
 CONFIG_PARSER_PROTOTYPE(config_parse_dhcp_acl_ip_address);

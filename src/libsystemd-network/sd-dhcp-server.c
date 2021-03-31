@@ -15,6 +15,7 @@
 #include "fd-util.h"
 #include "in-addr-util.h"
 #include "io-util.h"
+#include "ordered-set.h"
 #include "siphash24.h"
 #include "string-util.h"
 #include "unaligned.h"
@@ -148,13 +149,13 @@ static sd_dhcp_server *dhcp_server_free(sd_dhcp_server *server) {
 
         free(server->timezone);
 
-        for (sd_dhcp_lease_server_type i = 0; i < _SD_DHCP_LEASE_SERVER_TYPE_MAX; i++)
+        for (sd_dhcp_lease_server_type_t i = 0; i < _SD_DHCP_LEASE_SERVER_TYPE_MAX; i++)
                 free(server->servers[i].addr);
 
         hashmap_free(server->leases_by_client_id);
 
-        ordered_hashmap_free(server->extra_options);
-        ordered_hashmap_free(server->vendor_options);
+        ordered_set_free(server->extra_options);
+        ordered_set_free(server->vendor_options);
 
         free(server->bound_leases);
         return mfree(server);
@@ -424,66 +425,23 @@ static int server_message_init(sd_dhcp_server *server, DHCPPacket **ret,
         return 0;
 }
 
-static int server_send_offer(sd_dhcp_server *server, DHCPRequest *req,
-                             be32_t address) {
-        _cleanup_free_ DHCPPacket *packet = NULL;
-        size_t offset;
-        be32_t lease_time;
-        int r;
-
-        r = server_message_init(server, &packet, DHCP_OFFER, &offset, req);
-        if (r < 0)
-                return r;
-
-        packet->dhcp.yiaddr = address;
-
-        lease_time = htobe32(req->lifetime);
-        r = dhcp_option_append(&packet->dhcp, req->max_optlen, &offset, 0,
-                               SD_DHCP_OPTION_IP_ADDRESS_LEASE_TIME, 4,
-                               &lease_time);
-        if (r < 0)
-                return r;
-
-        r = dhcp_option_append(&packet->dhcp, req->max_optlen, &offset, 0,
-                               SD_DHCP_OPTION_SUBNET_MASK, 4, &server->netmask);
-        if (r < 0)
-                return r;
-
-        if (server->emit_router) {
-                r = dhcp_option_append(&packet->dhcp, req->max_optlen, &offset, 0,
-                                       SD_DHCP_OPTION_ROUTER, 4, &server->address);
-                if (r < 0)
-                        return r;
-        }
-
-        r = dhcp_server_send_packet(server, req, packet, DHCP_OFFER, offset);
-        if (r < 0)
-                return r;
-
-        return 0;
-}
-
-static int server_send_ack(
+static int server_send_offer_or_ack(
                 sd_dhcp_server *server,
                 DHCPRequest *req,
-                be32_t address) {
-
-        static const uint8_t option_map[_SD_DHCP_LEASE_SERVER_TYPE_MAX] = {
-                [SD_DHCP_LEASE_DNS] = SD_DHCP_OPTION_DOMAIN_NAME_SERVER,
-                [SD_DHCP_LEASE_NTP] = SD_DHCP_OPTION_NTP_SERVER,
-                [SD_DHCP_LEASE_SIP] = SD_DHCP_OPTION_SIP_SERVER,
-                [SD_DHCP_LEASE_POP3] = SD_DHCP_OPTION_POP3_SERVER,
-                [SD_DHCP_LEASE_SMTP] = SD_DHCP_OPTION_SMTP_SERVER,
-                [SD_DHCP_LEASE_LPR] = SD_DHCP_OPTION_LPR_SERVER,
-        };
+                be32_t address,
+                uint8_t type) {
 
         _cleanup_free_ DHCPPacket *packet = NULL;
-        be32_t lease_time;
         sd_dhcp_option *j;
+        be32_t lease_time;
         size_t offset;
         int r;
 
-        r = server_message_init(server, &packet, DHCP_ACK, &offset, req);
+        assert(server);
+        assert(req);
+        assert(IN_SET(type, DHCP_OFFER, DHCP_ACK));
+
+        r = server_message_init(server, &packet, type, &offset, req);
         if (r < 0)
                 return r;
 
@@ -508,46 +466,57 @@ static int server_send_ack(
                         return r;
         }
 
-        for (sd_dhcp_lease_server_type k = 0; k < _SD_DHCP_LEASE_SERVER_TYPE_MAX; k++) {
+        if (type == DHCP_ACK) {
+                static const uint8_t option_map[_SD_DHCP_LEASE_SERVER_TYPE_MAX] = {
+                        [SD_DHCP_LEASE_DNS] = SD_DHCP_OPTION_DOMAIN_NAME_SERVER,
+                        [SD_DHCP_LEASE_NTP] = SD_DHCP_OPTION_NTP_SERVER,
+                        [SD_DHCP_LEASE_SIP] = SD_DHCP_OPTION_SIP_SERVER,
+                        [SD_DHCP_LEASE_POP3] = SD_DHCP_OPTION_POP3_SERVER,
+                        [SD_DHCP_LEASE_SMTP] = SD_DHCP_OPTION_SMTP_SERVER,
+                        [SD_DHCP_LEASE_LPR] = SD_DHCP_OPTION_LPR_SERVER,
+                };
 
-                if (server->servers[k].size <= 0)
-                        continue;
+                for (sd_dhcp_lease_server_type_t k = 0; k < _SD_DHCP_LEASE_SERVER_TYPE_MAX; k++) {
+                        if (server->servers[k].size <= 0)
+                                continue;
 
-                r = dhcp_option_append(
-                                &packet->dhcp, req->max_optlen, &offset, 0,
-                                option_map[k],
-                                sizeof(struct in_addr) * server->servers[k].size, server->servers[k].addr);
-                if (r < 0)
-                        return r;
+                        r = dhcp_option_append(
+                                        &packet->dhcp, req->max_optlen, &offset, 0,
+                                        option_map[k],
+                                        sizeof(struct in_addr) * server->servers[k].size,
+                                        server->servers[k].addr);
+                        if (r < 0)
+                                return r;
+                }
+
+
+                if (server->timezone) {
+                        r = dhcp_option_append(
+                                        &packet->dhcp, req->max_optlen, &offset, 0,
+                                        SD_DHCP_OPTION_NEW_TZDB_TIMEZONE,
+                                        strlen(server->timezone), server->timezone);
+                        if (r < 0)
+                                return r;
+                }
         }
 
-
-        if (server->timezone) {
-                r = dhcp_option_append(
-                                &packet->dhcp, req->max_optlen, &offset, 0,
-                                SD_DHCP_OPTION_NEW_TZDB_TIMEZONE,
-                                strlen(server->timezone), server->timezone);
-                if (r < 0)
-                        return r;
-        }
-
-        ORDERED_HASHMAP_FOREACH(j, server->extra_options) {
+        ORDERED_SET_FOREACH(j, server->extra_options) {
                 r = dhcp_option_append(&packet->dhcp, req->max_optlen, &offset, 0,
                                        j->option, j->length, j->data);
                 if (r < 0)
                         return r;
         }
 
-        if (!ordered_hashmap_isempty(server->vendor_options)) {
+        if (!ordered_set_isempty(server->vendor_options)) {
                 r = dhcp_option_append(
                                 &packet->dhcp, req->max_optlen, &offset, 0,
                                 SD_DHCP_OPTION_VENDOR_SPECIFIC,
-                                ordered_hashmap_size(server->vendor_options), server->vendor_options);
+                                ordered_set_size(server->vendor_options), server->vendor_options);
                 if (r < 0)
                         return r;
         }
 
-        r = dhcp_server_send_packet(server, req, packet, DHCP_ACK, offset);
+        r = dhcp_server_send_packet(server, req, packet, type, offset);
         if (r < 0)
                 return r;
 
@@ -648,12 +617,12 @@ static int parse_request(uint8_t code, uint8_t len, const void *option, void *us
         return 0;
 }
 
-static void dhcp_request_free(DHCPRequest *req) {
+static DHCPRequest* dhcp_request_free(DHCPRequest *req) {
         if (!req)
-                return;
+                return NULL;
 
         free(req->client_id.data);
-        free(req);
+        return mfree(req);
 }
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(DHCPRequest*, dhcp_request_free);
@@ -782,7 +751,7 @@ int dhcp_server_handle_message(sd_dhcp_server *server, DHCPMessage *message,
                         /* no free addresses left */
                         return 0;
 
-                r = server_send_offer(server, req, address);
+                r = server_send_offer_or_ack(server, req, address, DHCP_OFFER);
                 if (r < 0)
                         /* this only fails on critical errors */
                         return log_dhcp_server_errno(server, r, "Could not send offer: %m");
@@ -885,7 +854,7 @@ int dhcp_server_handle_message(sd_dhcp_server *server, DHCPMessage *message,
 
                         lease->expiration = req->lifetime * USEC_PER_SEC + time_now;
 
-                        r = server_send_ack(server, req, address);
+                        r = server_send_offer_or_ack(server, req, address, DHCP_ACK);
                         if (r < 0) {
                                 /* this only fails on critical errors */
                                 log_dhcp_server_errno(server, r, "Could not send ack: %m");
@@ -1056,13 +1025,12 @@ int sd_dhcp_server_start(sd_dhcp_server *server) {
 }
 
 int sd_dhcp_server_forcerenew(sd_dhcp_server *server) {
-        unsigned i;
         int r = 0;
 
         assert_return(server, -EINVAL);
         assert(server->bound_leases);
 
-        for (i = 0; i < server->pool_size; i++) {
+        for (uint32_t i = 0; i < server->pool_size; i++) {
                 DHCPLease *lease = server->bound_leases[i];
 
                 if (!lease || lease == &server->invalid_lease)
@@ -1118,7 +1086,7 @@ int sd_dhcp_server_set_default_lease_time(sd_dhcp_server *server, uint32_t t) {
 
 int sd_dhcp_server_set_servers(
                 sd_dhcp_server *server,
-                sd_dhcp_lease_server_type what,
+                sd_dhcp_lease_server_type_t what,
                 const struct in_addr addresses[],
                 size_t n_addresses) {
 
@@ -1181,11 +1149,7 @@ int sd_dhcp_server_add_option(sd_dhcp_server *server, sd_dhcp_option *v) {
         assert_return(server, -EINVAL);
         assert_return(v, -EINVAL);
 
-        r = ordered_hashmap_ensure_allocated(&server->extra_options, &dhcp_option_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = ordered_hashmap_put(server->extra_options, UINT_TO_PTR(v->option), v);
+        r = ordered_set_ensure_put(&server->extra_options, &dhcp_option_hash_ops, v);
         if (r < 0)
                 return r;
 
@@ -1199,11 +1163,7 @@ int sd_dhcp_server_add_vendor_option(sd_dhcp_server *server, sd_dhcp_option *v) 
         assert_return(server, -EINVAL);
         assert_return(v, -EINVAL);
 
-        r = ordered_hashmap_ensure_allocated(&server->vendor_options, &dhcp_option_hash_ops);
-        if (r < 0)
-                return -ENOMEM;
-
-        r = ordered_hashmap_put(server->vendor_options, v, v);
+        r = ordered_set_ensure_put(&server->vendor_options, &dhcp_option_hash_ops, v);
         if (r < 0)
                 return r;
 

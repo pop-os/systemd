@@ -33,7 +33,7 @@ typedef enum LinkState {
         LINK_STATE_FAILED,      /* at least one configuration process failed */
         LINK_STATE_LINGER,      /* RTM_DELLINK for the link has been received */
         _LINK_STATE_MAX,
-        _LINK_STATE_INVALID = -1
+        _LINK_STATE_INVALID = -EINVAL,
 } LinkState;
 
 typedef struct Manager Manager;
@@ -83,7 +83,6 @@ typedef struct Link {
         unsigned route_messages;
         unsigned nexthop_messages;
         unsigned routing_policy_rule_messages;
-        unsigned routing_policy_rule_remove_messages;
         unsigned tc_messages;
         unsigned sr_iov_messages;
         unsigned enslaving;
@@ -130,6 +129,7 @@ typedef struct Link {
         bool setting_genmode:1;
         bool ipv6_mtu_set:1;
         bool bridge_mdb_configured:1;
+        bool activated:1;
 
         sd_dhcp_server *dhcp_server;
 
@@ -203,24 +203,15 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Link*, link_unref);
 DEFINE_TRIVIAL_DESTRUCTOR(link_netlink_destroy_callback, Link, link_unref);
 
 int link_get(Manager *m, int ifindex, Link **ret);
-int link_add(Manager *manager, sd_netlink_message *message, Link **ret);
-void link_drop(Link *link);
 
 int link_down(Link *link, link_netlink_message_handler_t callback);
 
 void link_enter_failed(Link *link);
-int link_initialized(Link *link, sd_device *device);
 
 void link_set_state(Link *link, LinkState state);
 void link_check_ready(Link *link);
 
 void link_update_operstate(Link *link, bool also_update_bond_master);
-int link_update(Link *link, sd_netlink_message *message);
-
-void link_dirty(Link *link);
-void link_clean(Link *link);
-int link_save(Link *link);
-int link_save_and_clean(Link *link);
 
 int link_carrier_reset(Link *link);
 bool link_has_carrier(Link *link);
@@ -231,7 +222,7 @@ int link_ipv6ll_gained(Link *link, const struct in6_addr *address);
 
 int link_set_mtu(Link *link, uint32_t mtu);
 
-bool link_ipv4ll_enabled(Link *link, AddressFamily mask);
+bool link_ipv4ll_enabled(Link *link);
 
 int link_stop_engines(Link *link, bool may_keep_dhcp);
 
@@ -240,6 +231,9 @@ LinkState link_state_from_string(const char *s) _pure_;
 
 int link_configure(Link *link);
 int link_reconfigure(Link *link, bool force);
+
+int manager_udev_process_link(sd_device_monitor *monitor, sd_device *device, void *userdata);
+int manager_rtnl_process_link(sd_netlink *rtnl, sd_netlink_message *message, Manager *m);
 
 int log_link_message_full_errno(Link *link, sd_netlink_message *m, int level, int err, const char *msg);
 #define log_link_message_error_errno(link, m, err, msg)   log_link_message_full_errno(link, m, LOG_ERR, err, msg)

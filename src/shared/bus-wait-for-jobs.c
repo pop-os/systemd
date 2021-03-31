@@ -61,9 +61,9 @@ static int match_job_removed(sd_bus_message *m, void *userdata, sd_bus_error *er
         return 0;
 }
 
-void bus_wait_for_jobs_free(BusWaitForJobs *d) {
+BusWaitForJobs* bus_wait_for_jobs_free(BusWaitForJobs *d) {
         if (!d)
-                return;
+                return NULL;
 
         set_free(d->jobs);
 
@@ -75,7 +75,7 @@ void bus_wait_for_jobs_free(BusWaitForJobs *d) {
         free(d->name);
         free(d->result);
 
-        free(d);
+        return mfree(d);
 }
 
 int bus_wait_for_jobs_new(sd_bus *bus, BusWaitForJobs **ret) {
@@ -133,7 +133,7 @@ static int bus_process_wait(sd_bus *bus) {
                 if (r > 0)
                         return 0;
 
-                r = sd_bus_wait(bus, (uint64_t) -1);
+                r = sd_bus_wait(bus, UINT64_MAX);
                 if (r < 0)
                         return r;
         }
@@ -200,22 +200,24 @@ static void log_job_error_with_service_result(const char* service, const char *r
 
                 if (i < ELEMENTSOF(explanations)) {
                         log_error("Job for %s failed because %s.\n"
-                                  "See \"%s status %s\" and \"%s -xe\" for details.\n",
+                                  "See \"%s status %s\" and \"%s -xeu %s\" for details.\n",
                                   service,
                                   explanations[i].explanation,
                                   systemctl,
                                   service_shell_quoted ?: "<service>",
-                                  journalctl);
+                                  journalctl,
+                                  service_shell_quoted ?: "<service>");
                         goto finish;
                 }
         }
 
         log_error("Job for %s failed.\n"
-                  "See \"%s status %s\" and \"%s -xe\" for details.\n",
+                  "See \"%s status %s\" and \"%s -xeu %s\" for details.\n",
                   service,
                   systemctl,
                   service_shell_quoted ?: "<service>",
-                  journalctl);
+                  journalctl,
+                  service_shell_quoted ?: "<service>");
 
 finish:
         /* For some results maybe additional explanation is required */

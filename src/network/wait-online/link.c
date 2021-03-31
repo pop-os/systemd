@@ -15,14 +15,7 @@ int link_new(Manager *m, Link **ret, int ifindex, const char *ifname) {
 
         assert(m);
         assert(ifindex > 0);
-
-        r = hashmap_ensure_allocated(&m->links, NULL);
-        if (r < 0)
-                return r;
-
-        r = hashmap_ensure_allocated(&m->links_by_name, &string_hash_ops);
-        if (r < 0)
-                return r;
+        assert(ifname);
 
         n = strdup(ifname);
         if (!n)
@@ -39,11 +32,11 @@ int link_new(Manager *m, Link **ret, int ifindex, const char *ifname) {
                 .required_operstate = LINK_OPERSTATE_RANGE_DEFAULT,
         };
 
-        r = hashmap_put(m->links_by_name, l->ifname, l);
+        r = hashmap_ensure_put(&m->links, NULL, INT_TO_PTR(ifindex), l);
         if (r < 0)
                 return r;
 
-        r = hashmap_put(m->links, INT_TO_PTR(ifindex), l);
+        r = hashmap_ensure_put(&m->links_by_name, &string_hash_ops, l->ifname, l);
         if (r < 0)
                 return r;
 
@@ -137,8 +130,7 @@ int link_update_monitor(Link *l) {
 
                 s = link_operstate_from_string(operstate);
                 if (s < 0)
-                        ret = log_link_debug_errno(l, SYNTHETIC_ERRNO(EINVAL),
-                                                   "Failed to parse operational state, ignoring: %m");
+                        ret = log_link_debug_errno(l, s, "Failed to parse operational state, ignoring: %m");
                 else
                         l->operational_state = s;
         }

@@ -199,12 +199,15 @@ static int run_fsck(const char *node, const char *fstype) {
                 return 0;
         }
 
-        r = safe_fork("(fsck)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR, &fsck_pid);
+        r = safe_fork("(fsck)",
+                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
+                      &fsck_pid);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Child */
                 execl("/sbin/fsck", "/sbin/fsck", "-aTl", node, NULL);
+                log_open();
                 log_error_errno(errno, "Failed to execute fsck: %m");
                 _exit(FSCK_OPERATIONAL_ERROR);
         }
@@ -518,7 +521,7 @@ static int luks_validate(
         blkid_loff_t offset = 0, size = 0;
         blkid_partlist pl;
         bool found = false;
-        int r, i, n;
+        int r, n;
 
         assert(fd >= 0);
         assert(label);
@@ -570,9 +573,9 @@ static int luks_validate(
         if (n < 0)
                 return errno > 0 ? -errno : -EIO;
 
-        for (i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
                 blkid_partition pp;
-                sd_id128_t id;
+                sd_id128_t id = SD_ID128_NULL;
                 const char *sid;
 
                 errno = 0;
@@ -681,12 +684,12 @@ static int luks_validate_home_record(
                 PasswordCache *cache,
                 UserRecord **ret_luks_home_record) {
 
-        int r, token;
+        int r;
 
         assert(cd);
         assert(h);
 
-        for (token = 0;; token++) {
+        for (int token = 0;; token++) {
                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL, *rr = NULL;
                 _cleanup_(EVP_CIPHER_CTX_freep) EVP_CIPHER_CTX *context = NULL;
                 _cleanup_(user_record_unrefp) UserRecord *lhr = NULL;
@@ -1592,10 +1595,10 @@ static int luks_format(
         return 0;
 }
 
-DEFINE_TRIVIAL_CLEANUP_FUNC(struct fdisk_context*, fdisk_unref_context);
-DEFINE_TRIVIAL_CLEANUP_FUNC(struct fdisk_partition*, fdisk_unref_partition);
-DEFINE_TRIVIAL_CLEANUP_FUNC(struct fdisk_parttype*, fdisk_unref_parttype);
-DEFINE_TRIVIAL_CLEANUP_FUNC(struct fdisk_table*, fdisk_unref_table);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct fdisk_context*, fdisk_unref_context, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct fdisk_partition*, fdisk_unref_partition, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct fdisk_parttype*, fdisk_unref_parttype, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct fdisk_table*, fdisk_unref_table, NULL);
 
 static int make_partition_table(
                 int fd,
@@ -2351,12 +2354,15 @@ static int ext4_offline_resize_fs(HomeSetup *setup, uint64_t new_size, bool disc
         log_info("Temporary unmounting of file system completed.");
 
         /* resize2fs requires that the file system is force checked first, do so. */
-        r = safe_fork("(e2fsck)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR, &fsck_pid);
+        r = safe_fork("(e2fsck)",
+                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
+                      &fsck_pid);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Child */
                 execlp("e2fsck" ,"e2fsck", "-fp", setup->dm_node, NULL);
+                log_open();
                 log_error_errno(errno, "Failed to execute e2fsck: %m");
                 _exit(EXIT_FAILURE);
         }
@@ -2380,12 +2386,15 @@ static int ext4_offline_resize_fs(HomeSetup *setup, uint64_t new_size, bool disc
                 return log_oom();
 
         /* Resize the thing */
-        r = safe_fork("(e2resize)", FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR, &resize_pid);
+        r = safe_fork("(e2resize)",
+                      FORK_RESET_SIGNALS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_LOG|FORK_WAIT|FORK_STDOUT_TO_STDERR|FORK_CLOSE_ALL_FDS,
+                      &resize_pid);
         if (r < 0)
                 return r;
         if (r == 0) {
                 /* Child */
                 execlp("resize2fs" ,"resize2fs", setup->dm_node, size_str, NULL);
+                log_open();
                 log_error_errno(errno, "Failed to execute resize2fs: %m");
                 _exit(EXIT_FAILURE);
         }
@@ -2423,7 +2432,7 @@ static int prepare_resize_partition(
         _cleanup_(fdisk_unref_contextp) struct fdisk_context *c = NULL;
         _cleanup_(fdisk_unref_tablep) struct fdisk_table *t = NULL;
         _cleanup_free_ char *path = NULL, *disk_uuid_as_string = NULL;
-        size_t n_partitions, i;
+        size_t n_partitions;
         sd_id128_t disk_uuid;
         bool found = false;
         int r;
@@ -2473,7 +2482,7 @@ static int prepare_resize_partition(
                 return log_error_errno(r, "Failed to acquire partition table: %m");
 
         n_partitions = fdisk_table_get_nents(t);
-        for (i = 0; i < n_partitions; i++)  {
+        for (size_t i = 0; i < n_partitions; i++)  {
                 struct fdisk_partition *p;
 
                 p = fdisk_table_get_partition(t, i);
@@ -2898,7 +2907,7 @@ int home_passwd_luks(
                 PasswordCache *cache,      /* the passwords acquired via PKCS#11/FIDO2 security tokens */
                 char **effective_passwords /* new passwords */) {
 
-        size_t volume_key_size, i, max_key_slots, n_effective;
+        size_t volume_key_size, max_key_slots, n_effective;
         _cleanup_(erase_and_freep) void *volume_key = NULL;
         struct crypt_pbkdf_type good_pbkdf, minimal_pbkdf;
         const char *type;
@@ -2943,7 +2952,7 @@ int home_passwd_luks(
         build_good_pbkdf(&good_pbkdf, h);
         build_minimal_pbkdf(&minimal_pbkdf, h);
 
-        for (i = 0; i < max_key_slots; i++) {
+        for (size_t i = 0; i < max_key_slots; i++) {
                 r = crypt_keyslot_destroy(setup->crypt_device, i);
                 if (r < 0 && !IN_SET(r, -ENOENT, -EINVAL)) /* Returns EINVAL or ENOENT if there's no key in this slot already */
                         return log_error_errno(r, "Failed to destroy LUKS password: %m");

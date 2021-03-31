@@ -9,6 +9,7 @@
 #include "sd-resolve.h"
 
 #include "dhcp-identifier.h"
+#include "firewall-util.h"
 #include "hashmap.h"
 #include "networkd-link.h"
 #include "networkd-network.h"
@@ -59,11 +60,21 @@ struct Manager {
 
         Set *rules;
         Set *rules_foreign;
-        Set *rules_saved;
+
+        /* Manage nexthops by id. */
+        Hashmap *nexthops_by_id;
+
+        /* Manager stores nexthops without RTA_OIF attribute. */
+        Set *nexthops;
+        Set *nexthops_foreign;
 
         /* Manager stores routes without RTA_OIF attribute. */
         Set *routes;
         Set *routes_foreign;
+
+        /* Route table name */
+        Hashmap *route_table_numbers_by_name;
+        Hashmap *route_table_names_by_number;
 
         /* For link speed meter*/
         bool use_speed_meter;
@@ -74,10 +85,12 @@ struct Manager {
 
         bool dhcp4_prefix_root_cannot_set_table:1;
         bool bridge_mdb_on_master_not_supported:1;
+
+        FirewallContext *fw_ctx;
 };
 
 int manager_new(Manager **ret);
-void manager_free(Manager *m);
+Manager* manager_free(Manager *m);
 
 int manager_connect_bus(Manager *m);
 int manager_start(Manager *m);
@@ -86,8 +99,6 @@ int manager_load_config(Manager *m);
 bool manager_should_reload(Manager *m);
 
 int manager_enumerate(Manager *m);
-
-void manager_dirty(Manager *m);
 
 Link* manager_find_uplink(Manager *m, Link *exclude);
 

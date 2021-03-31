@@ -8,7 +8,9 @@
 #include "copy.h"
 #include "def.h"
 #include "dirent-util.h"
+#include "discover-image.h"
 #include "dissect-image.h"
+#include "errno-list.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -16,7 +18,6 @@
 #include "io-util.h"
 #include "locale-util.h"
 #include "loop-util.h"
-#include "machine-image.h"
 #include "mkdir.h"
 #include "nulstr-util.h"
 #include "os-util.h"
@@ -495,7 +496,7 @@ int portable_extract(
 
         assert(name_or_path);
 
-        r = image_find_harder(IMAGE_PORTABLE, name_or_path, &image);
+        r = image_find_harder(IMAGE_PORTABLE, name_or_path, NULL, &image);
         if (r < 0)
                 return r;
 
@@ -591,7 +592,7 @@ static int unit_file_is_active(
 static int portable_changes_add(
                 PortableChange **changes,
                 size_t *n_changes,
-                PortableChangeType type,
+                int type_or_errno, /* PORTABLE_COPY, PORTABLE_SYMLINK, … if positive, or errno if negative */
                 const char *path,
                 const char *source) {
 
@@ -600,6 +601,11 @@ static int portable_changes_add(
 
         assert(path);
         assert(!changes == !n_changes);
+
+        if (type_or_errno >= 0)
+                assert(type_or_errno < _PORTABLE_CHANGE_TYPE_MAX);
+        else
+                assert(type_or_errno >= -ERRNO_MAX);
 
         if (!changes)
                 return 0;
@@ -624,7 +630,7 @@ static int portable_changes_add(
         }
 
         c[(*n_changes)++] = (PortableChange) {
-                .type = type,
+                .type_or_errno = type_or_errno,
                 .path = TAKE_PTR(p),
                 .source = TAKE_PTR(s),
         };
@@ -635,7 +641,7 @@ static int portable_changes_add(
 static int portable_changes_add_with_prefix(
                 PortableChange **changes,
                 size_t *n_changes,
-                PortableChangeType type,
+                int type_or_errno,
                 const char *prefix,
                 const char *path,
                 const char *source) {
@@ -653,7 +659,7 @@ static int portable_changes_add_with_prefix(
                         source = prefix_roota(prefix, source);
         }
 
-        return portable_changes_add(changes, n_changes, type, path, source);
+        return portable_changes_add(changes, n_changes, type_or_errno, path, source);
 }
 
 void portable_changes_free(PortableChange *changes, size_t n_changes) {
@@ -710,9 +716,7 @@ static int install_chroot_dropin(
                                IN_SET(type, IMAGE_DIRECTORY, IMAGE_SUBVOLUME) ? "RootDirectory=" : "RootImage=", image_path, "\n"
                                "Environment=PORTABLE=", basename(image_path), "\n"
                                "BindReadOnlyPaths=", os_release_source, ":/run/host/os-release\n"
-                               "LogExtraFields=PORTABLE=", basename(image_path), "\n",
-                               NULL))
-
+                               "LogExtraFields=PORTABLE=", basename(image_path), "\n"))
                         return -ENOMEM;
         }
 
@@ -955,7 +959,7 @@ static int install_image_symlink(
         /* If the image is outside of the image search also link it into it, so that it can be found with short image
          * names and is listed among the images. */
 
-        if (image_in_search_path(IMAGE_PORTABLE, image_path))
+        if (image_in_search_path(IMAGE_PORTABLE, NULL, image_path))
                 return 0;
 
         r = image_symlink(image_path, flags, &sl);
@@ -989,7 +993,7 @@ int portable_attach(
 
         assert(name_or_path);
 
-        r = image_find_harder(IMAGE_PORTABLE, name_or_path, &image);
+        r = image_find_harder(IMAGE_PORTABLE, name_or_path, NULL, &image);
         if (r < 0)
                 return r;
 
@@ -1005,13 +1009,13 @@ int portable_attach(
                 r = unit_file_exists(UNIT_FILE_SYSTEM, &paths, item->name);
                 if (r < 0)
                         return sd_bus_error_set_errnof(error, r, "Failed to determine whether unit '%s' exists on the host: %m", item->name);
-                if (r > 0)
+                if (!FLAGS_SET(flags, PORTABLE_REATTACH) && r > 0)
                         return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS, "Unit file '%s' exists on the host already, refusing.", item->name);
 
                 r = unit_file_is_active(bus, item->name, error);
                 if (r < 0)
                         return r;
-                if (r > 0)
+                if (!FLAGS_SET(flags, PORTABLE_REATTACH) && r > 0)
                         return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS, "Unit file '%s' is active already, refusing.", item->name);
         }
 
@@ -1037,10 +1041,14 @@ static bool marker_matches_image(const char *marker, const char *name_or_path) {
         a = last_path_component(marker);
 
         if (image_name_is_valid(name_or_path)) {
-                const char *e;
+                const char *e, *underscore;
 
                 /* We shall match against an image name. In that case let's compare the last component, and optionally
-                 * allow either a suffix of ".raw" or a series of "/". */
+                 * allow either a suffix of ".raw" or a series of "/".
+                 * But allow matching on a different version of the same image, when a "_" is used as a separator. */
+                underscore = strchr(name_or_path, '_');
+                if (underscore)
+                        return strneq(a, name_or_path, underscore - name_or_path);
 
                 e = startswith(a, name_or_path);
                 if (!e)
@@ -1050,7 +1058,7 @@ static bool marker_matches_image(const char *marker, const char *name_or_path) {
                         e[strspn(e, "/")] == 0 ||
                         streq(e, ".raw");
         } else {
-                const char *b;
+                const char *b, *underscore;
                 size_t l;
 
                 /* We shall match against a path. Let's ignore any prefix here though, as often there are many ways to
@@ -1062,7 +1070,11 @@ static bool marker_matches_image(const char *marker, const char *name_or_path) {
                 if (strcspn(b, "/") != l)
                         return false;
 
-                return memcmp(a, b, l) == 0;
+                underscore = strchr(b, '_');
+                if (underscore)
+                        l = underscore - b;
+
+                return strneq(a, b, l);
         }
 }
 
@@ -1187,7 +1199,7 @@ int portable_detach(
                 r = unit_file_is_active(bus, de->d_name, error);
                 if (r < 0)
                         return r;
-                if (r > 0)
+                if (!FLAGS_SET(flags, PORTABLE_REATTACH) && r > 0)
                         return sd_bus_error_setf(error, BUS_ERROR_UNIT_EXISTS, "Unit file '%s' is active, can't detach.", de->d_name);
 
                 r = set_put_strdup(&unit_files, de->d_name);
@@ -1195,7 +1207,7 @@ int portable_detach(
                         return log_debug_errno(r, "Failed to add unit name '%s' to set: %m", de->d_name);
 
                 if (path_is_absolute(marker) &&
-                    !image_in_search_path(IMAGE_PORTABLE, marker)) {
+                    !image_in_search_path(IMAGE_PORTABLE, NULL, marker)) {
 
                         r = set_ensure_consume(&markers, &path_hash_ops_free, TAKE_PTR(marker));
                         if (r < 0)
@@ -1411,7 +1423,7 @@ static const char* const portable_change_type_table[_PORTABLE_CHANGE_TYPE_MAX] =
         [PORTABLE_WRITE] = "write",
 };
 
-DEFINE_STRING_TABLE_LOOKUP(portable_change_type, PortableChangeType);
+DEFINE_STRING_TABLE_LOOKUP(portable_change_type, int);
 
 static const char* const portable_state_table[_PORTABLE_STATE_MAX] = {
         [PORTABLE_DETACHED] = "detached",

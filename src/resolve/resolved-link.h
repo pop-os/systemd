@@ -23,6 +23,7 @@ struct LinkAddress {
 
         int family;
         union in_addr_union in_addr;
+        unsigned char prefixlen;
 
         unsigned char flags, scope;
 
@@ -91,7 +92,7 @@ void link_allocate_scopes(Link *l);
 
 DnsServer* link_set_dns_server(Link *l, DnsServer *s);
 DnsServer* link_get_dns_server(Link *l);
-void link_next_dns_server(Link *l);
+void link_next_dns_server(Link *l, DnsServer *if_current);
 
 DnssecMode link_get_dnssec_mode(Link *l);
 bool link_dnssec_supported(Link *l);

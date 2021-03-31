@@ -188,17 +188,17 @@ Home *home_free(Home *h) {
         user_record_unref(h->record);
         user_record_unref(h->secret);
 
-        h->worker_event_source = sd_event_source_unref(h->worker_event_source);
+        h->worker_event_source = sd_event_source_disable_unref(h->worker_event_source);
         safe_close(h->worker_stdout_fd);
         free(h->user_name);
         free(h->sysfs);
 
-        h->ref_event_source_please_suspend = sd_event_source_unref(h->ref_event_source_please_suspend);
-        h->ref_event_source_dont_suspend = sd_event_source_unref(h->ref_event_source_dont_suspend);
+        h->ref_event_source_please_suspend = sd_event_source_disable_unref(h->ref_event_source_please_suspend);
+        h->ref_event_source_dont_suspend = sd_event_source_disable_unref(h->ref_event_source_dont_suspend);
 
         h->pending_operations = ordered_set_free(h->pending_operations);
-        h->pending_event_source = sd_event_source_unref(h->pending_event_source);
-        h->deferred_change_event_source = sd_event_source_unref(h->deferred_change_event_source);
+        h->pending_event_source = sd_event_source_disable_unref(h->pending_event_source);
+        h->deferred_change_event_source = sd_event_source_disable_unref(h->deferred_change_event_source);
 
         h->current_operation = operation_unref(h->current_operation);
 
@@ -888,7 +888,7 @@ static int home_on_worker_process(sd_event_source *s, const siginfo_t *si, void 
         (void) hashmap_remove_value(h->manager->homes_by_worker_pid, PID_TO_PTR(h->worker_pid), h);
 
         h->worker_pid = 0;
-        h->worker_event_source = sd_event_source_unref(h->worker_event_source);
+        h->worker_event_source = sd_event_source_disable_unref(h->worker_event_source);
 
         if (si->si_code != CLD_EXITED) {
                 assert(IN_SET(si->si_code, CLD_KILLED, CLD_DUMPED));
@@ -1007,7 +1007,7 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
 
         r = safe_fork_full("(sd-homework)",
                            (int[]) { stdin_fd, stdout_fd }, 2,
-                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG, &pid);
+                           FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_LOG|FORK_REOPEN_LOG, &pid);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -1038,6 +1038,10 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
                                 _exit(EXIT_FAILURE);
                         }
 
+                r = setenv_systemd_exec_pid(true);
+                if (r < 0)
+                        log_warning_errno(r, "Failed to update $SYSTEMD_EXEC_PID, ignoring: %m");
+
                 r = rearrange_stdio(stdin_fd, stdout_fd, STDERR_FILENO);
                 if (r < 0) {
                         log_error_errno(r, "Failed to rearrange stdin/stdout/stderr: %m");
@@ -1063,7 +1067,7 @@ static int home_start_work(Home *h, const char *verb, UserRecord *hr, UserRecord
 
         r = hashmap_put(h->manager->homes_by_worker_pid, PID_TO_PTR(pid), h);
         if (r < 0) {
-                h->worker_event_source = sd_event_source_unref(h->worker_event_source);
+                h->worker_event_source = sd_event_source_disable_unref(h->worker_event_source);
                 return r;
         }
 
@@ -1834,7 +1838,9 @@ int home_killall(Home *h) {
         assert(h->uid > 0); /* We never should be UID 0 */
 
         /* Let's kill everything matching the specified UID */
-        r = safe_fork("(sd-killer)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_WAIT|FORK_LOG, NULL);
+        r = safe_fork("(sd-killer)",
+                      FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_DEATHSIG|FORK_WAIT|FORK_LOG|FORK_REOPEN_LOG,
+                      NULL);
         if (r < 0)
                 return r;
         if (r == 0) {
@@ -2656,11 +2662,7 @@ int home_schedule_operation(Home *h, Operation *o, sd_bus_error *error) {
                 if (ordered_set_size(h->pending_operations) >= PENDING_OPERATIONS_MAX)
                         return sd_bus_error_setf(error, BUS_ERROR_TOO_MANY_OPERATIONS, "Too many client operations requested");
 
-                r = ordered_set_ensure_allocated(&h->pending_operations, &operation_hash_ops);
-                if (r < 0)
-                        return r;
-
-                r = ordered_set_put(h->pending_operations, o);
+                r = ordered_set_ensure_put(&h->pending_operations, &operation_hash_ops, o);
                 if (r < 0)
                         return r;
 
@@ -2711,7 +2713,7 @@ static int home_get_image_path_seat(Home *h, char **ret) {
         if (!S_ISBLK(st.st_mode))
                 return -ENOTBLK;
 
-        r = sd_device_new_from_devnum(&d, 'b', st.st_rdev);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0)
                 return r;
 

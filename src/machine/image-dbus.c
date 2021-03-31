@@ -8,6 +8,7 @@
 #include "bus-label.h"
 #include "bus-polkit.h"
 #include "copy.h"
+#include "discover-image.h"
 #include "dissect-image.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -15,9 +16,9 @@
 #include "image-dbus.h"
 #include "io-util.h"
 #include "loop-util.h"
-#include "machine-image.h"
 #include "missing_capability.h"
 #include "mount-util.h"
+#include "os-util.h"
 #include "process-util.h"
 #include "raw-clone.h"
 #include "strv.h"
@@ -390,10 +391,6 @@ static int image_object_find(sd_bus *bus, const char *path, const char *interfac
                 return 1;
         }
 
-        r = hashmap_ensure_allocated(&m->image_cache, &image_hash_ops);
-        if (r < 0)
-                return r;
-
         if (!m->image_cache_defer_event) {
                 r = sd_event_add_defer(m->event, &m->image_cache_defer_event, image_flush_cache, m);
                 if (r < 0)
@@ -408,7 +405,7 @@ static int image_object_find(sd_bus *bus, const char *path, const char *interfac
         if (r < 0)
                 return r;
 
-        r = image_find(IMAGE_MACHINE, e, &image);
+        r = image_find(IMAGE_MACHINE, e, NULL, &image);
         if (r == -ENOENT)
                 return 0;
         if (r < 0)
@@ -416,7 +413,7 @@ static int image_object_find(sd_bus *bus, const char *path, const char *interfac
 
         image->userdata = m;
 
-        r = hashmap_put(m->image_cache, image->name, image);
+        r = hashmap_ensure_put(&m->image_cache, &image_hash_ops, image->name, image);
         if (r < 0) {
                 image_unref(image);
                 return r;
@@ -452,7 +449,7 @@ static int image_node_enumerator(sd_bus *bus, const char *path, void *userdata, 
         if (!images)
                 return -ENOMEM;
 
-        r = image_discover(IMAGE_MACHINE, images);
+        r = image_discover(IMAGE_MACHINE, NULL, images);
         if (r < 0)
                 return r;
 

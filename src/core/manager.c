@@ -80,6 +80,7 @@
 #include "transaction.h"
 #include "umask-util.h"
 #include "unit-name.h"
+#include "unit-serialize.h"
 #include "user-util.h"
 #include "virt.h"
 #include "watchdog.h"
@@ -510,7 +511,7 @@ static int manager_setup_signals(Manager *m) {
                         SIGCHLD,     /* Child died */
                         SIGTERM,     /* Reexecute daemon */
                         SIGHUP,      /* Reload configuration */
-                        SIGUSR1,     /* systemd/upstart: reconnect to D-Bus */
+                        SIGUSR1,     /* systemd: reconnect to D-Bus */
                         SIGUSR2,     /* systemd: dump status */
                         SIGINT,      /* Kernel sends us this on control-alt-del */
                         SIGWINCH,    /* Kernel sends us this on kbrequest (alt-arrowup) */
@@ -641,22 +642,14 @@ int manager_default_environment(Manager *m) {
                 /* Import locale variables LC_*= from configuration */
                 (void) locale_setup(&m->transient_environment);
         } else {
-                _cleanup_free_ char *k = NULL;
-
-                /* The user manager passes its own environment
-                 * along to its children, except for $PATH. */
+                /* The user manager passes its own environment along to its children, except for $PATH. */
                 m->transient_environment = strv_copy(environ);
                 if (!m->transient_environment)
                         return log_oom();
 
-                k = strdup("PATH=" DEFAULT_USER_PATH);
-                if (!k)
-                        return log_oom();
-
-                r = strv_env_replace(&m->transient_environment, k);
+                r = strv_env_replace_strdup(&m->transient_environment, "PATH=" DEFAULT_USER_PATH);
                 if (r < 0)
                         return log_oom();
-                TAKE_PTR(k);
         }
 
         sanitize_environment(m->transient_environment);
@@ -1187,18 +1180,15 @@ static void unit_gc_sweep(Unit *u, unsigned gc_marker) {
                         is_bad = false;
         }
 
-        if (u->refs_by_target) {
-                const UnitRef *ref;
+        const UnitRef *ref;
+        LIST_FOREACH(refs_by_target, ref, u->refs_by_target) {
+                unit_gc_sweep(ref->source, gc_marker);
 
-                LIST_FOREACH(refs_by_target, ref, u->refs_by_target) {
-                        unit_gc_sweep(ref->source, gc_marker);
+                if (ref->source->gc_marker == gc_marker + GC_OFFSET_GOOD)
+                        goto good;
 
-                        if (ref->source->gc_marker == gc_marker + GC_OFFSET_GOOD)
-                                goto good;
-
-                        if (ref->source->gc_marker != gc_marker + GC_OFFSET_BAD)
-                                is_bad = false;
-                }
+                if (ref->source->gc_marker != gc_marker + GC_OFFSET_BAD)
+                        is_bad = false;
         }
 
         if (is_bad)
@@ -2210,7 +2200,7 @@ static unsigned manager_dispatch_dbus_queue(Manager *m) {
         /* When we are reloading, let's not wait with generating signals, since we need to exit the manager as quickly
          * as we can. There's no point in throttling generation of signals in that case. */
         if (MANAGER_IS_RELOADING(m) || m->send_reloading_done || m->pending_reload_message)
-                budget = (unsigned) -1; /* infinite budget in this case */
+                budget = UINT_MAX; /* infinite budget in this case */
         else {
                 /* Anything to do at all? */
                 if (!m->dbus_unit_queue && !m->dbus_job_queue)
@@ -2242,7 +2232,7 @@ static unsigned manager_dispatch_dbus_queue(Manager *m) {
                 bus_unit_send_change_signal(u);
                 n++;
 
-                if (budget != (unsigned) -1)
+                if (budget != UINT_MAX)
                         budget--;
         }
 
@@ -2252,7 +2242,7 @@ static unsigned manager_dispatch_dbus_queue(Manager *m) {
                 bus_job_send_change_signal(j);
                 n++;
 
-                if (budget != (unsigned) -1)
+                if (budget != UINT_MAX)
                         budget--;
         }
 
@@ -3180,22 +3170,19 @@ static bool manager_timestamp_shall_serialize(ManagerTimestamp t) {
 #define DESTROY_IPC_FLAG (UINT32_C(1) << 31)
 
 static void manager_serialize_uid_refs_internal(
-                Manager *m,
                 FILE *f,
-                Hashmap **uid_refs,
+                Hashmap *uid_refs,
                 const char *field_name) {
 
         void *p, *k;
 
-        assert(m);
         assert(f);
-        assert(uid_refs);
         assert(field_name);
 
         /* Serialize the UID reference table. Or actually, just the IPC destruction flag of it, as
          * the actual counter of it is better rebuild after a reload/reexec. */
 
-        HASHMAP_FOREACH_KEY(p, k, *uid_refs) {
+        HASHMAP_FOREACH_KEY(p, k, uid_refs) {
                 uint32_t c;
                 uid_t uid;
 
@@ -3210,11 +3197,11 @@ static void manager_serialize_uid_refs_internal(
 }
 
 static void manager_serialize_uid_refs(Manager *m, FILE *f) {
-        manager_serialize_uid_refs_internal(m, f, &m->uid_refs, "destroy-ipc-uid");
+        manager_serialize_uid_refs_internal(f, m->uid_refs, "destroy-ipc-uid");
 }
 
 static void manager_serialize_gid_refs(Manager *m, FILE *f) {
-        manager_serialize_uid_refs_internal(m, f, &m->gid_refs, "destroy-ipc-gid");
+        manager_serialize_uid_refs_internal(f, m->gid_refs, "destroy-ipc-gid");
 }
 
 int manager_serialize(
@@ -3474,7 +3461,6 @@ void manager_retry_runtime_watchdog(Manager *m) {
 }
 
 static void manager_deserialize_uid_refs_one_internal(
-                Manager *m,
                 Hashmap** uid_refs,
                 const char *value) {
 
@@ -3482,18 +3468,16 @@ static void manager_deserialize_uid_refs_one_internal(
         uint32_t c;
         int r;
 
-        assert(m);
         assert(uid_refs);
         assert(value);
 
         r = parse_uid(value, &uid);
         if (r < 0 || uid == 0) {
-                log_debug("Unable to parse UID reference serialization: " UID_FMT, uid);
+                log_debug("Unable to parse UID/GID reference serialization: " UID_FMT, uid);
                 return;
         }
 
-        r = hashmap_ensure_allocated(uid_refs, &trivial_hash_ops);
-        if (r < 0) {
+        if (hashmap_ensure_allocated(uid_refs, &trivial_hash_ops) < 0) {
                 log_oom();
                 return;
         }
@@ -3506,17 +3490,17 @@ static void manager_deserialize_uid_refs_one_internal(
 
         r = hashmap_replace(*uid_refs, UID_TO_PTR(uid), UINT32_TO_PTR(c));
         if (r < 0) {
-                log_debug_errno(r, "Failed to add UID reference entry: %m");
+                log_debug_errno(r, "Failed to add UID/GID reference entry: %m");
                 return;
         }
 }
 
 static void manager_deserialize_uid_refs_one(Manager *m, const char *value) {
-        manager_deserialize_uid_refs_one_internal(m, &m->uid_refs, value);
+        manager_deserialize_uid_refs_one_internal(&m->uid_refs, value);
 }
 
 static void manager_deserialize_gid_refs_one(Manager *m, const char *value) {
-        manager_deserialize_uid_refs_one_internal(m, &m->gid_refs, value);
+        manager_deserialize_uid_refs_one_internal(&m->gid_refs, value);
 }
 
 int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
@@ -3842,6 +3826,9 @@ int manager_reload(Manager *m) {
         /* Clean up runtime objects no longer referenced */
         manager_vacuum(m);
 
+        /* Clean up deserialized tracked clients */
+        m->deserialized_subscribed = strv_free(m->deserialized_subscribed);
+
         /* Consider the reload process complete now. */
         assert(m->n_reloading > 0);
         m->n_reloading--;
@@ -4105,7 +4092,8 @@ static int manager_run_environment_generators(Manager *m) {
 
         RUN_WITH_UMASK(0022)
                 r = execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC, gather_environment,
-                                        args, NULL, m->transient_environment, EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS);
+                                        args, NULL, m->transient_environment,
+                                        EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS | EXEC_DIR_SET_SYSTEMD_EXEC_PID);
         return r;
 }
 
@@ -4140,7 +4128,8 @@ static int manager_run_generators(Manager *m) {
 
         RUN_WITH_UMASK(0022)
                 (void) execute_directories((const char* const*) paths, DEFAULT_TIMEOUT_USEC, NULL, NULL,
-                                           (char**) argv, m->transient_environment, EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS);
+                                           (char**) argv, m->transient_environment,
+                                           EXEC_DIR_PARALLEL | EXEC_DIR_IGNORE_ERRORS | EXEC_DIR_SET_SYSTEMD_EXEC_PID);
 
         r = 0;
 
@@ -4585,16 +4574,13 @@ ManagerState manager_state(Manager *m) {
 }
 
 static void manager_unref_uid_internal(
-                Manager *m,
-                Hashmap **uid_refs,
+                Hashmap *uid_refs,
                 uid_t uid,
                 bool destroy_now,
                 int (*_clean_ipc)(uid_t uid)) {
 
         uint32_t c, n;
 
-        assert(m);
-        assert(uid_refs);
         assert(uid_is_valid(uid));
         assert(_clean_ipc);
 
@@ -4612,14 +4598,14 @@ static void manager_unref_uid_internal(
         if (uid == 0) /* We don't keep track of root, and will never destroy it */
                 return;
 
-        c = PTR_TO_UINT32(hashmap_get(*uid_refs, UID_TO_PTR(uid)));
+        c = PTR_TO_UINT32(hashmap_get(uid_refs, UID_TO_PTR(uid)));
 
         n = c & ~DESTROY_IPC_FLAG;
         assert(n > 0);
         n--;
 
         if (destroy_now && n == 0) {
-                hashmap_remove(*uid_refs, UID_TO_PTR(uid));
+                hashmap_remove(uid_refs, UID_TO_PTR(uid));
 
                 if (c & DESTROY_IPC_FLAG) {
                         log_debug("%s " UID_FMT " is no longer referenced, cleaning up its IPC.",
@@ -4629,20 +4615,19 @@ static void manager_unref_uid_internal(
                 }
         } else {
                 c = n | (c & DESTROY_IPC_FLAG);
-                assert_se(hashmap_update(*uid_refs, UID_TO_PTR(uid), UINT32_TO_PTR(c)) >= 0);
+                assert_se(hashmap_update(uid_refs, UID_TO_PTR(uid), UINT32_TO_PTR(c)) >= 0);
         }
 }
 
 void manager_unref_uid(Manager *m, uid_t uid, bool destroy_now) {
-        manager_unref_uid_internal(m, &m->uid_refs, uid, destroy_now, clean_ipc_by_uid);
+        manager_unref_uid_internal(m->uid_refs, uid, destroy_now, clean_ipc_by_uid);
 }
 
 void manager_unref_gid(Manager *m, gid_t gid, bool destroy_now) {
-        manager_unref_uid_internal(m, &m->gid_refs, (uid_t) gid, destroy_now, clean_ipc_by_gid);
+        manager_unref_uid_internal(m->gid_refs, (uid_t) gid, destroy_now, clean_ipc_by_gid);
 }
 
 static int manager_ref_uid_internal(
-                Manager *m,
                 Hashmap **uid_refs,
                 uid_t uid,
                 bool clean_ipc) {
@@ -4650,7 +4635,6 @@ static int manager_ref_uid_internal(
         uint32_t c, n;
         int r;
 
-        assert(m);
         assert(uid_refs);
         assert(uid_is_valid(uid));
 
@@ -4681,25 +4665,22 @@ static int manager_ref_uid_internal(
 }
 
 int manager_ref_uid(Manager *m, uid_t uid, bool clean_ipc) {
-        return manager_ref_uid_internal(m, &m->uid_refs, uid, clean_ipc);
+        return manager_ref_uid_internal(&m->uid_refs, uid, clean_ipc);
 }
 
 int manager_ref_gid(Manager *m, gid_t gid, bool clean_ipc) {
-        return manager_ref_uid_internal(m, &m->gid_refs, (uid_t) gid, clean_ipc);
+        return manager_ref_uid_internal(&m->gid_refs, (uid_t) gid, clean_ipc);
 }
 
 static void manager_vacuum_uid_refs_internal(
-                Manager *m,
-                Hashmap **uid_refs,
+                Hashmap *uid_refs,
                 int (*_clean_ipc)(uid_t uid)) {
 
         void *p, *k;
 
-        assert(m);
-        assert(uid_refs);
         assert(_clean_ipc);
 
-        HASHMAP_FOREACH_KEY(p, k, *uid_refs) {
+        HASHMAP_FOREACH_KEY(p, k, uid_refs) {
                 uint32_t c, n;
                 uid_t uid;
 
@@ -4717,16 +4698,16 @@ static void manager_vacuum_uid_refs_internal(
                         (void) _clean_ipc(uid);
                 }
 
-                assert_se(hashmap_remove(*uid_refs, k) == p);
+                assert_se(hashmap_remove(uid_refs, k) == p);
         }
 }
 
 static void manager_vacuum_uid_refs(Manager *m) {
-        manager_vacuum_uid_refs_internal(m, &m->uid_refs, clean_ipc_by_uid);
+        manager_vacuum_uid_refs_internal(m->uid_refs, clean_ipc_by_uid);
 }
 
 static void manager_vacuum_gid_refs(Manager *m) {
-        manager_vacuum_uid_refs_internal(m, &m->gid_refs, clean_ipc_by_gid);
+        manager_vacuum_uid_refs_internal(m->gid_refs, clean_ipc_by_gid);
 }
 
 static void manager_vacuum(Manager *m) {
@@ -4818,6 +4799,7 @@ char *manager_taint_string(Manager *m) {
 
         buf = new(char, sizeof("split-usr:"
                                "cgroups-missing:"
+                               "cgrousv1:"
                                "local-hwclock:"
                                "var-run-bad:"
                                "overflowuid-not-65534:"
@@ -4833,6 +4815,9 @@ char *manager_taint_string(Manager *m) {
 
         if (access("/proc/cgroups", F_OK) < 0)
                 e = stpcpy(e, "cgroups-missing:");
+
+        if (cg_all_unified() == 0)
+                e = stpcpy(e, "cgroupsv1:");
 
         if (clock_is_localtime(NULL) > 0)
                 e = stpcpy(e, "local-hwclock:");

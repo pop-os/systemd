@@ -1,12 +1,4 @@
-/* SPDX-License-Identifier: LGPL-2.1-or-later
- *
- * libudev - interface to udev device information
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- */
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <errno.h>
 #include <poll.h>
@@ -44,10 +36,10 @@ struct udev_ctrl {
         int sock_connect;
         union sockaddr_union saddr;
         socklen_t addrlen;
-        bool bound:1;
-        bool cleanup_socket:1;
-        bool connected:1;
-        bool maybe_disconnected:1;
+        bool bound;
+        bool cleanup_socket;
+        bool connected;
+        bool maybe_disconnected;
         sd_event *event;
         sd_event_source *event_source;
         sd_event_source *event_source_connect;
@@ -172,9 +164,10 @@ static void udev_ctrl_disconnect_and_listen_again(struct udev_ctrl *uctrl) {
         udev_ctrl_disconnect(uctrl);
         udev_ctrl_unref(uctrl);
         (void) sd_event_source_set_enabled(uctrl->event_source, SD_EVENT_ON);
+        /* We don't return NULL here because uctrl is not freed */
 }
 
-DEFINE_TRIVIAL_CLEANUP_FUNC(struct udev_ctrl *, udev_ctrl_disconnect_and_listen_again);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct udev_ctrl*, udev_ctrl_disconnect_and_listen_again, NULL);
 
 static int udev_ctrl_connection_event_handler(sd_event_source *s, int fd, uint32_t revents, void *userdata) {
         _cleanup_(udev_ctrl_disconnect_and_listen_againp) struct udev_ctrl *uctrl = NULL;

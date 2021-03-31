@@ -5,7 +5,6 @@
 #include <fnmatch.h>
 #include <getopt.h>
 #include <linux/fs.h>
-#include <poll.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -30,7 +29,6 @@
 #include "catalog.h"
 #include "chattr-util.h"
 #include "def.h"
-#include "device-private.h"
 #include "dissect-image.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -55,6 +53,7 @@
 #include "mountpoint-util.h"
 #include "nulstr-util.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pcre2-dlopen.h"
@@ -165,8 +164,8 @@ typedef struct BootId {
 } BootId;
 
 #if HAVE_PCRE2
-DEFINE_TRIVIAL_CLEANUP_FUNC(pcre2_match_data*, sym_pcre2_match_data_free);
-DEFINE_TRIVIAL_CLEANUP_FUNC(pcre2_code*, sym_pcre2_code_free);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(pcre2_match_data*, sym_pcre2_match_data_free, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(pcre2_code*, sym_pcre2_code_free, NULL);
 
 static int pattern_compile(const char *pattern, unsigned flags, pcre2_code **out) {
         int errorcode, r;
@@ -206,7 +205,7 @@ static int add_matches_for_device(sd_journal *j, const char *devpath) {
         if (stat(devpath, &st) < 0)
                 return log_error_errno(errno, "Couldn't stat file: %m");
 
-        r = device_new_from_stat_rdev(&device, &st);
+        r = sd_device_new_from_stat_rdev(&device, &st);
         if (r < 0)
                 return log_error_errno(r, "Failed to get device from devnum %u:%u: %m", major(st.st_rdev), minor(st.st_rdev));
 
@@ -402,12 +401,13 @@ static int help(void) {
                "     --dump-catalog          Show entries in the message catalog\n"
                "     --update-catalog        Update the message catalog database\n"
                "     --setup-keys            Generate a new FSS key pair\n"
-               "\nSee the %2$s for details.\n"
-               , program_invocation_short_name
-               , link
-               , ansi_underline(), ansi_normal()
-               , ansi_highlight(), ansi_normal()
-        );
+               "\nSee the %2$s for details.\n",
+               program_invocation_short_name,
+               link,
+               ansi_underline(),
+               ansi_normal(),
+               ansi_highlight(),
+               ansi_normal());
 
         return 0;
 }
@@ -564,7 +564,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                         arg_output = output_mode_from_string(optarg);
                         if (arg_output < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown output format '%s'.", optarg);
+                                return log_error_errno(arg_output, "Unknown output format '%s'.", optarg);
 
                         if (IN_SET(arg_output, OUTPUT_EXPORT, OUTPUT_JSON, OUTPUT_JSON_PRETTY, OUTPUT_JSON_SSE, OUTPUT_JSON_SEQ, OUTPUT_CAT))
                                 arg_quiet = true;
@@ -718,13 +718,13 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_ROOT:
-                        r = parse_path_argument_and_warn(optarg, /* suppress_root= */ true, &arg_root);
+                        r = parse_path_argument(optarg, /* suppress_root= */ true, &arg_root);
                         if (r < 0)
                                 return r;
                         break;
 
                 case ARG_IMAGE:
-                        r = parse_path_argument_and_warn(optarg, /* suppress_root= */ false, &arg_image);
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_image);
                         if (r < 0)
                                 return r;
                         break;
@@ -834,7 +834,7 @@ static int parse_argv(int argc, char *argv[]) {
                                 to = log_level_from_string(dots + 2);
 
                                 if (from < 0 || to < 0)
-                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        return log_error_errno(from < 0 ? from : to,
                                                                "Failed to parse log level range %s", optarg);
 
                                 arg_priorities = 0;
@@ -852,8 +852,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                                 p = log_level_from_string(optarg);
                                 if (p < 0)
-                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                               "Unknown log level %s", optarg);
+                                        return log_error_errno(p, "Unknown log level %s", optarg);
 
                                 arg_priorities = 0;
 
@@ -884,8 +883,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                                 num = log_facility_unshifted_from_string(fac);
                                 if (num < 0)
-                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                               "Bad --facility= argument \"%s\".", fac);
+                                        return log_error_errno(num, "Bad --facility= argument \"%s\".", fac);
 
                                 if (set_ensure_put(&arg_facilities, NULL, INT_TO_PTR(num)) < 0)
                                         return log_oom();
@@ -2096,8 +2094,6 @@ static int wait_for_change(sd_journal *j, int poll_fd) {
                 { .fd = poll_fd, .events = POLLIN },
                 { .fd = STDOUT_FILENO },
         };
-
-        struct timespec ts;
         usec_t timeout;
         int r;
 
@@ -2111,20 +2107,15 @@ static int wait_for_change(sd_journal *j, int poll_fd) {
         if (r < 0)
                 return log_error_errno(r, "Failed to determine journal waiting time: %m");
 
-        if (ppoll(pollfds, ELEMENTSOF(pollfds),
-                  timeout == USEC_INFINITY ? NULL : timespec_store(&ts, timeout), NULL) < 0) {
-                if (errno == EINTR)
-                        return 0;
+        r = ppoll_usec(pollfds, ELEMENTSOF(pollfds), timeout);
+        if (r == -EINTR)
+                return 0;
+        if (r < 0)
+                return log_error_errno(r, "Couldn't wait for journal event: %m");
 
-                return log_error_errno(errno, "Couldn't wait for journal event: %m");
-        }
-
-        if (pollfds[1].revents & (POLLHUP|POLLERR|POLLNVAL)) /* STDOUT has been closed? */
+        if (pollfds[1].revents & (POLLHUP|POLLERR)) /* STDOUT has been closed? */
                 return log_debug_errno(SYNTHETIC_ERRNO(ECANCELED),
                                        "Standard output has been closed.");
-
-        if (pollfds[0].revents & POLLNVAL)
-                return log_debug_errno(SYNTHETIC_ERRNO(EBADF), "Change fd closed?");
 
         r = sd_journal_process(j);
         if (r < 0)
@@ -2144,7 +2135,7 @@ int main(int argc, char *argv[]) {
         int n_shown = 0, r, poll_fd = -1;
 
         setlocale(LC_ALL, "");
-        log_setup_cli();
+        log_setup();
 
         /* Increase max number of open files if we can, we might needs this when browsing journal files, which might be
          * split up into many files. */

@@ -16,11 +16,13 @@
 #include "fileio.h"
 #include "limits-util.h"
 #include "path-util.h"
+#include "percent-util.h"
 
 BUS_DEFINE_PROPERTY_GET(bus_property_get_tasks_max, "t", TasksMax, tasks_max_resolve);
 
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_cgroup_device_policy, cgroup_device_policy, CGroupDevicePolicy);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_managed_oom_mode, managed_oom_mode, ManagedOOMMode);
+static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_managed_oom_preference, managed_oom_preference, ManagedOOMPreference);
 
 static int property_get_cgroup_mask(
                 sd_bus *bus,
@@ -32,7 +34,6 @@ static int property_get_cgroup_mask(
                 sd_bus_error *error) {
 
         CGroupMask *mask = userdata;
-        CGroupController ctrl;
         int r;
 
         assert(bus);
@@ -42,7 +43,7 @@ static int property_get_cgroup_mask(
         if (r < 0)
                 return r;
 
-        for (ctrl = 0; ctrl < _CGROUP_CONTROLLER_MAX; ctrl++) {
+        for (CGroupController ctrl = 0; ctrl < _CGROUP_CONTROLLER_MAX; ctrl++) {
                 if ((*mask & CGROUP_CONTROLLER_TO_MASK(ctrl)) == 0)
                         continue;
 
@@ -395,7 +396,8 @@ const sd_bus_vtable bus_cgroup_vtable[] = {
         SD_BUS_PROPERTY("DisableControllers", "as", property_get_cgroup_mask, offsetof(CGroupContext, disable_controllers), 0),
         SD_BUS_PROPERTY("ManagedOOMSwap", "s", property_get_managed_oom_mode, offsetof(CGroupContext, moom_swap), 0),
         SD_BUS_PROPERTY("ManagedOOMMemoryPressure", "s", property_get_managed_oom_mode, offsetof(CGroupContext, moom_mem_pressure), 0),
-        SD_BUS_PROPERTY("ManagedOOMMemoryPressureLimitPercent", "s", bus_property_get_percent, offsetof(CGroupContext, moom_mem_pressure_limit), 0),
+        SD_BUS_PROPERTY("ManagedOOMMemoryPressureLimit", "u", NULL, offsetof(CGroupContext, moom_mem_pressure_limit), 0),
+        SD_BUS_PROPERTY("ManagedOOMPreference", "s", property_get_managed_oom_preference, offsetof(CGroupContext, moom_preference), 0),
         SD_BUS_VTABLE_END
 };
 
@@ -703,10 +705,10 @@ static int bus_cgroup_set_boolean(
                         /* Prepare to chop off suffix */                \
                         assert_se(endswith(name, "Scale"));             \
                                                                         \
-                        uint32_t scaled = DIV_ROUND_UP((uint64_t) raw * 1000, (uint64_t) UINT32_MAX); \
-                        unit_write_settingf(u, flags, name, "%.*s=%" PRIu32 ".%" PRIu32 "%%", \
+                        int scaled = UINT32_SCALE_TO_PERMYRIAD(raw);    \
+                        unit_write_settingf(u, flags, name, "%.*s=" PERMYRIAD_AS_PERCENT_FORMAT_STR, \
                                             (int)(strlen(name) - strlen("Scale")), name, \
-                                            scaled / 10, scaled % 10);  \
+                                            PERMYRIAD_AS_PERCENT_FORMAT_VAL(scaled)); \
                 }                                                       \
                                                                         \
                 return 1;                                               \
@@ -1453,7 +1455,7 @@ int bus_cgroup_set_property(
 
                 p = cgroup_device_policy_from_string(policy);
                 if (p < 0)
-                        return -EINVAL;
+                        return p;
 
                 if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
                         c->device_policy = p;
@@ -1697,16 +1699,45 @@ int bus_cgroup_set_property(
                 return 1;
         }
 
-        if (streq(name, "ManagedOOMMemoryPressureLimitPercent")) {
+        if (streq(name, "ManagedOOMMemoryPressureLimit")) {
+                uint32_t v;
+
                 if (!UNIT_VTABLE(u)->can_set_managed_oom)
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Cannot set %s for this unit type", name);
 
-                r = bus_set_transient_percent(u, name, &c->moom_mem_pressure_limit, message, flags, error);
+                r = sd_bus_message_read(message, "u", &v);
                 if (r < 0)
                         return r;
 
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        c->moom_mem_pressure_limit = v;
+                        unit_write_settingf(u, flags, name,
+                                            "ManagedOOMMemoryPressureLimit=" PERMYRIAD_AS_PERCENT_FORMAT_STR,
+                                            PERMYRIAD_AS_PERCENT_FORMAT_VAL(UINT32_SCALE_TO_PERMYRIAD(v)));
+                }
+
                 if (c->moom_mem_pressure == MANAGED_OOM_KILL)
                         (void) manager_varlink_send_managed_oom_update(u);
+
+                return 1;
+        }
+
+        if (streq(name, "ManagedOOMPreference")) {
+                ManagedOOMPreference p;
+                const char *pref;
+
+                r = sd_bus_message_read(message, "s", &pref);
+                if (r < 0)
+                        return r;
+
+                p = managed_oom_preference_from_string(pref);
+                if (p < 0)
+                        return p;
+
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        c->moom_preference = p;
+                        unit_write_settingf(u, flags, name, "ManagedOOMPreference=%s", pref);
+                }
 
                 return 1;
         }

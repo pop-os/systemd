@@ -37,7 +37,7 @@ static bool stderr_redirected = false;
 _noreturn_ static void pager_fallback(void) {
         int r;
 
-        r = copy_bytes(STDIN_FILENO, STDOUT_FILENO, (uint64_t) -1, 0);
+        r = copy_bytes(STDIN_FILENO, STDOUT_FILENO, UINT64_MAX, 0);
         if (r < 0) {
                 log_error_errno(r, "Internal pager failed: %m");
                 _exit(EXIT_FAILURE);
@@ -262,7 +262,7 @@ int pager_open(PagerFlags flags) {
         if (r < 0)
                 return r;
         if (r > 0)
-                (void) ignore_signals(SIGINT, -1);
+                (void) ignore_signals(SIGINT);
 
         return 1;
 }

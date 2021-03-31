@@ -75,11 +75,7 @@ static int prefix_new_static(Network *network, const char *filename, unsigned se
         prefix->network = network;
         prefix->section = TAKE_PTR(n);
 
-        r = hashmap_ensure_allocated(&network->prefixes_by_section, &network_config_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(network->prefixes_by_section, prefix->section, prefix);
+        r = hashmap_ensure_put(&network->prefixes_by_section, &network_config_hash_ops, prefix->section, prefix);
         if (r < 0)
                 return r;
 
@@ -147,11 +143,7 @@ static int route_prefix_new_static(Network *network, const char *filename, unsig
         prefix->network = network;
         prefix->section = TAKE_PTR(n);
 
-        r = hashmap_ensure_allocated(&network->route_prefixes_by_section, &network_config_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(network->route_prefixes_by_section, prefix->section, prefix);
+        r = hashmap_ensure_put(&network->route_prefixes_by_section, &network_config_hash_ops, prefix->section, prefix);
         if (r < 0)
                 return r;
 
@@ -533,8 +525,8 @@ static int radv_set_dns(Link *link, Link *uplink) {
 
                 p = dns;
                 for (size_t i = 0; i < link->network->n_router_dns; i++)
-                        if (IN6_IS_ADDR_UNSPECIFIED(&link->network->router_dns[i])) {
-                                if (!IN6_IS_ADDR_UNSPECIFIED(&link->ipv6ll_address))
+                        if (in6_addr_is_null(&link->network->router_dns[i])) {
+                                if (in6_addr_is_set(&link->ipv6ll_address))
                                         *(p++) = link->ipv6ll_address;
                         } else
                                 *(p++) = link->network->router_dns[i];
@@ -956,7 +948,7 @@ int config_parse_router_prefix_delegation(
         /* For backward compatibility */
         val = radv_prefix_delegation_from_string(rvalue);
         if (val < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                log_syntax(unit, LOG_WARNING, filename, line, val,
                            "Invalid %s= setting, ignoring assignment: %s", lvalue, rvalue);
                 return 0;
         }

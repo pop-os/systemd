@@ -7,6 +7,8 @@ Bugfixes:
 * userdbctl: "Password OK: yes" is shown even when there are no passwords
   or the password is locked.
 
+* Get rid of nftw(). We should refuse to use such useless APIs on principle.
+
 External:
 
 * Fedora: add an rpmlint check that verifies that all unit files in the RPM are listed in %systemd_post macros.
@@ -20,8 +22,139 @@ Janitorial Clean-ups:
 
 Features:
 
+* maybe add a tool that displays most recent journal logs as QR code to scan
+  off screen and run it automatically on boot failures, emergency logs and
+  such. Use DRM APIs directly, see
+  https://github.com/dvdhrm/docs/blob/master/drm-howto/modeset.c for an example
+  for doing that.
+
+* pass systemd-detect-virt result to generators as env var. Modifying behaviour
+  based on whether we are virtualized or not is a pretty common thing, hence
+  maybe just pass that info along for free in an env var. We cache the result
+  anyway, so it's basically free.
+
+* systemd-repart: read LUKS encryption key from $CREDENTIALS_PATH
+
+* introduce /dev/disk/root/* symlinks that allow referencing partitions on the
+  disk the rootfs is on in a reasonably secure way.
+
+* systemd-repart: add a switch to factory reset the partition table without
+  immediately applying the new configuration again. i.e. --factory-reset=leave
+  or so. (this is useful to factory reset an image, then putting it into
+  another machine, ensuring that luks key is generated on new machine, not old)
+
+* move logind udev rules to top-level rule.d/ directory
+
+* move multiseat vid/pid matches from logind udev rule to hwdb
+
+* nspawn: default to 1:1 userns
+
+* Provide a reasonably bespoke solution for mounting host $HOME directories
+  into containers:
+  • add new option --mount-user=$USER for mounting $HOME of the user into the
+    container at the same place
+  • check /etc/passwd for UID or user name clashes. If UID clash pick a different
+    UID in container, and map via userns. If user name clash, refuse. If
+    matching user already exists use that.
+  • otherwise: write user record of specified user into /run/host/passwd or so
+  • in nss-systemd pick up user record from there and make available to system
+  With all that in place if nspawn host and container payload are up-to-date
+  enough we have a very simple way to make host users available in containers.
+
+* systemd-sysusers: pick up passwords from credentials logic, so that users can
+  easily set root user pw. enable cred inheriting for root user from PID 1, so
+  that for containers we can configure the root pw automatically via nspawn's
+  --set-credential= switch. (Also do this for systemd-firstboot)
+
+* whenever we receive fds via SCM_RIGHTS make sure none got dropped due to the
+  reception limit the kernel silently enforces.
+
+* add an Open= setting to service unit files that can open arbitrary file
+  system paths at service startup time and pass them to the service process via
+  our usual socket activation protocol. If passed path refers to AF_UNIX
+  socket: connect() to it.
+
+* add a ConnectSocket= setting to service unit files, that may reference a
+  socket unit, and which will connect to the socket defined therein, and pass
+  the resulting fd to the service program via socket activation proto.
+
+* Add a concept of ListenStream=anonymous to socket units: listen on a socket
+  that is deleted in the fs. Usecase would be with ConnectSocket= above.
+
+* Hook up journald's FSS logic with TPM2: seal the verification disk by
+  time-based policy, so that the verification key can remain on host and ve
+  validated via TPM.
+
+* sd-boot: define a drop-in dir in the ESP that may contain X.509
+  certificates. If the firmware is detected to be in setup mode, automatically
+  enroll them as PK/KEK/db, turn off setup mode and proceed. Optionally,
+  instead of auto-enrolling them add them to the sd-boot menu, giving the user
+  the option to manually enroll them, after selecting the menu entry. This way,
+  installer images can just drop the certfiicates in the ESP, and on first boot
+  can easily enroll the keys without ever booting up.
+
+* efi stub: optionally, load initrd from disk as a separate file, HMAC check it
+  with key from TPM, bound to PCR, refusing if failing. This would then allow
+  traditional distros that generate initrds locally to secure them with TPM:
+  after generating the initrd, do the HMAC calculation, put result in initrd
+  filename, done. This would then bind the validity of the initrd to the local
+  host, and used kernel, and means people cannot change initrd or kernel
+  without booting the kernel + initrd.
+
+* importd: add ability download images for portabled + sysext
+
+* importd: support image signature verification with PKCS#7 + OpenBSD signify
+  logic, as alternative to crummy gpg
+
+* sd-boot: add service that automatically runs "bootctl update" on every boot,
+  in a graceful way, so that updated /usr trees automatically propagate into
+  updated boot loaders on reboot.
+
+* sysext: optionally, if the merged trees allow it use bind mounts instead of
+  overlayfs
+
+* nspawn: add support for sysext extensions, too. i.e. a new --extension=
+  switch that takes one or more arguments, and applies the extensions already
+  during startup.
+
+* add "systemd-analyze debug" + AttachDebugger= in unit files: The former
+  specifies a command to execute; the latter specifies that an already running
+  "systemd-analyze debug" instance shall be contacted and execution paused
+  until it gives an OK. That way, tools like gdb or strace can be safely be
+  invoked on processes forked off PID 1.
+
+* expose MS_NOSYMFOLLOW in various places
+
+* tpm2: support a PIN policy, i.e. allowing windows-style short authentication
+  passwords by using the TPM2 to enforce ratelimiting and such, use for
+  cryptsetup and homed
+
+* Add concept for upgrading TPM2 enrollments, maybe a new switch
+  --pcrs=4:<hash> or so, i.e. select a PCR to include in the hash, and then
+  override its hash
+
+* homed: store PKCS#11 + FIDO2 token info in LUKS2 header, compatible with
+  systemd-cryptsetup, so that it can unlock homed volumes
+
+* cryptenroll: politely refuse enrolling new keys to homed volumes, since we
+  we cannot update identity info
+
+* TPM2: auto-reenroll in cryptsetup, as fallback for hosed firmware upgrades
+  and such
+
+* cryptsetup: if only recovery keys are registered and no regular passphrases,
+  ask user for "recovery key", not "passphrase"
+
+* cyptsetup: add option for automatically removing empty password slot on boot
+
 * cryptsetup: optionally, when run during boot-up and password is never
-  entered, and we are on AC power (or so), power off machine again
+  entered, and we are on battery power (or so), power off machine again
+
+* cryptsetup: when FIDO2/PKCS#11/TPM2 token/chip didn't show up after some
+  time, abort the attempt, fallback to asking for pw
+
+* cryptsetup: when waiting for FIDO2/PKCS#11 token, tell plymouth that, and
+  allow plymouth to abort the waiting and enter pw instead
 
 * when configuring loopback netif, and it fails due to EPERM, eat up error if
   it happens to be set up alright already.
@@ -76,9 +209,6 @@ Features:
 
 * make use of new glibc 2.32 APIs sigabbrev_np() and strerrorname_np().
 
-* cryptsetup: if keyfile specified in crypttab is AF_UNIX socket, connect to it
-  and read from it (like we do elsewhere with READ_FULL_FILE_CONNECT_SOCKET)
-
 * when main nspawn supervisor process gets suspended due to SIGSTOP/SIGTTOU or
   so, freeze the payload too.
 
@@ -107,16 +237,10 @@ Features:
   client UID, so that synthetic hash table collisions can slow down a specific
   user's journal stream down but not the others.
 
-* add "throttling" to sd-event event sources: optionally, when we wake up too
-  often for one, let's turn it off entirely for a while. Use that for the
-  /proc/self/mountinfo logic.
-
 * nspawn: support time namespaces
 
 * systemd-firstboot: make sure to always use chase_symlinks() before
   reading/writing files
-
-* add ConditionSecurity=tpm2
 
 * Remove any support for booting without /usr pre-mounted in the initrd entirely.
   Update INITRD_INTERFACE.md accordingly.
@@ -139,10 +263,6 @@ Features:
       since they are so basic and our defaults)
   o move into separate libsystemd-shared-iptables.so .so
     - iptables-libs (only used by nspawn + networkd)
-
-* seccomp: when SystemCallArchitectures=native is set then don't install any
-  other seccomp filters for any of the other archs, in order to reduce the
-  number of seccomp filters we install needlessly.
 
 * seccomp: maybe use seccomp_merge() to merge our filters per-arch if we can.
   Apparently kernel performance is much better with fewer larger seccomp
@@ -207,9 +327,6 @@ Features:
   thus allows defining OS images which can be A/B updated and we default to the
   newest version automatically, both in nspawn and in sd-boot
 
-* cryptsetup: support FIDO2 tokens for deriving keys (i.e. do what homed can do
-  also in plain cryptsetup)
-
 * systemd-gpt-auto should probably set x-systemd.growfs on the mounts it
   creates
 
@@ -247,12 +364,6 @@ Features:
 
 * add growvol and makevol options for /etc/crypttab, similar to
   x-systemd.growfs and x-systemd-makefs.
-
-* hook up the TPM to /etc/crypttab, with a new option that is similar to the
-  new PKCS#11 option in crypttab, and allows unlocking a LUKS volume via a key
-  unsealed from the TPM. Optionally, if TPM is not available fall back to
-  TPM-less mode, and set up linear DM mapping instead (inspired by kpartx), so
-  that the device paths stay the same, regardless if crypto is used or not.
 
 * systemd-repart: by default generate minimized partition tables (i.e. tables
   that only cover the space actually used, excluding any free space at the
@@ -304,7 +415,7 @@ Features:
   initrd had set.
 
 * sd-event: add native support for P_ALL waitid() watching, then move PID 1 to
-  it fo reaping assigned but unknown children. This needs to some special care
+  it for reaping assigned but unknown children. This needs to some special care
   to operate somewhat sensibly in light of priorities: P_ALL will return
   arbitrary processes, regardless of the priority we want to watch them with,
   hence on each event loop iteration check all processes which we shall watch
@@ -800,9 +911,6 @@ Features:
   picked up by systemd unless they contain a medium. This would mirror
   the behaviour we already have for CD drives.
 
-* networkd/udev: implement SR_IOV configuration in .link files:
-  http://lists.freedesktop.org/archives/systemd-devel/2015-January/027451.html
-
 * hostnamectl: show root image uuid
 
 * Find a solution for SMACK capabilities stuff:
@@ -1017,7 +1125,7 @@ Features:
   - logind: when the power button is pressed short, just popup a
     logout dialog. If it is pressed for 1s, do the usual
     shutdown. Inspiration are Macs here.
-  - expose "Locked" property on logind sesison objects
+  - expose "Locked" property on logind session objects
   - maybe allow configuration of the StopTimeout for session scopes
   - rename session scope so that it includes the UID. THat way
     the session scope can be arranged freely in slices and we don't have
@@ -1210,6 +1318,7 @@ Features:
   - creating new directories/subvolumes/fifos/device nodes
     should not follow symlinks. None of the other adjustment or creation
     calls follow symlinks.
+  - add --test mode
 
 * make sure systemd-ask-password-wall does not shutdown systemd-ask-password-console too early
 
@@ -1311,7 +1420,6 @@ Features:
      for all routes to it. possibly a second default for DHCP routes.
    - allow Name= to be specified repeatedly in the [Match] section. Maybe also
      support Name=foo*|bar*|baz ?
-   - duplicate address check for static IPs (like ARPCHECK in network-scripts)
    - whenever uplink info changes, make DHCP server send out FORCERENEW
 
 * Figure out how to do unittests of networkd's state serialization

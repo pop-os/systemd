@@ -2,8 +2,10 @@
 #pragma once
 
 #include "sd-event.h"
+#include "in-addr-util.h"
 
 typedef struct DnsTransaction DnsTransaction;
+typedef struct DnsTransactionFinder DnsTransactionFinder;
 typedef enum DnsTransactionState DnsTransactionState;
 typedef enum DnsTransactionSource DnsTransactionSource;
 
@@ -30,8 +32,10 @@ enum DnsTransactionState {
         DNS_TRANSACTION_RR_TYPE_UNSUPPORTED,
         DNS_TRANSACTION_NETWORK_DOWN,
         DNS_TRANSACTION_NOT_FOUND, /* like NXDOMAIN, but when LLMNR/TCP connections fail */
+        DNS_TRANSACTION_NO_SOURCE, /* All suitable DnsTransactionSource turned off */
+        DNS_TRANSACTION_STUB_LOOP,
         _DNS_TRANSACTION_STATE_MAX,
-        _DNS_TRANSACTION_STATE_INVALID = -1
+        _DNS_TRANSACTION_STATE_INVALID = -EINVAL,
 };
 
 #define DNS_TRANSACTION_IS_LIVE(state) IN_SET((state), DNS_TRANSACTION_NULL, DNS_TRANSACTION_PENDING, DNS_TRANSACTION_VALIDATING)
@@ -42,13 +46,16 @@ enum DnsTransactionSource {
         DNS_TRANSACTION_ZONE,
         DNS_TRANSACTION_TRUST_ANCHOR,
         _DNS_TRANSACTION_SOURCE_MAX,
-        _DNS_TRANSACTION_SOURCE_INVALID = -1
+        _DNS_TRANSACTION_SOURCE_INVALID = -EINVAL,
 };
 
 struct DnsTransaction {
         DnsScope *scope;
 
-        DnsResourceKey *key;
+        DnsResourceKey *key;         /* For regular lookups the RR key to look for */
+        DnsPacket *bypass;           /* For bypass lookups the full original request packet */
+
+        uint64_t query_flags;
 
         DnsTransactionState state;
 
@@ -58,8 +65,6 @@ struct DnsTransaction {
 
         bool initial_jitter_scheduled:1;
         bool initial_jitter_elapsed:1;
-
-        bool clamp_ttl:1;
 
         bool probing:1;
 
@@ -72,15 +77,12 @@ struct DnsTransaction {
         uint32_t answer_nsec_ttl;
         int answer_errno; /* if state is DNS_TRANSACTION_ERRNO */
 
-        /* Indicates whether the primary answer is authenticated,
-         * i.e. whether the RRs from answer which directly match the
-         * question are authenticated, or, if there are none, whether
-         * the NODATA or NXDOMAIN case is. It says nothing about
-         * additional RRs listed in the answer, however they have
-         * their own DNS_ANSWER_AUTHORIZED FLAGS. Note that this bit
-         * is defined different than the AD bit in DNS packets, as
-         * that covers more than just the actual primary answer. */
-        bool answer_authenticated;
+        /* SD_RESOLVED_AUTHENTICATED here indicates whether the primary answer is authenticated, i.e. whether
+         * the RRs from answer which directly match the question are authenticated, or, if there are none,
+         * whether the NODATA or NXDOMAIN case is. It says nothing about additional RRs listed in the answer,
+         * however they have their own DNS_ANSWER_AUTHORIZED FLAGS. Note that this bit is defined different
+         * than the AD bit in DNS packets, as that covers more than just the actual primary answer. */
+        uint64_t answer_query_flags;
 
         /* Contains DNSKEY, DS, SOA RRs we already verified and need
          * to authenticate this reply */
@@ -106,8 +108,11 @@ struct DnsTransaction {
         /* The features of the DNS server at time of transaction start */
         DnsServerFeatureLevel current_feature_level;
 
-        /* If we got SERVFAIL back, we retry the lookup, using a lower feature level than we used before. */
-        DnsServerFeatureLevel clamp_feature_level;
+        /* If we got SERVFAIL back, we retry the lookup, using a lower feature level than we used
+         * before. Similar, if we get NXDOMAIN in pure EDNS0 mode, we check in EDNS0-less mode before giving
+         * up (as mitigation for DVE-2018-0001). */
+        DnsServerFeatureLevel clamp_feature_level_servfail;
+        DnsServerFeatureLevel clamp_feature_level_nxdomain;
 
         /* Query candidates this transaction is referenced by and that
          * shall be notified about this specific transaction
@@ -132,22 +137,61 @@ struct DnsTransaction {
 
         LIST_FIELDS(DnsTransaction, transactions_by_scope);
         LIST_FIELDS(DnsTransaction, transactions_by_stream);
+        LIST_FIELDS(DnsTransaction, transactions_by_key);
 };
 
-int dns_transaction_new(DnsTransaction **ret, DnsScope *s, DnsResourceKey *key);
+int dns_transaction_new(DnsTransaction **ret, DnsScope *s, DnsResourceKey *key, DnsPacket *bypass, uint64_t flags);
 DnsTransaction* dns_transaction_free(DnsTransaction *t);
 
-bool dns_transaction_gc(DnsTransaction *t);
+DnsTransaction* dns_transaction_gc(DnsTransaction *t);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DnsTransaction*, dns_transaction_gc);
 
 int dns_transaction_go(DnsTransaction *t);
 
-void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p);
+void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p, bool encrypted);
 void dns_transaction_complete(DnsTransaction *t, DnsTransactionState state);
 
 void dns_transaction_notify(DnsTransaction *t, DnsTransaction *source);
 int dns_transaction_validate_dnssec(DnsTransaction *t);
 int dns_transaction_request_dnssec_keys(DnsTransaction *t);
+
+static inline DnsResourceKey *dns_transaction_key(DnsTransaction *t) {
+        assert(t);
+
+        /* Return the lookup key of this transaction. Either takes the lookup key from the bypass packet if
+         * we are a bypass transaction. Or take the configured key for regular transactions. */
+
+        if (t->key)
+                return t->key;
+
+        assert(t->bypass);
+
+        if (dns_question_isempty(t->bypass->question))
+                return NULL;
+
+        return t->bypass->question->keys[0];
+}
+
+static inline uint64_t dns_transaction_source_to_query_flags(DnsTransactionSource s) {
+
+        switch (s) {
+
+        case DNS_TRANSACTION_NETWORK:
+                return SD_RESOLVED_FROM_NETWORK;
+
+        case DNS_TRANSACTION_CACHE:
+                return SD_RESOLVED_FROM_CACHE;
+
+        case DNS_TRANSACTION_ZONE:
+                return SD_RESOLVED_FROM_ZONE;
+
+        case DNS_TRANSACTION_TRUST_ANCHOR:
+                return SD_RESOLVED_FROM_TRUST_ANCHOR;
+
+        default:
+                return 0;
+        }
+}
 
 const char* dns_transaction_state_to_string(DnsTransactionState p) _const_;
 DnsTransactionState dns_transaction_state_from_string(const char *s) _pure_;

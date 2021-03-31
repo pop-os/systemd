@@ -236,6 +236,11 @@ static void test_get_process_cmdline_harder(void) {
                 return;
         }
 
+        /* Set RLIMIT_STACK to infinity to test we don't try to allocate unncessarily large values to read
+         * the cmdline. */
+        if (setrlimit(RLIMIT_STACK, &RLIMIT_MAKE_CONST(RLIM_INFINITY)) < 0)
+                log_warning("Testing without RLIMIT_STACK=infinity");
+
         assert_se(unlink(path) >= 0);
 
         assert_se(prctl(PR_SET_NAME, "testa") >= 0);
@@ -598,8 +603,8 @@ static void test_ioprio_class_from_to_string(void) {
         test_ioprio_class_from_to_string_one("1", 1);
         test_ioprio_class_from_to_string_one("7", 7);
         test_ioprio_class_from_to_string_one("8", 8);
-        test_ioprio_class_from_to_string_one("9", -1);
-        test_ioprio_class_from_to_string_one("-1", -1);
+        test_ioprio_class_from_to_string_one("9", -EINVAL);
+        test_ioprio_class_from_to_string_one("-1", -EINVAL);
 }
 
 static void test_setpriority_closest(void) {

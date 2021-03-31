@@ -100,7 +100,7 @@ int rename_noreplace(int olddirfd, const char *oldpath, int newdirfd, const char
 
         /* renameat2() exists since Linux 3.15, btrfs and FAT added support for it later. If it is not implemented,
          * fall back to a different method. */
-        if (!IN_SET(errno, EINVAL, ENOSYS, ENOTTY))
+        if (!ERRNO_IS_NOT_SUPPORTED(errno) && errno != EINVAL)
                 return -errno;
 
         /* Let's try to use linkat()+unlinkat() as fallback. This doesn't work on directories and on some file systems
@@ -117,7 +117,7 @@ int rename_noreplace(int olddirfd, const char *oldpath, int newdirfd, const char
                 return 0;
         }
 
-        if (!IN_SET(errno, EINVAL, ENOSYS, ENOTTY, EPERM)) /* FAT returns EPERM on link()… */
+        if (!ERRNO_IS_NOT_SUPPORTED(errno) && !IN_SET(errno, EINVAL, EPERM)) /* FAT returns EPERM on link()… */
                 return -errno;
 
         /* OK, neither RENAME_NOREPLACE nor linkat()+unlinkat() worked. Let's then fall back to the racy TOCTOU
@@ -135,34 +135,34 @@ int rename_noreplace(int olddirfd, const char *oldpath, int newdirfd, const char
 }
 
 int readlinkat_malloc(int fd, const char *p, char **ret) {
-        size_t l = FILENAME_MAX+1;
-        int r;
+        size_t l = PATH_MAX;
 
         assert(p);
         assert(ret);
 
         for (;;) {
-                char *c;
+                _cleanup_free_ char *c = NULL;
                 ssize_t n;
 
-                c = new(char, l);
+                c = new(char, l+1);
                 if (!c)
                         return -ENOMEM;
 
-                n = readlinkat(fd, p, c, l-1);
-                if (n < 0) {
-                        r = -errno;
-                        free(c);
-                        return r;
-                }
+                n = readlinkat(fd, p, c, l);
+                if (n < 0)
+                        return -errno;
 
-                if ((size_t) n < l-1) {
+                if ((size_t) n < l) {
                         c[n] = 0;
-                        *ret = c;
+                        *ret = TAKE_PTR(c);
                         return 0;
                 }
 
-                free(c);
+                if (l > (SSIZE_MAX-1)/2) /* readlinkat() returns an ssize_t, and we want an extra byte for a
+                                          * trailing NUL, hence do an overflow check relative to SSIZE_MAX-1
+                                          * here */
+                        return -EFBIG;
+
                 l *= 2;
         }
 }
@@ -428,9 +428,9 @@ int symlink_idempotent(const char *from, const char *to, bool make_relative) {
         if (make_relative) {
                 _cleanup_free_ char *parent = NULL;
 
-                parent = dirname_malloc(to);
-                if (!parent)
-                        return -ENOMEM;
+                r = path_extract_directory(to, &parent);
+                if (r < 0)
+                        return r;
 
                 r = path_make_relative(parent, from, &relpath);
                 if (r < 0)
@@ -934,7 +934,7 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                         /* Preserve the trailing slash */
 
                         if (flags & CHASE_TRAIL_SLASH)
-                                if (!strextend(&done, "/", NULL))
+                                if (!strextend(&done, "/"))
                                         return -ENOMEM;
 
                         break;
@@ -1005,7 +1005,7 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                                 if (streq_ptr(done, "/"))
                                         *done = '\0';
 
-                                if (!strextend(&done, first, todo, NULL))
+                                if (!strextend(&done, first, todo))
                                         return -ENOMEM;
 
                                 exists = false;
@@ -1098,7 +1098,7 @@ int chase_symlinks(const char *path, const char *original_root, unsigned flags, 
                         if (streq(done, "/"))
                                 *done = '\0';
 
-                        if (!strextend(&done, first, NULL))
+                        if (!strextend(&done, first))
                                 return -ENOMEM;
                 }
 
@@ -1413,33 +1413,45 @@ int unlinkat_deallocate(int fd, const char *name, UnlinkDeallocateFlags flags) {
 int fsync_directory_of_file(int fd) {
         _cleanup_free_ char *path = NULL;
         _cleanup_close_ int dfd = -1;
+        struct stat st;
         int r;
 
-        r = fd_verify_regular(fd);
-        if (r < 0)
-                return r;
+        assert(fd >= 0);
 
-        r = fd_get_path(fd, &path);
-        if (r < 0) {
-                log_debug_errno(r, "Failed to query /proc/self/fd/%d%s: %m",
-                                fd,
-                                r == -ENOSYS ? ", ignoring" : "");
+        /* We only reasonably can do this for regular files and directories, hence check for that */
+        if (fstat(fd, &st) < 0)
+                return -errno;
 
-                if (r == -ENOSYS)
-                        /* If /proc is not available, we're most likely running in some
-                         * chroot environment, and syncing the directory is not very
-                         * important in that case. Let's just silently do nothing. */
-                        return 0;
+        if (S_ISREG(st.st_mode)) {
 
-                return r;
-        }
+                r = fd_get_path(fd, &path);
+                if (r < 0) {
+                        log_debug_errno(r, "Failed to query /proc/self/fd/%d%s: %m",
+                                        fd,
+                                        r == -ENOSYS ? ", ignoring" : "");
 
-        if (!path_is_absolute(path))
-                return -EINVAL;
+                        if (r == -ENOSYS)
+                                /* If /proc is not available, we're most likely running in some
+                                 * chroot environment, and syncing the directory is not very
+                                 * important in that case. Let's just silently do nothing. */
+                                return 0;
 
-        dfd = open_parent(path, O_CLOEXEC, 0);
-        if (dfd < 0)
-                return dfd;
+                        return r;
+                }
+
+                if (!path_is_absolute(path))
+                        return -EINVAL;
+
+                dfd = open_parent(path, O_CLOEXEC|O_NOFOLLOW, 0);
+                if (dfd < 0)
+                        return dfd;
+
+        } else if (S_ISDIR(st.st_mode)) {
+                dfd = openat(fd, "..", O_RDONLY|O_DIRECTORY|O_CLOEXEC, 0);
+                if (dfd < 0)
+                        return -errno;
+        } else
+                return -ENOTTY;
 
         if (fsync(dfd) < 0)
                 return -errno;
@@ -1453,9 +1465,14 @@ int fsync_full(int fd) {
         /* Sync both the file and the directory */
 
         r = fsync(fd) < 0 ? -errno : 0;
-        q = fsync_directory_of_file(fd);
 
-        return r < 0 ? r : q;
+        q = fsync_directory_of_file(fd);
+        if (r < 0) /* Return earlier error */
+                return r;
+        if (q == -ENOTTY) /* Ignore if the 'fd' refers to a block device or so which doesn't really have a
+                           * parent dir */
+                return 0;
+        return q;
 }
 
 int fsync_path_at(int at_fd, const char *path) {
@@ -1472,8 +1489,7 @@ int fsync_path_at(int at_fd, const char *path) {
                 } else
                         fd = at_fd;
         } else {
-
-                opened_fd = openat(at_fd, path, O_RDONLY|O_CLOEXEC);
+                opened_fd = openat(at_fd, path, O_RDONLY|O_CLOEXEC|O_NONBLOCK);
                 if (opened_fd < 0)
                         return -errno;
 
@@ -1503,16 +1519,11 @@ int syncfs_path(int atfd, const char *path) {
 
 int open_parent(const char *path, int flags, mode_t mode) {
         _cleanup_free_ char *parent = NULL;
-        int fd;
+        int fd, r;
 
-        if (isempty(path))
-                return -EINVAL;
-        if (path_equal(path, "/")) /* requesting the parent of the root dir is fishy, let's prohibit that */
-                return -EINVAL;
-
-        parent = dirname_malloc(path);
-        if (!parent)
-                return -ENOMEM;
+        r = path_extract_directory(path, &parent);
+        if (r < 0)
+                return r;
 
         /* Let's insist on O_DIRECTORY since the parent of a file or directory is a directory. Except if we open an
          * O_TMPFILE file, because in that case we are actually create a regular file below the parent directory. */
@@ -1612,4 +1623,95 @@ int path_is_encrypted(const char *path) {
         xsprintf_sys_block_path(p, NULL, devt);
 
         return blockdev_is_encrypted(p, 10 /* safety net: maximum recursion depth */);
+}
+
+int conservative_renameat(
+                int olddirfd, const char *oldpath,
+                int newdirfd, const char *newpath) {
+
+        _cleanup_close_ int old_fd = -1, new_fd = -1;
+        struct stat old_stat, new_stat;
+
+        /* Renames the old path to thew new path, much like renameat() — except if both are regular files and
+         * have the exact same contents and basic file attributes already. In that case remove the new file
+         * instead. This call is useful for reducing inotify wakeups on files that are updated but don't
+         * actually change. This function is written in a style that we rather rename too often than suppress
+         * too much. i.e. whenever we are in doubt we rather rename than fail. After all reducing inotify
+         * events is an optimization only, not more. */
+
+        old_fd = openat(olddirfd, oldpath, O_CLOEXEC|O_RDONLY|O_NOCTTY|O_NOFOLLOW);
+        if (old_fd < 0)
+                goto do_rename;
+
+        new_fd = openat(newdirfd, newpath, O_CLOEXEC|O_RDONLY|O_NOCTTY|O_NOFOLLOW);
+        if (new_fd < 0)
+                goto do_rename;
+
+        if (fstat(old_fd, &old_stat) < 0)
+                goto do_rename;
+
+        if (!S_ISREG(old_stat.st_mode))
+                goto do_rename;
+
+        if (fstat(new_fd, &new_stat) < 0)
+                goto do_rename;
+
+        if (new_stat.st_ino == old_stat.st_ino &&
+            new_stat.st_dev == old_stat.st_dev)
+                goto is_same;
+
+        if (old_stat.st_mode != new_stat.st_mode ||
+            old_stat.st_size != new_stat.st_size ||
+            old_stat.st_uid != new_stat.st_uid ||
+            old_stat.st_gid != new_stat.st_gid)
+                goto do_rename;
+
+        for (;;) {
+                uint8_t buf1[16*1024];
+                uint8_t buf2[sizeof(buf1)];
+                ssize_t l1, l2;
+
+                l1 = read(old_fd, buf1, sizeof(buf1));
+                if (l1 < 0)
+                        goto do_rename;
+
+                if (l1 == sizeof(buf1))
+                        /* Read the full block, hence read a full block in the other file too */
+
+                        l2 = read(new_fd, buf2, l1);
+                else {
+                        assert((size_t) l1 < sizeof(buf1));
+
+                        /* Short read. This hence was the last block in the first file, and then came
+                         * EOF. Read one byte more in the second file, so that we can verify we hit EOF there
+                         * too. */
+
+                        assert((size_t) (l1 + 1) <= sizeof(buf2));
+                        l2 = read(new_fd, buf2, l1 + 1);
+                }
+                if (l2 != l1)
+                        goto do_rename;
+
+                if (memcmp(buf1, buf2, l1) != 0)
+                        goto do_rename;
+
+                if ((size_t) l1 < sizeof(buf1)) /* We hit EOF on the first file, and the second file too, hence exit
+                                                 * now. */
+                        break;
+        }
+
+is_same:
+        /* Everything matches? Then don't rename, instead remove the source file, and leave the existing
+         * destination in place */
+
+        if (unlinkat(olddirfd, oldpath, 0) < 0)
+                goto do_rename;
+
+        return 0;
+
+do_rename:
+        if (renameat(olddirfd, oldpath, newdirfd, newpath) < 0)
+                return -errno;
+
+        return 1;
 }
