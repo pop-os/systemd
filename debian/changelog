@@ -1,3 +1,9 @@
+systemd (248-1) UNRELEASED; urgency=medium
+
+  * New upstream version 248
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 31 Mar 2021 15:31:42 +0200
+
 systemd (247.3-5) unstable; urgency=medium
 
   * udev-udeb: setup /dev/fd, /dev/std{in,out,err} symlinks.
