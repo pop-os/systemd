@@ -59,10 +59,10 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index cacbbd7..285f5b8 100644
+index 7ef26cb..333d13b 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
-@@ -840,6 +840,7 @@ manpages = [
+@@ -847,6 +847,7 @@ manpages = [
    '8',
    ['systemd-fsck', 'systemd-fsck-root.service'],
    ''],
@@ -239,10 +239,10 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index cf93f38..e33b729 100644
+index 6a474af..0dcff3a 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -2895,6 +2895,15 @@ executable(
+@@ -2873,6 +2873,15 @@ executable(
          install : true,
          install_dir : rootlibexecdir)
  
@@ -269,7 +269,7 @@ index 0346a19..5ea2444 100644
 +src/fsckd/fsckd.c
 diff --git a/src/fsckd/fsckd.c b/src/fsckd/fsckd.c
 new file mode 100644
-index 0000000..4af8e45
+index 0000000..8876961
 --- /dev/null
 +++ b/src/fsckd/fsckd.c
 @@ -0,0 +1,699 @@
@@ -378,8 +378,8 @@ index 0000000..4af8e45
 +        bool cancel_requested;
 +} Manager;
 +
-+static void client_free(Client *c);
-+static void manager_free(Manager *m);
++static Client* client_free(Client *c);
++static Manager* manager_free(Manager *m);
 +
 +DEFINE_TRIVIAL_CLEANUP_FUNC(Client*, client_free);
 +DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
@@ -458,7 +458,7 @@ index 0000000..4af8e45
 +        return 1;
 +}
 +
-+static void client_free(Client *c) {
++static Client* client_free(Client *c) {
 +        assert(c);
 +
 +        if (c->manager) {
@@ -472,7 +472,7 @@ index 0000000..4af8e45
 +                free(c->device_name);
 +        if (c->device_id)
 +                free(c->device_id);
-+        free(c);
++        return mfree(c);
 +}
 +
 +static void manager_disconnect_plymouth(Manager *m) {
@@ -788,9 +788,9 @@ index 0000000..4af8e45
 +        return 0;
 +}
 +
-+static void manager_free(Manager *m) {
++static Manager* manager_free(Manager *m) {
 +        if (!m)
-+                return;
++                return NULL;
 +
 +        /* clear last line */
 +        manager_write_console(m, NULL);
@@ -805,7 +805,7 @@ index 0000000..4af8e45
 +
 +        sd_event_unref(m->event);
 +
-+        free(m);
++        return mfree(m);
 +}
 +
 +static int manager_new(Manager **ret, int fd) {
@@ -973,10 +973,10 @@ index 0000000..4af8e45
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index ba60eb7..95d7eda 100644
+index 0d0eeea..955ebbf 100644
 --- a/units/meson.build
 +++ b/units/meson.build
-@@ -103,6 +103,7 @@ units = [
+@@ -108,6 +108,7 @@ units = [
          ['systemd-exit.service',                ''],
          ['systemd-firstboot.service',           'ENABLE_FIRSTBOOT',
           'sysinit.target.wants/'],
@@ -984,7 +984,7 @@ index ba60eb7..95d7eda 100644
          ['systemd-halt.service',                ''],
          ['systemd-homed-activate.service',      'ENABLE_HOMED'],
          ['systemd-initctl.socket',              'HAVE_SYSV_COMPAT',
-@@ -174,6 +175,7 @@ in_units = [
+@@ -180,6 +181,7 @@ in_units = [
          ['systemd-pstore.service',               'ENABLE_PSTORE'],
          ['systemd-fsck-root.service',            ''],
          ['systemd-fsck@.service',                ''],

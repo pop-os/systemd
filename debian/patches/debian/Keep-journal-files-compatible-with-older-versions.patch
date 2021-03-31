@@ -12,14 +12,14 @@ will then be able to read journal files with those features.
 
 Closes: #968055
 ---
- src/journal/compress.h     | 10 +++++-----
- src/journal/journal-file.c |  8 ++++----
+ src/libsystemd/sd-journal/compress.h     | 10 +++++-----
+ src/libsystemd/sd-journal/journal-file.c |  8 ++++----
  2 files changed, 9 insertions(+), 9 deletions(-)
 
-diff --git a/src/journal/compress.h b/src/journal/compress.h
+diff --git a/src/libsystemd/sd-journal/compress.h b/src/libsystemd/sd-journal/compress.h
 index db7f399..6cd9290 100644
---- a/src/journal/compress.h
-+++ b/src/journal/compress.h
+--- a/src/libsystemd/sd-journal/compress.h
++++ b/src/libsystemd/sd-journal/compress.h
 @@ -18,14 +18,14 @@ int compress_blob_zstd(const void *src, uint64_t src_size,
  static inline int compress_blob(const void *src, uint64_t src_size,
                                  void *dst, size_t dst_alloc_size, size_t *dst_size) {
@@ -40,12 +40,12 @@ index db7f399..6cd9290 100644
  #elif HAVE_XZ
          r = compress_blob_xz(src, src_size, dst, dst_alloc_size, dst_size);
          if (r == 0)
-diff --git a/src/journal/journal-file.c b/src/journal/journal-file.c
-index 15336be..6ce18c9 100644
---- a/src/journal/journal-file.c
-+++ b/src/journal/journal-file.c
-@@ -3411,10 +3411,10 @@ int journal_file_open(
-                 .prot = prot_from_flags(flags),
+diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
+index f8bb708..af13beb 100644
+--- a/src/libsystemd/sd-journal/journal-file.c
++++ b/src/libsystemd/sd-journal/journal-file.c
+@@ -3440,10 +3440,10 @@ int journal_file_open(
+                 .flags = flags,
                  .writable = (flags & O_ACCMODE) != O_RDONLY,
  
 -#if HAVE_ZSTD
@@ -58,7 +58,7 @@ index 15336be..6ce18c9 100644
  #elif HAVE_XZ
                  .compress_xz = compress,
  #endif
-@@ -3432,7 +3432,7 @@ int journal_file_open(
+@@ -3461,7 +3461,7 @@ int journal_file_open(
          if (r < 0) {
                  if (r != -ENXIO)
                          log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_KEYED_HASH environment variable, ignoring.");

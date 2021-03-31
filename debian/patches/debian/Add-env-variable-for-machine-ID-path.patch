@@ -33,10 +33,10 @@ index d5de935..78612a0 100644
                          return r;
  
 diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
-index d1f9252..4c93adb 100644
+index c42c487..0cab386 100644
 --- a/src/test/test-fs-util.c
 +++ b/src/test/test-fs-util.c
-@@ -211,7 +211,7 @@ static void test_chase_symlinks(void) {
+@@ -214,7 +214,7 @@ static void test_chase_symlinks(void) {
          assert_se(streq(result, "/test-chase.fsldajfl"));
          result = mfree(result);
  
@@ -45,7 +45,7 @@ index d1f9252..4c93adb 100644
          assert_se(r == -ENOTDIR);
          result = mfree(result);
  
-@@ -284,23 +284,26 @@ static void test_chase_symlinks(void) {
+@@ -287,23 +287,26 @@ static void test_chase_symlinks(void) {
                  assert_se(chase_symlinks(q, NULL, CHASE_SAFE, NULL, NULL) >= 0);
          }
  

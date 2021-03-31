@@ -16,10 +16,10 @@ Fixes: #17575
  2 files changed, 6 insertions(+), 5 deletions(-)
 
 diff --git a/src/systemctl/systemctl-compat-halt.c b/src/systemctl/systemctl-compat-halt.c
-index 8e41bd6..239a780 100644
+index 82cb3df..16dcaa6 100644
 --- a/src/systemctl/systemctl-compat-halt.c
 +++ b/src/systemctl/systemctl-compat-halt.c
-@@ -149,11 +149,11 @@ int halt_main(void) {
+@@ -148,11 +148,11 @@ int halt_main(void) {
          if (r < 0)
                  return r;
  
@@ -36,10 +36,10 @@ index 8e41bd6..239a780 100644
                  if (arg_dry_run || arg_force > 0) {
                          (void) must_be_root();
 diff --git a/src/systemctl/systemctl-logind.c b/src/systemctl/systemctl-logind.c
-index 405f12a..fd0b143 100644
+index 103f816..5f60c95 100644
 --- a/src/systemctl/systemctl-logind.c
 +++ b/src/systemctl/systemctl-logind.c
-@@ -315,8 +315,9 @@ int logind_schedule_shutdown(void) {
+@@ -334,8 +334,9 @@ int logind_schedule_shutdown(void) {
          (void) logind_set_wall_message();
  
          r = bus_call_method(bus, bus_login_mgr, "ScheduleShutdown", &error, NULL, "st", action, arg_when);
