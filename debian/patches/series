@@ -61,3 +61,4 @@ lp1914062-udevadm-don-t-return-early.patch
 lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch
 lp1921696/rfkill-improve-error-logging.patch
 lp1921696/rfkill-use-short-writes-and-accept-long-reads.patch
+LoadCredentials-do-not-assert-on-invalid-syntax.patch
