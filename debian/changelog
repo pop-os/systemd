@@ -1,4 +1,4 @@
-systemd (247.3-3ubuntu3) UNRELEASED; urgency=medium
+systemd (247.3-3ubuntu3) hirsute; urgency=medium
 
   * Make systemd-rfkill work with latest Linux kernels (LP: #1921696)
     Files:
@@ -9,7 +9,7 @@ systemd (247.3-3ubuntu3) UNRELEASED; urgency=medium
     File: debian/patches/LoadCredentials-do-not-assert-on-invalid-syntax.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=5e7f913d0fd36b0800a8d99f809f61d263200343
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 06 Apr 2021 16:45:08 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Wed, 07 Apr 2021 17:57:49 +0200
 
 systemd (247.3-3ubuntu2) hirsute; urgency=medium
 
