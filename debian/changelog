@@ -1,3 +1,18 @@
+systemd (247.3-4) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Backport patch to fix assert with invalid LoadCredentials=
+    Regression introduced in v247, fixed in v249, see:
+    https://github.com/systemd/systemd/issues/19178
+    (Closes: #986302)
+
+  [ Michael Biebl ]
+  * network: Delay addition of IPv6 Proxy NDP addresses.
+    Fixes "IPv6 Proxy NDP addresses are being lost from interfaces after
+    networkd adds them". (Closes: #985510)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 11 Apr 2021 16:06:46 +0200
+
 systemd (247.3-3) unstable; urgency=medium
 
   * pkg-config: make prefix overridable again (Closes: #984763)
