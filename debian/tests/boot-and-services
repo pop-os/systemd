@@ -40,8 +40,9 @@ class ServicesTest(unittest.TestCase):
     def test_no_failed(self):
         '''No failed units'''
 
-        out = subprocess.check_output(['systemctl', '--state=failed', '--no-legend'],
-                                      universal_newlines=True)
+        out = subprocess.check_output(
+                ['systemctl', '--state=failed', '--no-legend', '--plain'],
+                universal_newlines=True)
         failed = out.splitlines()
         # ignore /etc/modules failure as stuff that we put there by default
         # often fails
