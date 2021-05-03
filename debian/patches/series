@@ -63,3 +63,4 @@ lp1914062-udevadm-don-t-return-early.patch
 lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch
 lp1921696/rfkill-improve-error-logging.patch
 lp1921696/rfkill-use-short-writes-and-accept-long-reads.patch
+0001-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
