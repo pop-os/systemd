@@ -1,3 +1,27 @@
+systemd (247.3-5) unstable; urgency=medium
+
+  * udev-udeb: setup /dev/fd, /dev/std{in,out,err} symlinks.
+    As systemd-udevd no longer sets them up itself, we create them manually
+    after mounting devtmpfs. This avoids breaking applications which expect
+    those symlinks. (Closes: #975018)
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 12 Apr 2021 20:21:24 +0200
+
+systemd (247.3-4) unstable; urgency=medium
+
+  [ Luca Boccassi ]
+  * Backport patch to fix assert with invalid LoadCredentials=
+    Regression introduced in v247, fixed in v249, see:
+    https://github.com/systemd/systemd/issues/19178
+    (Closes: #986302)
+
+  [ Michael Biebl ]
+  * network: Delay addition of IPv6 Proxy NDP addresses.
+    Fixes "IPv6 Proxy NDP addresses are being lost from interfaces after
+    networkd adds them". (Closes: #985510)
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 11 Apr 2021 16:06:46 +0200
+
 systemd (247.3-3ubuntu3) hirsute; urgency=medium
 
   * Make systemd-rfkill work with latest Linux kernels (LP: #1921696)

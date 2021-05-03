@@ -1,8 +1,9 @@
-From 3aa57658434e7a95c6000bebb166c31f1c6d051b Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Sun, 14 Feb 2021 14:38:32 +0100
-Subject: [PATCH] basic/unit-file: when loading linked unit files, use link
- source as "fragment path"
+Subject: [PATCH] basic/unit-file: when loading linked unit files,
+ use link source as "fragment path"
+
+From 3aa57658434e7a95c6000bebb166c31f1c6d051b Mon Sep 17 00:00:00 2001
 Origin: upstream, https://github.com/systemd/systemd/pull/18579/commits/3aa57658434e7a95c6000bebb166c31f1c6d051b
 Bug: https://github.com/systemd/systemd/issues/18058
 Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1887744
@@ -29,10 +30,39 @@ so in practice we wouldn't hit this too often.
 
 In unit_load_fragment() a comment is added to explain what we're doing there.
 ---
- src/basic/unit-file.c    | 14 ++++++++------
  src/core/load-fragment.c |  7 ++++---
+ src/shared/unit-file.c   | 14 ++++++++------
  2 files changed, 12 insertions(+), 9 deletions(-)
 
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index df5669a..e4a2bbe 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -5517,10 +5517,11 @@ int unit_load_fragment(Unit *u) {
+                 }
+         }
+ 
+-        /* We do the merge dance here because for some unit types, the unit might have aliases which are not
++        /* Call merge_by_names with the name derived from the fragment path as the preferred name.
++         *
++         * We do the merge dance here because for some unit types, the unit might have aliases which are not
+          * declared in the file system. In particular, this is true (and frequent) for device and swap units.
+          */
+-        Unit *merged;
+         const char *id = u->id;
+         _cleanup_free_ char *free_id = NULL;
+ 
+@@ -5537,7 +5538,7 @@ int unit_load_fragment(Unit *u) {
+                 }
+         }
+ 
+-        merged = u;
++        Unit *merged = u;
+         r = merge_by_names(&merged, names, id);
+         if (r < 0)
+                 return r;
+diff --git a/src/shared/unit-file.c b/src/shared/unit-file.c
+index 4c30719..1ff332f 100644
 --- a/src/shared/unit-file.c
 +++ b/src/shared/unit-file.c
 @@ -354,10 +354,16 @@ int unit_file_build_name_map(
@@ -65,28 +95,3 @@ In unit_load_fragment() a comment is added to explain what we're doing there.
                                  }
  
                          } else {
---- a/src/core/load-fragment.c
-+++ b/src/core/load-fragment.c
-@@ -5517,10 +5517,11 @@ int unit_load_fragment(Unit *u) {
-                 }
-         }
- 
--        /* We do the merge dance here because for some unit types, the unit might have aliases which are not
-+        /* Call merge_by_names with the name derived from the fragment path as the preferred name.
-+         *
-+         * We do the merge dance here because for some unit types, the unit might have aliases which are not
-          * declared in the file system. In particular, this is true (and frequent) for device and swap units.
-          */
--        Unit *merged;
-         const char *id = u->id;
-         _cleanup_free_ char *free_id = NULL;
- 
-@@ -5537,7 +5538,7 @@ int unit_load_fragment(Unit *u) {
-                 }
-         }
- 
--        merged = u;
-+        Unit *merged = u;
-         r = merge_by_names(&merged, names, id);
-         if (r < 0)
-                 return r;
