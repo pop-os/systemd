@@ -427,11 +427,11 @@ static int json_dispatch_rlimits(const char *name, JsonVariant *variant, JsonDis
 
                 p = startswith(key, "RLIMIT_");
                 if (!p)
-                        l = -1;
+                        l = -SYNTHETIC_ERRNO(EINVAL);
                 else
                         l = rlimit_from_string(p);
                 if (l < 0)
-                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "Resource limit '%s' not known.", key);
+                        return json_log(variant, flags, l, "Resource limit '%s' not known.", key);
 
                 if (!json_variant_is_object(value))
                         return json_log(value, flags, SYNTHETIC_ERRNO(EINVAL), "Resource limit '%s' has invalid value.", key);
@@ -570,7 +570,7 @@ static int json_dispatch_umask(const char *name, JsonVariant *variant, JsonDispa
         uintmax_t k;
 
         if (json_variant_is_null(variant)) {
-                *m = (mode_t) -1;
+                *m = MODE_INVALID;
                 return 0;
         }
 
@@ -590,7 +590,7 @@ static int json_dispatch_access_mode(const char *name, JsonVariant *variant, Jso
         uintmax_t k;
 
         if (json_variant_is_null(variant)) {
-                *m = (mode_t) -1;
+                *m = MODE_INVALID;
                 return 0;
         }
 
@@ -608,7 +608,6 @@ static int json_dispatch_access_mode(const char *name, JsonVariant *variant, Jso
 static int json_dispatch_environment(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
         _cleanup_strv_free_ char **n = NULL;
         char ***l = userdata;
-        size_t i;
         int r;
 
         if (json_variant_is_null(variant)) {
@@ -619,8 +618,7 @@ static int json_dispatch_environment(const char *name, JsonVariant *variant, Jso
         if (!json_variant_is_array(variant))
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an array.", strna(name));
 
-        for (i = 0; i < json_variant_elements(variant); i++) {
-                _cleanup_free_ char *c = NULL;
+        for (size_t i = 0; i < json_variant_elements(variant); i++) {
                 JsonVariant *e;
                 const char *a;
 
@@ -633,19 +631,12 @@ static int json_dispatch_environment(const char *name, JsonVariant *variant, Jso
                 if (!env_assignment_is_valid(a))
                         return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not an array of environment variables.", strna(name));
 
-                c = strdup(a);
-                if (!c)
-                        return json_log_oom(variant, flags);
-
-                r = strv_env_replace(&n, c);
+                r = strv_env_replace_strdup(&n, a);
                 if (r < 0)
                         return json_log_oom(variant, flags);
-
-                c = NULL;
         }
 
-        strv_free_and_replace(*l, n);
-        return 0;
+        return strv_free_and_replace(*l, n);
 }
 
 int json_dispatch_user_disposition(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
@@ -661,7 +652,7 @@ int json_dispatch_user_disposition(const char *name, JsonVariant *variant, JsonD
 
         k = user_disposition_from_string(json_variant_string(variant));
         if (k < 0)
-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "Disposition type '%s' not known.", json_variant_string(variant));
+                return json_log(variant, flags, k, "Disposition type '%s' not known.", json_variant_string(variant));
 
         *disposition = k;
         return 0;
@@ -680,7 +671,7 @@ static int json_dispatch_storage(const char *name, JsonVariant *variant, JsonDis
 
         k = user_storage_from_string(json_variant_string(variant));
         if (k < 0)
-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "Storage type '%s' not known.", json_variant_string(variant));
+                return json_log(variant, flags, k, "Storage type '%s' not known.", json_variant_string(variant));
 
         *storage = k;
         return 0;
@@ -875,7 +866,7 @@ static int dispatch_pkcs11_key_data(const char *name, JsonVariant *variant, Json
         if (!json_variant_is_string(variant))
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a string.", strna(name));
 
-        r = unbase64mem(json_variant_string(variant), (size_t) -1, &b, &l);
+        r = unbase64mem(json_variant_string(variant), SIZE_MAX, &b, &l);
         if (r < 0)
                 return json_log(variant, flags, r, "Failed to decode encrypted PKCS#11 key: %m");
 
@@ -942,7 +933,7 @@ static int dispatch_fido2_hmac_credential(const char *name, JsonVariant *variant
         if (!json_variant_is_string(variant))
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a string.", strna(name));
 
-        r = unbase64mem(json_variant_string(variant), (size_t) -1, &b, &l);
+        r = unbase64mem(json_variant_string(variant), SIZE_MAX, &b, &l);
         if (r < 0)
                 return json_log(variant, flags, r, "Failed to decode FIDO2 credential ID: %m");
 
@@ -972,7 +963,7 @@ static int dispatch_fido2_hmac_credential_array(const char *name, JsonVariant *v
                 if (!array)
                         return log_oom();
 
-                r = unbase64mem(json_variant_string(e), (size_t) -1, &b, &l);
+                r = unbase64mem(json_variant_string(e), SIZE_MAX, &b, &l);
                 if (r < 0)
                         return json_log(variant, flags, r, "Failed to decode FIDO2 credential ID: %m");
 
@@ -1002,7 +993,7 @@ static int dispatch_fido2_hmac_salt_value(const char *name, JsonVariant *variant
         if (!json_variant_is_string(variant))
                 return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' is not a string.", strna(name));
 
-        r = unbase64mem(json_variant_string(variant), (size_t) -1, &b, &l);
+        r = unbase64mem(json_variant_string(variant), SIZE_MAX, &b, &l);
         if (r < 0)
                 return json_log(variant, flags, r, "Failed to decode FIDO2 salt: %m");
 
@@ -1471,7 +1462,7 @@ int user_group_record_mangle(
         JsonDispatchFlags json_flags = USER_RECORD_LOAD_FLAGS_TO_JSON_DISPATCH_FLAGS(load_flags);
         _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
         JsonVariant *array[ELEMENTSOF(mask_field) * 2];
-        size_t n_retain = 0, i;
+        size_t n_retain = 0;
         UserRecordMask m = 0;
         int r;
 
@@ -1496,7 +1487,7 @@ int user_group_record_mangle(
                 return json_log(v, json_flags, SYNTHETIC_ERRNO(EINVAL), "Stripping everything from record, refusing.");
 
         /* Check if we have the special sections and if they match our flags set */
-        for (i = 0; i < ELEMENTSOF(mask_field); i++) {
+        for (size_t i = 0; i < ELEMENTSOF(mask_field); i++) {
                 JsonVariant *e, *k;
 
                 if (FLAGS_SET(USER_RECORD_STRIP_MASK(load_flags), mask_field[i].mask)) {
@@ -1535,16 +1526,15 @@ int user_group_record_mangle(
                 r = json_variant_new_object(&w, array, n_retain);
                 if (r < 0)
                         return json_log(v, json_flags, r, "Failed to allocate new object: %m");
-        } else {
+        } else
                 /* And now check if there's anything else in the record */
-                for (i = 0; i < json_variant_elements(v); i += 2) {
+                for (size_t i = 0; i < json_variant_elements(v); i += 2) {
                         const char *f;
                         bool special = false;
-                        size_t j;
 
                         assert_se(f = json_variant_string(json_variant_by_index(v, i)));
 
-                        for (j = 0; j < ELEMENTSOF(mask_field); j++)
+                        for (size_t j = 0; j < ELEMENTSOF(mask_field); j++)
                                 if (streq(f, mask_field[j].name)) { /* already covered in the loop above */
                                         special = true;
                                         continue;
@@ -1558,7 +1548,6 @@ int user_group_record_mangle(
                                 break;
                         }
                 }
-        }
 
         if (FLAGS_SET(load_flags, USER_RECORD_REQUIRE_REGULAR) && !FLAGS_SET(m, USER_RECORD_REGULAR))
                 return json_log(v, json_flags, SYNTHETIC_ERRNO(EBADMSG), "Record lacks basic identity fields, which are required.");
@@ -1765,7 +1754,7 @@ const char *user_record_skeleton_directory(UserRecord *h) {
 mode_t user_record_access_mode(UserRecord *h) {
         assert(h);
 
-        return h->access_mode != (mode_t) -1 ? h->access_mode : 0700;
+        return h->access_mode != MODE_INVALID ? h->access_mode : 0700;
 }
 
 const char* user_record_home_directory(UserRecord *h) {

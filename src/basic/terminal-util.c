@@ -41,13 +41,14 @@
 #include "strv.h"
 #include "terminal-util.h"
 #include "time-util.h"
+#include "user-util.h"
 #include "util.h"
 
 static volatile unsigned cached_columns = 0;
 static volatile unsigned cached_lines = 0;
 
 static volatile int cached_on_tty = -1;
-static volatile int cached_colors_enabled = -1;
+static volatile int cached_color_mode = _COLOR_INVALID;
 static volatile int cached_underline_enabled = -1;
 
 int chvt(int vt) {
@@ -164,8 +165,7 @@ int ask_char(char *ret, const char *replies, const char *fmt, ...) {
                 char c;
                 bool need_nl = true;
 
-                if (colors_enabled())
-                        fputs(ANSI_HIGHLIGHT, stdout);
+                fputs(ansi_highlight(), stdout);
 
                 putchar('\r');
 
@@ -173,8 +173,7 @@ int ask_char(char *ret, const char *replies, const char *fmt, ...) {
                 vprintf(fmt, ap);
                 va_end(ap);
 
-                if (colors_enabled())
-                        fputs(ANSI_NORMAL, stdout);
+                fputs(ansi_normal(), stdout);
 
                 fflush(stdout);
 
@@ -213,15 +212,13 @@ int ask_string(char **ret, const char *text, ...) {
         assert(ret);
         assert(text);
 
-        if (colors_enabled())
-                fputs(ANSI_HIGHLIGHT, stdout);
+        fputs(ansi_highlight(), stdout);
 
         va_start(ap, text);
         vprintf(text, ap);
         va_end(ap);
 
-        if (colors_enabled())
-                fputs(ANSI_NORMAL, stdout);
+        fputs(ansi_normal(), stdout);
 
         fflush(stdout);
 
@@ -444,11 +441,11 @@ int acquire_terminal(
 
                                 assert(ts != USEC_INFINITY);
 
-                                n = now(CLOCK_MONOTONIC);
-                                if (ts + timeout < n)
+                                n = usec_sub_unsigned(now(CLOCK_MONOTONIC), ts);
+                                if (n >= timeout)
                                         return -ETIMEDOUT;
 
-                                r = fd_wait_for_event(notify, POLLIN, ts + timeout - n);
+                                r = fd_wait_for_event(notify, POLLIN, usec_sub_unsigned(timeout, n));
                                 if (r < 0)
                                         return r;
                                 if (r == 0)
@@ -867,7 +864,7 @@ void reset_terminal_feature_caches(void) {
         cached_columns = 0;
         cached_lines = 0;
 
-        cached_colors_enabled = -1;
+        cached_color_mode = _COLOR_INVALID;
         cached_underline_enabled = -1;
         cached_on_tty = -1;
 }
@@ -1206,38 +1203,62 @@ bool terminal_is_dumb(void) {
         return getenv_terminal_is_dumb();
 }
 
-bool colors_enabled(void) {
+static ColorMode parse_systemd_colors(void) {
+        const char *e;
+        int r;
 
-        /* Returns true if colors are considered supported on our stdout. For that we check $SYSTEMD_COLORS first
-         * (which is the explicit way to turn colors on/off). If that didn't work we turn colors off unless we are on a
-         * TTY. And if we are on a TTY we turn it off if $TERM is set to "dumb". There's one special tweak though: if
-         * we are PID 1 then we do not check whether we are connected to a TTY, because we don't keep /dev/console open
-         * continuously due to fear of SAK, and hence things are a bit weird. */
+        e = getenv("SYSTEMD_COLORS");
+        if (!e)
+                return _COLOR_INVALID;
+        if (streq(e, "16"))
+                return COLOR_16;
+        if (streq(e, "256"))
+                return COLOR_256;
+        r = parse_boolean(e);
+        if (r >= 0)
+                return r > 0 ? COLOR_ON : COLOR_OFF;
+        return _COLOR_INVALID;
+}
 
-        if (cached_colors_enabled < 0) {
-                int val;
+ColorMode get_color_mode(void) {
 
-                val = getenv_bool("SYSTEMD_COLORS");
-                if (val >= 0)
-                        cached_colors_enabled = val;
+        /* Returns the mode used to choose output colors. The possible modes are COLOR_OFF for no colors,
+         * COLOR_16 for only the base 16 ANSI colors, COLOR_256 for more colors and COLOR_ON for unrestricted
+         * color output. For that we check $SYSTEMD_COLORS first (which is the explicit way to
+         * change the mode). If that didn't work we turn colors off unless we are on a TTY. And if we are on a TTY
+         * we turn it off if $TERM is set to "dumb". There's one special tweak though: if we are PID 1 then we do not
+         * check whether we are connected to a TTY, because we don't keep /dev/console open continuously due to fear
+         * of SAK, and hence things are a bit weird. */
+        ColorMode m;
 
+        if (cached_color_mode < 0) {
+                m = parse_systemd_colors();
+                if (m >= 0)
+                        cached_color_mode = m;
                 else if (getenv("NO_COLOR"))
                         /* We only check for the presence of the variable; value is ignored. */
-                        cached_colors_enabled = false;
+                        cached_color_mode = COLOR_OFF;
 
                 else if (getpid_cached() == 1)
-                        /* PID1 outputs to the console without holding it open all the time */
-                        cached_colors_enabled = !getenv_terminal_is_dumb();
+                        /* PID1 outputs to the console without holding it open all the time.
+                         *
+                         * Note that the Linux console can only display 16 colors. We still enable 256 color
+                         * mode even for PID1 output though (which typically goes to the Linux console),
+                         * since the Linux console is able to parse the 256 color sequences and automatically
+                         * map them to the closest color in the 16 color palette (since kernel 3.16). Doing
+                         * 256 colors is nice for people who invoke systemd in a container or via a serial
+                         * link or such, and use a true 256 color terminal to do so. */
+                        cached_color_mode = getenv_terminal_is_dumb() ? COLOR_OFF : COLOR_256;
                 else
-                        cached_colors_enabled = !terminal_is_dumb();
+                        cached_color_mode = terminal_is_dumb() ? COLOR_OFF : COLOR_256;
         }
 
-        return cached_colors_enabled;
+        return cached_color_mode;
 }
 
 bool dev_console_colors_enabled(void) {
         _cleanup_free_ char *s = NULL;
-        int b;
+        ColorMode m;
 
         /* Returns true if we assume that color is supported on /dev/console.
          *
@@ -1246,9 +1267,9 @@ bool dev_console_colors_enabled(void) {
          * line. If we find $TERM set we assume color if it's not set to "dumb", similarly to how regular
          * colors_enabled() operates. */
 
-        b = getenv_bool("SYSTEMD_COLORS");
-        if (b >= 0)
-                return b;
+        m = parse_systemd_colors();
+        if (m >= 0)
+                return m;
 
         if (getenv("NO_COLOR"))
                 return false;
@@ -1321,7 +1342,7 @@ int vt_restore(int fd) {
                         q = -errno;
         }
 
-        r = fchmod_and_chown(fd, TTY_MODE, 0, (gid_t) -1);
+        r = fchmod_and_chown(fd, TTY_MODE, 0, GID_INVALID);
         if (r < 0) {
                 log_debug_errno(r, "Failed to chmod()/chown() VT, ignoring: %m");
                 if (q >= 0)
@@ -1353,34 +1374,34 @@ void get_log_colors(int priority, const char **on, const char **off, const char 
 
         if (priority <= LOG_ERR) {
                 if (on)
-                        *on = ANSI_HIGHLIGHT_RED;
+                        *on = ansi_highlight_red();
                 if (off)
-                        *off = ANSI_NORMAL;
+                        *off = ansi_normal();
                 if (highlight)
-                        *highlight = ANSI_HIGHLIGHT;
+                        *highlight = ansi_highlight();
 
         } else if (priority <= LOG_WARNING) {
                 if (on)
-                        *on = ANSI_HIGHLIGHT_YELLOW;
+                        *on = ansi_highlight_yellow();
                 if (off)
-                        *off = ANSI_NORMAL;
+                        *off = ansi_normal();
                 if (highlight)
-                        *highlight = ANSI_HIGHLIGHT;
+                        *highlight = ansi_highlight();
 
         } else if (priority <= LOG_NOTICE) {
                 if (on)
-                        *on = ANSI_HIGHLIGHT;
+                        *on = ansi_highlight();
                 if (off)
-                        *off = ANSI_NORMAL;
+                        *off = ansi_normal();
                 if (highlight)
-                        *highlight = ANSI_HIGHLIGHT_RED;
+                        *highlight = ansi_highlight_red();
 
         } else if (priority >= LOG_DEBUG) {
                 if (on)
-                        *on = ANSI_GREY;
+                        *on = ansi_grey();
                 if (off)
-                        *off = ANSI_NORMAL;
+                        *off = ansi_normal();
                 if (highlight)
-                        *highlight = ANSI_HIGHLIGHT_RED;
+                        *highlight = ansi_highlight_red();
         }
 }

@@ -63,6 +63,25 @@
     url="https://www.freedesktop.org/wiki/Software/systemd/ControlGroupInterface/">New
     Control Group Interfaces</ulink> for an introduction on how to make
     use of resource control APIs from programs.</para>
+
+    <refsect2>
+      <title>Setting resource controls for a group of related units</title>
+
+      <para>As described in
+      <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>, the
+      settings listed here may be set through the main file of a unit and drop-in snippets in
+      <filename index="false">*.d/</filename> directories. The list of directories searched for drop-ins
+      includes names formed by repeatedly truncating the unit name after all dashes. This is particularly
+      convenient to set resource limits for a group of units with similar names.</para>
+
+      <para>For example, every user gets their own slice
+      <filename>user-<replaceable>nnn</replaceable>.slice</filename>. Drop-ins with local configuration that
+      affect user 1000 may be placed in
+      <filename index="false">/etc/systemd/system/user-1000.slice</filename>,
+      <filename index="false">/etc/systemd/system/user-1000.slice.d/*.conf</filename>, but also
+      <filename index="false">/etc/systemd/system/user-.slice.d/*.conf</filename>. This last directory
+      applies to all user slices.</para>
+    </refsect2>
   </refsect1>
 
   <refsect1>
@@ -901,14 +920,46 @@ DeviceAllow=/dev/loop-control
       </varlistentry>
 
       <varlistentry>
-        <term><varname>ManagedOOMMemoryPressureLimitPercent=</varname></term>
+        <term><varname>ManagedOOMMemoryPressureLimit=</varname></term>
 
         <listitem>
           <para>Overrides the default memory pressure limit set by
-          <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry> for this unit
-          (cgroup). Takes a percentage value between 0% and 100%, inclusive. This property is ignored unless
-          <varname>ManagedOOMMemoryPressure=</varname><option>kill</option>. Defaults to 0%, which means use the
-          default set by <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+          this unit (cgroup). Takes a percentage value between 0% and 100%, inclusive. This property is
+          ignored unless <varname>ManagedOOMMemoryPressure=</varname><option>kill</option>. Defaults to 0%,
+          which means to use the default set by
+          <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
+          </para>
+        </listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>ManagedOOMPreference=none|avoid|omit</varname></term>
+
+        <listitem>
+          <para>Allows deprioritizing or omitting this unit's cgroup as a candidate when
+          <command>systemd-oomd</command> needs to act. Requires support for extended attributes (see
+          <citerefentry project='man-pages'><refentrytitle>xattr</refentrytitle><manvolnum>7</manvolnum></citerefentry>)
+          in order to use <option>avoid</option> or <option>omit</option>. Additionally,
+          <command>systemd-oomd</command> will ignore these extended attributes if the unit's cgroup is not
+          owned by the root user.</para>
+
+          <para>If this property is set to <option>avoid</option>, the service manager will convey this to
+          <command>systemd-oomd</command>, which will only select this cgroup if there are no other viable
+          candidates.</para>
+
+          <para>If this property is set to <option>omit</option>, the service manager will convey this to
+          <command>systemd-oomd</command>, which will ignore this cgroup as a candidate and will not perform
+          any actions on it.</para>
+
+          <para>It is recommended to use <option>avoid</option> and <option>omit</option> sparingly, as it
+          can adversely affect <command>systemd-oomd</command>'s kill behavior. Also note that these extended
+          attributes are not applied recursively to cgroups under this unit's cgroup.</para>
+
+          <para>Defaults to <option>none</option> which means <command>systemd-oomd</command> will rank this
+          unit's cgroup as defined in
+          <citerefentry><refentrytitle>systemd-oomd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+          and <citerefentry><refentrytitle>oomd.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
           </para>
         </listitem>
       </varlistentry>

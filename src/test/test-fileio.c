@@ -9,6 +9,7 @@
 #include "ctype.h"
 #include "env-file.h"
 #include "env-util.h"
+#include "errno-util.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
@@ -703,28 +704,28 @@ static const char buffer[] =
 static void test_read_line_one_file(FILE *f) {
         _cleanup_free_ char *line = NULL;
 
-        assert_se(read_line(f, (size_t) -1, &line) == 15 && streq(line, "Some test data"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 15 && streq(line, "Some test data"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) > 0 && streq(line, "루Non-ascii chars: ąę„”"));
+        assert_se(read_line(f, SIZE_MAX, &line) > 0 && streq(line, "루Non-ascii chars: ąę„”"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) == 13 && streq(line, "terminators"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 13 && streq(line, "terminators"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) == 15 && streq(line, "and even more"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 15 && streq(line, "and even more"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) == 25 && streq(line, "now the same with a NUL"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 25 && streq(line, "now the same with a NUL"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) == 10 && streq(line, "and more"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 10 && streq(line, "and more"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) == 16 && streq(line, "and even more"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 16 && streq(line, "and even more"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, &line) == 20 && streq(line, "and yet even more"));
+        assert_se(read_line(f, SIZE_MAX, &line) == 20 && streq(line, "and yet even more"));
         line = mfree(line);
 
         assert_se(read_line(f, 1024, &line) == 30 && streq(line, "With newlines, and a NUL byte"));
@@ -736,7 +737,7 @@ static void test_read_line_one_file(FILE *f) {
         assert_se(read_line(f, 1024, &line) == 14 && streq(line, "an empty line"));
         line = mfree(line);
 
-        assert_se(read_line(f, (size_t) -1, NULL) == 16);
+        assert_se(read_line(f, SIZE_MAX, NULL) == 16);
 
         assert_se(read_line(f, 16, &line) == -ENOBUFS);
         line = mfree(line);
@@ -819,11 +820,11 @@ static void test_read_line4(void) {
 
                 assert_se(f = fmemopen_unlocked((void*) eof_endings[i].string, eof_endings[i].length, "r"));
 
-                r = read_line(f, (size_t) -1, &s);
+                r = read_line(f, SIZE_MAX, &s);
                 assert_se((size_t) r == eof_endings[i].length);
                 assert_se(streq_ptr(s, "foo"));
 
-                assert_se(read_line(f, (size_t) -1, NULL) == 0); /* Ensure we hit EOF */
+                assert_se(read_line(f, SIZE_MAX, NULL) == 0); /* Ensure we hit EOF */
         }
 }
 
@@ -911,13 +912,75 @@ static void test_read_full_file_socket(void) {
                 _exit(EXIT_SUCCESS);
         }
 
-        assert_se(read_full_file_full(AT_FDCWD, j, 0, NULL, &data, &size) == -ENXIO);
-        assert_se(read_full_file_full(AT_FDCWD, j, READ_FULL_FILE_CONNECT_SOCKET, clientname, &data, &size) >= 0);
+        assert_se(read_full_file_full(AT_FDCWD, j, UINT64_MAX, SIZE_MAX, 0, NULL, &data, &size) == -ENXIO);
+        assert_se(read_full_file_full(AT_FDCWD, j, UINT64_MAX, SIZE_MAX, READ_FULL_FILE_CONNECT_SOCKET, clientname, &data, &size) >= 0);
         assert_se(size == strlen(TEST_STR));
         assert_se(streq(data, TEST_STR));
 
         assert_se(wait_for_terminate_and_check("(server)", pid, WAIT_LOG) >= 0);
 #undef TEST_STR
+}
+
+static void test_read_full_file_offset_size(void) {
+        _cleanup_fclose_ FILE *f = NULL;
+        _cleanup_(unlink_and_freep) char *fn = NULL;
+        _cleanup_free_ char *rbuf = NULL;
+        size_t rbuf_size;
+        uint8_t buf[4711];
+
+        random_bytes(buf, sizeof(buf));
+
+        assert_se(tempfn_random_child(NULL, NULL, &fn) >= 0);
+        assert_se(f = fopen(fn, "we"));
+        assert_se(fwrite(buf, 1, sizeof(buf), f) == sizeof(buf));
+        assert_se(fflush_and_check(f) >= 0);
+
+        assert_se(read_full_file_full(AT_FDCWD, fn, UINT64_MAX, SIZE_MAX, 0, NULL, &rbuf, &rbuf_size) >= 0);
+        assert_se(rbuf_size == sizeof(buf));
+        assert_se(memcmp(buf, rbuf, rbuf_size) == 0);
+        rbuf = mfree(rbuf);
+
+        assert_se(read_full_file_full(AT_FDCWD, fn, UINT64_MAX, 128, 0, NULL, &rbuf, &rbuf_size) >= 0);
+        assert_se(rbuf_size == 128);
+        assert_se(memcmp(buf, rbuf, rbuf_size) == 0);
+        rbuf = mfree(rbuf);
+
+        assert_se(read_full_file_full(AT_FDCWD, fn, 1234, SIZE_MAX, 0, NULL, &rbuf, &rbuf_size) >= 0);
+        assert_se(rbuf_size == sizeof(buf) - 1234);
+        assert_se(memcmp(buf + 1234, rbuf, rbuf_size) == 0);
+        rbuf = mfree(rbuf);
+
+        assert_se(read_full_file_full(AT_FDCWD, fn, 2345, 777, 0, NULL, &rbuf, &rbuf_size) >= 0);
+        assert_se(rbuf_size == 777);
+        assert_se(memcmp(buf + 2345, rbuf, rbuf_size) == 0);
+        rbuf = mfree(rbuf);
+
+        assert_se(read_full_file_full(AT_FDCWD, fn, 4700, 20, 0, NULL, &rbuf, &rbuf_size) >= 0);
+        assert_se(rbuf_size == 11);
+        assert_se(memcmp(buf + 4700, rbuf, rbuf_size) == 0);
+        rbuf = mfree(rbuf);
+
+        assert_se(read_full_file_full(AT_FDCWD, fn, 10000, 99, 0, NULL, &rbuf, &rbuf_size) >= 0);
+        assert_se(rbuf_size == 0);
+        rbuf = mfree(rbuf);
+}
+
+static void test_read_full_virtual_file(void) {
+        const char *filename;
+        int r;
+
+        FOREACH_STRING(filename,
+                       "/proc/1/cmdline",
+                       "/etc/nsswitch.conf",
+                       "/sys/kernel/uevent_seqnum") {
+
+                _cleanup_free_ char *buf = NULL;
+                size_t size = 0;
+
+                r = read_full_virtual_file(filename, &buf, &size);
+                log_info_errno(r, "read_full_virtual_file(\"%s\"): %m (%zu bytes)", filename, size);
+                assert_se(r == 0 || ERRNO_IS_PRIVILEGE(r) || r == -ENOENT);
+        }
 }
 
 int main(int argc, char *argv[]) {
@@ -946,6 +1009,8 @@ int main(int argc, char *argv[]) {
         test_read_line4();
         test_read_nul_string();
         test_read_full_file_socket();
+        test_read_full_file_offset_size();
+        test_read_full_virtual_file();
 
         return 0;
 }

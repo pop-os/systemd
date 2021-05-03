@@ -75,10 +75,8 @@ static int timer_verify(Timer *t) {
         assert(t);
         assert(UNIT(t)->load_state == UNIT_LOADED);
 
-        if (!t->values && !t->on_clock_change && !t->on_timezone_change) {
-                log_unit_error(UNIT(t), "Timer unit lacks value setting. Refusing.");
-                return -ENOEXEC;
-        }
+        if (!t->values && !t->on_clock_change && !t->on_timezone_change)
+                return log_unit_error_errno(UNIT(t), SYNTHETIC_ERRNO(ENOEXEC), "Timer unit lacks value setting. Refusing.");
 
         return 0;
 }
@@ -102,12 +100,18 @@ static int timer_add_default_dependencies(Timer *t) {
                         return r;
 
                 LIST_FOREACH(value, v, t->values) {
-                        if (v->base == TIMER_CALENDAR) {
-                                r = unit_add_dependency_by_name(UNIT(t), UNIT_AFTER, SPECIAL_TIME_SYNC_TARGET, true, UNIT_DEPENDENCY_DEFAULT);
+                        const char *target;
+
+                        if (v->base != TIMER_CALENDAR)
+                                continue;
+
+                        FOREACH_STRING(target, SPECIAL_TIME_SYNC_TARGET, SPECIAL_TIME_SET_TARGET) {
+                                r = unit_add_dependency_by_name(UNIT(t), UNIT_AFTER, target, true, UNIT_DEPENDENCY_DEFAULT);
                                 if (r < 0)
                                         return r;
-                                break;
                         }
+
+                        break;
                 }
         }
 
@@ -259,8 +263,7 @@ static void timer_dump(Unit *u, FILE *f, const char *prefix) {
                 prefix, yes_no(t->on_clock_change),
                 prefix, yes_no(t->on_timezone_change));
 
-        LIST_FOREACH(value, v, t->values) {
-
+        LIST_FOREACH(value, v, t->values)
                 if (v->base == TIMER_CALENDAR) {
                         _cleanup_free_ char *p = NULL;
 
@@ -280,7 +283,6 @@ static void timer_dump(Unit *u, FILE *f, const char *prefix) {
                                 timer_base_to_string(v->base),
                                 format_timespan(timespan1, sizeof(timespan1), v->value, 0));
                 }
-        }
 }
 
 static void timer_set_state(Timer *t, TimerState state) {
@@ -670,9 +672,7 @@ static int timer_start(Unit *u) {
                         }
 
                 } else if (errno == ENOENT)
-                        /* The timer has never run before,
-                         * make sure a stamp file exists.
-                         */
+                        /* The timer has never run before, make sure a stamp file exists. */
                         (void) touch_file(t->stamp_path, true, USEC_INFINITY, UID_INVALID, GID_INVALID, MODE_INVALID);
         }
 

@@ -8,6 +8,7 @@
 
 #include "alloc-util.h"
 #include "bus-common-errors.h"
+#include "bus-get-properties.h"
 #include "bus-log-control-api.h"
 #include "bus-polkit.h"
 #include "def.h"
@@ -16,6 +17,7 @@
 #include "env-util.h"
 #include "fileio-label.h"
 #include "fileio.h"
+#include "hostname-setup.h"
 #include "hostname-util.h"
 #include "id128-util.h"
 #include "main-func.h"
@@ -25,10 +27,12 @@
 #include "os-util.h"
 #include "parse-util.h"
 #include "path-util.h"
+#include "sd-device.h"
 #include "selinux-util.h"
 #include "service-util.h"
 #include "signal-util.h"
 #include "stat-util.h"
+#include "string-table.h"
 #include "strv.h"
 #include "user-util.h"
 #include "util.h"
@@ -47,16 +51,21 @@ enum {
         PROP_DEPLOYMENT,
         PROP_LOCATION,
 
+        PROP_HARDWARE_VENDOR,
+        PROP_HARDWARE_MODEL,
+
         /* Read from /etc/os-release (or /usr/lib/os-release) */
         PROP_OS_PRETTY_NAME,
         PROP_OS_CPE_NAME,
         PROP_OS_HOME_URL,
         _PROP_MAX,
-        _PROP_INVALID = -1,
+        _PROP_INVALID = -EINVAL,
 };
 
 typedef struct Context {
         char *data[_PROP_MAX];
+
+        HostnameSource hostname_source;
 
         struct stat etc_hostname_stat;
         struct stat etc_os_release_stat;
@@ -66,11 +75,9 @@ typedef struct Context {
 } Context;
 
 static void context_reset(Context *c, uint64_t mask) {
-        int p;
-
         assert(c);
 
-        for (p = 0; p < _PROP_MAX; p++) {
+        for (int p = 0; p < _PROP_MAX; p++) {
                 if (!FLAGS_SET(mask, UINT64_C(1) << p))
                         continue;
 
@@ -152,8 +159,7 @@ static void context_read_os_release(Context *c) {
         r = parse_os_release(NULL,
                              "PRETTY_NAME", &c->data[PROP_OS_PRETTY_NAME],
                              "CPE_NAME", &c->data[PROP_OS_CPE_NAME],
-                             "HOME_URL", &c->data[PROP_OS_HOME_URL],
-                             NULL);
+                             "HOME_URL", &c->data[PROP_OS_HOME_URL]);
         if (r < 0 && r != -ENOENT)
                 log_warning_errno(r, "Failed to read os-release file, ignoring: %m");
 
@@ -312,68 +318,93 @@ static char* context_fallback_icon_name(Context *c) {
         return strdup("computer");
 }
 
-static bool hostname_is_useful(const char *hn) {
-        return !isempty(hn) && !is_localhost(hn);
-}
-
 static int context_update_kernel_hostname(
                 Context *c,
                 const char *transient_hn) {
 
-        const char *static_hn, *hn;
-        struct utsname u;
+        _cleanup_free_ char *_hn_free = NULL;
+        const char *hn;
+        HostnameSource hns;
+        int r;
 
         assert(c);
 
-        if (!transient_hn) {
-                /* If no transient hostname is passed in, then let's check what is currently set. */
-                assert_se(uname(&u) >= 0);
-                transient_hn =
-                        isempty(u.nodename) || streq(u.nodename, "(none)") ? NULL : u.nodename;
-        }
-
-        static_hn = c->data[PROP_STATIC_HOSTNAME];
-
-        /* /etc/hostname with something other than "localhost"
-         * has the highest preference ... */
-        if (hostname_is_useful(static_hn))
-                hn = static_hn;
+        /* /etc/hostname has the highest preference ... */
+        if (c->data[PROP_STATIC_HOSTNAME]) {
+                hn = c->data[PROP_STATIC_HOSTNAME];
+                hns = HOSTNAME_STATIC;
 
         /* ... the transient hostname, (ie: DHCP) comes next ... */
-        else if (!isempty(transient_hn))
+        } else if (transient_hn) {
                 hn = transient_hn;
-
-        /* ... fallback to static "localhost.*" ignored above ... */
-        else if (!isempty(static_hn))
-                hn = static_hn;
+                hns = HOSTNAME_TRANSIENT;
 
         /* ... and the ultimate fallback */
-        else
-                hn = FALLBACK_HOSTNAME;
+        } else {
+                hn = _hn_free = get_default_hostname();
+                if (!hn)
+                        return log_oom();
 
-        if (sethostname_idempotent(hn) < 0)
-                return -errno;
+                hns = HOSTNAME_DEFAULT;
+        }
+
+        r = sethostname_idempotent(hn);
+        if (r < 0)
+                return log_error_errno(r, "Failed to set hostname: %m");
+
+        if (c->hostname_source != hns) {
+                c->hostname_source = hns;
+                r = 1;
+        }
 
         (void) nscd_flush_cache(STRV_MAKE("hosts"));
 
-        return 0;
+        if (r == 0)
+                log_debug("Hostname was already set to <%s>.", hn);
+        else {
+                log_info("Hostname set to <%s> (%s)", hn, hostname_source_to_string(hns));
+
+                hostname_update_source_hint(hn, hns);
+        }
+
+        return r; /* 0 if no change, 1 if something was done  */
+}
+
+static void unset_statp(struct stat **p) {
+        if (!*p)
+                return;
+
+        **p = (struct stat) {};
 }
 
 static int context_write_data_static_hostname(Context *c) {
+        _cleanup_(unset_statp) struct stat *s = NULL;
+        int r;
+
         assert(c);
 
+        /* Make sure that if we fail here, we invalidate the cached information, since it was updated
+         * already, even if we can't make it hit the disk. */
+        s = &c->etc_hostname_stat;
+
         if (isempty(c->data[PROP_STATIC_HOSTNAME])) {
+                if (unlink("/etc/hostname") < 0 && errno != ENOENT)
+                        return -errno;
 
-                if (unlink("/etc/hostname") < 0)
-                        return errno == ENOENT ? 0 : -errno;
-
+                TAKE_PTR(s);
                 return 0;
         }
-        return write_string_file_atomic_label("/etc/hostname", c->data[PROP_STATIC_HOSTNAME]);
+
+        r = write_string_file_atomic_label("/etc/hostname", c->data[PROP_STATIC_HOSTNAME]);
+        if (r < 0)
+                return r;
+
+        TAKE_PTR(s);
+        return 0;
 }
 
 static int context_write_data_machine_info(Context *c) {
-
+        _cleanup_(unset_statp) struct stat *s = NULL;
         static const char * const name[_PROP_MAX] = {
                 [PROP_PRETTY_HOSTNAME] = "PRETTY_HOSTNAME",
                 [PROP_ICON_NAME] = "ICON_NAME",
@@ -381,46 +412,89 @@ static int context_write_data_machine_info(Context *c) {
                 [PROP_DEPLOYMENT] = "DEPLOYMENT",
                 [PROP_LOCATION] = "LOCATION",
         };
-
         _cleanup_strv_free_ char **l = NULL;
-        int r, p;
+        int r;
 
         assert(c);
+
+        /* Make sure that if we fail here, we invalidate the cached information, since it was updated
+         * already, even if we can't make it hit the disk. */
+        s = &c->etc_machine_info_stat;
 
         r = load_env_file(NULL, "/etc/machine-info", &l);
         if (r < 0 && r != -ENOENT)
                 return r;
 
-        for (p = PROP_PRETTY_HOSTNAME; p <= PROP_LOCATION; p++) {
-                _cleanup_free_ char *t = NULL;
-                char **u;
-
+        for (int p = PROP_PRETTY_HOSTNAME; p <= PROP_LOCATION; p++) {
                 assert(name[p]);
 
-                if (isempty(c->data[p]))  {
-                        strv_env_unset(l, name[p]);
-                        continue;
-                }
-
-                t = strjoin(name[p], "=", c->data[p]);
-                if (!t)
-                        return -ENOMEM;
-
-                u = strv_env_set(l, t);
-                if (!u)
-                        return -ENOMEM;
-
-                strv_free_and_replace(l, u);
+                r = strv_env_assign(&l, name[p], empty_to_null(c->data[p]));
+                if (r < 0)
+                        return r;
         }
 
         if (strv_isempty(l)) {
-                if (unlink("/etc/machine-info") < 0)
-                        return errno == ENOENT ? 0 : -errno;
+                if (unlink("/etc/machine-info") < 0 && errno != ENOENT)
+                        return -errno;
 
+                TAKE_PTR(s);
                 return 0;
         }
 
-        return write_env_file_label("/etc/machine-info", l);
+        r = write_env_file_label("/etc/machine-info", l);
+        if (r < 0)
+                return r;
+
+        TAKE_PTR(s);
+        return 0;
+}
+
+static int property_get_hardware_vendor(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+        _cleanup_(sd_device_unrefp) sd_device *device = NULL;
+        const char *hardware_vendor = NULL;
+        int r;
+
+        r = sd_device_new_from_syspath(&device, "/sys/class/dmi/id");
+        if (r < 0) {
+                log_warning_errno(r, "Failed to open /sys/class/dmi/id device, ignoring: %m");
+                return sd_bus_message_append(reply, "s", NULL);
+        }
+
+        if (sd_device_get_property_value(device, "ID_VENDOR_FROM_DATABASE", &hardware_vendor) < 0)
+                (void) sd_device_get_property_value(device, "ID_VENDOR", &hardware_vendor);
+
+        return sd_bus_message_append(reply, "s", hardware_vendor);
+}
+
+static int property_get_hardware_model(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+        _cleanup_(sd_device_unrefp) sd_device *device = NULL;
+        const char *hardware_model = NULL;
+        int r;
+
+        r = sd_device_new_from_syspath(&device, "/sys/class/dmi/id");
+        if (r < 0) {
+                log_warning_errno(r, "Failed to open /sys/class/dmi/id device, ignoring: %m");
+                return sd_bus_message_append(reply, "s", NULL);
+        }
+
+        if (sd_device_get_property_value(device, "ID_MODEL_FROM_DATABASE", &hardware_model) < 0)
+                (void) sd_device_get_property_value(device, "ID_MODEL", &hardware_model);
+
+        return sd_bus_message_append(reply, "s", hardware_model);
 }
 
 static int property_get_hostname(
@@ -432,16 +506,20 @@ static int property_get_hostname(
                 void *userdata,
                 sd_bus_error *error) {
 
-        _cleanup_free_ char *current = NULL;
+        _cleanup_free_ char *hn = NULL;
         int r;
 
-        r = gethostname_strict(&current);
-        if (r == -ENXIO)
-                return sd_bus_message_append(reply, "s", FALLBACK_HOSTNAME);
-        if (r < 0)
-                return r;
+        r = gethostname_strict(&hn);
+        if (r < 0) {
+                if (r != -ENXIO)
+                        return r;
 
-        return sd_bus_message_append(reply, "s", current);
+                hn = get_default_hostname();
+                if (!hn)
+                        return -ENOMEM;
+        }
+
+        return sd_bus_message_append(reply, "s", hn);
 }
 
 static int property_get_static_hostname(
@@ -459,6 +537,66 @@ static int property_get_static_hostname(
         context_read_etc_hostname(c);
 
         return sd_bus_message_append(reply, "s", c->data[PROP_STATIC_HOSTNAME]);
+}
+
+static int property_get_default_hostname(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        _cleanup_free_ char *hn = get_default_hostname();
+        if (!hn)
+                return log_oom();
+
+        return sd_bus_message_append(reply, "s", hn);
+}
+
+static int property_get_hostname_source(
+                sd_bus *bus,
+                const char *path,
+                const char *interface,
+                const char *property,
+                sd_bus_message *reply,
+                void *userdata,
+                sd_bus_error *error) {
+
+        Context *c = userdata;
+        int r;
+        assert(c);
+
+        context_read_etc_hostname(c);
+
+        if (c->hostname_source < 0) {
+                char hostname[HOST_NAME_MAX + 1] = {};
+                _cleanup_free_ char *fallback = NULL;
+
+                (void) get_hostname_filtered(hostname);
+
+                if (streq_ptr(hostname, c->data[PROP_STATIC_HOSTNAME]))
+                        c->hostname_source = HOSTNAME_STATIC;
+
+                else {
+                        /* If the hostname was not set by us, try to figure out where it came from. If we set
+                         * it to the default hostname, the file will tell us. We compare the string because
+                         * it is possible that the hostname was set by an older version that had a different
+                         * fallback, in the initramfs or before we reexecuted. */
+
+                        r = read_one_line_file("/run/systemd/default-hostname", &fallback);
+                        if (r < 0 && r != -ENOENT)
+                                log_warning_errno(r, "Failed to read /run/systemd/default-hostname, ignoring: %m");
+
+                        if (streq_ptr(fallback, hostname))
+                                c->hostname_source = HOSTNAME_DEFAULT;
+                        else
+                                c->hostname_source = HOSTNAME_TRANSIENT;
+                }
+        }
+
+        return sd_bus_message_append(reply, "s", hostname_source_to_string(c->hostname_source));
 }
 
 static int property_get_machine_info_field(
@@ -579,7 +717,6 @@ static int method_set_hostname(sd_bus_message *m, void *userdata, sd_bus_error *
         Context *c = userdata;
         const char *name;
         int interactive, r;
-        struct utsname u;
 
         assert(m);
         assert(c);
@@ -588,20 +725,15 @@ static int method_set_hostname(sd_bus_message *m, void *userdata, sd_bus_error *
         if (r < 0)
                 return r;
 
-        context_read_etc_hostname(c);
+        name = empty_to_null(name);
 
-        if (isempty(name))
-                name = c->data[PROP_STATIC_HOSTNAME];
+        /* We always go through with the procedure below without comparing to the current hostname, because
+         * we might want to adjust hostname source information even if the actual hostname is unchanged. */
 
-        if (isempty(name))
-                name = FALLBACK_HOSTNAME;
-
-        if (!hostname_is_valid(name, false))
+        if (name && !hostname_is_valid(name, 0))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid hostname '%s'", name);
 
-        assert_se(uname(&u) >= 0);
-        if (streq_ptr(name, u.nodename))
-                return sd_bus_reply_method_return(m, NULL);
+        context_read_etc_hostname(c);
 
         r = bus_verify_polkit_async(
                         m,
@@ -618,14 +750,12 @@ static int method_set_hostname(sd_bus_message *m, void *userdata, sd_bus_error *
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
         r = context_update_kernel_hostname(c, name);
-        if (r < 0) {
-                log_error_errno(r, "Failed to set hostname: %m");
+        if (r < 0)
                 return sd_bus_error_set_errnof(error, r, "Failed to set hostname: %m");
-        }
-
-        log_info("Changed hostname to '%s'", name);
-
-        (void) sd_bus_emit_properties_changed(sd_bus_message_get_bus(m), "/org/freedesktop/hostname1", "org.freedesktop.hostname1", "Hostname", NULL);
+        else if (r > 0)
+                (void) sd_bus_emit_properties_changed(sd_bus_message_get_bus(m),
+                                                      "/org/freedesktop/hostname1", "org.freedesktop.hostname1",
+                                                      "Hostname", "HostnameSource", NULL);
 
         return sd_bus_reply_method_return(m, NULL);
 }
@@ -650,7 +780,7 @@ static int method_set_static_hostname(sd_bus_message *m, void *userdata, sd_bus_
         if (streq_ptr(name, c->data[PROP_STATIC_HOSTNAME]))
                 return sd_bus_reply_method_return(m, NULL);
 
-        if (!isempty(name) && !hostname_is_valid(name, false))
+        if (name && !hostname_is_valid(name, 0))
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid static hostname '%s'", name);
 
         r = bus_verify_polkit_async(
@@ -667,9 +797,19 @@ static int method_set_static_hostname(sd_bus_message *m, void *userdata, sd_bus_
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = free_and_strdup(&c->data[PROP_STATIC_HOSTNAME], name);
+        r = free_and_strdup_warn(&c->data[PROP_STATIC_HOSTNAME], name);
         if (r < 0)
                 return r;
+
+        r = context_write_data_static_hostname(c);
+        if (r < 0) {
+                log_error_errno(r, "Failed to write static hostname: %m");
+                if (ERRNO_IS_PRIVILEGE(r))
+                        return sd_bus_error_set(error, BUS_ERROR_FILE_IS_PROTECTED, "Not allowed to update /etc/hostname.");
+                if (r == -EROFS)
+                        return sd_bus_error_set(error, BUS_ERROR_READ_ONLY_FILESYSTEM, "/etc/hostname is in a read-only filesystem.");
+                return sd_bus_error_set_errnof(error, r, "Failed to set static hostname: %m");
+        }
 
         r = context_update_kernel_hostname(c, NULL);
         if (r < 0) {
@@ -677,15 +817,9 @@ static int method_set_static_hostname(sd_bus_message *m, void *userdata, sd_bus_
                 return sd_bus_error_set_errnof(error, r, "Failed to set hostname: %m");
         }
 
-        r = context_write_data_static_hostname(c);
-        if (r < 0) {
-                log_error_errno(r, "Failed to write static hostname: %m");
-                return sd_bus_error_set_errnof(error, r, "Failed to set static hostname: %m");
-        }
-
-        log_info("Changed static hostname to '%s'", strna(c->data[PROP_STATIC_HOSTNAME]));
-
-        (void) sd_bus_emit_properties_changed(sd_bus_message_get_bus(m), "/org/freedesktop/hostname1", "org.freedesktop.hostname1", "StaticHostname", NULL);
+        (void) sd_bus_emit_properties_changed(sd_bus_message_get_bus(m),
+                                              "/org/freedesktop/hostname1", "org.freedesktop.hostname1",
+                                              "StaticHostname", "Hostname", "HostnameSource", NULL);
 
         return sd_bus_reply_method_return(m, NULL);
 }
@@ -743,13 +877,17 @@ static int set_machine_info(Context *c, sd_bus_message *m, int prop, sd_bus_mess
         if (r == 0)
                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
 
-        r = free_and_strdup(&c->data[prop], name);
+        r = free_and_strdup_warn(&c->data[prop], name);
         if (r < 0)
                 return r;
 
         r = context_write_data_machine_info(c);
         if (r < 0) {
                 log_error_errno(r, "Failed to write machine info: %m");
+                if (ERRNO_IS_PRIVILEGE(r))
+                        return sd_bus_error_set(error, BUS_ERROR_FILE_IS_PROTECTED, "Not allowed to update /etc/machine-info.");
+                if (r == -EROFS)
+                        return sd_bus_error_set(error, BUS_ERROR_READ_ONLY_FILESYSTEM, "/etc/machine-info is in a read-only filesystem.");
                 return sd_bus_error_set_errnof(error, r, "Failed to write machine info: %m");
         }
 
@@ -850,6 +988,8 @@ static const sd_bus_vtable hostname_vtable[] = {
         SD_BUS_PROPERTY("Hostname", "s", property_get_hostname, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("StaticHostname", "s", property_get_static_hostname, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("PrettyHostname", "s", property_get_machine_info_field, offsetof(Context, data) + sizeof(char*) * PROP_PRETTY_HOSTNAME, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("DefaultHostname", "s", property_get_default_hostname, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("HostnameSource", "s", property_get_hostname_source, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("IconName", "s", property_get_icon_name, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("Chassis", "s", property_get_chassis, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("Deployment", "s", property_get_machine_info_field, offsetof(Context, data) + sizeof(char*) * PROP_DEPLOYMENT, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
@@ -860,6 +1000,8 @@ static const sd_bus_vtable hostname_vtable[] = {
         SD_BUS_PROPERTY("OperatingSystemPrettyName", "s", property_get_os_release_field, offsetof(Context, data) + sizeof(char*) * PROP_OS_PRETTY_NAME, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("OperatingSystemCPEName", "s", property_get_os_release_field, offsetof(Context, data) + sizeof(char*) * PROP_OS_CPE_NAME, SD_BUS_VTABLE_PROPERTY_CONST),
         SD_BUS_PROPERTY("HomeURL", "s", property_get_os_release_field, offsetof(Context, data) + sizeof(char*) * PROP_OS_HOME_URL, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("HardwareVendor", "s", property_get_hardware_vendor, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+        SD_BUS_PROPERTY("HardwareModel", "s", property_get_hardware_model, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 
         SD_BUS_METHOD_WITH_NAMES("SetHostname",
                                  "sb",
@@ -960,12 +1102,14 @@ static int connect_bus(Context *c, sd_event *event, sd_bus **ret) {
 }
 
 static int run(int argc, char *argv[]) {
-        _cleanup_(context_destroy) Context context = {};
+        _cleanup_(context_destroy) Context context = {
+                .hostname_source = _HOSTNAME_INVALID, /* appropriate value will be set later */
+        };
         _cleanup_(sd_event_unrefp) sd_event *event = NULL;
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         int r;
 
-        log_setup_service();
+        log_setup();
 
         r = service_parse_argv("systemd-hostnamed.service",
                                "Manage the system hostname and related metadata.",

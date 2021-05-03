@@ -3,6 +3,7 @@
 #include <netinet/in.h>
 #include <linux/if_arp.h>
 
+#include "bus-error.h"
 #include "dhcp-internal.h"
 #include "dhcp6-internal.h"
 #include "escape.h"
@@ -62,11 +63,9 @@ static struct DUID fallback_duid = { .type = DUID_TYPE_EN };
 DUID* link_get_duid(Link *link) {
         if (link->network->duid.type != _DUID_TYPE_INVALID)
                 return &link->network->duid;
-        else if (link->hw_addr.length == 0 &&
-                 (link->manager->duid.type == DUID_TYPE_LLT ||
-                  link->manager->duid.type == DUID_TYPE_LL))
-                /* Fallback to DUID that works without mac addresses.
-                 * This is useful for tunnel devices without mac address. */
+        else if (link->hw_addr.length == 0 && IN_SET(link->manager->duid.type, DUID_TYPE_LLT, DUID_TYPE_LL))
+                /* Fallback to DUID that works without MAC address.
+                 * This is useful for tunnel devices without MAC address. */
                 return &fallback_duid;
         else
                 return &link->manager->duid;
@@ -101,18 +100,20 @@ static int get_product_uuid_handler(sd_bus_message *m, void *userdata, sd_bus_er
 
         e = sd_bus_message_get_error(m);
         if (e) {
-                log_error_errno(sd_bus_error_get_errno(e),
-                                "Could not get product UUID. Falling back to use machine-app-specific ID as DUID-UUID: %s",
-                                e->message);
+                r = sd_bus_error_get_errno(e);
+                log_warning_errno(r, "Could not get product UUID. Falling back to use machine-app-specific ID as DUID-UUID: %s",
+                                  bus_error_message(e, r));
                 goto configure;
         }
 
         r = sd_bus_message_read_array(m, 'y', &a, &sz);
-        if (r < 0)
+        if (r < 0) {
+                log_warning_errno(r, "Failed to get product UUID. Falling back to use machine-app-specific ID as DUID-UUID: %m");
                 goto configure;
+        }
 
         if (sz != sizeof(sd_id128_t)) {
-                log_error("Invalid product UUID. Falling back to use machine-app-specific ID as DUID-UUID.");
+                log_warning("Invalid product UUID. Falling back to use machine-app-specific ID as DUID-UUID.");
                 goto configure;
         }
 
@@ -282,16 +283,9 @@ int config_parse_dhcp(
                 /* Previously, we had a slightly different enum here,
                  * support its values for compatibility. */
 
-                if (streq(rvalue, "none"))
-                        s = ADDRESS_FAMILY_NO;
-                else if (streq(rvalue, "v4"))
-                        s = ADDRESS_FAMILY_IPV4;
-                else if (streq(rvalue, "v6"))
-                        s = ADDRESS_FAMILY_IPV6;
-                else if (streq(rvalue, "both"))
-                        s = ADDRESS_FAMILY_YES;
-                else {
-                        log_syntax(unit, LOG_WARNING, filename, line, 0,
+                s = dhcp_deprecated_address_family_from_string(rvalue);
+                if (s < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, s,
                                    "Failed to parse DHCP option, ignoring: %s", rvalue);
                         return 0;
                 }
@@ -506,7 +500,7 @@ int config_parse_iaid(const char *unit,
         return 0;
 }
 
-int config_parse_dhcp_user_class(
+int config_parse_dhcp_user_or_vendor_class(
                 const char *unit,
                 const char *filename,
                 unsigned line,
@@ -524,6 +518,7 @@ int config_parse_dhcp_user_class(
         assert(l);
         assert(lvalue);
         assert(rvalue);
+        assert(IN_SET(ltype, AF_INET, AF_INET6));
 
         if (isempty(rvalue)) {
                 *l = strv_free(*l);
@@ -549,13 +544,13 @@ int config_parse_dhcp_user_class(
                 if (ltype == AF_INET) {
                         if (len > UINT8_MAX || len == 0) {
                                 log_syntax(unit, LOG_WARNING, filename, line, 0,
-                                           "%s length is not in the range 1-255, ignoring.", w);
+                                           "%s length is not in the range 1…255, ignoring.", w);
                                 continue;
                         }
                 } else {
                         if (len > UINT16_MAX || len == 0) {
                                 log_syntax(unit, LOG_WARNING, filename, line, 0,
-                                           "%s length is not in the range 1-65535, ignoring.", w);
+                                           "%s length is not in the range 1…65535, ignoring.", w);
                                 continue;
                         }
                 }
@@ -563,57 +558,6 @@ int config_parse_dhcp_user_class(
                 r = strv_consume(l, TAKE_PTR(w));
                 if (r < 0)
                         return log_oom();
-        }
-}
-
-int config_parse_dhcp_vendor_class(
-                const char *unit,
-                const char *filename,
-                unsigned line,
-                const char *section,
-                unsigned section_line,
-                const char *lvalue,
-                int ltype,
-                const char *rvalue,
-                void *data,
-                void *userdata) {
-        char ***l = data;
-        int r;
-
-        assert(l);
-        assert(lvalue);
-        assert(rvalue);
-
-        if (isempty(rvalue)) {
-                *l = strv_free(*l);
-                return 0;
-        }
-
-        for (const char *p = rvalue;;) {
-                _cleanup_free_ char *w = NULL;
-
-                r = extract_first_word(&p, &w, NULL, EXTRACT_CUNESCAPE|EXTRACT_UNQUOTE);
-                if (r == -ENOMEM)
-                        return log_oom();
-                if (r < 0) {
-                        log_syntax(unit, LOG_WARNING, filename, line, r,
-                                   "Failed to split vendor classes option, ignoring: %s", rvalue);
-                        return 0;
-                }
-                if (r == 0)
-                        return 0;
-
-                if (strlen(w) > UINT8_MAX) {
-                        log_syntax(unit, LOG_WARNING, filename, line, 0,
-                                   "%s length is not in the range 1-255, ignoring.", w);
-                        continue;
-                }
-
-                r = strv_push(l, w);
-                if (r < 0)
-                        return log_oom();
-
-                w = NULL;
         }
 }
 
@@ -720,7 +664,7 @@ int config_parse_dhcp_send_option(
 
         type = dhcp_option_data_type_from_string(word);
         if (type < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, 0,
+                log_syntax(unit, LOG_WARNING, filename, line, type,
                            "Invalid DHCP option data type, ignoring assignment: %s", p);
                 return 0;
         }
@@ -739,25 +683,31 @@ int config_parse_dhcp_send_option(
                 break;
         }
         case DHCP_OPTION_DATA_UINT16:{
-                r = safe_atou16(p, &uint16_data);
+                uint16_t k;
+
+                r = safe_atou16(p, &k);
                 if (r < 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to parse DHCP uint16 data, ignoring assignment: %s", p);
                         return 0;
                 }
 
+                uint16_data = htobe16(k);
                 udata = &uint16_data;
                 sz = sizeof(uint16_t);
                 break;
         }
         case DHCP_OPTION_DATA_UINT32: {
-                r = safe_atou32(p, &uint32_data);
+                uint32_t k;
+
+                r = safe_atou32(p, &k);
                 if (r < 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to parse DHCP uint32 data, ignoring assignment: %s", p);
                         return 0;
                 }
 
+                uint32_data = htobe32(k);
                 udata = &uint32_data;
                 sz = sizeof(uint32_t);
 
@@ -858,7 +808,6 @@ int config_parse_dhcp_request_options(
                 void *userdata) {
 
         Network *network = data;
-        const char *p;
         int r;
 
         assert(filename);
@@ -875,7 +824,7 @@ int config_parse_dhcp_request_options(
                 return 0;
         }
 
-        for (p = rvalue;;) {
+        for (const char *p = rvalue;;) {
                 _cleanup_free_ char *n = NULL;
                 uint32_t i;
 

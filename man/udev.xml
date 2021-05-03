@@ -79,14 +79,16 @@
           <varlistentry>
             <term><literal>==</literal></term>
             <listitem>
-              <para>Compare for equality.</para>
+              <para>Compare for equality. (The specified key has the specified value.)</para>
             </listitem>
           </varlistentry>
 
           <varlistentry>
             <term><literal>!=</literal></term>
             <listitem>
-              <para>Compare for inequality.</para>
+              <para>Compare for inequality. (The specified key doesn't have the specified value, or the
+              specified key is not present at all.)
+              </para>
             </listitem>
           </varlistentry>
 
@@ -125,7 +127,7 @@
         <title>Values</title>
           <para>Values are written as double quoted strings, such as ("string").
           To include a quotation mark (") in the value, precede it by a backslash (\").
-          Any other occurrences of a character followed by a backslash are not further unescaped.
+          Any other occurrences of a backslash followed by a character are not unescaped.
           That is, "\t\n" is treated as four characters:
           backslash, lowercase t, backslash, lowercase n.</para>
 
@@ -167,6 +169,13 @@
           </varlistentry>
 
           <varlistentry>
+            <term><varname>KERNELS</varname></term>
+            <listitem>
+              <para>Search the devpath upwards for a matching device name.</para>
+            </listitem>
+          </varlistentry>
+
+          <varlistentry>
             <term><varname>NAME</varname></term>
             <listitem>
               <para>Match the name of a network interface. It can be used once the
@@ -190,41 +199,19 @@
               <para>Match the subsystem of the event device.</para>
             </listitem>
           </varlistentry>
-          <varlistentry>
-            <term><varname>DRIVER</varname></term>
-            <listitem>
-              <para>Match the driver name of the event device. Only set this key for devices
-              which are bound to a driver at the time the event is generated.</para>
-            </listitem>
-          </varlistentry>
-          <varlistentry>
-            <term><varname>ATTR{<replaceable>filename</replaceable>}</varname></term>
-            <listitem>
-              <para>Match sysfs attribute values of the event device. Trailing
-              whitespace in the attribute values is ignored unless the specified match
-              value itself contains trailing whitespace.
-              </para>
-            </listitem>
-          </varlistentry>
-          <varlistentry>
-            <term><varname>SYSCTL{<replaceable>kernel parameter</replaceable>}</varname></term>
-            <listitem>
-              <para>Match a kernel parameter value.
-              </para>
-            </listitem>
-          </varlistentry>
-
-          <varlistentry>
-            <term><varname>KERNELS</varname></term>
-            <listitem>
-              <para>Search the devpath upwards for a matching device name.</para>
-            </listitem>
-          </varlistentry>
 
           <varlistentry>
             <term><varname>SUBSYSTEMS</varname></term>
             <listitem>
               <para>Search the devpath upwards for a matching device subsystem name.</para>
+            </listitem>
+          </varlistentry>
+
+          <varlistentry>
+            <term><varname>DRIVER</varname></term>
+            <listitem>
+              <para>Match the driver name of the event device. Only set this key for devices
+              which are bound to a driver at the time the event is generated.</para>
             </listitem>
           </varlistentry>
 
@@ -236,19 +223,31 @@
           </varlistentry>
 
           <varlistentry>
-            <term><varname>ATTRS{<replaceable>filename</replaceable>}</varname></term>
+            <term><varname>ATTR{<replaceable>filename</replaceable>}</varname></term>
             <listitem>
-              <para>Search the devpath upwards for a device with matching sysfs attribute values.
-              If multiple <varname>ATTRS</varname> matches are specified, all of them
-              must match on the same device. Trailing whitespace in the attribute values is ignored
-              unless the specified match value itself contains trailing whitespace.</para>
+              <para>Match sysfs attribute value of the event device.</para>
+
+              <para>Trailing whitespace in the attribute values is ignored unless the specified match value
+              itself contains trailing whitespace.</para>
             </listitem>
           </varlistentry>
 
           <varlistentry>
-            <term><varname>TAGS</varname></term>
+            <term><varname>ATTRS{<replaceable>filename</replaceable>}</varname></term>
             <listitem>
-              <para>Search the devpath upwards for a device with matching tag.</para>
+              <para>Search the devpath upwards for a device with matching sysfs attribute values. If
+              multiple <varname>ATTRS</varname> matches are specified, all of them must match on the same
+              device.</para>
+
+              <para>Trailing whitespace in the attribute values is ignored unless the specified match value
+              itself contains trailing whitespace.</para>
+            </listitem>
+          </varlistentry>
+
+          <varlistentry>
+            <term><varname>SYSCTL{<replaceable>kernel parameter</replaceable>}</varname></term>
+            <listitem>
+              <para>Match a kernel parameter value.</para>
             </listitem>
           </varlistentry>
 
@@ -289,6 +288,13 @@
             <term><varname>TAG</varname></term>
             <listitem>
               <para>Match against a device tag.</para>
+            </listitem>
+          </varlistentry>
+
+          <varlistentry>
+            <term><varname>TAGS</varname></term>
+            <listitem>
+              <para>Search the devpath upwards for a device with matching tag.</para>
             </listitem>
           </varlistentry>
 
@@ -459,7 +465,7 @@
               <para>Specify a program to be executed after processing of all the rules for the event. With
               <literal>+=</literal>, this invocation is added to the list, and with <literal>=</literal> or
               <literal>:=</literal>, it replaces any previous contents of the list. Please note that both
-              <literal>program</literal> and <literal>builtin</literal> types described below use a single
+              <literal>program</literal> and <literal>builtin</literal> types described below share a common
               list, so clearing the list with <literal>:=</literal> and <literal>=</literal> affects both
               types.</para>
 
@@ -645,6 +651,24 @@
                     This option can be useful in certain cases
                     (e.g. Device Mapper devices) for persisting device state
                     on the transition from initramfs.</para>
+                  </listitem>
+                </varlistentry>
+                <varlistentry>
+                  <term><option>log_level=<replaceable>level</replaceable></option></term>
+                  <listitem>
+                    <para>Takes a log level name like <literal>debug</literal> or
+                    <literal>info</literal>, or a special value <literal>reset</literal>. When a log
+                    level name is specified, the maximum log level is changed to that level. When
+                    <literal>reset</literal> is set, then the previously specified log level is
+                    revoked. Defaults to the log level of the main process of
+                    <command>systemd-udevd</command>.</para>
+                    <para>This may be useful when debugging events for certain devices. Note that the
+                    log level is applied when the line including this rule is processed. So, for
+                    debugging, it is recommended that this is specified at earlier place, e.g., the
+                    first line of <filename>00-debug.rules</filename>.</para>
+                    <para>Example for debugging uevent processing for network interfaces.
+                    <programlisting># /etc/udev/rules.d/00-debug-net.rules
+SUBSYSTEM=="net", OPTIONS="log_level=debug"</programlisting></para>
                   </listitem>
                 </varlistentry>
               </variablelist>

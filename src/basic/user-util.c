@@ -836,7 +836,7 @@ bool valid_user_group_name(const char *u, ValidUserFlags flags) {
 
                 if (l > (size_t) sz)
                         return false;
-                if (l > FILENAME_MAX)
+                if (l > NAME_MAX) /* must fit in a filename */
                         return false;
                 if (l > UT_NAMESIZE - 1)
                         return false;
@@ -882,7 +882,7 @@ char *mangle_gecos(const char *d) {
                         continue;
                 }
 
-                len = utf8_encoded_valid_unichar(i, (size_t) -1);
+                len = utf8_encoded_valid_unichar(i, SIZE_MAX);
                 if (len < 0) {
                         *i = ' ';
                         continue;

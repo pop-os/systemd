@@ -21,6 +21,7 @@ common_sources = '''
         graphics.c
         measure.c
         pe.c
+        secure-boot.c
         util.c
 '''.split()
 
@@ -44,10 +45,15 @@ if conf.get('ENABLE_EFI') == 1 and get_option('gnu-efi') != 'false'
         if efi_cc.length() == 0
                 efi_cc = cc.cmd_array()
         endif
-        efi_ld = get_option('efi-ld')
-        if efi_ld == ''
-                efi_ld = find_program('ld', required: true)
+
+        efi_ld = find_program(get_option('efi-ld'), required: true)
+        efi_ld_name = efi_ld.path().split('/')[-1]
+        if efi_ld_name == 'lld' or efi_ld_name == 'ld.lld'
+                # LLVM/LLD does not support PE/COFF relocations
+                # https://lists.llvm.org/pipermail/llvm-dev/2021-March/149234.html
+                error('LLVM/lld does not support PE/COFF relocations. Use different linker for EFI image.')
         endif
+
         efi_incdir = get_option('efi-includedir')
 
         gnu_efi_path_arch = ''
@@ -133,8 +139,8 @@ endif
 if have_gnu_efi
         compile_args = ['-Wall',
                         '-Wextra',
-                        '-std=gnu90',
-                        '-nostdinc',
+                        '-std=gnu99',
+                        '-nostdlib',
                         '-fpic',
                         '-fshort-wchar',
                         '-ffreestanding',
@@ -144,6 +150,8 @@ if have_gnu_efi
                         '-Wno-missing-field-initializers',
                         '-isystem', efi_incdir,
                         '-isystem', join_paths(efi_incdir, gnu_efi_path_arch),
+                        '-I', fundamental_path,
+                        '-DSD_BOOT',
                         '-include', efi_config_h,
                         '-include', version_h]
         if efi_arch == 'x86_64'
@@ -193,17 +201,17 @@ if have_gnu_efi
 
         systemd_boot_objects = []
         stub_objects = []
-        foreach file : common_sources + systemd_boot_sources + stub_sources
-                o_file = custom_target(file + '.o',
+        foreach file : fundamental_source_paths + common_sources + systemd_boot_sources + stub_sources
+                o_file = custom_target(file.split('/')[-1] + '.o',
                                        input : file,
-                                       output : file + '.o',
+                                       output : file.split('/')[-1] + '.o',
                                        command : efi_cc + ['-c', '@INPUT@', '-o', '@OUTPUT@']
                                                  + compile_args,
-                                       depend_files : efi_headers)
-                if (common_sources + systemd_boot_sources).contains(file)
+                                       depend_files : efi_headers + fundamental_headers)
+                if (fundamental_source_paths + common_sources + systemd_boot_sources).contains(file)
                         systemd_boot_objects += o_file
                 endif
-                if (common_sources + stub_sources).contains(file)
+                if (fundamental_source_paths + common_sources + stub_sources).contains(file)
                         stub_objects += o_file
                 endif
         endforeach

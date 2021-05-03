@@ -91,7 +91,7 @@ int btrfs_is_subvol_fd(int fd) {
         if (fstat(fd, &st) < 0)
                 return -errno;
 
-        if (!S_ISDIR(st.st_mode) || st.st_ino != 256)
+        if (!btrfs_might_be_subvol(&st))
                 return 0;
 
         return btrfs_is_filesystem(fd);
@@ -194,7 +194,7 @@ int btrfs_subvol_set_read_only_fd(int fd, bool b) {
         if (fstat(fd, &st) < 0)
                 return -errno;
 
-        if (!S_ISDIR(st.st_mode) || st.st_ino != 256)
+        if (!btrfs_might_be_subvol(&st))
                 return -EINVAL;
 
         if (ioctl(fd, BTRFS_IOC_SUBVOL_GETFLAGS, &flags) < 0)
@@ -229,7 +229,7 @@ int btrfs_subvol_get_read_only_fd(int fd) {
         if (fstat(fd, &st) < 0)
                 return -errno;
 
-        if (!S_ISDIR(st.st_mode) || st.st_ino != 256)
+        if (!btrfs_might_be_subvol(&st))
                 return -EINVAL;
 
         if (ioctl(fd, BTRFS_IOC_SUBVOL_GETFLAGS, &flags) < 0)
@@ -396,18 +396,18 @@ static bool btrfs_ioctl_search_args_inc(struct btrfs_ioctl_search_args *args) {
          * comparing. This call increases the counter by one, dealing
          * with the overflow between the overflows */
 
-        if (args->key.min_offset < (uint64_t) -1) {
+        if (args->key.min_offset < UINT64_MAX) {
                 args->key.min_offset++;
                 return true;
         }
 
-        if (args->key.min_type < (uint8_t) -1) {
+        if (args->key.min_type < UINT8_MAX) {
                 args->key.min_type++;
                 args->key.min_offset = 0;
                 return true;
         }
 
-        if (args->key.min_objectid < (uint64_t) -1) {
+        if (args->key.min_objectid < UINT64_MAX) {
                 args->key.min_objectid++;
                 args->key.min_offset = 0;
                 args->key.min_type = 0;
@@ -464,11 +464,11 @@ int btrfs_subvol_get_info_fd(int fd, uint64_t subvol_id, BtrfsSubvolInfo *ret) {
                 .key.max_type = BTRFS_ROOT_ITEM_KEY,
 
                 .key.min_offset = 0,
-                .key.max_offset = (uint64_t) -1,
+                .key.max_offset = UINT64_MAX,
 
                 /* No restrictions on the other components */
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
 
         bool found = false;
@@ -562,7 +562,7 @@ int btrfs_qgroup_get_quota_fd(int fd, uint64_t qgroupid, BtrfsQuotaInfo *ret) {
 
                 /* No restrictions on the other components */
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
 
         bool found_info = false, found_limit = false;
@@ -624,12 +624,12 @@ int btrfs_qgroup_get_quota_fd(int fd, uint64_t qgroupid, BtrfsQuotaInfo *ret) {
                                 if (le64toh(qli->flags) & BTRFS_QGROUP_LIMIT_MAX_RFER)
                                         ret->referenced_max = le64toh(qli->max_rfer);
                                 else
-                                        ret->referenced_max = (uint64_t) -1;
+                                        ret->referenced_max = UINT64_MAX;
 
                                 if (le64toh(qli->flags) & BTRFS_QGROUP_LIMIT_MAX_EXCL)
                                         ret->exclusive_max = le64toh(qli->max_excl);
                                 else
-                                        ret->exclusive_max = (uint64_t) -1;
+                                        ret->exclusive_max = UINT64_MAX;
 
                                 found_limit = true;
                         }
@@ -648,13 +648,13 @@ finish:
                 return -ENODATA;
 
         if (!found_info) {
-                ret->referenced = (uint64_t) -1;
-                ret->exclusive = (uint64_t) -1;
+                ret->referenced = UINT64_MAX;
+                ret->exclusive = UINT64_MAX;
         }
 
         if (!found_limit) {
-                ret->referenced_max = (uint64_t) -1;
-                ret->exclusive_max = (uint64_t) -1;
+                ret->referenced_max = UINT64_MAX;
+                ret->exclusive_max = UINT64_MAX;
         }
 
         return 0;
@@ -671,9 +671,9 @@ int btrfs_qgroup_get_quota(const char *path, uint64_t qgroupid, BtrfsQuotaInfo *
 }
 
 int btrfs_subvol_find_subtree_qgroup(int fd, uint64_t subvol_id, uint64_t *ret) {
-        uint64_t level, lowest = (uint64_t) -1, lowest_qgroupid = 0;
+        uint64_t level, lowest = UINT64_MAX, lowest_qgroupid = 0;
         _cleanup_free_ uint64_t *qgroups = NULL;
-        int r, n, i;
+        int r, n;
 
         assert(fd >= 0);
         assert(ret);
@@ -703,7 +703,7 @@ int btrfs_subvol_find_subtree_qgroup(int fd, uint64_t subvol_id, uint64_t *ret) 
         if (n < 0)
                 return n;
 
-        for (i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
                 uint64_t id;
 
                 r = btrfs_qgroupid_split(qgroups[i], &level, &id);
@@ -713,13 +713,13 @@ int btrfs_subvol_find_subtree_qgroup(int fd, uint64_t subvol_id, uint64_t *ret) 
                 if (id != subvol_id)
                         continue;
 
-                if (lowest == (uint64_t) -1 || level < lowest) {
+                if (lowest == UINT64_MAX || level < lowest) {
                         lowest_qgroupid = qgroups[i];
                         lowest = level;
                 }
         }
 
-        if (lowest == (uint64_t) -1) {
+        if (lowest == UINT64_MAX) {
                 /* No suitable higher-level qgroup found, let's return
                  * the leaf qgroup instead, and indicate that with the
                  * return value. */
@@ -824,7 +824,6 @@ int btrfs_qgroup_set_limit_fd(int fd, uint64_t qgroupid, uint64_t referenced_max
                 .lim.max_rfer = referenced_max,
                 .lim.flags = BTRFS_QGROUP_LIMIT_MAX_RFER,
         };
-        unsigned c;
         int r;
 
         assert(fd >= 0);
@@ -843,7 +842,7 @@ int btrfs_qgroup_set_limit_fd(int fd, uint64_t qgroupid, uint64_t referenced_max
 
         args.qgroupid = qgroupid;
 
-        for (c = 0;; c++) {
+        for (unsigned c = 0;; c++) {
                 if (ioctl(fd, BTRFS_IOC_QGROUP_LIMIT, &args) < 0) {
 
                         if (errno == EBUSY && c < 10) {
@@ -924,7 +923,6 @@ static int qgroup_create_or_destroy(int fd, bool b, uint64_t qgroupid) {
                 .create = b,
                 .qgroupid = qgroupid,
         };
-        unsigned c;
         int r;
 
         r = btrfs_is_filesystem(fd);
@@ -933,7 +931,7 @@ static int qgroup_create_or_destroy(int fd, bool b, uint64_t qgroupid) {
         if (r == 0)
                 return -ENOTTY;
 
-        for (c = 0;; c++) {
+        for (unsigned c = 0;; c++) {
                 if (ioctl(fd, BTRFS_IOC_QGROUP_CREATE, &args) < 0) {
 
                         /* On old kernels if quota is not enabled, we get EINVAL. On newer kernels we get
@@ -968,7 +966,7 @@ int btrfs_qgroup_destroy(int fd, uint64_t qgroupid) {
 int btrfs_qgroup_destroy_recursive(int fd, uint64_t qgroupid) {
         _cleanup_free_ uint64_t *qgroups = NULL;
         uint64_t subvol_id;
-        int i, n, r;
+        int n, r;
 
         /* Destroys the specified qgroup, but unassigns it from all
          * its parents first. Also, it recursively destroys all
@@ -983,7 +981,7 @@ int btrfs_qgroup_destroy_recursive(int fd, uint64_t qgroupid) {
         if (n < 0)
                 return n;
 
-        for (i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
                 uint64_t id;
 
                 r = btrfs_qgroupid_split(qgroups[i], NULL, &id);
@@ -1043,7 +1041,6 @@ static int qgroup_assign_or_unassign(int fd, bool b, uint64_t child, uint64_t pa
                 .src = child,
                 .dst = parent,
         };
-        unsigned c;
         int r;
 
         r = btrfs_is_filesystem(fd);
@@ -1052,7 +1049,7 @@ static int qgroup_assign_or_unassign(int fd, bool b, uint64_t child, uint64_t pa
         if (r == 0)
                 return -ENOTTY;
 
-        for (c = 0;; c++) {
+        for (unsigned c = 0;; c++) {
                 r = ioctl(fd, BTRFS_IOC_QGROUP_ASSIGN, &args);
                 if (r < 0) {
                         if (errno == EBUSY && c < 10) {
@@ -1092,7 +1089,7 @@ static int subvol_remove_children(int fd, const char *subvolume, uint64_t subvol
                 .key.max_type = BTRFS_ROOT_BACKREF_KEY,
 
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
 
         struct btrfs_ioctl_vol_args vol_args = {};
@@ -1268,7 +1265,7 @@ int btrfs_qgroup_copy_limits(int fd, uint64_t old_qgroupid, uint64_t new_qgroupi
 
                 /* No restrictions on the other components */
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
 
         int r;
@@ -1351,7 +1348,7 @@ int btrfs_qgroup_copy_limits(int fd, uint64_t old_qgroupid, uint64_t new_qgroupi
 static int copy_quota_hierarchy(int fd, uint64_t old_subvol_id, uint64_t new_subvol_id) {
         _cleanup_free_ uint64_t *old_qgroups = NULL, *old_parent_qgroups = NULL;
         bool copy_from_parent = false, insert_intermediary_qgroup = false;
-        int n_old_qgroups, n_old_parent_qgroups, r, i;
+        int n_old_qgroups, n_old_parent_qgroups, r;
         uint64_t old_parent_id;
 
         assert(fd >= 0);
@@ -1375,9 +1372,8 @@ static int copy_quota_hierarchy(int fd, uint64_t old_subvol_id, uint64_t new_sub
                         return n_old_parent_qgroups;
         }
 
-        for (i = 0; i < n_old_qgroups; i++) {
+        for (int i = 0; i < n_old_qgroups; i++) {
                 uint64_t id;
-                int j;
 
                 r = btrfs_qgroupid_split(old_qgroups[i], NULL, &id);
                 if (r < 0)
@@ -1392,7 +1388,7 @@ static int copy_quota_hierarchy(int fd, uint64_t old_subvol_id, uint64_t new_sub
                         break;
                 }
 
-                for (j = 0; j < n_old_parent_qgroups; j++)
+                for (int j = 0; j < n_old_parent_qgroups; j++)
                         if (old_parent_qgroups[j] == old_qgroups[i])
                                 /* The old subvolume shared a common
                                  * parent qgroup with its parent
@@ -1455,7 +1451,7 @@ static int subvol_snapshot_children(
                 .key.max_type = BTRFS_ROOT_BACKREF_KEY,
 
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
 
         struct btrfs_ioctl_vol_args_v2 vol_args = {
@@ -1725,10 +1721,10 @@ int btrfs_qgroup_find_parents(int fd, uint64_t qgroupid, uint64_t **ret) {
 
                 /* No restrictions on the other components */
                 .key.min_offset = 0,
-                .key.max_offset = (uint64_t) -1,
+                .key.max_offset = UINT64_MAX,
 
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
 
         _cleanup_free_ uint64_t *items = NULL;
@@ -1880,12 +1876,11 @@ int btrfs_subvol_auto_qgroup_fd(int fd, uint64_t subvol_id, bool insert_intermed
         if (insert_intermediary_qgroup) {
                 uint64_t lowest = 256, new_qgroupid;
                 bool created = false;
-                int i;
 
                 /* Determine the lowest qgroup that the parent
                  * subvolume is assigned to. */
 
-                for (i = 0; i < n; i++) {
+                for (int i = 0; i < n; i++) {
                         uint64_t level;
 
                         r = btrfs_qgroupid_split(qgroups[i], &level, NULL);
@@ -1910,7 +1905,7 @@ int btrfs_subvol_auto_qgroup_fd(int fd, uint64_t subvol_id, bool insert_intermed
                 if (r >= 0)
                         changed = created = true;
 
-                for (i = 0; i < n; i++) {
+                for (int i = 0; i < n; i++) {
                         r = btrfs_qgroup_assign(fd, new_qgroupid, qgroups[i]);
                         if (r < 0 && r != -EEXIST) {
                                 if (created)
@@ -1970,10 +1965,10 @@ int btrfs_subvol_get_parent(int fd, uint64_t subvol_id, uint64_t *ret) {
 
                 /* No restrictions on the other components */
                 .key.min_offset = 0,
-                .key.max_offset = (uint64_t) -1,
+                .key.max_offset = UINT64_MAX,
 
                 .key.min_transid = 0,
-                .key.max_transid = (uint64_t) -1,
+                .key.max_transid = UINT64_MAX,
         };
         int r;
 

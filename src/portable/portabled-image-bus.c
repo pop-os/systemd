@@ -9,13 +9,15 @@
 #include "bus-common-errors.h"
 #include "bus-get-properties.h"
 #include "bus-label.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
 #include "bus-util.h"
+#include "discover-image.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "io-util.h"
-#include "machine-image.h"
 #include "missing_capability.h"
+#include "os-util.h"
 #include "portable.h"
 #include "portabled-bus.h"
 #include "portabled-image-bus.h"
@@ -422,6 +424,186 @@ static int bus_image_method_remove(sd_bus_message *message, void *userdata, sd_b
         return bus_image_common_remove(NULL, message, NULL, userdata, error);
 }
 
+/* Given two PortableChange arrays, return a new array that has all elements of the first that are
+ * not also present in the second, comparing the basename of the path values. */
+static int normalize_portable_changes(
+                const PortableChange *changes_attached,
+                size_t n_changes_attached,
+                const PortableChange *changes_detached,
+                size_t n_changes_detached,
+                PortableChange **ret_changes,
+                size_t *ret_n_changes) {
+
+        PortableChange *changes = NULL;
+        size_t n_changes = 0;
+        int r = 0;
+
+        assert(ret_n_changes);
+        assert(ret_changes);
+
+        if (n_changes_detached == 0)
+                return 0; /* Nothing to do */
+
+        changes = new0(PortableChange, n_changes_attached + n_changes_detached);
+        if (!changes)
+                return -ENOMEM;
+
+        /* Corner case: only detached, nothing attached */
+        if (n_changes_attached == 0) {
+                memcpy(changes, changes_detached, sizeof(PortableChange) * n_changes_detached);
+                *ret_changes = TAKE_PTR(changes);
+                *ret_n_changes = n_changes_detached;
+
+                return 0;
+        }
+
+        for (size_t i = 0; i < n_changes_detached; ++i) {
+                bool found = false;
+
+                for (size_t j = 0; j < n_changes_attached; ++j)
+                        if (streq(basename(changes_detached[i].path), basename(changes_attached[j].path))) {
+                                found = true;
+                                break;
+                        }
+
+                if (!found) {
+                        _cleanup_free_ char *path = NULL, *source = NULL;
+
+                        path = strdup(changes_detached[i].path);
+                        if (!path) {
+                                r = -ENOMEM;
+                                goto fail;
+                        }
+
+                        if (changes_detached[i].source) {
+                                source = strdup(changes_detached[i].source);
+                                if (!source) {
+                                        r = -ENOMEM;
+                                        goto fail;
+                                }
+                        }
+
+                        changes[n_changes++] = (PortableChange) {
+                                .type_or_errno = changes_detached[i].type_or_errno,
+                                .path = TAKE_PTR(path),
+                                .source = TAKE_PTR(source),
+                        };
+                }
+        }
+
+        *ret_n_changes = n_changes;
+        *ret_changes = TAKE_PTR(changes);
+
+        return 0;
+
+fail:
+        portable_changes_free(changes, n_changes);
+        return r;
+}
+
+int bus_image_common_reattach(
+                Manager *m,
+                sd_bus_message *message,
+                const char *name_or_path,
+                Image *image,
+                sd_bus_error *error) {
+
+        PortableChange *changes_detached = NULL, *changes_attached = NULL, *changes_gone = NULL;
+        size_t n_changes_detached = 0, n_changes_attached = 0, n_changes_gone = 0;
+        _cleanup_strv_free_ char **matches = NULL;
+        PortableFlags flags = PORTABLE_REATTACH;
+        const char *profile, *copy_mode;
+        int runtime, r;
+
+        assert(message);
+        assert(name_or_path || image);
+
+        if (!m) {
+                assert(image);
+                m = image->userdata;
+        }
+
+        r = sd_bus_message_read_strv(message, &matches);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_read(message, "sbs", &profile, &runtime, &copy_mode);
+        if (r < 0)
+                return r;
+
+        if (streq(copy_mode, "symlink"))
+                flags |= PORTABLE_PREFER_SYMLINK;
+        else if (streq(copy_mode, "copy"))
+                flags |= PORTABLE_PREFER_COPY;
+        else if (!isempty(copy_mode))
+                return sd_bus_reply_method_errorf(message, SD_BUS_ERROR_INVALID_ARGS, "Unknown copy mode '%s'", copy_mode);
+
+        if (runtime)
+                flags |= PORTABLE_RUNTIME;
+
+        r = bus_image_acquire(m,
+                              message,
+                              name_or_path,
+                              image,
+                              BUS_IMAGE_AUTHENTICATE_ALL,
+                              "org.freedesktop.portable1.attach-images",
+                              &image,
+                              error);
+        if (r < 0)
+                return r;
+        if (r == 0) /* Will call us back */
+                return 1;
+
+        r = portable_detach(
+                        sd_bus_message_get_bus(message),
+                        image->path,
+                        flags,
+                        &changes_detached,
+                        &n_changes_detached,
+                        error);
+        if (r < 0)
+                goto finish;
+
+        r = portable_attach(
+                        sd_bus_message_get_bus(message),
+                        image->path,
+                        matches,
+                        profile,
+                        flags,
+                        &changes_attached,
+                        &n_changes_attached,
+                        error);
+        if (r < 0)
+                goto finish;
+
+        /* We want to return the list of units really removed by the detach,
+         * and not added again by the attach */
+        r = normalize_portable_changes(changes_attached, n_changes_attached,
+                                       changes_detached, n_changes_detached,
+                                       &changes_gone, &n_changes_gone);
+        if (r < 0)
+                goto finish;
+
+        /* First, return the units that are gone (so that the caller can stop them)
+         * Then, return the units that are changed/added (so that the caller can
+         * start/restart/enable them) */
+        r = reply_portable_changes_pair(message,
+                                        changes_gone, n_changes_gone,
+                                        changes_attached, n_changes_attached);
+        if (r < 0)
+                goto finish;
+
+finish:
+        portable_changes_free(changes_detached, n_changes_detached);
+        portable_changes_free(changes_attached, n_changes_attached);
+        portable_changes_free(changes_gone, n_changes_gone);
+        return r;
+}
+
+static int bus_image_method_reattach(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return bus_image_common_reattach(NULL, message, NULL, userdata, error);
+}
+
 int bus_image_common_mark_read_only(
                 Manager *m,
                 sd_bus_message *message,
@@ -527,14 +709,60 @@ const sd_bus_vtable image_vtable[] = {
         SD_BUS_PROPERTY("Limit", "t", NULL, offsetof(Image, limit), 0),
         SD_BUS_PROPERTY("UsageExclusive", "t", NULL, offsetof(Image, usage_exclusive), 0),
         SD_BUS_PROPERTY("LimitExclusive", "t", NULL, offsetof(Image, limit_exclusive), 0),
-        SD_BUS_METHOD("GetOSRelease", NULL, "a{ss}", bus_image_method_get_os_release, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetMetadata", "as", "saya{say}", bus_image_method_get_metadata, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetState", NULL, "s", bus_image_method_get_state, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("Attach", "assbs", "a(sss)", bus_image_method_attach, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("Detach", "b", "a(sss)", bus_image_method_detach, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("Remove", NULL, NULL, bus_image_method_remove, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MarkReadOnly", "b", NULL, bus_image_method_mark_read_only, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("SetLimit", "t", NULL, bus_image_method_set_limit, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetOSRelease",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_RESULT("a{ss}", os_release),
+                                bus_image_method_get_os_release,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetMetadata",
+                                SD_BUS_ARGS("as", matches),
+                                SD_BUS_RESULT("s", image,
+                                              "ay", os_release,
+                                              "a{say}", units),
+                                bus_image_method_get_metadata,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetState",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_RESULT("s", state),
+                                bus_image_method_get_state,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("Attach",
+                                SD_BUS_ARGS("as", matches,
+                                            "s", profile,
+                                            "b", runtime,
+                                            "s", copy_mode),
+                                SD_BUS_RESULT("a(sss)", changes),
+                                bus_image_method_attach,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("Detach",
+                                SD_BUS_ARGS("b", runtime),
+                                SD_BUS_RESULT("a(sss)", changes),
+                                bus_image_method_detach,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("Reattach",
+                                SD_BUS_ARGS("as", matches,
+                                            "s", profile,
+                                            "b", runtime,
+                                            "s", copy_mode),
+                                SD_BUS_RESULT("a(sss)", changes_removed,
+                                              "a(sss)", changes_updated),
+                                bus_image_method_reattach,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("Remove",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_NO_RESULT,
+                                bus_image_method_remove,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("MarkReadOnly",
+                                SD_BUS_ARGS("b", read_only),
+                                SD_BUS_NO_RESULT,
+                                bus_image_method_mark_read_only,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("SetLimit",
+                                SD_BUS_ARGS("t", limit),
+                                SD_BUS_NO_RESULT,
+                                bus_image_method_set_limit,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_VTABLE_END
 };
 
@@ -606,7 +834,7 @@ int bus_image_acquire(
         if (image_name_is_valid(name_or_path)) {
 
                 /* If it's a short name, let's search for it */
-                r = image_find(IMAGE_PORTABLE, name_or_path, &loaded);
+                r = image_find(IMAGE_PORTABLE, name_or_path, NULL, &loaded);
                 if (r == -ENOENT)
                         return sd_bus_error_setf(error, BUS_ERROR_NO_SUCH_PORTABLE_IMAGE, "No image '%s' found.", name_or_path);
 
@@ -738,3 +966,10 @@ int bus_image_node_enumerator(sd_bus *bus, const char *path, void *userdata, cha
 
         return 1;
 }
+
+const BusObjectImplementation image_object = {
+        "/org/freedesktop/portable1/image",
+        "org.freedesktop.portable1.Image",
+        .fallback_vtables = BUS_FALLBACK_VTABLES({image_vtable, bus_image_object_find}),
+        .node_enumerator = bus_image_node_enumerator,
+};

@@ -27,7 +27,8 @@
 #include "string-util.h"
 #include "tmpfile-util.h"
 
-#define READ_FULL_BYTES_MAX (4U*1024U*1024U)
+/* The maximum size of the file we'll read in one go. */
+#define READ_FULL_BYTES_MAX (4U*1024U*1024U - 1)
 
 int fopen_unlocked(const char *path, const char *options, FILE **ret) {
         assert(ret);
@@ -368,7 +369,6 @@ int read_full_virtual_file(const char *filename, char **ret_contents, size_t *re
         struct stat st;
         size_t n, size;
         int n_retries;
-        char *p;
 
         assert(ret_contents);
 
@@ -385,16 +385,10 @@ int read_full_virtual_file(const char *filename, char **ret_contents, size_t *re
         if (fd < 0)
                 return -errno;
 
-        /* Start size for files in /proc which usually report a file size of 0. */
-        size = LINE_MAX / 2;
-
         /* Limit the number of attempts to read the number of bytes returned by fstat(). */
         n_retries = 3;
 
         for (;;) {
-                if (n_retries <= 0)
-                        return -EIO;
-
                 if (fstat(fd, &st) < 0)
                         return -errno;
 
@@ -402,19 +396,23 @@ int read_full_virtual_file(const char *filename, char **ret_contents, size_t *re
                         return -EBADF;
 
                 /* Be prepared for files from /proc which generally report a file size of 0. */
+                assert_cc(READ_FULL_BYTES_MAX < SSIZE_MAX);
                 if (st.st_size > 0) {
+                        if (st.st_size > READ_FULL_BYTES_MAX)
+                                return -EFBIG;
+
                         size = st.st_size;
                         n_retries--;
-                } else
-                        size = size * 2;
+                } else {
+                        size = READ_FULL_BYTES_MAX;
+                        n_retries = 0;
+                }
 
-                if (size > READ_FULL_BYTES_MAX)
-                        return -E2BIG;
-
-                p = realloc(buf, size + 1);
-                if (!p)
+                buf = malloc(size + 1);
+                if (!buf)
                         return -ENOMEM;
-                buf = TAKE_PTR(p);
+                /* Use a bigger allocation if we got it anyway, but not more than the limit. */
+                size = MIN(malloc_usable_size(buf) - 1, READ_FULL_BYTES_MAX);
 
                 for (;;) {
                         ssize_t k;
@@ -441,27 +439,32 @@ int read_full_virtual_file(const char *filename, char **ret_contents, size_t *re
                  * processing, let's try again either with a bigger guessed size or the new
                  * file size. */
 
+                if (n_retries <= 0)
+                        return st.st_size > 0 ? -EIO : -EFBIG;
+
                 if (lseek(fd, 0, SEEK_SET) < 0)
                         return -errno;
+
+                buf = mfree(buf);
         }
 
         if (n < size) {
+                char *p;
+
+                /* Return rest of the buffer to libc */
                 p = realloc(buf, n + 1);
                 if (!p)
                         return -ENOMEM;
-                buf = TAKE_PTR(p);
+                buf = p;
         }
 
-        if (!ret_size) {
-                /* Safety check: if the caller doesn't want to know the size of what we
-                 * just read it will rely on the trailing NUL byte. But if there's an
-                 * embedded NUL byte, then we should refuse operation as otherwise
-                 * there'd be ambiguity about what we just read. */
-
-                if (memchr(buf, 0, n))
-                        return -EBADMSG;
-        } else
+        if (ret_size)
                 *ret_size = n;
+        else if (memchr(buf, 0, n))
+                /* Safety check: if the caller doesn't want to know the size of what we just read it will
+                 * rely on the trailing NUL byte. But if there's an embedded NUL byte, then we should refuse
+                 * operation as otherwise there'd be ambiguity about what we just read. */
+                return -EBADMSG;
 
         buf[n] = 0;
         *ret_contents = TAKE_PTR(buf);
@@ -472,12 +475,13 @@ int read_full_virtual_file(const char *filename, char **ret_contents, size_t *re
 int read_full_stream_full(
                 FILE *f,
                 const char *filename,
+                uint64_t offset,
+                size_t size,
                 ReadFullFileFlags flags,
                 char **ret_contents,
                 size_t *ret_size) {
 
         _cleanup_free_ char *buf = NULL;
-        struct stat st;
         size_t n, n_next, l;
         int fd, r;
 
@@ -485,31 +489,44 @@ int read_full_stream_full(
         assert(ret_contents);
         assert(!FLAGS_SET(flags, READ_FULL_FILE_UNBASE64 | READ_FULL_FILE_UNHEX));
 
-        n_next = LINE_MAX; /* Start size */
+        if (offset != UINT64_MAX && offset > LONG_MAX)
+                return -ERANGE;
+
+        n_next = size != SIZE_MAX ? size : LINE_MAX; /* Start size */
 
         fd = fileno(f);
-        if (fd >= 0) { /* If the FILE* object is backed by an fd (as opposed to memory or such, see fmemopen()), let's
-                        * optimize our buffering */
+        if (fd >= 0) { /* If the FILE* object is backed by an fd (as opposed to memory or such, see
+                        * fmemopen()), let's optimize our buffering */
+                struct stat st;
 
                 if (fstat(fd, &st) < 0)
                         return -errno;
 
                 if (S_ISREG(st.st_mode)) {
+                        if (size == SIZE_MAX) {
+                                uint64_t rsize =
+                                        LESS_BY((uint64_t) st.st_size, offset == UINT64_MAX ? 0 : offset);
 
-                        /* Safety check */
-                        if (st.st_size > READ_FULL_BYTES_MAX)
-                                return -E2BIG;
+                                /* Safety check */
+                                if (rsize > READ_FULL_BYTES_MAX)
+                                        return -E2BIG;
 
-                        /* Start with the right file size. Note that we increase the size
-                         * to read here by one, so that the first read attempt already
-                         * makes us notice the EOF. */
-                        if (st.st_size > 0)
-                                n_next = st.st_size + 1;
+                                /* Start with the right file size. Note that we increase the size to read
+                                 * here by one, so that the first read attempt already makes us notice the
+                                 * EOF. If the reported size of the file is zero, we avoid this logic
+                                 * however, since quite likely it might be a virtual file in procfs that all
+                                 * report a zero file size. */
+                                if (st.st_size > 0)
+                                        n_next = rsize + 1;
+                        }
 
                         if (flags & READ_FULL_FILE_WARN_WORLD_READABLE)
                                 (void) warn_file_is_world_accessible(filename, &st, NULL, 0);
                 }
         }
+
+        if (offset != UINT64_MAX && fseek(f, offset, SEEK_SET) < 0)
+                return -errno;
 
         n = l = 0;
         for (;;) {
@@ -532,7 +549,9 @@ int read_full_stream_full(
                 }
 
                 buf = t;
-                n = n_next;
+                /* Unless a size has been explicitly specified, try to read as much as fits into the memory
+                 * we allocated (minus 1, to leave one byte for the safety NUL byte) */
+                n = size == SIZE_MAX ? malloc_usable_size(buf) - 1 : n_next;
 
                 errno = 0;
                 k = fread(buf + l, 1, n - l, f);
@@ -546,6 +565,11 @@ int read_full_stream_full(
                 }
                 if (feof(f))
                         break;
+
+                if (size != SIZE_MAX) { /* If we got asked to read some specific size, we already sized the buffer right, hence leave */
+                        assert(l == size);
+                        break;
+                }
 
                 assert(k > 0); /* we can't have read zero bytes because that would have been EOF */
 
@@ -605,15 +629,18 @@ finalize:
 int read_full_file_full(
                 int dir_fd,
                 const char *filename,
+                uint64_t offset,
+                size_t size,
                 ReadFullFileFlags flags,
                 const char *bind_name,
-                char **contents, size_t *size) {
+                char **ret_contents,
+                size_t *ret_size) {
 
         _cleanup_fclose_ FILE *f = NULL;
         int r;
 
         assert(filename);
-        assert(contents);
+        assert(ret_contents);
 
         r = xfopenat(dir_fd, filename, "re", 0, &f);
         if (r < 0) {
@@ -627,6 +654,10 @@ int read_full_file_full(
                 /* If this is enabled, let's try to connect to it */
                 if (!FLAGS_SET(flags, READ_FULL_FILE_CONNECT_SOCKET))
                         return -ENXIO;
+
+                /* Seeking is not supported on AF_UNIX sockets */
+                if (offset != UINT64_MAX)
+                        return -ESPIPE;
 
                 if (dir_fd == AT_FDCWD)
                         r = sockaddr_un_set_path(&sa.un, filename);
@@ -681,7 +712,7 @@ int read_full_file_full(
 
         (void) __fsetlocking(f, FSETLOCKING_BYCALLER);
 
-        return read_full_stream_full(f, filename, flags, contents, size);
+        return read_full_stream_full(f, filename, offset, size, flags, ret_contents, ret_size);
 }
 
 int executable_is_script(const char *path, char **interpreter) {
@@ -1120,7 +1151,7 @@ static EndOfLineMarker categorize_eol(char c, ReadLineFlags flags) {
         return EOL_NONE;
 }
 
-DEFINE_TRIVIAL_CLEANUP_FUNC(FILE*, funlockfile);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(FILE*, funlockfile, NULL);
 
 int read_line_full(FILE *f, size_t limit, ReadLineFlags flags, char **ret) {
         size_t n = 0, allocated = 0, count = 0;
@@ -1295,15 +1326,6 @@ int warn_file_is_world_accessible(const char *filename, struct stat *st, const c
                 log_warning("%s has %04o mode that is too permissive, please adjust the ownership and access mode.",
                             filename, st->st_mode & 07777);
         return 0;
-}
-
-int sync_rights(int from, int to) {
-        struct stat st;
-
-        if (fstat(from, &st) < 0)
-                return -errno;
-
-        return fchmod_and_chown(to, st.st_mode & 07777, st.st_uid, st.st_gid);
 }
 
 int rename_and_apply_smack_floor_label(const char *from, const char *to) {

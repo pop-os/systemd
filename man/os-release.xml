@@ -317,6 +317,35 @@
         </para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><varname>DEFAULT_HOSTNAME=</varname></term>
+
+        <listitem><para>A string specifying the hostname if
+        <citerefentry><refentrytitle>hostname</refentrytitle><manvolnum>5</manvolnum></citerefentry> is not
+        present and no other configuration source specifies the hostname. Must be either a single DNS label
+        (a string composed of 7-bit ASCII lower-case characters and no spaces or dots, limited to the format
+        allowed for DNS domain name labels), or a sequence of such labels separated by single dots that forms
+        a valid DNS FQDN. The hostname must be at most 64 characters, which is a Linux limitation (DNS allows
+        longer names).</para>
+
+        <para>See
+        <citerefentry><refentrytitle>org.freedesktop.hostname1</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+        for a description of how
+        <citerefentry><refentrytitle>systemd-hostnamed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+        determines the fallback hostname.</para></listitem>
+      </varlistentry>
+
+      <varlistentry>
+        <term><varname>SYSEXT_LEVEL=</varname></term>
+
+        <listitem><para>A lower-case string (mostly numeric, no spaces or other characters outside of 0–9,
+        a–z, ".", "_" and "-") identifying the operating system extensions support level, to indicate which
+        extension images are supported (See:
+        <citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>8</manvolnum></citerefentry>).
+        Example: <literal>SYSEXT_LEVEL=2</literal> or
+        <literal>SYSEXT_LEVEL=15.14</literal>.</para></listitem>
+      </varlistentry>
+
     </variablelist>
 
     <para>If you are reading this file from C code or a shell script

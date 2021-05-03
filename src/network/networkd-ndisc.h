@@ -14,7 +14,7 @@ typedef enum IPv6TokenAddressGeneration {
         IPV6_TOKEN_ADDRESS_GENERATION_STATIC,
         IPV6_TOKEN_ADDRESS_GENERATION_PREFIXSTABLE,
         _IPV6_TOKEN_ADDRESS_GENERATION_MAX,
-        _IPV6_TOKEN_ADDRESS_GENERATION_INVALID = -1,
+        _IPV6_TOKEN_ADDRESS_GENERATION_INVALID = -EINVAL,
 } IPv6TokenAddressGeneration;
 
 typedef enum IPv6AcceptRAStartDHCP6Client {
@@ -22,7 +22,7 @@ typedef enum IPv6AcceptRAStartDHCP6Client {
         IPV6_ACCEPT_RA_START_DHCP6_CLIENT_ALWAYS,
         IPV6_ACCEPT_RA_START_DHCP6_CLIENT_YES,
         _IPV6_ACCEPT_RA_START_DHCP6_CLIENT_MAX,
-        _IPV6_ACCEPT_RA_START_DHCP6_CLIENT_INVALID = -1,
+        _IPV6_ACCEPT_RA_START_DHCP6_CLIENT_INVALID = -EINVAL,
 } IPv6AcceptRAStartDHCP6Client;
 
 typedef struct NDiscAddress {
@@ -63,7 +63,6 @@ struct IPv6Token {
 };
 
 int ipv6token_new(IPv6Token **ret);
-DEFINE_TRIVIAL_CLEANUP_FUNC(IPv6Token *, freep);
 
 static inline char* NDISC_DNSSL_DOMAIN(const NDiscDNSSL *n) {
         return ((char*) n) + ALIGN(sizeof(NDiscDNSSL));
@@ -77,7 +76,7 @@ int ndisc_configure(Link *link);
 void ndisc_vacuum(Link *link);
 void ndisc_flush(Link *link);
 
-CONFIG_PARSER_PROTOTYPE(config_parse_ndisc_deny_listed_prefix);
+CONFIG_PARSER_PROTOTYPE(config_parse_ndisc_address_filter);
 CONFIG_PARSER_PROTOTYPE(config_parse_address_generation_type);
 CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_accept_ra_start_dhcp6_client);
 

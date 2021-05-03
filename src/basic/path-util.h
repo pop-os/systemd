@@ -88,9 +88,9 @@ int path_strv_make_absolute_cwd(char **l);
 char** path_strv_resolve(char **l, const char *root);
 char** path_strv_resolve_uniq(char **l, const char *root);
 
-int find_executable_full(const char *name, bool use_path_envvar, char **ret);
-static inline int find_executable(const char *name, char **ret) {
-        return find_executable_full(name, true, ret);
+int find_executable_full(const char *name, bool use_path_envvar, char **ret_filename, int *ret_fd);
+static inline int find_executable(const char *name, char **ret_filename) {
+        return find_executable_full(name, true, ret_filename, NULL);
 }
 
 bool paths_check_timestamp(const char* const* paths, usec_t *paths_ts_usec, bool update);
@@ -144,11 +144,10 @@ int fsck_exists(const char *fstype);
                 _ret;                                                   \
         })
 
-int parse_path_argument_and_warn(const char *path, bool suppress_root, char **arg);
-
 char* dirname_malloc(const char *path);
 const char *last_path_component(const char *path);
 int path_extract_filename(const char *p, char **ret);
+int path_extract_directory(const char *p, char **ret);
 
 bool filename_is_valid(const char *p) _pure_;
 bool path_is_valid(const char *p) _pure_;

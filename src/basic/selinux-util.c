@@ -29,7 +29,7 @@
 #include "time-util.h"
 
 #if HAVE_SELINUX
-DEFINE_TRIVIAL_CLEANUP_FUNC(context_t, context_free);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(context_t, context_free, NULL);
 #define _cleanup_context_free_ _cleanup_(context_freep)
 
 static int mac_selinux_reload(int seqno);
@@ -50,7 +50,7 @@ static struct selabel_handle *label_hnd = NULL;
                 int _e = (error);                                       \
                                                                         \
                 int _r = (log_get_max_level() >= LOG_PRI(_level))       \
-                        ? log_internal_realm(_level, _e, PROJECT_FILE, __LINE__, __func__, __VA_ARGS__) \
+                        ? log_internal(_level, _e, PROJECT_FILE, __LINE__, __func__, __VA_ARGS__) \
                         : -ERRNO_VALUE(_e);                             \
                 _enforcing ? _r : 0;                                    \
         })
@@ -272,6 +272,8 @@ int mac_selinux_fix_container_fd(int fd, const char *path, const char *inside_pa
 
         /* Check for policy reload so 'label_hnd' is kept up-to-date by callbacks */
         mac_selinux_maybe_reload();
+        if (!label_hnd)
+                return 0;
 
         if (selabel_lookup_raw(label_hnd, &fcon, inside_path, st.st_mode) < 0) {
                 /* If there's no label to set, then exit without warning */
@@ -484,6 +486,8 @@ static int selinux_create_file_prepare_abspath(const char *abspath, mode_t mode)
 
         /* Check for policy reload so 'label_hnd' is kept up-to-date by callbacks */
         mac_selinux_maybe_reload();
+        if (!label_hnd)
+                return 0;
 
         r = selabel_lookup_raw(label_hnd, &filecon, abspath, mode);
         if (r < 0) {
@@ -505,7 +509,6 @@ int mac_selinux_create_file_prepare_at(int dirfd, const char *path, mode_t mode)
 #if HAVE_SELINUX
         _cleanup_free_ char *abspath = NULL;
         int r;
-
 
         assert(path);
 
@@ -628,6 +631,8 @@ int mac_selinux_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
 
         /* Check for policy reload so 'label_hnd' is kept up-to-date by callbacks */
         mac_selinux_maybe_reload();
+        if (!label_hnd)
+                goto skipped;
 
         if (path_is_absolute(path))
                 r = selabel_lookup_raw(label_hnd, &fcon, path, S_IFSOCK);

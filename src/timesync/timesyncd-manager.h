@@ -27,6 +27,8 @@ typedef struct Manager Manager;
 #define NTP_RETRY_INTERVAL_MIN_USEC     (15 * USEC_PER_SEC)
 #define NTP_RETRY_INTERVAL_MAX_USEC     (6 * 60 * USEC_PER_SEC) /* 6 minutes */
 
+#define DEFAULT_CONNECTION_RETRY_USEC (30*USEC_PER_SEC)
+
 struct Manager {
         sd_bus *bus;
         sd_event *event;
@@ -60,6 +62,7 @@ struct Manager {
         struct timespec trans_time_mon;
         struct timespec trans_time;
         usec_t retry_interval;
+        usec_t connection_retry_usec;
         bool pending;
 
         /* poll timer */
@@ -76,7 +79,7 @@ struct Manager {
         } samples[8];
         unsigned samples_idx;
         double samples_jitter;
-        usec_t max_root_distance_usec;
+        usec_t root_distance_max_usec;
 
         /* last change */
         bool jumped;
@@ -100,7 +103,7 @@ struct Manager {
 };
 
 int manager_new(Manager **ret);
-void manager_free(Manager *m);
+Manager* manager_free(Manager *m);
 
 DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
 

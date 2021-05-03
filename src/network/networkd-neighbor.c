@@ -60,11 +60,7 @@ static int neighbor_new_static(Network *network, const char *filename, unsigned 
                 .section = TAKE_PTR(n),
         };
 
-        r = hashmap_ensure_allocated(&network->neighbors_by_section, &network_config_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(network->neighbors_by_section, neighbor->section, neighbor);
+        r = hashmap_ensure_put(&network->neighbors_by_section, &network_config_hash_ops, neighbor->section, neighbor);
         if (r < 0)
                 return r;
 
@@ -174,6 +170,7 @@ static int neighbor_add_internal(Link *link, Set **neighbors, const Neighbor *in
 }
 
 static int neighbor_add(Link *link, const Neighbor *in, Neighbor **ret) {
+        bool is_new = false;
         Neighbor *neighbor;
         int r;
 
@@ -183,6 +180,7 @@ static int neighbor_add(Link *link, const Neighbor *in, Neighbor **ret) {
                 r = neighbor_add_internal(link, &link->neighbors, in, &neighbor);
                 if (r < 0)
                         return r;
+                is_new = true;
         } else if (r == 0) {
                 /* Neighbor is foreign, claim it as recognized */
                 r = set_ensure_put(&link->neighbors, &neighbor_hash_ops, neighbor);
@@ -192,12 +190,13 @@ static int neighbor_add(Link *link, const Neighbor *in, Neighbor **ret) {
                 set_remove(link->neighbors_foreign, neighbor);
         } else if (r == 1) {
                 /* Neighbor already exists */
+                ;
         } else
                 return r;
 
         if (ret)
                 *ret = neighbor;
-        return 0;
+        return is_new;
 }
 
 static int neighbor_add_foreign(Link *link, const Neighbor *in, Neighbor **ret) {
@@ -283,7 +282,7 @@ static int neighbor_configure(Neighbor *neighbor, Link *link) {
         if (r < 0)
                 return log_link_error_errno(link, r, "Could not add neighbor: %m");
 
-        return 0;
+        return r;
 }
 
 int link_set_neighbors(Link *link) {
@@ -293,6 +292,11 @@ int link_set_neighbors(Link *link) {
         assert(link);
         assert(link->network);
         assert(link->state != _LINK_STATE_INVALID);
+
+        if (link->neighbor_messages != 0) {
+                log_link_debug(link, "Neighbors are configuring.");
+                return 0;
+        }
 
         link->neighbors_configured = false;
 

@@ -8,13 +8,16 @@
 #include "def.h"
 #include "fd-util.h"
 #include "fileio.h"
+#include "fs-util.h"
 #include "hashmap.h"
 #include "log.h"
+#include "mkdir.h"
 #include "mountpoint-util.h"
 #include "path-util.h"
 #include "rm-rf.h"
 #include "string-util.h"
 #include "tests.h"
+#include "tmpfile-util.h"
 
 static void test_mount_propagation_flags(const char *name, int ret, unsigned long expected) {
         long unsigned flags;
@@ -280,11 +283,57 @@ static void test_fd_is_mount_point(void) {
         assert_se(fd_is_mount_point(fd, "proc", 0) > 0);
         assert_se(fd_is_mount_point(fd, "proc/", 0) > 0);
 
-        /* /root's entire raison d'etre is to be on the root file system (i.e. not in /home/ which might be
-         * split off), so that the user can always log in, so it cannot be a mount point unless the system is
-         * borked. Let's allow for it to be missing though. */
+        /* /root's entire reason for being is to be on the root file system (i.e. not in /home/ which
+         * might be split off), so that the user can always log in, so it cannot be a mount point unless
+         * the system is borked. Let's allow for it to be missing though. */
         assert_se(IN_SET(fd_is_mount_point(fd, "root", 0), -ENOENT, 0));
         assert_se(IN_SET(fd_is_mount_point(fd, "root/", 0), -ENOENT, 0));
+}
+
+static void test_make_mount_point_inode(void) {
+        _cleanup_(rm_rf_physical_and_freep) char *d = NULL;
+        const char *src_file, *src_dir, *dst_file, *dst_dir;
+        struct stat st;
+
+        log_info("/* %s */", __func__);
+
+        assert_se(mkdtemp_malloc(NULL, &d) >= 0);
+
+        src_file = strjoina(d, "/src/file");
+        src_dir = strjoina(d, "/src/dir");
+        dst_file = strjoina(d, "/dst/file");
+        dst_dir = strjoina(d, "/dst/dir");
+
+        assert_se(mkdir_p(src_dir, 0755) >= 0);
+        assert_se(mkdir_parents(dst_file, 0755) >= 0);
+        assert_se(touch(src_file) >= 0);
+
+        assert_se(make_mount_point_inode_from_path(src_file, dst_file, 0755) >= 0);
+        assert_se(make_mount_point_inode_from_path(src_dir, dst_dir, 0755) >= 0);
+
+        assert_se(stat(dst_dir, &st) == 0);
+        assert_se(S_ISDIR(st.st_mode));
+        assert_se(stat(dst_file, &st) == 0);
+        assert_se(S_ISREG(st.st_mode));
+        assert_se(!(S_IXUSR & st.st_mode));
+        assert_se(!(S_IXGRP & st.st_mode));
+        assert_se(!(S_IXOTH & st.st_mode));
+
+        assert_se(unlink(dst_file) == 0);
+        assert_se(rmdir(dst_dir) == 0);
+
+        assert_se(stat(src_file, &st) == 0);
+        assert_se(make_mount_point_inode_from_stat(&st, dst_file, 0755) >= 0);
+        assert_se(stat(src_dir, &st) == 0);
+        assert_se(make_mount_point_inode_from_stat(&st, dst_dir, 0755) >= 0);
+
+        assert_se(stat(dst_dir, &st) == 0);
+        assert_se(S_ISDIR(st.st_mode));
+        assert_se(stat(dst_file, &st) == 0);
+        assert_se(S_ISREG(st.st_mode));
+        assert_se(!(S_IXUSR & st.st_mode));
+        assert_se(!(S_IXGRP & st.st_mode));
+        assert_se(!(S_IXOTH & st.st_mode));
 }
 
 int main(int argc, char *argv[]) {
@@ -311,6 +360,7 @@ int main(int argc, char *argv[]) {
         test_mnt_id();
         test_path_is_mount_point();
         test_fd_is_mount_point();
+        test_make_mount_point_inode();
 
         return 0;
 }

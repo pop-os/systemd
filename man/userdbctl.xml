@@ -36,8 +36,8 @@
     <para><command>userdbctl</command> may be used to inspect user and groups (as well as group memberships)
     of the system. This client utility inquires user/group information provided by various system services,
     both operating on JSON user/group records (as defined by the <ulink
-    url="https://systemd.io/USER_RECORD">JSON User Record</ulink> and <ulink
-    url="https://systemd.io/GROUP_RECORD">JSON Group Record</ulink> definitions), and classic UNIX NSS/glibc
+    url="https://systemd.io/USER_RECORD">JSON User Records</ulink> and <ulink
+    url="https://systemd.io/GROUP_RECORD">JSON Group Records</ulink> definitions), and classic UNIX NSS/glibc
     user and group records. This tool is primarily a client to the <ulink
     url="https://systemd.io/USER_GROUP_API">User/Group Record Lookup API via Varlink</ulink>.</para>
   </refsect1>
@@ -215,7 +215,7 @@
       </varlistentry>
 
       <varlistentry>
-        <term><constant>io.systemd.NameSeviceSwitch</constant></term>
+        <term><constant>io.systemd.NameServiceSwitch</constant></term>
 
         <listitem><para>This service is (also) provided by
         <citerefentry><refentrytitle>systemd-userdbd.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
@@ -232,7 +232,7 @@
 
     <para>Note that <command>userdbctl</command> has internal support for NSS-based lookups too. This means
     that if neither <constant>io.systemd.Multiplexer</constant> nor
-    <constant>io.systemd.NameSeviceSwitch</constant> are running look-ups into the basic user/group
+    <constant>io.systemd.NameServiceSwitch</constant> are running look-ups into the basic user/group
     databases will still work.</para>
   </refsect1>
 
@@ -256,7 +256,7 @@ AuthorizedKeysCommandUser root
     <para>On success, 0 is returned, a non-zero failure code otherwise.</para>
   </refsect1>
 
-  <xi:include href="less-variables.xml" />
+  <xi:include href="common-variables.xml" />
 
   <refsect1>
     <title>See Also</title>

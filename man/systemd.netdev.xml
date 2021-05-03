@@ -181,10 +181,13 @@
           <entry>A virtual tunnel interface like vti/vti6 but with several advantages.</entry></row>
 
           <row><entry><varname>ifb</varname></entry>
-          <entry> The Intermediate Functional Block (ifb) pseudo network interface acts as a QoS concentrator for multiple different sources of traffic.</entry></row>
+          <entry>The Intermediate Functional Block (ifb) pseudo network interface acts as a QoS concentrator for multiple different sources of traffic.</entry></row>
 
           <row><entry><varname>bareudp</varname></entry>
-          <entry> Bare UDP tunnels provide a generic L3 encapsulation support for tunnelling different L3 protocols like MPLS, IP etc. inside of an UDP tunnel.</entry></row>
+          <entry>Bare UDP tunnels provide a generic L3 encapsulation support for tunnelling different L3 protocols like MPLS, IP etc. inside of an UDP tunnel.</entry></row>
+
+          <row><entry><varname>batadv</varname></entry>
+          <entry><ulink url="https://www.open-mesh.org/projects/open-mesh/wiki">B.A.T.M.A.N. Advanced</ulink> is a routing protocol for multi-hop mobile ad-hoc networks which operates on layer 2.</entry></row>
         </tbody>
       </tgroup>
     </table>
@@ -451,6 +454,13 @@
         </listitem>
       </varlistentry>
       <varlistentry>
+        <term><varname>Protocol=</varname></term>
+        <listitem>
+          <para>Allows setting the protocol used for the VLAN interface. Takes <literal>802.1q</literal> or,
+          <literal>802.1ad</literal>, and defaults to unset and kernel's default is used.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
         <term><varname>GVRP=</varname></term>
         <listitem>
           <para>Takes a boolean. The Generic VLAN Registration Protocol (GVRP) is a protocol that
@@ -484,6 +494,28 @@
           like physical interfaces. When unset, the kernel's default will be used.</para>
         </listitem>
       </varlistentry>
+      <varlistentry>
+        <term><varname>EgressQOSMaps=</varname></term>
+        <listitem>
+          <para>Defines a mapping of Linux internal packet priority (<constant>SO_PRIORITY</constant>) to VLAN header
+          PCP field for outgoing frames. Takes a whitespace-separated list of unsigned integer pairs in the format
+          <literal>from</literal>-<literal>to</literal>, e.g., <literal>21-7 45-5</literal> ranges 1–4294967294.
+          Note that <literal>from</literal> must be greater than or equal to <literal>to</literal>. When unset,
+          the kernel's default will be used.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>IngressQOSMaps=</varname></term>
+        <listitem>
+          <para>Defines a mapping of Linux internal packet priority (<constant>SO_PRIORITY</constant>) to VLAN header
+          PCP field for incoming frames. Takes a whitespace-separated list of unsigned integer pairs in the format
+          <literal>from</literal>-<literal>to</literal>, e.g., <literal>21-7 45-5</literal> ranges 1–4294967294.
+          Note that <literal>from</literal> must be greater than or equal to <literal>to</literal>. When unset,
+          the kernel's default will be used.
+          </para>
+        </listitem>
+      </varlistentry>
     </variablelist>
   </refsect1>
 
@@ -515,6 +547,13 @@
           hexadecimal. This option may appear more than once, in which case the lists are merged. If
           the empty string is assigned to this option, the list of hardware addresses defined prior
           to this is reset. Defaults to unset.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>BroadcastMulticastQueueLength=</varname></term>
+        <listitem>
+          <para>Specifies the length of the receive queue for broadcast/multicast packets. An unsigned
+          integer in the range 0…4294967294. Defaults to unset.</para>
         </listitem>
       </varlistentry>
     </variablelist>
@@ -572,7 +611,7 @@
       <varlistentry>
         <term><varname>VNI=</varname></term>
         <listitem>
-          <para>The VXLAN Network Identifier (or VXLAN Segment ID). Takes a number in the range 1-16777215.</para>
+          <para>The VXLAN Network Identifier (or VXLAN Segment ID). Takes a number in the range 1…16777215.</para>
         </listitem>
       </varlistentry>
       <varlistentry>
@@ -871,7 +910,7 @@
       <varlistentry>
         <term><varname>PeerTunnelId=</varname></term>
         <listitem>
-          <para>Specifies the peer tunnel id. Takes a number in the range 1—4294967295. The value used must
+          <para>Specifies the peer tunnel id. Takes a number in the range 1…4294967295. The value used must
           match the <literal>TunnelId=</literal> value being used at the peer. This setting is compulsory.
           </para>
         </listitem>
@@ -1354,7 +1393,7 @@
       <varlistentry>
         <term><varname>ERSPANIndex=</varname></term>
         <listitem>
-          <para>Specifies the ERSPAN index field for the interface, an integer in the range 1-1048575 associated with
+          <para>Specifies the ERSPAN index field for the interface, an integer in the range 1…1048575 associated with
           the ERSPAN traffic's source port and direction. This field is mandatory.
           </para>
         </listitem>
@@ -1406,7 +1445,7 @@
           <para>The <varname>Protocol=</varname> specifies the protocol number of the packets arriving
           at the UDP port. When <varname>Encapsulation=FooOverUDP</varname>, this field is mandatory
           and is not set by default. Takes an IP protocol name such as <literal>gre</literal> or
-          <literal>ipip</literal>, or an integer within the range 1-255. When
+          <literal>ipip</literal>, or an integer within the range 1…255. When
           <varname>Encapsulation=GenericUDPEncapsulation</varname>, this must not be specified.</para>
         </listitem>
       </varlistentry>
@@ -1765,7 +1804,7 @@
       <varlistentry>
         <term><varname>AdActorSystemPriority=</varname></term>
         <listitem>
-          <para>Specifies the 802.3ad actor system priority. Takes a number in the range 1—65535.</para>
+          <para>Specifies the 802.3ad actor system priority. Takes a number in the range 1…65535.</para>
         </listitem>
       </varlistentry>
 
@@ -1979,6 +2018,107 @@
         <term><varname>Table=</varname></term>
         <listitem>
           <para>The numeric routing table identifier. This setting is compulsory.</para>
+        </listitem>
+      </varlistentry>
+    </variablelist>
+  </refsect1>
+
+  <refsect1>
+    <title>[BatmanAdvanced] Section Options</title>
+    <para>The [BatmanAdvanced] section only applies for
+    netdevs of kind <literal>batadv</literal> and accepts the
+    following keys:</para>
+
+    <variablelist class='network-directives'>
+      <varlistentry>
+        <term><varname>GatewayMode=</varname></term>
+        <listitem>
+          <para>Takes one of <literal>off</literal>, <literal>server</literal>, or <literal>client</literal>.
+          A batman-adv node can either run in server mode (sharing its internet
+          connection with the mesh) or in client mode (searching for the most suitable internet connection
+          in the mesh) or having the gateway support turned off entirely (which is the default setting).
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Aggregation=</varname></term>
+        <listitem>
+          <para>Takes a boolean value. Enables or disables aggregation of originator messages. Defaults to
+           true.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>BridgeLoopAvoidance=</varname></term>
+        <listitem>
+          <para>Takes a boolean value. Enables or disables avoidance of loops on bridges. Defaults to true.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>DistributedArpTable=</varname></term>
+        <listitem>
+          <para>Takes a boolean value. Enables or disables the distributed ARP table. Defaults to true.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>Fragmentation=</varname></term>
+        <listitem>
+          <para>Takes a boolean value. Enables or disables fragmentation. Defaults to true.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>HopPenalty=</varname></term>
+        <listitem>
+          <para>The hop penalty setting allows to modify
+          <citerefentry project='mankier'><refentrytitle>batctl</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+          preference for multihop routes vs. short routes. This integer value is applied to the
+          TQ (Transmit Quality) of each forwarded OGM (Originator Message), thereby propagating the
+          cost of an extra hop (the packet has to be received and retransmitted which costs airtime).
+          A higher hop penalty will make it more unlikely that other nodes will choose this node as
+          intermediate hop towards any given destination. The default hop penalty of '15' is a reasonable
+          value for most setups and probably does not need to be changed. However, mobile nodes could
+          choose a value of 255 (maximum value) to avoid being chosen as a router by other nodes.
+          The minimum value is 0.
+          </para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>OriginatorIntervalSec=</varname></term>
+        <listitem>
+          <para>The value specifies the interval in seconds, unless another time unit is specified in which
+          batman-adv floods the network with its protocol information.
+          See <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+          for more information.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>GatewayBandwidthDown=</varname></term>
+        <listitem>
+          <para>If the node is a server, this
+          parameter is used to inform other nodes in the network about
+          this node's internet connection download bandwidth in bits per second. Just enter any number
+          suffixed with K, M, G or T (base 1000) and the batman-adv
+          module will propagate the entered value in the mesh.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>GatewayBandwidthUp=</varname></term>
+        <listitem>
+          <para>If the node is a server, this
+          parameter is used to inform other nodes in the network about
+          this node's internet connection upload bandwidth in bits per second. Just enter any number
+          suffixed with K, M, G or T (base 1000) and the batman-adv
+          module will propagate the entered value in the mesh.</para>
+        </listitem>
+      </varlistentry>
+      <varlistentry>
+        <term><varname>RoutingAlgorithm=</varname></term>
+        <listitem>
+          <para>This can be either <literal>batman-v</literal> or <literal>batman-iv</literal> and describes which routing_algo
+          of <citerefentry><refentrytitle>batctl</refentrytitle><manvolnum>8</manvolnum></citerefentry> to use. The algorithm
+          cannot be changed after interface creation. Defaults to <literal>batman-v</literal>.
+          </para>
         </listitem>
       </varlistentry>
     </variablelist>

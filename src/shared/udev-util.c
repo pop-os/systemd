@@ -1,12 +1,18 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
+#include <ctype.h>
 #include <errno.h>
+#include <sys/inotify.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
+#include "device-nodes.h"
+#include "device-private.h"
 #include "device-util.h"
 #include "env-file.h"
+#include "errno-util.h"
 #include "escape.h"
+#include "fd-util.h"
 #include "log.h"
 #include "macro.h"
 #include "parse-util.h"
@@ -14,6 +20,7 @@
 #include "signal-util.h"
 #include "string-table.h"
 #include "string-util.h"
+#include "strxcpyx.h"
 #include "udev-util.h"
 #include "utf8.h"
 
@@ -63,7 +70,7 @@ int udev_parse_config_full(
 
                 /* we set the udev log level here explicitly, this is supposed
                  * to regulate the code in libudev/ and udev/. */
-                r = log_set_max_level_from_string_realm(LOG_REALM_UDEV, log);
+                r = log_set_max_level_from_string(log);
                 if (r < 0)
                         log_syntax(NULL, LOG_WARNING, "/etc/udev/udev.conf", 0, r,
                                    "failed to set udev log level '%s', ignoring: %m", log);
@@ -129,7 +136,7 @@ static int device_new_from_dev_path(const char *devlink, sd_device **ret_device)
                 return log_error_errno(SYNTHETIC_ERRNO(ENOTBLK),
                                        "%s does not point to a block device: %m", devlink);
 
-        r = sd_device_new_from_devnum(ret_device, 'b', st.st_rdev);
+        r = sd_device_new_from_stat_rdev(ret_device, &st);
         if (r < 0)
                 return log_error_errno(r, "Failed to initialize device from %s: %m", devlink);
 
@@ -170,7 +177,7 @@ static int device_monitor_handler(sd_device_monitor *monitor, sd_device *device,
          * (And yes, we only need to special case REMOVE. It's the only "negative" event type, where a device
          * ceases to exist. All other event types are "positive": the device exists and is registered in the
          * udev database, thus whenever we see the event, we can consider it initialized.) */
-        if (device_for_action(device, DEVICE_ACTION_REMOVE))
+        if (device_for_action(device, SD_DEVICE_REMOVE))
                 return 0;
 
         if (data->sysname && sd_device_get_sysname(device, &sysname) >= 0 && streq(sysname, data->sysname))
@@ -313,15 +320,32 @@ int device_is_renaming(sd_device *dev) {
         return true;
 }
 
-bool device_for_action(sd_device *dev, DeviceAction action) {
-        DeviceAction a;
+bool device_for_action(sd_device *dev, sd_device_action_t a) {
+        sd_device_action_t b;
 
         assert(dev);
 
-        if (device_get_action(dev, &a) < 0)
+        if (a < 0)
                 return false;
 
-        return a == action;
+        if (sd_device_get_action(dev, &b) < 0)
+                return false;
+
+        return a == b;
+}
+
+void log_device_uevent(sd_device *device, const char *str) {
+        sd_device_action_t action = _SD_DEVICE_ACTION_INVALID;
+        uint64_t seqnum = 0;
+
+        if (!DEBUG_LOGGING)
+                return;
+
+        (void) sd_device_get_seqnum(device, &seqnum);
+        (void) sd_device_get_action(device, &action);
+        log_device_debug(device, "%s%s(SEQNUM=%"PRIu64", ACTION=%s)",
+                         strempty(str), isempty(str) ? "" : " ",
+                         seqnum, strna(device_action_to_string(action)));
 }
 
 int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos) {
@@ -368,4 +392,172 @@ int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos) {
         *ret_value = str;
         *ret_endpos = i + 1;
         return 0;
+}
+
+size_t udev_replace_whitespace(const char *str, char *to, size_t len) {
+        bool is_space = false;
+        size_t i, j;
+
+        assert(str);
+        assert(to);
+
+        /* Copy from 'str' to 'to', while removing all leading and trailing whitespace, and replacing
+         * each run of consecutive whitespace with a single underscore. The chars from 'str' are copied
+         * up to the \0 at the end of the string, or at most 'len' chars.  This appends \0 to 'to', at
+         * the end of the copied characters.
+         *
+         * If 'len' chars are copied into 'to', the final \0 is placed at len+1 (i.e. 'to[len] = \0'),
+         * so the 'to' buffer must have at least len+1 chars available.
+         *
+         * Note this may be called with 'str' == 'to', i.e. to replace whitespace in-place in a buffer.
+         * This function can handle that situation.
+         *
+         * Note that only 'len' characters are read from 'str'. */
+
+        i = strspn(str, WHITESPACE);
+
+        for (j = 0; j < len && i < len && str[i] != '\0'; i++) {
+                if (isspace(str[i])) {
+                        is_space = true;
+                        continue;
+                }
+
+                if (is_space) {
+                        if (j + 1 >= len)
+                                break;
+
+                        to[j++] = '_';
+                        is_space = false;
+                }
+                to[j++] = str[i];
+        }
+
+        to[j] = '\0';
+        return j;
+}
+
+size_t udev_replace_chars(char *str, const char *allow) {
+        size_t i = 0, replaced = 0;
+
+        assert(str);
+
+        /* allow chars in allow list, plain ascii, hex-escaping and valid utf8. */
+
+        while (str[i] != '\0') {
+                int len;
+
+                if (allow_listed_char_for_devnode(str[i], allow)) {
+                        i++;
+                        continue;
+                }
+
+                /* accept hex encoding */
+                if (str[i] == '\\' && str[i+1] == 'x') {
+                        i += 2;
+                        continue;
+                }
+
+                /* accept valid utf8 */
+                len = utf8_encoded_valid_unichar(str + i, SIZE_MAX);
+                if (len > 1) {
+                        i += len;
+                        continue;
+                }
+
+                /* if space is allowed, replace whitespace with ordinary space */
+                if (isspace(str[i]) && allow && strchr(allow, ' ')) {
+                        str[i] = ' ';
+                        i++;
+                        replaced++;
+                        continue;
+                }
+
+                /* everything else is replaced with '_' */
+                str[i] = '_';
+                i++;
+                replaced++;
+        }
+        return replaced;
+}
+
+int udev_resolve_subsys_kernel(const char *string, char *result, size_t maxsize, bool read_value) {
+        _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
+        _cleanup_free_ char *temp = NULL;
+        char *subsys, *sysname, *attr;
+        const char *val;
+        int r;
+
+        assert(string);
+        assert(result);
+
+        /* handle "[<SUBSYSTEM>/<KERNEL>]<attribute>" format */
+
+        if (string[0] != '[')
+                return -EINVAL;
+
+        temp = strdup(string);
+        if (!temp)
+                return -ENOMEM;
+
+        subsys = &temp[1];
+
+        sysname = strchr(subsys, '/');
+        if (!sysname)
+                return -EINVAL;
+        sysname[0] = '\0';
+        sysname = &sysname[1];
+
+        attr = strchr(sysname, ']');
+        if (!attr)
+                return -EINVAL;
+        attr[0] = '\0';
+        attr = &attr[1];
+        if (attr[0] == '/')
+                attr = &attr[1];
+        if (attr[0] == '\0')
+                attr = NULL;
+
+        if (read_value && !attr)
+                return -EINVAL;
+
+        r = sd_device_new_from_subsystem_sysname(&dev, subsys, sysname);
+        if (r < 0)
+                return r;
+
+        if (read_value) {
+                r = sd_device_get_sysattr_value(dev, attr, &val);
+                if (r < 0 && !ERRNO_IS_PRIVILEGE(r) && r != -ENOENT)
+                        return r;
+                if (r >= 0)
+                        strscpy(result, maxsize, val);
+                else
+                        result[0] = '\0';
+                log_debug("value '[%s/%s]%s' is '%s'", subsys, sysname, attr, result);
+        } else {
+                r = sd_device_get_syspath(dev, &val);
+                if (r < 0)
+                        return r;
+
+                strscpyl(result, maxsize, val, attr ? "/" : NULL, attr ?: NULL, NULL);
+                log_debug("path '[%s/%s]%s' is '%s'", subsys, sysname, strempty(attr), result);
+        }
+        return 0;
+}
+
+int udev_queue_is_empty(void) {
+        return access("/run/udev/queue", F_OK) < 0 ?
+                (errno == ENOENT ? true : -errno) : false;
+}
+
+int udev_queue_init(void) {
+        _cleanup_close_ int fd = -1;
+
+        fd = inotify_init1(IN_CLOEXEC);
+        if (fd < 0)
+                return -errno;
+
+        if (inotify_add_watch(fd, "/run/udev" , IN_DELETE) < 0)
+                return -errno;
+
+        return TAKE_FD(fd);
 }

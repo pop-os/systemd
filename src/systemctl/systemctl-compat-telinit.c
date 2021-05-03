@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
 #include <getopt.h>
+#include <unistd.h>
 
 #include "alloc-util.h"
 #include "pretty-print.h"
+#include "rlimit-util.h"
 #include "systemctl-compat-telinit.h"
 #include "systemctl-daemon-reload.h"
 #include "systemctl-start-unit.h"
@@ -31,11 +33,11 @@ static int telinit_help(void) {
                "\nOptions:\n"
                "     --help      Show this help\n"
                "     --no-wall   Don't send wall message before halt/power-off/reboot\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight(), ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -149,4 +151,12 @@ int reload_with_fallback(void) {
                 return log_error_errno(errno, "kill() failed: %m");
 
         return 0;
+}
+
+int exec_telinit(char *argv[]) {
+        (void) rlimit_nofile_safe();
+        execv(TELINIT, argv);
+
+        return log_error_errno(SYNTHETIC_ERRNO(EIO),
+                               "Couldn't find an alternative telinit implementation to spawn.");
 }

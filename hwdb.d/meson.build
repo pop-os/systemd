@@ -4,6 +4,8 @@
 # they are very long but quite repetitive and the parser is not very fast.
 # So we don't "test" them.
 hwdb_files_notest = files('''
+        README
+        20-dmi-id.hwdb
         20-pci-vendor-model.hwdb
         20-pci-classes.hwdb
         20-usb-vendor-model.hwdb
@@ -19,6 +21,7 @@ hwdb_files_notest = files('''
 
 hwdb_files_test = files('''
         60-autosuspend.hwdb
+        60-autosuspend-fingerprint-reader.hwdb
         60-evdev.hwdb
         60-input-id.hwdb
         60-keyboard.hwdb
@@ -64,9 +67,9 @@ endif
 ############################################################
 
 run_target(
-        'hwdb-update',
-        command : [hwdb_update_sh, meson.current_source_dir()])
+        'update-hwdb',
+        command : [update_hwdb_sh, meson.current_source_dir()])
 
 run_target(
-        'autosuspend-update',
-        command : [autosuspend_update_sh, project_source_root + '/tools/chromiumos'])
+        'update-hwdb-autosuspend',
+        command : [update_hwdb_autosuspend_sh, project_source_root])

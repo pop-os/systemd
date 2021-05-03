@@ -10,6 +10,7 @@
 #include "condition.h"
 #include "conf-parser.h"
 #include "hashmap.h"
+#include "net-condition.h"
 #include "netdev.h"
 #include "networkd-brvlan.h"
 #include "networkd-dhcp-common.h"
@@ -34,7 +35,7 @@ typedef enum KeepConfiguration {
         KEEP_CONFIGURATION_STATIC        = 1 << 2,
         KEEP_CONFIGURATION_YES           = KEEP_CONFIGURATION_DHCP | KEEP_CONFIGURATION_STATIC,
         _KEEP_CONFIGURATION_MAX,
-        _KEEP_CONFIGURATION_INVALID = -1,
+        _KEEP_CONFIGURATION_INVALID = -EINVAL,
 } KeepConfiguration;
 
 typedef enum IPv6LinkLocalAddressGenMode {
@@ -43,8 +44,19 @@ typedef enum IPv6LinkLocalAddressGenMode {
        IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_STABLE_PRIVACY = IN6_ADDR_GEN_MODE_STABLE_PRIVACY,
        IPV6_LINK_LOCAL_ADDRESSS_GEN_MODE_RANDOM         = IN6_ADDR_GEN_MODE_RANDOM,
        _IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_MAX,
-       _IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_INVALID        = -1
+       _IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_INVALID        = -EINVAL,
 } IPv6LinkLocalAddressGenMode;
+
+typedef enum ActivationPolicy {
+        ACTIVATION_POLICY_UP,
+        ACTIVATION_POLICY_ALWAYS_UP,
+        ACTIVATION_POLICY_MANUAL,
+        ACTIVATION_POLICY_ALWAYS_DOWN,
+        ACTIVATION_POLICY_DOWN,
+        ACTIVATION_POLICY_BOUND,
+        _ACTIVATION_POLICY_MAX,
+        _ACTIVATION_POLICY_INVALID = -EINVAL,
+} ActivationPolicy;
 
 typedef struct Manager Manager;
 
@@ -65,24 +77,17 @@ struct Network {
         char *description;
 
         /* [Match] section */
-        Set *match_mac;
-        Set *match_permanent_mac;
-        char **match_path;
-        char **match_driver;
-        char **match_type;
-        char **match_name;
-        char **match_property;
-        char **match_wlan_iftype;
-        char **match_ssid;
-        Set *match_bssid;
+        NetMatch match;
         LIST_HEAD(Condition, conditions);
 
         /* Master or stacked netdevs */
+        NetDev *batadv;
         NetDev *bridge;
         NetDev *bond;
         NetDev *vrf;
         NetDev *xfrm;
         Hashmap *stacked_netdevs;
+        char *batadv_name;
         char *bridge_name;
         char *bond_name;
         char *vrf_name;
@@ -95,9 +100,11 @@ struct Network {
         int arp;
         int multicast;
         int allmulticast;
+        int promiscuous;
         bool unmanaged;
         bool required_for_online; /* Is this network required to be considered online? */
         LinkOperationalStateRange required_operstate_for_online;
+        ActivationPolicy activation_policy;
 
         /* misc settings */
         bool configure_without_carrier;
@@ -105,7 +112,7 @@ struct Network {
         KeepConfiguration keep_configuration;
         char **bind_carrier;
         bool default_route_on_device;
-        bool ip_masquerade;
+        AddressFamily ip_masquerade;
 
         /* DHCP Client Support */
         AddressFamily dhcp;
@@ -151,8 +158,10 @@ struct Network {
         OrderedHashmap *dhcp_client_send_vendor_options;
 
         /* DHCPv6 Client support*/
+        bool dhcp6_use_address;
         bool dhcp6_use_dns;
         bool dhcp6_use_dns_set;
+        bool dhcp6_use_hostname;
         bool dhcp6_use_ntp;
         bool dhcp6_use_ntp_set;
         bool dhcp6_rapid_commit;
@@ -204,6 +213,7 @@ struct Network {
         int dhcp6_pd;
         bool dhcp6_pd_announce;
         bool dhcp6_pd_assign;
+        bool dhcp6_pd_manage_temporary_address;
         int64_t dhcp6_pd_subnet_id;
         union in_addr_union dhcp6_pd_token;
 
@@ -236,6 +246,7 @@ struct Network {
         unsigned can_data_sample_point;
         usec_t can_restart_us;
         int can_triple_sampling;
+        int can_berr_reporting;
         int can_termination;
         int can_listen_only;
         int can_fd_mode;
@@ -244,6 +255,7 @@ struct Network {
         /* sysctl settings */
         AddressFamily ip_forward;
         int ipv4_accept_local;
+        int ipv4_route_localnet;
         int ipv6_dad_transmits;
         int ipv6_hop_limit;
         int proxy_arp;
@@ -263,7 +275,12 @@ struct Network {
         DHCPUseDomains ipv6_accept_ra_use_domains;
         IPv6AcceptRAStartDHCP6Client ipv6_accept_ra_start_dhcp6_client;
         uint32_t ipv6_accept_ra_route_table;
+        Set *ndisc_deny_listed_router;
+        Set *ndisc_allow_listed_router;
         Set *ndisc_deny_listed_prefix;
+        Set *ndisc_allow_listed_prefix;
+        Set *ndisc_deny_listed_route_prefix;
+        Set *ndisc_allow_listed_route_prefix;
         OrderedSet *ipv6_tokens;
 
         /* LLDP support */
@@ -314,7 +331,6 @@ int network_get(Manager *manager, unsigned short iftype, sd_device *device,
                 const struct ether_addr *mac, const struct ether_addr *permanent_mac,
                 enum nl80211_iftype wlan_iftype, const char *ssid, const struct ether_addr *bssid,
                 Network **ret);
-int network_apply(Network *network, Link *link);
 void network_apply_anonymize_if_set(Network *network);
 
 bool network_has_static_ipv6_configurations(Network *network);
@@ -330,6 +346,7 @@ CONFIG_PARSER_PROTOTYPE(config_parse_ntp);
 CONFIG_PARSER_PROTOTYPE(config_parse_required_for_online);
 CONFIG_PARSER_PROTOTYPE(config_parse_keep_configuration);
 CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_link_local_address_gen_mode);
+CONFIG_PARSER_PROTOTYPE(config_parse_activation_policy);
 
 const struct ConfigPerfItem* network_network_gperf_lookup(const char *key, GPERF_LEN_TYPE length);
 
@@ -338,3 +355,6 @@ KeepConfiguration keep_configuration_from_string(const char *s) _pure_;
 
 const char* ipv6_link_local_address_gen_mode_to_string(IPv6LinkLocalAddressGenMode s) _const_;
 IPv6LinkLocalAddressGenMode ipv6_link_local_address_gen_mode_from_string(const char *s) _pure_;
+
+const char* activation_policy_to_string(ActivationPolicy i) _const_;
+ActivationPolicy activation_policy_from_string(const char *s) _pure_;

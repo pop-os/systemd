@@ -150,6 +150,8 @@ static const char* const ethtool_link_mode_bit_table[] = {
         [ETHTOOL_LINK_MODE_400000baseLR4_ER4_FR4_Full_BIT] = "400000baselr4-er4-fr4-full",
         [ETHTOOL_LINK_MODE_400000baseDR4_Full_BIT]         = "400000basedr4-full",
         [ETHTOOL_LINK_MODE_400000baseCR4_Full_BIT]         = "400000basecr4-full",
+        [ETHTOOL_LINK_MODE_100baseFX_Half_BIT]             = "100basefx-half",
+        [ETHTOOL_LINK_MODE_100baseFX_Full_BIT]             = "100basefx-full",
 };
 /* Make sure the array is large enough to fit all bits */
 assert_cc((ELEMENTSOF(ethtool_link_mode_bit_table)-1) / 32 < N_ADVERTISE);
@@ -1090,7 +1092,7 @@ int config_parse_advertise(const char *unit,
                 /* We reuse the kernel provided enum which does not contain negative value. So, the cast
                  * below is mandatory. Otherwise, the check below always passes and access an invalid address. */
                 if ((int) mode < 0) {
-                        log_syntax(unit, LOG_WARNING, filename, line, 0,
+                        log_syntax(unit, LOG_WARNING, filename, line, mode,
                                    "Failed to parse advertise mode, ignoring: %s", w);
                         continue;
                 }

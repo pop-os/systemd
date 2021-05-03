@@ -140,10 +140,9 @@ static int help(void) {
                "  -h --help          Show this help and exit\n"
                "     --version       Print version string and exit\n"
                "  -n --dry-run       Just print what would be done\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -202,7 +201,7 @@ static int run(int argc, char *argv[]) {
         dev_t devno;
         int r;
 
-        log_setup_service();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

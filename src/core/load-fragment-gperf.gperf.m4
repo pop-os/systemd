@@ -1,3 +1,4 @@
+m4_dnl SPDX-License-Identifier: LGPL-2.1-or-later
 %{
 #if __GNUC__ >= 7
 _Pragma("GCC diagnostic ignored \"-Wimplicit-fallthrough\"")
@@ -27,6 +28,7 @@ $1.RootImageOptions,                     config_parse_root_image_options,       
 $1.RootHash,                             config_parse_exec_root_hash,                 0,                                  offsetof($1, exec_context)
 $1.RootHashSignature,                    config_parse_exec_root_hash_sig,             0,                                  offsetof($1, exec_context)
 $1.RootVerity,                           config_parse_unit_path_printf,               true,                               offsetof($1, exec_context.root_verity)
+$1.ExtensionImages,                      config_parse_extension_images,               0,                                  offsetof($1, exec_context)
 $1.MountImages,                          config_parse_mount_images,                   0,                                  offsetof($1, exec_context)
 $1.User,                                 config_parse_user_group_compat,              0,                                  offsetof($1, exec_context.user)
 $1.Group,                                config_parse_user_group_compat,              0,                                  offsetof($1, exec_context.group)
@@ -118,6 +120,8 @@ $1.InaccessibleDirectories,              config_parse_namespace_path_strv,      
 $1.ReadWritePaths,                       config_parse_namespace_path_strv,            0,                                  offsetof($1, exec_context.read_write_paths)
 $1.ReadOnlyPaths,                        config_parse_namespace_path_strv,            0,                                  offsetof($1, exec_context.read_only_paths)
 $1.InaccessiblePaths,                    config_parse_namespace_path_strv,            0,                                  offsetof($1, exec_context.inaccessible_paths)
+$1.ExecPaths,                            config_parse_namespace_path_strv,            0,                                  offsetof($1, exec_context.exec_paths)
+$1.NoExecPaths,                          config_parse_namespace_path_strv,            0,                                  offsetof($1, exec_context.no_exec_paths)
 $1.BindPaths,                            config_parse_bind_paths,                     0,                                  offsetof($1, exec_context)
 $1.BindReadOnlyPaths,                    config_parse_bind_paths,                     0,                                  offsetof($1, exec_context)
 $1.TemporaryFileSystem,                  config_parse_temporary_filesystems,          0,                                  offsetof($1, exec_context)
@@ -129,14 +133,16 @@ $1.ProtectKernelLogs,                    config_parse_bool,                     
 $1.ProtectClock,                         config_parse_bool,                           0,                                  offsetof($1, exec_context.protect_clock)
 $1.ProtectControlGroups,                 config_parse_bool,                           0,                                  offsetof($1, exec_context.protect_control_groups)
 $1.NetworkNamespacePath,                 config_parse_unit_path_printf,               0,                                  offsetof($1, exec_context.network_namespace_path)
+$1.IPCNamespacePath,                     config_parse_unit_path_printf,               0,                                  offsetof($1, exec_context.ipc_namespace_path)
 $1.LogNamespace,                         config_parse_log_namespace,                  0,                                  offsetof($1, exec_context)
 $1.PrivateNetwork,                       config_parse_bool,                           0,                                  offsetof($1, exec_context.private_network)
 $1.PrivateUsers,                         config_parse_bool,                           0,                                  offsetof($1, exec_context.private_users)
 $1.PrivateMounts,                        config_parse_bool,                           0,                                  offsetof($1, exec_context.private_mounts)
+$1.PrivateIPC,                           config_parse_bool,                           0,                                  offsetof($1, exec_context.private_ipc)
 $1.ProtectSystem,                        config_parse_protect_system,                 0,                                  offsetof($1, exec_context.protect_system)
 $1.ProtectHome,                          config_parse_protect_home,                   0,                                  offsetof($1, exec_context.protect_home)
 $1.MountFlags,                           config_parse_exec_mount_flags,               0,                                  offsetof($1, exec_context.mount_flags)
-$1.MountAPIVFS,                          config_parse_bool,                           0,                                  offsetof($1, exec_context.mount_apivfs)
+$1.MountAPIVFS,                          config_parse_exec_mount_apivfs,              0,                                  offsetof($1, exec_context)
 $1.Personality,                          config_parse_personality,                    0,                                  offsetof($1, exec_context.personality)
 $1.RuntimeDirectoryPreserve,             config_parse_runtime_preserve_mode,          0,                                  offsetof($1, exec_context.runtime_directory_preserve_mode)
 $1.RuntimeDirectoryMode,                 config_parse_mode,                           0,                                  offsetof($1, exec_context.directories[EXEC_DIRECTORY_RUNTIME].mode)
@@ -226,7 +232,8 @@ $1.IPIngressFilterPath,                  config_parse_ip_filter_bpf_progs,      
 $1.IPEgressFilterPath,                   config_parse_ip_filter_bpf_progs,            0,                                  offsetof($1, cgroup_context.ip_filters_egress)
 $1.ManagedOOMSwap,                       config_parse_managed_oom_mode,               0,                                  offsetof($1, cgroup_context.moom_swap)
 $1.ManagedOOMMemoryPressure,             config_parse_managed_oom_mode,               0,                                  offsetof($1, cgroup_context.moom_mem_pressure)
-$1.ManagedOOMMemoryPressureLimitPercent, config_parse_managed_oom_mem_pressure_limit, 0,                                  offsetof($1, cgroup_context.moom_mem_pressure_limit)
+$1.ManagedOOMMemoryPressureLimit,        config_parse_managed_oom_mem_pressure_limit, 0,                                  offsetof($1, cgroup_context.moom_mem_pressure_limit)
+$1.ManagedOOMPreference,                 config_parse_managed_oom_preference,         0,                                  offsetof($1, cgroup_context.moom_preference)
 $1.NetClass,                             config_parse_warn_compat,                    DISABLED_LEGACY,                    0'
 )m4_dnl
 Unit.Description,                        config_parse_unit_string_printf,             0,                                  offsetof(Unit, description)

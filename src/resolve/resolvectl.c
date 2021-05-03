@@ -19,16 +19,20 @@
 #include "format-table.h"
 #include "format-util.h"
 #include "gcrypt-util.h"
+#include "hostname-util.h"
 #include "main-func.h"
 #include "missing_network.h"
 #include "netlink-util.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "pretty-print.h"
+#include "process-util.h"
 #include "resolvconf-compat.h"
 #include "resolvectl.h"
 #include "resolved-def.h"
 #include "resolved-dns-packet.h"
+#include "resolved-util.h"
 #include "socket-netlink.h"
 #include "sort-util.h"
 #include "stdio-util.h"
@@ -155,9 +159,22 @@ static void print_source(uint64_t flags, usec_t rtt) {
         assert_se(format_timespan(rtt_str, sizeof(rtt_str), rtt, 100));
 
         printf(" in %s.%s\n"
-               "%s-- Data is authenticated: %s%s\n",
+               "%s-- Data is authenticated: %s; Data was acquired via local or encrypted transport: %s%s\n",
                rtt_str, ansi_normal(),
-               ansi_grey(), yes_no(flags & SD_RESOLVED_AUTHENTICATED), ansi_normal());
+               ansi_grey(),
+               yes_no(flags & SD_RESOLVED_AUTHENTICATED),
+               yes_no(flags & SD_RESOLVED_CONFIDENTIAL),
+               ansi_normal());
+
+        if ((flags & (SD_RESOLVED_FROM_MASK|SD_RESOLVED_SYNTHETIC)) != 0)
+                printf("%s-- Data from:%s%s%s%s%s%s\n",
+                       ansi_grey(),
+                       FLAGS_SET(flags, SD_RESOLVED_SYNTHETIC) ? " synthetic" : "",
+                       FLAGS_SET(flags, SD_RESOLVED_FROM_CACHE) ? " cache" : "",
+                       FLAGS_SET(flags, SD_RESOLVED_FROM_ZONE) ? " zone" : "",
+                       FLAGS_SET(flags, SD_RESOLVED_FROM_TRUST_ANCHOR) ? " trust-anchor" : "",
+                       FLAGS_SET(flags, SD_RESOLVED_FROM_NETWORK) ? " network" : "",
+                       ansi_normal());
 }
 
 static void print_ifindex_comment(int printed_so_far, int ifindex) {
@@ -407,18 +424,69 @@ static int output_rr_packet(const void *d, size_t l, int ifindex) {
         return 0;
 }
 
+static int idna_candidate(const char *name, char **ret) {
+        _cleanup_free_ char *idnafied = NULL;
+        int r;
+
+        assert(name);
+        assert(ret);
+
+        r = dns_name_apply_idna(name, &idnafied);
+        if (r < 0)
+                return log_error_errno(r, "Failed to apply IDNA to name '%s': %m", name);
+        if (r > 0 && !streq(name, idnafied)) {
+                *ret = TAKE_PTR(idnafied);
+                return true;
+        }
+
+        *ret = NULL;
+        return false;
+}
+
+static bool single_label_nonsynthetic(const char *name) {
+        _cleanup_free_ char *first_label = NULL;
+        int r;
+
+        if (!dns_name_is_single_label(name))
+                return false;
+
+        if (is_localhost(name) || is_gateway_hostname(name))
+                return false;
+
+        r = resolve_system_hostname(NULL, &first_label);
+        if (r < 0) {
+                log_warning_errno(r, "Failed to determine the hostname: %m");
+                return false;
+        }
+
+        return !streq(name, first_label);
+}
+
 static int resolve_record(sd_bus *bus, const char *name, uint16_t class, uint16_t type, bool warn_missing) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *req = NULL, *reply = NULL;
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+        _cleanup_free_ char *idnafied = NULL;
+        bool needs_authentication = false;
         unsigned n = 0;
         uint64_t flags;
-        int r;
         usec_t ts;
-        bool needs_authentication = false;
+        int r;
 
         assert(name);
 
         log_debug("Resolving %s %s %s (interface %s).", name, dns_class_to_string(class), dns_type_to_string(type), isempty(arg_ifname) ? "*" : arg_ifname);
+
+        if (dns_name_dot_suffixed(name) == 0 && single_label_nonsynthetic(name))
+                log_notice("(Note that search domains are not appended when --type= is specified. "
+                           "Please specify fully qualified domain names, or remove --type= switch from invocation in order to request regular hostname resolution.)");
+
+        r = idna_candidate(name, &idnafied);
+        if (r < 0)
+                return r;
+        if (r > 0)
+                log_notice("(Note that IDNA translation is not applied when --type= is specified. "
+                           "Please specify translated domain names — i.e. '%s' — when resolving raw records, or remove --type= switch from invocation in order to request regular hostname resolution.",
+                           idnafied);
 
         r = bus_message_new_method_call(bus, &req, bus_resolve_mgr, "ResolveRecord");
         if (r < 0)
@@ -566,8 +634,7 @@ static int resolve_rfc4501(sd_bus *bus, const char *name) {
 
                                 r = dns_class_from_string(t);
                                 if (r < 0)
-                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                               "Unknown DNS class %s.", t);
+                                        return log_error_errno(r, "Unknown DNS class %s.", t);
 
                                 class = r;
 
@@ -595,8 +662,7 @@ static int resolve_rfc4501(sd_bus *bus, const char *name) {
 
                                 r = dns_type_from_string(t);
                                 if (r < 0)
-                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                               "Unknown DNS type %s.", t);
+                                        return log_error_errno(r, "Unknown DNS type %s: %m", t);
 
                                 type = r;
 
@@ -2568,12 +2634,11 @@ static int compat_help(void) {
                "     --set-dnssec=MODE      Set per-interface DNSSEC mode\n"
                "     --set-nta=DOMAIN       Set per-interface DNSSEC NTA\n"
                "     --revert               Revert per-interface configuration\n"
-               "\nSee the %4$s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight()
-               , ansi_normal()
-               , link
-        );
+               "\nSee the %4$s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -2623,18 +2688,23 @@ static int native_help(void) {
                "     --service-address=BOOL    Resolve address for services (default: yes)\n"
                "     --service-txt=BOOL        Resolve TXT records for services (default: yes)\n"
                "     --cname=BOOL              Follow CNAME redirects (default: yes)\n"
-               "     --search=BOOL             Use search domains for single-label names\n"
-               "                                                              (default: yes)\n"
+               "     --validate=BOOL           Allow DNSSEC validation (default: yes)\n"
+               "     --synthesize=BOOL         Allow synthetic response (default: yes)\n"
+               "     --cache=BOOL              Allow response from cache (default: yes)\n"
+               "     --zone=BOOL               Allow response from locally registered mDNS/LLMNR\n"
+               "                               records (default: yes)\n"
+               "     --trust-anchor=BOOL       Allow response from local trust anchor (default: yes)\n"
+               "     --network=BOOL            Allow response from network (default: yes)\n"
+               "     --search=BOOL             Use search domains for single-label names (default: yes)\n"
                "     --raw[=payload|packet]    Dump the answer as binary data\n"
                "     --legend=BOOL             Print headers and additional info (default: yes)\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight()
-               , ansi_normal()
-               , ansi_highlight()
-               , ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -2739,10 +2809,9 @@ static int compat_parse_argv(int argc, char *argv[]) {
                         }
 
                         r = dns_type_from_string(optarg);
-                        if (r < 0) {
-                                log_error("Failed to parse RR record type %s", optarg);
-                                return r;
-                        }
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse RR record type %s: %m", optarg);
+
                         arg_type = (uint16_t) r;
                         assert((int) arg_type == r);
 
@@ -2756,21 +2825,18 @@ static int compat_parse_argv(int argc, char *argv[]) {
                         }
 
                         r = dns_class_from_string(optarg);
-                        if (r < 0) {
-                                log_error("Failed to parse RR record class %s", optarg);
-                                return r;
-                        }
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse RR record class %s: %m", optarg);
+
                         arg_class = (uint16_t) r;
                         assert((int) arg_class == r);
 
                         break;
 
                 case ARG_LEGEND:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--legend=", optarg, &arg_legend);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --legend= argument");
-
-                        arg_legend = r;
+                                return r;
                         break;
 
                 case 'p':
@@ -2832,30 +2898,30 @@ static int compat_parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_CNAME:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--cname=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --cname= argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_CNAME, r == 0);
                         break;
 
                 case ARG_SERVICE_ADDRESS:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--service-address=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --service-address= argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_ADDRESS, r == 0);
                         break;
 
                 case ARG_SERVICE_TXT:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--service-txt=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --service-txt= argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_TXT, r == 0);
                         break;
 
                 case ARG_SEARCH:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--search=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --search argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_SEARCH, r == 0);
                         break;
 
@@ -2967,6 +3033,12 @@ static int native_parse_argv(int argc, char *argv[]) {
                 ARG_VERSION = 0x100,
                 ARG_LEGEND,
                 ARG_CNAME,
+                ARG_VALIDATE,
+                ARG_SYNTHESIZE,
+                ARG_CACHE,
+                ARG_ZONE,
+                ARG_TRUST_ANCHOR,
+                ARG_NETWORK,
                 ARG_SERVICE_ADDRESS,
                 ARG_SERVICE_TXT,
                 ARG_RAW,
@@ -2983,6 +3055,12 @@ static int native_parse_argv(int argc, char *argv[]) {
                 { "interface",             required_argument, NULL, 'i'                       },
                 { "protocol",              required_argument, NULL, 'p'                       },
                 { "cname",                 required_argument, NULL, ARG_CNAME                 },
+                { "validate",              required_argument, NULL, ARG_VALIDATE              },
+                { "synthesize",            required_argument, NULL, ARG_SYNTHESIZE            },
+                { "cache",                 required_argument, NULL, ARG_CACHE                 },
+                { "zone",                  required_argument, NULL, ARG_ZONE                  },
+                { "trust-anchor",          required_argument, NULL, ARG_TRUST_ANCHOR          },
+                { "network",               required_argument, NULL, ARG_NETWORK               },
                 { "service-address",       required_argument, NULL, ARG_SERVICE_ADDRESS       },
                 { "service-txt",           required_argument, NULL, ARG_SERVICE_TXT           },
                 { "raw",                   optional_argument, NULL, ARG_RAW                   },
@@ -3026,10 +3104,9 @@ static int native_parse_argv(int argc, char *argv[]) {
                         }
 
                         r = dns_type_from_string(optarg);
-                        if (r < 0) {
-                                log_error("Failed to parse RR record type %s", optarg);
-                                return r;
-                        }
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse RR record type %s: %m", optarg);
+
                         arg_type = (uint16_t) r;
                         assert((int) arg_type == r);
 
@@ -3042,21 +3119,18 @@ static int native_parse_argv(int argc, char *argv[]) {
                         }
 
                         r = dns_class_from_string(optarg);
-                        if (r < 0) {
-                                log_error("Failed to parse RR record class %s", optarg);
-                                return r;
-                        }
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse RR record class %s: %m", optarg);
+
                         arg_class = (uint16_t) r;
                         assert((int) arg_class == r);
 
                         break;
 
                 case ARG_LEGEND:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--legend=", optarg, &arg_legend);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --legend= argument");
-
-                        arg_legend = r;
+                                return r;
                         break;
 
                 case 'p':
@@ -3102,30 +3176,72 @@ static int native_parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_CNAME:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--cname=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --cname= argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_CNAME, r == 0);
                         break;
 
-                case ARG_SERVICE_ADDRESS:
-                        r = parse_boolean(optarg);
+                case ARG_VALIDATE:
+                        r = parse_boolean_argument("--validate=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --service-address= argument.");
+                                return r;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_VALIDATE, r == 0);
+                        break;
+
+                case ARG_SYNTHESIZE:
+                        r = parse_boolean_argument("--synthesize=", optarg, NULL);
+                        if (r < 0)
+                                return r;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_SYNTHESIZE, r == 0);
+                        break;
+
+                case ARG_CACHE:
+                        r = parse_boolean_argument("--cache=", optarg, NULL);
+                        if (r < 0)
+                                return r;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_CACHE, r == 0);
+                        break;
+
+                case ARG_ZONE:
+                        r = parse_boolean_argument("--zone=", optarg, NULL);
+                        if (r < 0)
+                                return r;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_ZONE, r == 0);
+                        break;
+
+                case ARG_TRUST_ANCHOR:
+                        r = parse_boolean_argument("--trust-anchor=", optarg, NULL);
+                        if (r < 0)
+                                return r;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_TRUST_ANCHOR, r == 0);
+                        break;
+
+                case ARG_NETWORK:
+                        r = parse_boolean_argument("--network=", optarg, NULL);
+                        if (r < 0)
+                                return r;
+                        SET_FLAG(arg_flags, SD_RESOLVED_NO_NETWORK, r == 0);
+                        break;
+
+                case ARG_SERVICE_ADDRESS:
+                        r = parse_boolean_argument("--service-address=", optarg, NULL);
+                        if (r < 0)
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_ADDRESS, r == 0);
                         break;
 
                 case ARG_SERVICE_TXT:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--service-txt=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --service-txt= argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_TXT, r == 0);
                         break;
 
                 case ARG_SEARCH:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--search=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --search argument.");
+                                return r;
                         SET_FLAG(arg_flags, SD_RESOLVED_NO_SEARCH, r == 0);
                         break;
 
@@ -3298,11 +3414,11 @@ static int run(int argc, char **argv) {
         int r;
 
         setlocale(LC_ALL, "");
-        log_setup_cli();
+        log_setup();
 
-        if (streq(program_invocation_short_name, "resolvconf"))
+        if (invoked_as(argv, "resolvconf"))
                 r = resolvconf_parse_argv(argc, argv);
-        else if (streq(program_invocation_short_name, "systemd-resolve"))
+        else if (invoked_as(argv, "systemd-resolve"))
                 r = compat_parse_argv(argc, argv);
         else
                 r = native_parse_argv(argc, argv);

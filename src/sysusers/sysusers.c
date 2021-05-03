@@ -17,6 +17,7 @@
 #include "mount-util.h"
 #include "nscd-flush.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "path-util.h"
 #include "pretty-print.h"
 #include "selinux-util.h"
@@ -255,7 +256,7 @@ static int make_backup(const char *target, const char *x) {
         if (r < 0)
                 return r;
 
-        r = copy_bytes(src, fileno(dst), (uint64_t) -1, COPY_REFLINK);
+        r = copy_bytes(src, fileno(dst), UINT64_MAX, COPY_REFLINK);
         if (r < 0)
                 return r;
 
@@ -392,7 +393,7 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char 
         original = fopen(passwd_path, "re");
         if (original) {
 
-                r = sync_rights(fileno(original), fileno(passwd));
+                r = copy_rights(fileno(original), fileno(passwd));
                 if (r < 0)
                         return r;
 
@@ -493,7 +494,7 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char 
         original = fopen(shadow_path, "re");
         if (original) {
 
-                r = sync_rights(fileno(original), fileno(shadow));
+                r = copy_rights(fileno(original), fileno(shadow));
                 if (r < 0)
                         return r;
 
@@ -538,7 +539,7 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char 
                         .sp_warn = -1,
                         .sp_inact = -1,
                         .sp_expire = -1,
-                        .sp_flag = (unsigned long) -1, /* this appears to be what everybody does ... */
+                        .sp_flag = ULONG_MAX, /* this appears to be what everybody does ... */
                 };
 
                 r = putspent_sane(&n, shadow);
@@ -589,7 +590,7 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
         original = fopen(group_path, "re");
         if (original) {
 
-                r = sync_rights(fileno(original), fileno(group));
+                r = copy_rights(fileno(original), fileno(group));
                 if (r < 0)
                         return r;
 
@@ -687,7 +688,7 @@ static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, ch
         if (original) {
                 struct sgrp *sg;
 
-                r = sync_rights(fileno(original), fileno(gshadow));
+                r = copy_rights(fileno(original), fileno(gshadow));
                 if (r < 0)
                         return r;
 
@@ -1050,13 +1051,15 @@ static int add_user(Item *i) {
                 i->uid = search_uid;
         }
 
-        r = ordered_hashmap_ensure_allocated(&todo_uids, NULL);
-        if (r < 0)
+        r = ordered_hashmap_ensure_put(&todo_uids, NULL, UID_TO_PTR(i->uid), i);
+        if (r == -EEXIST)
+                return log_error_errno(r, "Requested user %s with uid " UID_FMT " and gid" GID_FMT " to be created is duplicated "
+                                       "or conflicts with another user.", i->name, i->uid, i->gid);
+        if (r == -ENOMEM)
                 return log_oom();
-
-        r = ordered_hashmap_put(todo_uids, UID_TO_PTR(i->uid), i);
         if (r < 0)
-                return log_oom();
+                return log_error_errno(r, "Failed to store user %s with uid " UID_FMT " and gid " GID_FMT " to be created: %m",
+                                       i->name, i->uid, i->gid);
 
         i->todo_user = true;
         log_info("Creating user %s (%s) with uid " UID_FMT " and gid " GID_FMT ".", i->name, strna(i->description), i->uid, i->gid);
@@ -1219,13 +1222,13 @@ static int add_group(Item *i) {
                 i->gid = search_uid;
         }
 
-        r = ordered_hashmap_ensure_allocated(&todo_gids, NULL);
-        if (r < 0)
+        r = ordered_hashmap_ensure_put(&todo_gids, NULL, GID_TO_PTR(i->gid), i);
+        if (r == -EEXIST)
+                return log_error_errno(r, "Requested group %s with gid "GID_FMT " to be created is duplicated or conflicts with another user.", i->name, i->gid);
+        if (r == -ENOMEM)
                 return log_oom();
-
-        r = ordered_hashmap_put(todo_gids, GID_TO_PTR(i->gid), i);
         if (r < 0)
-                return log_oom();
+                return log_error_errno(r, "Failed to store group %s with gid " GID_FMT " to be created: %m", i->name, i->gid);
 
         i->todo_group = true;
         log_info("Creating group %s with gid " GID_FMT ".", i->name, i->gid);
@@ -1305,10 +1308,6 @@ static int add_implicit(void) {
                         if (!ordered_hashmap_get(users, *m)) {
                                 _cleanup_(item_freep) Item *j = NULL;
 
-                                r = ordered_hashmap_ensure_allocated(&users, &item_hash_ops);
-                                if (r < 0)
-                                        return log_oom();
-
                                 j = new0(Item, 1);
                                 if (!j)
                                         return log_oom();
@@ -1318,21 +1317,19 @@ static int add_implicit(void) {
                                 if (!j->name)
                                         return log_oom();
 
-                                r = ordered_hashmap_put(users, j->name, j);
-                                if (r < 0)
+                                r = ordered_hashmap_ensure_put(&users, &item_hash_ops, j->name, j);
+                                if (r == -ENOMEM)
                                         return log_oom();
+                                if (r < 0)
+                                        return log_error_errno(r, "Failed to add implicit user '%s': %m", j->name);
 
                                 log_debug("Adding implicit user '%s' due to m line", j->name);
-                                j = NULL;
+                                TAKE_PTR(j);
                         }
 
                 if (!(ordered_hashmap_get(users, g) ||
                       ordered_hashmap_get(groups, g))) {
                         _cleanup_(item_freep) Item *j = NULL;
-
-                        r = ordered_hashmap_ensure_allocated(&groups, &item_hash_ops);
-                        if (r < 0)
-                                return log_oom();
 
                         j = new0(Item, 1);
                         if (!j)
@@ -1343,12 +1340,14 @@ static int add_implicit(void) {
                         if (!j->name)
                                 return log_oom();
 
-                        r = ordered_hashmap_put(groups, j->name, j);
-                        if (r < 0)
+                        r = ordered_hashmap_ensure_put(&groups, &item_hash_ops, j->name, j);
+                        if (r == -ENOMEM)
                                 return log_oom();
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to add implicit group '%s': %m", j->name);
 
                         log_debug("Adding implicit group '%s' due to m line", j->name);
-                        j = NULL;
+                        TAKE_PTR(j);
                 }
         }
 
@@ -1764,10 +1763,9 @@ static int help(void) {
                "     --replace=PATH         Treat arguments as replacement for PATH\n"
                "     --inline               Treat arguments as configuration lines\n"
                "     --no-pager             Do not pipe output into a pager\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -1816,7 +1814,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_ROOT:
-                        r = parse_path_argument_and_warn(optarg, /* suppress_root= */ false, &arg_root);
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_root);
                         if (r < 0)
                                 return r;
                         break;
@@ -1826,7 +1824,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
                                                "This systemd-sysusers version is compiled without support for --image=.");
 #else
-                        r = parse_path_argument_and_warn(optarg, /* suppress_root= */ false, &arg_image);
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_image);
                         if (r < 0)
                                 return r;
                         break;
@@ -1931,7 +1929,7 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        log_setup_service();
+        log_setup();
 
         if (arg_cat_config)
                 return cat_config();

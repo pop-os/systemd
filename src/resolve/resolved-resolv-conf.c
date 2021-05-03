@@ -252,7 +252,11 @@ static void write_resolv_conf_search(
 
 static int write_uplink_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *domains) {
 
-        fputs("# This file is managed by man:systemd-resolved(8). Do not edit.\n"
+        fputs("# This is "PRIVATE_UPLINK_RESOLV_CONF" managed by man:systemd-resolved(8).\n"
+              "# Do not edit.\n"
+              "#\n"
+              "# This file might be symlinked as /etc/resolv.conf. If you're looking at\n"
+              "# /etc/resolv.conf and seeing this text, you have followed the symlink.\n"
               "#\n"
               "# This is a dynamic resolv.conf file for connecting local clients directly to\n"
               "# all known uplink DNS servers. This file lists all configured search domains.\n"
@@ -285,7 +289,11 @@ static int write_uplink_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSe
 }
 
 static int write_stub_resolv_conf_contents(FILE *f, OrderedSet *dns, OrderedSet *domains) {
-        fputs("# This file is managed by man:systemd-resolved(8). Do not edit.\n"
+        fputs("# This is "PRIVATE_STUB_RESOLV_CONF" managed by man:systemd-resolved(8).\n"
+              "# Do not edit.\n"
+              "#\n"
+              "# This file might be symlinked as /etc/resolv.conf. If you're looking at\n"
+              "# /etc/resolv.conf and seeing this text, you have followed the symlink.\n"
               "#\n"
               "# This is a dynamic resolv.conf file for connecting local clients to the\n"
               "# internal DNS stub resolver of systemd-resolved. This file lists all\n"
@@ -360,8 +368,9 @@ int manager_write_resolv_conf(Manager *m) {
                         goto fail;
                 }
 
-                if (rename(temp_path_stub, PRIVATE_STUB_RESOLV_CONF) < 0)
-                        r = log_error_errno(errno, "Failed to move new %s into place: %m", PRIVATE_STUB_RESOLV_CONF);
+                r = conservative_rename(temp_path_stub, PRIVATE_STUB_RESOLV_CONF);
+                if (r < 0)
+                        log_error_errno(r, "Failed to move new %s into place: %m", PRIVATE_STUB_RESOLV_CONF);
 
         } else {
                 r = symlink_atomic_label(basename(PRIVATE_UPLINK_RESOLV_CONF), PRIVATE_STUB_RESOLV_CONF);
@@ -369,8 +378,9 @@ int manager_write_resolv_conf(Manager *m) {
                         log_error_errno(r, "Failed to symlink %s: %m", PRIVATE_STUB_RESOLV_CONF);
         }
 
-        if (rename(temp_path_uplink, PRIVATE_UPLINK_RESOLV_CONF) < 0)
-                r = log_error_errno(errno, "Failed to move new %s into place: %m", PRIVATE_UPLINK_RESOLV_CONF);
+        r = conservative_rename(temp_path_uplink, PRIVATE_UPLINK_RESOLV_CONF);
+        if (r < 0)
+                log_error_errno(r, "Failed to move new %s into place: %m", PRIVATE_UPLINK_RESOLV_CONF);
 
  fail:
         if (r < 0) {

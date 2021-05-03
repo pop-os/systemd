@@ -8,6 +8,7 @@
 #include "escape.h"
 #include "alloc-util.h"
 #include "dhcp-client-internal.h"
+#include "hostname-setup.h"
 #include "hostname-util.h"
 #include "parse-util.h"
 #include "network-internal.h"
@@ -16,8 +17,9 @@
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-network.h"
+#include "networkd-state-file.h"
 #include "string-table.h"
-#include "string-util.h"
+#include "strv.h"
 #include "sysctl-util.h"
 #include "web-util.h"
 
@@ -34,8 +36,6 @@ static int dhcp4_release_old_lease(Link *link) {
                 return 0;
 
         log_link_debug(link, "Removing old DHCPv4 address and routes.");
-
-        link_dirty(link);
 
         SET_FOREACH(route, link->dhcp_routes_old) {
                 k = route_remove(route, NULL, link, NULL);
@@ -69,6 +69,10 @@ static void dhcp4_check_ready(Link *link) {
                 link_enter_failed(link);
                 return;
         }
+
+        r = sd_ipv4ll_stop(link->ipv4ll);
+        if (r < 0)
+                log_link_warning_errno(link, r, "Failed to drop IPv4 link-local address, ignoring: %m");
 
         link_check_ready(link);
 }
@@ -119,7 +123,7 @@ static int route_scope_from_address(const Route *route, const struct in_addr *se
         assert(self_addr);
 
         if (in4_addr_is_localhost(&route->dst.in) ||
-            (!in4_addr_is_null(self_addr) && in4_addr_equal(&route->dst.in, self_addr)))
+            (in4_addr_is_set(self_addr) && in4_addr_equal(&route->dst.in, self_addr)))
                 return RT_SCOPE_HOST;
         else if (in4_addr_is_null(&route->gw.in))
                 return RT_SCOPE_LINK;
@@ -158,7 +162,7 @@ static int dhcp_route_configure(Route *route, Link *link) {
 static int link_set_dns_routes(Link *link, const struct in_addr *address) {
         const struct in_addr *dns;
         uint32_t table;
-        int i, n, r;
+        int n, r;
 
         assert(link);
         assert(link->dhcp_lease);
@@ -176,7 +180,7 @@ static int link_set_dns_routes(Link *link, const struct in_addr *address) {
 
         table = link_get_dhcp_route_table(link);
 
-        for (i = 0; i < n; i ++) {
+        for (int i = 0; i < n; i ++) {
                 _cleanup_(route_freep) Route *route = NULL;
 
                 r = route_new(&route);
@@ -832,7 +836,7 @@ static int dhcp4_update_address(Link *link, bool announce) {
                 if (r < 0 && r != -ENODATA)
                         return log_link_error_errno(link, r, "DHCP error: Could not get gateway: %m");
 
-                if (r > 0 && !in4_addr_is_null(&router[0]))
+                if (r > 0 && in4_addr_is_set(&router[0]))
                         log_struct(LOG_INFO,
                                    LOG_LINK_INTERFACE(link),
                                    LOG_LINK_MESSAGE(link, "DHCPv4 address "IPV4_ADDRESS_FMT_STR"/%u via "IPV4_ADDRESS_FMT_STR,
@@ -867,7 +871,7 @@ static int dhcp4_update_address(Link *link, bool announce) {
 
         /* allow reusing an existing address and simply update its lifetime
          * in case it already exists */
-        r = address_configure(addr, link, dhcp4_address_handler, true, &ret);
+        r = address_configure(addr, link, dhcp4_address_handler, &ret);
         if (r < 0)
                 return log_link_error_errno(link, r, "Failed to set DHCPv4 address: %m");
 
@@ -1049,10 +1053,7 @@ static int dhcp4_handler(sd_dhcp_client *client, int event, void *userdata) {
 
         switch (event) {
                 case SD_DHCP_CLIENT_EVENT_STOP:
-
-                        if (link_ipv4ll_enabled(link, ADDRESS_FAMILY_FALLBACK_IPV4)) {
-                                assert(link->ipv4ll);
-
+                        if (link->ipv4ll) {
                                 log_link_debug(link, "DHCP client is stopped. Acquiring IPv4 link-local address");
 
                                 r = sd_ipv4ll_start(link->ipv4ll);
@@ -1137,6 +1138,17 @@ static int dhcp4_handler(sd_dhcp_client *client, int event, void *userdata) {
                                         return -ENOMSG;
                         }
                         break;
+
+                case SD_DHCP_CLIENT_EVENT_TRANSIENT_FAILURE:
+                        if (link->ipv4ll && !sd_ipv4ll_is_running(link->ipv4ll)) {
+                                log_link_debug(link, "Problems acquiring DHCP lease, acquiring IPv4 link-local address");
+
+                                r = sd_ipv4ll_start(link->ipv4ll);
+                                if (r < 0)
+                                        return log_link_warning_errno(link, r, "Could not acquire IPv4 link-local address: %m");
+                        }
+                        break;
+
                 default:
                         if (event < 0)
                                 log_link_warning_errno(link, event, "DHCP error: Client failed: %m");
@@ -1162,7 +1174,7 @@ static int dhcp4_set_hostname(Link *link) {
         else {
                 r = gethostname_strict(&hostname);
                 if (r < 0 && r != -ENXIO) /* ENXIO: no hostname set or hostname is "localhost" */
-                        return r;
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to get hostname: %m");
 
                 hn = hostname;
         }
@@ -1170,60 +1182,9 @@ static int dhcp4_set_hostname(Link *link) {
         r = sd_dhcp_client_set_hostname(link->dhcp_client, hn);
         if (r == -EINVAL && hostname)
                 /* Ignore error when the machine's hostname is not suitable to send in DHCP packet. */
-                log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set hostname from kernel hostname, ignoring: %m");
+                log_link_debug_errno(link, r, "DHCP4 CLIENT: Failed to set hostname from kernel hostname, ignoring: %m");
         else if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set hostname: %m");
-
-        return 0;
-}
-
-static bool promote_secondaries_enabled(const char *ifname) {
-        _cleanup_free_ char *promote_secondaries_sysctl = NULL;
-        char *promote_secondaries_path;
-        int r;
-
-        promote_secondaries_path = strjoina("net/ipv4/conf/", ifname, "/promote_secondaries");
-        r = sysctl_read(promote_secondaries_path, &promote_secondaries_sysctl);
-        if (r < 0) {
-                log_debug_errno(r, "Cannot read sysctl %s", promote_secondaries_path);
-                return false;
-        }
-
-        truncate_nl(promote_secondaries_sysctl);
-        r = parse_boolean(promote_secondaries_sysctl);
-        if (r < 0)
-                log_warning_errno(r, "Cannot parse sysctl %s with content %s as boolean", promote_secondaries_path, promote_secondaries_sysctl);
-        return r > 0;
-}
-
-/* dhcp4_set_promote_secondaries will ensure this interface has
- * the "promote_secondaries" option in the kernel set. If this sysctl
- * is not set DHCP will work only as long as the IP address does not
- * changes between leases. The kernel will remove all secondary IP
- * addresses of an interface otherwise. The way systemd-network works
- * is that the new IP of a lease is added as a secondary IP and when
- * the primary one expires it relies on the kernel to promote the
- * secondary IP. See also https://github.com/systemd/systemd/issues/7163
- */
-static int dhcp4_set_promote_secondaries(Link *link) {
-        int r;
-
-        assert(link);
-
-        /* check if the kernel has promote_secondaries enabled for our
-         * interface. If it is not globally enabled or enabled for the
-         * specific interface we must either enable it.
-         */
-        if (!(promote_secondaries_enabled("all") || promote_secondaries_enabled(link->ifname))) {
-                char *promote_secondaries_path = NULL;
-
-                log_link_debug(link, "promote_secondaries is unset, setting it");
-                promote_secondaries_path = strjoina("net/ipv4/conf/", link->ifname, "/promote_secondaries");
-                r = sysctl_write(promote_secondaries_path, "1");
-                if (r < 0)
-                        log_link_warning_errno(link, r, "cannot set sysctl %s to 1", promote_secondaries_path);
-                return r > 0;
-        }
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set hostname: %m");
 
         return 0;
 }
@@ -1253,7 +1214,7 @@ static int dhcp4_set_client_identifier(Link *link) {
                                                          duid->raw_data_len > 0 ? duid->raw_data : NULL,
                                                          duid->raw_data_len);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set IAID+DUID: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set IAID+DUID: %m");
                 break;
         }
         case DHCP_CLIENT_ID_DUID_ONLY: {
@@ -1269,7 +1230,7 @@ static int dhcp4_set_client_identifier(Link *link) {
                                                     duid->raw_data_len > 0 ? duid->raw_data : NULL,
                                                     duid->raw_data_len);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set DUID: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set DUID: %m");
                 break;
         }
         case DHCP_CLIENT_ID_MAC: {
@@ -1287,7 +1248,7 @@ static int dhcp4_set_client_identifier(Link *link) {
                                                  hw_addr,
                                                  hw_addr_len);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set client ID: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set client ID: %m");
                 break;
         }
         default:
@@ -1297,23 +1258,29 @@ static int dhcp4_set_client_identifier(Link *link) {
         return 0;
 }
 
-static int dhcp4_init(Link *link) {
-        int r;
+static int dhcp4_set_request_address(Link *link) {
+        Address *a;
 
         assert(link);
+        assert(link->network);
+        assert(link->dhcp_client);
 
-        if (link->dhcp_client)
+        if (!FLAGS_SET(link->network->keep_configuration, KEEP_CONFIGURATION_DHCP))
                 return 0;
 
-        r = sd_dhcp_client_new(&link->dhcp_client, link->network->dhcp_anonymize);
-        if (r < 0)
-                return r;
+        SET_FOREACH(a, link->addresses_foreign) {
+                if (a->family != AF_INET)
+                        continue;
+                if (link_address_is_dynamic(link, a))
+                        break;
+        }
 
-        r = sd_dhcp_client_attach_event(link->dhcp_client, link->manager->event, 0);
-        if (r < 0)
-                return r;
+        if (!a)
+                return 0;
 
-        return 0;
+        log_link_debug(link, "DHCP4 CLIENT: requesting " IPV4_ADDRESS_FMT_STR, IPV4_ADDRESS_FMT_VAL(a->in_addr.in));
+
+        return sd_dhcp_client_set_request_address(link->dhcp_client, &a->in_addr.in);
 }
 
 int dhcp4_configure(Link *link) {
@@ -1327,45 +1294,45 @@ int dhcp4_configure(Link *link) {
         if (!link_dhcp4_enabled(link))
                 return 0;
 
-        r = dhcp4_set_promote_secondaries(link);
-        if (r < 0)
-                return r;
+        if (!link->dhcp_client) {
+                r = sd_dhcp_client_new(&link->dhcp_client, link->network->dhcp_anonymize);
+                if (r < 0)
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to allocate DHCP4 client: %m");
 
-        r = dhcp4_init(link);
-        if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to initialize DHCP4 client: %m");
+                r = sd_dhcp_client_attach_event(link->dhcp_client, link->manager->event, 0);
+                if (r < 0)
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to attach event to DHCP4 client: %m");
+        }
 
         r = sd_dhcp_client_set_mac(link->dhcp_client,
                                    link->hw_addr.addr.bytes,
                                    link->bcast_addr.length > 0 ? link->bcast_addr.addr.bytes : NULL,
                                    link->hw_addr.length, link->iftype);
         if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set MAC address: %m");
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set MAC address: %m");
 
         r = sd_dhcp_client_set_ifindex(link->dhcp_client, link->ifindex);
         if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set ifindex: %m");
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set ifindex: %m");
 
         r = sd_dhcp_client_set_callback(link->dhcp_client, dhcp4_handler, link);
         if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set callback: %m");
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set callback: %m");
 
-        r = sd_dhcp_client_set_request_broadcast(link->dhcp_client,
-                                                 link->network->dhcp_broadcast);
+        r = sd_dhcp_client_set_request_broadcast(link->dhcp_client, link->network->dhcp_broadcast);
         if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for broadcast: %m");
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for broadcast: %m");
 
-        if (link->mtu) {
+        if (link->mtu > 0) {
                 r = sd_dhcp_client_set_mtu(link->dhcp_client, link->mtu);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set MTU: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set MTU: %m");
         }
 
         if (link->network->dhcp_use_mtu) {
-                r = sd_dhcp_client_set_request_option(link->dhcp_client,
-                                                      SD_DHCP_OPTION_INTERFACE_MTU);
+                r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_INTERFACE_MTU);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for MTU: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for MTU: %m");
         }
 
         /* NOTE: even if this variable is called "use", it also "sends" PRL
@@ -1374,39 +1341,37 @@ int dhcp4_configure(Link *link) {
         /* NOTE: when using Anonymize=yes, routes PRL options are sent
          * by default, so they don't need to be added here. */
         if (link->network->dhcp_use_routes && !link->network->dhcp_anonymize) {
-                r = sd_dhcp_client_set_request_option(link->dhcp_client,
-                                                      SD_DHCP_OPTION_STATIC_ROUTE);
+                r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_STATIC_ROUTE);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for static route: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for static route: %m");
 
-                r = sd_dhcp_client_set_request_option(link->dhcp_client,
-                                                      SD_DHCP_OPTION_CLASSLESS_STATIC_ROUTE);
+                r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_CLASSLESS_STATIC_ROUTE);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for classless static route: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for classless static route: %m");
         }
 
         if (link->network->dhcp_use_domains != DHCP_USE_DOMAINS_NO && !link->network->dhcp_anonymize) {
                 r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_DOMAIN_SEARCH_LIST);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for domain search list: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for domain search list: %m");
         }
 
         if (link->network->dhcp_use_ntp) {
                 r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_NTP_SERVER);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for NTP server: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for NTP server: %m");
         }
 
         if (link->network->dhcp_use_sip) {
                 r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_SIP_SERVER);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for SIP server: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for SIP server: %m");
         }
 
         if (link->network->dhcp_use_timezone) {
                 r = sd_dhcp_client_set_request_option(link->dhcp_client, SD_DHCP_OPTION_NEW_TZDB_TIMEZONE);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for timezone: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for timezone: %m");
         }
 
         SET_FOREACH(request_options, link->network->dhcp_request_options) {
@@ -1414,7 +1379,7 @@ int dhcp4_configure(Link *link) {
 
                 r = sd_dhcp_client_set_request_option(link->dhcp_client, option);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for '%u': %m", option);
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for '%u': %m", option);
         }
 
         ORDERED_HASHMAP_FOREACH(send_option, link->network->dhcp_client_send_options) {
@@ -1422,7 +1387,7 @@ int dhcp4_configure(Link *link) {
                 if (r == -EEXIST)
                         continue;
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set send option: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set send option: %m");
         }
 
         ORDERED_HASHMAP_FOREACH(send_option, link->network->dhcp_client_send_vendor_options) {
@@ -1430,7 +1395,7 @@ int dhcp4_configure(Link *link) {
                 if (r == -EEXIST)
                         continue;
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set send option: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set send option: %m");
         }
 
         r = dhcp4_set_hostname(link);
@@ -1441,49 +1406,52 @@ int dhcp4_configure(Link *link) {
                 r = sd_dhcp_client_set_vendor_class_identifier(link->dhcp_client,
                                                                link->network->dhcp_vendor_class_identifier);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set vendor class identifier: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set vendor class identifier: %m");
         }
 
        if (link->network->dhcp_mudurl) {
-                r = sd_dhcp_client_set_mud_url(link->dhcp_client,
-                                               link->network->dhcp_mudurl);
+                r = sd_dhcp_client_set_mud_url(link->dhcp_client, link->network->dhcp_mudurl);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set MUD URL: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set MUD URL: %m");
         }
 
         if (link->network->dhcp_user_class) {
                 r = sd_dhcp_client_set_user_class(link->dhcp_client, link->network->dhcp_user_class);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set user class: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set user class: %m");
         }
 
-        if (link->network->dhcp_client_port) {
+        if (link->network->dhcp_client_port > 0) {
                 r = sd_dhcp_client_set_client_port(link->dhcp_client, link->network->dhcp_client_port);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set listen port: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set listen port: %m");
         }
 
         if (link->network->dhcp_max_attempts > 0) {
                 r = sd_dhcp_client_set_max_attempts(link->dhcp_client, link->network->dhcp_max_attempts);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set max attempts: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set max attempts: %m");
         }
 
         if (link->network->dhcp_ip_service_type > 0) {
                 r = sd_dhcp_client_set_service_type(link->dhcp_client, link->network->dhcp_ip_service_type);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set IP service type: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set IP service type: %m");
         }
 
         if (link->network->dhcp_fallback_lease_lifetime > 0) {
                 r = sd_dhcp_client_set_fallback_lease_lifetime(link->dhcp_client, link->network->dhcp_fallback_lease_lifetime);
                 if (r < 0)
-                        return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed set to lease lifetime: %m");
+                        return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed set to lease lifetime: %m");
         }
+
+        r = dhcp4_set_request_address(link);
+        if (r < 0)
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to set initial DHCPv4 address: %m");
 
         r = dhcp4_configure_dad(link);
         if (r < 0)
-                return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to configure service type: %m");
+                return log_link_warning_errno(link, r, "DHCP4 CLIENT: Failed to configure service type: %m");
 
         return dhcp4_set_client_identifier(link);
 }
@@ -1509,30 +1477,6 @@ int dhcp4_update_mac(Link *link) {
         r = dhcp4_dad_update_mac(link);
         if (r < 0)
                 return r;
-
-        return 0;
-}
-
-int link_deserialize_dhcp4(Link *link, const char *dhcp4_address) {
-        union in_addr_union address;
-        int r;
-
-        assert(link);
-
-        if (isempty(dhcp4_address))
-                return 0;
-
-        r = in_addr_from_string(AF_INET, dhcp4_address, &address);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Failed to parse DHCPv4 address: %s", dhcp4_address);
-
-        r = dhcp4_init(link);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Failed to initialize DHCPv4 client: %m");
-
-        r = sd_dhcp_client_set_request_address(link->dhcp_client, &address.in);
-        if (r < 0)
-                return log_link_debug_errno(link, r, "Failed to set initial DHCPv4 address %s: %m", dhcp4_address);
 
         return 0;
 }
@@ -1563,7 +1507,7 @@ int config_parse_dhcp_max_attempts(
         }
 
         if (streq(rvalue, "infinity")) {
-                network->dhcp_max_attempts = (uint64_t) -1;
+                network->dhcp_max_attempts = UINT64_MAX;
                 return 0;
         }
 

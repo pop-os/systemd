@@ -147,15 +147,14 @@ typedef struct UnitCondition {
         LIST_FIELDS(struct UnitCondition, conditions);
 } UnitCondition;
 
-static void unit_condition_free(UnitCondition *c) {
+static UnitCondition* unit_condition_free(UnitCondition *c) {
         if (!c)
-                return;
+                return NULL;
 
         free(c->name);
         free(c->param);
-        free(c);
+        return mfree(c);
 }
-
 DEFINE_TRIVIAL_CLEANUP_FUNC(UnitCondition*, unit_condition_free);
 
 typedef struct UnitStatusInfo {
@@ -314,7 +313,9 @@ static void print_status_info(
 
         format_active_state(i->active_state, &active_on, &active_off);
 
-        printf("%s%s%s %s", active_on, special_glyph(SPECIAL_GLYPH_BLACK_CIRCLE), active_off, strna(i->id));
+        const SpecialGlyph glyph = unit_active_state_to_glyph(unit_active_state_from_string(i->active_state));
+
+        printf("%s%s%s %s", active_on, special_glyph(glyph), active_off, strna(i->id));
 
         if (i->description && !streq_ptr(i->id, i->description))
                 printf(" - %s", i->description);
@@ -433,7 +434,7 @@ static void print_status_info(
 
                 printf("%s %s%s%s %s\n",
                        t == i->triggered_by ? "TriggeredBy:" : "            ",
-                       on, special_glyph(SPECIAL_GLYPH_BLACK_CIRCLE), off,
+                       on, special_glyph(unit_active_state_to_glyph(state)), off,
                        *t);
         }
 
@@ -647,7 +648,7 @@ static void print_status_info(
         if (i->status_errno > 0)
                 printf("      Error: %i (%s)\n", i->status_errno, strerror_safe(i->status_errno));
 
-        if (i->ip_ingress_bytes != (uint64_t) -1 && i->ip_egress_bytes != (uint64_t) -1) {
+        if (i->ip_ingress_bytes != UINT64_MAX && i->ip_egress_bytes != UINT64_MAX) {
                 char buf_in[FORMAT_BYTES_MAX], buf_out[FORMAT_BYTES_MAX];
 
                 printf("         IP: %s in, %s out\n",
@@ -663,16 +664,16 @@ static void print_status_info(
                         format_bytes(buf_out, sizeof(buf_out), i->io_write_bytes));
         }
 
-        if (i->tasks_current != (uint64_t) -1) {
+        if (i->tasks_current != UINT64_MAX) {
                 printf("      Tasks: %" PRIu64, i->tasks_current);
 
-                if (i->tasks_max != (uint64_t) -1)
+                if (i->tasks_max != UINT64_MAX)
                         printf(" (limit: %" PRIu64 ")\n", i->tasks_max);
                 else
                         printf("\n");
         }
 
-        if (i->memory_current != (uint64_t) -1) {
+        if (i->memory_current != UINT64_MAX) {
                 char buf[FORMAT_BYTES_MAX];
 
                 printf("     Memory: %s", format_bytes(buf, sizeof(buf), i->memory_current));
@@ -713,7 +714,7 @@ static void print_status_info(
                 printf("\n");
         }
 
-        if (i->cpu_usage_nsec != (uint64_t) -1) {
+        if (i->cpu_usage_nsec != UINT64_MAX) {
                 char buf[FORMAT_TIMESPAN_MAX];
                 printf("        CPU: %s\n", format_timespan(buf, sizeof(buf), i->cpu_usage_nsec / NSEC_PER_USEC, USEC_PER_MSEC));
         }
@@ -1101,7 +1102,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
 
                 } else if (endswith(name, "ExitStatus") && streq(contents, "aiai")) {
                         const int32_t *status, *signal;
-                        size_t n_status, n_signal, i;
+                        size_t n_status, n_signal;
 
                         r = sd_bus_message_enter_container(m, 'r', "aiai");
                         if (r < 0)
@@ -1130,7 +1131,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                         fputc('=', stdout);
                                 }
 
-                                for (i = 0; i < n_status; i++) {
+                                for (size_t i = 0; i < n_status; i++) {
                                         if (first)
                                                 first = false;
                                         else
@@ -1139,7 +1140,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                         printf("%"PRIi32, status[i]);
                                 }
 
-                                for (i = 0; i < n_signal; i++) {
+                                for (size_t i = 0; i < n_signal; i++) {
                                         const char *str;
 
                                         str = signal_to_string((int) signal[i]);
@@ -1473,10 +1474,10 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 if (prefixlen > FAMILY_ADDRESS_SIZE(family) * 8)
                                         continue;
 
-                                if (in_addr_prefix_to_string(family, (union in_addr_union *) ap, prefixlen, &str) < 0)
+                                if (in_addr_prefix_to_string(family, (const union in_addr_union*) ap, prefixlen, &str) < 0)
                                         continue;
 
-                                if (!strextend_with_separator(&addresses, " ", str, NULL))
+                                if (!strextend_with_separator(&addresses, " ", str))
                                         return log_oom();
                         }
 
@@ -1513,7 +1514,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                              rbind == MS_REC ? ":rbind" : "") < 0)
                                         return log_oom();
 
-                                if (!strextend_with_separator(&paths, " ", str, NULL))
+                                if (!strextend_with_separator(&paths, " ", str))
                                         return log_oom();
                         }
                         if (r < 0)
@@ -1545,7 +1546,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 if (asprintf(&str, "%s%s%s", target, isempty(option) ? "" : ":", strempty(option)) < 0)
                                         return log_oom();
 
-                                if (!strextend_with_separator(&paths, " ", str, NULL))
+                                if (!strextend_with_separator(&paths, " ", str))
                                         return log_oom();
                         }
                         if (r < 0)
@@ -1593,7 +1594,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 if (!utf8_is_valid(str))
                                         continue;
 
-                                if (!strextend_with_separator(&fields, " ", str, NULL))
+                                if (!strextend_with_separator(&fields, " ", str))
                                         return log_oom();
                         }
                         if (r < 0)
@@ -1670,7 +1671,7 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                                 if (r < 0)
                                         return r;
 
-                                if (!strextend_with_separator(&paths, " ", str, NULL))
+                                if (!strextend_with_separator(&paths, " ", str))
                                         return log_oom();
 
                                 r = sd_bus_message_exit_container(m);
@@ -1706,7 +1707,7 @@ typedef enum SystemctlShowMode{
         SYSTEMCTL_SHOW_STATUS,
         SYSTEMCTL_SHOW_HELP,
         _SYSTEMCTL_SHOW_MODE_MAX,
-        _SYSTEMCTL_SHOW_MODE_INVALID = -1,
+        _SYSTEMCTL_SHOW_MODE_INVALID = -EINVAL,
 } SystemctlShowMode;
 
 static const char* const systemctl_show_mode_table[_SYSTEMCTL_SHOW_MODE_MAX] = {
@@ -1822,16 +1823,16 @@ static int show_one(
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
         _cleanup_set_free_ Set *found_properties = NULL;
         _cleanup_(unit_status_info_free) UnitStatusInfo info = {
-                .memory_current = (uint64_t) -1,
+                .memory_current = UINT64_MAX,
                 .memory_high = CGROUP_LIMIT_MAX,
                 .memory_max = CGROUP_LIMIT_MAX,
                 .memory_swap_max = CGROUP_LIMIT_MAX,
-                .memory_limit = (uint64_t) -1,
-                .cpu_usage_nsec = (uint64_t) -1,
-                .tasks_current = (uint64_t) -1,
-                .tasks_max = (uint64_t) -1,
-                .ip_ingress_bytes = (uint64_t) -1,
-                .ip_egress_bytes = (uint64_t) -1,
+                .memory_limit = UINT64_MAX,
+                .cpu_usage_nsec = UINT64_MAX,
+                .tasks_current = UINT64_MAX,
+                .tasks_max = UINT64_MAX,
+                .ip_ingress_bytes = UINT64_MAX,
+                .ip_egress_bytes = UINT64_MAX,
                 .io_read_bytes = UINT64_MAX,
                 .io_write_bytes = UINT64_MAX,
         };
@@ -1931,7 +1932,6 @@ static int show_all(
 
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ UnitInfo *unit_infos = NULL;
-        const UnitInfo *u;
         unsigned c;
         int r, ret = 0;
 
@@ -1945,7 +1945,7 @@ static int show_all(
 
         typesafe_qsort(unit_infos, c, unit_info_compare);
 
-        for (u = unit_infos; u < unit_infos + c; u++) {
+        for (const UnitInfo *u = unit_infos; u < unit_infos + c; u++) {
                 _cleanup_free_ char *p = NULL;
 
                 p = unit_dbus_path_from_name(u->id);
@@ -2038,8 +2038,7 @@ int show(int argc, char *argv[], void *userdata) {
 
         show_mode = systemctl_show_mode_from_string(argv[0]);
         if (show_mode < 0)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Invalid argument.");
+                return log_error_errno(show_mode, "Invalid argument.");
 
         if (show_mode == SYSTEMCTL_SHOW_HELP && argc <= 1)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),

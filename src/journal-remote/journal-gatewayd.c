@@ -22,6 +22,7 @@
 #include "log.h"
 #include "logs-show.h"
 #include "main-func.h"
+#include "memory-util.h"
 #include "microhttpd-util.h"
 #include "os-util.h"
 #include "parse-util.h"
@@ -37,7 +38,7 @@ static char *arg_cert_pem = NULL;
 static char *arg_trust_pem = NULL;
 static const char *arg_directory = NULL;
 
-STATIC_DESTRUCTOR_REGISTER(arg_key_pem, freep);
+STATIC_DESTRUCTOR_REGISTER(arg_key_pem, erase_and_freep);
 STATIC_DESTRUCTOR_REGISTER(arg_cert_pem, freep);
 STATIC_DESTRUCTOR_REGISTER(arg_trust_pem, freep);
 
@@ -500,7 +501,9 @@ static int request_handler_entries(
         if (!response)
                 return respond_oom(connection);
 
-        MHD_add_response_header(response, "Content-Type", mime_types[m->mode]);
+        if (MHD_add_response_header(response, "Content-Type", mime_types[m->mode]) == MHD_NO)
+                return respond_oom(connection);
+
         return MHD_queue_response(connection, MHD_HTTP_OK, response);
 }
 
@@ -628,7 +631,9 @@ static int request_handler_fields(
         if (!response)
                 return respond_oom(connection);
 
-        MHD_add_response_header(response, "Content-Type", mime_types[m->mode == OUTPUT_JSON ? OUTPUT_JSON : OUTPUT_SHORT]);
+        if (MHD_add_response_header(response, "Content-Type", mime_types[m->mode == OUTPUT_JSON ? OUTPUT_JSON : OUTPUT_SHORT]) == MHD_NO)
+                return respond_oom(connection);
+
         return MHD_queue_response(connection, MHD_HTTP_OK, response);
 }
 
@@ -636,7 +641,7 @@ static int request_handler_redirect(
                 struct MHD_Connection *connection,
                 const char *target) {
 
-        char *page;
+        _cleanup_free_ char *page = NULL;
         _cleanup_(MHD_destroy_responsep) struct MHD_Response *response = NULL;
 
         assert(connection);
@@ -646,13 +651,14 @@ static int request_handler_redirect(
                 return respond_oom(connection);
 
         response = MHD_create_response_from_buffer(strlen(page), page, MHD_RESPMEM_MUST_FREE);
-        if (!response) {
-                free(page);
+        if (!response)
                 return respond_oom(connection);
-        }
+        TAKE_PTR(page);
 
-        MHD_add_response_header(response, "Content-Type", "text/html");
-        MHD_add_response_header(response, "Location", target);
+        if (MHD_add_response_header(response, "Content-Type", "text/html") == MHD_NO ||
+            MHD_add_response_header(response, "Location", target) == MHD_NO)
+                return respond_oom(connection);
+
         return MHD_queue_response(connection, MHD_HTTP_MOVED_PERMANENTLY, response);
 }
 
@@ -681,7 +687,9 @@ static int request_handler_file(
                 return respond_oom(connection);
         TAKE_FD(fd);
 
-        MHD_add_response_header(response, "Content-Type", mime_type);
+        if (MHD_add_response_header(response, "Content-Type", mime_type) == MHD_NO)
+                return respond_oom(connection);
+
         return MHD_queue_response(connection, MHD_HTTP_OK, response);
 }
 
@@ -754,7 +762,7 @@ static int request_handler_machine(
         if (r < 0)
                 return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %m");
 
-        (void) parse_os_release(NULL, "PRETTY_NAME", &os_name, NULL);
+        (void) parse_os_release(NULL, "PRETTY_NAME", &os_name);
         (void) get_virtualization(&v);
 
         r = asprintf(&json,
@@ -782,7 +790,9 @@ static int request_handler_machine(
                 return respond_oom(connection);
         TAKE_PTR(json);
 
-        MHD_add_response_header(response, "Content-Type", "application/json");
+        if (MHD_add_response_header(response, "Content-Type", "application/json") == MHD_NO)
+                return respond_oom(connection);
+
         return MHD_queue_response(connection, MHD_HTTP_OK, response);
 }
 
@@ -851,10 +861,9 @@ static int help(void) {
                "     --key=KEY.PEM    Server key in PEM format\n"
                "     --trust=CERT.PEM Certificate authority certificate in PEM format\n"
                "  -D --directory=PATH Serve journal files in directory\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -896,7 +905,11 @@ static int parse_argv(int argc, char *argv[]) {
                         if (arg_key_pem)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Key file specified twice");
-                        r = read_full_file_full(AT_FDCWD, optarg, READ_FULL_FILE_CONNECT_SOCKET, NULL, &arg_key_pem, NULL);
+                        r = read_full_file_full(
+                                        AT_FDCWD, optarg, UINT64_MAX, SIZE_MAX,
+                                        READ_FULL_FILE_SECURE|READ_FULL_FILE_WARN_WORLD_READABLE|READ_FULL_FILE_CONNECT_SOCKET,
+                                        NULL,
+                                        &arg_key_pem, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read key file: %m");
                         assert(arg_key_pem);
@@ -906,7 +919,11 @@ static int parse_argv(int argc, char *argv[]) {
                         if (arg_cert_pem)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Certificate file specified twice");
-                        r = read_full_file_full(AT_FDCWD, optarg, READ_FULL_FILE_CONNECT_SOCKET, NULL, &arg_cert_pem, NULL);
+                        r = read_full_file_full(
+                                        AT_FDCWD, optarg, UINT64_MAX, SIZE_MAX,
+                                        READ_FULL_FILE_CONNECT_SOCKET,
+                                        NULL,
+                                        &arg_cert_pem, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read certificate file: %m");
                         assert(arg_cert_pem);
@@ -917,14 +934,18 @@ static int parse_argv(int argc, char *argv[]) {
                         if (arg_trust_pem)
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "CA certificate file specified twice");
-                        r = read_full_file_full(AT_FDCWD, optarg, READ_FULL_FILE_CONNECT_SOCKET, NULL, &arg_trust_pem, NULL);
+                        r = read_full_file_full(
+                                        AT_FDCWD, optarg, UINT64_MAX, SIZE_MAX,
+                                        READ_FULL_FILE_CONNECT_SOCKET,
+                                        NULL,
+                                        &arg_trust_pem, NULL);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read CA certificate file: %m");
                         assert(arg_trust_pem);
                         break;
 #else
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                               "Option --trust is not available.");
+                                               "Option --trust= is not available.");
 #endif
                 case 'D':
                         arg_directory = optarg;
@@ -983,7 +1004,7 @@ static int run(int argc, char *argv[]) {
                 MHD_USE_THREAD_PER_CONNECTION;
         int r, n;
 
-        log_setup_service();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

@@ -21,9 +21,9 @@
 #include "main-func.h"
 #include "memory-util.h"
 #include "missing_magic.h"
-#include "modhex.h"
 #include "mount-util.h"
 #include "path-util.h"
+#include "recovery-key.h"
 #include "rm-rf.h"
 #include "stat-util.h"
 #include "strv.h"
@@ -1633,7 +1633,7 @@ static int run(int argc, char *argv[]) {
 
         start = now(CLOCK_MONOTONIC);
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

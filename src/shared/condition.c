@@ -146,7 +146,7 @@ typedef enum {
         ORDER_EQUAL,
         ORDER_UNEQUAL,
         _ORDER_MAX,
-        _ORDER_INVALID = -1
+        _ORDER_INVALID = -EINVAL,
 } OrderOperator;
 
 static OrderOperator parse_order(const char **s) {
@@ -247,7 +247,7 @@ static int condition_test_kernel_version(Condition *c, char **env) {
                                         return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Unexpected end of expression: %s", p);
                         }
 
-                        r = test_order(str_verscmp(u.release, s), order);
+                        r = test_order(strverscmp_improved(u.release, s), order);
                 } else
                         /* No prefix? Then treat as glob string */
                         r = fnmatch(s, u.release, 0) == 0;
@@ -353,6 +353,15 @@ static int condition_test_control_group_controller(Condition *c, char **env) {
         assert(c);
         assert(c->parameter);
         assert(c->type == CONDITION_CONTROL_GROUP_CONTROLLER);
+
+        if (streq(c->parameter, "v2"))
+                return cg_all_unified();
+        if (streq(c->parameter, "v1")) {
+                r = cg_all_unified();
+                if (r < 0)
+                        return r;
+                return !r;
+        }
 
         r = cg_mask_supported(&system_mask);
         if (r < 0)
@@ -480,6 +489,32 @@ static int condition_test_ac_power(Condition *c, char **env) {
         return (on_ac_power() != 0) == !!r;
 }
 
+static int has_tpm2(void) {
+        int r;
+
+        /* Checks whether the system has at least one TPM2 resource manager device, i.e. at least one "tpmrm"
+         * class device */
+
+        r = dir_is_empty("/sys/class/tpmrm");
+        if (r == 0)
+                return true; /* nice! we have a device */
+
+        /* Hmm, so Linux doesn't know of the TPM2 device (or we couldn't check for it), most likely because
+         * the driver wasn't loaded yet. Let's see if the firmware knows about a TPM2 device, in this
+         * case. This way we can answer the TPM2 question already during early boot (where we most likely
+         * need it) */
+        if (efi_has_tpm2())
+                return true;
+
+        /* OK, this didn't work either, in this case propagate the original errors */
+        if (r == -ENOENT)
+                return false;
+        if (r < 0)
+                return log_debug_errno(r, "Failed to determine whether system has TPM2 support: %m");
+
+        return !r;
+}
+
 static int condition_test_security(Condition *c, char **env) {
         assert(c);
         assert(c->parameter);
@@ -499,6 +534,8 @@ static int condition_test_security(Condition *c, char **env) {
                 return mac_tomoyo_use();
         if (streq(c->parameter, "uefi-secureboot"))
                 return is_efi_secure_boot();
+        if (streq(c->parameter, "tpm2"))
+                return has_tpm2();
 
         return false;
 }
@@ -728,6 +765,14 @@ static int condition_test_path_is_read_write(Condition *c, char **env) {
         return path_is_read_only_fs(c->parameter) <= 0;
 }
 
+static int condition_test_cpufeature(Condition *c, char **env) {
+        assert(c);
+        assert(c->parameter);
+        assert(c->type == CONDITION_CPU_FEATURE);
+
+        return has_cpu_with_flag(ascii_strlower(c->parameter));
+}
+
 static int condition_test_path_is_encrypted(Condition *c, char **env) {
         int r;
 
@@ -806,6 +851,7 @@ int condition_test(Condition *c, char **env) {
                 [CONDITION_CPUS]                     = condition_test_cpus,
                 [CONDITION_MEMORY]                   = condition_test_memory,
                 [CONDITION_ENVIRONMENT]              = condition_test_environment,
+                [CONDITION_CPU_FEATURE]              = condition_test_cpufeature,
         };
 
         int r, b;
@@ -928,6 +974,7 @@ static const char* const condition_type_table[_CONDITION_TYPE_MAX] = {
         [CONDITION_CPUS] = "ConditionCPUs",
         [CONDITION_MEMORY] = "ConditionMemory",
         [CONDITION_ENVIRONMENT] = "ConditionEnvironment",
+        [CONDITION_CPU_FEATURE] = "ConditionCPUFeature",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(condition_type, ConditionType);
@@ -959,6 +1006,7 @@ static const char* const assert_type_table[_CONDITION_TYPE_MAX] = {
         [CONDITION_CPUS] = "AssertCPUs",
         [CONDITION_MEMORY] = "AssertMemory",
         [CONDITION_ENVIRONMENT] = "AssertEnvironment",
+        [CONDITION_CPU_FEATURE] = "AssertCPUFeature",
 };
 
 DEFINE_STRING_TABLE_LOOKUP(assert_type, ConditionType);

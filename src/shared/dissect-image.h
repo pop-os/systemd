@@ -45,7 +45,7 @@ typedef enum PartitionDesignator {
         PARTITION_TMP,
         PARTITION_VAR,
         _PARTITION_DESIGNATOR_MAX,
-        _PARTITION_DESIGNATOR_INVALID = -1
+        _PARTITION_DESIGNATOR_INVALID = -EINVAL,
 } PartitionDesignator;
 
 static inline PartitionDesignator PARTITION_VERITY_OF(PartitionDesignator p) {
@@ -86,7 +86,7 @@ typedef enum DissectImageFlags {
         DISSECT_IMAGE_FSCK                = 1 << 11, /* File system check the partition before mounting (no effect when combined with DISSECT_IMAGE_READ_ONLY) */
         DISSECT_IMAGE_NO_PARTITION_TABLE  = 1 << 12, /* Only recognize single file system images */
         DISSECT_IMAGE_VERITY_SHARE        = 1 << 13, /* When activating a verity device, reuse existing one if already open */
-        DISSECT_IMAGE_MKDIR               = 1 << 14, /* Make directory to mount right before mounting, if missing */
+        DISSECT_IMAGE_MKDIR               = 1 << 14, /* Make top-level directory to mount right before mounting, if missing */
 } DissectImageFlags;
 
 struct DissectedImage {
@@ -97,10 +97,12 @@ struct DissectedImage {
 
         DissectedPartition partitions[_PARTITION_DESIGNATOR_MAX];
 
+        char *image_name;
         char *hostname;
         sd_id128_t machine_id;
         char **machine_info;
         char **os_release;
+        char **extension_release;
 };
 
 struct MountOptions {
@@ -161,3 +163,5 @@ bool dissected_image_can_do_verity(const DissectedImage *image, PartitionDesigna
 bool dissected_image_has_verity(const DissectedImage *image, PartitionDesignator d);
 
 int mount_image_privately_interactively(const char *path, DissectImageFlags flags, char **ret_directory, LoopDevice **ret_loop_device, DecryptedImage **ret_decrypted_image);
+
+int verity_dissect_and_mount(const char *src, const char *dest, const MountOptions *options, const char *required_host_os_release_id, const char *required_host_os_release_version_id, const char *required_host_os_release_sysext_level);

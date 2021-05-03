@@ -3,10 +3,11 @@
 #include "alloc-util.h"
 #include "btrfs-util.h"
 #include "bus-common-errors.h"
+#include "bus-object.h"
 #include "bus-polkit.h"
+#include "discover-image.h"
 #include "fd-util.h"
 #include "io-util.h"
-#include "machine-image.h"
 #include "missing_capability.h"
 #include "portable.h"
 #include "portabled-bus.h"
@@ -41,7 +42,7 @@ static int property_get_pool_usage(
                 sd_bus_error *error) {
 
         _cleanup_close_ int fd = -1;
-        uint64_t usage = (uint64_t) -1;
+        uint64_t usage = UINT64_MAX;
 
         assert(bus);
         assert(reply);
@@ -67,7 +68,7 @@ static int property_get_pool_limit(
                 sd_bus_error *error) {
 
         _cleanup_close_ int fd = -1;
-        uint64_t size = (uint64_t) -1;
+        uint64_t size = UINT64_MAX;
 
         assert(bus);
         assert(reply);
@@ -299,6 +300,10 @@ finish:
         return r;
 }
 
+static int method_reattach_image(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        return redirect_method_to_image(userdata, message, error, bus_image_common_reattach);
+}
+
 static int method_remove_image(sd_bus_message *message, void *userdata, sd_bus_error *error) {
         return redirect_method_to_image(userdata, message, error, bus_image_common_remove);
 }
@@ -355,39 +360,108 @@ const sd_bus_vtable manager_vtable[] = {
         SD_BUS_PROPERTY("PoolUsage", "t", property_get_pool_usage, 0, 0),
         SD_BUS_PROPERTY("PoolLimit", "t", property_get_pool_limit, 0, 0),
         SD_BUS_PROPERTY("Profiles", "as", property_get_profiles, 0, 0),
-        SD_BUS_METHOD("GetImage", "s", "o", method_get_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("ListImages", NULL, "a(ssbtttso)", method_list_images, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageOSRelease", "s", "a{ss}", method_get_image_os_release, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageMetadata", "sas", "saya{say}", method_get_image_metadata, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("GetImageState", "s", "s", method_get_image_state, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("AttachImage", "sassbs", "a(sss)", method_attach_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("DetachImage", "sb", "a(sss)", method_detach_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("RemoveImage", "s", NULL, method_remove_image, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("MarkImageReadOnly", "sb", NULL, method_mark_image_read_only, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("SetImageLimit", "st", NULL, method_set_image_limit, SD_BUS_VTABLE_UNPRIVILEGED),
-        SD_BUS_METHOD("SetPoolLimit", "t", NULL, method_set_pool_limit, SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetImage",
+                                SD_BUS_ARGS("s", image),
+                                SD_BUS_RESULT("o", object),
+                                method_get_image,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("ListImages",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_RESULT("a(ssbtttso)", images),
+                                method_list_images,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetImageOSRelease",
+                                SD_BUS_ARGS("s", image),
+                                SD_BUS_RESULT("a{ss}", os_release),
+                                method_get_image_os_release,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetImageMetadata",
+                                SD_BUS_ARGS("s", image,
+                                            "as", matches),
+                                SD_BUS_RESULT("s", image,
+                                              "ay", os_release,
+                                              "a{say}", units),
+                                method_get_image_metadata,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("GetImageState",
+                                SD_BUS_ARGS("s", image),
+                                SD_BUS_RESULT("s", state),
+                                method_get_image_state,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("AttachImage",
+                                SD_BUS_ARGS("s", image,
+                                            "as", matches,
+                                            "s", profile,
+                                            "b", runtime,
+                                            "s", copy_mode),
+                                SD_BUS_RESULT("a(sss)", changes),
+                                method_attach_image,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("DetachImage",
+                                SD_BUS_ARGS("s", image,
+                                            "b", runtime),
+                                SD_BUS_RESULT("a(sss)", changes),
+                                method_detach_image,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("ReattachImage",
+                                SD_BUS_ARGS("s", image,
+                                            "as", matches,
+                                            "s", profile,
+                                            "b", runtime,
+                                            "s", copy_mode),
+                                SD_BUS_RESULT("a(sss)", changes_removed,
+                                              "a(sss)", changes_updated),
+                                method_reattach_image,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("RemoveImage",
+                                SD_BUS_ARGS("s", image),
+                                SD_BUS_NO_RESULT,
+                                method_remove_image,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("MarkImageReadOnly",
+                                SD_BUS_ARGS("s", image,
+                                            "b", read_only),
+                                SD_BUS_NO_RESULT,
+                                method_mark_image_read_only,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("SetImageLimit",
+                                SD_BUS_ARGS("s", image,
+                                            "t", limit),
+                                SD_BUS_NO_RESULT,
+                                method_set_image_limit,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("SetPoolLimit",
+                                SD_BUS_ARGS("t", limit),
+                                SD_BUS_NO_RESULT,
+                                method_set_pool_limit,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_VTABLE_END
 };
 
-int reply_portable_changes(sd_bus_message *m, const PortableChange *changes, size_t n_changes) {
-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+const BusObjectImplementation manager_object = {
+        "/org/freedesktop/portable1",
+        "org.freedesktop.portable1.Manager",
+        .vtables = BUS_VTABLES(manager_vtable),
+        .children = BUS_IMPLEMENTATIONS(&image_object),
+};
+
+static int reply_portable_compose_message(sd_bus_message *reply, const PortableChange *changes, size_t n_changes) {
         size_t i;
         int r;
 
-        assert(m);
+        assert(reply);
         assert(changes || n_changes == 0);
-
-        r = sd_bus_message_new_method_return(m, &reply);
-        if (r < 0)
-                return r;
 
         r = sd_bus_message_open_container(reply, 'a', "(sss)");
         if (r < 0)
                 return r;
 
         for (i = 0; i < n_changes; i++) {
+                if (changes[i].type_or_errno < 0)
+                        continue;
+
                 r = sd_bus_message_append(reply, "(sss)",
-                                          portable_change_type_to_string(changes[i].type),
+                                          portable_change_type_to_string(changes[i].type_or_errno),
                                           changes[i].path,
                                           changes[i].source);
                 if (r < 0)
@@ -395,6 +469,50 @@ int reply_portable_changes(sd_bus_message *m, const PortableChange *changes, siz
         }
 
         r = sd_bus_message_close_container(reply);
+        if (r < 0)
+                return r;
+
+        return 0;
+}
+
+int reply_portable_changes(sd_bus_message *m, const PortableChange *changes, size_t n_changes) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        int r;
+
+        assert(m);
+
+        r = sd_bus_message_new_method_return(m, &reply);
+        if (r < 0)
+                return r;
+
+        r = reply_portable_compose_message(reply, changes, n_changes);
+        if (r < 0)
+                return r;
+
+        return sd_bus_send(NULL, reply, NULL);
+}
+
+int reply_portable_changes_pair(
+                sd_bus_message *m,
+                const PortableChange *changes_first,
+                size_t n_changes_first,
+                const PortableChange *changes_second,
+                size_t n_changes_second) {
+
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        int r;
+
+        assert(m);
+
+        r = sd_bus_message_new_method_return(m, &reply);
+        if (r < 0)
+                return r;
+
+        r = reply_portable_compose_message(reply, changes_first, n_changes_first);
+        if (r < 0)
+                return r;
+
+        r = reply_portable_compose_message(reply, changes_second, n_changes_second);
         if (r < 0)
                 return r;
 

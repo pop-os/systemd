@@ -7,13 +7,6 @@
 Distribution=fedora
 Release=33
 
-[Output]
-Format=gpt_ext4
-Bootable=yes
-
-[Partitions]
-RootSize=3G
-
 [Packages]
 BuildPackages=
         audit-libs-devel
@@ -66,17 +59,20 @@ BuildPackages=
         python3-lxml
         qrencode-devel
         rpm
+        tpm2-tss-devel
         tree
         valgrind-devel
         xz-devel
         zstd
 
 Packages=
+        gdb
         # libfido2 + libzstd can be dropped once the Fedora RPM gets a dependency on them
         libfido2
         libzstd
+        nano
         # procps-ng provides a set of useful utilies (ps, free, etc)
         procps-ng
-
-BuildDirectory=mkosi.builddir
-Cache=mkosi.cache
+        strace
+        tpm2-tss
+        vi

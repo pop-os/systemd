@@ -578,7 +578,7 @@ static int manager_dispatch_vcsa_udev(sd_device_monitor *monitor, sd_device *dev
 
         if (sd_device_get_sysname(device, &name) >= 0 &&
             startswith(name, "vcsa") &&
-            device_for_action(device, DEVICE_ACTION_REMOVE))
+            device_for_action(device, SD_DEVICE_REMOVE))
                 seat_preallocate_vts(m->seat0);
 
         return 0;
@@ -788,7 +788,7 @@ static int manager_connect_console(Manager *m) {
                                        "Not enough real-time signals available: %u-%u",
                                        SIGRTMIN, SIGRTMAX);
 
-        assert_se(ignore_signals(SIGRTMIN + 1, -1) >= 0);
+        assert_se(ignore_signals(SIGRTMIN + 1) >= 0);
         assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGRTMIN, -1) >= 0);
 
         r = sd_event_add_signal(m->event, NULL, SIGRTMIN, manager_vt_switch, m);
@@ -1148,7 +1148,7 @@ static int manager_run(Manager *m) {
                 if (r > 0)
                         continue;
 
-                r = sd_event_run(m->event, (uint64_t) -1);
+                r = sd_event_run(m->event, UINT64_MAX);
                 if (r < 0)
                         return r;
         }
@@ -1160,7 +1160,7 @@ static int run(int argc, char *argv[]) {
         int r;
 
         log_set_facility(LOG_AUTH);
-        log_setup_service();
+        log_setup();
 
         r = service_parse_argv("systemd-logind.service",
                                "Manager for user logins and devices and privileged operations.",

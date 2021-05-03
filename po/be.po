@@ -4,13 +4,13 @@
 #
 #
 # Viktar Vaŭčkievič <victorenator@gmail.com>, 2015, 2016.
-# Zmicer Turok <nashtlumach@gmail.com>, 2020.
+# Zmicer Turok <nashtlumach@gmail.com>, 2020, 2021.
 msgid ""
 msgstr ""
 "Project-Id-Version: systemd master\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2020-08-19 18:02+0200\n"
-"PO-Revision-Date: 2020-10-16 06:30+0000\n"
+"POT-Creation-Date: 2021-01-08 17:48+0100\n"
+"PO-Revision-Date: 2021-01-10 18:36+0000\n"
 "Last-Translator: Zmicer Turok <nashtlumach@gmail.com>\n"
 "Language-Team: Belarusian <https://translate.fedoraproject.org/projects/"
 "systemd/master/be/>\n"
@@ -20,7 +20,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=n%10==1 && n%100!=11 ? 0 : n%10>=2 && n"
 "%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2;\n"
-"X-Generator: Weblate 4.2.2\n"
+"X-Generator: Weblate 4.4\n"
 
 #: src/core/org.freedesktop.systemd1.policy.in:22
 msgid "Send passphrase back to system"
@@ -94,7 +94,8 @@ msgstr "Праверыць уліковыя даныя хатняй прасто
 #: src/home/org.freedesktop.home1.policy:34
 msgid ""
 "Authentication is required to check credentials against a user's home area."
-msgstr "Для праверкі ўліковых даных хатняй прасторы патрабуецца аўтэнтыфікацыя."
+msgstr ""
+"Для праверкі ўліковых даных хатняй прасторы патрабуецца аўтэнтыфікацыя."
 
 #: src/home/org.freedesktop.home1.policy:43
 msgid "Update a home area"
@@ -307,56 +308,69 @@ msgstr ""
 "ноўтбука, патрабуецца аўтэнтыфікацыя."
 
 #: src/login/org.freedesktop.login1.policy:117
+msgid "Allow applications to inhibit system handling of the reboot key"
+msgstr ""
+"Дазволіць праграмам перашкаджаць сістэме апрацоўваць кнопку перазапуску"
+
+#: src/login/org.freedesktop.login1.policy:118
+msgid ""
+"Authentication is required for an application to inhibit system handling of "
+"the reboot key."
+msgstr ""
+"Для таго, каб дазволіць праграмам перашкаджаць сістэме апрацоўваць кнопку "
+"перазапуску, патрабуецца аўтэнтыфікацыя."
+
+#: src/login/org.freedesktop.login1.policy:128
 msgid "Allow non-logged-in user to run programs"
 msgstr "Дазволіць праграмам працаваць у фоне па-за сеансам карыстальніка"
 
-#: src/login/org.freedesktop.login1.policy:118
+#: src/login/org.freedesktop.login1.policy:129
 msgid "Explicit request is required to run programs as a non-logged-in user."
 msgstr ""
 "Для таго, каб дазволіць праграмам працаваць па-за сеансам карыстальніка, "
 "патрабуецца відавочны запыт."
 
-#: src/login/org.freedesktop.login1.policy:127
+#: src/login/org.freedesktop.login1.policy:138
 msgid "Allow non-logged-in users to run programs"
 msgstr "Дазволіць праграмам працаваць у фоне па-за сеансам карыстальніка"
 
-#: src/login/org.freedesktop.login1.policy:128
+#: src/login/org.freedesktop.login1.policy:139
 msgid "Authentication is required to run programs as a non-logged-in user."
 msgstr ""
 "Для таго, каб дазволіць праграмам працаваць па-за межамі сеанса "
 "карыстальніка, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:137
+#: src/login/org.freedesktop.login1.policy:148
 msgid "Allow attaching devices to seats"
 msgstr "Дазволіць далучаць прылады да працоўных месцаў"
 
-#: src/login/org.freedesktop.login1.policy:138
+#: src/login/org.freedesktop.login1.policy:149
 msgid "Authentication is required to attach a device to a seat."
 msgstr ""
 "Для таго, каб дазволіць далучаць прылады да працоўных месцаў, патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:148
+#: src/login/org.freedesktop.login1.policy:159
 msgid "Flush device to seat attachments"
 msgstr "Адлучыць прылады ад працоўных месцаў"
 
-#: src/login/org.freedesktop.login1.policy:149
+#: src/login/org.freedesktop.login1.policy:160
 msgid "Authentication is required to reset how devices are attached to seats."
 msgstr "Для адлучэння прылад ад працоўных месцаў патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:158
+#: src/login/org.freedesktop.login1.policy:169
 msgid "Power off the system"
 msgstr "Выключыць сістэму"
 
-#: src/login/org.freedesktop.login1.policy:159
+#: src/login/org.freedesktop.login1.policy:170
 msgid "Authentication is required to power off the system."
 msgstr "Для выключэння сістэмы патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:169
+#: src/login/org.freedesktop.login1.policy:180
 msgid "Power off the system while other users are logged in"
 msgstr "Выключыць сістэму з іншымі прысутнымі карыстальнікамі"
 
-#: src/login/org.freedesktop.login1.policy:170
+#: src/login/org.freedesktop.login1.policy:181
 msgid ""
 "Authentication is required to power off the system while other users are "
 "logged in."
@@ -364,11 +378,11 @@ msgstr ""
 "Для выключэння сістэмы з іншымі прысутнымі карыстальнікамі патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:180
+#: src/login/org.freedesktop.login1.policy:191
 msgid "Power off the system while an application is inhibiting this"
 msgstr "Выключыць сістэму, калі праграмы перашкаджаюць гэтаму"
 
-#: src/login/org.freedesktop.login1.policy:181
+#: src/login/org.freedesktop.login1.policy:192
 msgid ""
 "Authentication is required to power off the system while an application is "
 "inhibiting this."
@@ -376,19 +390,19 @@ msgstr ""
 "Для выключэння сістэмы з актыўнымі праграмамі, якія перашкаджаюць "
 "выключэнню, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:191
+#: src/login/org.freedesktop.login1.policy:202
 msgid "Reboot the system"
 msgstr "Перазагрузіць сістэму"
 
-#: src/login/org.freedesktop.login1.policy:192
+#: src/login/org.freedesktop.login1.policy:203
 msgid "Authentication is required to reboot the system."
 msgstr "Для перазагрузкі сістэмы патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:202
+#: src/login/org.freedesktop.login1.policy:213
 msgid "Reboot the system while other users are logged in"
 msgstr "Перазагрузіць сістэму з іншымі прысутнымі карыстальнікамі"
 
-#: src/login/org.freedesktop.login1.policy:203
+#: src/login/org.freedesktop.login1.policy:214
 msgid ""
 "Authentication is required to reboot the system while other users are logged "
 "in."
@@ -396,11 +410,11 @@ msgstr ""
 "Для перазагрузкі сістэмы з іншымі прысутнымі карыстальнікамі патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:213
+#: src/login/org.freedesktop.login1.policy:224
 msgid "Reboot the system while an application is inhibiting this"
 msgstr "Перазагрузіць сістэму, калі праграмы перашкаджаюць гэтаму"
 
-#: src/login/org.freedesktop.login1.policy:214
+#: src/login/org.freedesktop.login1.policy:225
 msgid ""
 "Authentication is required to reboot the system while an application is "
 "inhibiting this."
@@ -408,19 +422,19 @@ msgstr ""
 "Для перазагрузкі сістэмы з актыўнымі праграмамі, якія перашкаджаюць "
 "выключэнню, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:224
+#: src/login/org.freedesktop.login1.policy:235
 msgid "Halt the system"
 msgstr "Спыніць сістэму"
 
-#: src/login/org.freedesktop.login1.policy:225
+#: src/login/org.freedesktop.login1.policy:236
 msgid "Authentication is required to halt the system."
 msgstr "Для спынення сістэмы патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:235
+#: src/login/org.freedesktop.login1.policy:246
 msgid "Halt the system while other users are logged in"
 msgstr "Спыніць сістэму з іншымі прысутнымі карыстальнікамі"
 
-#: src/login/org.freedesktop.login1.policy:236
+#: src/login/org.freedesktop.login1.policy:247
 msgid ""
 "Authentication is required to halt the system while other users are logged "
 "in."
@@ -428,11 +442,11 @@ msgstr ""
 "Для спынення сістэмы з іншымі прысутнымі карыстальнікамі патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:246
+#: src/login/org.freedesktop.login1.policy:257
 msgid "Halt the system while an application is inhibiting this"
 msgstr "Спыніць сістэму, калі праграмы перашкаджаюць гэтаму"
 
-#: src/login/org.freedesktop.login1.policy:247
+#: src/login/org.freedesktop.login1.policy:258
 msgid ""
 "Authentication is required to halt the system while an application is "
 "inhibiting this."
@@ -440,19 +454,19 @@ msgstr ""
 "Для спынення сістэмы з актыўнымі праграмамі, якія перашкаджаюць выключэнню, "
 "патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:257
+#: src/login/org.freedesktop.login1.policy:268
 msgid "Suspend the system"
 msgstr "Прыпыніць сістэму"
 
-#: src/login/org.freedesktop.login1.policy:258
+#: src/login/org.freedesktop.login1.policy:269
 msgid "Authentication is required to suspend the system."
 msgstr "Для прыпынення сістэмы патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:267
+#: src/login/org.freedesktop.login1.policy:278
 msgid "Suspend the system while other users are logged in"
 msgstr "Прыпыніць сістэму з іншымі прысутнымі карыстальнікамі"
 
-#: src/login/org.freedesktop.login1.policy:268
+#: src/login/org.freedesktop.login1.policy:279
 msgid ""
 "Authentication is required to suspend the system while other users are "
 "logged in."
@@ -460,11 +474,11 @@ msgstr ""
 "Для прыпынення сістэмы з іншымі прысутнымі карыстальнікамі патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:278
+#: src/login/org.freedesktop.login1.policy:289
 msgid "Suspend the system while an application is inhibiting this"
 msgstr "Прыпыніць сістэму, калі праграмы перашкаджаюць гэтаму"
 
-#: src/login/org.freedesktop.login1.policy:279
+#: src/login/org.freedesktop.login1.policy:290
 msgid ""
 "Authentication is required to suspend the system while an application is "
 "inhibiting this."
@@ -472,19 +486,19 @@ msgstr ""
 "Для прыпынення сістэмы з актыўнымі праграмамі, якія перашкаджаюць "
 "выключэнню, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:289
+#: src/login/org.freedesktop.login1.policy:300
 msgid "Hibernate the system"
 msgstr "Перавесці сістэму ў рэжым сну"
 
-#: src/login/org.freedesktop.login1.policy:290
+#: src/login/org.freedesktop.login1.policy:301
 msgid "Authentication is required to hibernate the system."
 msgstr "Для пераводу сістэмы ў рэжым сну патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:299
+#: src/login/org.freedesktop.login1.policy:310
 msgid "Hibernate the system while other users are logged in"
 msgstr "Перавесці сістэму ў рэжым сну з іншымі прысутнымі карыстальнікамі"
 
-#: src/login/org.freedesktop.login1.policy:300
+#: src/login/org.freedesktop.login1.policy:311
 msgid ""
 "Authentication is required to hibernate the system while other users are "
 "logged in."
@@ -492,11 +506,11 @@ msgstr ""
 "Для пераводу сістэмы ў рэжым сну з іншымі прысутнымі карыстальнікамі "
 "патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:310
+#: src/login/org.freedesktop.login1.policy:321
 msgid "Hibernate the system while an application is inhibiting this"
 msgstr "Перавесці сістэму ў рэжым сну, калі праграмы перашкаджаюць гэтаму"
 
-#: src/login/org.freedesktop.login1.policy:311
+#: src/login/org.freedesktop.login1.policy:322
 msgid ""
 "Authentication is required to hibernate the system while an application is "
 "inhibiting this."
@@ -504,50 +518,50 @@ msgstr ""
 "Для пераводу сістэмы ў рэжым сну з актыўнымі праграмамі, якія перашкаджаюць "
 "выключэнню, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:321
+#: src/login/org.freedesktop.login1.policy:332
 msgid "Manage active sessions, users and seats"
 msgstr "Кіраванне актыўнымі сеансамі, карыстальнікамі і працоўнымі месцамі"
 
-#: src/login/org.freedesktop.login1.policy:322
+#: src/login/org.freedesktop.login1.policy:333
 msgid "Authentication is required to manage active sessions, users and seats."
 msgstr ""
 "Для кіравання актыўнымі сеансамі, карыстальнікамі і працоўнымі месцамі "
 "патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:331
+#: src/login/org.freedesktop.login1.policy:342
 msgid "Lock or unlock active sessions"
 msgstr "Заблакаваць або разблакаваць актыўныя сеансы"
 
-#: src/login/org.freedesktop.login1.policy:332
+#: src/login/org.freedesktop.login1.policy:343
 msgid "Authentication is required to lock or unlock active sessions."
 msgstr ""
 "Для таго, каб заблакаваць ці разблакаваць актыўныя сеансы, патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:341
+#: src/login/org.freedesktop.login1.policy:352
 msgid "Set the reboot \"reason\" in the kernel"
 msgstr "Вызначыць \"прычыну\" перазапуску"
 
-#: src/login/org.freedesktop.login1.policy:342
+#: src/login/org.freedesktop.login1.policy:353
 msgid "Authentication is required to set the reboot \"reason\" in the kernel."
 msgstr ""
 "Для таго, каб вызначыць прычыну перазапуску, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:352
+#: src/login/org.freedesktop.login1.policy:363
 msgid "Indicate to the firmware to boot to setup interface"
 msgstr "Запусціць наладку прашыўкі падчас наступнага запуску"
 
-#: src/login/org.freedesktop.login1.policy:353
+#: src/login/org.freedesktop.login1.policy:364
 msgid ""
 "Authentication is required to indicate to the firmware to boot to setup "
 "interface."
 msgstr "Для таго, каб запусціць наладку прашыўкі, патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:363
+#: src/login/org.freedesktop.login1.policy:374
 msgid "Indicate to the boot loader to boot to the boot loader menu"
 msgstr "Вывесці меню загрузчыка падчас наступнага запуску"
 
-#: src/login/org.freedesktop.login1.policy:364
+#: src/login/org.freedesktop.login1.policy:375
 msgid ""
 "Authentication is required to indicate to the boot loader to boot to the "
 "boot loader menu."
@@ -555,11 +569,11 @@ msgstr ""
 "Для вываду меню загрузчыка падчас наступнага запуску патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:374
+#: src/login/org.freedesktop.login1.policy:385
 msgid "Indicate to the boot loader to boot a specific entry"
 msgstr "Абраць пэўны загрузачны запіс падчас наступнага запуску"
 
-#: src/login/org.freedesktop.login1.policy:375
+#: src/login/org.freedesktop.login1.policy:386
 msgid ""
 "Authentication is required to indicate to the boot loader to boot into a "
 "specific boot loader entry."
@@ -567,19 +581,19 @@ msgstr ""
 "Для таго, каб абраць пэўны загрузачны запіс падчас наступнага запуску, "
 "патрабуецца аўтэнтыфікацыя."
 
-#: src/login/org.freedesktop.login1.policy:385
+#: src/login/org.freedesktop.login1.policy:396
 msgid "Set a wall message"
 msgstr "Вызначыць усеагульнае паведамленне"
 
-#: src/login/org.freedesktop.login1.policy:386
+#: src/login/org.freedesktop.login1.policy:397
 msgid "Authentication is required to set a wall message"
 msgstr "Для вызначэння ўсеагульнага паведамлення патрабуецца аўтэнтыфікацыя"
 
-#: src/login/org.freedesktop.login1.policy:395
+#: src/login/org.freedesktop.login1.policy:406
 msgid "Change Session"
 msgstr "Змяніць сеанс"
 
-#: src/login/org.freedesktop.login1.policy:396
+#: src/login/org.freedesktop.login1.policy:407
 msgid "Authentication is required to change the virtual terminal."
 msgstr "Для змены віртуальнага сеанса патрабуецца аўтэнтыфікацыя."
 
@@ -798,7 +812,8 @@ msgstr "Змяніць канфігурацыю сеткавага інтэрф�
 
 #: src/network/org.freedesktop.network1.policy:177
 msgid "Authentication is required to reconfigure network interface."
-msgstr "Для змены канфігурацыі сеткавага інтэрфейсу патрабуецца аўтэнтыфікацыя."
+msgstr ""
+"Для змены канфігурацыі сеткавага інтэрфейсу патрабуецца аўтэнтыфікацыя."
 
 #: src/portable/org.freedesktop.portable1.policy:13
 msgid "Inspect a portable service image"
@@ -893,23 +908,23 @@ msgstr ""
 "Для ўключэння або выключэння сінхранізацыі часу па сетцы патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:362
+#: src/core/dbus-unit.c:359
 msgid "Authentication is required to start '$(unit)'."
 msgstr "Для запуску \"$(unit)\" патрабуецца аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:363
+#: src/core/dbus-unit.c:360
 msgid "Authentication is required to stop '$(unit)'."
 msgstr "Для спынення \"$(unit)\" патрабуецца аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:364
+#: src/core/dbus-unit.c:361
 msgid "Authentication is required to reload '$(unit)'."
 msgstr "Для перачытання стану \"$(unit)\" патрабуецца аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:365 src/core/dbus-unit.c:366
+#: src/core/dbus-unit.c:362 src/core/dbus-unit.c:363
 msgid "Authentication is required to restart '$(unit)'."
 msgstr "Для перазапуску \"$(unit)\" патрабуецца аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:538
+#: src/core/dbus-unit.c:535
 msgid ""
 "Authentication is required to send a UNIX signal to the processes of "
 "'$(unit)'."
@@ -917,17 +932,17 @@ msgstr ""
 "Для адпраўкі сігналу UNIX працэсам адзінкі \"$(unit)\" патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:569
+#: src/core/dbus-unit.c:566
 msgid "Authentication is required to reset the \"failed\" state of '$(unit)'."
 msgstr ""
 "Для таго, каб скінуць стан \"failed\" у \"$(unit)\", патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:602
+#: src/core/dbus-unit.c:599
 msgid "Authentication is required to set properties on '$(unit)'."
 msgstr "Для змены ўласцівасцей \"$(unit)\" патрабуецца аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:711
+#: src/core/dbus-unit.c:708
 msgid ""
 "Authentication is required to delete files and directories associated with "
 "'$(unit)'."
@@ -935,7 +950,7 @@ msgstr ""
 "Для выдалення файлаў і каталогаў, якія звязаныя з \"$(unit)\", патрабуецца "
 "аўтэнтыфікацыя."
 
-#: src/core/dbus-unit.c:760
+#: src/core/dbus-unit.c:757
 msgid ""
 "Authentication is required to freeze or thaw the processes of '$(unit)' unit."
 msgstr ""

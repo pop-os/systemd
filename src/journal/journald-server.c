@@ -144,7 +144,7 @@ static int cache_space_refresh(Server *s, JournalStorage *storage) {
 
         ts = now(CLOCK_MONOTONIC);
 
-        if (space->timestamp != 0 && space->timestamp + RECHECK_SPACE_USEC > ts)
+        if (space->timestamp != 0 && usec_add(space->timestamp, RECHECK_SPACE_USEC) > ts)
                 return 0;
 
         r = determine_path_usage(s, storage->path, &vfs_used, &vfs_avail);
@@ -1206,7 +1206,7 @@ finish:
         server_driver_message(s, 0, NULL,
                               LOG_MESSAGE("Time spent on flushing to %s is %s for %u entries.",
                                           s->system_storage.path,
-                                          format_timespan(ts, sizeof(ts), now(CLOCK_MONOTONIC) - start, 0),
+                                          format_timespan(ts, sizeof(ts), usec_sub_unsigned(now(CLOCK_MONOTONIC), start), 0),
                                           n),
                               NULL);
 
@@ -1625,17 +1625,19 @@ static int server_parse_config_file(Server *s) {
         assert(s);
 
         if (s->namespace) {
-                const char *namespaced;
+                const char *namespaced, *dropin_dirname;
 
                 /* If we are running in namespace mode, load the namespace specific configuration file, and nothing else */
                 namespaced = strjoina(PKGSYSCONFDIR "/journald@", s->namespace, ".conf");
+                dropin_dirname = strjoina("journald@", s->namespace, ".conf.d");
 
-                r = config_parse(NULL,
-                                 namespaced, NULL,
-                                 "Journal\0",
-                                 config_item_perf_lookup, journald_gperf_lookup,
-                                 CONFIG_PARSE_WARN, s,
-                                 NULL);
+                r = config_parse_many(
+                                STRV_MAKE_CONST(namespaced),
+                                (const char* const*) CONF_PATHS_STRV("systemd"),
+                                dropin_dirname,
+                                "Journal\0",
+                                config_item_perf_lookup, journald_gperf_lookup,
+                                CONFIG_PARSE_WARN, s, NULL);
                 if (r < 0)
                         return r;
 
@@ -2033,7 +2035,7 @@ static int server_open_varlink(Server *s, const char *socket, int fd) {
 
         assert(s);
 
-        r = varlink_server_new(&s->varlink_server, VARLINK_SERVER_ROOT_ONLY);
+        r = varlink_server_new(&s->varlink_server, VARLINK_SERVER_ROOT_ONLY|VARLINK_SERVER_INHERIT_USERDATA);
         if (r < 0)
                 return r;
 
@@ -2185,7 +2187,7 @@ int server_init(Server *s, const char *namespace) {
                 .notify_fd = -1,
 
                 .compress.enabled = true,
-                .compress.threshold_bytes = (uint64_t) -1,
+                .compress.threshold_bytes = UINT64_MAX,
                 .seal = true,
 
                 .set_audit = true,
@@ -2593,7 +2595,7 @@ int config_parse_compress(
 
         if (isempty(rvalue)) {
                 compress->enabled = true;
-                compress->threshold_bytes = (uint64_t) -1;
+                compress->threshold_bytes = UINT64_MAX;
         } else if (streq(rvalue, "1")) {
                 log_syntax(unit, LOG_WARNING, filename, line, 0,
                            "Compress= ambiguously specified as 1, enabling compression with default threshold");

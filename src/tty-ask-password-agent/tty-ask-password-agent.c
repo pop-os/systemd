@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <poll.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <sys/prctl.h>
@@ -366,7 +365,7 @@ static int process_and_watch_password_files(bool watch) {
         }
 
         for (;;) {
-                int timeout = -1;
+                usec_t timeout = USEC_INFINITY;
 
                 r = process_password_files();
                 if (r < 0) {
@@ -385,16 +384,11 @@ static int process_and_watch_password_files(bool watch) {
                 if (!watch)
                         break;
 
-                if (poll(pollfd, _FD_MAX, timeout) < 0) {
-                        if (errno == EINTR)
-                                continue;
-
-                        return -errno;
-                }
-
-                if (pollfd[FD_SIGNAL].revents & POLLNVAL ||
-                    pollfd[FD_INOTIFY].revents & POLLNVAL)
-                        return -EBADF;
+                r = ppoll_usec(pollfd, _FD_MAX, timeout);
+                if (r == -EINTR)
+                        continue;
+                if (r < 0)
+                        return r;
 
                 if (pollfd[FD_INOTIFY].revents != 0)
                         (void) flush_fd(notify);
@@ -424,10 +418,9 @@ static int help(void) {
                "     --wall     Continuously forward password requests to wall\n"
                "     --plymouth Ask question with Plymouth instead of on TTY\n"
                "     --console  Ask question on /dev/console instead of current TTY\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -685,7 +678,7 @@ static int ask_on_consoles(char *argv[]) {
 static int run(int argc, char *argv[]) {
         int r;
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

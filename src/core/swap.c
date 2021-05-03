@@ -10,7 +10,6 @@
 #include "alloc-util.h"
 #include "dbus-swap.h"
 #include "dbus-unit.h"
-#include "device-private.h"
 #include "device-util.h"
 #include "device.h"
 #include "escape.h"
@@ -287,15 +286,11 @@ static int swap_verify(Swap *s) {
         if (r < 0)
                 return log_unit_error_errno(UNIT(s), r, "Failed to generate unit name from path: %m");
 
-        if (!unit_has_name(UNIT(s), e)) {
-                log_unit_error(UNIT(s), "Value of What= and unit name do not match, not loading.");
-                return -ENOEXEC;
-        }
+        if (!unit_has_name(UNIT(s), e))
+                return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Value of What= and unit name do not match, not loading.");
 
-        if (s->exec_context.pam_name && s->kill_context.kill_mode != KILL_CONTROL_GROUP) {
-                log_unit_error(UNIT(s), "Unit has PAM enabled. Kill mode must be set to 'control-group'. Refusing to load.");
-                return -ENOEXEC;
-        }
+        if (s->exec_context.pam_name && s->kill_context.kill_mode != KILL_CONTROL_GROUP)
+                return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Unit has PAM enabled. Kill mode must be set to 'control-group'. Refusing to load.");
 
         return 0;
 }
@@ -311,7 +306,7 @@ static int swap_load_devnode(Swap *s) {
         if (stat(s->what, &st) < 0 || !S_ISBLK(st.st_mode))
                 return 0;
 
-        r = device_new_from_stat_rdev(&d, &st);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0) {
                 log_unit_full_errno(UNIT(s), r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
                                     "Failed to allocate device for swap %s: %m", s->what);
@@ -514,7 +509,7 @@ static int swap_process_new(Manager *m, const char *device, int prio, bool set_f
         if (stat(device, &st) < 0 || !S_ISBLK(st.st_mode))
                 return 0;
 
-        r = device_new_from_stat_rdev(&d, &st);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0) {
                 log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
                                "Failed to allocate device for swap %s: %m", device);
@@ -1187,15 +1182,13 @@ static int swap_dispatch_timer(sd_event_source *source, usec_t usec, void *userd
 }
 
 static int swap_load_proc_swaps(Manager *m, bool set_flags) {
-        unsigned i;
-
         assert(m);
 
         rewind(m->proc_swaps);
 
         (void) fscanf(m->proc_swaps, "%*s %*s %*s %*s %*s\n");
 
-        for (i = 1;; i++) {
+        for (unsigned i = 1;; i++) {
                 _cleanup_free_ char *dev = NULL, *d = NULL;
                 int prio = 0, k;
 

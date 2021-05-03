@@ -28,9 +28,9 @@ static const char * const ndisc_event_table[_SD_NDISC_EVENT_MAX] = {
         [SD_NDISC_EVENT_ROUTER] = "router",
 };
 
-DEFINE_STRING_TABLE_LOOKUP(ndisc_event, sd_ndisc_event);
+DEFINE_STRING_TABLE_LOOKUP(ndisc_event, sd_ndisc_event_t);
 
-static void ndisc_callback(sd_ndisc *ndisc, sd_ndisc_event event, sd_ndisc_router *rt) {
+static void ndisc_callback(sd_ndisc *ndisc, sd_ndisc_event_t event, sd_ndisc_router *rt) {
         assert(ndisc);
         assert(event >= 0 && event < _SD_NDISC_EVENT_MAX);
 
@@ -221,12 +221,11 @@ static int ndisc_recv(sd_event_source *s, int fd, uint32_t revents, void *userda
         if (!rt)
                 return -ENOMEM;
 
-        r = icmp6_receive(fd, NDISC_ROUTER_RAW(rt), rt->raw_size, &rt->address,
-                     &rt->timestamp);
+        r = icmp6_receive(fd, NDISC_ROUTER_RAW(rt), rt->raw_size, &rt->address, &rt->timestamp);
         if (r < 0) {
                 switch (r) {
                 case -EADDRNOTAVAIL:
-                        (void) in_addr_to_string(AF_INET6, (union in_addr_union*) &rt->address, &addr);
+                        (void) in_addr_to_string(AF_INET6, (const union in_addr_union*) &rt->address, &addr);
                         log_ndisc("Received RA from non-link-local address %s. Ignoring", addr);
                         break;
 

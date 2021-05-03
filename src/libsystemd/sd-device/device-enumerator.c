@@ -21,7 +21,7 @@ typedef enum DeviceEnumerationType {
         DEVICE_ENUMERATION_TYPE_DEVICES,
         DEVICE_ENUMERATION_TYPE_SUBSYSTEMS,
         _DEVICE_ENUMERATION_TYPE_MAX,
-        _DEVICE_ENUMERATION_TYPE_INVALID = -1,
+        _DEVICE_ENUMERATION_TYPE_INVALID = -EINVAL,
 } DeviceEnumerationType;
 
 struct sd_device_enumerator {
@@ -63,11 +63,9 @@ _public_ int sd_device_enumerator_new(sd_device_enumerator **ret) {
 }
 
 static sd_device_enumerator *device_enumerator_free(sd_device_enumerator *enumerator) {
-        size_t i;
-
         assert(enumerator);
 
-        for (i = 0; i < enumerator->n_devices; i++)
+        for (size_t i = 0; i < enumerator->n_devices; i++)
                 sd_device_unref(enumerator->devices[i]);
 
         free(enumerator->devices);
@@ -287,13 +285,11 @@ int device_enumerator_add_device(sd_device_enumerator *enumerator, sd_device *de
 
 static bool match_sysattr_value(sd_device *device, const char *sysattr, const char *match_value) {
         const char *value;
-        int r;
 
         assert(device);
         assert(sysattr);
 
-        r = sd_device_get_sysattr_value(device, sysattr, &value);
-        if (r < 0)
+        if (sd_device_get_sysattr_value(device, sysattr, &value) < 0)
                 return false;
 
         if (!match_value)
@@ -784,7 +780,6 @@ static void device_enumerator_dedup_devices(sd_device_enumerator *enumerator) {
 
 int device_enumerator_scan_devices(sd_device_enumerator *enumerator) {
         int r = 0, k;
-        size_t i;
 
         assert(enumerator);
 
@@ -792,7 +787,7 @@ int device_enumerator_scan_devices(sd_device_enumerator *enumerator) {
             enumerator->type == DEVICE_ENUMERATION_TYPE_DEVICES)
                 return 0;
 
-        for (i = 0; i < enumerator->n_devices; i++)
+        for (size_t i = 0; i < enumerator->n_devices; i++)
                 sd_device_unref(enumerator->devices[i]);
 
         enumerator->n_devices = 0;
@@ -851,7 +846,6 @@ _public_ sd_device *sd_device_enumerator_get_device_next(sd_device_enumerator *e
 int device_enumerator_scan_subsystems(sd_device_enumerator *enumerator) {
         const char *subsysdir;
         int r = 0, k;
-        size_t i;
 
         assert(enumerator);
 
@@ -859,7 +853,7 @@ int device_enumerator_scan_subsystems(sd_device_enumerator *enumerator) {
             enumerator->type == DEVICE_ENUMERATION_TYPE_SUBSYSTEMS)
                 return 0;
 
-        for (i = 0; i < enumerator->n_devices; i++)
+        for (size_t i = 0; i < enumerator->n_devices; i++)
                 sd_device_unref(enumerator->devices[i]);
 
         enumerator->n_devices = 0;

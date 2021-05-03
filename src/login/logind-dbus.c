@@ -30,6 +30,7 @@
 #include "format-util.h"
 #include "fs-util.h"
 #include "logind-dbus.h"
+#include "logind-polkit.h"
 #include "logind-seat-dbus.h"
 #include "logind-session-dbus.h"
 #include "logind-user-dbus.h"
@@ -1047,15 +1048,7 @@ static int method_activate_session_on_seat(sd_bus_message *message, void *userda
                 return sd_bus_error_setf(error, BUS_ERROR_SESSION_NOT_ON_SEAT,
                                          "Session %s not on seat %s", session_name, seat_name);
 
-        r = bus_verify_polkit_async(
-                        message,
-                        CAP_SYS_ADMIN,
-                        "org.freedesktop.login1.chvt",
-                        NULL,
-                        false,
-                        UID_INVALID,
-                        &m->polkit_registry,
-                        error);
+        r = check_polkit_chvt(message, m, error);
         if (r < 0)
                 return r;
         if (r == 0)
@@ -1644,7 +1637,7 @@ static int execute_shutdown_or_sleep(
         m->action_what = w;
 
         /* Make sure the lid switch is ignored for a while */
-        manager_set_lid_switch_ignore(m, now(CLOCK_MONOTONIC) + m->holdoff_timeout_usec);
+        manager_set_lid_switch_ignore(m, usec_add(now(CLOCK_MONOTONIC), m->holdoff_timeout_usec));
 
         return 0;
 
@@ -1793,14 +1786,14 @@ static int verify_shutdown_creds(
                 Manager *m,
                 sd_bus_message *message,
                 InhibitWhat w,
-                bool interactive,
                 const char *action,
                 const char *action_multiple_sessions,
                 const char *action_ignore_inhibit,
+                uint64_t flags,
                 sd_bus_error *error) {
 
         _cleanup_(sd_bus_creds_unrefp) sd_bus_creds *creds = NULL;
-        bool multiple_sessions, blocked;
+        bool multiple_sessions, blocked, interactive;
         uid_t uid;
         int r;
 
@@ -1823,6 +1816,7 @@ static int verify_shutdown_creds(
 
         multiple_sessions = r > 0;
         blocked = manager_is_inhibited(m, w, INHIBIT_BLOCK, NULL, false, true, uid, NULL);
+        interactive = flags & SD_LOGIND_INTERACTIVE;
 
         if (multiple_sessions && action_multiple_sessions) {
                 r = bus_verify_polkit_async(message, CAP_SYS_BOOT, action_multiple_sessions, NULL, interactive, UID_INVALID, &m->polkit_registry, error);
@@ -1832,12 +1826,19 @@ static int verify_shutdown_creds(
                         return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
         }
 
-        if (blocked && action_ignore_inhibit) {
-                r = bus_verify_polkit_async(message, CAP_SYS_BOOT, action_ignore_inhibit, NULL, interactive, UID_INVALID, &m->polkit_registry, error);
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+        if (blocked) {
+                /* We don't check polkit for root here, because you can't be more privileged than root */
+                if (uid == 0 && (flags & SD_LOGIND_ROOT_CHECK_INHIBITORS))
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_ACCESS_DENIED,
+                                                 "Access denied to root due to active block inhibitor");
+
+                if (action_ignore_inhibit) {
+                        r = bus_verify_polkit_async(message, CAP_SYS_BOOT, action_ignore_inhibit, NULL, interactive, UID_INVALID, &m->polkit_registry, error);
+                        if (r < 0)
+                                return r;
+                        if (r == 0)
+                                return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+                }
         }
 
         if (!multiple_sessions && !blocked && action) {
@@ -1860,9 +1861,11 @@ static int method_do_shutdown_or_sleep(
                 const char *action_multiple_sessions,
                 const char *action_ignore_inhibit,
                 const char *sleep_verb,
+                bool with_flags,
                 sd_bus_error *error) {
 
-        int interactive, r;
+        uint64_t flags;
+        int r;
 
         assert(m);
         assert(message);
@@ -1870,9 +1873,25 @@ static int method_do_shutdown_or_sleep(
         assert(w >= 0);
         assert(w <= _INHIBIT_WHAT_MAX);
 
-        r = sd_bus_message_read(message, "b", &interactive);
-        if (r < 0)
-                return r;
+        if (with_flags) {
+                /* New style method: with flags parameter (and interactive bool in the bus message header) */
+                r = sd_bus_message_read(message, "t", &flags);
+                if (r < 0)
+                        return r;
+                if ((flags & ~SD_LOGIND_SHUTDOWN_AND_SLEEP_FLAGS_PUBLIC) != 0)
+                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid flags parameter");
+        } else {
+                /* Old style method: no flags parameter, but interactive bool passed as boolean in
+                 * payload. Let's convert this argument to the new-style flags parameter for our internal
+                 * use. */
+                int interactive;
+
+                r = sd_bus_message_read(message, "b", &interactive);
+                if (r < 0)
+                        return r;
+
+                flags = interactive ? SD_LOGIND_INTERACTIVE : 0;
+        }
 
         /* Don't allow multiple jobs being executed at the same time */
         if (m->action_what > 0)
@@ -1891,8 +1910,8 @@ static int method_do_shutdown_or_sleep(
                         return r;
         }
 
-        r = verify_shutdown_creds(m, message, w, interactive, action, action_multiple_sessions,
-                                  action_ignore_inhibit, error);
+        r = verify_shutdown_creds(m, message, w, action, action_multiple_sessions,
+                                  action_ignore_inhibit, flags, error);
         if (r != 0)
                 return r;
 
@@ -1914,6 +1933,7 @@ static int method_poweroff(sd_bus_message *message, void *userdata, sd_bus_error
                         "org.freedesktop.login1.power-off-multiple-sessions",
                         "org.freedesktop.login1.power-off-ignore-inhibit",
                         NULL,
+                        sd_bus_message_is_method_call(message, NULL, "PowerOffWithFlags"),
                         error);
 }
 
@@ -1928,6 +1948,7 @@ static int method_reboot(sd_bus_message *message, void *userdata, sd_bus_error *
                         "org.freedesktop.login1.reboot-multiple-sessions",
                         "org.freedesktop.login1.reboot-ignore-inhibit",
                         NULL,
+                        sd_bus_message_is_method_call(message, NULL, "RebootWithFlags"),
                         error);
 }
 
@@ -1942,6 +1963,7 @@ static int method_halt(sd_bus_message *message, void *userdata, sd_bus_error *er
                         "org.freedesktop.login1.halt-multiple-sessions",
                         "org.freedesktop.login1.halt-ignore-inhibit",
                         NULL,
+                        sd_bus_message_is_method_call(message, NULL, "HaltWithFlags"),
                         error);
 }
 
@@ -1956,6 +1978,7 @@ static int method_suspend(sd_bus_message *message, void *userdata, sd_bus_error 
                         "org.freedesktop.login1.suspend-multiple-sessions",
                         "org.freedesktop.login1.suspend-ignore-inhibit",
                         "suspend",
+                        sd_bus_message_is_method_call(message, NULL, "SuspendWithFlags"),
                         error);
 }
 
@@ -1970,6 +1993,7 @@ static int method_hibernate(sd_bus_message *message, void *userdata, sd_bus_erro
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
                         "hibernate",
+                        sd_bus_message_is_method_call(message, NULL, "HibernateWithFlags"),
                         error);
 }
 
@@ -1984,6 +2008,7 @@ static int method_hybrid_sleep(sd_bus_message *message, void *userdata, sd_bus_e
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
                         "hybrid-sleep",
+                        sd_bus_message_is_method_call(message, NULL, "HybridSleepWithFlags"),
                         error);
 }
 
@@ -1998,6 +2023,7 @@ static int method_suspend_then_hibernate(sd_bus_message *message, void *userdata
                         "org.freedesktop.login1.hibernate-multiple-sessions",
                         "org.freedesktop.login1.hibernate-ignore-inhibit",
                         "hybrid-sleep",
+                        sd_bus_message_is_method_call(message, NULL, "SuspendThenHibernateWithFlags"),
                         error);
 }
 
@@ -2185,8 +2211,8 @@ static int method_schedule_shutdown(sd_bus_message *message, void *userdata, sd_
         } else
                 return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Unsupported shutdown type");
 
-        r = verify_shutdown_creds(m, message, INHIBIT_SHUTDOWN, false,
-                                  action, action_multiple_sessions, action_ignore_inhibit, error);
+        r = verify_shutdown_creds(m, message, INHIBIT_SHUTDOWN, action, action_multiple_sessions,
+                                  action_ignore_inhibit, 0, error);
         if (r != 0)
                 return r;
 
@@ -3538,9 +3564,21 @@ static const sd_bus_vtable manager_vtable[] = {
                                  NULL,,
                                  method_poweroff,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("PowerOffWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
+                                 NULL,,
+                                 method_poweroff,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_NAMES("Reboot",
                                  "b",
                                  SD_BUS_PARAM(interactive),
+                                 NULL,,
+                                 method_reboot,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("RebootWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
                                  NULL,,
                                  method_reboot,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
@@ -3550,9 +3588,21 @@ static const sd_bus_vtable manager_vtable[] = {
                                  NULL,,
                                  method_halt,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("HaltWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
+                                 NULL,,
+                                 method_halt,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_NAMES("Suspend",
                                  "b",
                                  SD_BUS_PARAM(interactive),
+                                 NULL,,
+                                 method_suspend,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("SuspendWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
                                  NULL,,
                                  method_suspend,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
@@ -3562,15 +3612,33 @@ static const sd_bus_vtable manager_vtable[] = {
                                  NULL,,
                                  method_hibernate,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("HibernateWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
+                                 NULL,,
+                                 method_hibernate,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_NAMES("HybridSleep",
                                  "b",
                                  SD_BUS_PARAM(interactive),
                                  NULL,,
                                  method_hybrid_sleep,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("HybridSleepWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
+                                 NULL,,
+                                 method_hybrid_sleep,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
         SD_BUS_METHOD_WITH_NAMES("SuspendThenHibernate",
                                  "b",
                                  SD_BUS_PARAM(interactive),
+                                 NULL,,
+                                 method_suspend_then_hibernate,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_NAMES("SuspendThenHibernateWithFlags",
+                                 "t",
+                                 SD_BUS_PARAM(flags),
                                  NULL,,
                                  method_suspend_then_hibernate,
                                  SD_BUS_VTABLE_UNPRIVILEGED),
@@ -4016,7 +4084,7 @@ int manager_start_scope(
                 return r;
 
         /* disable TasksMax= for the session scope, rely on the slice setting for it */
-        r = sd_bus_message_append(m, "(sv)", "TasksMax", "t", (uint64_t)-1);
+        r = sd_bus_message_append(m, "(sv)", "TasksMax", "t", UINT64_MAX);
         if (r < 0)
                 return bus_log_create_error(r);
 

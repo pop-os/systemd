@@ -408,6 +408,11 @@ static void test_exec_inaccessiblepaths(Manager *m) {
         test(m, "exec-inaccessiblepaths-mount-propagation.service", can_unshare ? 0 : EXIT_FAILURE, CLD_EXITED);
 }
 
+static void test_exec_noexecpaths(Manager *m) {
+
+        test(m, "exec-noexecpaths-simple.service", can_unshare ? 0 : EXIT_FAILURE, CLD_EXITED);
+}
+
 static void test_exec_temporaryfilesystem(Manager *m) {
 
         test(m, "exec-temporaryfilesystem-options.service", can_unshare ? 0 : EXIT_NAMESPACE, CLD_EXITED);
@@ -439,6 +444,7 @@ static void test_exec_systemcallfilter(Manager *m) {
         test(m, "exec-systemcallfilter-with-errno-name.service", errno_from_name("EILSEQ"), CLD_EXITED);
         test(m, "exec-systemcallfilter-with-errno-number.service", 255, CLD_EXITED);
         test(m, "exec-systemcallfilter-with-errno-multi.service", errno_from_name("EILSEQ"), CLD_EXITED);
+        test(m, "exec-systemcallfilter-with-errno-in-allow-list.service", errno_from_name("EILSEQ"), CLD_EXITED);
         test(m, "exec-systemcallfilter-override-error-action.service", SIGSYS, CLD_KILLED);
         test(m, "exec-systemcallfilter-override-error-action2.service", errno_from_name("EILSEQ"), CLD_EXITED);
 #endif
@@ -571,6 +577,11 @@ static void test_exec_dynamicuser(Manager *m) {
         _cleanup_free_ char *bad = private_directory_bad(m);
         if (bad) {
                 log_warning("%s: %s has bad permissions, skipping test.", __func__, bad);
+                return;
+        }
+
+        if (strstr_ptr(ci_environment(), "github-actions")) {
+                log_notice("%s: skipping test on GH Actions because of systemd/systemd#10337", __func__);
                 return;
         }
 
@@ -806,6 +817,10 @@ static void test_exec_standardoutput_append(Manager *m) {
         test(m, "exec-standardoutput-append.service", 0, CLD_EXITED);
 }
 
+static void test_exec_standardoutput_truncate(Manager *m) {
+        test(m, "exec-standardoutput-truncate.service", 0, CLD_EXITED);
+}
+
 static void test_exec_condition(Manager *m) {
         test_service(m, "exec-condition-failed.service", SERVICE_FAILURE_EXIT_CODE);
         test_service(m, "exec-condition-skip.service", SERVICE_SKIP_CONDITION);
@@ -856,6 +871,7 @@ int main(int argc, char *argv[]) {
                 entry(test_exec_ignoresigpipe),
                 entry(test_exec_inaccessiblepaths),
                 entry(test_exec_ioschedulingclass),
+                entry(test_exec_noexecpaths),
                 entry(test_exec_oomscoreadjust),
                 entry(test_exec_passenvironment),
                 entry(test_exec_personality),
@@ -871,6 +887,7 @@ int main(int argc, char *argv[]) {
                 entry(test_exec_standardinput),
                 entry(test_exec_standardoutput),
                 entry(test_exec_standardoutput_append),
+                entry(test_exec_standardoutput_truncate),
                 entry(test_exec_supplementarygroups),
                 entry(test_exec_systemcallerrornumber),
                 entry(test_exec_systemcallfilter),
@@ -892,8 +909,8 @@ int main(int argc, char *argv[]) {
         test_setup_logging(LOG_DEBUG);
 
 #if HAS_FEATURE_ADDRESS_SANITIZER
-        if (strstr_ptr(ci_environment(), "travis")) {
-                log_notice("Running on TravisCI under ASan, skipping, see https://github.com/systemd/systemd/issues/10696");
+        if (strstr_ptr(ci_environment(), "travis") || strstr_ptr(ci_environment(), "github-actions")) {
+                log_notice("Running on Travis CI/GH Actions under ASan, skipping, see https://github.com/systemd/systemd/issues/10696");
                 return EXIT_TEST_SKIP;
         }
 #endif

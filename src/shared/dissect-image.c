@@ -23,17 +23,20 @@
 #include "def.h"
 #include "device-nodes.h"
 #include "device-util.h"
+#include "discover-image.h"
 #include "dissect-image.h"
 #include "dm-util.h"
 #include "env-file.h"
+#include "extension-release.h"
 #include "fd-util.h"
 #include "fileio.h"
 #include "fs-util.h"
 #include "fsck-util.h"
 #include "gpt.h"
 #include "hexdecoct.h"
-#include "hostname-util.h"
+#include "hostname-setup.h"
 #include "id128-util.h"
+#include "import-util.h"
 #include "mkdir.h"
 #include "mount-util.h"
 #include "mountpoint-util.h"
@@ -148,7 +151,8 @@ static int device_is_partition(sd_device *d, blkid_partition pp) {
                 return false;
 
         r = sd_device_get_sysattr_value(d, "partition", &v);
-        if (r == -ENOENT) /* Not a partition device */
+        if (r == -ENOENT ||        /* Not a partition device */
+            ERRNO_IS_PRIVILEGE(r)) /* Not ready to access? */
                 return false;
         if (r < 0)
                 return r;
@@ -245,7 +249,7 @@ static int device_monitor_handler(sd_device_monitor *monitor, sd_device *device,
 
         assert(w);
 
-        if (device_for_action(device, DEVICE_ACTION_REMOVE))
+        if (device_for_action(device, SD_DEVICE_REMOVE))
                 return 0;
 
         r = sd_device_get_parent(device, &pp);
@@ -472,7 +476,7 @@ int dissect_image(
         _cleanup_(blkid_free_probep) blkid_probe b = NULL;
         _cleanup_free_ char *generic_node = NULL;
         sd_id128_t generic_uuid = SD_ID128_NULL;
-        const char *pttype = NULL;
+        const char *pttype = NULL, *sysname = NULL;
         blkid_partlist pl;
         int r, generic_nr, n_partitions;
         struct stat st;
@@ -529,7 +533,7 @@ int dissect_image(
         if (!S_ISBLK(st.st_mode))
                 return -ENOTBLK;
 
-        r = sd_device_new_from_devnum(&d, 'b', st.st_rdev);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0)
                 return r;
 
@@ -578,6 +582,34 @@ int dissect_image(
         m = new0(DissectedImage, 1);
         if (!m)
                 return -ENOMEM;
+
+        r = sd_device_get_sysname(d, &sysname);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to get device sysname: %m");
+        if (startswith(sysname, "loop")) {
+                _cleanup_free_ char *name_stripped = NULL;
+                const char *full_path;
+
+                r = sd_device_get_sysattr_value(d, "loop/backing_file", &full_path);
+                if (r < 0)
+                        log_debug_errno(r, "Failed to lookup image name via loop device backing file sysattr, ignoring: %m");
+                else {
+                        r = raw_strip_suffixes(basename(full_path), &name_stripped);
+                        if (r < 0)
+                                return r;
+                }
+
+                free_and_replace(m->image_name, name_stripped);
+        } else {
+                r = free_and_strdup(&m->image_name, sysname);
+                if (r < 0)
+                        return r;
+        }
+
+        if (!image_name_is_valid(m->image_name)) {
+                log_debug("Image name %s is not valid, ignoring", strempty(m->image_name));
+                m->image_name = mfree(m->image_name);
+        }
 
         if ((!(flags & DISSECT_IMAGE_GPT_ONLY) &&
             (flags & DISSECT_IMAGE_REQUIRE_ROOT)) ||
@@ -1197,9 +1229,11 @@ DissectedImage* dissected_image_unref(DissectedImage *m) {
                 free(m->partitions[i].mount_options);
         }
 
+        free(m->image_name);
         free(m->hostname);
         strv_free(m->machine_info);
         strv_free(m->os_release);
+        strv_free(m->extension_release);
 
         return mfree(m);
 }
@@ -1253,6 +1287,7 @@ static int run_fsck(const char *node, const char *fstype) {
         if (r == 0) {
                 /* Child */
                 execl("/sbin/fsck", "/sbin/fsck", "-aT", node, NULL);
+                log_open();
                 log_debug_errno(errno, "Failed to execl() fsck: %m");
                 _exit(FSCK_OPERATIONAL_ERROR);
         }
@@ -1310,20 +1345,28 @@ static int mount_partition(
         }
 
         if (directory) {
-                if (!FLAGS_SET(flags, DISSECT_IMAGE_READ_ONLY)) {
-                        /* Automatically create missing mount points, if necessary. */
-                        r = mkdir_p_root(where, directory, uid_shift, (gid_t) uid_shift, 0755);
-                        if (r < 0)
-                                return r;
-                }
+                /* Automatically create missing mount points inside the image, if necessary. */
+                r = mkdir_p_root(where, directory, uid_shift, (gid_t) uid_shift, 0755);
+                if (r < 0 && r != -EROFS)
+                        return r;
 
                 r = chase_symlinks(directory, where, CHASE_PREFIX_ROOT, &chased, NULL);
                 if (r < 0)
                         return r;
 
                 p = chased;
-        } else
+        } else {
+                /* Create top-level mount if missing – but only if this is asked for. This won't modify the
+                 * image (as the branch above does) but the host hierarchy, and the created directory might
+                 * survive our mount in the host hierarchy hence. */
+                if (FLAGS_SET(flags, DISSECT_IMAGE_MKDIR)) {
+                        r = mkdir_p(where, 0755);
+                        if (r < 0)
+                                return r;
+                }
+
                 p = where;
+        }
 
         /* If requested, turn on discard support. */
         if (fstype_can_discard(fstype) &&
@@ -1340,19 +1383,13 @@ static int mount_partition(
                 if (asprintf(&uid_option, "uid=" UID_FMT ",gid=" GID_FMT, uid_shift, (gid_t) uid_shift) < 0)
                         return -ENOMEM;
 
-                if (!strextend_with_separator(&options, ",", uid_option, NULL))
+                if (!strextend_with_separator(&options, ",", uid_option))
                         return -ENOMEM;
         }
 
         if (!isempty(m->mount_options))
-                if (!strextend_with_separator(&options, ",", m->mount_options, NULL))
+                if (!strextend_with_separator(&options, ",", m->mount_options))
                         return -ENOMEM;
-
-        if (FLAGS_SET(flags, DISSECT_IMAGE_MKDIR)) {
-                r = mkdir_p(p, 0755);
-                if (r < 0)
-                        return r;
-        }
 
         r = mount_nofollow_verbose(LOG_DEBUG, node, p, fstype, MS_NODEV|(rw ? 0 : MS_RDONLY), options);
         if (r < 0)
@@ -1370,7 +1407,7 @@ int dissected_image_mount(DissectedImage *m, const char *where, uid_t uid_shift,
         /* Returns:
          *
          *  -ENXIO        → No root partition found
-         *  -EMEDIUMTYPE  → DISSECT_IMAGE_VALIDATE_OS set but no os-release file found
+         *  -EMEDIUMTYPE  → DISSECT_IMAGE_VALIDATE_OS set but no os-release/extension-release file found
          *  -EUNATCH      → Encrypted partition found for which no dm-crypt was set up yet
          *  -EUCLEAN      → fsck for file system failed
          *  -EBUSY        → File system already mounted/used elsewhere (kernel)
@@ -1386,10 +1423,6 @@ int dissected_image_mount(DissectedImage *m, const char *where, uid_t uid_shift,
                         return r;
         }
 
-        /* Mask DISSECT_IMAGE_MKDIR for all subdirs: the idea is that only the top-level mount point is
-         * created if needed, but the image itself not modified. */
-        flags &= ~DISSECT_IMAGE_MKDIR;
-
         if ((flags & DISSECT_IMAGE_MOUNT_NON_ROOT_ONLY) == 0) {
                 /* For us mounting root always means mounting /usr as well */
                 r = mount_partition(m->partitions + PARTITION_USR, where, "/usr", uid_shift, flags);
@@ -1400,8 +1433,13 @@ int dissected_image_mount(DissectedImage *m, const char *where, uid_t uid_shift,
                         r = path_is_os_tree(where);
                         if (r < 0)
                                 return r;
-                        if (r == 0)
-                                return -EMEDIUMTYPE;
+                        if (r == 0) {
+                                r = path_is_extension_tree(where, m->image_name);
+                                if (r < 0)
+                                        return r;
+                                if (r == 0)
+                                        return -EMEDIUMTYPE;
+                        }
                 }
         }
 
@@ -1481,7 +1519,7 @@ int dissected_image_mount_and_warn(DissectedImage *m, const char *where, uid_t u
         if (r == -ENXIO)
                 return log_error_errno(r, "Not root file system found in image.");
         if (r == -EMEDIUMTYPE)
-                return log_error_errno(r, "No suitable os-release file in image found.");
+                return log_error_errno(r, "No suitable os-release/extension-release file in image found.");
         if (r == -EUNATCH)
                 return log_error_errno(r, "Encrypted file system discovered, but decryption not requested.");
         if (r == -EUCLEAN)
@@ -1512,13 +1550,12 @@ struct DecryptedImage {
 
 DecryptedImage* decrypted_image_unref(DecryptedImage* d) {
 #if HAVE_LIBCRYPTSETUP
-        size_t i;
         int r;
 
         if (!d)
                 return NULL;
 
-        for (i = 0; i < d->n_decrypted; i++) {
+        for (size_t i = 0; i < d->n_decrypted; i++) {
                 DecryptedPartition *p = d->decrypted + i;
 
                 if (p->device && p->name && !p->relinquished) {
@@ -1532,6 +1569,7 @@ DecryptedImage* decrypted_image_unref(DecryptedImage* d) {
                 free(p->name);
         }
 
+        free(d->decrypted);
         free(d);
 #endif
         return NULL;
@@ -1672,7 +1710,7 @@ static int verity_can_reuse(
 #if HAVE_CRYPT_ACTIVATE_BY_SIGNED_KEY
         /* Ensure that, if signatures are supported, we only reuse the device if the previous mount used the
          * same settings, so that a previous unsigned mount will not be reused if the user asks to use
-         * signing for the new one, and viceversa. */
+         * signing for the new one, and vice versa. */
         if (!!verity->root_hash_sig != !!(crypt_params.flags & CRYPT_VERITY_ROOT_HASH_SIGNATURE))
                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Error opening verity device, it already exists but signature settings are not the same.");
 #endif
@@ -1681,12 +1719,12 @@ static int verity_can_reuse(
         return 0;
 }
 
-static inline void dm_deferred_remove_clean(char *name) {
+static inline char* dm_deferred_remove_clean(char *name) {
         if (!name)
-                return;
+                return NULL;
 
         (void) sym_crypt_deactivate_by_name(NULL, name, CRYPT_DEACTIVATE_DEFERRED);
-        free(name);
+        return mfree(name);
 }
 DEFINE_TRIVIAL_CLEANUP_FUNC(char *, dm_deferred_remove_clean);
 
@@ -1964,19 +2002,15 @@ int dissected_image_decrypt_interactively(
 }
 
 int decrypted_image_relinquish(DecryptedImage *d) {
-
-#if HAVE_LIBCRYPTSETUP
-        size_t i;
-        int r;
-#endif
-
         assert(d);
 
-        /* Turns on automatic removal after the last use ended for all DM devices of this image, and sets a boolean so
-         * that we don't clean it up ourselves either anymore */
+        /* Turns on automatic removal after the last use ended for all DM devices of this image, and sets a
+         * boolean so that we don't clean it up ourselves either anymore */
 
 #if HAVE_LIBCRYPTSETUP
-        for (i = 0; i < d->n_decrypted; i++) {
+        int r;
+
+        for (size_t i = 0; i < d->n_decrypted; i++) {
                 DecryptedPartition *p = d->decrypted + i;
 
                 if (p->relinquished)
@@ -2125,7 +2159,7 @@ int verity_settings_load(
 
         if ((root_hash || verity->root_hash) && !verity->root_hash_sig) {
                 if (root_hash_sig_path) {
-                        r = read_full_file_full(AT_FDCWD, root_hash_sig_path, 0, NULL, (char**) &root_hash_sig, &root_hash_sig_size);
+                        r = read_full_file(root_hash_sig_path, (char**) &root_hash_sig, &root_hash_sig_size);
                         if (r < 0 && r != -ENOENT)
                                 return r;
 
@@ -2141,7 +2175,7 @@ int verity_settings_load(
                                 if (!p)
                                         return -ENOMEM;
 
-                                r = read_full_file_full(AT_FDCWD, p, 0, NULL, (char**) &root_hash_sig, &root_hash_sig_size);
+                                r = read_full_file(p, (char**) &root_hash_sig, &root_hash_sig_size);
                                 if (r < 0 && r != -ENOENT)
                                         return r;
                                 if (r >= 0)
@@ -2155,7 +2189,7 @@ int verity_settings_load(
                                 if (!p)
                                         return -ENOMEM;
 
-                                r = read_full_file_full(AT_FDCWD, p, 0, NULL, (char**) &root_hash_sig, &root_hash_sig_size);
+                                r = read_full_file(p, (char**) &root_hash_sig, &root_hash_sig_size);
                                 if (r < 0 && r != -ENOENT)
                                         return r;
                                 if (r >= 0)
@@ -2207,24 +2241,26 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
                 META_MACHINE_ID,
                 META_MACHINE_INFO,
                 META_OS_RELEASE,
+                META_EXTENSION_RELEASE,
                 _META_MAX,
         };
 
-        static const char *const paths[_META_MAX] = {
-                [META_HOSTNAME]     = "/etc/hostname\0",
-                [META_MACHINE_ID]   = "/etc/machine-id\0",
-                [META_MACHINE_INFO] = "/etc/machine-info\0",
-                [META_OS_RELEASE]   = "/etc/os-release\0"
-                                      "/usr/lib/os-release\0",
+        static const char *paths[_META_MAX] = {
+                [META_HOSTNAME]          = "/etc/hostname\0",
+                [META_MACHINE_ID]        = "/etc/machine-id\0",
+                [META_MACHINE_INFO]      = "/etc/machine-info\0",
+                [META_OS_RELEASE]        = "/etc/os-release\0"
+                                           "/usr/lib/os-release\0",
+                [META_EXTENSION_RELEASE] = NULL,
         };
 
-        _cleanup_strv_free_ char **machine_info = NULL, **os_release = NULL;
+        _cleanup_strv_free_ char **machine_info = NULL, **os_release = NULL, **extension_release = NULL;
         _cleanup_close_pair_ int error_pipe[2] = { -1, -1 };
         _cleanup_(rmdir_and_freep) char *t = NULL;
         _cleanup_(sigkill_waitp) pid_t child = 0;
         sd_id128_t machine_id = SD_ID128_NULL;
         _cleanup_free_ char *hostname = NULL;
-        unsigned n_meta_initialized = 0, k;
+        unsigned n_meta_initialized = 0;
         int fds[2 * _META_MAX], r, v;
         ssize_t n;
 
@@ -2232,11 +2268,28 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
 
         assert(m);
 
-        for (; n_meta_initialized < _META_MAX; n_meta_initialized ++)
+        /* As per the os-release spec, if the image is an extension it will have a file
+         * named after the image name in extension-release.d/ */
+        if (m->image_name) {
+                char *ext;
+
+                ext = strjoina("/usr/lib/extension-release.d/extension-release.", m->image_name, "0");
+                ext[strlen(ext) - 1] = '\0'; /* Extra \0 for NULSTR_FOREACH using placeholder from above */
+                paths[META_EXTENSION_RELEASE] = ext;
+        } else
+                log_debug("No image name available, will skip extension-release metadata");
+
+        for (; n_meta_initialized < _META_MAX; n_meta_initialized ++) {
+                if (!paths[n_meta_initialized]) {
+                        fds[2*n_meta_initialized] = fds[2*n_meta_initialized+1] = -1;
+                        continue;
+                }
+
                 if (pipe2(fds + 2*n_meta_initialized, O_CLOEXEC) < 0) {
                         r = -errno;
                         goto finish;
                 }
+        }
 
         r = mkdtemp_malloc("/tmp/dissect-XXXXXX", &t);
         if (r < 0)
@@ -2262,9 +2315,12 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
                         _exit(EXIT_FAILURE);
                 }
 
-                for (k = 0; k < _META_MAX; k++) {
+                for (unsigned k = 0; k < _META_MAX; k++) {
                         _cleanup_close_ int fd = -ENOENT;
                         const char *p;
+
+                        if (!paths[k])
+                                continue;
 
                         fds[2*k] = safe_close(fds[2*k]);
 
@@ -2279,7 +2335,7 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
                                 continue;
                         }
 
-                        r = copy_bytes(fd, fds[2*k+1], (uint64_t) -1, 0);
+                        r = copy_bytes(fd, fds[2*k+1], UINT64_MAX, 0);
                         if (r < 0) {
                                 (void) write(error_pipe[1], &r, sizeof(r));
                                 _exit(EXIT_FAILURE);
@@ -2293,8 +2349,11 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
 
         error_pipe[1] = safe_close(error_pipe[1]);
 
-        for (k = 0; k < _META_MAX; k++) {
+        for (unsigned k = 0; k < _META_MAX; k++) {
                 _cleanup_fclose_ FILE *f = NULL;
+
+                if (!paths[k])
+                        continue;
 
                 fds[2*k+1] = safe_close(fds[2*k+1]);
 
@@ -2346,6 +2405,13 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
                                 log_debug_errno(r, "Failed to read OS release file: %m");
 
                         break;
+
+                case META_EXTENSION_RELEASE:
+                        r = load_env_file_pairs(f, "extension-release", &extension_release);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to read extension release file: %m");
+
+                        break;
                 }
         }
 
@@ -2369,9 +2435,10 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
         m->machine_id = machine_id;
         strv_free_and_replace(m->machine_info, machine_info);
         strv_free_and_replace(m->os_release, os_release);
+        strv_free_and_replace(m->extension_release, extension_release);
 
 finish:
-        for (k = 0; k < n_meta_initialized; k++)
+        for (unsigned k = 0; k < n_meta_initialized; k++)
                 safe_close_pair(fds + 2*k);
 
         return r;
@@ -2553,5 +2620,109 @@ static const char *const partition_designator_table[] = {
         [PARTITION_TMP] = "tmp",
         [PARTITION_VAR] = "var",
 };
+
+int verity_dissect_and_mount(
+                const char *src,
+                const char *dest,
+                const MountOptions *options,
+                const char *required_host_os_release_id,
+                const char *required_host_os_release_version_id,
+                const char *required_host_os_release_sysext_level) {
+
+        _cleanup_(loop_device_unrefp) LoopDevice *loop_device = NULL;
+        _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
+        _cleanup_(dissected_image_unrefp) DissectedImage *dissected_image = NULL;
+        _cleanup_(verity_settings_done) VeritySettings verity = VERITY_SETTINGS_DEFAULT;
+        DissectImageFlags dissect_image_flags;
+        int r;
+
+        assert(src);
+        assert(dest);
+
+        r = verity_settings_load(&verity, src, NULL, NULL);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to load root hash: %m");
+
+        dissect_image_flags = verity.data_path ? DISSECT_IMAGE_NO_PARTITION_TABLE : 0;
+
+        r = loop_device_make_by_path(
+                        src,
+                        -1,
+                        verity.data_path ? 0 : LO_FLAGS_PARTSCAN,
+                        &loop_device);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to create loop device for image: %m");
+
+        r = dissect_image(
+                        loop_device->fd,
+                        &verity,
+                        options,
+                        dissect_image_flags,
+                        &dissected_image);
+        /* No partition table? Might be a single-filesystem image, try again */
+        if (!verity.data_path && r == -ENOPKG)
+                 r = dissect_image(
+                                loop_device->fd,
+                                &verity,
+                                options,
+                                dissect_image_flags|DISSECT_IMAGE_NO_PARTITION_TABLE,
+                                &dissected_image);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to dissect image: %m");
+
+        r = dissected_image_decrypt(
+                        dissected_image,
+                        NULL,
+                        &verity,
+                        dissect_image_flags,
+                        &decrypted_image);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to decrypt dissected image: %m");
+
+        r = mkdir_p_label(dest, 0755);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to create destination directory %s: %m", dest);
+        r = umount_recursive(dest, 0);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to umount under destination directory %s: %m", dest);
+
+        r = dissected_image_mount(dissected_image, dest, UID_INVALID, dissect_image_flags);
+        if (r < 0)
+                return log_debug_errno(r, "Failed to mount image: %m");
+
+        /* If we got os-release values from the caller, then we need to match them with the image's
+         * extension-release.d/ content. Return -EINVAL if there's any mismatch.
+         * First, check the distro ID. If that matches, then check the new SYSEXT_LEVEL value if
+         * available, or else fallback to VERSION_ID. */
+        if (required_host_os_release_id &&
+            (required_host_os_release_version_id || required_host_os_release_sysext_level)) {
+                _cleanup_strv_free_ char **extension_release = NULL;
+
+                r = load_extension_release_pairs(dest, dissected_image->image_name, &extension_release);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to parse image %s extension-release metadata: %m", dissected_image->image_name);
+
+                r = extension_release_validate(
+                        dissected_image->image_name,
+                        required_host_os_release_id,
+                        required_host_os_release_version_id,
+                        required_host_os_release_sysext_level,
+                        extension_release);
+                if (r == 0)
+                        return log_debug_errno(SYNTHETIC_ERRNO(ESTALE), "Image %s extension-release metadata does not match the root's", dissected_image->image_name);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to compare image %s extension-release metadata with the root's os-release: %m", dissected_image->image_name);
+        }
+
+        if (decrypted_image) {
+                r = decrypted_image_relinquish(decrypted_image);
+                if (r < 0)
+                        return log_debug_errno(r, "Failed to relinquish decrypted image: %m");
+        }
+
+        loop_device_relinquish(loop_device);
+
+        return 0;
+}
 
 DEFINE_STRING_TABLE_LOOKUP(partition_designator, PartitionDesignator);

@@ -10,6 +10,7 @@
 #include "fileio.h"
 #include "networkd-address.h"
 #include "networkd-dhcp-server.h"
+#include "networkd-dhcp-server-bus.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
 #include "networkd-network.h"
@@ -46,7 +47,7 @@ static Address* link_find_dhcp_server_address(Link *link) {
         /* The first statically configured address if there is any */
         ORDERED_HASHMAP_FOREACH(address, link->network->addresses_by_section)
                 if (address->family == AF_INET &&
-                    !in_addr_is_null(address->family, &address->in_addr))
+                    in_addr_is_set(address->family, &address->in_addr))
                         return address;
 
         /* If that didn't work, find a suitable address we got from the pool */
@@ -59,7 +60,7 @@ static Address* link_find_dhcp_server_address(Link *link) {
 
 static int link_push_uplink_to_dhcp_server(
                 Link *link,
-                sd_dhcp_lease_server_type what,
+                sd_dhcp_lease_server_type_t what,
                 sd_dhcp_server *s) {
 
         _cleanup_free_ struct in_addr *addresses = NULL;
@@ -271,6 +272,10 @@ int dhcp4_server_configure(Link *link) {
                         return r;
         }
 
+        r = sd_dhcp_server_set_callback(link->dhcp_server, dhcp_server_callback, link);
+        if (r < 0)
+                return log_link_warning_errno(link, r, "Failed to set callback for DHCPv4 server instance: %m");
+
         address = link_find_dhcp_server_address(link);
         if (!address)
                 return log_link_error_errno(link, SYNTHETIC_ERRNO(EBUSY),
@@ -302,7 +307,7 @@ int dhcp4_server_configure(Link *link) {
                         return log_link_error_errno(link, r, "Failed to set default lease time for DHCPv4 server instance: %m");
         }
 
-        for (sd_dhcp_lease_server_type type = 0; type < _SD_DHCP_LEASE_SERVER_TYPE_MAX; type ++) {
+        for (sd_dhcp_lease_server_type_t type = 0; type < _SD_DHCP_LEASE_SERVER_TYPE_MAX; type ++) {
 
                 if (!link->network->dhcp_server_emit[type].emit)
                         continue;

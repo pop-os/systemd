@@ -15,10 +15,10 @@
 void manager_mdns_stop(Manager *m) {
         assert(m);
 
-        m->mdns_ipv4_event_source = sd_event_source_unref(m->mdns_ipv4_event_source);
+        m->mdns_ipv4_event_source = sd_event_source_disable_unref(m->mdns_ipv4_event_source);
         m->mdns_ipv4_fd = safe_close(m->mdns_ipv4_fd);
 
-        m->mdns_ipv6_event_source = sd_event_source_unref(m->mdns_ipv6_event_source);
+        m->mdns_ipv6_event_source = sd_event_source_disable_unref(m->mdns_ipv6_event_source);
         m->mdns_ipv6_fd = safe_close(m->mdns_ipv6_fd);
 }
 
@@ -237,7 +237,7 @@ static int mdns_scope_process_query(DnsScope *s, DnsPacket *p) {
         if (!ratelimit_below(&s->ratelimit))
                 return 0;
 
-        r = dns_scope_emit_udp(s, -1, reply);
+        r = dns_scope_emit_udp(s, -1, AF_UNSPEC, reply);
         if (r < 0)
                 return log_debug_errno(r, "Failed to send reply packet: %m");
 
@@ -254,7 +254,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
         if (r <= 0)
                 return r;
 
-        if (manager_our_packet(m, p))
+        if (manager_packet_from_local_address(m, p))
                 return 0;
 
         scope = manager_find_scope(m, p);
@@ -265,6 +265,7 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
 
         if (dns_packet_validate_reply(p) > 0) {
                 DnsResourceRecord *rr;
+                DnsTransaction *t;
 
                 log_debug("Got mDNS reply packet");
 
@@ -286,12 +287,15 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                 dns_scope_check_conflicts(scope, p);
 
                 DNS_ANSWER_FOREACH(rr, p->answer) {
-                        const char *name = dns_resource_key_name(rr->key);
-                        DnsTransaction *t;
+                        const char *name;
 
-                        /* If the received reply packet contains ANY record that is not .local or .in-addr.arpa,
-                         * we assume someone's playing tricks on us and discard the packet completely. */
+                        name = dns_resource_key_name(rr->key);
+
+                        /* If the received reply packet contains ANY record that is not .local
+                         * or .in-addr.arpa or .ip6.arpa, we assume someone's playing tricks on
+                         * us and discard the packet completely. */
                         if (!(dns_name_endswith(name, "in-addr.arpa") > 0 ||
+                              dns_name_endswith(name, "ip6.arpa") > 0 ||
                               dns_name_endswith(name, "local") > 0))
                                 return 0;
 
@@ -300,26 +304,17 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                                 /* See the section 10.1 of RFC6762 */
                                 rr->ttl = 1;
                         }
-
-                        t = dns_scope_find_transaction(scope, rr->key, false);
-                        if (t)
-                                dns_transaction_process_reply(t, p);
-
-                        /* Also look for the various types of ANY transactions */
-                        t = dns_scope_find_transaction(scope, &DNS_RESOURCE_KEY_CONST(rr->key->class, DNS_TYPE_ANY, dns_resource_key_name(rr->key)), false);
-                        if (t)
-                                dns_transaction_process_reply(t, p);
-
-                        t = dns_scope_find_transaction(scope, &DNS_RESOURCE_KEY_CONST(DNS_CLASS_ANY, rr->key->type, dns_resource_key_name(rr->key)), false);
-                        if (t)
-                                dns_transaction_process_reply(t, p);
-
-                        t = dns_scope_find_transaction(scope, &DNS_RESOURCE_KEY_CONST(DNS_CLASS_ANY, DNS_TYPE_ANY, dns_resource_key_name(rr->key)), false);
-                        if (t)
-                                dns_transaction_process_reply(t, p);
                 }
 
-                dns_cache_put(&scope->cache, scope->manager->enable_cache, NULL, DNS_PACKET_RCODE(p), p->answer, false, (uint32_t) -1, 0, p->family, &p->sender);
+                LIST_FOREACH(transactions_by_scope, t, scope->transactions) {
+                        r = dns_answer_match_key(p->answer, t->key, NULL);
+                        if (r < 0)
+                                log_debug_errno(r, "Failed to match resource key, ignoring: %m");
+                        else if (r > 0) /* This packet matches the transaction, let's pass it on as reply */
+                                dns_transaction_process_reply(t, p, false);
+                }
+
+                dns_cache_put(&scope->cache, scope->manager->enable_cache, NULL, DNS_PACKET_RCODE(p), p->answer, NULL, false, _DNSSEC_RESULT_INVALID, UINT32_MAX, p->family, &p->sender);
 
         } else if (dns_packet_validate_query(p) > 0)  {
                 log_debug("Got mDNS query packet for id %u", DNS_PACKET_ID(p));

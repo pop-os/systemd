@@ -44,10 +44,9 @@ static int help(void) {
                "                            Required operational state\n"
                "     --any                  Wait until at least one of the interfaces is online\n"
                "     --timeout=SECS         Maximum time to wait for network connectivity\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -83,11 +82,9 @@ static int parse_interface_with_operstate_range(const char *str) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Invalid interface name '%s'", ifname);
 
-        r = hashmap_ensure_allocated(&arg_interfaces, &string_hash_ops);
-        if (r < 0)
+        r = hashmap_ensure_put(&arg_interfaces, &string_hash_ops, ifname, TAKE_PTR(range));
+        if (r == -ENOMEM)
                 return log_oom();
-
-        r = hashmap_put(arg_interfaces, ifname, TAKE_PTR(range));
         if (r < 0)
                 return log_error_errno(r, "Failed to store interface name: %m");
         if (r == 0)
@@ -187,7 +184,7 @@ static int run(int argc, char *argv[]) {
         _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         int r;
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

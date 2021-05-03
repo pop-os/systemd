@@ -200,7 +200,7 @@ static int write_timeout(
         usec_t u;
         int r;
 
-        r = fstab_filter_options(opts, filter, NULL, &timeout, NULL);
+        r = fstab_filter_options(opts, filter, NULL, &timeout, NULL, NULL);
         if (r < 0)
                 return log_warning_errno(r, "Failed to parse options: %m");
         if (r == 0)
@@ -241,7 +241,7 @@ static int write_dependency(
         assert(f);
         assert(opts);
 
-        r = fstab_extract_values(opts, filter, &names);
+        r = fstab_filter_options(opts, filter, NULL, NULL, &names, NULL);
         if (r < 0)
                 return log_warning_errno(r, "Failed to parse options: %m");
         if (r == 0)
@@ -274,17 +274,17 @@ static int write_dependency(
 
 static int write_after(FILE *f, const char *opts) {
         return write_dependency(f, opts,
-                                "x-systemd.after", "After=%1$s\n");
+                                "x-systemd.after\0", "After=%1$s\n");
 }
 
 static int write_requires_after(FILE *f, const char *opts) {
         return write_dependency(f, opts,
-                                "x-systemd.requires", "After=%1$s\nRequires=%1$s\n");
+                                "x-systemd.requires\0", "After=%1$s\nRequires=%1$s\n");
 }
 
 static int write_before(FILE *f, const char *opts) {
         return write_dependency(f, opts,
-                                "x-systemd.before", "Before=%1$s\n");
+                                "x-systemd.before\0", "Before=%1$s\n");
 }
 
 static int write_requires_mounts_for(FILE *f, const char *opts) {
@@ -295,7 +295,7 @@ static int write_requires_mounts_for(FILE *f, const char *opts) {
         assert(f);
         assert(opts);
 
-        r = fstab_extract_values(opts, "x-systemd.requires-mounts-for", &paths);
+        r = fstab_filter_options(opts, "x-systemd.requires-mounts-for\0", NULL, NULL, &paths, NULL);
         if (r < 0)
                 return log_warning_errno(r, "Failed to parse options: %m");
         if (r == 0)
@@ -376,11 +376,11 @@ static int add_mount(
             mount_point_ignore(where))
                 return 0;
 
-        r = fstab_extract_values(opts, "x-systemd.wanted-by", &wanted_by);
+        r = fstab_filter_options(opts, "x-systemd.wanted-by\0", NULL, NULL, &wanted_by, NULL);
         if (r < 0)
                 return r;
 
-        r = fstab_extract_values(opts, "x-systemd.required-by", &required_by);
+        r = fstab_filter_options(opts, "x-systemd.required-by\0", NULL, NULL, &required_by, NULL);
         if (r < 0)
                 return r;
 
@@ -423,7 +423,7 @@ static int add_mount(
                  * mount.nfs (so systemd can manage the job-control aspects of 'bg'),
                  * we need to explicitly preserve that default, and also ensure
                  * the systemd mount-timeout doesn't interfere.
-                 * By placing these options first, they can be over-ridden by
+                 * By placing these options first, they can be overridden by
                  * settings in /etc/fstab. */
                 opts = strjoina("x-systemd.mount-timeout=infinity,retry=10000,nofail,", opts, ",fg");
                 SET_FLAG(flags, NOFAIL, true);
@@ -611,11 +611,11 @@ static int parse_fstab(bool initrd) {
                          * /etc/fstab. So we canonicalize here. Note that we use CHASE_NONEXISTENT to handle the case
                          * where a symlink refers to another mount target; this works assuming the sub-mountpoint
                          * target is the final directory. */
-                        r = chase_symlinks(where, initrd ? "/sysroot" : NULL,
+                        k = chase_symlinks(where, initrd ? "/sysroot" : NULL,
                                            CHASE_PREFIX_ROOT | CHASE_NONEXISTENT,
                                            &canonical_where, NULL);
-                        if (r < 0) /* If we can't canonicalize we continue on as if it wasn't a symlink */
-                                log_debug_errno(r, "Failed to read symlink target for %s, ignoring: %m", where);
+                        if (k < 0) /* If we can't canonicalize we continue on as if it wasn't a symlink */
+                                log_debug_errno(k, "Failed to read symlink target for %s, ignoring: %m", where);
                         else if (streq(canonical_where, where)) /* If it was fully canonicalized, suppress the change */
                                 canonical_where = mfree(canonical_where);
                         else
@@ -671,7 +671,8 @@ static int parse_fstab(bool initrd) {
 
 static int add_sysroot_mount(void) {
         _cleanup_free_ char *what = NULL;
-        const char *opts;
+        const char *opts, *fstype;
+        bool default_rw;
         int r;
 
         if (isempty(arg_root_what)) {
@@ -691,12 +692,29 @@ static int add_sysroot_mount(void) {
                 return 0;
         }
 
-        what = fstab_node_to_udev_node(arg_root_what);
-        if (!what)
-                return log_oom();
+        if (streq(arg_root_what, "tmpfs")) {
+                /* If root=tmpfs is specified, then take this as shortcut for a writable tmpfs mount as root */
+
+                what = strdup("rootfs"); /* just a pretty name, to show up in /proc/self/mountinfo */
+                if (!what)
+                        return log_oom();
+
+                fstype = arg_root_fstype ?: "tmpfs"; /* tmpfs, unless overridden */
+
+                default_rw = true; /* writable, unless overridden */;
+        } else {
+
+                what = fstab_node_to_udev_node(arg_root_what);
+                if (!what)
+                        return log_oom();
+
+                fstype = arg_root_fstype; /* if not specified explicitly, don't default to anything here */
+
+                default_rw = false; /* read-only, unless overridden */
+        }
 
         if (!arg_root_options)
-                opts = arg_root_rw > 0 ? "rw" : "ro";
+                opts = arg_root_rw > 0 || (arg_root_rw < 0 && default_rw) ? "rw" : "ro";
         else if (arg_root_rw >= 0 ||
                  !fstab_test_option(arg_root_options, "ro\0" "rw\0"))
                 opts = strjoina(arg_root_options, ",", arg_root_rw > 0 ? "rw" : "ro");
@@ -715,7 +733,7 @@ static int add_sysroot_mount(void) {
                          what,
                          "/sysroot",
                          NULL,
-                         arg_root_fstype,
+                         fstype,
                          opts,
                          is_device_path(what) ? 1 : 0, /* passno */
                          0,                            /* makefs off, growfs off, noauto off, nofail off, automount off */
@@ -827,23 +845,21 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (free_and_strdup(&arg_root_what, value) < 0)
-                        return log_oom();
+                return free_and_strdup_warn(&arg_root_what, value);
 
         } else if (streq(key, "rootfstype")) {
 
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (free_and_strdup(&arg_root_fstype, value) < 0)
-                        return log_oom();
+                return free_and_strdup_warn(&arg_root_fstype, value);
 
         } else if (streq(key, "rootflags")) {
 
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (!strextend_with_separator(&arg_root_options, ",", value, NULL))
+                if (!strextend_with_separator(&arg_root_options, ",", value))
                         return log_oom();
 
         } else if (streq(key, "roothash")) {
@@ -851,31 +867,28 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (free_and_strdup(&arg_root_hash, value) < 0)
-                        return log_oom();
+                return free_and_strdup_warn(&arg_root_hash, value);
 
         } else if (streq(key, "mount.usr")) {
 
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (free_and_strdup(&arg_usr_what, value) < 0)
-                        return log_oom();
+                return free_and_strdup_warn(&arg_usr_what, value);
 
         } else if (streq(key, "mount.usrfstype")) {
 
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (free_and_strdup(&arg_usr_fstype, value) < 0)
-                        return log_oom();
+                return free_and_strdup_warn(&arg_usr_fstype, value);
 
         } else if (streq(key, "mount.usrflags")) {
 
                 if (proc_cmdline_value_missing(key, value))
                         return 0;
 
-                if (!strextend_with_separator(&arg_usr_options, ",", value, NULL))
+                if (!strextend_with_separator(&arg_usr_options, ",", value))
                         return log_oom();
 
         } else if (streq(key, "rw") && !value)
@@ -888,7 +901,7 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
                 if (value) {
                         m = volatile_mode_from_string(value);
                         if (m < 0)
-                                log_warning("Failed to parse systemd.volatile= argument: %s", value);
+                                log_warning_errno(m, "Failed to parse systemd.volatile= argument: %s", value);
                         else
                                 arg_volatile_mode = m;
                 } else

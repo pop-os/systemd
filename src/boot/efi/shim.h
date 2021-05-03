@@ -9,8 +9,8 @@
  */
 #pragma once
 
-BOOLEAN shim_loaded(void);
+#include <efi.h>
 
-BOOLEAN secure_boot_enabled(void);
+BOOLEAN shim_loaded(void);
 
 EFI_STATUS security_policy_install(void);

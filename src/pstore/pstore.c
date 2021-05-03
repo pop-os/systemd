@@ -53,7 +53,7 @@ typedef enum PStoreStorage {
         PSTORE_STORAGE_EXTERNAL,
         PSTORE_STORAGE_JOURNAL,
         _PSTORE_STORAGE_MAX,
-        _PSTORE_STORAGE_INVALID = -1
+        _PSTORE_STORAGE_INVALID = -EINVAL,
 } PStoreStorage;
 
 static const char* const pstore_storage_table[_PSTORE_STORAGE_MAX] = {
@@ -342,7 +342,7 @@ static int list_files(PStoreList *list, const char *sourcepath) {
                 size_t buf_size;
 
                 /* Now read contents of pstore file */
-                r = read_full_file(ifd_path, &buf, &buf_size);
+                r = read_full_virtual_file(ifd_path, &buf, &buf_size);
                 if (r < 0) {
                         log_warning_errno(r, "Failed to read file %s, skipping: %m", ifd_path);
                         continue;
@@ -367,7 +367,7 @@ static int run(int argc, char *argv[]) {
         _cleanup_(pstore_entries_reset) PStoreList list = {};
         int r;
 
-        log_setup_service();
+        log_setup();
 
         if (argc == 3) {
                 arg_sourcedir = argv[1];
