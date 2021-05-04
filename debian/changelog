@@ -1,10 +1,28 @@
-systemd (247.3-5ubuntu1) UNRELEASED; urgency=medium
+systemd (247.3-5ubuntu1) impish; urgency=medium
 
+  [ Balint Reczey ]
   * Merge to Ubuntu from Debian unstable
     - Dropped changes:
       * LoadCredentials: do not assert on invalid syntax (now present in Debian)
+  * debian/tests: Split upstream test to two parts.
+    The test can take very long time and may time out as it could be
+    observed in Ubuntu's CI system many times.
+    Files:
+    - debian/tests/control
+    - debian/tests/upstream
+    - debian/tests/upstream-1
+    - debian/tests/upstream-2
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a7f894c42d650e3ec62c88c34bdd693a9dfd8df6
+  * debian/gbp.conf: Update debian-branch to ubuntu-impish
+    File: debian/gbp.conf
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=98449bf7530b1b834ba71c80c1a58f2e3909c668
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 03 May 2021 19:42:40 +0200
+  [ Andy Chi ]
+  * Apply upstream patch to correct key and device mapping (LP: #1926547)
+    File: debian/patches/0001-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=0ad362c1975705805c94a17e1887cd3982cc192f
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 04 May 2021 14:20:02 +0200
 
 systemd (247.3-5) unstable; urgency=medium
 
