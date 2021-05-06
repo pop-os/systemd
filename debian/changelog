@@ -1,8 +1,33 @@
-systemd (248-1) UNRELEASED; urgency=medium
+systemd (248-1) experimental; urgency=medium
 
+  [ Balint Reczey ]
   * New upstream version 248
+    - add support for answering DNSSEC questions on the stub resolver
+      (Closes: #988132)
+    - turn off DNSSEC validation when timesyncd resolves hostnames
+      (Closes: #898530)
+    - add networkd/nspawn nftables backend
+      (Closes: #934584)
+    - support ipv6 for masquerade and dnat in nspawn and networkd
+      (Closes: #934676)
+  * Refresh patches
+  * debian/rules: Enable new systemd-sysext tool
+  * debian/rules: Build support for flushing of the nscd caches
+  * debian/rules: Build translations for debs but not for udebs
+  * debian/rules: Build without TPM2 support.
+    This is a new feature and needs further review.
+  * Ship systemd-cryptenroll in systemd package
+  * Update symbols file for libsystemd0
+  * debian/tests/control: Upstream test depends on attr
+  * debian/udev.postinst: Create the sgx system group.
+    Intel SGX enclave device nodes are now owned by this group.
+  * debian/rules: Don't ship README files in (/usr)/lib/*.d.
+    README files are typically shipped in /usr/share/doc.
+  * Revert "pager: stop disabling urlification under a pager"
+    Debian and Ubuntu do not yet have a less version that supports
+    urlification. This requires less 563 or later.
 
- -- Balint Reczey <rbalint@ubuntu.com>  Wed, 31 Mar 2021 15:31:42 +0200
+ -- Michael Biebl <biebl@debian.org>  Thu, 06 May 2021 23:00:08 +0200
 
 systemd (247.3-5) unstable; urgency=medium
 
