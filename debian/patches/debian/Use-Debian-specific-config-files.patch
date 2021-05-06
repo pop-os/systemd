@@ -16,7 +16,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 164 insertions(+), 113 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 3c2b25b..0ca2fb0 100644
+index 78d0390..9f2117d 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
 @@ -1454,19 +1454,43 @@ int get_timezone(char **ret) {
@@ -101,7 +101,7 @@ index 64761dd..b4ea9e2 100644
                  char *s;
  
 diff --git a/src/locale/keymap-util.c b/src/locale/keymap-util.c
-index e8de1b7..f3b235b 100644
+index d2f0566..6d064e2 100644
 --- a/src/locale/keymap-util.c
 +++ b/src/locale/keymap-util.c
 @@ -91,6 +91,7 @@ void locale_simplify(char *locale[_VARIABLE_LC_MAX]) {

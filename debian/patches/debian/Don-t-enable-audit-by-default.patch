@@ -42,7 +42,7 @@ index 8a08b28..6819204 100644
                  .watchdog_usec = USEC_INFINITY,
  
 diff --git a/src/journal/journald.conf b/src/journal/journald.conf
-index 2e675ec..65b79bf 100644
+index 64f4d4b..a690681 100644
 --- a/src/journal/journald.conf
 +++ b/src/journal/journald.conf
 @@ -44,4 +44,4 @@

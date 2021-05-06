@@ -239,7 +239,7 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 6a474af..0dcff3a 100644
+index 3e87e79..a77075a 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -2873,6 +2873,15 @@ executable(
@@ -973,7 +973,7 @@ index 0000000..8876961
 +        return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 +}
 diff --git a/units/meson.build b/units/meson.build
-index 0d0eeea..955ebbf 100644
+index 1546376..49dfab2 100644
 --- a/units/meson.build
 +++ b/units/meson.build
 @@ -108,6 +108,7 @@ units = [

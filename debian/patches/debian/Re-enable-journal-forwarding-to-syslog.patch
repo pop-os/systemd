@@ -42,7 +42,7 @@ index 6d87fa0..8a08b28 100644
  
                  .max_file_usec = DEFAULT_MAX_FILE_USEC,
 diff --git a/src/journal/journald.conf b/src/journal/journald.conf
-index 18d6b30..2e675ec 100644
+index 5a60a9d..64f4d4b 100644
 --- a/src/journal/journald.conf
 +++ b/src/journal/journald.conf
 @@ -32,7 +32,7 @@

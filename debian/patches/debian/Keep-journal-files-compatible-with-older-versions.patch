@@ -41,7 +41,7 @@ index db7f399..6cd9290 100644
          r = compress_blob_xz(src, src_size, dst, dst_alloc_size, dst_size);
          if (r == 0)
 diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
-index f8bb708..af13beb 100644
+index 3cf26f8..018b84a 100644
 --- a/src/libsystemd/sd-journal/journal-file.c
 +++ b/src/libsystemd/sd-journal/journal-file.c
 @@ -3440,10 +3440,10 @@ int journal_file_open(
