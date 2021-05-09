@@ -1,8 +1,8 @@
-systemd (248.2-1) UNRELEASED; urgency=medium
+systemd (248.2-1) experimental; urgency=medium
 
   * New upstream version 248.2
 
- -- Michael Biebl <biebl@debian.org>  Sun, 09 May 2021 21:15:15 +0200
+ -- Michael Biebl <biebl@debian.org>  Sun, 09 May 2021 21:17:10 +0200
 
 systemd (248.1-1) experimental; urgency=medium
 
