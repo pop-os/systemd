@@ -1,3 +1,19 @@
+systemd (248.2-1ubuntu1) UNRELEASED; urgency=medium
+
+  * Merge to Ubuntu from Debian unstable
+    - Dropped changes:
+      * Many cherry-picked upstream fixes:
+        - debian/patches/0001-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
+        - debian/patches/lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch
+        - debian/patches/lp1906331-sd-event-ref-event-loop-while-in-sd_event_prepare-ot.patch
+        - debian/patches/lp1907306/*
+        - debian/patches/lp1914062-udevadm-don-t-return-early.patch
+        - debian/patches/lp1917458-udev-rules-add-rule-to-create-dev-ptp_hyperv.patch
+        - debian/patches/lp1921696/rfkill-improve-error-logging.patch
+        - debian/patches/lp1921696/rfkill-use-short-writes-and-accept-long-reads.patch
+
+ -- Balint Reczey <rbalint@ubuntu.com>  Mon, 10 May 2021 21:01:07 +0200
+
 systemd (248.2-1) experimental; urgency=medium
 
   * New upstream version 248.2
