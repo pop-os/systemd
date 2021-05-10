@@ -19,8 +19,8 @@
 #include "idn-util.h"
 #include "io-util.h"
 #include "missing_network.h"
+#include "missing_socket.h"
 #include "netlink-util.h"
-#include "network-internal.h"
 #include "ordered-set.h"
 #include "parse-util.h"
 #include "random-util.h"
@@ -33,6 +33,7 @@
 #include "resolved-manager.h"
 #include "resolved-mdns.h"
 #include "resolved-resolv-conf.h"
+#include "resolved-util.h"
 #include "resolved-varlink.h"
 #include "socket-util.h"
 #include "string-table.h"
@@ -314,75 +315,65 @@ static int manager_network_monitor_listen(Manager *m) {
         return 0;
 }
 
-static int determine_hostname(char **full_hostname, char **llmnr_hostname, char **mdns_hostname) {
+static int manager_clock_change_listen(Manager *m);
+
+static int on_clock_change(sd_event_source *source, int fd, uint32_t revents, void *userdata) {
+        Manager *m = userdata;
+
+        assert(m);
+
+        /* The clock has changed, let's flush all caches. Why that? That's because DNSSEC validation takes
+         * the system clock into consideration, and if the clock changes the old validations might have been
+         * wrong. Let's redo all validation with the new, correct time.
+         *
+         * (Also, this is triggered after system suspend, which is also a good reason to drop caches, since
+         * we might be connected to a different network now without this being visible in a dropped link
+         * carrier or so.) */
+
+        log_info("Clock change detected. Flushing caches.");
+        manager_flush_caches(m, LOG_DEBUG /* downgrade the functions own log message, since we already logged here at LOG_INFO level */);
+
+        /* The clock change timerfd is unusable after it triggered once, create a new one. */
+        return manager_clock_change_listen(m);
+}
+
+static int manager_clock_change_listen(Manager *m) {
+        _cleanup_close_ int fd = -1;
+        int r;
+
+        assert(m);
+
+        m->clock_change_event_source = sd_event_source_disable_unref(m->clock_change_event_source);
+
+        fd = time_change_fd();
+        if (fd < 0)
+                return log_error_errno(fd, "Failed to allocate clock change timer fd: %m");
+
+        r = sd_event_add_io(m->event, &m->clock_change_event_source, fd, EPOLLIN, on_clock_change, m);
+        if (r < 0)
+                return log_error_errno(r, "Failed to create clock change event source: %m");
+
+        r = sd_event_source_set_io_fd_own(m->clock_change_event_source, true);
+        if (r < 0)
+                return log_error_errno(r, "Failed to pass ownership of clock fd to event source: %m");
+        TAKE_FD(fd);
+
+        (void) sd_event_source_set_description(m->clock_change_event_source, "clock-change");
+
+        return 0;
+}
+
+static int determine_hostnames(char **full_hostname, char **llmnr_hostname, char **mdns_hostname) {
         _cleanup_free_ char *h = NULL, *n = NULL;
-#if HAVE_LIBIDN2
-        _cleanup_free_ char *utf8 = NULL;
-#elif HAVE_LIBIDN
-        int k;
-#endif
-        char label[DNS_LABEL_MAX];
-        const char *p, *decoded;
         int r;
 
         assert(full_hostname);
         assert(llmnr_hostname);
         assert(mdns_hostname);
 
-        /* Extract and normalize the first label of the locally configured hostname, and check it's not "localhost". */
-
-        r = gethostname_strict(&h);
+        r = resolve_system_hostname(&h, &n);
         if (r < 0)
-                return log_debug_errno(r, "Can't determine system hostname: %m");
-
-        p = h;
-        r = dns_label_unescape(&p, label, sizeof label, 0);
-        if (r < 0)
-                return log_error_errno(r, "Failed to unescape hostname: %m");
-        if (r == 0)
-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "Couldn't find a single label in hostname.");
-
-#if HAVE_LIBIDN || HAVE_LIBIDN2
-        r = dlopen_idn();
-        if (r < 0) {
-                log_debug_errno(r, "Failed to initialize IDN support, ignoring: %m");
-                decoded = label; /* no decoding */
-        } else
-#endif
-        {
-#if HAVE_LIBIDN2
-                r = sym_idn2_to_unicode_8z8z(label, &utf8, 0);
-                if (r != IDN2_OK)
-                        return log_error_errno(SYNTHETIC_ERRNO(EUCLEAN),
-                                               "Failed to undo IDNA: %s", sym_idn2_strerror(r));
-                assert(utf8_is_valid(utf8));
-
-                r = strlen(utf8);
-                decoded = utf8;
-#elif HAVE_LIBIDN
-                k = dns_label_undo_idna(label, r, label, sizeof label);
-                if (k < 0)
-                        return log_error_errno(k, "Failed to undo IDNA: %m");
-                if (k > 0)
-                        r = k;
-
-                if (!utf8_is_valid(label))
-                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                               "System hostname is not UTF-8 clean.");
-                decoded = label;
-#else
-                decoded = label; /* no decoding */
-#endif
-        }
-
-        r = dns_label_escape_new(decoded, r, &n);
-        if (r < 0)
-                return log_error_errno(r, "Failed to escape hostname: %m");
-
-        if (is_localhost(n))
-                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
-                                       "System hostname is 'localhost', ignoring.");
+                return r;
 
         r = dns_name_concat(n, "local", 0, mdns_hostname);
         if (r < 0)
@@ -394,20 +385,25 @@ static int determine_hostname(char **full_hostname, char **llmnr_hostname, char 
         return 0;
 }
 
-static const char *fallback_hostname(void) {
+static char* fallback_hostname(void) {
 
-        /* Determine the fall back hostname. For exposing this system to the outside world, we cannot have it to be
-         * "localhost" even if that's the compiled in hostname. In this case, let's revert to "linux" instead. */
+        /* Determine the fall back hostname. For exposing this system to the outside world, we cannot have it
+         * to be "localhost" even if that's the default hostname. In this case, let's revert to "linux"
+         * instead. */
 
-        if (is_localhost(FALLBACK_HOSTNAME))
-                return "linux";
+        _cleanup_free_ char *n = get_default_hostname();
+        if (!n)
+                return NULL;
 
-        return FALLBACK_HOSTNAME;
+        if (is_localhost(n))
+                return strdup("linux");
+
+        return TAKE_PTR(n);
 }
 
 static int make_fallback_hostnames(char **full_hostname, char **llmnr_hostname, char **mdns_hostname) {
-        _cleanup_free_ char *n = NULL, *m = NULL;
-        char label[DNS_LABEL_MAX], *h;
+        _cleanup_free_ char *h = NULL, *n = NULL, *m = NULL;
+        char label[DNS_LABEL_MAX];
         const char *p;
         int r;
 
@@ -415,7 +411,10 @@ static int make_fallback_hostnames(char **full_hostname, char **llmnr_hostname, 
         assert(llmnr_hostname);
         assert(mdns_hostname);
 
-        p = fallback_hostname();
+        p = h = fallback_hostname();
+        if (!h)
+                return log_oom();
+
         r = dns_label_unescape(&p, label, sizeof label, 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to unescape fallback hostname: %m");
@@ -430,14 +429,9 @@ static int make_fallback_hostnames(char **full_hostname, char **llmnr_hostname, 
         if (r < 0)
                 return log_error_errno(r, "Failed to concatenate mDNS hostname: %m");
 
-        h = strdup(fallback_hostname());
-        if (!h)
-                return log_oom();
-
         *llmnr_hostname = TAKE_PTR(n);
         *mdns_hostname = TAKE_PTR(m);
-
-        *full_hostname = h;
+        *full_hostname = TAKE_PTR(h);
 
         return 0;
 }
@@ -450,9 +444,11 @@ static int on_hostname_change(sd_event_source *es, int fd, uint32_t revents, voi
 
         assert(m);
 
-        r = determine_hostname(&full_hostname, &llmnr_hostname, &mdns_hostname);
-        if (r < 0)
+        r = determine_hostnames(&full_hostname, &llmnr_hostname, &mdns_hostname);
+        if (r < 0) {
+                log_warning_errno(r, "Failed to determine the local hostname and LLMNR/mDNS names, ignoring: %m");
                 return 0; /* ignore invalid hostnames */
+        }
 
         llmnr_hostname_changed = !streq(llmnr_hostname, m->llmnr_hostname);
         if (streq(full_hostname, m->full_hostname) &&
@@ -495,9 +491,15 @@ static int manager_watch_hostname(Manager *m) {
 
         (void) sd_event_source_set_description(m->hostname_event_source, "hostname");
 
-        r = determine_hostname(&m->full_hostname, &m->llmnr_hostname, &m->mdns_hostname);
+        r = determine_hostnames(&m->full_hostname, &m->llmnr_hostname, &m->mdns_hostname);
         if (r < 0) {
-                log_info("Defaulting to hostname '%s'.", fallback_hostname());
+                _cleanup_free_ char *d = NULL;
+
+                d = fallback_hostname();
+                if (!d)
+                        return log_oom();
+
+                log_info("Defaulting to hostname '%s'.", d);
 
                 r = make_fallback_hostnames(&m->full_hostname, &m->llmnr_hostname, &m->mdns_hostname);
                 if (r < 0)
@@ -550,7 +552,7 @@ static int manager_sigusr2(sd_event_source *s, const struct signalfd_siginfo *si
         assert(si);
         assert(m);
 
-        manager_flush_caches(m);
+        manager_flush_caches(m, LOG_INFO);
 
         return 0;
 }
@@ -594,9 +596,6 @@ int manager_new(Manager **ret) {
                 .read_resolv_conf = true,
                 .need_builtin_fallbacks = true,
                 .etc_hosts_last = USEC_INFINITY,
-                .etc_hosts_mtime = USEC_INFINITY,
-                .etc_hosts_ino = 0,
-                .etc_hosts_dev = 0,
                 .read_etc_hosts = true,
         };
 
@@ -640,6 +639,10 @@ int manager_new(Manager **ret) {
                 return r;
 
         r = manager_rtnl_listen(m);
+        if (r < 0)
+                return r;
+
+        r = manager_clock_change_listen(m);
         if (r < 0)
                 return r;
 
@@ -691,6 +694,8 @@ Manager *manager_free(Manager *m) {
         while (m->dns_queries)
                 dns_query_free(m->dns_queries);
 
+        m->stub_queries_by_packet = hashmap_free(m->stub_queries_by_packet);
+
         dns_scope_free(m->unicast_scope);
 
         /* At this point only orphaned streams should remain. All others should have been freed already by their
@@ -710,11 +715,14 @@ Manager *manager_free(Manager *m) {
 
         sd_netlink_unref(m->rtnl);
         sd_event_source_unref(m->rtnl_event_source);
+        sd_event_source_unref(m->clock_change_event_source);
 
         manager_llmnr_stop(m);
         manager_mdns_stop(m);
         manager_dns_stub_stop(m);
         manager_varlink_done(m);
+
+        manager_socket_graveyard_clear(m);
 
         ordered_set_free(m->dns_extra_stub_listeners);
 
@@ -726,8 +734,6 @@ Manager *manager_free(Manager *m) {
         sd_event_source_unref(m->sigusr2_event_source);
         sd_event_source_unref(m->sigrtmin1_event_source);
 
-        sd_event_unref(m->event);
-
         dns_resource_key_unref(m->llmnr_host_ipv4_key);
         dns_resource_key_unref(m->llmnr_host_ipv6_key);
         dns_resource_key_unref(m->mdns_host_ipv4_key);
@@ -735,6 +741,8 @@ Manager *manager_free(Manager *m) {
 
         sd_event_source_unref(m->hostname_event_source);
         safe_close(m->hostname_fd);
+
+        sd_event_unref(m->event);
 
         free(m->full_hostname);
         free(m->llmnr_hostname);
@@ -805,6 +813,8 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
         } else
                 return -EAFNOSUPPORT;
 
+        p->timestamp = now(clock_boottime_or_monotonic());
+
         CMSG_FOREACH(cmsg, &mh) {
 
                 if (cmsg->cmsg_level == IPPROTO_IPV6) {
@@ -826,6 +836,9 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                                 p->ttl = *(int *) CMSG_DATA(cmsg);
                                 break;
 
+                        case IPV6_RECVFRAGSIZE:
+                                p->fragsize = *(int *) CMSG_DATA(cmsg);
+                                break;
                         }
                 } else if (cmsg->cmsg_level == IPPROTO_IP) {
                         assert(p->family == AF_INET);
@@ -845,6 +858,10 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         case IP_TTL:
                                 p->ttl = *(int *) CMSG_DATA(cmsg);
                                 break;
+
+                        case IP_RECVFRAGSIZE:
+                                p->fragsize = *(int *) CMSG_DATA(cmsg);
+                                break;
                         }
                 }
         }
@@ -863,8 +880,10 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
                         p->ifindex = manager_find_ifindex(m, p->family, &p->destination);
         }
 
-        *ret = TAKE_PTR(p);
+        log_debug("Received %s UDP packet of size %zu, ifindex=%i, ttl=%i, fragsize=%zu",
+                  dns_protocol_to_string(protocol), p->size, p->ifindex, p->ttl, p->fragsize);
 
+        *ret = TAKE_PTR(p);
         return 1;
 }
 
@@ -1098,6 +1117,12 @@ int manager_find_ifindex(Manager *m, int family, const union in_addr_union *in_a
 
         assert(m);
 
+        if (!IN_SET(family, AF_INET, AF_INET6))
+                return 0;
+
+        if (!in_addr)
+                return 0;
+
         a = manager_find_link_address(m, family, in_addr);
         if (a)
                 return a->link->ifindex;
@@ -1193,6 +1218,12 @@ LinkAddress* manager_find_link_address(Manager *m, int family, const union in_ad
 
         assert(m);
 
+        if (!IN_SET(family, AF_INET, AF_INET6))
+                return NULL;
+
+        if (!in_addr)
+                return NULL;
+
         HASHMAP_FOREACH(l, m->links) {
                 LinkAddress *a;
 
@@ -1204,11 +1235,29 @@ LinkAddress* manager_find_link_address(Manager *m, int family, const union in_ad
         return NULL;
 }
 
-bool manager_our_packet(Manager *m, DnsPacket *p) {
+bool manager_packet_from_local_address(Manager *m, DnsPacket *p) {
         assert(m);
         assert(p);
 
+        /* Let's see if this packet comes from an IP address we have on any local interface */
+
         return !!manager_find_link_address(m, p->family, &p->sender);
+}
+
+bool manager_packet_from_our_transaction(Manager *m, DnsPacket *p) {
+        DnsTransaction *t;
+
+        assert(m);
+        assert(p);
+
+        /* Let's see if we have a transaction with a query message with the exact same binary contents as the
+         * one we just got. If so, it's almost definitely a packet loop of some kind. */
+
+        t = hashmap_get(m->dns_transactions, UINT_TO_PTR(DNS_PACKET_ID(p)));
+        if (!t)
+                return false;
+
+        return t->sent && dns_packet_equal(t->sent, p);
 }
 
 DnsScope* manager_find_scope(Manager *m, DnsPacket *p) {
@@ -1441,7 +1490,7 @@ bool manager_routable(Manager *m) {
         return false;
 }
 
-void manager_flush_caches(Manager *m) {
+void manager_flush_caches(Manager *m, int log_level) {
         DnsScope *scope;
 
         assert(m);
@@ -1449,7 +1498,7 @@ void manager_flush_caches(Manager *m) {
         LIST_FOREACH(scopes, scope, m->dns_scopes)
                 dns_cache_flush(&scope->cache);
 
-        log_info("Flushed all caches.");
+        log_full(log_level, "Flushed all caches.");
 }
 
 void manager_reset_server_features(Manager *m) {
@@ -1548,4 +1597,88 @@ bool manager_next_dnssd_names(Manager *m) {
                 manager_refresh_rrs(m);
 
         return tried;
+}
+
+bool manager_server_is_stub(Manager *m, DnsServer *s) {
+        DnsStubListenerExtra *l;
+
+        assert(m);
+        assert(s);
+
+        /* Safety check: we generally already skip the main stub when parsing configuration. But let's be
+         * extra careful, and check here again */
+        if (s->family == AF_INET &&
+            s->address.in.s_addr == htobe32(INADDR_DNS_STUB) &&
+            dns_server_port(s) == 53)
+                return true;
+
+        /* Main reason to call this is to check server data against the extra listeners, and filter things
+         * out. */
+        ORDERED_SET_FOREACH(l, m->dns_extra_stub_listeners)
+                if (s->family == l->family &&
+                    in_addr_equal(s->family, &s->address, &l->address) &&
+                    dns_server_port(s) == dns_stub_listener_extra_port(l))
+                        return true;
+
+        return false;
+}
+
+int socket_disable_pmtud(int fd, int af) {
+        int r;
+
+        assert(fd >= 0);
+
+        if (af == AF_UNSPEC) {
+                r = socket_get_family(fd, &af);
+                if (r < 0)
+                        return r;
+        }
+
+        switch (af) {
+
+        case AF_INET: {
+                /* Turn off path MTU discovery, let's rather fragment on the way than to open us up against
+                 * PMTU forgery vulnerabilities.
+                 *
+                 * There appears to be no documentation about IP_PMTUDISC_OMIT, but it has the effect that
+                 * the "Don't Fragment" bit in the IPv4 header is turned off, thus enforcing fragmentation if
+                 * our datagram size exceeds the MTU of a router in the path, and turning off path MTU
+                 * discovery.
+                 *
+                 * This helps mitigating the PMTUD vulnerability described here:
+                 *
+                 * https://blog.apnic.net/2019/07/12/its-time-to-consider-avoiding-ip-fragmentation-in-the-dns/
+                 *
+                 * Similar logic is in place in most DNS servers.
+                 *
+                 * There are multiple conflicting goals: we want to allow the largest datagrams possible (for
+                 * efficiency reasons), but not have fragmentation (for security reasons), nor use PMTUD (for
+                 * security reasons, too). Our strategy to deal with this is: use large packets, turn off
+                 * PMTUD, but watch fragmentation taking place, and then size our packets to the max of the
+                 * fragments seen — and if we need larger packets always go to TCP.
+                 */
+
+                r = setsockopt_int(fd, IPPROTO_IP, IP_MTU_DISCOVER, IP_PMTUDISC_OMIT);
+                if (r < 0)
+                        return r;
+
+                return 0;
+        }
+
+        case AF_INET6: {
+                /* On IPv6 fragmentation only is done by the sender — never by routers on the path. PMTUD is
+                 * mandatory. If we want to turn off PMTUD, the only way is by sending with minimal MTU only,
+                 * so that we apply maximum fragmentation locally already, and thus PMTUD doesn't happen
+                 * because there's nothing that could be fragmented further anymore. */
+
+                r = setsockopt_int(fd, IPPROTO_IPV6, IPV6_MTU, IPV6_MIN_MTU);
+                if (r < 0)
+                        return r;
+
+                return 0;
+        }
+
+        default:
+                return -EAFNOSUPPORT;
+        }
 }

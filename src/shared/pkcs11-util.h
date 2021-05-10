@@ -21,8 +21,8 @@ P11KitUri *uri_from_module_info(const CK_INFO *info);
 P11KitUri *uri_from_slot_info(const CK_SLOT_INFO *slot_info);
 P11KitUri *uri_from_token_info(const CK_TOKEN_INFO *token_info);
 
-DEFINE_TRIVIAL_CLEANUP_FUNC(P11KitUri*, p11_kit_uri_free);
-DEFINE_TRIVIAL_CLEANUP_FUNC(CK_FUNCTION_LIST**, p11_kit_modules_finalize_and_release);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(P11KitUri*, p11_kit_uri_free, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(CK_FUNCTION_LIST**, p11_kit_modules_finalize_and_release, NULL);
 
 CK_RV pkcs11_get_slot_list_malloc(CK_FUNCTION_LIST *m, CK_SLOT_ID **ret_slotids, CK_ULONG *ret_n_slotids);
 
@@ -44,4 +44,12 @@ int pkcs11_token_acquire_rng(CK_FUNCTION_LIST *m, CK_SESSION_HANDLE session);
 
 typedef int (*pkcs11_find_token_callback_t)(CK_FUNCTION_LIST *m, CK_SESSION_HANDLE session, CK_SLOT_ID slotid, const CK_SLOT_INFO *slot_info, const CK_TOKEN_INFO *token_info, P11KitUri *uri, void *userdata);
 int pkcs11_find_token(const char *pkcs11_uri, pkcs11_find_token_callback_t callback, void *userdata);
+
+#if HAVE_OPENSSL
+int pkcs11_acquire_certificate(const char *uri, const char *askpw_friendly_name, const char *askpw_icon_name, X509 **ret_cert, char **ret_pin_used);
 #endif
+
+#endif
+
+int pkcs11_list_tokens(void);
+int pkcs11_find_token_auto(char **ret);

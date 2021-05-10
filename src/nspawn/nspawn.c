@@ -36,6 +36,7 @@
 #include "copy.h"
 #include "cpu-set-util.h"
 #include "dev-setup.h"
+#include "discover-image.h"
 #include "dissect-image.h"
 #include "env-util.h"
 #include "escape.h"
@@ -46,13 +47,13 @@
 #include "fs-util.h"
 #include "gpt.h"
 #include "hexdecoct.h"
+#include "hostname-setup.h"
 #include "hostname-util.h"
 #include "id128-util.h"
 #include "io-util.h"
 #include "log.h"
 #include "loop-util.h"
 #include "loopback-setup.h"
-#include "machine-image.h"
 #include "macro.h"
 #include "main-func.h"
 #include "missing_sched.h"
@@ -77,6 +78,7 @@
 #include "nulstr-util.h"
 #include "os-util.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
@@ -165,6 +167,7 @@ static uint64_t arg_caps_retain =
         (1ULL << CAP_SYS_PTRACE) |
         (1ULL << CAP_SYS_RESOURCE) |
         (1ULL << CAP_SYS_TTY_CONFIG);
+static uint64_t arg_caps_ambient = 0;
 static CapabilityQuintet arg_full_capabilities = CAPABILITY_QUINTET_NULL;
 static CustomMount *arg_custom_mounts = NULL;
 static size_t arg_n_custom_mounts = 0;
@@ -214,7 +217,7 @@ static bool arg_oom_score_adjust_set = false;
 static CPUSet arg_cpu_set = {};
 static ResolvConfMode arg_resolv_conf = RESOLV_CONF_AUTO;
 static TimezoneMode arg_timezone = TIMEZONE_AUTO;
-static unsigned arg_console_width = (unsigned) -1, arg_console_height = (unsigned) -1;
+static unsigned arg_console_width = UINT_MAX, arg_console_height = UINT_MAX;
 static DeviceNode* arg_extra_nodes = NULL;
 static size_t arg_n_extra_nodes = 0;
 static char **arg_sysctl = NULL;
@@ -379,6 +382,9 @@ static int help(void) {
                "     --capability=CAP       In addition to the default, retain specified\n"
                "                            capability\n"
                "     --drop-capability=CAP  Drop the specified capability from the default set\n"
+               "     --ambient-capability=CAP\n"
+               "                            Sets the specified capability for the started\n"
+               "                            process. Not useful if booting a machine.\n"
                "     --no-new-privileges    Set PR_SET_NO_NEW_PRIVS flag for container payload\n"
                "     --system-call-filter=LIST|~LIST\n"
                "                            Permit/prohibit specific system calls\n"
@@ -424,12 +430,13 @@ static int help(void) {
                "     --load-credential=ID:PATH\n"
                "                            Load credential to pass to container from file or\n"
                "                            AF_UNIX stream socket.\n"
-               "\nSee the %2$s for details.\n"
-               , program_invocation_short_name
-               , link
-               , ansi_underline(), ansi_normal()
-               , ansi_highlight(), ansi_normal()
-        );
+               "\nSee the %2$s for details.\n",
+               program_invocation_short_name,
+               link,
+               ansi_underline(),
+               ansi_normal(),
+               ansi_highlight(),
+               ansi_normal());
 
         return 0;
 }
@@ -542,7 +549,7 @@ static int parse_capability_spec(const char *spec, uint64_t *ret_mask) {
                 }
 
                 if (streq(t, "all"))
-                        mask = (uint64_t) -1;
+                        mask = UINT64_MAX;
                 else {
                         r = capability_from_name(t);
                         if (r < 0)
@@ -648,6 +655,7 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_UUID,
                 ARG_READ_ONLY,
                 ARG_CAPABILITY,
+                ARG_AMBIENT_CAPABILITY,
                 ARG_DROP_CAPABILITY,
                 ARG_LINK_JOURNAL,
                 ARG_BIND,
@@ -709,6 +717,7 @@ static int parse_argv(int argc, char *argv[]) {
                 { "uuid",                   required_argument, NULL, ARG_UUID                   },
                 { "read-only",              no_argument,       NULL, ARG_READ_ONLY              },
                 { "capability",             required_argument, NULL, ARG_CAPABILITY             },
+                { "ambient-capability",     required_argument, NULL, ARG_AMBIENT_CAPABILITY     },
                 { "drop-capability",        required_argument, NULL, ARG_DROP_CAPABILITY        },
                 { "no-new-privileges",      required_argument, NULL, ARG_NO_NEW_PRIVILEGES      },
                 { "link-journal",           required_argument, NULL, ARG_LINK_JOURNAL           },
@@ -783,7 +792,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return version();
 
                 case 'D':
-                        r = parse_path_argument_and_warn(optarg, false, &arg_directory);
+                        r = parse_path_argument(optarg, false, &arg_directory);
                         if (r < 0)
                                 return r;
 
@@ -791,7 +800,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_TEMPLATE:
-                        r = parse_path_argument_and_warn(optarg, false, &arg_template);
+                        r = parse_path_argument(optarg, false, &arg_template);
                         if (r < 0)
                                 return r;
 
@@ -799,7 +808,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'i':
-                        r = parse_path_argument_and_warn(optarg, false, &arg_image);
+                        r = parse_path_argument(optarg, false, &arg_image);
                         if (r < 0)
                                 return r;
 
@@ -807,7 +816,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_OCI_BUNDLE:
-                        r = parse_path_argument_and_warn(optarg, false, &arg_oci_bundle);
+                        r = parse_path_argument(optarg, false, &arg_oci_bundle);
                         if (r < 0)
                                 return r;
 
@@ -926,7 +935,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_NETWORK_NAMESPACE_PATH:
-                        r = parse_path_argument_and_warn(optarg, false, &arg_network_namespace_path);
+                        r = parse_path_argument(optarg, false, &arg_network_namespace_path);
                         if (r < 0)
                                 return r;
 
@@ -979,7 +988,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (isempty(optarg))
                                 arg_machine = mfree(arg_machine);
                         else {
-                                if (!machine_name_is_valid(optarg))
+                                if (!hostname_is_valid(optarg, 0))
                                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                                "Invalid machine name: %s", optarg);
 
@@ -993,7 +1002,7 @@ static int parse_argv(int argc, char *argv[]) {
                         if (isempty(optarg))
                                 arg_hostname = mfree(arg_hostname);
                         else {
-                                if (!hostname_is_valid(optarg, false))
+                                if (!hostname_is_valid(optarg, 0))
                                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                                "Invalid hostname: %s", optarg);
 
@@ -1018,6 +1027,15 @@ static int parse_argv(int argc, char *argv[]) {
                         arg_settings_mask |= SETTING_READ_ONLY;
                         break;
 
+                case ARG_AMBIENT_CAPABILITY: {
+                        uint64_t m;
+                        r = parse_capability_spec(optarg, &m);
+                        if (r <= 0)
+                                return r;
+                        arg_caps_ambient |= m;
+                        arg_settings_mask |= SETTING_CAPABILITY;
+                        break;
+                }
                 case ARG_CAPABILITY:
                 case ARG_DROP_CAPABILITY: {
                         uint64_t m;
@@ -1092,17 +1110,13 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 'E': {
-                        char **n;
-
                         if (!env_assignment_is_valid(optarg))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Environment variable assignment '%s' is not valid.", optarg);
+                        r = strv_env_replace_strdup(&arg_setenv, optarg);
+                        if (r < 0)
+                                return r;
 
-                        n = strv_env_set(arg_setenv, optarg);
-                        if (!n)
-                                return log_oom();
-
-                        strv_free_and_replace(arg_setenv, n);
                         arg_settings_mask |= SETTING_ENVIRONMENT;
                         break;
                 }
@@ -1263,8 +1277,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                         arg_kill_signal = signal_from_string(optarg);
                         if (arg_kill_signal < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Cannot parse signal: %s", optarg);
+                                return log_error_errno(arg_kill_signal, "Cannot parse signal: %s", optarg);
 
                         arg_settings_mask |= SETTING_KILL_SIGNAL;
                         break;
@@ -1370,7 +1383,7 @@ static int parse_argv(int argc, char *argv[]) {
                 }
 
                 case ARG_VERITY_DATA:
-                        r = parse_path_argument_and_warn(optarg, false, &arg_verity_settings.data_path);
+                        r = parse_path_argument(optarg, false, &arg_verity_settings.data_path);
                         if (r < 0)
                                 return r;
                         break;
@@ -1426,8 +1439,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                         rl = rlimit_from_string_harder(name);
                         if (rl < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Unknown resource limit: %s", name);
+                                return log_error_errno(rl, "Unknown resource limit: %s", name);
 
                         if (!arg_rlimit[rl]) {
                                 arg_rlimit[rl] = new0(struct rlimit, 1);
@@ -1473,7 +1485,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                         arg_resolv_conf = resolv_conf_mode_from_string(optarg);
                         if (arg_resolv_conf < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                return log_error_errno(arg_resolv_conf,
                                                        "Failed to parse /etc/resolv.conf mode: %s", optarg);
 
                         arg_settings_mask |= SETTING_RESOLV_CONF;
@@ -1487,7 +1499,7 @@ static int parse_argv(int argc, char *argv[]) {
 
                         arg_timezone = timezone_mode_from_string(optarg);
                         if (arg_timezone < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                return log_error_errno(arg_timezone,
                                                        "Failed to parse /etc/localtime mode: %s", optarg);
 
                         arg_settings_mask |= SETTING_TIMEZONE;
@@ -1589,7 +1601,10 @@ static int parse_argv(int argc, char *argv[]) {
                                         return log_oom();
                         }
 
-                        r = read_full_file_full(AT_FDCWD, j ?: p, flags, NULL, &data, &size);
+                        r = read_full_file_full(AT_FDCWD, j ?: p, UINT64_MAX, SIZE_MAX,
+                                                flags,
+                                                NULL,
+                                                &data, &size);
                         if (r < 0)
                                 return log_error_errno(r, "Failed to read credential '%s': %m", j ?: p);
 
@@ -1752,10 +1767,16 @@ static int verify_arguments(void) {
         if (arg_expose_ports && !arg_private_network)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Cannot use --port= without private networking.");
 
-#if ! HAVE_LIBIPTC
-        if (arg_expose_ports)
-                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "--port= is not supported, compiled without libiptc support.");
-#endif
+        if (arg_caps_ambient) {
+                if (arg_caps_ambient == UINT64_MAX)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "AmbientCapability= does not support the value all.");
+
+                if ((arg_caps_ambient & arg_caps_retain) != arg_caps_ambient)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "AmbientCapability= setting is not fully covered by Capability= setting.");
+
+                if (arg_start_mode == START_BOOT)
+                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "AmbientCapability= setting is not useful for boot mode.");
+        }
 
         r = custom_mount_check_all();
         if (r < 0)
@@ -2445,14 +2466,21 @@ static int setup_kmsg(int kmsg_socket) {
         return 0;
 }
 
+struct ExposeArgs {
+        union in_addr_union address4;
+        union in_addr_union address6;
+        struct FirewallContext *fw_ctx;
+};
+
 static int on_address_change(sd_netlink *rtnl, sd_netlink_message *m, void *userdata) {
-        union in_addr_union *exposed = userdata;
+        struct ExposeArgs *args = userdata;
 
         assert(rtnl);
         assert(m);
-        assert(exposed);
+        assert(args);
 
-        expose_port_execute(rtnl, arg_expose_ports, exposed);
+        expose_port_execute(rtnl, &args->fw_ctx, arg_expose_ports, AF_INET, &args->address4);
+        expose_port_execute(rtnl, &args->fw_ctx, arg_expose_ports, AF_INET6, &args->address6);
         return 0;
 }
 
@@ -2612,20 +2640,20 @@ static int drop_capabilities(uid_t uid) {
         if (capability_quintet_is_set(&arg_full_capabilities)) {
                 q = arg_full_capabilities;
 
-                if (q.bounding == (uint64_t) -1)
+                if (q.bounding == UINT64_MAX)
                         q.bounding = uid == 0 ? arg_caps_retain : 0;
 
-                if (q.effective == (uint64_t) -1)
+                if (q.effective == UINT64_MAX)
                         q.effective = uid == 0 ? q.bounding : 0;
 
-                if (q.inheritable == (uint64_t) -1)
-                        q.inheritable = uid == 0 ? q.bounding : 0;
+                if (q.inheritable == UINT64_MAX)
+                        q.inheritable = uid == 0 ? q.bounding : arg_caps_ambient;
 
-                if (q.permitted == (uint64_t) -1)
-                        q.permitted = uid == 0 ? q.bounding : 0;
+                if (q.permitted == UINT64_MAX)
+                        q.permitted = uid == 0 ? q.bounding : arg_caps_ambient;
 
-                if (q.ambient == (uint64_t) -1 && ambient_capabilities_supported())
-                        q.ambient = 0;
+                if (q.ambient == UINT64_MAX && ambient_capabilities_supported())
+                        q.ambient = arg_caps_ambient;
 
                 if (capability_quintet_mangle(&q))
                         return log_error_errno(SYNTHETIC_ERRNO(EPERM), "Cannot set capabilities that are not in the current bounding set.");
@@ -2634,9 +2662,9 @@ static int drop_capabilities(uid_t uid) {
                 q = (CapabilityQuintet) {
                         .bounding = arg_caps_retain,
                         .effective = uid == 0 ? arg_caps_retain : 0,
-                        .inheritable = uid == 0 ? arg_caps_retain : 0,
-                        .permitted = uid == 0 ? arg_caps_retain : 0,
-                        .ambient = ambient_capabilities_supported() ? 0 : (uint64_t) -1,
+                        .inheritable = uid == 0 ? arg_caps_retain : arg_caps_ambient,
+                        .permitted = uid == 0 ? arg_caps_retain : arg_caps_ambient,
+                        .ambient = ambient_capabilities_supported() ? arg_caps_ambient : UINT64_MAX,
                 };
 
                 /* If we're not using OCI, proceed with mangled capabilities (so we don't error out)
@@ -2910,7 +2938,7 @@ static int determine_names(void) {
                 if (arg_machine) {
                         _cleanup_(image_unrefp) Image *i = NULL;
 
-                        r = image_find(IMAGE_MACHINE, arg_machine, &i);
+                        r = image_find(IMAGE_MACHINE, arg_machine, NULL, &i);
                         if (r == -ENOENT)
                                 return log_error_errno(r, "No image for machine '%s'.", arg_machine);
                         if (r < 0)
@@ -2955,7 +2983,7 @@ static int determine_names(void) {
                         return log_oom();
 
                 hostname_cleanup(arg_machine);
-                if (!machine_name_is_valid(arg_machine))
+                if (!hostname_is_valid(arg_machine, 0))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to determine machine name automatically, please use -M.");
 
                 if (arg_ephemeral) {
@@ -3017,7 +3045,7 @@ static int determine_uid_shift(const char *directory) {
                 arg_uid_range = UINT32_C(0x10000);
         }
 
-        if (arg_uid_shift > (uid_t) -1 - arg_uid_range)
+        if (arg_uid_shift > UID_INVALID - arg_uid_range)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "UID base too high for UID range.");
 
@@ -4071,6 +4099,7 @@ static int merge_settings(Settings *settings, const char *path) {
         if ((arg_settings_mask & SETTING_CAPABILITY) == 0) {
                 uint64_t plus, minus;
                 uint64_t network_minus = 0;
+                uint64_t ambient;
 
                 /* Note that we copy both the simple plus/minus caps here, and the full quintet from the
                  * Settings structure */
@@ -4102,6 +4131,12 @@ static int merge_settings(Settings *settings, const char *path) {
                         else
                                 arg_full_capabilities = settings->full_capabilities;
                 }
+
+                ambient = settings->ambient_capability;
+                if (!arg_settings_trusted && ambient != 0)
+                        log_warning("Ignoring AmbientCapability= setting, file %s is not trusted.", path);
+                else
+                        arg_caps_ambient |= ambient;
         }
 
         if ((arg_settings_mask & SETTING_KILL_SIGNAL) == 0 &&
@@ -4301,7 +4336,7 @@ static int merge_settings(Settings *settings, const char *path) {
         }
 
         if ((arg_settings_mask & SETTING_CLONE_NS_FLAGS) == 0 &&
-            settings->clone_ns_flags != (unsigned long) -1) {
+            settings->clone_ns_flags != ULONG_MAX) {
 
                 if (!arg_settings_trusted)
                         log_warning("Ignoring namespace setting, file '%s' is not trusted.", path);
@@ -4434,7 +4469,7 @@ static int run_container(
                bool secondary,
                FDSet *fds,
                char veth_name[IFNAMSIZ], bool *veth_created,
-               union in_addr_union *exposed,
+               struct ExposeArgs *expose_args,
                int *master, pid_t *pid, int *ret) {
 
         static const struct sigaction sa = {
@@ -4528,7 +4563,7 @@ static int run_container(
                 if (child_netns_fd < 0)
                         return log_error_errno(errno, "Cannot open file %s: %m", arg_network_namespace_path);
 
-                r = fd_is_network_ns(child_netns_fd);
+                r = fd_is_ns(child_netns_fd, CLONE_NEWNET);
                 if (r == -EUCLEAN)
                         log_debug_errno(r, "Cannot determine if passed network namespace path '%s' really refers to a network namespace, assuming it does.", arg_network_namespace_path);
                 else if (r < 0)
@@ -4815,7 +4850,7 @@ static int run_container(
         assert_se(sigprocmask(SIG_BLOCK, &mask_chld, NULL) >= 0);
 
         /* Reset signal to default */
-        r = default_signals(SIGCHLD, -1);
+        r = default_signals(SIGCHLD);
         if (r < 0)
                 return log_error_errno(r, "Failed to reset SIGCHLD: %m");
 
@@ -4863,11 +4898,12 @@ static int run_container(
         (void) sd_event_add_signal(event, NULL, SIGCHLD, on_sigchld, PID_TO_PTR(*pid));
 
         if (arg_expose_ports) {
-                r = expose_port_watch_rtnl(event, rtnl_socket_pair[0], on_address_change, exposed, &rtnl);
+                r = expose_port_watch_rtnl(event, rtnl_socket_pair[0], on_address_change, expose_args, &rtnl);
                 if (r < 0)
                         return r;
 
-                (void) expose_port_execute(rtnl, arg_expose_ports, exposed);
+                (void) expose_port_execute(rtnl, &expose_args->fw_ctx, arg_expose_ports, AF_INET, &expose_args->address4);
+                (void) expose_port_execute(rtnl, &expose_args->fw_ctx, arg_expose_ports, AF_INET6, &expose_args->address6);
         }
 
         rtnl_socket_pair[0] = safe_close(rtnl_socket_pair[0]);
@@ -4895,7 +4931,7 @@ static int run_container(
                         if (r < 0)
                                 return log_error_errno(r, "Failed to create PTY forwarder: %m");
 
-                        if (arg_console_width != (unsigned) -1 || arg_console_height != (unsigned) -1)
+                        if (arg_console_width != UINT_MAX || arg_console_height != UINT_MAX)
                                 (void) pty_forward_set_width_height(forward,
                                                                     arg_console_width,
                                                                     arg_console_height);
@@ -4994,7 +5030,8 @@ static int run_container(
                 return 0; /* finito */
         }
 
-        expose_port_flush(arg_expose_ports, exposed);
+        expose_port_flush(&expose_args->fw_ctx, arg_expose_ports, AF_INET, &expose_args->address4);
+        expose_port_flush(&expose_args->fw_ctx, arg_expose_ports, AF_INET6, &expose_args->address6);
 
         (void) remove_veth_links(veth_name, arg_network_veth_extra);
         *veth_created = false;
@@ -5123,12 +5160,13 @@ static int run(int argc, char *argv[]) {
         _cleanup_fdset_free_ FDSet *fds = NULL;
         int r, n_fd_passed, ret = EXIT_SUCCESS;
         char veth_name[IFNAMSIZ] = "";
-        union in_addr_union exposed = {};
+        struct ExposeArgs expose_args = {};
         _cleanup_(release_lock_file) LockFile tree_global_lock = LOCK_FILE_INIT, tree_local_lock = LOCK_FILE_INIT;
         char tmprootdir[] = "/tmp/nspawn-root-XXXXXX";
         _cleanup_(loop_device_unrefp) LoopDevice *loop = NULL;
         _cleanup_(decrypted_image_unrefp) DecryptedImage *decrypted_image = NULL;
         _cleanup_(dissected_image_unrefp) DissectedImage *dissected_image = NULL;
+        _cleanup_(fw_ctx_freep) FirewallContext *fw_ctx = NULL;
         pid_t pid = 0;
 
         log_parse_environment();
@@ -5181,7 +5219,7 @@ static int run(int argc, char *argv[]) {
         /* Ignore SIGPIPE here, because we use splice() on the ptyfwd stuff and that will generate SIGPIPE if
          * the result is closed. Note that the container payload child will reset signal mask+handler anyway,
          * so just turning this off here means we only turn it off in nspawn itself, not any children. */
-        (void) ignore_signals(SIGPIPE, -1);
+        (void) ignore_signals(SIGPIPE);
 
         n_fd_passed = sd_listen_fds(false);
         if (n_fd_passed > 0) {
@@ -5485,12 +5523,20 @@ static int run(int argc, char *argv[]) {
                 goto finish;
         }
 
+        if (arg_expose_ports) {
+                r = fw_ctx_new(&fw_ctx);
+                if (r < 0) {
+                        log_error_errno(r, "Cannot expose configured ports, firewall initialization failed: %m");
+                        goto finish;
+                }
+                expose_args.fw_ctx = fw_ctx;
+        }
         for (;;) {
                 r = run_container(dissected_image,
                                   secondary,
                                   fds,
                                   veth_name, &veth_created,
-                                  &exposed, &master,
+                                  &expose_args, &master,
                                   &pid, &ret);
                 if (r <= 0)
                         break;
@@ -5506,7 +5552,7 @@ finish:
 
         /* Try to flush whatever is still queued in the pty */
         if (master >= 0) {
-                (void) copy_bytes(master, STDOUT_FILENO, (uint64_t) -1, 0);
+                (void) copy_bytes(master, STDOUT_FILENO, UINT64_MAX, 0);
                 master = safe_close(master);
         }
 
@@ -5540,7 +5586,8 @@ finish:
                 (void) rm_rf(p, REMOVE_ROOT);
         }
 
-        expose_port_flush(arg_expose_ports, &exposed);
+        expose_port_flush(&fw_ctx, arg_expose_ports, AF_INET,  &expose_args.address4);
+        expose_port_flush(&fw_ctx, arg_expose_ports, AF_INET6, &expose_args.address6);
 
         if (veth_created)
                 (void) remove_veth_links(veth_name, arg_network_veth_extra);

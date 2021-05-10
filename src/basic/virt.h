@@ -41,7 +41,7 @@ enum {
         VIRTUALIZATION_CONTAINER_LAST = VIRTUALIZATION_CONTAINER_OTHER,
 
         _VIRTUALIZATION_MAX,
-        _VIRTUALIZATION_INVALID = -1
+        _VIRTUALIZATION_INVALID = -EINVAL,
 };
 
 static inline bool VIRTUALIZATION_IS_VM(int x) {
@@ -61,3 +61,4 @@ int running_in_chroot(void);
 
 const char *virtualization_to_string(int v) _const_;
 int virtualization_from_string(const char *s) _pure_;
+bool has_cpu_with_flag(const char *flag);

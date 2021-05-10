@@ -5,13 +5,13 @@
 
 #include "alloc-util.h"
 #include "btrfs-util.h"
+#include "discover-image.h"
 #include "fd-util.h"
 #include "format-util.h"
 #include "fs-util.h"
 #include "hostname-util.h"
 #include "import-common.h"
 #include "import-util.h"
-#include "machine-image.h"
 #include "mkdir.h"
 #include "ratelimit.h"
 #include "rm-rf.h"
@@ -126,13 +126,13 @@ static int import_fs(int argc, char *argv[], void *userdata) {
         local = empty_or_dash_to_null(local);
 
         if (local) {
-                if (!machine_name_is_valid(local))
+                if (!hostname_is_valid(local, 0))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                "Local image name '%s' is not valid.",
                                                local);
 
                 if (!arg_force) {
-                        r = image_find(IMAGE_MACHINE, local, NULL);
+                        r = image_find(IMAGE_MACHINE, local, NULL, NULL);
                         if (r < 0) {
                                 if (r != -ENOENT)
                                         return log_error_errno(r, "Failed to check whether image '%s' exists: %m", local);
@@ -196,6 +196,7 @@ static int import_fs(int argc, char *argv[], void *userdata) {
         if (r < 0)
                 goto finish;
 
+        (void) import_assign_pool_quota_and_warn(arg_image_root);
         (void) import_assign_pool_quota_and_warn(temp_path);
 
         if (arg_read_only) {

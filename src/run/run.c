@@ -21,6 +21,7 @@
 #include "fd-util.h"
 #include "format-util.h"
 #include "main-func.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
@@ -131,11 +132,11 @@ static int help(void) {
                "     --on-timezone-change         Run when the timezone changes\n"
                "     --on-clock-change            Run when the realtime clock jumps\n"
                "     --timer-property=NAME=VALUE  Set timer unit property\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight(), ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -470,7 +471,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_WORKING_DIRECTORY:
-                        r = parse_path_argument_and_warn(optarg, true, &arg_working_directory);
+                        r = parse_path_argument(optarg, true, &arg_working_directory);
                         if (r < 0)
                                 return r;
 
@@ -955,10 +956,12 @@ static int make_unit_name(sd_bus *bus, UnitType t, char **ret) {
                 return 0;
         }
 
-        /* We managed to get the unique name, then let's use that to
-         * name our transient units. */
+        /* We managed to get the unique name, then let's use that to name our transient units. */
 
-        id = startswith(unique, ":1.");
+        id = startswith(unique, ":1."); /* let' strip the usual prefix */
+        if (!id)
+                id = startswith(unique, ":"); /* the spec only requires things to start with a colon, hence
+                                               * let's add a generic fallback for that. */
         if (!id)
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Unique name %s has unexpected format.",

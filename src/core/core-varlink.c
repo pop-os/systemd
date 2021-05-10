@@ -142,7 +142,7 @@ static int vl_method_subscribe_managed_oom_cgroups(
         /* We only take one subscriber for this method so return an error if there's already an existing one.
          * This shouldn't happen since systemd-oomd is the only client of this method. */
         if (FLAGS_SET(flags, VARLINK_METHOD_MORE) && m->managed_oom_varlink_request)
-                return varlink_error(m->managed_oom_varlink_request, VARLINK_ERROR_SUBSCRIPTION_TAKEN, NULL);
+                return varlink_error(link, VARLINK_ERROR_SUBSCRIPTION_TAKEN, NULL);
 
         r = json_build(&arr, JSON_BUILD_EMPTY_ARRAY);
         if (r < 0)
@@ -188,6 +188,7 @@ static int vl_method_subscribe_managed_oom_cgroups(
         if (!FLAGS_SET(flags, VARLINK_METHOD_MORE))
                 return varlink_reply(link, v);
 
+        assert(!m->managed_oom_varlink_request);
         m->managed_oom_varlink_request = varlink_ref(link);
         return varlink_notify(m->managed_oom_varlink_request, v);
 }
@@ -432,7 +433,7 @@ int manager_varlink_init(Manager *m) {
         if (!MANAGER_IS_SYSTEM(m))
                 return 0;
 
-        r = varlink_server_new(&s, VARLINK_SERVER_ACCOUNT_UID);
+        r = varlink_server_new(&s, VARLINK_SERVER_ACCOUNT_UID|VARLINK_SERVER_INHERIT_USERDATA);
         if (r < 0)
                 return log_error_errno(r, "Failed to allocate varlink server object: %m");
 
@@ -475,8 +476,7 @@ void manager_varlink_done(Manager *m) {
         assert(m);
 
         /* Send the final message if we still have a subscribe request open. */
-        if (m->managed_oom_varlink_request)
-                m->managed_oom_varlink_request = varlink_close_unref(m->managed_oom_varlink_request);
+        m->managed_oom_varlink_request = varlink_close_unref(m->managed_oom_varlink_request);
 
         m->varlink_server = varlink_server_unref(m->varlink_server);
 }

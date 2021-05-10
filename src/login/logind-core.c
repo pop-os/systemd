@@ -246,7 +246,7 @@ int manager_process_seat_device(Manager *m, sd_device *d) {
 
         assert(m);
 
-        if (device_for_action(d, DEVICE_ACTION_REMOVE) ||
+        if (device_for_action(d, SD_DEVICE_REMOVE) ||
             sd_device_has_current_tag(d, "seat") <= 0) {
                 const char *syspath;
 
@@ -317,7 +317,7 @@ int manager_process_button_device(Manager *m, sd_device *d) {
         if (r < 0)
                 return r;
 
-        if (device_for_action(d, DEVICE_ACTION_REMOVE) ||
+        if (device_for_action(d, SD_DEVICE_REMOVE) ||
             sd_device_has_current_tag(d, "power-switch") <= 0) {
 
                 b = hashmap_get(m->buttons, sysname);
@@ -485,7 +485,7 @@ int config_parse_n_autovts(
 static int vt_is_busy(unsigned vtnr) {
         struct vt_stat vt_stat;
         int r;
-        _cleanup_close_ int fd;
+        _cleanup_close_ int fd = -1;
 
         assert(vtnr >= 1);
 

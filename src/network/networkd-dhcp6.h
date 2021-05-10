@@ -11,7 +11,7 @@ typedef enum DHCP6ClientStartMode {
         DHCP6_CLIENT_START_MODE_INFORMATION_REQUEST,
         DHCP6_CLIENT_START_MODE_SOLICIT,
         _DHCP6_CLIENT_START_MODE_MAX,
-        _DHCP6_CLIENT_START_MODE_INVALID = -1,
+        _DHCP6_CLIENT_START_MODE_INVALID = -EINVAL,
 } DHCP6ClientStartMode;
 
 typedef struct Link Link;
@@ -26,6 +26,7 @@ typedef struct DHCP6DelegatedPrefix {
 DHCP6DelegatedPrefix *dhcp6_pd_free(DHCP6DelegatedPrefix *p);
 DEFINE_TRIVIAL_CLEANUP_FUNC(DHCP6DelegatedPrefix*, dhcp6_pd_free);
 
+bool link_dhcp6_with_address_enabled(Link *link);
 bool link_dhcp6_pd_is_enabled(Link *link);
 int dhcp6_pd_remove(Link *link);
 int dhcp6_configure(Link *link);

@@ -58,14 +58,13 @@ struct job_info {
 
 static int output_jobs_list(sd_bus *bus, const struct job_info* jobs, unsigned n, bool skipped) {
         _cleanup_(table_unrefp) Table *table = NULL;
-        const struct job_info *j;
         const char *on, *off;
         int r;
 
         assert(n == 0 || jobs);
 
         if (n == 0) {
-                if (!arg_no_legend) {
+                if (arg_legend != 0) {
                         on = ansi_highlight_green();
                         off = ansi_normal();
 
@@ -80,13 +79,13 @@ static int output_jobs_list(sd_bus *bus, const struct job_info* jobs, unsigned n
         if (!table)
                 return log_oom();
 
-        table_set_header(table, !arg_no_legend);
+        table_set_header(table, arg_legend != 0);
         if (arg_full)
                 table_set_width(table, 0);
 
         (void) table_set_empty_string(table, "-");
 
-        for (j = jobs; j < jobs + n; j++) {
+        for (const struct job_info *j = jobs; j < jobs + n; j++) {
                 if (streq(j->state, "running"))
                         on = ansi_highlight();
                 else
@@ -112,7 +111,7 @@ static int output_jobs_list(sd_bus *bus, const struct job_info* jobs, unsigned n
         if (r < 0)
                 return log_error_errno(r, "Failed to print the table: %m");
 
-        if (!arg_no_legend) {
+        if (arg_legend != 0) {
                 on = ansi_highlight();
                 off = ansi_normal();
 

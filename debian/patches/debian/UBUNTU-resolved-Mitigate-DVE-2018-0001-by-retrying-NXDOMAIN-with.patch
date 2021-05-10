@@ -18,32 +18,33 @@ Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1796501
 Bug-DNS: https://github.com/dns-violations/dns-violations/blob/master/2018/DVE-2018-0001.md
 (cherry picked from commit cc0a0eb1a9379a81256d68d65f8450a487c0ab12)
 ---
- src/resolve/resolved-dns-transaction.c | 38 +++++++++++++++++++++++++++++-----
- 1 file changed, 33 insertions(+), 5 deletions(-)
+ src/resolve/resolved-dns-transaction.c | 35 ++++++++++++++++++++++++++++++----
+ 1 file changed, 31 insertions(+), 4 deletions(-)
 
 diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
-index 37f0ddd..a34a96c 100644
+index d8c7fcf..96497bf 100644
 --- a/src/resolve/resolved-dns-transaction.c
 +++ b/src/resolve/resolved-dns-transaction.c
-@@ -385,12 +385,12 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
+@@ -471,15 +471,14 @@ static int dns_transaction_pick_server(DnsTransaction *t) {
          if (!server)
                  return -ESRCH;
  
 -        /* If we changed the server invalidate the feature level clamping, as the new server might have completely
 -         * different properties. */
--        if (server != t->server)
-+        /* If we changed the server invalidate the current & clamp feature levels, as the new server might have
++        /* If we changed the server invalidate the feature current & clamp feature levels, as the new server might have
 +         * completely different properties. */
-+        if (server != t->server) {
-                 t->clamp_feature_level = _DNS_SERVER_FEATURE_LEVEL_INVALID;
--
--        t->current_feature_level = dns_server_possible_feature_level(server);
+         if (server != t->server) {
+                 t->clamp_feature_level_servfail = _DNS_SERVER_FEATURE_LEVEL_INVALID;
+                 t->clamp_feature_level_nxdomain = _DNS_SERVER_FEATURE_LEVEL_INVALID;
 +                t->current_feature_level = dns_server_possible_feature_level(server);
-+        }
+         }
  
+-        t->current_feature_level = dns_server_possible_feature_level(server);
+-
          /* Clamp the feature level if that is requested. */
-         if (t->clamp_feature_level != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
-@@ -1027,6 +1027,34 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p) {
+         if (t->clamp_feature_level_servfail != _DNS_SERVER_FEATURE_LEVEL_INVALID &&
+             t->current_feature_level > t->clamp_feature_level_servfail)
+@@ -1163,6 +1162,34 @@ void dns_transaction_process_reply(DnsTransaction *t, DnsPacket *p, bool encrypt
                          return;
                  }
  

@@ -76,12 +76,12 @@ static int synthesize_localhost_rr(Manager *m, const DnsResourceKey *key, int if
 
                 rr->a.in_addr.s_addr = htobe32(INADDR_LOOPBACK);
 
-                r = dns_answer_add(*answer, rr, dns_synthesize_ifindex(ifindex), DNS_ANSWER_AUTHENTICATED);
+                r = dns_answer_add(*answer, rr, dns_synthesize_ifindex(ifindex), DNS_ANSWER_AUTHENTICATED, NULL);
                 if (r < 0)
                         return r;
         }
 
-        if (IN_SET(key->type, DNS_TYPE_AAAA, DNS_TYPE_ANY)) {
+        if (IN_SET(key->type, DNS_TYPE_AAAA, DNS_TYPE_ANY) && socket_ipv6_is_enabled()) {
                 _cleanup_(dns_resource_record_unrefp) DnsResourceRecord *rr = NULL;
 
                 rr = dns_resource_record_new_full(DNS_CLASS_IN, DNS_TYPE_AAAA, dns_resource_key_name(key));
@@ -90,7 +90,7 @@ static int synthesize_localhost_rr(Manager *m, const DnsResourceKey *key, int if
 
                 rr->aaaa.in6_addr = in6addr_loopback;
 
-                r = dns_answer_add(*answer, rr, dns_synthesize_ifindex(ifindex), DNS_ANSWER_AUTHENTICATED);
+                r = dns_answer_add(*answer, rr, dns_synthesize_ifindex(ifindex), DNS_ANSWER_AUTHENTICATED, NULL);
                 if (r < 0)
                         return r;
         }
@@ -109,7 +109,7 @@ static int answer_add_ptr(DnsAnswer **answer, const char *from, const char *to, 
         if (!rr->ptr.name)
                 return -ENOMEM;
 
-        return dns_answer_add(*answer, rr, ifindex, flags);
+        return dns_answer_add(*answer, rr, ifindex, flags, NULL);
 }
 
 static int synthesize_localhost_ptr(Manager *m, const DnsResourceKey *key, int ifindex, DnsAnswer **answer) {
@@ -155,7 +155,7 @@ static int answer_add_addresses_rr(
                 if (r < 0)
                         return r;
 
-                r = dns_answer_add(*answer, rr, addresses[j].ifindex, DNS_ANSWER_AUTHENTICATED);
+                r = dns_answer_add(*answer, rr, addresses[j].ifindex, DNS_ANSWER_AUTHENTICATED, NULL);
                 if (r < 0)
                         return r;
         }
@@ -197,7 +197,7 @@ static int answer_add_addresses_ptr(
                 if (r < 0)
                         return r;
 
-                r = dns_answer_add(*answer, rr, addresses[j].ifindex, DNS_ANSWER_AUTHENTICATED);
+                r = dns_answer_add(*answer, rr, addresses[j].ifindex, DNS_ANSWER_AUTHENTICATED, NULL);
                 if (r < 0)
                         return r;
 
@@ -234,7 +234,7 @@ static int synthesize_system_hostname_rr(Manager *m, const DnsResourceKey *key, 
                                         .address.in.s_addr = htobe32(0x7F000002),
                                 };
 
-                        if (IN_SET(af, AF_INET6, AF_UNSPEC))
+                        if (IN_SET(af, AF_INET6, AF_UNSPEC) && socket_ipv6_is_enabled())
                                 buffer[n++] = (struct local_address) {
                                         .family = AF_INET6,
                                         .ifindex = dns_synthesize_ifindex(ifindex),

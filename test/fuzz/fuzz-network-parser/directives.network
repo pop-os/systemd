@@ -30,6 +30,7 @@ Host=
 MACAddress=
 PermanentMACAddress=
 [Link]
+ActivationPolicy=
 RequiredForOnline=
 ARP=
 AllMulticast=
@@ -38,6 +39,7 @@ MTUBytes=
 Multicast=
 MACAddress=
 Group=
+Promiscuous=
 [SR-IOV]
 VirtualFunction=
 MACSpoofCheck=
@@ -122,8 +124,10 @@ MUDURL=
 RouteMTUBytes=
 FallbackLeaseLifetimeSec=
 [DHCPv6]
+UseAddress=
 UseNTP=
 UseDNS=
+UseHostname=
 RapidCommit=
 ForceDHCPv6PDOtherInformation=
 PrefixDelegationHint=
@@ -139,6 +143,7 @@ RouteMetric=
 SubnetId=
 Announce=
 Assign=
+ManageTemporaryAddress=
 Token=
 [Route]
 Destination=
@@ -160,6 +165,8 @@ Source=
 Metric=
 TTLPropagate=
 MultiPathRoute=
+TCPAdvertisedMaximumSegmentSize=
+NextHop=
 [Network]
 IPv6DuplicateAddressDetection=
 IPMasquerade=
@@ -172,6 +179,7 @@ IPv6ProxyNDPAddress=
 IPv6AcceptRA=
 IPv6AcceptRouterAdvertisements=
 IPv4AcceptLocal=
+IPv4RouteLocalnet=
 DNSSECNegativeTrustAnchors=
 MACVTAP=
 IPv6PrivacyExtensions=
@@ -218,6 +226,7 @@ VRF=
 IgnoreCarrierLoss=
 KeepConfiguration=
 DHCPv6PrefixDelegation=
+BatmanAdvanced=
 [IPv6Prefix]
 Prefix=
 OnLink=
@@ -243,6 +252,7 @@ FDMode=
 FDNonISO=
 RestartSec=
 TripleSampling=
+BusErrorReporting=
 Termination=
 ListenOnly=
 [Address]
@@ -274,6 +284,7 @@ InvertRule=
 Family=
 SuppressPrefixLength=
 User=
+Type=
 [IPv6SendRA]
 RouterPreference=
 DNSLifetimeSec=
@@ -308,6 +319,12 @@ UseDNS=
 DHCPv6Client=
 UseAutonomousPrefix=
 UseOnLinkPrefix=
+RouterAllowList=
+RouterDenyList=
+PrefixAllowList=
+PrefixDenyList=
+RouteAllowList=
+RouteDenyList=
 DenyList=
 BlackList=
 [DHCPServer]
@@ -335,6 +352,9 @@ SendVendorOption=
 [NextHop]
 Id=
 Gateway=
+Family=
+OnLink=
+Blackhole=
 [QDisc]
 Parent=
 Handle=

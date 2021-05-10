@@ -19,6 +19,7 @@ basic_sources = files('''
         blockdev-util.h
         btrfs-util.c
         btrfs-util.h
+        build.c
         build.h
         bus-label.c
         bus-label.h
@@ -41,6 +42,7 @@ basic_sources = files('''
         dirent-util.h
         dlfcn-util.c
         dlfcn-util.h
+        dns-def.h
         efivars.c
         efivars.h
         env-file.c
@@ -81,8 +83,6 @@ basic_sources = files('''
         io-util.c
         io-util.h
         ioprio.h
-        kbd-util.c
-        kbd-util.h
         khash.c
         khash.h
         label.c
@@ -113,7 +113,12 @@ basic_sources = files('''
         linux/libc-compat.h
         linux/loadavg.h
         linux/netdevice.h
+        linux/netfilter/nf_tables.h
+        linux/netfilter/nfnetlink.h
         linux/netlink.h
+        linux/nexthop.h
+        linux/nl80211.h
+        linux/pkt_sched.h
         linux/rtnetlink.h
         linux/wireguard.h
         list.h
@@ -163,12 +168,16 @@ basic_sources = files('''
         nulstr-util.h
         ordered-set.c
         ordered-set.h
+        os-util.c
+        os-util.h
         parse-util.c
         parse-util.h
         path-lookup.c
         path-lookup.h
         path-util.c
         path-util.h
+        percent-util.c
+        percent-util.h
         prioq.c
         prioq.h
         proc-cmdline.c
@@ -186,6 +195,8 @@ basic_sources = files('''
         ratelimit.h
         raw-clone.h
         raw-reboot.h
+        recovery-key.c
+        recovery-key.h
         replace-var.c
         replace-var.h
         rlimit-util.c
@@ -224,6 +235,8 @@ basic_sources = files('''
         strv.h
         strxcpyx.c
         strxcpyx.h
+        sysctl-util.c
+        sysctl-util.h
         syslog-util.c
         syslog-util.h
         terminal-util.c
@@ -236,6 +249,8 @@ basic_sources = files('''
         unaligned.h
         unit-def.c
         unit-def.h
+        unit-file.c
+        unit-file.h
         unit-name.c
         unit-name.h
         user-util.c
@@ -253,6 +268,9 @@ basic_sources = files('''
 missing_audit_h = files('missing_audit.h')
 missing_capability_h = files('missing_capability.h')
 missing_socket_h = files('missing_socket.h')
+
+missing_syscall_def_h = files('missing_syscall_def.h')
+basic_sources += missing_syscall_def_h
 
 generate_af_list = find_program('generate-af-list.sh')
 af_list_txt = custom_target(
@@ -322,14 +340,53 @@ foreach item : [['af',     af_list_txt,     'af',         ''],
 endforeach
 
 basic_sources += generated_gperf_headers
-basic_gcrypt_sources = files(
-        'gcrypt-util.c',
-        'gcrypt-util.h')
+
+############################################################
+
+arch_list = [
+        'alpha',
+        'arc',
+        'arm',
+        'arm64',
+        'i386',
+        'ia64',
+        'm68k',
+        'mips64',
+        'mips64n32',
+        'mipso32',
+        'powerpc',
+        'powerpc64',
+        's390',
+        's390x',
+        'sparc',
+        'x86_64']
+
+run_target(
+        'update-syscall-tables',
+        command : [update_syscall_tables_sh, meson.current_source_dir()] + arch_list)
+
+syscall_list_txt = files('syscall-list.txt')
+
+syscall_lists = []
+foreach arch: arch_list
+        syscall_lists += files('syscalls-@0@.txt'.format(arch))
+endforeach
+
+missing_syscalls_py = find_program('missing_syscalls.py')
+
+run_target(
+        'update-syscall-header',
+        command : [missing_syscalls_py,
+                   missing_syscall_def_h,
+                   syscall_lists])
+
+############################################################
 
 libbasic = static_library(
         'basic',
         basic_sources,
-        include_directories : includes,
+        fundamental_sources,
+        include_directories : basic_includes,
         dependencies : [versiondep,
                         threads,
                         libcap,
@@ -340,11 +397,17 @@ libbasic = static_library(
         c_args : ['-fvisibility=default'],
         install : false)
 
+############################################################
+
+basic_gcrypt_sources = files(
+        'gcrypt-util.c',
+        'gcrypt-util.h')
+
 # A convenience library that is separate from libbasic to avoid
 # unnecessary linking to libgcrypt.
 libbasic_gcrypt = static_library(
         'basic-gcrypt',
         basic_gcrypt_sources,
-        include_directories : includes,
+        include_directories : basic_includes,
         dependencies : [libgcrypt],
         c_args : ['-fvisibility=default'])

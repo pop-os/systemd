@@ -44,7 +44,7 @@ typedef enum CGroupDevicePolicy {
         CGROUP_DEVICE_POLICY_STRICT,
 
         _CGROUP_DEVICE_POLICY_MAX,
-        _CGROUP_DEVICE_POLICY_INVALID = -1
+        _CGROUP_DEVICE_POLICY_INVALID = -EINVAL,
 } CGroupDevicePolicy;
 
 typedef enum FreezerAction {
@@ -52,7 +52,7 @@ typedef enum FreezerAction {
         FREEZER_THAW,
 
         _FREEZER_ACTION_MAX,
-        _FREEZER_ACTION_INVALID = -1,
+        _FREEZER_ACTION_INVALID = -EINVAL,
 } FreezerAction;
 
 struct CGroupDeviceAllow {
@@ -163,7 +163,8 @@ struct CGroupContext {
         /* Settings for systemd-oomd */
         ManagedOOMMode moom_swap;
         ManagedOOMMode moom_mem_pressure;
-        int moom_mem_pressure_limit;
+        uint32_t moom_mem_pressure_limit; /* Normalized to 2^32-1 == 100% */
+        ManagedOOMPreference moom_preference;
 };
 
 /* Used when querying IP accounting data */
@@ -173,7 +174,7 @@ typedef enum CGroupIPAccountingMetric {
         CGROUP_IP_EGRESS_BYTES,
         CGROUP_IP_EGRESS_PACKETS,
         _CGROUP_IP_ACCOUNTING_METRIC_MAX,
-        _CGROUP_IP_ACCOUNTING_METRIC_INVALID = -1,
+        _CGROUP_IP_ACCOUNTING_METRIC_INVALID = -EINVAL,
 } CGroupIPAccountingMetric;
 
 /* Used when querying IO accounting data */
@@ -183,7 +184,7 @@ typedef enum CGroupIOAccountingMetric {
         CGROUP_IO_READ_OPERATIONS,
         CGROUP_IO_WRITE_OPERATIONS,
         _CGROUP_IO_ACCOUNTING_METRIC_MAX,
-        _CGROUP_IO_ACCOUNTING_METRIC_INVALID = -1,
+        _CGROUP_IO_ACCOUNTING_METRIC_INVALID = -EINVAL,
 } CGroupIOAccountingMetric;
 
 typedef struct Unit Unit;
@@ -203,6 +204,8 @@ void cgroup_context_free_blockio_device_weight(CGroupContext *c, CGroupBlockIODe
 void cgroup_context_free_blockio_device_bandwidth(CGroupContext *c, CGroupBlockIODeviceBandwidth *b);
 
 int cgroup_add_device_allow(CGroupContext *c, const char *dev, const char *mode);
+
+void cgroup_oomd_xattr_apply(Unit *u, const char *cgroup_path);
 
 CGroupMask unit_get_own_mask(Unit *u);
 CGroupMask unit_get_delegate_mask(Unit *u);

@@ -44,6 +44,7 @@
 #include "main-func.h"
 #include "netlink-util.h"
 #include "network-internal.h"
+#include "network-util.h"
 #include "pager.h"
 #include "parse-util.h"
 #include "pretty-print.h"
@@ -229,7 +230,7 @@ static int link_info_compare(const LinkInfo *a, const LinkInfo *b) {
         return CMP(a->ifindex, b->ifindex);
 }
 
-static const LinkInfo* link_info_array_free(LinkInfo *array) {
+static LinkInfo* link_info_array_free(LinkInfo *array) {
         for (unsigned i = 0; array && array[i].needs_freeing; i++) {
                 sd_device_unref(array[i].sd_device);
                 free(array[i].ssid);
@@ -579,8 +580,7 @@ static int acquire_link_info(sd_bus *bus, sd_netlink *rtnl, char **patterns, Lin
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL, *reply = NULL;
         _cleanup_(link_info_array_freep) LinkInfo *links = NULL;
         _cleanup_close_ int fd = -1;
-        size_t allocated = 0, c = 0, j;
-        sd_netlink_message *i;
+        size_t allocated = 0, c = 0;
         int r;
 
         assert(rtnl);
@@ -605,7 +605,7 @@ static int acquire_link_info(sd_bus *bus, sd_netlink *rtnl, char **patterns, Lin
                         return log_oom();
         }
 
-        for (i = reply; i; i = sd_netlink_message_next(i)) {
+        for (sd_netlink_message *i = reply; i; i = sd_netlink_message_next(i)) {
                 if (!GREEDY_REALLOC0(links, allocated, c + 2)) /* We keep one trailing one as marker */
                         return -ENOMEM;
 
@@ -644,7 +644,7 @@ static int acquire_link_info(sd_bus *bus, sd_netlink *rtnl, char **patterns, Lin
         typesafe_qsort(links, c, link_info_compare);
 
         if (bus)
-                for (j = 0; j < c; j++)
+                for (size_t j = 0; j < c; j++)
                         (void) acquire_link_bitrates(bus, links + j);
 
         *ret = TAKE_PTR(links);
@@ -660,7 +660,7 @@ static int list_links(int argc, char *argv[], void *userdata) {
         _cleanup_(link_info_array_freep) LinkInfo *links = NULL;
         _cleanup_(table_unrefp) Table *table = NULL;
         TableCell *cell;
-        int c, i, r;
+        int c, r;
 
         r = sd_netlink_open(&rtnl);
         if (r < 0)
@@ -690,7 +690,7 @@ static int list_links(int argc, char *argv[], void *userdata) {
         assert_se(cell = table_get_cell(table, 0, 1));
         (void) table_set_ellipsize_percent(table, cell, 100);
 
-        for (i = 0; i < c; i++) {
+        for (int i = 0; i < c; i++) {
                 _cleanup_free_ char *setup_state = NULL, *operational_state = NULL;
                 const char *on_color_operational, *off_color_operational,
                            *on_color_setup, *off_color_setup;
@@ -704,7 +704,7 @@ static int list_links(int argc, char *argv[], void *userdata) {
                         setup_state = strdup("unmanaged");
                 setup_state_to_color(setup_state, &on_color_setup, &off_color_setup);
 
-                t = link_get_type_string(links[i].iftype, links[i].sd_device);
+                t = link_get_type_string(links[i].sd_device, links[i].iftype);
 
                 r = table_add_many(table,
                                    TABLE_INT, links[i].ifindex,
@@ -770,7 +770,6 @@ static int get_gateway_description(
                 union in_addr_union *gateway,
                 char **gateway_description) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL, *reply = NULL;
-        sd_netlink_message *m;
         int r;
 
         assert(rtnl);
@@ -791,7 +790,7 @@ static int get_gateway_description(
         if (r < 0)
                 return r;
 
-        for (m = reply; m; m = sd_netlink_message_next(m)) {
+        for (sd_netlink_message *m = reply; m; m = sd_netlink_message_next(m)) {
                 union in_addr_union gw = IN_ADDR_NULL;
                 struct ether_addr mac = ETHER_ADDR_NULL;
                 uint16_t type;
@@ -891,7 +890,7 @@ static int dump_gateways(
                 int ifindex) {
         _cleanup_free_ struct local_address *local = NULL;
         _cleanup_strv_free_ char **buf = NULL;
-        int r, n, i;
+        int r, n;
 
         assert(rtnl);
         assert(table);
@@ -900,7 +899,7 @@ static int dump_gateways(
         if (n <= 0)
                 return n;
 
-        for (i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
                 _cleanup_free_ char *gateway = NULL, *description = NULL, *with_description = NULL;
                 char name[IF_NAMESIZE+1];
 
@@ -939,7 +938,7 @@ static int dump_addresses(
         _cleanup_free_ struct local_address *local = NULL;
         _cleanup_strv_free_ char **buf = NULL;
         struct in_addr dhcp4_address = {};
-        int r, n, i;
+        int r, n;
 
         assert(rtnl);
         assert(table);
@@ -951,7 +950,7 @@ static int dump_addresses(
         if (lease)
                 (void) sd_dhcp_lease_get_address(lease, &dhcp4_address);
 
-        for (i = 0; i < n; i++) {
+        for (int i = 0; i < n; i++) {
                 _cleanup_free_ char *pretty = NULL;
                 char name[IF_NAMESIZE+1];
 
@@ -988,7 +987,6 @@ static int dump_addresses(
 static int dump_address_labels(sd_netlink *rtnl) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL, *reply = NULL;
         _cleanup_(table_unrefp) Table *table = NULL;
-        sd_netlink_message *m;
         TableCell *cell;
         int r;
 
@@ -1013,7 +1011,7 @@ static int dump_address_labels(sd_netlink *rtnl) {
         if (arg_full)
                 table_set_width(table, 0);
 
-        r = table_set_sort(table, (size_t) 0, (size_t) SIZE_MAX);
+        r = table_set_sort(table, (size_t) 0);
         if (r < 0)
                 return r;
 
@@ -1024,7 +1022,7 @@ static int dump_address_labels(sd_netlink *rtnl) {
         assert_se(cell = table_get_cell(table, 0, 1));
         (void) table_set_align_percent(table, cell, 100);
 
-        for (m = reply; m; m = sd_netlink_message_next(m)) {
+        for (sd_netlink_message *m = reply; m; m = sd_netlink_message_next(m)) {
                 _cleanup_free_ char *pretty = NULL;
                 union in_addr_union prefix = IN_ADDR_NULL;
                 uint8_t prefixlen;
@@ -1264,7 +1262,6 @@ static int dump_dhcp_leases(Table *table, const char *prefix, sd_bus *bus, const
 }
 
 static int dump_ifindexes(Table *table, const char *prefix, const int *ifindexes) {
-        unsigned c;
         int r;
 
         assert(prefix);
@@ -1272,7 +1269,7 @@ static int dump_ifindexes(Table *table, const char *prefix, const int *ifindexes
         if (!ifindexes || ifindexes[0] <= 0)
                 return 0;
 
-        for (c = 0; ifindexes[c] > 0; c++) {
+        for (unsigned c = 0; ifindexes[c] > 0; c++) {
                 r = table_add_many(table,
                                    TABLE_EMPTY,
                                    TABLE_STRING, c == 0 ? prefix : "",
@@ -1390,7 +1387,7 @@ static int link_status_one(
 
         _cleanup_strv_free_ char **dns = NULL, **ntp = NULL, **sip = NULL, **search_domains = NULL, **route_domains = NULL;
         _cleanup_free_ char *t = NULL, *network = NULL, *iaid = NULL, *duid = NULL,
-                *setup_state = NULL, *operational_state = NULL, *lease_file = NULL;
+                *setup_state = NULL, *operational_state = NULL, *lease_file = NULL, *activation_policy = NULL;
         const char *driver = NULL, *path = NULL, *vendor = NULL, *model = NULL, *link = NULL,
                 *on_color_operational, *off_color_operational, *on_color_setup, *off_color_setup;
         _cleanup_free_ int *carrier_bound_to = NULL, *carrier_bound_by = NULL;
@@ -1428,7 +1425,7 @@ static int link_status_one(
                         (void) sd_device_get_property_value(info->sd_device, "ID_MODEL", &model);
         }
 
-        t = link_get_type_string(info->iftype, info->sd_device);
+        t = link_get_type_string(info->sd_device, info->iftype);
 
         (void) sd_network_link_get_network_file(info->ifindex, &network);
 
@@ -1790,7 +1787,7 @@ static int link_status_one(
                 if (r < 0)
                         return table_log_add_error(r);
         } else if (STRPTR_IN_SET(info->netdev_kind, "ipip", "sit", "gre", "gretap", "erspan", "vti")) {
-                if (!in_addr_is_null(AF_INET, &info->local)) {
+                if (in_addr_is_set(AF_INET, &info->local)) {
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Local:",
@@ -1799,7 +1796,7 @@ static int link_status_one(
                                 return table_log_add_error(r);
                 }
 
-                if (!in_addr_is_null(AF_INET, &info->remote)) {
+                if (in_addr_is_set(AF_INET, &info->remote)) {
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Remote:",
@@ -1808,7 +1805,7 @@ static int link_status_one(
                                 return table_log_add_error(r);
                 }
         } else if (STRPTR_IN_SET(info->netdev_kind, "ip6gre", "ip6gretap", "ip6erspan", "vti6")) {
-                if (!in_addr_is_null(AF_INET6, &info->local)) {
+                if (in_addr_is_set(AF_INET6, &info->local)) {
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Local:",
@@ -1817,7 +1814,7 @@ static int link_status_one(
                                 return table_log_add_error(r);
                 }
 
-                if (!in_addr_is_null(AF_INET6, &info->remote)) {
+                if (in_addr_is_set(AF_INET6, &info->remote)) {
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Remote:",
@@ -1833,14 +1830,14 @@ static int link_status_one(
                 if (r < 0)
                         return table_log_add_error(r);
 
-                if (info->has_tunnel_ipv4 && !in_addr_is_null(AF_INET, &info->remote)) {
+                if (info->has_tunnel_ipv4 && in_addr_is_set(AF_INET, &info->remote)) {
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Remote:",
                                            TABLE_IN_ADDR, &info->remote);
                         if (r < 0)
                                 return table_log_add_error(r);
-                } else if (!in_addr_is_null(AF_INET6, &info->remote)) {
+                } else if (in_addr_is_set(AF_INET6, &info->remote)) {
                         r = table_add_many(table,
                                            TABLE_EMPTY,
                                            TABLE_STRING, "Remote:",
@@ -2065,6 +2062,16 @@ static int link_status_one(
         if (r < 0)
                 return r;
 
+        r = sd_network_link_get_activation_policy(info->ifindex, &activation_policy);
+        if (r >= 0) {
+                r = table_add_many(table,
+                                   TABLE_EMPTY,
+                                   TABLE_STRING, "Activation Policy:",
+                                   TABLE_STRING, activation_policy);
+                if (r < 0)
+                        return table_log_add_error(r);
+        }
+
         if (lease) {
                 const void *client_id;
                 size_t client_id_len;
@@ -2212,7 +2219,7 @@ static int link_status(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_(sd_hwdb_unrefp) sd_hwdb *hwdb = NULL;
         _cleanup_(link_info_array_freep) LinkInfo *links = NULL;
-        int r, c, i;
+        int r, c;
 
         (void) pager_open(arg_pager_flags);
 
@@ -2237,7 +2244,7 @@ static int link_status(int argc, char *argv[], void *userdata) {
         if (c < 0)
                 return c;
 
-        for (i = 0; i < c; i++) {
+        for (int i = 0; i < c; i++) {
                 if (i > 0)
                         fputc('\n', stdout);
 
@@ -2266,7 +2273,7 @@ static char *lldp_capabilities_to_string(uint16_t x) {
 }
 
 static void lldp_capabilities_legend(uint16_t x) {
-        unsigned w, i, cols = columns();
+        unsigned cols = columns();
         static const char* const table[] = {
                 "o - Other",
                 "p - Repeater",
@@ -2285,7 +2292,7 @@ static void lldp_capabilities_legend(uint16_t x) {
                 return;
 
         printf("\nCapability Flags:\n");
-        for (w = 0, i = 0; i < ELEMENTSOF(table); i++)
+        for (unsigned w = 0, i = 0; i < ELEMENTSOF(table); i++)
                 if (x & (1U << i) || arg_all) {
                         bool newline;
 
@@ -2301,7 +2308,7 @@ static int link_lldp_status(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_(link_info_array_freep) LinkInfo *links = NULL;
         _cleanup_(table_unrefp) Table *table = NULL;
-        int i, r, c, m = 0;
+        int r, c, m = 0;
         uint16_t all = 0;
         TableCell *cell;
 
@@ -2347,7 +2354,7 @@ static int link_lldp_status(int argc, char *argv[], void *userdata) {
         assert_se(cell = table_get_cell(table, 0, 5));
         table_set_minimum_width(table, cell, 16);
 
-        for (i = 0; i < c; i++) {
+        for (int i = 0; i < c; i++) {
                 _cleanup_fclose_ FILE *f = NULL;
 
                 r = open_lldp_neighbors(links[i].ifindex, &f);
@@ -2476,7 +2483,7 @@ static int link_up_down_send_message(sd_netlink *rtnl, char *command, int index)
 static int link_up_down(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_set_free_ Set *indexes = NULL;
-        int index, r, i;
+        int index, r;
         void *p;
 
         r = sd_netlink_open(&rtnl);
@@ -2487,7 +2494,7 @@ static int link_up_down(int argc, char *argv[], void *userdata) {
         if (!indexes)
                 return log_oom();
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 index = resolve_interface_or_warn(&rtnl, argv[i]);
                 if (index < 0)
                         return index;
@@ -2503,8 +2510,8 @@ static int link_up_down(int argc, char *argv[], void *userdata) {
                 if (r < 0) {
                         char ifname[IF_NAMESIZE + 1];
 
-                        return log_error_errno(r, "Failed to %s interface %s: %m",
-                                               argv[1], format_ifname_full(index, ifname, FORMAT_IFNAME_IFINDEX));
+                        return log_error_errno(r, "Failed to bring %s interface %s: %m",
+                                               argv[0], format_ifname_full(index, ifname, FORMAT_IFNAME_IFINDEX));
                 }
         }
 
@@ -2514,7 +2521,7 @@ static int link_up_down(int argc, char *argv[], void *userdata) {
 static int link_delete(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_set_free_ Set *indexes = NULL;
-        int index, r, i;
+        int index, r;
         void *p;
 
         r = sd_netlink_open(&rtnl);
@@ -2525,7 +2532,7 @@ static int link_delete(int argc, char *argv[], void *userdata) {
         if (!indexes)
                 return log_oom();
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 index = resolve_interface_or_warn(&rtnl, argv[i]);
                 if (index < 0)
                         return index;
@@ -2564,13 +2571,13 @@ static int link_renew_one(sd_bus *bus, int index, const char *name) {
 static int link_renew(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
-        int index, i, k = 0, r;
+        int index, k = 0, r;
 
         r = sd_bus_open_system(&bus);
         if (r < 0)
                 return log_error_errno(r, "Failed to connect system bus: %m");
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 index = resolve_interface_or_warn(&rtnl, argv[i]);
                 if (index < 0)
                         return index;
@@ -2598,14 +2605,14 @@ static int link_force_renew_one(sd_bus *bus, int index, const char *name) {
 static int link_force_renew(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
-        int index, i, k = 0, r;
+        int k = 0, r;
 
         r = sd_bus_open_system(&bus);
         if (r < 0)
                 return log_error_errno(r, "Failed to connect system bus: %m");
 
-        for (i = 1; i < argc; i++) {
-                index = resolve_interface_or_warn(&rtnl, argv[i]);
+        for (int i = 1; i < argc; i++) {
+                int index = resolve_interface_or_warn(&rtnl, argv[i]);
                 if (index < 0)
                         return index;
 
@@ -2638,7 +2645,7 @@ static int verb_reconfigure(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
         _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
         _cleanup_set_free_ Set *indexes = NULL;
-        int index, i, r;
+        int index, r;
         void *p;
 
         r = sd_bus_open_system(&bus);
@@ -2649,7 +2656,7 @@ static int verb_reconfigure(int argc, char *argv[], void *userdata) {
         if (!indexes)
                 return log_oom();
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++) {
                 index = resolve_interface_or_warn(&rtnl, argv[i]);
                 if (index < 0)
                         return index;
@@ -2704,12 +2711,11 @@ static int help(void) {
                "  -s --stats             Show detailed link statics\n"
                "  -l --full              Do not ellipsize output\n"
                "  -n --lines=INTEGER     Number of journal entries to show\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight()
-               , ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -2816,7 +2822,7 @@ static void warn_networkd_missing(void) {
 static int run(int argc, char* argv[]) {
         int r;
 
-        log_setup_cli();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

@@ -8,7 +8,7 @@ Subject: UBUNTU: drop unrelated settings from sysctl defaults shipped by
  1 file changed, 24 deletions(-)
 
 diff --git a/sysctl.d/50-default.conf b/sysctl.d/50-default.conf
-index 14378b2..a830167 100644
+index f41e24b..87e95d4 100644
 --- a/sysctl.d/50-default.conf
 +++ b/sysctl.d/50-default.conf
 @@ -11,26 +11,6 @@
@@ -40,7 +40,7 @@ index 14378b2..a830167 100644
  net.ipv4.conf.*.promote_secondaries = 1
 @@ -47,10 +27,6 @@ net.ipv4.conf.*.promote_secondaries = 1
  # Fair Queue CoDel packet scheduler to fight bufferbloat
- net.core.default_qdisc = fq_codel
+ -net.core.default_qdisc = fq_codel
  
 -# Enable hard and soft link protection
 -fs.protected_hardlinks = 1

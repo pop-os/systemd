@@ -39,6 +39,7 @@
 #include "mkdir.h"
 #include "nulstr-util.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
@@ -206,7 +207,10 @@ static int call_get_addresses(
                 else
                         strcpy(buf_ifi, "");
 
-                if (!strextend(&addresses, prefix, inet_ntop(family, a, buffer, sizeof(buffer)), buf_ifi, NULL))
+                if (!strextend(&addresses,
+                               prefix,
+                               inet_ntop(family, a, buffer, sizeof(buffer)),
+                               buf_ifi))
                         return log_oom();
 
                 r = sd_bus_message_exit_container(reply);
@@ -235,7 +239,7 @@ static int show_table(Table *table, const char *word) {
         assert(word);
 
         if (table_get_rows(table) > 1 || OUTPUT_MODE_IS_JSON(arg_output)) {
-                r = table_set_sort(table, (size_t) 0, (size_t) -1);
+                r = table_set_sort(table, (size_t) 0);
                 if (r < 0)
                         return table_log_sort_error(r);
 
@@ -960,8 +964,8 @@ static int show_pool_info(sd_bus *bus) {
         };
 
         PoolStatusInfo info = {
-                .usage = (uint64_t) -1,
-                .limit = (uint64_t) -1,
+                .usage = UINT64_MAX,
+                .limit = UINT64_MAX,
         };
 
         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -1561,7 +1565,7 @@ static int make_service_name(const char *name, char **ret) {
         assert(name);
         assert(ret);
 
-        if (!machine_name_is_valid(name))
+        if (!hostname_is_valid(name, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Invalid machine name %s.", name);
 
@@ -1868,6 +1872,9 @@ static int import_tar(int argc, char *argv[], void *userdata) {
                 r = path_extract_filename(path, &fn);
                 if (r < 0)
                         return log_error_errno(r, "Cannot extract container name from filename: %m");
+                if (r == O_DIRECTORY)
+                        return log_error_errno(SYNTHETIC_ERRNO(EISDIR),
+                                               "Path '%s' refers to directory, but we need a regular file: %m", path);
 
                 local = fn;
         }
@@ -1881,7 +1888,7 @@ static int import_tar(int argc, char *argv[], void *userdata) {
 
         local = ll;
 
-        if (!machine_name_is_valid(local))
+        if (!hostname_is_valid(local, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Local name %s is not a suitable machine name.",
                                        local);
@@ -1928,6 +1935,9 @@ static int import_raw(int argc, char *argv[], void *userdata) {
                 r = path_extract_filename(path, &fn);
                 if (r < 0)
                         return log_error_errno(r, "Cannot extract container name from filename: %m");
+                if (r == O_DIRECTORY)
+                        return log_error_errno(SYNTHETIC_ERRNO(EISDIR),
+                                               "Path '%s' refers to directory, but we need a regular file: %m", path);
 
                 local = fn;
         }
@@ -1941,7 +1951,7 @@ static int import_raw(int argc, char *argv[], void *userdata) {
 
         local = ll;
 
-        if (!machine_name_is_valid(local))
+        if (!hostname_is_valid(local, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Local name %s is not a suitable machine name.",
                                        local);
@@ -1995,7 +2005,7 @@ static int import_fs(int argc, char *argv[], void *userdata) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Need either path or local name.");
 
-        if (!machine_name_is_valid(local))
+        if (!hostname_is_valid(local, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Local name %s is not a suitable machine name.",
                                        local);
@@ -2048,7 +2058,7 @@ static int export_tar(int argc, char *argv[], void *userdata) {
         assert(bus);
 
         local = argv[1];
-        if (!machine_name_is_valid(local))
+        if (!hostname_is_valid(local, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Machine name %s is not valid.", local);
 
@@ -2090,7 +2100,7 @@ static int export_raw(int argc, char *argv[], void *userdata) {
         assert(bus);
 
         local = argv[1];
-        if (!machine_name_is_valid(local))
+        if (!hostname_is_valid(local, 0))
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Machine name %s is not valid.", local);
 
@@ -2155,7 +2165,7 @@ static int pull_tar(int argc, char *argv[], void *userdata) {
 
                 local = ll;
 
-                if (!machine_name_is_valid(local))
+                if (!hostname_is_valid(local, 0))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                "Local name %s is not a suitable machine name.",
                                                local);
@@ -2211,7 +2221,7 @@ static int pull_raw(int argc, char *argv[], void *userdata) {
 
                 local = ll;
 
-                if (!machine_name_is_valid(local))
+                if (!hostname_is_valid(local, 0))
                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                "Local name %s is not a suitable machine name.",
                                                local);
@@ -2374,7 +2384,7 @@ static int set_limit(int argc, char *argv[], void *userdata) {
         polkit_agent_open_if_enabled(arg_transport, arg_ask_password);
 
         if (STR_IN_SET(argv[argc-1], "-", "none", "infinity"))
-                limit = (uint64_t) -1;
+                limit = UINT64_MAX;
         else {
                 r = parse_size(argv[argc-1], 1024, &limit);
                 if (r < 0)
@@ -2531,14 +2541,13 @@ static int help(int argc, char *argv[], void *userdata) {
                "     --verify=MODE            Verification mode for downloaded images (no,\n"
                "                              checksum, signature)\n"
                "     --force                  Download image even if already exists\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , ansi_highlight()
-               , ansi_normal()
-               , ansi_highlight()
-               , ansi_normal()
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -2691,10 +2700,10 @@ static int parse_argv(int argc, char *argv[]) {
                                 return 0;
                         }
 
-                        arg_output = output_mode_from_string(optarg);
-                        if (arg_output < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Unknown output '%s'.", optarg);
+                        r = output_mode_from_string(optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Unknown output '%s'.", optarg);
+                        arg_output = r;
 
                         if (OUTPUT_MODE_IS_JSON(arg_output))
                                 arg_legend = false;
@@ -2713,15 +2722,9 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 's':
-                        if (streq(optarg, "help")) {
-                                DUMP_STRING_TABLE(signal, int, _NSIG);
-                                return 0;
-                        }
-
-                        arg_signal = signal_from_string(optarg);
-                        if (arg_signal < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Failed to parse signal string %s.", optarg);
+                        r = parse_signal_argument(optarg, &arg_signal);
+                        if (r <= 0)
+                                return r;
                         break;
 
                 case ARG_NO_ASK_PASSWORD:
@@ -2756,10 +2759,10 @@ static int parse_argv(int argc, char *argv[]) {
                                 return 0;
                         }
 
-                        arg_verify = import_verify_from_string(optarg);
-                        if (arg_verify < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Failed to parse --verify= setting: %s", optarg);
+                        r = import_verify_from_string(optarg);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse --verify= setting: %s", optarg);
+                        arg_verify = r;
                         break;
 
                 case ARG_FORCE:
@@ -2874,7 +2877,7 @@ static int run(int argc, char *argv[]) {
         int r;
 
         setlocale(LC_ALL, "");
-        log_setup_cli();
+        log_setup();
 
         /* The journal merging logic potentially needs a lot of fds. */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);

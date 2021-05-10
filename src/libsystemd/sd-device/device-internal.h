@@ -69,14 +69,14 @@ struct sd_device {
 
         char *id_filename;
 
-        uint64_t usec_initialized;
+        usec_t usec_initialized;
 
         mode_t devmode;
         uid_t devuid;
         gid_t devgid;
 
         /* only set when device is passed through netlink */
-        DeviceAction action;
+        sd_device_action_t action;
         uint64_t seqnum;
 
         bool parent_set:1; /* no need to try to reload parent */

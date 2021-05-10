@@ -515,7 +515,7 @@
       <varlistentry>
         <term><option>--tasks-max=</option><replaceable>TASKS</replaceable></term>
 
-        <listitem><para>Takes a non-zero unsigned integer as argument. Configures the maximum numer of tasks
+        <listitem><para>Takes a non-zero unsigned integer as argument. Configures the maximum number of tasks
         (i.e. threads, where each process is at least one thread) the user may have at any given time. This
         limit applies to all tasks forked off the user's sessions, even if they change user identity via
         <citerefentry project='man-pages'><refentrytitle>su</refentrytitle><manvolnum>1</manvolnum></citerefentry>
@@ -846,9 +846,13 @@
     <title>Exit status</title>
 
     <para>On success, 0 is returned, a non-zero failure code otherwise.</para>
+
+    <para>When a command is invoked with <command>with</command>, the exit status of the child is
+    propagated. Effectively, <command>homectl</command> will exit without error if the command is
+    successfully invoked <emphasis>and</emphasis> finishes successfully.</para>
   </refsect1>
 
-  <xi:include href="less-variables.xml" />
+  <xi:include href="common-variables.xml" />
 
   <refsect1>
     <title>Examples</title>

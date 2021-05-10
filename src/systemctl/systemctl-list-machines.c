@@ -33,12 +33,10 @@ void machine_info_clear(struct machine_info *info) {
 }
 
 static void free_machines_list(struct machine_info *machine_infos, int n) {
-        int i;
-
         if (!machine_infos)
                 return;
 
-        for (i = 0; i < n; i++)
+        for (int i = 0; i < n; i++)
                 machine_info_clear(&machine_infos[i]);
 
         free(machine_infos);
@@ -150,7 +148,6 @@ static int get_machine_list(
 
 static int output_machines_list(struct machine_info *machine_infos, unsigned n) {
         _cleanup_(table_unrefp) Table *table = NULL;
-        struct machine_info *m;
         bool state_missing = false;
         int r;
 
@@ -160,7 +157,7 @@ static int output_machines_list(struct machine_info *machine_infos, unsigned n) 
         if (!table)
                 return log_oom();
 
-        table_set_header(table, !arg_no_legend);
+        table_set_header(table, arg_legend != 0);
         if (arg_plain) {
                 /* Hide the 'glyph' column when --plain is requested */
                 r = table_hide_column_from_display(table, 0);
@@ -172,7 +169,7 @@ static int output_machines_list(struct machine_info *machine_infos, unsigned n) 
 
         (void) table_set_empty_string(table, "-");
 
-        for (m = machine_infos; m < machine_infos + n; m++) {
+        for (struct machine_info *m = machine_infos; m < machine_infos + n; m++) {
                 _cleanup_free_ char *mname = NULL;
                 const char *on_state = "", *on_failed = "";
                 bool circle = false;
@@ -213,7 +210,7 @@ static int output_machines_list(struct machine_info *machine_infos, unsigned n) 
         if (r < 0)
                 return r;
 
-        if (!arg_no_legend) {
+        if (arg_legend != 0) {
                 printf("\n");
                 if (state_missing && geteuid() != 0)
                         printf("Notice: some information only available to privileged users was not shown.\n");

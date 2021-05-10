@@ -144,7 +144,6 @@ static int add_rtattr(sd_netlink_message *m, unsigned short type, const void *da
         size_t message_length;
         struct nlmsghdr *new_hdr;
         struct rtattr *rta;
-        unsigned i;
         int offset;
 
         assert(m);
@@ -172,7 +171,7 @@ static int add_rtattr(sd_netlink_message *m, unsigned short type, const void *da
         rtattr_append_attribute_internal(rta, type, data, data_length);
 
         /* if we are inside containers, extend them */
-        for (i = 0; i < m->n_containers; i++)
+        for (unsigned i = 0; i < m->n_containers; i++)
                 GET_CONTAINER(m, i)->rta_len += RTA_SPACE(data_length);
 
         /* update message size */
@@ -643,7 +642,6 @@ int sd_netlink_message_open_array(sd_netlink_message *m, uint16_t type) {
 }
 
 int sd_netlink_message_cancel_array(sd_netlink_message *m) {
-        unsigned i;
         uint32_t rta_len;
 
         assert_return(m, -EINVAL);
@@ -652,7 +650,7 @@ int sd_netlink_message_cancel_array(sd_netlink_message *m) {
 
         rta_len = GET_CONTAINER(m, (m->n_containers - 1))->rta_len;
 
-        for (i = 0; i < m->n_containers; i++)
+        for (unsigned i = 0; i < m->n_containers; i++)
                 GET_CONTAINER(m, i)->rta_len -= rta_len;
 
         m->hdr->nlmsg_len -= rta_len;
@@ -663,13 +661,17 @@ int sd_netlink_message_cancel_array(sd_netlink_message *m) {
         return 0;
 }
 
-static int netlink_message_read_internal(sd_netlink_message *m, unsigned short type, void **data, bool *net_byteorder) {
+static int netlink_message_read_internal(
+                sd_netlink_message *m,
+                unsigned short type,
+                void **ret_data,
+                bool *ret_net_byteorder) {
+
         struct netlink_attribute *attribute;
         struct rtattr *rta;
 
         assert_return(m, -EINVAL);
         assert_return(m->sealed, -EPERM);
-        assert_return(data, -EINVAL);
 
         assert(m->n_containers < RTNL_CONTAINER_DEPTH);
 
@@ -686,10 +688,11 @@ static int netlink_message_read_internal(sd_netlink_message *m, unsigned short t
 
         rta = (struct rtattr*)((uint8_t *) m->hdr + attribute->offset);
 
-        *data = RTA_DATA(rta);
+        if (ret_data)
+                *ret_data = RTA_DATA(rta);
 
-        if (net_byteorder)
-                *net_byteorder = attribute->net_byteorder;
+        if (ret_net_byteorder)
+                *ret_net_byteorder = attribute->net_byteorder;
 
         return RTA_PAYLOAD(rta);
 }
@@ -972,6 +975,27 @@ int sd_netlink_message_read_in6_addr(sd_netlink_message *m, unsigned short type,
                 *data = u.in6;
 
         return r;
+}
+
+int sd_netlink_message_has_flag(sd_netlink_message *m, unsigned short type) {
+        void *attr_data;
+        int r;
+
+        assert_return(m, -EINVAL);
+
+        /* This returns 1 when the flag is set, 0 when not set, negative errno on error. */
+
+        r = message_attribute_has_type(m, NULL, type, NETLINK_TYPE_FLAG);
+        if (r < 0)
+                return r;
+
+        r = netlink_message_read_internal(m, type, &attr_data, NULL);
+        if (r == -ENODATA)
+                return 0;
+        if (r < 0)
+                return r;
+
+        return 1;
 }
 
 int sd_netlink_message_read_strv(sd_netlink_message *m, unsigned short container_type, unsigned short type_id, char ***ret) {
@@ -1257,7 +1281,6 @@ int sd_netlink_message_rewind(sd_netlink_message *m, sd_netlink *genl) {
         const NLType *nl_type;
         uint16_t type;
         size_t size;
-        unsigned i;
         int r;
 
         assert_return(m, -EINVAL);
@@ -1267,7 +1290,7 @@ int sd_netlink_message_rewind(sd_netlink_message *m, sd_netlink *genl) {
         if (!m->sealed)
                 rtnl_message_seal(m);
 
-        for (i = 1; i <= m->n_containers; i++)
+        for (unsigned i = 1; i <= m->n_containers; i++)
                 m->containers[i].attributes = mfree(m->containers[i].attributes);
 
         m->n_containers = 0;

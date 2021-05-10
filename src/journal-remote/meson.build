@@ -16,16 +16,15 @@ libsystemd_journal_remote_sources = files('''
 '''.split())
 
 if conf.get('HAVE_MICROHTTPD') == 1
-        libsystemd_journal_remote_sources += files('''
-                microhttpd-util.h
-                microhttpd-util.c
-'''.split())
+        libsystemd_journal_remote_sources += files(
+                'microhttpd-util.h',
+                'microhttpd-util.c')
 endif
 
 libsystemd_journal_remote = static_library(
         'systemd-journal-remote',
         libsystemd_journal_remote_sources,
-        include_directories : includes,
+        include_directories : journal_includes,
         dependencies : [threads,
                         libmicrohttpd,
                         libgnutls,
@@ -59,7 +58,7 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
                 input : 'journal-remote.conf.in',
                 output : 'journal-remote.conf',
                 configuration : substs)
-        if install_sysconfdir
+        if install_sysconfdir_samples
                 install_data(journal_remote_conf,
                              install_dir : pkgsysconfdir)
         endif
@@ -75,3 +74,11 @@ if conf.get('ENABLE_REMOTE') == 1 and conf.get('HAVE_MICROHTTPD') == 1
                                             chmod 755 $DESTDIR/var/log/journal/remote || :''')
         endif
 endif
+
+############################################################
+
+fuzzers += [
+        [['src/journal-remote/fuzz-journal-remote.c'],
+         [libsystemd_journal_remote,
+          libshared]],
+]

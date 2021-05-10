@@ -70,6 +70,18 @@
         is false. Defaults to yes.</para></listitem>
       </varlistentry>
 
+      <varlistentry>
+        <term><varname>RouteTable=</varname></term>
+        <listitem><para>Defines the route table name. Takes a whitespace-separated list of the pairs of
+        route table name and number. The route table name and number in each pair are separated with a
+        colon, i.e., <literal><replaceable>name</replaceable>:<replaceable>number</replaceable></literal>.
+        The route table name must not be <literal>default</literal>, <literal>main</literal>, or
+        <literal>local</literal>, as these route table names are predefined with route table number 253,
+        254, and 255, respectively. The route table number must be an integer in the range 1…4294967295.
+        This setting can be specified multiple times. If an empty string is specified, then the list
+        specified earlier are cleared. Defaults to unset.</para></listitem>
+      </varlistentry>
+
     </variablelist>
   </refsect1>
 

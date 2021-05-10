@@ -24,21 +24,21 @@ fi
 
 trap cleanup EXIT
 
-cp /usr/share/minimal.* "${image_dir}/"
-image="${image_dir}/minimal"
+cp /usr/share/minimal* "${image_dir}/"
+image="${image_dir}/minimal_0"
 roothash="$(cat ${image}.roothash)"
 
 os_release=$(test -e /etc/os-release && echo /etc/os-release || echo /usr/lib/os-release)
 
 systemd-dissect --json=short ${image}.raw | grep -q -F '{"rw":"ro","designator":"root","partition_uuid":null,"fstype":"squashfs","architecture":null,"verity":"external"'
 systemd-dissect ${image}.raw | grep -q -F "MARKER=1"
-systemd-dissect ${image}.raw | grep -q -F -f $os_release
+systemd-dissect ${image}.raw | grep -q -F -f <(sed 's/"//g' $os_release)
 
 mv ${image}.verity ${image}.fooverity
 mv ${image}.roothash ${image}.foohash
 systemd-dissect --json=short ${image}.raw --root-hash=${roothash} --verity-data=${image}.fooverity | grep -q -F '{"rw":"ro","designator":"root","partition_uuid":null,"fstype":"squashfs","architecture":null,"verity":"external"'
 systemd-dissect ${image}.raw --root-hash=${roothash} --verity-data=${image}.fooverity | grep -q -F "MARKER=1"
-systemd-dissect ${image}.raw --root-hash=${roothash} --verity-data=${image}.fooverity | grep -q -F -f $os_release
+systemd-dissect ${image}.raw --root-hash=${roothash} --verity-data=${image}.fooverity | grep -q -F -f <(sed 's/"//g' $os_release)
 mv ${image}.fooverity ${image}.verity
 mv ${image}.foohash ${image}.roothash
 
@@ -130,7 +130,7 @@ VERITY_UUID=$(systemd-id128 -u show $(tail -c 32 ${image}.roothash) -u | tail -n
 systemd-dissect --json=short --root-hash ${roothash} ${image}.gpt | grep -q '{"rw":"ro","designator":"root","partition_uuid":"'$ROOT_UUID'","fstype":"squashfs","architecture":"'$architecture'","verity":"yes","node":'
 systemd-dissect --json=short --root-hash ${roothash} ${image}.gpt | grep -q '{"rw":"ro","designator":"root-verity","partition_uuid":"'$VERITY_UUID'","fstype":"DM_verity_hash","architecture":"'$architecture'","verity":null,"node":'
 systemd-dissect --root-hash ${roothash} ${image}.gpt | grep -q -F "MARKER=1"
-systemd-dissect --root-hash ${roothash} ${image}.gpt | grep -q -F -f $os_release
+systemd-dissect --root-hash ${roothash} ${image}.gpt | grep -q -F -f <(sed 's/"//g' $os_release)
 
 systemd-dissect --root-hash ${roothash} --mount ${image}.gpt ${image_dir}/mount
 cat ${image_dir}/mount/usr/lib/os-release | grep -q -F -f $os_release
@@ -204,6 +204,51 @@ systemctl start testservice-50c.service
 grep -q -F "MARKER=1" ${image_dir}/result/c
 grep -F "squashfs" ${image_dir}/result/c | grep -q -F "noatime"
 grep -F "squashfs" ${image_dir}/result/c | grep -q -F -v "nosuid"
+
+# Adding a new mounts at runtime works if the unit is in the active state,
+# so use Type=notify to make sure there's no race condition in the test
+cat > /run/systemd/system/testservice-50d.service <<EOF
+[Service]
+RuntimeMaxSec=300
+Type=notify
+RemainAfterExit=yes
+MountAPIVFS=yes
+PrivateTmp=yes
+ExecStart=/bin/sh -c 'systemd-notify --ready; while ! grep -q -F MARKER /tmp/img/usr/lib/os-release; do sleep 0.1; done; mount | grep -F "/tmp/img" | grep -q -F "nosuid"'
+EOF
+systemctl start testservice-50d.service
+
+systemctl mount-image --mkdir testservice-50d.service ${image}.raw /tmp/img root:nosuid
+
+while systemctl show -P SubState testservice-50d.service | grep -q running
+do
+    sleep 0.1
+done
+
+systemctl is-active testservice-50d.service
+
+# ExtensionImages will set up an overlay
+systemd-run -t --property ExtensionImages=/usr/share/app0.raw --property RootImage=${image}.raw cat /opt/script0.sh | grep -q -F "extension-release.app0"
+systemd-run -t --property ExtensionImages=/usr/share/app0.raw --property RootImage=${image}.raw cat /usr/lib/systemd/system/some_file | grep -q -F "MARKER=1"
+systemd-run -t --property ExtensionImages="/usr/share/app0.raw /usr/share/app1.raw" --property RootImage=${image}.raw cat /opt/script0.sh | grep -q -F "extension-release.app0"
+systemd-run -t --property ExtensionImages="/usr/share/app0.raw /usr/share/app1.raw" --property RootImage=${image}.raw cat /usr/lib/systemd/system/some_file | grep -q -F "MARKER=1"
+systemd-run -t --property ExtensionImages="/usr/share/app0.raw /usr/share/app1.raw" --property RootImage=${image}.raw cat /opt/script1.sh | grep -q -F "extension-release.app1"
+systemd-run -t --property ExtensionImages="/usr/share/app0.raw /usr/share/app1.raw" --property RootImage=${image}.raw cat /usr/lib/systemd/system/other_file | grep -q -F "MARKER=1"
+cat >/run/systemd/system/testservice-50e.service <<EOF
+[Service]
+MountAPIVFS=yes
+TemporaryFileSystem=/run
+RootImage=${image}.raw
+ExtensionImages=/usr/share/app0.raw /usr/share/app1.raw:nosuid
+# Relevant only for sanitizer runs
+UnsetEnvironment=LD_PRELOAD
+ExecStart=/bin/bash -c '/opt/script0.sh | grep ID'
+ExecStart=/bin/bash -c '/opt/script1.sh | grep ID'
+Type=oneshot
+RemainAfterExit=yes
+EOF
+systemctl start testservice-50e.service
+systemctl is-active testservice-50e.service
 
 echo OK >/testok
 

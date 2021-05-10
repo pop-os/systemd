@@ -59,9 +59,9 @@ typedef struct SysvStub {
         bool loaded;
 } SysvStub;
 
-static void free_sysvstub(SysvStub *s) {
+static SysvStub* free_sysvstub(SysvStub *s) {
         if (!s)
-                return;
+                return NULL;
 
         free(s->name);
         free(s->path);
@@ -71,9 +71,8 @@ static void free_sysvstub(SysvStub *s) {
         strv_free(s->after);
         strv_free(s->wants);
         strv_free(s->wanted_by);
-        free(s);
+        return mfree(s);
 }
-
 DEFINE_TRIVIAL_CLEANUP_FUNC(SysvStub*, free_sysvstub);
 
 static void free_sysvstub_hashmapp(Hashmap **h) {
@@ -138,7 +137,7 @@ static int generate_unit_file(SysvStub *s) {
                 path_escaped);
 
         if (s->description) {
-                _cleanup_free_ char *t;
+                _cleanup_free_ char *t = NULL;
 
                 t = specifier_escape(s->description);
                 if (!t)
@@ -166,7 +165,7 @@ static int generate_unit_file(SysvStub *s) {
                 yes_no(!s->pid_file));
 
         if (s->pid_file) {
-                _cleanup_free_ char *t;
+                _cleanup_free_ char *t = NULL;
 
                 t = specifier_escape(s->pid_file);
                 if (!t)
@@ -420,7 +419,7 @@ static int handle_dependencies(SysvStub *s, unsigned line, const char *full_text
 }
 
 static int load_sysv(SysvStub *s) {
-        _cleanup_fclose_ FILE *f;
+        _cleanup_fclose_ FILE *f = NULL;
         unsigned line = 0;
         int r;
         enum {

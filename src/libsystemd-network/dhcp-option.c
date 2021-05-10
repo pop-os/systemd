@@ -17,6 +17,7 @@
 static int option_append(uint8_t options[], size_t size, size_t *offset,
                          uint8_t code, size_t optlen, const void *optval) {
         assert(options);
+        assert(size > 0);
         assert(offset);
 
         if (code != SD_DHCP_OPTION_END)
@@ -80,11 +81,11 @@ static int option_append(uint8_t options[], size_t size, size_t *offset,
 
                 break;
         case SD_DHCP_OPTION_VENDOR_SPECIFIC: {
-                OrderedHashmap *s = (OrderedHashmap *) optval;
+                OrderedSet *s = (OrderedSet *) optval;
                 struct sd_dhcp_option *p;
                 size_t l = 0;
 
-                ORDERED_HASHMAP_FOREACH(p, s)
+                ORDERED_SET_FOREACH(p, s)
                         l += p->length + 2;
 
                 if (*offset + l + 2 > size)
@@ -95,7 +96,7 @@ static int option_append(uint8_t options[], size_t size, size_t *offset,
 
                 *offset += 2;
 
-                ORDERED_HASHMAP_FOREACH(p, s) {
+                ORDERED_SET_FOREACH(p, s) {
                         options[*offset] = p->option;
                         options[*offset + 1] = p->length;
                         memcpy(&options[*offset + 2], p->data, p->length);
@@ -165,7 +166,7 @@ int dhcp_option_append(DHCPMessage *message, size_t size, size_t *offset,
                         } else if (r == -ENOBUFS && use_sname) {
                                 /* did not fit, but we have more buffers to try
                                    close the file array and move the offset to its end */
-                                r = option_append(message->options, size, offset, SD_DHCP_OPTION_END, 0, NULL);
+                                r = option_append(message->file, sizeof(message->file), &file_offset, SD_DHCP_OPTION_END, 0, NULL);
                                 if (r < 0)
                                         return r;
 

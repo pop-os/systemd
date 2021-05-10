@@ -16,12 +16,12 @@ typedef struct DnsResourceRecord DnsResourceRecord;
 typedef struct DnsTxtItem DnsTxtItem;
 
 /* DNSKEY RR flags */
-#define DNSKEY_FLAG_SEP      (UINT16_C(1) << 0)
-#define DNSKEY_FLAG_REVOKE   (UINT16_C(1) << 7)
-#define DNSKEY_FLAG_ZONE_KEY (UINT16_C(1) << 8)
+#define DNSKEY_FLAG_SEP            (UINT16_C(1) << 0)
+#define DNSKEY_FLAG_REVOKE         (UINT16_C(1) << 7)
+#define DNSKEY_FLAG_ZONE_KEY       (UINT16_C(1) << 8)
 
 /* mDNS RR flags */
-#define MDNS_RR_CACHE_FLUSH  (UINT16_C(1) << 15)
+#define MDNS_RR_CACHE_FLUSH_OR_QU  (UINT16_C(1) << 15)
 
 /* DNSSEC algorithm identifiers, see
  * http://tools.ietf.org/html/rfc4034#appendix-A.1 and
@@ -76,7 +76,7 @@ struct DnsResourceKey {
  * resource key object. */
 #define DNS_RESOURCE_KEY_CONST(c, t, n)                 \
         ((DnsResourceKey) {                             \
-                .n_ref = (unsigned) -1,                 \
+                .n_ref = UINT_MAX,                      \
                 .class = c,                             \
                 .type = t,                              \
                 ._name = (char*) n,                     \
@@ -324,12 +324,17 @@ int dns_resource_record_is_synthetic(DnsResourceRecord *rr);
 
 int dns_resource_record_clamp_ttl(DnsResourceRecord **rr, uint32_t max_ttl);
 
+bool dns_resource_record_is_link_local_address(DnsResourceRecord *rr);
+
+int dns_resource_record_get_cname_target(DnsResourceKey *key, DnsResourceRecord *cname, char **ret);
+
 DnsTxtItem *dns_txt_item_free_all(DnsTxtItem *i);
 bool dns_txt_item_equal(DnsTxtItem *a, DnsTxtItem *b);
 DnsTxtItem *dns_txt_item_copy(DnsTxtItem *i);
 int dns_txt_item_new_empty(DnsTxtItem **ret);
 
 void dns_resource_record_hash_func(const DnsResourceRecord *i, struct siphash *state);
+int dns_resource_record_compare_func(const DnsResourceRecord *x, const DnsResourceRecord *y);
 
 extern const struct hash_ops dns_resource_key_hash_ops;
 extern const struct hash_ops dns_resource_record_hash_ops;

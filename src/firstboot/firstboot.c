@@ -24,6 +24,7 @@
 #include "mkdir.h"
 #include "mount-util.h"
 #include "os-util.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
@@ -105,8 +106,7 @@ static void print_welcome(void) {
         r = parse_os_release(
                         arg_root,
                         "PRETTY_NAME", &pretty_name,
-                        "ANSI_COLOR", &ansi_color,
-                        NULL);
+                        "ANSI_COLOR", &ansi_color);
         if (r < 0)
                 log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
                                "Failed to read os-release file, ignoring: %m");
@@ -210,10 +210,7 @@ static int prompt_loop(const char *text, char **l, unsigned percentage, bool (*i
                         }
 
                         log_info("Selected '%s'.", l[u-1]);
-                        if (free_and_strdup(ret, l[u-1]) < 0)
-                                return log_oom();
-
-                        return 0;
+                        return free_and_strdup_warn(ret, l[u-1]);
                 }
 
                 if (!is_valid(p)) {
@@ -493,7 +490,7 @@ static int prompt_hostname(void) {
                         break;
                 }
 
-                if (!hostname_is_valid(h, true)) {
+                if (!hostname_is_valid(h, VALID_HOSTNAME_TRAILING_DOT)) {
                         log_error("Specified hostname invalid.");
                         continue;
                 }
@@ -678,7 +675,7 @@ static int write_root_passwd(const char *passwd_path, const char *password, cons
         if (original) {
                 struct passwd *i;
 
-                r = sync_rights(fileno(original), fileno(passwd));
+                r = copy_rights(fileno(original), fileno(passwd));
                 if (r < 0)
                         return r;
 
@@ -746,7 +743,7 @@ static int write_root_shadow(const char *shadow_path, const char *hashed_passwor
         if (original) {
                 struct spwd *i;
 
-                r = sync_rights(fileno(original), fileno(shadow));
+                r = copy_rights(fileno(original), fileno(shadow));
                 if (r < 0)
                         return r;
 
@@ -774,7 +771,7 @@ static int write_root_shadow(const char *shadow_path, const char *hashed_passwor
                         .sp_warn = -1,
                         .sp_inact = -1,
                         .sp_expire = -1,
-                        .sp_flag = (unsigned long) -1, /* this appears to be what everybody does ... */
+                        .sp_flag = ULONG_MAX, /* this appears to be what everybody does ... */
                 };
 
                 if (errno != ENOENT)
@@ -954,10 +951,9 @@ static int help(void) {
                "     --force                                Overwrite existing files\n"
                "     --delete-root-password                 Delete root password\n"
                "     --welcome=no                           Disable the welcome text\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -1050,13 +1046,13 @@ static int parse_argv(int argc, char *argv[]) {
                         return version();
 
                 case ARG_ROOT:
-                        r = parse_path_argument_and_warn(optarg, true, &arg_root);
+                        r = parse_path_argument(optarg, true, &arg_root);
                         if (r < 0)
                                 return r;
                         break;
 
                 case ARG_IMAGE:
-                        r = parse_path_argument_and_warn(optarg, false, &arg_image);
+                        r = parse_path_argument(optarg, false, &arg_image);
                         if (r < 0)
                                 return r;
                         break;
@@ -1135,21 +1131,21 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_HOSTNAME:
-                        if (!hostname_is_valid(optarg, true))
+                        if (!hostname_is_valid(optarg, VALID_HOSTNAME_TRAILING_DOT))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Host name %s is not valid.", optarg);
 
-                        hostname_cleanup(optarg);
                         r = free_and_strdup(&arg_hostname, optarg);
                         if (r < 0)
                                 return log_oom();
 
+                        hostname_cleanup(arg_hostname);
                         break;
 
                 case ARG_MACHINE_ID:
-                        if (sd_id128_from_string(optarg, &arg_machine_id) < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Failed to parse machine id %s.", optarg);
+                        r = sd_id128_from_string(optarg, &arg_machine_id);
+                        if (r < 0)
+                                return log_error_errno(r, "Failed to parse machine id %s.", optarg);
 
                         break;
 
@@ -1272,7 +1268,7 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

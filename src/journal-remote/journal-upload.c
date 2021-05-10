@@ -22,6 +22,7 @@
 #include "log.h"
 #include "main-func.h"
 #include "mkdir.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
@@ -69,6 +70,9 @@ static void close_fd_input(Uploader *u);
                         cmd;                                            \
                 }                                                       \
         } while (0)
+
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(CURL*, curl_easy_cleanup, NULL);
+DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(struct curl_slist*, curl_slist_free_all, NULL);
 
 static size_t output_callback(char *buf,
                               size_t size,
@@ -179,29 +183,28 @@ int start_upload(Uploader *u,
         assert(input_callback);
 
         if (!u->header) {
-                struct curl_slist *h;
+                _cleanup_(curl_slist_free_allp) struct curl_slist *h = NULL;
+                struct curl_slist *l;
 
                 h = curl_slist_append(NULL, "Content-Type: application/vnd.fdo.journal");
                 if (!h)
                         return log_oom();
 
-                h = curl_slist_append(h, "Transfer-Encoding: chunked");
-                if (!h) {
-                        curl_slist_free_all(h);
+                l = curl_slist_append(h, "Transfer-Encoding: chunked");
+                if (!l)
                         return log_oom();
-                }
+                h = l;
 
-                h = curl_slist_append(h, "Accept: text/plain");
-                if (!h) {
-                        curl_slist_free_all(h);
+                l = curl_slist_append(h, "Accept: text/plain");
+                if (!l)
                         return log_oom();
-                }
+                h = l;
 
-                u->header = h;
+                u->header = TAKE_PTR(h);
         }
 
         if (!u->easy) {
-                CURL *curl;
+                _cleanup_(curl_easy_cleanupp) CURL *curl = NULL;
 
                 curl = curl_easy_init();
                 if (!curl)
@@ -259,7 +262,7 @@ int start_upload(Uploader *u,
                         easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1,
                                     LOG_WARNING, );
 
-                u->easy = curl;
+                u->easy = TAKE_PTR(curl);
         } else {
                 /* truncate the potential old error message */
                 u->error[0] = '\0';
@@ -356,7 +359,7 @@ static int open_file_for_upload(Uploader *u, const char *filename) {
 
         u->input = fd;
 
-        if (arg_follow) {
+        if (arg_follow != 0) {
                 r = sd_event_add_io(u->events, &u->input_event,
                                     fd, EPOLLIN, dispatch_fd_input, u);
                 if (r < 0) {
@@ -413,7 +416,7 @@ static int setup_uploader(Uploader *u, const char *url, const char *state_file) 
         assert(url);
 
         *u = (Uploader) {
-                .input = -1
+                .input = -1,
         };
 
         host = STARTSWITH_SET(url, "http://", "https://");
@@ -606,10 +609,9 @@ static int help(void) {
                "     --follow[=BOOL]        Do [not] wait for input\n"
                "     --save-state[=FILE]    Save uploaded cursors (default \n"
                "                            " STATE_FILE ")\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -748,16 +750,10 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_FOLLOW:
-                        if (optarg) {
-                                r = parse_boolean(optarg);
-                                if (r < 0)
-                                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                               "Failed to parse --follow= parameter.");
-
-                                arg_follow = !!r;
-                        } else
-                                arg_follow = true;
-
+                        r = parse_boolean_argument("--follow", optarg, NULL);
+                        if (r < 0)
+                                return r;
+                        arg_follow = r;
                         break;
 
                 case ARG_SAVE_STATE:
@@ -821,7 +817,7 @@ static int run(int argc, char **argv) {
         int r;
 
         log_show_color(true);
-        log_parse_environment_cli();
+        log_parse_environment();
 
         /* The journal merging logic potentially needs a lot of fds. */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
@@ -858,7 +854,7 @@ static int run(int argc, char **argv) {
                 r = open_journal_for_upload(&u, j,
                                             arg_cursor ?: u.last_cursor,
                                             arg_cursor ? arg_after_cursor : true,
-                                            !!arg_follow);
+                                            arg_follow != 0);
                 if (r < 0)
                         return r;
         }

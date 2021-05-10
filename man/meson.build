@@ -184,48 +184,19 @@ html = custom_target(
         depends : html_pages,
         command : ['echo'])
 
-run_target(
-        'doc-sync',
-        depends : man_pages + html_pages,
-        command : ['rsync', '-rlv',
-                   '--delete-excluded',
-                   '--include=man',
-                   '--include=*.html',
-                   '--exclude=*',
-                   '--omit-dir-times',
-                   meson.current_build_dir(),
-                   get_option('www-target')])
-
-############################################################
-
-if dbus_docs.length() > 0
-        custom_target(
-                'update-dbus-docs',
-                output : 'update-dbus-docs',
-                command : [update_dbus_docs_py,
-                           '--build-dir=@0@'.format(project_build_root),
-                           '@INPUT@'],
-                input : dbus_docs)
-
-        if conf.get('BUILD_MODE') == 'BUILD_MODE_DEVELOPER'
-                test('dbus-docs-fresh',
-                     update_dbus_docs_py,
-                     args : ['--build-dir=@0@'.format(project_build_root),
-                             '--test'] + dbus_docs)
-        endif
-endif
-
-############################################################
-
-if git.found()
-        custom_target(
-                'update-man-rules',
-                output : 'update-man-rules',
-                command : ['sh', '-c',
-                           'cd @0@ && '.format(meson.build_root()) +
-                           'python3 @0@/tools/update-man-rules.py $(git ls-files ":/man/*.xml") >t && '.format(project_source_root) +
-                           'mv t @0@/rules/meson.build'.format(meson.current_source_dir())],
-                depend_files : custom_entities_ent)
+rsync = find_program('rsync', required : false)
+if rsync.found()
+        run_target(
+                'doc-sync',
+                depends : man_pages + html_pages,
+                command : [rsync, '-rlv',
+                           '--delete-excluded',
+                           '--include=man',
+                           '--include=*.html',
+                           '--exclude=*',
+                           '--omit-dir-times',
+                           meson.current_build_dir(),
+                           get_option('www-target')])
 endif
 
 ############################################################

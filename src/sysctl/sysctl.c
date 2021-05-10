@@ -161,7 +161,7 @@ static int apply_all(OrderedHashmap *sysctl_options) {
                                         continue;
 
                                 if (ordered_hashmap_contains(sysctl_options, key)) {
-                                        log_info("Not setting %s (explicit setting exists).", key);
+                                        log_debug("Not setting %s (explicit setting exists).", key);
                                         continue;
                                 }
 
@@ -294,10 +294,9 @@ static int help(void) {
                "     --cat-config       Show configuration files\n"
                "     --prefix=PATH      Only apply rules with the specified prefix\n"
                "     --no-pager         Do not pipe output into a pager\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -387,7 +386,7 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

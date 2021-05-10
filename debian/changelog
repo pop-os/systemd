@@ -1,3 +1,85 @@
+systemd (248.2-1) experimental; urgency=medium
+
+  * New upstream version 248.2
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 09 May 2021 21:17:10 +0200
+
+systemd (248.1-1) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 248.1
+  * Rebase patches
+  * d/e/checkout-upstream: switch to main branch
+  * Update make-fbdev-blacklist to not blacklist hyperv_fb
+
+  [ Luca Boccassi ]
+  * systemd.install: catch all files installed in usr/bin and bin.
+    At the moment, individual binaries are mentioned specifically in the
+    install file.  When new binaries are added, manual work is needed to get
+    them packaged, which affects the upstream autopkgtest-based CI.
+    Change systemd.install to instead pick up everything from usr/bin and bin.
+  * upstream suite: add build-dep on vim-tiny.
+    Required by some of the images in the upstream test suite
+
+  [ Zbigniew Jędrzejewski-Szmek ]
+  * Let "upstream" test use upstream test runner
+
+  [ Dan Streetman ]
+  * Slight adjustments to previous patch for deny/black-list naming.
+    Also add in two vars used by the integration runner script
+  * d/t/upstream: use NO_BUILD=1.
+    Also don't bother sed-modifying test-functions file, as the NO_BUILD
+    changes remove the need for that.
+  * d/t/control: install all binary packages for upstream test.
+    With the change to just call the upstream script to run the integration
+    tests, the packages to test need to be installed so the test-function
+    script can list out the files each package contains, and copy those files
+    into each nspawn and/or qemu testbed. Without all packages installed,
+    some tests fail; specifically TEST-30 currently requires systemd-timesyncd
+    which was not previously installed for the 'upstream' test suite.
+    This changes the control file to just install all binary packages, using
+    the '@' notation.
+  * d/t/boot-smoke: update test to avoid false negatives
+
+  [ Frantisek Sumsal ]
+  * upstream-ci: fix test_no_failed() check.
+    Without `--plain` `systemctl` prints a circle (●) in the first column
+    for each failed service, which with the current code interferes with
+    attempted journal listing for each such service.
+
+ -- Michael Biebl <biebl@debian.org>  Fri, 07 May 2021 12:25:15 +0200
+
+systemd (248-1) experimental; urgency=medium
+
+  [ Balint Reczey ]
+  * New upstream version 248
+    - add support for answering DNSSEC questions on the stub resolver
+      (Closes: #988132)
+    - turn off DNSSEC validation when timesyncd resolves hostnames
+      (Closes: #898530)
+    - add networkd/nspawn nftables backend
+      (Closes: #934584)
+    - support ipv6 for masquerade and dnat in nspawn and networkd
+      (Closes: #934676)
+  * Refresh patches
+  * debian/rules: Enable new systemd-sysext tool
+  * debian/rules: Build support for flushing of the nscd caches
+  * debian/rules: Build translations for debs but not for udebs
+  * debian/rules: Build without TPM2 support.
+    This is a new feature and needs further review.
+  * Ship systemd-cryptenroll in systemd package
+  * Update symbols file for libsystemd0
+  * debian/tests/control: Upstream test depends on attr
+  * debian/udev.postinst: Create the sgx system group.
+    Intel SGX enclave device nodes are now owned by this group.
+  * debian/rules: Don't ship README files in (/usr)/lib/*.d.
+    README files are typically shipped in /usr/share/doc.
+  * Revert "pager: stop disabling urlification under a pager"
+    Debian and Ubuntu do not yet have a less version that supports
+    urlification. This requires less 563 or later.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 06 May 2021 23:00:08 +0200
+
 systemd (247.3-5ubuntu1) impish; urgency=medium
 
   [ Balint Reczey ]

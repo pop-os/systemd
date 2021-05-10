@@ -17,6 +17,11 @@ TIMED_OUT=  # will be 1 after run_* if *_TIMEOUT is set and test timed out
 UNIFIED_CGROUP_HIERARCHY="${UNIFIED_CGROUP_HIERARCHY:-default}"
 EFI_MOUNT="${EFI_MOUNT:-$(bootctl -x 2>/dev/null || echo /boot)}"
 QEMU_MEM="${QEMU_MEM:-512M}"
+# Note that defining a different IMAGE_NAME in a test setup script will only result
+# in default.img being copied and renamed. It can then be extended by defining
+# a test_append_files() function. The $1 parameter will be the root directory.
+# To force creating a new image from scratch (eg: to encrypt it), also define
+# TEST_FORCE_NEWIMAGE=1 in the test setup script.
 IMAGE_NAME=${IMAGE_NAME:-default}
 TEST_REQUIRE_INSTALL_TESTS="${TEST_REQUIRE_INSTALL_TESTS:-1}"
 TEST_PARALLELIZE="${TEST_PARALLELIZE:-0}"
@@ -38,12 +43,39 @@ if ! ROOTLIBDIR=$(pkg-config --variable=systemdutildir systemd); then
     ROOTLIBDIR=/usr/lib/systemd
 fi
 
+# The calling test.sh scripts have TEST_BASE_DIR set via their Makefile, but we don't need them to provide it
+TEST_BASE_DIR=${TEST_BASE_DIR:-$(realpath $(dirname "$BASH_SOURCE"))}
+TEST_UNITS_DIR="$TEST_BASE_DIR/units"
+SOURCE_DIR=$(realpath "$TEST_BASE_DIR/..")
+TOOLS_DIR="$SOURCE_DIR/tools"
+
+# note that find-build-dir.sh will return $BUILD_DIR if provided, else it will try to find it
+if ! BUILD_DIR=$($TOOLS_DIR/find-build-dir.sh); then
+    if [ "$NO_BUILD" ]; then
+        BUILD_DIR=$SOURCE_DIR
+    else
+        echo "ERROR: no build found, please set BUILD_DIR or use NO_BUILD" >&2
+        exit 1
+    fi
+fi
+
 PATH_TO_INIT=$ROOTLIBDIR/systemd
 [ "$SYSTEMD_JOURNALD" ] || SYSTEMD_JOURNALD=$(which -a $BUILD_DIR/systemd-journald $ROOTLIBDIR/systemd-journald 2>/dev/null | grep '^/' -m1)
 [ "$SYSTEMD_JOURNAL_REMOTE" ] || SYSTEMD_JOURNAL_REMOTE=$(which -a $BUILD_DIR/systemd-journal-remote $ROOTLIBDIR/systemd-journal-remote 2>/dev/null | grep '^/' -m1)
 [ "$SYSTEMD" ] || SYSTEMD=$(which -a $BUILD_DIR/systemd $ROOTLIBDIR/systemd 2>/dev/null | grep '^/' -m1)
 [ "$SYSTEMD_NSPAWN" ] || SYSTEMD_NSPAWN=$(which -a $BUILD_DIR/systemd-nspawn systemd-nspawn 2>/dev/null | grep '^/' -m1)
 [ "$JOURNALCTL" ] || JOURNALCTL=$(which -a $BUILD_DIR/journalctl journalctl 2>/dev/null | grep '^/' -m1)
+
+TESTFILE=${BASH_SOURCE[1]}
+if [ -z "$TESTFILE" ]; then
+    echo "ERROR: test-functions must be sourced from one of the TEST-*/test.sh scripts" >&2
+    exit 1
+fi
+TESTNAME=$(basename $(dirname $(realpath $TESTFILE)))
+STATEDIR="$BUILD_DIR/test/$TESTNAME"
+STATEFILE="$STATEDIR/.testdir"
+IMAGESTATEDIR="$STATEDIR/.."
+TESTLOG="$STATEDIR/test.log"
 
 BASICTOOLS=(
     awk
@@ -92,6 +124,7 @@ BASICTOOLS=(
     rmdir
     sed
     seq
+    setfattr
     setfont
     setsid
     sfdisk
@@ -143,11 +176,6 @@ DEBUGTOOLS=(
     vi
 )
 
-STATEDIR="${BUILD_DIR:-.}/test/$(basename $(dirname $(realpath $0)))"
-STATEFILE="$STATEDIR/.testdir"
-IMAGESTATEDIR="$STATEDIR/.."
-TESTLOG="$STATEDIR/test.log"
-
 is_built_with_asan() {
     if ! type -P objdump >/dev/null; then
         ddebug "Failed to find objdump. Assuming systemd hasn't been built with ASAN."
@@ -155,7 +183,7 @@ is_built_with_asan() {
     fi
 
     # Borrowed from https://github.com/google/oss-fuzz/blob/cd9acd02f9d3f6e80011cc1e9549be526ce5f270/infra/base-images/base-runner/bad_build_check#L182
-    local _asan_calls=$(objdump -dC $SYSTEMD_JOURNALD | egrep "callq\s+[0-9a-f]+\s+<__asan" -c)
+    local _asan_calls=$(objdump -dC $SYSTEMD_JOURNALD | egrep "callq?\s+[0-9a-f]+\s+<__asan" -c)
     if (( $_asan_calls < 1000 )); then
         return 1
     else
@@ -170,13 +198,15 @@ if [[ "$IS_BUILT_WITH_ASAN" = "yes" ]]; then
     SKIP_INITRD="${SKIP_INITRD:-yes}"
     PATH_TO_INIT=$ROOTLIBDIR/systemd-under-asan
     QEMU_MEM="2048M"
-    QEMU_SMP=4
+    QEMU_SMP="${QEMU_SMP:-4}"
 
     # We need to correctly distinguish between gcc's and clang's ASan DSOs.
-    if ldd $SYSTEMD | grep -q libasan.so; then
+    if ASAN_RT_NAME="$(ldd "$SYSTEMD" | awk '/libasan.so/ {x=$1; exit} END {print x; exit x==""}')"; then
         ASAN_COMPILER=gcc
-    elif ldd $SYSTEMD | grep -q libclang_rt.asan; then
+        ASAN_RT_PATH="$(readlink -f "$(${CC:-gcc} --print-file-name "$ASAN_RT_NAME")")"
+    elif ASAN_RT_NAME="$(ldd "$SYSTEMD" | awk '/libclang_rt.asan/ {x=$1; exit} END {print x; exit x==""}')"; then
         ASAN_COMPILER=clang
+        ASAN_RT_PATH="$(readlink -f "$(${CC:-clang} --print-file-name "$ASAN_RT_NAME")")"
 
         # As clang's ASan DSO is usually in a non-standard path, let's check if
         # the environment is set accordingly. If not, warn the user and exit.
@@ -184,10 +214,8 @@ if [[ "$IS_BUILT_WITH_ASAN" = "yes" ]]; then
         # user should encounter (and fix) the same issue when running the unit
         # tests (meson test)
         if ldd "$SYSTEMD" | grep -q "libclang_rt.asan.*not found"; then
-            _asan_rt_name="$(ldd $SYSTEMD | awk '/libclang_rt.asan/ {print $1; exit}')"
-            _asan_rt_path="$(find /usr/lib* /usr/local/lib* -type f -name "$_asan_rt_name" 2>/dev/null | sed 1q)"
-            echo >&2 "clang's ASan DSO ($_asan_rt_name) is not present in the runtime library path"
-            echo >&2 "Consider setting LD_LIBRARY_PATH=${_asan_rt_path%/*}"
+            echo >&2 "clang's ASan DSO ($ASAN_RT_NAME) is not present in the runtime library path"
+            echo >&2 "Consider setting LD_LIBRARY_PATH=${ASAN_RT_PATH%/*}"
             exit 1
         fi
     else
@@ -195,6 +223,8 @@ if [[ "$IS_BUILT_WITH_ASAN" = "yes" ]]; then
         echo >&2 "gcc does this by default, for clang compile with -shared-libasan"
         exit 1
     fi
+
+    echo "Detected ASan RT '$ASAN_RT_NAME' located at '$ASAN_RT_PATH'"
 fi
 
 function find_qemu_bin() {
@@ -235,7 +265,7 @@ function qemu_min_version() {
     find_qemu_bin || return 2
 
     # get version from binary
-    qemu_ver=$($QEMU_BIN --version | awk '/^QEMU emulator version ([0-9]*\.[0-9]*\.[0-9]*) / {print $4}')
+    qemu_ver=$($QEMU_BIN --version | awk '/^QEMU emulator version ([0-9]*\.[0-9]*\.[0-9]*)/ {print $4}')
 
     # Check version string format
     echo "$qemu_ver" | grep -q '^[0-9]*\.[0-9]*\.[0-9]*$' || return 2
@@ -435,6 +465,108 @@ run_nspawn() {
     return 0
 }
 
+# Build two very minimal root images, with two units, one is the same and one is different across them
+install_verity_minimal() {
+    if [ -e $initdir/usr/share/minimal.raw ]; then
+        return
+    fi
+    if ! command -v mksquashfs >/dev/null 2>&1; then
+        dfatal "mksquashfs not found"
+        exit 1
+    fi
+    if ! command -v veritysetup >/dev/null 2>&1; then
+        dfatal "veritysetup not found"
+        exit 1
+    fi
+    (
+        BASICTOOLS=(
+            bash
+            cat
+            grep
+            mount
+            sleep
+        )
+        oldinitdir=$initdir
+        rm -rfv $TESTDIR/minimal
+        export initdir=$TESTDIR/minimal
+        mkdir -p $initdir/usr/lib/systemd/system $initdir/usr/lib/extension-release.d $initdir/etc $initdir/var/tmp $initdir/opt
+        setup_basic_dirs
+        install_basic_tools
+        if [[ -v ASAN_RT_PATH ]]; then
+            # If we're compiled with ASan, install the ASan RT (and its dependencies)
+            # into the verity images to get rid of the annoying errors about
+            # missing $LD_PRELOAD libraries.
+            inst_libs "$ASAN_RT_PATH"
+            inst_library "$ASAN_RT_PATH"
+        fi
+        cp $os_release $initdir/usr/lib/os-release
+        ln -s ../usr/lib/os-release $initdir/etc/os-release
+        touch $initdir/etc/machine-id $initdir/etc/resolv.conf
+        touch $initdir/opt/some_file
+        echo MARKER=1 >> $initdir/usr/lib/os-release
+        echo -e "[Service]\nExecStartPre=cat /usr/lib/os-release\nExecStart=sleep 120" > $initdir/usr/lib/systemd/system/app0.service
+        cp $initdir/usr/lib/systemd/system/app0.service $initdir/usr/lib/systemd/system/app0-foo.service
+
+        mksquashfs $initdir $oldinitdir/usr/share/minimal_0.raw
+        veritysetup format $oldinitdir/usr/share/minimal_0.raw $oldinitdir/usr/share/minimal_0.verity | \
+            grep '^Root hash:' | cut -f2 | tr -d '\n' > $oldinitdir/usr/share/minimal_0.roothash
+
+        sed -i "s/MARKER=1/MARKER=2/g" $initdir/usr/lib/os-release
+        rm $initdir/usr/lib/systemd/system/app0-foo.service
+        cp $initdir/usr/lib/systemd/system/app0.service $initdir/usr/lib/systemd/system/app0-bar.service
+
+        mksquashfs $initdir $oldinitdir/usr/share/minimal_1.raw
+        veritysetup format $oldinitdir/usr/share/minimal_1.raw $oldinitdir/usr/share/minimal_1.verity | \
+            grep '^Root hash:' | cut -f2 | tr -d '\n' > $oldinitdir/usr/share/minimal_1.roothash
+
+        # Rolling distros like Arch do not set VERSION_ID
+        local version_id=""
+        if grep -q "^VERSION_ID=" $os_release; then
+            version_id="$(grep "^VERSION_ID=" $os_release)"
+        fi
+
+        export initdir=$TESTDIR/app0
+        mkdir -p $initdir/usr/lib/extension-release.d $initdir/usr/lib/systemd/system $initdir/opt
+        grep "^ID=" $os_release > $initdir/usr/lib/extension-release.d/extension-release.app0
+        echo "${version_id}" >> $initdir/usr/lib/extension-release.d/extension-release.app0
+        cat <<EOF > $initdir/usr/lib/systemd/system/app0.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/script0.sh
+EOF
+        cat <<EOF > $initdir/opt/script0.sh
+#!/bin/bash
+set -e
+test -e /usr/lib/os-release
+cat /usr/lib/extension-release.d/extension-release.app0
+EOF
+        chmod +x $initdir/opt/script0.sh
+        echo MARKER=1 > $initdir/usr/lib/systemd/system/some_file
+        mksquashfs $initdir $oldinitdir/usr/share/app0.raw
+
+        export initdir=$TESTDIR/app1
+        mkdir -p $initdir/usr/lib/extension-release.d $initdir/usr/lib/systemd/system $initdir/opt
+        grep "^ID=" $os_release > $initdir/usr/lib/extension-release.d/extension-release.app1
+        echo "${version_id}" >> $initdir/usr/lib/extension-release.d/extension-release.app1
+        cat <<EOF > $initdir/usr/lib/systemd/system/app1.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/script1.sh
+EOF
+        cat <<EOF > $initdir/opt/script1.sh
+#!/bin/bash
+set -e
+test -e /usr/lib/os-release
+cat /usr/lib/extension-release.d/extension-release.app1
+EOF
+        chmod +x $initdir/opt/script1.sh
+        echo MARKER=1 > $initdir/usr/lib/systemd/system/other_file
+        mksquashfs $initdir $oldinitdir/usr/share/app1.raw
+    )
+}
+
 setup_basic_environment() {
     # create the basic filesystem layout
     setup_basic_dirs
@@ -464,6 +596,9 @@ setup_basic_environment() {
     generate_module_dependencies
     if [[ "$IS_BUILT_WITH_ASAN" = "yes" ]]; then
         create_asan_wrapper
+    fi
+    if [ -n "$TEST_INSTALL_VERITY_MINIMAL" ]; then
+        install_verity_minimal
     fi
 }
 
@@ -528,25 +663,22 @@ create_asan_wrapper() {
     local _asan_rt_pattern
     ddebug "Create $_asan_wrapper"
 
-    case "$ASAN_COMPILER" in
-        gcc)
-            _asan_rt_pattern="*libasan*"
-            ;;
-        clang)
-            _asan_rt_pattern="libclang_rt.asan-*"
-            # Install llvm-symbolizer to generate useful reports
-            # See: https://clang.llvm.org/docs/AddressSanitizer.html#symbolizing-the-reports
-            dracut_install "llvm-symbolizer"
-            ;;
-        *)
-            dfail "Unsupported compiler: $ASAN_COMPILER"
-            exit 1
-    esac
+    [[ -z "$ASAN_RT_PATH" ]] && dfatal "ASAN_RT_PATH is empty, but it shouldn't be"
+
+    # clang: install llvm-symbolizer to generate useful reports
+    # See: https://clang.llvm.org/docs/AddressSanitizer.html#symbolizing-the-reports
+    [[ "$ASAN_COMPILER" == "clang" ]] && dracut_install "llvm-symbolizer"
 
     cat >$_asan_wrapper <<EOF
 #!/usr/bin/env bash
 
 set -x
+
+echo "ASan RT: $ASAN_RT_PATH"
+if [[ ! -e "$ASAN_RT_PATH" ]]; then
+    echo >&2 "Couldn't find ASan RT at '$ASAN_RT_PATH', can't continue"
+    exit 1
+fi
 
 DEFAULT_ASAN_OPTIONS=${ASAN_OPTIONS:-strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1}
 DEFAULT_UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:print_summary=1:halt_on_error=1}
@@ -560,15 +692,15 @@ mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -o remount,rw /
 
-PATH_TO_ASAN=\$(find / -name '$_asan_rt_pattern' | sed 1q)
-if [[ "\$PATH_TO_ASAN" ]]; then
-  # A lot of services (most notably dbus) won't start without preloading libasan
-  # See https://github.com/systemd/systemd/issues/5004
-  DEFAULT_ENVIRONMENT="\$DEFAULT_ENVIRONMENT LD_PRELOAD=\$PATH_TO_ASAN"
+# A lot of services (most notably dbus) won't start without preloading libasan
+# See https://github.com/systemd/systemd/issues/5004
+DEFAULT_ENVIRONMENT="\$DEFAULT_ENVIRONMENT LD_PRELOAD=$ASAN_RT_PATH"
+
+if [[ "$ASAN_COMPILER" == "clang" ]]; then
   # Let's add the ASan DSO's path to the dynamic linker's cache. This is pretty
   # unnecessary for gcc & libasan, however, for clang this is crucial, as its
   # runtime ASan DSO is in a non-standard (library) path.
-  echo \${PATH_TO_ASAN%/*} > /etc/ld.so.conf.d/asan-path-override.conf
+  echo "${ASAN_RT_PATH%/*}" > /etc/ld.so.conf.d/asan-path-override.conf
   ldconfig
 fi
 echo DefaultEnvironment=\$DEFAULT_ENVIRONMENT >>/etc/systemd/system.conf
@@ -598,6 +730,21 @@ printf "[Unit]\nConditionVirtualization=container\n\n[Service]\nTimeoutSec=240s\
 # Let's override another hard-coded timeout that kicks in too early
 mkdir -p /etc/systemd/system/systemd-journal-flush.service.d
 printf "[Service]\nTimeoutSec=180s\n" >/etc/systemd/system/systemd-journal-flush.service.d/timeout.conf
+
+# D-Bus has troubles during system shutdown causing it to fail. Although it's
+# harmless, it causes unnecessary noise in the logs, so let's disable LSan's
+# at_exit check just for the dbus.service
+mkdir -p /etc/systemd/system/dbus.service.d
+printf "[Service]\nEnvironment=ASAN_OPTIONS=leak_check_at_exit=false\n" >/etc/systemd/system/dbus.service.d/disable-lsan.conf
+
+# Some utilities run via IMPORT/RUN/PROGRAM udev directives fail because
+# they're uninstrumented (like dmsetup). Let's add a simple rule which sets
+# LD_PRELOAD to the ASan RT library to fix this.
+mkdir -p /etc/udev/rules.d
+cat > /etc/udev/rules.d/00-set-LD_PRELOAD.rules << INNER_EOF
+SUBSYSTEM=="block", ENV{LD_PRELOAD}="$ASAN_RT_PATH"
+INNER_EOF
+chmod 0644 /etc/udev/rules.d/00-set-LD_PRELOAD.rules
 
 # The 'mount' utility doesn't behave well under libasan, causing unexpected
 # fails during boot and subsequent test results check:
@@ -629,7 +776,7 @@ create_strace_wrapper() {
     cat >$_strace_wrapper <<EOF
 #!/usr/bin/env bash
 
-exec strace -D -o /strace.out $ROOTLIBDIR/systemd "\$@"
+exec strace -f -D -o /strace.out $ROOTLIBDIR/systemd "\$@"
 EOF
     chmod 0755 $_strace_wrapper
 }
@@ -658,7 +805,7 @@ install_dmevent() {
     fi
 }
 
-install_systemd() {
+install_compiled_systemd() {
     ddebug "Install compiled systemd"
 
     local _ninja_bin=$(type -P ninja || type -P ninja-build)
@@ -667,6 +814,42 @@ install_systemd() {
         exit 1
     fi
     (set -x; DESTDIR=$initdir "$_ninja_bin" -C $BUILD_DIR install)
+}
+
+install_debian_systemd() {
+    ddebug "Install debian systemd"
+
+    local _systemd_pkgs=$(grep -E '^Package:' ${SOURCE_DIR}/debian/control | cut -d ':' -f 2)
+    local _files=""
+    for deb in $_systemd_pkgs; do
+        _files=$(dpkg-query -L $deb 2>/dev/null) || continue
+        ddebug "Install debian files from package $deb"
+        for file in $_files; do
+            [ -e "$file" ] || continue
+            [ -d "$file" ] && continue
+            inst $file
+        done
+    done
+}
+
+install_distro_systemd() {
+    ddebug "Install distro systemd"
+
+    if [ "$LOOKS_LIKE_DEBIAN" ]; then
+        install_debian_systemd
+    else
+        dfatal "NO_BUILD not supported for this distro"
+        exit 1
+    fi
+}
+
+install_systemd() {
+    if [ "$NO_BUILD" ]; then
+        install_distro_systemd
+    else
+        install_compiled_systemd
+    fi
+
     # remove unneeded documentation
     rm -fr $initdir/usr/share/{man,doc}
 
@@ -692,7 +875,31 @@ get_ldpath() {
 install_missing_libraries() {
     # install possible missing libraries
     for i in $initdir{,/usr}/{sbin,bin}/* $initdir{,/usr}/lib/systemd/{,tests/{,manual/,unsafe/}}*; do
-        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$(get_ldpath $i):$(get_ldpath $i)/src/udev" inst_libs $i
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$(get_ldpath $i)" inst_libs $i
+    done
+
+    # A number of dependencies is now optional via dlopen, so the install
+    # script will not pick them up, since it looks at linkage.
+    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu libfido2; do
+        ddebug "Searching for $lib via pkg-config"
+        if pkg-config --exists ${lib}; then
+                path=$(pkg-config --variable=libdir ${lib})
+                if [ -z "${path}" ]; then
+                    ddebug "$lib.pc does not contain a libdir variable, skipping"
+                    continue
+                fi
+
+                if ! [[ ${lib} =~ ^lib ]]; then
+                        lib="lib${lib}"
+                fi
+                # Some pkg-config files are broken and give out the wrong paths
+                # (eg: libcryptsetup), so just ignore them
+                inst_libs "${path}/${lib}.so" || true
+                inst_library "${path}/${lib}.so" || true
+        else
+            ddebug "$lib.pc not found, skipping"
+            continue
+        fi
     done
 }
 
@@ -851,6 +1058,9 @@ check_result_nspawn() {
     test -s $TESTDIR/failed && ret=$(($ret+1))
     [ -n "$TIMED_OUT" ] && ret=$(($ret+1))
     check_asan_reports "$1" || ret=$(($ret+1))
+    if [ -d "${ARTIFACT_DIRECTORY}" ] && [ -f $1/strace.out ]; then
+        cp $1/strace.out "${ARTIFACT_DIRECTORY}/"
+    fi
     _umount_dir $initdir
     return $ret
 }
@@ -863,6 +1073,9 @@ check_result_qemu() {
     [[ -f $initdir/failed ]] && cp -a $initdir/failed $TESTDIR
     save_journal $initdir/var/log/journal
     check_asan_reports "$initdir" || ret=$(($ret+1))
+    if [ -d "${ARTIFACT_DIRECTORY}" ] && [ -f $initdir/strace.out ]; then
+        cp $initdir/strace.out "${ARTIFACT_DIRECTORY}/"
+    fi
     _umount_dir $initdir
     [[ -f $TESTDIR/failed ]] && cat $TESTDIR/failed
     echo $JOURNAL_LIST
@@ -903,7 +1116,7 @@ install_execs() {
          # some {rc,halt}.local scripts and programs are okay to not exist, the rest should
          # also, plymouth is pulled in by rescue.service, but even there the exit code
          # is ignored; as it's not present on some distros, don't fail if it doesn't exist
-         dinfo "Attempting to install $i"
+         dinfo "Attempting to install $i (based on unit file reference)"
          inst $i || [ "${i%.local}" != "$i" ] || [ "${i%systemd-update-done}" != "$i" ] || [ "${i##*/}" == "plymouth" ]
      done
     )
@@ -963,6 +1176,7 @@ install_config_files() {
     # we want an empty environment
     > $initdir/etc/environment
     > $initdir/etc/machine-id
+    > $initdir/etc/resolv.conf
 
     # set the hostname
     echo systemd-testsuite > $initdir/etc/hostname
@@ -1045,8 +1259,14 @@ EOF
 }
 
 install_user_dbus() {
-    inst $ROOTLIBDIR/user/dbus.socket
-    inst_symlink /usr/lib/systemd/user/sockets.target.wants/dbus.socket || inst_symlink /etc/systemd/user/sockets.target.wants/dbus.socket
+    local userunitdir
+    if ! userunitdir=$(pkg-config --variable=systemduserunitdir systemd); then
+        echo "WARNING! Cannot determine userunitdir from pkg-config, assuming /usr/lib/systemd/user" >&2
+        local userunitdir=/usr/lib/systemd/user
+    fi
+
+    inst $userunitdir/dbus.socket
+    inst_symlink $userunitdir/sockets.target.wants/dbus.socket || inst_symlink /etc/systemd/user/sockets.target.wants/dbus.socket
 
     # Append the After= dependency on dbus in case it isn't already set up
     mkdir -p "$initdir/etc/systemd/system/user@.service.d/"
@@ -1056,16 +1276,16 @@ After=dbus.service
 EOF
 
     # Newer Fedora versions use dbus-broker by default. Let's install it if it's available.
-    if [ -f $ROOTLIBDIR/user/dbus-broker.service ]; then
-        inst $ROOTLIBDIR/user/dbus-broker.service
+    if [ -f $userunitdir/dbus-broker.service ]; then
+        inst $userunitdir/dbus-broker.service
         inst_symlink /etc/systemd/user/dbus.service
     elif [ -f $ROOTLIBDIR/system/dbus-daemon.service ]; then
         # Fedora rawhide replaced dbus.service with dbus-daemon.service
-        inst $ROOTLIBDIR/user/dbus-daemon.service
+        inst $userunitdir/dbus-daemon.service
         # Alias symlink
         inst_symlink /etc/systemd/user/dbus.service
     else
-        inst $ROOTLIBDIR/user/dbus.service
+        inst $userunitdir/dbus.service
     fi
 }
 
@@ -1120,6 +1340,7 @@ install_zoneinfo() {
     inst_any /usr/share/zoneinfo/Asia/Vladivostok
     inst_any /usr/share/zoneinfo/Australia/Sydney
     inst_any /usr/share/zoneinfo/Europe/Berlin
+    inst_any /usr/share/zoneinfo/Europe/Dublin
     inst_any /usr/share/zoneinfo/Europe/Kiev
     inst_any /usr/share/zoneinfo/Pacific/Auckland
     inst_any /usr/share/zoneinfo/Pacific/Honolulu
@@ -1172,7 +1393,7 @@ setup_basic_dirs() {
     mkdir -p $initdir/etc/systemd/system
     mkdir -p $initdir/var/log/journal
 
-    for d in usr/bin usr/sbin bin etc lib "$libdir" sbin tmp usr var var/log dev proc sys sysroot root run run/lock run/initramfs; do
+    for d in usr/bin usr/sbin bin etc lib "$libdir" sbin tmp usr var var/log var/tmp dev proc sys sysroot root run run/lock run/initramfs; do
         if [ -L "/$d" ]; then
             inst_symlink "/$d"
         else
@@ -1556,7 +1777,7 @@ inst_binary() {
     # In such cases, let's check if the binary indeed exists in the image
     # before doing any other chcecks. If it does, immediately return with
     # success.
-    [[ $# -eq 1 && -e $initdir/$1 ]] && return 0
+    [[ $# -eq 1 && -e $initdir/$1 || -e $initdir/bin/$1 || -e $initdir/sbin/$1 || -e $initdir/usr/bin/$1 || -e $initdir/usr/sbin/$1 ]] && return 0
 
     _bin=$(find_binary "$1") || return 1
     _target=${2:-$_bin}
@@ -1989,6 +2210,10 @@ _test_cleanup() {
         set +e
         _umount_dir $initdir
         rm -vf "$IMAGE_PUBLIC"
+        # If multiple setups/cleans are ran in parallel, this can cause a race
+        if [ ${TEST_PARALLELIZE} -ne 1 ]; then
+            rm -vf "${IMAGESTATEDIR}/default.img"
+        fi
         rm -vfr "$TESTDIR"
         rm -vf "$STATEFILE"
     ) || :
@@ -2029,24 +2254,43 @@ test_setup() {
         mount_initdir
     else
         if [ ! -e "$IMAGE_PUBLIC" ]; then
-            # Create the backing public image, but then completely unmount
-            # it and drop the loopback device responsible for it, since we're
-            # going to symlink/copy the image and mount it again from
-            # elsewhere.
-            test_create_image
-            test_setup_cleanup
-            umount_loopback
-            cleanup_loopdev
+            # default.img is the base that every test uses and optionally appends to
+            if [ ! -e "${IMAGESTATEDIR}/default.img" ] || [ -n "${TEST_FORCE_NEWIMAGE}" ]; then
+                # Create the backing public image, but then completely unmount
+                # it and drop the loopback device responsible for it, since we're
+                # going to symlink/copy the image and mount it again from
+                # elsewhere.
+                local image_old=${IMAGE_PUBLIC}
+                if [ -z "${TEST_FORCE_NEWIMAGE}" ]; then
+                    IMAGE_PUBLIC="${IMAGESTATEDIR}/default.img"
+                fi
+                test_create_image
+                test_setup_cleanup
+                umount_loopback
+                cleanup_loopdev
+                IMAGE_PUBLIC="${image_old}"
+            fi
+            if [ "${IMAGE_NAME}" != "default" ] && [ -z "${TEST_FORCE_NEWIMAGE}" ]; then
+                cp -v "$(realpath "${IMAGESTATEDIR}/default.img")" "$IMAGE_PUBLIC"
+            fi
+        fi
+
+        local hook_defined=1
+        if declare -f -F test_append_files > /dev/null; then
+            hook_defined=$?
         fi
 
         echo "Reusing existing cached image $IMAGE_PUBLIC → $(realpath $IMAGE_PUBLIC)"
-        if [ ${TEST_PARALLELIZE} -ne 0 ]; then
+        if [ ${TEST_PARALLELIZE} -ne 0 ] || [ ${hook_defined} -eq 0 ]; then
             cp -v "$(realpath $IMAGE_PUBLIC)" "$IMAGE_PRIVATE"
         else
             ln -sv "$(realpath $IMAGE_PUBLIC)" "$IMAGE_PRIVATE"
         fi
 
         mount_initdir
+        if [ ${hook_defined} -eq 0 ]; then
+            test_append_files "$initdir"
+        fi
     fi
 
     setup_nspawn_root
@@ -2086,6 +2330,20 @@ do_test() {
     if [[ $UID != "0" ]]; then
         echo "TEST: $TEST_DESCRIPTION [SKIPPED]: not root" >&2
         exit 0
+    fi
+
+    if [ -n "$TEST_NO_QEMU" ] && [ -n "$TEST_NO_NSPAWN" ]; then
+        echo "TEST: $TEST_DESCRIPTION [SKIPPED]: both QEMU and nspawn disabled" >&2
+        exit 0
+    fi
+
+    if [ -n "$TEST_QEMU_ONLY" ] && [ -z "$TEST_NO_NSPAWN" ]; then
+        echo "TEST: $TEST_DESCRIPTION [SKIPPED]: QEMU-only tests requested" >&2
+        exit 0
+    fi
+
+    if [ -n "$TEST_PREFER_NSPAWN" ] && [ -z "$TEST_NO_NSPAWN" ]; then
+        TEST_NO_QEMU=1
     fi
 
     # Detect lib paths
@@ -2132,11 +2390,15 @@ do_test() {
             --all)
                 ret=0
                 echo -n "${testname}: $TEST_DESCRIPTION "
-                (
-                    test_setup
-                    test_setup_cleanup
-                    test_run "$2"
-                ) </dev/null >"$TESTLOG" 2>&1 || ret=$?
+                # Do not use a subshell, otherwise cleanup variables (LOOPDEV) will be lost
+                # and loop devices will leak
+                test_setup </dev/null >"$TESTLOG" 2>&1 || ret=$?
+                if [ $ret -eq 0 ]; then
+                    test_setup_cleanup </dev/null >>"$TESTLOG" 2>&1 || ret=$?
+                fi
+                if [ $ret -eq 0 ]; then
+                    test_run "$2" </dev/null >>"$TESTLOG" 2>&1 || ret=$?
+                fi
                 test_cleanup
                 if [ $ret -eq 0 ]; then
                     rm "$TESTLOG"

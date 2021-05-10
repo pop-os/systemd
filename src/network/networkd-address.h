@@ -30,6 +30,7 @@ typedef struct Address {
         uint32_t flags;
         char *label;
 
+        int set_broadcast;
         struct in_addr broadcast;
         struct ifa_cacheinfo cinfo;
 
@@ -49,8 +50,7 @@ typedef struct Address {
 int address_new(Address **ret);
 Address *address_free(Address *address);
 int address_get(Link *link, const Address *in, Address **ret);
-bool address_exists(Link *link, int family, const union in_addr_union *in_addr);
-int address_configure(const Address *address, Link *link, link_netlink_message_handler_t callback, bool update, Address **ret);
+int address_configure(const Address *address, Link *link, link_netlink_message_handler_t callback, Address **ret);
 int address_remove(const Address *address, Link *link, link_netlink_message_handler_t callback);
 bool address_equal(const Address *a1, const Address *a2);
 bool address_is_ready(const Address *a);
@@ -62,8 +62,8 @@ DEFINE_NETWORK_SECTION_FUNCTIONS(Address, address_free);
 int link_set_addresses(Link *link);
 int link_drop_addresses(Link *link);
 int link_drop_foreign_addresses(Link *link);
-int link_serialize_addresses(Link *link, FILE *f);
-int link_deserialize_addresses(Link *link, const char *addresses);
+bool link_address_is_dynamic(const Link *link, const Address *address);
+int link_has_ipv6_address(Link *link, const struct in6_addr *address);
 
 void ipv4_dad_unref(Link *link);
 int ipv4_dad_stop(Link *link);

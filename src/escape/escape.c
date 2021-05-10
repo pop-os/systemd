@@ -40,10 +40,9 @@ static int help(void) {
                "  -u --unescape           Unescape strings\n"
                "  -m --mangle             Mangle strings\n"
                "  -p --path               When escaping/unescaping assume the string is a path\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               link);
 
         return 0;
 }
@@ -83,17 +82,16 @@ static int parse_argv(int argc, char *argv[]) {
                 case ARG_VERSION:
                         return version();
 
-                case ARG_SUFFIX:
-
-                        if (unit_type_from_string(optarg) < 0)
-                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
-                                                       "Invalid unit suffix type %s.", optarg);
+                case ARG_SUFFIX: {
+                        UnitType t = unit_type_from_string(optarg);
+                        if (t < 0)
+                                return log_error_errno(t, "Invalid unit suffix type \"%s\".", optarg);
 
                         arg_suffix = optarg;
                         break;
+                }
 
                 case ARG_TEMPLATE:
-
                         if (!unit_name_is_valid(optarg, UNIT_NAME_TEMPLATE))
                                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                                        "Template name %s is not valid.", optarg);
@@ -159,7 +157,7 @@ static int run(int argc, char *argv[]) {
         char **i;
         int r;
 
-        log_setup_cli();
+        log_setup();
 
         r = parse_argv(argc, argv);
         if (r <= 0)

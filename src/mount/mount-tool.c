@@ -23,9 +23,11 @@
 #include "mount-util.h"
 #include "mountpoint-util.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-util.h"
 #include "pretty-print.h"
+#include "process-util.h"
 #include "sort-util.h"
 #include "spawn-polkit-agent.h"
 #include "stat-util.h"
@@ -114,11 +116,10 @@ static int help(void) {
                "     --list                       List mountable block devices\n"
                "  -u --umount                     Unmount mount points\n"
                "  -G --collect                    Unload unit after it stopped, even when failed\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , streq(program_invocation_short_name, "systemd-umount") ? "" : "--umount "
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               streq(program_invocation_short_name, "systemd-umount") ? "" : "--umount ",
+               link);
 
         return 0;
 }
@@ -182,8 +183,8 @@ static int parse_argv(int argc, char *argv[]) {
         assert(argc >= 0);
         assert(argv);
 
-        if (strstr(program_invocation_short_name, "systemd-umount"))
-                        arg_action = ACTION_UMOUNT;
+        if (invoked_as(argv, "systemd-umount"))
+                arg_action = ACTION_UMOUNT;
 
         while ((c = getopt_long(argc, argv, "hqH:M:t:o:p:AuGl", options, NULL)) >= 0)
 
@@ -242,13 +243,15 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case 't':
-                        if (free_and_strdup(&arg_mount_type, optarg) < 0)
-                                return log_oom();
+                        r = free_and_strdup_warn(&arg_mount_type, optarg);
+                        if (r < 0)
+                                return r;
                         break;
 
                 case 'o':
-                        if (free_and_strdup(&arg_mount_options, optarg) < 0)
-                                return log_oom();
+                        r = free_and_strdup_warn(&arg_mount_options, optarg);
+                        if (r < 0)
+                                return r;
                         break;
 
                 case ARG_OWNER: {
@@ -264,16 +267,15 @@ static int parse_argv(int argc, char *argv[]) {
                 }
 
                 case ARG_FSCK:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--fsck=", optarg, &arg_fsck);
                         if (r < 0)
-                                return log_error_errno(r, "Failed to parse --fsck= argument: %s", optarg);
-
-                        arg_fsck = r;
+                                return r;
                         break;
 
                 case ARG_DESCRIPTION:
-                        if (free_and_strdup(&arg_description, optarg) < 0)
-                                return log_oom();
+                        r = free_and_strdup_warn(&arg_description, optarg);
+                        if (r < 0)
+                                return r;
                         break;
 
                 case 'p':
@@ -287,9 +289,9 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_AUTOMOUNT:
-                        r = parse_boolean(optarg);
+                        r = parse_boolean_argument("--automount=", optarg, NULL);
                         if (r < 0)
-                                return log_error_errno(r, "--automount= expects a valid boolean parameter: %s", optarg);
+                                return r;
 
                         arg_action = r ? ACTION_AUTOMOUNT : ACTION_MOUNT;
                         break;
@@ -927,7 +929,7 @@ static int umount_by_device(sd_bus *bus, const char *what) {
                 return log_error_errno(SYNTHETIC_ERRNO(ENOTBLK),
                                        "Not a block device: %s", what);
 
-        r = sd_device_new_from_devnum(&d, 'b', st.st_rdev);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0)
                 return log_error_errno(r, "Failed to get device from device number: %m");
 
@@ -1195,7 +1197,7 @@ static int acquire_removable(sd_device *d) {
                 return 0;
 
         for (;;) {
-                if (sd_device_get_sysattr_value(d, "removable", &v) > 0)
+                if (sd_device_get_sysattr_value(d, "removable", &v) >= 0)
                         break;
 
                 if (sd_device_get_parent(d, &d) < 0)
@@ -1268,7 +1270,7 @@ static int discover_loop_backing_file(void) {
                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
                                        "Invalid file type: %s", loop_dev);
 
-        r = sd_device_new_from_devnum(&d, 'b', st.st_rdev);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0)
                 return log_error_errno(r, "Failed to get device from device number: %m");
 
@@ -1312,7 +1314,7 @@ static int discover_device(void) {
                                        "Invalid file type: %s",
                                        arg_mount_what);
 
-        r = sd_device_new_from_devnum(&d, 'b', st.st_rdev);
+        r = sd_device_new_from_stat_rdev(&d, &st);
         if (r < 0)
                 return log_error_errno(r, "Failed to get device from device number: %m");
 
@@ -1381,7 +1383,7 @@ static int list_devices(void) {
         if (arg_full)
                 table_set_width(table, 0);
 
-        r = table_set_sort(table, (size_t) 0, (size_t) SIZE_MAX);
+        r = table_set_sort(table, (size_t) 0);
         if (r < 0)
                 return log_error_errno(r, "Failed to set sort index: %m");
 

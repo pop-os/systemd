@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "sd-id128.h"
+
 #include "bpf-program.h"
 #include "condition.h"
 #include "emergency-action.h"
@@ -23,14 +25,14 @@ typedef enum KillOperation {
         KILL_KILL,
         KILL_WATCHDOG,
         _KILL_OPERATION_MAX,
-        _KILL_OPERATION_INVALID = -1
+        _KILL_OPERATION_INVALID = -EINVAL,
 } KillOperation;
 
 typedef enum CollectMode {
         COLLECT_INACTIVE,
         COLLECT_INACTIVE_OR_FAILED,
         _COLLECT_MODE_MAX,
-        _COLLECT_MODE_INVALID = -1,
+        _COLLECT_MODE_INVALID = -EINVAL,
 } CollectMode;
 
 static inline bool UNIT_IS_ACTIVE_OR_RELOADING(UnitActiveState t) {
@@ -118,9 +120,6 @@ typedef struct Unit {
         UnitLoadState load_state;
         Unit *merged_into;
 
-        FreezerState freezer_state;
-        sd_bus_message *pending_freezer_message;
-
         char *id;   /* The one special name that we use for identification */
         char *instance;
 
@@ -148,6 +147,16 @@ typedef struct Unit {
         /* If this is a transient unit we are currently writing, this is where we are writing it to */
         FILE *transient_file;
 
+        /* Freezer state */
+        sd_bus_message *pending_freezer_message;
+        FreezerState freezer_state;
+
+        /* Job timeout and action to take */
+        EmergencyAction job_timeout_action;
+        usec_t job_timeout;
+        usec_t job_running_timeout;
+        char *job_timeout_reboot_arg;
+
         /* If there is something to do with this unit, then this is the installed job for it */
         Job *job;
 
@@ -161,13 +170,6 @@ typedef struct Unit {
         /* References to this unit from clients */
         sd_bus_track *bus_track;
         char **deserialized_refs;
-
-        /* Job timeout and action to take */
-        usec_t job_timeout;
-        usec_t job_running_timeout;
-        bool job_running_timeout_set:1;
-        EmergencyAction job_timeout_action;
-        char *job_timeout_reboot_arg;
 
         /* References to this */
         LIST_HEAD(UnitRef, refs_by_target);
@@ -239,6 +241,9 @@ typedef struct Unit {
         /* Put a ratelimit on unit starting */
         RateLimit start_ratelimit;
         EmergencyAction start_limit_action;
+
+        /* The unit has been marked for reload, restart, etc. Stored as 1u << marker1 | 1u << marker2. */
+        unsigned markers;
 
         /* What to do on failure or success */
         EmergencyAction success_action, failure_action;
@@ -356,6 +361,8 @@ typedef struct Unit {
         bool in_stop_when_unneeded_queue:1;
 
         bool sent_dbus_new_signal:1;
+
+        bool job_running_timeout_set:1;
 
         bool in_audit:1;
         bool on_console:1;
@@ -638,7 +645,7 @@ typedef struct UnitVTable {
 
 extern const UnitVTable * const unit_vtable[_UNIT_TYPE_MAX];
 
-static inline const UnitVTable* UNIT_VTABLE(Unit *u) {
+static inline const UnitVTable* UNIT_VTABLE(const Unit *u) {
         return unit_vtable[u->type];
 }
 
@@ -667,8 +674,8 @@ static inline Unit* UNIT_TRIGGER(Unit *u) {
         return hashmap_first_key(u->dependencies[UNIT_TRIGGERS]);
 }
 
-Unit *unit_new(Manager *m, size_t size);
-void unit_free(Unit *u);
+Unit* unit_new(Manager *m, size_t size);
+Unit* unit_free(Unit *u);
 DEFINE_TRIVIAL_CLEANUP_FUNC(Unit *, unit_free);
 
 int unit_new_for_name(Manager *m, size_t size, const char *name, Unit **ret);
@@ -721,8 +728,6 @@ int unit_freezer_state_kernel(Unit *u, FreezerState *ret);
 
 const char* unit_sub_state_to_string(Unit *u);
 
-void unit_dump(Unit *u, FILE *f, const char *prefix);
-
 bool unit_can_reload(Unit *u) _pure_;
 bool unit_can_start(Unit *u) _pure_;
 bool unit_can_stop(Unit *u) _pure_;
@@ -738,7 +743,6 @@ int unit_kill_common(Unit *u, KillWho who, int signo, pid_t main_pid, pid_t cont
 typedef enum UnitNotifyFlags {
         UNIT_NOTIFY_RELOAD_FAILURE    = 1 << 0,
         UNIT_NOTIFY_WILL_AUTO_RESTART = 1 << 1,
-        UNIT_NOTIFY_SKIP_CONDITION    = 1 << 2,
 } UnitNotifyFlags;
 
 void unit_notify(Unit *u, UnitActiveState os, UnitActiveState ns, UnitNotifyFlags flags);
@@ -764,10 +768,6 @@ char *unit_dbus_path_invocation_id(Unit *u);
 int unit_load_related_unit(Unit *u, const char *type, Unit **_found);
 
 bool unit_can_serialize(Unit *u) _pure_;
-
-int unit_serialize(Unit *u, FILE *f, FDSet *fds, bool serialize_jobs);
-int unit_deserialize(Unit *u, FILE *f, FDSet *fds);
-int unit_deserialize_skip(FILE *f);
 
 int unit_add_node_dependency(Unit *u, const char *what, UnitDependency d, UnitDependencyMask mask);
 int unit_add_blockdev_dependency(Unit *u, const char *what, UnitDependencyMask mask);
@@ -808,7 +808,7 @@ void unit_ref_unset(UnitRef *ref);
 
 int unit_patch_contexts(Unit *u);
 
-ExecContext *unit_get_exec_context(Unit *u) _pure_;
+ExecContext *unit_get_exec_context(const Unit *u) _pure_;
 KillContext *unit_get_kill_context(Unit *u) _pure_;
 CGroupContext *unit_get_cgroup_context(Unit *u) _pure_;
 
@@ -848,6 +848,7 @@ void unit_unref_uid_gid(Unit *u, bool destroy_now);
 
 void unit_notify_user_lookup(Unit *u, uid_t uid, gid_t gid);
 
+int unit_set_invocation_id(Unit *u, sd_id128_t id);
 int unit_acquire_invocation_id(Unit *u);
 
 bool unit_shall_confirm_spawn(Unit *u);
@@ -876,6 +877,11 @@ int unit_pid_attachable(Unit *unit, pid_t pid, sd_bus_error *error);
 
 static inline bool unit_has_job_type(Unit *u, JobType type) {
         return u && u->job && u->job->type == type;
+}
+
+static inline bool unit_log_level_test(const Unit *u, int level) {
+        ExecContext *ec = unit_get_exec_context(u);
+        return !ec || ec->log_level_max < 0 || ec->log_level_max >= LOG_PRI(level);
 }
 
 /* unit_log_skip is for cases like ExecCondition= where a unit is considered "done"
@@ -917,9 +923,10 @@ int unit_thaw_vtable_common(Unit *u);
 #define log_unit_full_errno(unit, level, error, ...)                    \
         ({                                                              \
                 const Unit *_u = (unit);                                \
-                (log_get_max_level() < LOG_PRI(level)) ? -ERRNO_VALUE(error) : \
-                        _u ? log_object_internal(level, error, PROJECT_FILE, __LINE__, __func__, _u->manager->unit_log_field, _u->id, _u->manager->invocation_log_field, _u->invocation_id_string, ##__VA_ARGS__) : \
-                                log_internal(level, error, PROJECT_FILE, __LINE__, __func__, ##__VA_ARGS__); \
+                const int _l = (level);                                 \
+                (log_get_max_level() < LOG_PRI(_l) || (_u && !unit_log_level_test(_u, _l))) ? -ERRNO_VALUE(error) : \
+                        _u ? log_object_internal(_l, error, PROJECT_FILE, __LINE__, __func__, _u->manager->unit_log_field, _u->id, _u->manager->invocation_log_field, _u->invocation_id_string, ##__VA_ARGS__) : \
+                                log_internal(_l, error, PROJECT_FILE, __LINE__, __func__, ##__VA_ARGS__); \
         })
 
 #define log_unit_full(unit, level, ...) (void) log_unit_full_errno(unit, level, 0, __VA_ARGS__)
@@ -935,6 +942,27 @@ int unit_thaw_vtable_common(Unit *u);
 #define log_unit_notice_errno(unit, error, ...)  log_unit_full_errno(unit, LOG_NOTICE, error, __VA_ARGS__)
 #define log_unit_warning_errno(unit, error, ...) log_unit_full_errno(unit, LOG_WARNING, error, __VA_ARGS__)
 #define log_unit_error_errno(unit, error, ...)   log_unit_full_errno(unit, LOG_ERR, error, __VA_ARGS__)
+
+#define log_unit_struct_errno(unit, level, error, ...)                  \
+        ({                                                              \
+                const Unit *_u = (unit);                                \
+                const int _l = (level);                                 \
+                unit_log_level_test(_u, _l) ?                           \
+                        log_struct_errno(_l, error, __VA_ARGS__, LOG_UNIT_ID(_u)) : \
+                        -ERRNO_VALUE(error);                            \
+        })
+
+#define log_unit_struct(unit, level, ...) log_unit_struct_errno(unit, level, 0, __VA_ARGS__)
+
+#define log_unit_struct_iovec_errno(unit, level, error, iovec, n_iovec) \
+        ({                                                              \
+                const int _l = (level);                                 \
+                unit_log_level_test(unit, _l) ?                         \
+                        log_struct_iovec_errno(_l, error, iovec, n_iovec) : \
+                        -ERRNO_VALUE(error);                            \
+        })
+
+#define log_unit_struct_iovec(unit, level, iovec, n_iovec) log_unit_struct_iovec_errno(unit, level, 0, iovec, n_iovec)
 
 #define LOG_UNIT_MESSAGE(unit, fmt, ...) "MESSAGE=%s: " fmt, (unit)->id, ##__VA_ARGS__
 #define LOG_UNIT_ID(unit) (unit)->manager->unit_log_format_string, (unit)->id

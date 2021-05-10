@@ -76,6 +76,8 @@
           </para>
 
           <para>Message <parameter>call</parameter> is not attached to a bus.</para>
+
+          <para>Message <parameter>m</parameter> is not a method reply message.</para>
           </listitem>
         </varlistentry>
 

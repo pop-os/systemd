@@ -8,15 +8,7 @@
 [Distribution]
 Distribution=arch
 
-[Output]
-Format=raw_btrfs
-Bootable=yes
-
-[Partitions]
-RootSize=3G
-
 [Packages]
-Cache=/var/cache/pacman/pkg/
 BuildPackages=
         acl
         bzip2
@@ -50,9 +42,14 @@ BuildPackages=
         python
         python-lxml
         qrencode
+        rsync
         xz
         zstd
 
 Packages=
+        gdb
         libidn2
+        nano
         qrencode
+        strace
+        vi

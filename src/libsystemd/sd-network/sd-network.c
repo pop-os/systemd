@@ -212,6 +212,27 @@ _public_ int sd_network_link_get_required_operstate_for_online(int ifindex, char
         return 0;
 }
 
+_public_ int sd_network_link_get_activation_policy(int ifindex, char **policy) {
+        _cleanup_free_ char *s = NULL;
+        int r;
+
+        assert_return(policy, -EINVAL);
+
+        r = network_link_get_string(ifindex, "ACTIVATION_POLICY", &s);
+        if (r < 0) {
+                if (r != -ENODATA)
+                        return r;
+
+                /* For compatibility, assuming up. */
+                s = strdup("up");
+                if (!s)
+                        return -ENOMEM;
+        }
+
+        *policy = TAKE_PTR(s);
+        return 0;
+}
+
 _public_ int sd_network_link_get_llmnr(int ifindex, char **llmnr) {
         return network_link_get_string(ifindex, "LLMNR", llmnr);
 }
@@ -440,9 +461,9 @@ _public_ int sd_network_monitor_get_timeout(sd_network_monitor *m, uint64_t *tim
         assert_return(m, -EINVAL);
         assert_return(timeout_usec, -EINVAL);
 
-        /* For now we will only return (uint64_t) -1, since we don't
+        /* For now we will only return UINT64_MAX, since we don't
          * need any timeout. However, let's have this API to keep our
          * options open should we later on need it. */
-        *timeout_usec = (uint64_t) -1;
+        *timeout_usec = UINT64_MAX;
         return 0;
 }

@@ -27,6 +27,7 @@
 #include "def.h"
 #include "dirent-util.h"
 #include "dissect-image.h"
+#include "env-util.h"
 #include "escape.h"
 #include "fd-util.h"
 #include "fileio.h"
@@ -45,6 +46,7 @@
 #include "mountpoint-util.h"
 #include "offline-passwd.h"
 #include "pager.h"
+#include "parse-argument.h"
 #include "parse-util.h"
 #include "path-lookup.h"
 #include "path-util.h"
@@ -60,6 +62,7 @@
 #include "string-table.h"
 #include "string-util.h"
 #include "strv.h"
+#include "terminal-util.h"
 #include "umask-util.h"
 #include "user-util.h"
 
@@ -1308,11 +1311,15 @@ static int fd_set_attribute(Item *item, int fd, const char *path, const struct s
         if (procfs_fd < 0)
                 return log_error_errno(procfs_fd, "Failed to re-open '%s': %m", path);
 
-        r = chattr_fd(procfs_fd, f, item->attribute_mask, NULL);
-        if (r < 0)
-                log_full_errno(IN_SET(r, -ENOTTY, -EOPNOTSUPP) ? LOG_DEBUG : LOG_WARNING,
-                               r,
-                               "Cannot set file attribute for '%s', value=0x%08x, mask=0x%08x, ignoring: %m",
+        unsigned previous, current;
+        r = chattr_full(NULL, procfs_fd, f, item->attribute_mask, &previous, &current, true);
+        if (r == -ENOANO)
+                log_warning("Cannot set file attributes for '%s', maybe due to incompatibility in specified attributes, "
+                            "previous=0x%08x, current=0x%08x, expected=0x%08x, ignoring.",
+                            path, previous, current, (previous & ~item->attribute_mask) | (f & item->attribute_mask));
+        else if (r < 0)
+                log_full_errno(ERRNO_IS_NOT_SUPPORTED(r) ? LOG_DEBUG : LOG_WARNING, r,
+                               "Cannot set file attributes for '%s', value=0x%08x, mask=0x%08x, ignoring: %m",
                                path, item->attribute_value, item->attribute_mask);
 
         return 0;
@@ -1583,7 +1590,7 @@ typedef enum {
         CREATION_EXISTING,
         CREATION_FORCE,
         _CREATION_MODE_MAX,
-        _CREATION_MODE_INVALID = -1
+        _CREATION_MODE_INVALID = -EINVAL,
 } CreationMode;
 
 static const char *const creation_mode_verb_table[_CREATION_MODE_MAX] = {
@@ -1609,8 +1616,13 @@ static int create_directory_or_subvolume(const char *path, mode_t mode, bool sub
                 return pfd;
 
         if (subvol) {
-                if (btrfs_is_subvol(empty_to_root(arg_root)) <= 0)
-
+                r = getenv_bool("SYSTEMD_TMPFILES_FORCE_SUBVOL");
+                if (r < 0) {
+                        if (r != -ENXIO) /* env var is unset */
+                                log_warning_errno(r, "Cannot parse value of $SYSTEMD_TMPFILES_FORCE_SUBVOL, ignoring.");
+                        r = btrfs_is_subvol(empty_to_root(arg_root)) > 0;
+                }
+                if (!r)
                         /* Don't create a subvolume unless the root directory is
                          * one, too. We do this under the assumption that if the
                          * root directory is just a plain directory (i.e. very
@@ -1644,10 +1656,9 @@ static int create_directory_or_subvolume(const char *path, mode_t mode, bool sub
                         return log_error_errno(r, "%s does not exist and cannot be created as the file system is read-only.", path);
                 if (k < 0)
                         return log_error_errno(k, "Failed to check if %s exists: %m", path);
-                if (!k) {
-                        log_warning("\"%s\" already exists and is not a directory.", path);
-                        return -EEXIST;
-                }
+                if (!k)
+                        return log_warning_errno(SYNTHETIC_ERRNO(EEXIST),
+                                                 "\"%s\" already exists and is not a directory.", path);
 
                 *creation = CREATION_EXISTING;
         } else
@@ -1730,10 +1741,10 @@ static int empty_directory(Item *i, const char *path) {
         }
         if (r < 0)
                 return log_error_errno(r, "is_dir() failed on path %s: %m", path);
-        if (r == 0)
-                return log_error_errno(SYNTHETIC_ERRNO(EEXIST),
-                                       "'%s' already exists and is not a directory.",
-                                       path);
+        if (r == 0) {
+                log_warning("\"%s\" already exists and is not a directory.", path);
+                return 0;
+        }
 
         return path_set_perms(i, path);
 }
@@ -1792,7 +1803,7 @@ static int create_device(Item *i, mode_t file_type) {
                                         return log_error_errno(r, "Failed to create device node \"%s\": %m", i->path);
                                 creation = CREATION_FORCE;
                         } else {
-                                log_debug("%s is not a device node.", i->path);
+                                log_warning("\"%s\" already exists is not a device node.", i->path);
                                 return 0;
                         }
                 } else
@@ -2563,7 +2574,9 @@ static int patch_var_run(const char *fname, unsigned line, char **path) {
         /* Also log about this briefly. We do so at LOG_NOTICE level, as we fixed up the situation automatically, hence
          * there's no immediate need for action by the user. However, in the interest of making things less confusing
          * to the user, let's still inform the user that these snippets should really be updated. */
-        log_syntax(NULL, LOG_NOTICE, fname, line, 0, "Line references path below legacy directory /var/run/, updating %s → %s; please update the tmpfiles.d/ drop-in file accordingly.", *path, n);
+        log_syntax(NULL, LOG_NOTICE, fname, line, 0,
+                   "Line references path below legacy directory /var/run/, updating %s → %s; please update the tmpfiles.d/ drop-in file accordingly.",
+                   *path, n);
 
         free_and_replace(*path, n);
 
@@ -2991,8 +3004,8 @@ static int help(void) {
         if (r < 0)
                 return log_oom();
 
-        printf("%s [OPTIONS...] [CONFIGURATION FILE...]\n\n"
-               "Creates, deletes and cleans up volatile and temporary files and directories.\n\n"
+        printf("%s [OPTIONS...] [CONFIGURATION FILE...]\n"
+               "\n%sCreates, deletes and cleans up volatile and temporary files and directories.%s\n\n"
                "  -h --help                 Show this help\n"
                "     --user                 Execute user configuration\n"
                "     --version              Show package version\n"
@@ -3008,10 +3021,11 @@ static int help(void) {
                "     --image=PATH           Operate on disk image as filesystem root\n"
                "     --replace=PATH         Treat arguments as replacement for PATH\n"
                "     --no-pager             Do not pipe output into a pager\n"
-               "\nSee the %s for details.\n"
-               , program_invocation_short_name
-               , link
-        );
+               "\nSee the %s for details.\n",
+               program_invocation_short_name,
+               ansi_highlight(),
+               ansi_normal(),
+               link);
 
         return 0;
 }
@@ -3102,7 +3116,7 @@ static int parse_argv(int argc, char *argv[]) {
                         break;
 
                 case ARG_ROOT:
-                        r = parse_path_argument_and_warn(optarg, /* suppress_root= */ false, &arg_root);
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_root);
                         if (r < 0)
                                 return r;
                         break;
@@ -3112,7 +3126,7 @@ static int parse_argv(int argc, char *argv[]) {
                         return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
                                                "This systemd-tmpfiles version is compiled without support for --image=.");
 #else
-                        r = parse_path_argument_and_warn(optarg, /* suppress_root= */ false, &arg_image);
+                        r = parse_path_argument(optarg, /* suppress_root= */ false, &arg_image);
                         if (r < 0)
                                 return r;
 #endif
@@ -3173,7 +3187,7 @@ static int read_config_file(char **config_dirs, const char *fn, bool ignore_enoe
         _cleanup_fclose_ FILE *_f = NULL;
         unsigned v = 0;
         FILE *f;
-        Item *i;
+        ItemArray *ia;
         int r = 0;
 
         assert(fn);
@@ -3226,31 +3240,36 @@ static int read_config_file(char **config_dirs, const char *fn, bool ignore_enoe
         }
 
         /* we have to determine age parameter for each entry of type X */
-        ORDERED_HASHMAP_FOREACH(i, globs) {
-                Item *j, *candidate_item = NULL;
+        ORDERED_HASHMAP_FOREACH(ia, globs)
+                for (size_t ni = 0; ni < ia->n_items; ni++) {
+                        ItemArray *ja;
+                        Item *i = ia->items + ni, *candidate_item = NULL;
 
-                if (i->type != IGNORE_DIRECTORY_PATH)
-                        continue;
-
-                ORDERED_HASHMAP_FOREACH(j, items) {
-                        if (!IN_SET(j->type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY, CREATE_SUBVOLUME, CREATE_SUBVOLUME_INHERIT_QUOTA, CREATE_SUBVOLUME_NEW_QUOTA))
+                        if (i->type != IGNORE_DIRECTORY_PATH)
                                 continue;
 
-                        if (path_equal(j->path, i->path)) {
-                                candidate_item = j;
-                                break;
+                        ORDERED_HASHMAP_FOREACH(ja, items)
+                                for (size_t nj = 0; nj < ja->n_items; nj++) {
+                                        Item *j = ja->items + nj;
+
+                                        if (!IN_SET(j->type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY, CREATE_SUBVOLUME, CREATE_SUBVOLUME_INHERIT_QUOTA, CREATE_SUBVOLUME_NEW_QUOTA))
+                                                continue;
+
+                                        if (path_equal(j->path, i->path)) {
+                                                candidate_item = j;
+                                                break;
+                                        }
+
+                                        if ((!candidate_item && path_startswith(i->path, j->path)) ||
+                                            (candidate_item && path_startswith(j->path, candidate_item->path) && (fnmatch(i->path, j->path, FNM_PATHNAME | FNM_PERIOD) == 0)))
+                                                candidate_item = j;
+                                }
+
+                        if (candidate_item && candidate_item->age_set) {
+                                i->age = candidate_item->age;
+                                i->age_set = true;
                         }
-
-                        if ((!candidate_item && path_startswith(i->path, j->path)) ||
-                            (candidate_item && path_startswith(j->path, candidate_item->path) && (fnmatch(i->path, j->path, FNM_PATHNAME | FNM_PERIOD) == 0)))
-                                candidate_item = j;
                 }
-
-                if (candidate_item && candidate_item->age_set) {
-                        i->age = candidate_item->age;
-                        i->age_set = true;
-                }
-        }
 
         if (ferror(f)) {
                 log_error_errno(errno, "Failed to read from file %s: %m", fn);
@@ -3357,7 +3376,17 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
-        log_setup_service();
+        log_setup();
+
+        /* We require /proc/ for a lot of our operations, i.e. for adjusting access modes, for anything
+         * SELinux related, for recursive operation, for xattr, acl and chattr handling, for btrfs stuff and
+         * a lot more. It's probably the majority of invocations where /proc/ is required. Since people
+         * apparently invoke it without anyway and are surprised about the failures, let's catch this early
+         * and output a nice and friendly warning. */
+        if (proc_mounted() == 0)
+                return log_error_errno(SYNTHETIC_ERRNO(ENOSYS),
+                                       "/proc/ is not mounted, but required for successful operation of systemd-tmpfiles. "
+                                       "Please mount /proc/. Alternatively, consider using the --root= or --image= switches.");
 
         /* Descending down file system trees might take a lot of fds */
         (void) rlimit_nofile_bump(HIGH_RLIMIT_NOFILE);
@@ -3383,7 +3412,7 @@ static int run(int argc, char *argv[]) {
                         if (!j)
                                 return log_oom();
 
-                        if (!strextend(&t, "\n\t", j, NULL))
+                        if (!strextend(&t, "\n\t", j))
                                 return log_oom();
                 }
 

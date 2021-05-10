@@ -17,22 +17,29 @@
 
   <refnamediv>
     <refname>systemd-cryptsetup@.service</refname>
+    <!-- <refname>system-systemd\x2dcryptsetup.slice</refname> — this causes meson to go haywire because it
+         thinks this is a (windows) path. Let's just not create the alias for this name, and only include it
+         in the synopsis. -->
     <refname>systemd-cryptsetup</refname>
     <refpurpose>Full disk decryption logic</refpurpose>
   </refnamediv>
 
   <refsynopsisdiv>
     <para><filename>systemd-cryptsetup@.service</filename></para>
+    <para><filename>system-systemd\x2dcryptsetup.slice</filename></para>
     <para><filename>/usr/lib/systemd/systemd-cryptsetup</filename></para>
   </refsynopsisdiv>
 
   <refsect1>
     <title>Description</title>
 
-    <para><filename>systemd-cryptsetup@.service</filename> is a
-    service responsible for setting up encrypted block devices. It is
-    instantiated for each device that requires decryption for
-    access.</para>
+    <para><filename>systemd-cryptsetup@.service</filename> is a service responsible for setting up encrypted
+    block devices. It is instantiated for each device that requires decryption for access.</para>
+
+    <para><filename>systemd-cryptsetup@.service</filename> instances are part of the
+    <filename>system-systemd\x2dcryptsetup.slice</filename> slice, which is destroyed only very late in the
+    shutdown procedure. This allows the encrypted devices to remain up until filesystems have been unmounted.
+    </para>
 
     <para><filename>systemd-cryptsetup@.service</filename> will ask
     for hard disk passwords via the <ulink
@@ -50,13 +57,14 @@
 
     <orderedlist>
       <listitem><para>If a key file is explicitly configured (via the third column in
-      <filename>/etc/crypttab</filename>), a key read from it is used. If a PKCS#11 token is configured
-      (using the <varname>pkcs11-uri=</varname> option) the key is decrypted before use.</para></listitem>
+      <filename>/etc/crypttab</filename>), a key read from it is used. If a PKCS#11 token, FIDO2 token or
+      TPM2 device is configured (using the <varname>pkcs11-uri=</varname>, <varname>fido2-device=</varname>,
+      <varname>tpm2-device=</varname> options) the key is decrypted before use.</para></listitem>
 
       <listitem><para>If no key file is configured explicitly this way, a key file is automatically loaded
       from <filename>/etc/cryptsetup-keys.d/<replaceable>volume</replaceable>.key</filename> and
       <filename>/run/cryptsetup-keys.d/<replaceable>volume</replaceable>.key</filename>, if present. Here
-      too, if a PKCS#11 token is configured, any key found this way is decrypted before
+      too, if a PKCS#11/FIDO2/TPM2 token/device is configured, any key found this way is decrypted before
       use.</para></listitem>
 
       <listitem><para>If the <varname>try-empty-password</varname> option is specified it is then attempted
@@ -77,6 +85,7 @@
       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>systemd-cryptsetup-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
       <citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+      <citerefentry><refentrytitle>systemd-cryptenroll</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
       <citerefentry project='die-net'><refentrytitle>cryptsetup</refentrytitle><manvolnum>8</manvolnum></citerefentry>
      </para>
   </refsect1>

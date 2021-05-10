@@ -13,7 +13,7 @@ Failed to write 'add' to '/sys/bus/acpi/uevent': Permission denied
  1 file changed, 1 insertion(+)
 
 diff --git a/units/systemd-udev-trigger.service b/units/systemd-udev-trigger.service
-index 8b2d88e..3cd692b 100644
+index 3d0f7b4..e06a2e8 100644
 --- a/units/systemd-udev-trigger.service
 +++ b/units/systemd-udev-trigger.service
 @@ -15,6 +15,7 @@ Wants=systemd-udevd.service

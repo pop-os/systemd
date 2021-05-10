@@ -58,7 +58,7 @@ static int output_unit_file_list(const UnitFileList *units, unsigned c) {
         if (!table)
                 return log_oom();
 
-        table_set_header(table, !arg_no_legend);
+        table_set_header(table, arg_legend != 0);
         if (arg_full)
                 table_set_width(table, 0);
 
@@ -127,7 +127,7 @@ static int output_unit_file_list(const UnitFileList *units, unsigned c) {
         if (r < 0)
                 return r;
 
-        if (!arg_no_legend)
+        if (arg_legend != 0)
                 printf("\n%u unit files listed.\n", c);
 
         return 0;
@@ -136,7 +136,6 @@ static int output_unit_file_list(const UnitFileList *units, unsigned c) {
 int list_unit_files(int argc, char *argv[], void *userdata) {
         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
         _cleanup_free_ UnitFileList *units = NULL;
-        UnitFileList *unit;
         size_t size = 0;
         unsigned c = 0;
         const char *state;
@@ -265,7 +264,7 @@ int list_unit_files(int argc, char *argv[], void *userdata) {
                 return r;
 
         if (install_client_side())
-                for (unit = units; unit < units + c; unit++)
+                for (UnitFileList *unit = units; unit < units + c; unit++)
                         free(unit->path);
 
         if (c == 0)

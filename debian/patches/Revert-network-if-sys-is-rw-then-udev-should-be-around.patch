@@ -12,10 +12,10 @@ LP: #1857123
  1 file changed, 6 insertions(+), 6 deletions(-)
 
 diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
-index e8a7223..4485c6c 100644
+index 8219d95..35ba9f6 100644
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -43,7 +43,6 @@
+@@ -48,7 +48,6 @@
  #include "networkd-wifi.h"
  #include "set.h"
  #include "socket-util.h"
@@ -23,17 +23,17 @@ index e8a7223..4485c6c 100644
  #include "stdio-util.h"
  #include "string-table.h"
  #include "strv.h"
-@@ -52,6 +51,7 @@
+@@ -57,6 +56,7 @@
  #include "tmpfile-util.h"
  #include "udev-util.h"
  #include "util.h"
 +#include "virt.h"
  #include "vrf.h"
  
- bool link_ipv4ll_enabled(Link *link, AddressFamily mask) {
-@@ -2498,8 +2498,8 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
-         if (r < 0)
-                 return r;
+ bool link_ipv4ll_enabled(Link *link) {
+@@ -2442,8 +2442,8 @@ static int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
+ 
+         log_link_debug(link, "Link %d added", link->ifindex);
  
 -        if (path_is_read_only_fs("/sys") <= 0) {
 -                /* udev should be around */
@@ -42,7 +42,7 @@ index e8a7223..4485c6c 100644
                  sprintf(ifindex_str, "n%d", link->ifindex);
                  r = sd_device_new_from_device_id(&device, ifindex_str);
                  if (r < 0) {
-@@ -2509,7 +2509,7 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
+@@ -2453,7 +2453,7 @@ static int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
  
                  r = sd_device_get_is_initialized(device);
                  if (r < 0) {
@@ -51,7 +51,7 @@ index e8a7223..4485c6c 100644
                          goto failed;
                  }
                  if (r == 0) {
-@@ -2520,11 +2520,11 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
+@@ -2464,11 +2464,11 @@ static int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
  
                  r = device_is_renaming(device);
                  if (r < 0) {

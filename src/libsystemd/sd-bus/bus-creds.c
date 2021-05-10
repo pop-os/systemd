@@ -8,7 +8,6 @@
 #include "bus-creds.h"
 #include "bus-label.h"
 #include "bus-message.h"
-#include "bus-util.h"
 #include "capability-util.h"
 #include "cgroup-util.h"
 #include "errno-util.h"
@@ -1003,7 +1002,7 @@ int bus_creds_add_more(sd_bus_creds *c, uint64_t mask, pid_t pid, pid_t tid) {
                 const char *p;
 
                 p = procfs_file_alloca(pid, "cmdline");
-                r = read_full_file(p, &c->cmdline, &c->cmdline_size);
+                r = read_full_virtual_file(p, &c->cmdline, &c->cmdline_size);
                 if (r == -ENOENT)
                         return -ESRCH;
                 if (r < 0) {

@@ -9,6 +9,7 @@
 
 #include "capability-util.h"
 #include "daemon-util.h"
+#include "firewall-util.h"
 #include "main-func.h"
 #include "mkdir.h"
 #include "networkd-conf.h"
@@ -21,7 +22,7 @@ static int run(int argc, char *argv[]) {
         _cleanup_(notify_on_cleanup) const char *notify_message = NULL;
         int r;
 
-        log_setup_service();
+        log_setup();
 
         umask(0022);
 

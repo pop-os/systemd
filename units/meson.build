@@ -10,6 +10,9 @@ units = [
         ['cryptsetup-pre.target',               'HAVE_LIBCRYPTSETUP'],
         ['cryptsetup.target',                   'HAVE_LIBCRYPTSETUP',
          'sysinit.target.wants/'],
+        ['veritysetup-pre.target',              'HAVE_LIBCRYPTSETUP'],
+        ['veritysetup.target',                  'HAVE_LIBCRYPTSETUP',
+         'sysinit.target.wants/'],
         ['dev-hugepages.mount',                 '',
          'sysinit.target.wants/'],
         ['dev-mqueue.mount',                    '',
@@ -61,6 +64,8 @@ units = [
         ['reboot.target',                       '',
          'ctrl-alt-del.target' + (with_runlevels ? ' runlevel6.target' : '')],
         ['remote-cryptsetup.target',            'HAVE_LIBCRYPTSETUP',
+         'initrd-root-device.target.wants/'],
+        ['remote-veritysetup.target',           'HAVE_LIBCRYPTSETUP',
          'initrd-root-device.target.wants/'],
         ['remote-fs-pre.target',                ''],
         ['remote-fs.target',                    ''],
@@ -128,6 +133,7 @@ units = [
         ['systemd-poweroff.service',            ''],
         ['systemd-reboot.service',              ''],
         ['systemd-rfkill.socket',               'ENABLE_RFKILL'],
+        ['systemd-sysext.service',              'ENABLE_SYSEXT'],
         ['systemd-sysusers.service',            'ENABLE_SYSUSERS',
          'sysinit.target.wants/'],
         ['systemd-tmpfiles-clean.service',      'ENABLE_TMPFILES'],
@@ -203,7 +209,8 @@ in_units = [
         ['systemd-networkd.service',             'ENABLE_NETWORKD'],
         ['systemd-networkd-wait-online.service', 'ENABLE_NETWORKD'],
         ['systemd-nspawn@.service',              ''],
-        ['systemd-oomd.service',                 'ENABLE_OOMD'],
+        ['systemd-oomd.service',                 'ENABLE_OOMD',
+         'dbus-org.freedesktop.oom1.service'],
         ['systemd-portabled.service',            'ENABLE_PORTABLED',
          'dbus-org.freedesktop.portable1.service'],
         ['systemd-userdbd.service',              'ENABLE_USERDB'],
@@ -247,6 +254,8 @@ m4_units = [
         ['serial-getty@.service',              ''],
 ]
 
+add_wants = []
+
 foreach tuple : in_units
         file = tuple[0]
 
@@ -270,7 +279,7 @@ foreach tuple : in_units
 
         if install and tuple.length() > 2
                 foreach target : tuple[2].split()
-                        meson.add_install_script('meson-add-wants.sh', systemunitdir, target, file)
+                        add_wants += [systemunitdir, target, file]
                 endforeach
         endif
 endforeach
@@ -295,7 +304,7 @@ foreach tuple : m4_units
 
         if tuple.length() > 2 and install
                 foreach target : tuple[2].split()
-                        meson.add_install_script('meson-add-wants.sh', systemunitdir, target, file)
+                        add_wants += [systemunitdir, target, file]
                 endforeach
         endif
 endforeach
@@ -314,12 +323,13 @@ foreach tuple : units
 
                 if tuple.length() > 2
                         foreach target : tuple[2].split()
-                                meson.add_install_script(
-                                        'meson-add-wants.sh', systemunitdir, target, file)
+                                add_wants += [systemunitdir, target, file]
                         endforeach
                 endif
         endif
 endforeach
+
+meson.add_install_script('meson-add-wants.sh', add_wants)
 
 install_data('user-.slice.d/10-defaults.conf',
              install_dir : systemunitdir + '/user-.slice.d')

@@ -12,6 +12,7 @@
 /* This is the list of known sections. We need to ignore them in the initial parsing phase. */
 #define NETDEV_OTHER_SECTIONS                     \
         "-BareUDP\0"                              \
+        "-BatmanAdvanced\0"                       \
         "-Bond\0"                                 \
         "-Bridge\0"                               \
         "-FooOverUDP\0"                           \
@@ -83,9 +84,10 @@ typedef enum NetDevKind {
         NETDEV_KIND_XFRM,
         NETDEV_KIND_IFB,
         NETDEV_KIND_BAREUDP,
+        NETDEV_KIND_BATADV,
         _NETDEV_KIND_MAX,
         _NETDEV_KIND_TUNNEL, /* Used by config_parse_stacked_netdev() */
-        _NETDEV_KIND_INVALID = -1
+        _NETDEV_KIND_INVALID = -EINVAL,
 } NetDevKind;
 
 typedef enum NetDevState {
@@ -95,7 +97,7 @@ typedef enum NetDevState {
         NETDEV_STATE_READY,
         NETDEV_STATE_LINGER,
         _NETDEV_STATE_MAX,
-        _NETDEV_STATE_INVALID = -1,
+        _NETDEV_STATE_INVALID = -EINVAL,
 } NetDevState;
 
 typedef enum NetDevCreateType {
@@ -104,7 +106,7 @@ typedef enum NetDevCreateType {
         NETDEV_CREATE_STACKED,
         NETDEV_CREATE_AFTER_CONFIGURED,
         _NETDEV_CREATE_MAX,
-        _NETDEV_CREATE_INVALID = -1,
+        _NETDEV_CREATE_INVALID = -EINVAL,
 } NetDevCreateType;
 
 typedef struct Manager Manager;

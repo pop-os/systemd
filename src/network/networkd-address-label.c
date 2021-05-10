@@ -55,11 +55,7 @@ static int address_label_new_static(Network *network, const char *filename, unsi
                 .section = TAKE_PTR(n),
         };
 
-        r = hashmap_ensure_allocated(&network->address_labels_by_section, &network_config_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(network->address_labels_by_section, label->section, label);
+        r = hashmap_ensure_put(&network->address_labels_by_section, &network_config_hash_ops, label->section, label);
         if (r < 0)
                 return r;
 
@@ -192,8 +188,7 @@ int config_parse_address_label_prefix(const char *unit,
                 return 0;
         }
 
-        n = NULL;
-
+        TAKE_PTR(n);
         return 0;
 }
 
@@ -236,7 +231,7 @@ int config_parse_address_label(
         }
 
         n->label = k;
-        n = NULL;
+        TAKE_PTR(n);
 
         return 0;
 }

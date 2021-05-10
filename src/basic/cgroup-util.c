@@ -100,7 +100,7 @@ int cg_read_event(
         if (r < 0)
                 return r;
 
-        r = read_full_file(events, &content, NULL);
+        r = read_full_virtual_file(events, &content, NULL);
         if (r < 0)
                 return r;
 
@@ -527,41 +527,20 @@ int cg_get_path(const char *controller, const char *path, const char *suffix, ch
         return 0;
 }
 
-static int controller_is_accessible(const char *controller) {
-        int r;
+static int controller_is_v1_accessible(const char *root, const char *controller) {
+        const char *cpath, *dn;
 
         assert(controller);
 
-        /* Checks whether a specific controller is accessible,
-         * i.e. its hierarchy mounted. In the unified hierarchy all
-         * controllers are considered accessible, except for the named
-         * hierarchies */
+        dn = controller_to_dirname(controller);
 
-        if (!cg_controller_is_valid(controller))
-                return -EINVAL;
+        /* If root if specified, we check that:
+         * - possible subcgroup is created at root,
+         * - we can modify the hierarchy. */
 
-        r = cg_all_unified();
-        if (r < 0)
-                return r;
-        if (r > 0) {
-                /* We don't support named hierarchies if we are using
-                 * the unified hierarchy. */
-
-                if (streq(controller, SYSTEMD_CGROUP_CONTROLLER))
-                        return 0;
-
-                if (startswith(controller, "name="))
-                        return -EOPNOTSUPP;
-
-        } else {
-                const char *cc, *dn;
-
-                dn = controller_to_dirname(controller);
-                cc = strjoina("/sys/fs/cgroup/", dn);
-
-                if (laccess(cc, F_OK) < 0)
-                        return -errno;
-        }
+        cpath = strjoina("/sys/fs/cgroup/", dn, root, root ? "/cgroup.procs" : NULL);
+        if (laccess(cpath, root ? W_OK : F_OK) < 0)
+                return -errno;
 
         return 0;
 }
@@ -572,10 +551,23 @@ int cg_get_path_and_check(const char *controller, const char *path, const char *
         assert(controller);
         assert(fs);
 
-        /* Check if the specified controller is actually accessible */
-        r = controller_is_accessible(controller);
+        if (!cg_controller_is_valid(controller))
+                return -EINVAL;
+
+        r = cg_all_unified();
         if (r < 0)
                 return r;
+        if (r > 0) {
+                /* In the unified hierarchy all controllers are considered accessible,
+                 * except for the named hierarchies */
+                if (startswith(controller, "name="))
+                        return -EOPNOTSUPP;
+        } else {
+                /* Check if the specified controller is actually accessible */
+                r = controller_is_v1_accessible(NULL, controller);
+                if (r < 0)
+                        return r;
+        }
 
         return cg_get_path(controller, path, suffix, fs);
 }
@@ -633,6 +625,20 @@ int cg_get_xattr_malloc(const char *controller, const char *path, const char *na
                 return r;
 
         return r;
+}
+
+int cg_get_xattr_bool(const char *controller, const char *path, const char *name) {
+        _cleanup_free_ char *val = NULL;
+        int r;
+
+        assert(path);
+        assert(name);
+
+        r = cg_get_xattr_malloc(controller, path, name, &val);
+        if (r < 0)
+                return r;
+
+        return parse_boolean(val);
 }
 
 int cg_remove_xattr(const char *controller, const char *path, const char *name) {
@@ -1131,8 +1137,8 @@ static const char *skip_slices(const char *p) {
 }
 
 int cg_path_get_unit(const char *path, char **ret) {
+        _cleanup_free_ char *unit = NULL;
         const char *e;
-        char *unit;
         int r;
 
         assert(path);
@@ -1145,12 +1151,10 @@ int cg_path_get_unit(const char *path, char **ret) {
                 return r;
 
         /* We skipped over the slices, don't accept any now */
-        if (endswith(unit, ".slice")) {
-                free(unit);
+        if (endswith(unit, ".slice"))
                 return -ENXIO;
-        }
 
-        *ret = unit;
+        *ret = TAKE_PTR(unit);
         return 0;
 }
 
@@ -1555,7 +1559,7 @@ bool cg_controller_is_valid(const char *p) {
                 if (!strchr(CONTROLLER_VALID, *t))
                         return false;
 
-        if (t - p > FILENAME_MAX)
+        if (t - p > NAME_MAX)
                 return false;
 
         return true;
@@ -1619,7 +1623,7 @@ int cg_slice_to_path(const char *unit, char **ret) {
                 if (!escaped)
                         return -ENOMEM;
 
-                if (!strextend(&s, escaped, "/", NULL))
+                if (!strextend(&s, escaped, "/"))
                         return -ENOMEM;
 
                 dash = strchr(dash+1, '-');
@@ -1629,7 +1633,7 @@ int cg_slice_to_path(const char *unit, char **ret) {
         if (!e)
                 return -ENOMEM;
 
-        if (!strextend(&s, e, NULL))
+        if (!strextend(&s, e))
                 return -ENOMEM;
 
         *ret = TAKE_PTR(s);
@@ -1702,6 +1706,25 @@ int cg_get_attribute_as_bool(const char *controller, const char *path, const cha
                 return r;
 
         *ret = r;
+        return 0;
+}
+
+int cg_get_owner(const char *controller, const char *path, uid_t *ret_uid) {
+        _cleanup_free_ char *f = NULL;
+        struct stat stats;
+        int r;
+
+        assert(ret_uid);
+
+        r = cg_get_path(controller, path, NULL, &f);
+        if (r < 0)
+                return r;
+
+        r = stat(f, &stats);
+        if (r < 0)
+                return -errno;
+
+        *ret_uid = stats.st_uid;
         return 0;
 }
 
@@ -1861,7 +1884,7 @@ int cg_mask_from_string(const char *value, CGroupMask *ret) {
         return 0;
 }
 
-int cg_mask_supported(CGroupMask *ret) {
+int cg_mask_supported_subtree(const char *root, CGroupMask *ret) {
         CGroupMask mask;
         int r;
 
@@ -1873,14 +1896,10 @@ int cg_mask_supported(CGroupMask *ret) {
         if (r < 0)
                 return r;
         if (r > 0) {
-                _cleanup_free_ char *root = NULL, *controllers = NULL, *path = NULL;
+                _cleanup_free_ char *controllers = NULL, *path = NULL;
 
                 /* In the unified hierarchy we can read the supported and accessible controllers from
                  * the top-level cgroup attribute */
-
-                r = cg_get_root_path(&root);
-                if (r < 0)
-                        return r;
 
                 r = cg_get_path(SYSTEMD_CGROUP_CONTROLLER, root, "cgroup.controllers", &path);
                 if (r < 0)
@@ -1900,7 +1919,7 @@ int cg_mask_supported(CGroupMask *ret) {
         } else {
                 CGroupController c;
 
-                /* In the legacy hierarchy, we check which hierarchies are mounted. */
+                /* In the legacy hierarchy, we check which hierarchies are accessible. */
 
                 mask = 0;
                 for (c = 0; c < _CGROUP_CONTROLLER_MAX; c++) {
@@ -1911,13 +1930,24 @@ int cg_mask_supported(CGroupMask *ret) {
                                 continue;
 
                         n = cgroup_controller_to_string(c);
-                        if (controller_is_accessible(n) >= 0)
+                        if (controller_is_v1_accessible(root, n) >= 0)
                                 mask |= bit;
                 }
         }
 
         *ret = mask;
         return 0;
+}
+
+int cg_mask_supported(CGroupMask *ret) {
+        _cleanup_free_ char *root = NULL;
+        int r;
+
+        r = cg_get_root_path(&root);
+        if (r < 0)
+                return r;
+
+        return cg_mask_supported_subtree(root, ret);
 }
 
 int cg_kernel_controllers(Set **ret) {
@@ -1944,7 +1974,7 @@ int cg_kernel_controllers(Set **ret) {
                 return r;
 
         /* Ignore the header line */
-        (void) read_line(f, (size_t) -1, NULL);
+        (void) read_line(f, SIZE_MAX, NULL);
 
         for (;;) {
                 char *controller;
@@ -2022,8 +2052,14 @@ int cg_unified_cached(bool flush) {
                         unified_cache = CGROUP_UNIFIED_SYSTEMD;
                         unified_systemd_v232 = false;
                 } else {
-                        if (statfs("/sys/fs/cgroup/systemd/", &fs) < 0)
+                        if (statfs("/sys/fs/cgroup/systemd/", &fs) < 0) {
+                                if (errno == ENOENT) {
+                                        /* Some other software may have set up /sys/fs/cgroup in a configuration we do not recognize. */
+                                        log_debug_errno(errno, "Unsupported cgroupsv1 setup detected: name=systemd hierarchy not found.");
+                                        return -ENOMEDIUM;
+                                }
                                 return log_debug_errno(errno, "statfs(\"/sys/fs/cgroup/systemd\" failed: %m");
+                        }
 
                         if (F_TYPE_EQUAL(fs.f_type, CGROUP2_SUPER_MAGIC)) {
                                 log_debug("Found cgroup2 on /sys/fs/cgroup/systemd, unified hierarchy for systemd controller (v232 variant)");
@@ -2166,7 +2202,7 @@ CGroupMask get_cpu_accounting_mask(void) {
                         struct utsname u;
                         assert_se(uname(&u) >= 0);
 
-                        if (str_verscmp(u.release, "4.15") < 0)
+                        if (strverscmp_improved(u.release, "4.15") < 0)
                                 needed_mask = CGROUP_MASK_CPU;
                         else
                                 needed_mask = 0;
@@ -2187,3 +2223,11 @@ static const char* const managed_oom_mode_table[_MANAGED_OOM_MODE_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(managed_oom_mode, ManagedOOMMode);
+
+static const char* const managed_oom_preference_table[_MANAGED_OOM_PREFERENCE_MAX] = {
+        [MANAGED_OOM_PREFERENCE_NONE] = "none",
+        [MANAGED_OOM_PREFERENCE_AVOID] = "avoid",
+        [MANAGED_OOM_PREFERENCE_OMIT] = "omit",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(managed_oom_preference, ManagedOOMPreference);

@@ -549,25 +549,19 @@ static int mount_verify(Mount *m) {
         if (r < 0)
                 return log_unit_error_errno(UNIT(m), r, "Failed to generate unit name from mount path: %m");
 
-        if (!unit_has_name(UNIT(m), e)) {
-                log_unit_error(UNIT(m), "Where= setting doesn't match unit name. Refusing.");
-                return -ENOEXEC;
-        }
+        if (!unit_has_name(UNIT(m), e))
+                return log_unit_error_errno(UNIT(m), SYNTHETIC_ERRNO(ENOEXEC), "Where= setting doesn't match unit name. Refusing.");
 
-        if (mount_point_is_api(m->where) || mount_point_ignore(m->where)) {
-                log_unit_error(UNIT(m), "Cannot create mount unit for API file system %s. Refusing.", m->where);
-                return -ENOEXEC;
-        }
+        if (mount_point_is_api(m->where) || mount_point_ignore(m->where))
+                return log_unit_error_errno(UNIT(m), SYNTHETIC_ERRNO(ENOEXEC), "Cannot create mount unit for API file system %s. Refusing.", m->where);
 
         p = get_mount_parameters_fragment(m);
         if (p && !p->what && !UNIT(m)->perpetual)
                 return log_unit_error_errno(UNIT(m), SYNTHETIC_ERRNO(ENOEXEC),
                                             "What= setting is missing. Refusing.");
 
-        if (m->exec_context.pam_name && m->kill_context.kill_mode != KILL_CONTROL_GROUP) {
-                log_unit_error(UNIT(m), "Unit has PAM enabled. Kill mode must be set to control-group'. Refusing.");
-                return -ENOEXEC;
-        }
+        if (m->exec_context.pam_name && m->kill_context.kill_mode != KILL_CONTROL_GROUP)
+                return log_unit_error_errno(UNIT(m), SYNTHETIC_ERRNO(ENOEXEC), "Unit has PAM enabled. Kill mode must be set to control-group'. Refusing.");
 
         return 0;
 }
@@ -1016,14 +1010,16 @@ static void mount_enter_mounting(Mount *m) {
         p = get_mount_parameters_fragment(m);
         if (p && mount_is_bind(p)) {
                 r = mkdir_p_label(p->what, m->directory_mode);
-                if (r < 0)
+                /* mkdir_p_label() can return -EEXIST if the target path exists and is not a directory - which is
+                 * totally OK, in case the user wants us to overmount a non-directory inode. */
+                if (r < 0 && r != -EEXIST)
                         log_unit_error_errno(UNIT(m), r, "Failed to make bind mount source '%s': %m", p->what);
         }
 
         if (p) {
                 _cleanup_free_ char *opts = NULL;
 
-                r = fstab_filter_options(p->options, "nofail\0" "noauto\0" "auto\0", NULL, NULL, &opts);
+                r = fstab_filter_options(p->options, "nofail\0" "noauto\0" "auto\0", NULL, NULL, NULL, &opts);
                 if (r < 0)
                         goto fail;
 
@@ -1253,8 +1249,9 @@ static int mount_deserialize_item(Unit *u, const char *key, const char *value, F
         if (streq(key, "state")) {
                 MountState state;
 
-                if ((state = mount_state_from_string(value)) < 0)
-                        log_unit_debug(u, "Failed to parse state value: %s", value);
+                state = mount_state_from_string(value);
+                if (state < 0)
+                        log_unit_debug_errno(u, state, "Failed to parse state value: %s", value);
                 else
                         m->deserialized_state = state;
 
@@ -1263,7 +1260,7 @@ static int mount_deserialize_item(Unit *u, const char *key, const char *value, F
 
                 f = mount_result_from_string(value);
                 if (f < 0)
-                        log_unit_debug(u, "Failed to parse result value: %s", value);
+                        log_unit_debug_errno(u, f, "Failed to parse result value: %s", value);
                 else if (f != MOUNT_SUCCESS)
                         m->result = f;
 
@@ -1272,7 +1269,7 @@ static int mount_deserialize_item(Unit *u, const char *key, const char *value, F
 
                 f = mount_result_from_string(value);
                 if (f < 0)
-                        log_unit_debug(u, "Failed to parse reload result value: %s", value);
+                        log_unit_debug_errno(u, f, "Failed to parse reload result value: %s", value);
                 else if (f != MOUNT_SUCCESS)
                         m->reload_result = f;
 
@@ -1280,19 +1277,20 @@ static int mount_deserialize_item(Unit *u, const char *key, const char *value, F
 
                 r = safe_atou(value, &m->n_retry_umount);
                 if (r < 0)
-                        log_unit_debug(u, "Failed to parse n-retry-umount value: %s", value);
+                        log_unit_debug_errno(u, r, "Failed to parse n-retry-umount value: %s", value);
 
         } else if (streq(key, "control-pid")) {
 
-                if (parse_pid(value, &m->control_pid) < 0)
-                        log_unit_debug(u, "Failed to parse control-pid value: %s", value);
+                r = parse_pid(value, &m->control_pid);
+                if (r < 0)
+                        log_unit_debug_errno(u, r, "Failed to parse control-pid value: %s", value);
 
         } else if (streq(key, "control-command")) {
                 MountExecCommand id;
 
                 id = mount_exec_command_from_string(value);
                 if (id < 0)
-                        log_unit_debug(u, "Failed to parse exec-command value: %s", value);
+                        log_unit_debug_errno(u, id, "Failed to parse exec-command value: %s", value);
                 else {
                         m->control_command_id = id;
                         m->control_command = m->exec_command + id;
@@ -1858,6 +1856,12 @@ static void mount_enumerate(Manager *m) {
                 r = sd_event_source_set_priority(m->mount_event_source, SD_EVENT_PRIORITY_NORMAL-10);
                 if (r < 0) {
                         log_error_errno(r, "Failed to adjust mount watch priority: %m");
+                        goto fail;
+                }
+
+                r = sd_event_source_set_ratelimit(m->mount_event_source, 1 * USEC_PER_SEC, 5);
+                if (r < 0) {
+                        log_error_errno(r, "Failed to enable rate limit for mount events: %m");
                         goto fail;
                 }
 

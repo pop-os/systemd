@@ -37,6 +37,10 @@ Destination=192.168.1.2
 InitialAdvertisedReceiveWindow=30
 
 [Route]
+Destination=192.168.1.3
+TCPAdvertisedMaximumSegmentSize=30
+
+[Route]
 Type=blackhole
 Destination=202.54.1.2
 
@@ -47,6 +51,18 @@ Destination=202.54.1.3
 [Route]
 Type=prohibit
 Destination=202.54.1.4
+
+[Route]
+Type=blackhole
+Destination=2001:1234:5678::2
+
+[Route]
+Type=unreachable
+Destination=2001:1234:5678::3
+
+[Route]
+Type=prohibit
+Destination=2001:1234:5678::4
 
 [Route]
 Type=local

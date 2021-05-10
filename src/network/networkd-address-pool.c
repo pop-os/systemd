@@ -107,6 +107,15 @@ static bool address_pool_prefix_is_taken(
                                 return true;
                 }
 
+                /* Don't clash with assigned foreign addresses */
+                SET_FOREACH(a, l->addresses_foreign) {
+                        if (a->family != p->family)
+                                continue;
+
+                        if (in_addr_prefix_intersect(p->family, u, prefixlen, &a->in_addr, a->prefixlen))
+                                return true;
+                }
+
                 /* Don't clash with addresses already pulled from the pool, but not assigned yet */
                 SET_FOREACH(a, l->pool_addresses) {
                         if (a->family != p->family)
@@ -135,7 +144,6 @@ static bool address_pool_prefix_is_taken(
 
 static int address_pool_acquire_one(AddressPool *p, int family, unsigned prefixlen, union in_addr_union *found) {
         union in_addr_union u;
-        unsigned i;
         int r;
 
         assert(p);
@@ -150,7 +158,7 @@ static int address_pool_acquire_one(AddressPool *p, int family, unsigned prefixl
 
         u = p->in_addr;
 
-        for (i = 0; i < RANDOM_PREFIX_TRIAL_MAX; i++) {
+        for (unsigned i = 0; i < RANDOM_PREFIX_TRIAL_MAX; i++) {
                 r = in_addr_random_prefix(p->family, &u, p->prefixlen, prefixlen);
                 if (r <= 0)
                         return r;
@@ -159,8 +167,8 @@ static int address_pool_acquire_one(AddressPool *p, int family, unsigned prefixl
                         if (DEBUG_LOGGING) {
                                 _cleanup_free_ char *s = NULL;
 
-                                (void) in_addr_to_string(p->family, &u, &s);
-                                log_debug("Found range %s/%u", strna(s), prefixlen);
+                                (void) in_addr_prefix_to_string(p->family, &u, prefixlen, &s);
+                                log_debug("Found range %s", strna(s));
                         }
 
                         *found = u;

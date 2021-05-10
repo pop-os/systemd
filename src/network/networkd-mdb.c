@@ -70,11 +70,7 @@ static int mdb_entry_new_static(
                 .section = TAKE_PTR(n),
         };
 
-        r = hashmap_ensure_allocated(&network->mdb_entries_by_section, &network_config_hash_ops);
-        if (r < 0)
-                return r;
-
-        r = hashmap_put(network->mdb_entries_by_section, mdb_entry->section, mdb_entry);
+        r = hashmap_ensure_put(&network->mdb_entries_by_section, &network_config_hash_ops, mdb_entry->section, mdb_entry);
         if (r < 0)
                 return r;
 
@@ -199,6 +195,11 @@ int link_set_bridge_mdb(Link *link) {
         assert(link);
         assert(link->manager);
 
+        if (link->bridge_mdb_messages != 0) {
+                log_link_debug(link, "MDB entries are configuring.");
+                return 0;
+        }
+
         link->bridge_mdb_configured = false;
 
         if (!link->network)
@@ -321,8 +322,7 @@ int config_parse_mdb_vlan_id(
         if (r < 0)
                 return r;
 
-        mdb_entry = NULL;
-
+        TAKE_PTR(mdb_entry);
         return 0;
 }
 
@@ -359,7 +359,6 @@ int config_parse_mdb_group_address(
                 return 0;
         }
 
-        mdb_entry = NULL;
-
+        TAKE_PTR(mdb_entry);
         return 0;
 }
