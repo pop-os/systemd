@@ -18,6 +18,10 @@ for t in /usr/lib/systemd/tests/test-*; do
     [ "$tname" != test-udev ] || continue
     # test-execute fails in LXC LP: #1878051
     [ "$tname" != test-execute ] || ! systemd-detect-virt -c -q || continue
+    # test-mount-util fails in LXC, too:
+    # Assertion 'bind_remount_recursive(p, MS_RDONLY, MS_RDONLY, STRV_MAKE("/sys/kernel")) >= 0'
+    # failed at src/test/test-mount-util.c:111, function test_bind_remount_recursive(). Aborting.
+    [ "$tname" != test-mount-util ] || ! systemd-detect-virt -c -q || continue
     echo "====== $tname ======="
     # exit code 77 means "skip"
     rc=0
