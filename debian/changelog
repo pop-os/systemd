@@ -11,8 +11,17 @@ systemd (248.2-1ubuntu1) UNRELEASED; urgency=medium
         - debian/patches/lp1917458-udev-rules-add-rule-to-create-dev-ptp_hyperv.patch
         - debian/patches/lp1921696/rfkill-improve-error-logging.patch
         - debian/patches/lp1921696/rfkill-use-short-writes-and-accept-long-reads.patch
+  * debian/tests/root-unittests: Skip newly failing test-mount-utils in LXC
+    File: debian/tests/root-unittests
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=02e0d518ea9e40e81c4693dd49eec1c9aab736e7
+  * Merge lp1895418.patch to UBUNTU-resolved-default-no-negative-caching.patch
+    Files:
+    - debian/patches/debian/UBUNTU-resolved-default-no-negative-caching.patch
+    - debian/patches/test-Allow-running-only-a-subset-of-integration-tests-by-.patch
+    - debian/patches/lp1895418.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b285544ed5e3233abc54493defe65bd7525729e5
 
- -- Balint Reczey <rbalint@ubuntu.com>  Mon, 10 May 2021 21:01:07 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Tue, 11 May 2021 13:07:24 +0200
 
 systemd (248.2-1) experimental; urgency=medium
 
