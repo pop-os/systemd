@@ -62,3 +62,6 @@ lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch
 lp1921696/rfkill-improve-error-logging.patch
 lp1921696/rfkill-use-short-writes-and-accept-long-reads.patch
 LoadCredentials-do-not-assert-on-invalid-syntax.patch
+lp1664844/0001-network-add-ActivationPolicy-configuration-parameter.patch
+lp1664844/0002-test-add-ActivationPolicy-unit-tests.patch
+lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch
