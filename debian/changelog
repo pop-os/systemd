@@ -15,6 +15,14 @@ systemd (245.4-4ubuntu3.7) UNRELEASED; urgency=medium
     Check if ifindex is valid (LP: #1929122)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=6378191818bc7d169b657e6f7a2b50cfddb4275e
 
+  [ Łukasz 'sil2100' Zemczak ]
+  * d/p/lp1664844/0001-network-add-ActivationPolicy-configuration-parameter.patch,
+    d/p/lp1664844/0002-test-add-ActivationPolicy-unit-tests.patch,
+    d/p/lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch:
+    - add support for configuring the activation policy for an interface
+      (LP: #1664844)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=94f7b72d8128c743f35b308101a87d2c53a4074c
+
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 12 Apr 2021 14:30:39 -0400
 
 systemd (245.4-4ubuntu3.6) focal; urgency=medium
