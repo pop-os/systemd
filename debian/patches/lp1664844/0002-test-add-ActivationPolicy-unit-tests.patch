@@ -57,15 +57,15 @@ Bug-Ubuntu: https://bugs.launchpad.net/netplan/+bug/1664844
 +ActivationPolicy=up
 --- a/test/test-network/systemd-networkd-tests.py
 +++ b/test/test-network/systemd-networkd-tests.py
-@@ -1745,6 +1745,7 @@
-         '25-address-peer-ipv4.network',
+@@ -1605,6 +1605,7 @@
+         '25-address-link-section.network',
          '25-address-preferred-lifetime-zero.network',
          '25-address-static.network',
 +        '25-activation-policy.network',
          '25-bind-carrier.network',
          '25-bond-active-backup-slave.netdev',
          '25-fibrule-invert.network',
-@@ -2609,6 +2610,53 @@
+@@ -2211,6 +2212,53 @@
          self.assertRegex(output, 'inet 192.168.10.30/24 brd 192.168.10.255 scope global test1')
          self.wait_operstate('test1', 'routable')
  

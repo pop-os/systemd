@@ -36,7 +36,7 @@ Fixes: #17437
 
 --- a/man/systemd.network.xml
 +++ b/man/systemd.network.xml
-@@ -228,6 +228,36 @@
+@@ -225,6 +225,36 @@
            if <literal>RequiredForOnline=no</literal>.</para>
          </listitem>
        </varlistentry>
@@ -73,7 +73,7 @@ Fixes: #17437
      </variablelist>
    </refsect1>
  
-@@ -573,8 +603,9 @@
+@@ -464,8 +494,9 @@
            <listitem>
              <para>A link name or a list of link names. When set, controls the behavior of the current
              link. When all links in the list are in an operational down state, the current link is brought
@@ -85,7 +85,7 @@ Fixes: #17437
            </listitem>
          </varlistentry>
          <varlistentry>
-@@ -947,6 +978,10 @@
+@@ -819,6 +850,10 @@
            of the interface even if its carrier is lost. When unset, the value specified with
            <option>ConfigureWithoutCarrier=</option> is used.
            </para>
@@ -98,7 +98,7 @@ Fixes: #17437
        <varlistentry>
 --- a/src/network/networkd-link.c
 +++ b/src/network/networkd-link.c
-@@ -1812,17 +1812,38 @@
+@@ -2100,17 +2100,38 @@
          assert(link);
          assert(link->network);
  
@@ -139,15 +139,15 @@ Fixes: #17437
  
          if (link->network->bridge) {
                  r = link_set_bridge(link);
-@@ -2216,6 +2237,7 @@
+@@ -3099,6 +3120,7 @@
                  return r;
  
-         link_set_state(link, LINK_STATE_INITIALIZED);
+         link_set_state(link, LINK_STATE_PENDING);
 +        link->activated = false;
          link_dirty(link);
  
          /* link_configure_duid() returns 0 if it requests product UUID. In that case,
-@@ -2687,6 +2709,16 @@
+@@ -3680,6 +3702,16 @@
  static int link_admin_state_up(Link *link) {
          int r;
  
@@ -164,7 +164,7 @@ Fixes: #17437
          /* We set the ipv6 mtu after the device mtu, but the kernel resets
           * ipv6 mtu on NETDEV_UP, so we need to reset it.  The check for
           * ipv6_mtu_set prevents this from trying to set it too early before
-@@ -2701,6 +2733,21 @@
+@@ -3694,6 +3726,21 @@
          return 0;
  }
  
@@ -185,8 +185,8 @@ Fixes: #17437
 +
  int link_update(Link *link, sd_netlink_message *m) {
          _cleanup_strv_free_ char **s = NULL;
-         hw_addr_data hw_addr;
-@@ -2813,9 +2860,14 @@
+         struct ether_addr mac;
+@@ -3846,9 +3893,14 @@
                  r = link_admin_state_up(link);
                  if (r < 0)
                          return r;
@@ -204,27 +204,27 @@ Fixes: #17437
                  return r;
 --- a/src/network/networkd-link.h
 +++ b/src/network/networkd-link.h
-@@ -130,6 +130,7 @@
+@@ -119,6 +119,7 @@
+         bool setting_mtu:1;
          bool setting_genmode:1;
          bool ipv6_mtu_set:1;
-         bool bridge_mdb_configured:1;
 +        bool activated:1;
  
-         sd_dhcp_server *dhcp_server;
+         LIST_HEAD(Address, pool_addresses);
  
 --- a/src/network/networkd-network-gperf.gperf
 +++ b/src/network/networkd-network-gperf.gperf
-@@ -63,6 +63,7 @@
+@@ -48,6 +48,7 @@
  Link.Multicast,                              config_parse_tristate,                                    0,                             offsetof(Network, multicast)
  Link.AllMulticast,                           config_parse_tristate,                                    0,                             offsetof(Network, allmulticast)
  Link.Unmanaged,                              config_parse_bool,                                        0,                             offsetof(Network, unmanaged)
 +Link.ActivationPolicy,                       config_parse_activation_policy,                           0,                             offsetof(Network, activation_policy)
  Link.RequiredForOnline,                      config_parse_required_for_online,                         0,                             0
- SR-IOV.VirtualFunction,                      config_parse_sr_iov_uint32,                               0,                             0
- SR-IOV.VLANId,                               config_parse_sr_iov_uint32,                               0,                             0
+ Network.Description,                         config_parse_string,                                      0,                             offsetof(Network, description)
+ Network.Bridge,                              config_parse_ifname,                                      0,                             offsetof(Network, bridge_name)
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -238,9 +238,6 @@
+@@ -268,9 +268,6 @@
          if (network->dhcp_use_gateway < 0)
                  network->dhcp_use_gateway = network->dhcp_use_routes;
  
@@ -234,7 +234,7 @@ Fixes: #17437
          if (network->dhcp_critical >= 0) {
                  if (network->keep_configuration >= 0)
                          log_warning("%s: Both KeepConfiguration= and deprecated CriticalConnection= are set. "
-@@ -252,6 +249,30 @@
+@@ -282,6 +279,30 @@
                          network->keep_configuration = KEEP_CONFIGURATION_NO;
          }
  
@@ -265,18 +265,18 @@ Fixes: #17437
          if (network->keep_configuration < 0)
                  network->keep_configuration = KEEP_CONFIGURATION_NO;
  
-@@ -329,6 +350,7 @@
- 
-                 .required_for_online = true,
-                 .required_operstate_for_online = LINK_OPERSTATE_RANGE_DEFAULT,
+@@ -451,6 +472,7 @@
+                 .ipv6_proxy_ndp = -1,
+                 .duid.type = _DUID_TYPE_INVALID,
+                 .proxy_arp = -1,
 +                .activation_policy = _ACTIVATION_POLICY_INVALID,
                  .arp = -1,
                  .multicast = -1,
                  .allmulticast = -1,
-@@ -1238,3 +1260,15 @@
+@@ -1362,3 +1384,15 @@
+ };
  
- DEFINE_STRING_TABLE_LOOKUP(ipv6_link_local_address_gen_mode, IPv6LinkLocalAddressGenMode);
- DEFINE_CONFIG_PARSE_ENUM(config_parse_ipv6_link_local_address_gen_mode, ipv6_link_local_address_gen_mode, IPv6LinkLocalAddressGenMode, "Failed to parse IPv6 link local address generation mode");
+ DEFINE_STRING_TABLE_LOOKUP_WITH_BOOLEAN(keep_configuration, KeepConfiguration, KEEP_CONFIGURATION_YES);
 +
 +static const char* const activation_policy_table[_ACTIVATION_POLICY_MAX] = {
 +        [ACTIVATION_POLICY_UP] =          "up",
@@ -291,9 +291,9 @@ Fixes: #17437
 +DEFINE_CONFIG_PARSE_ENUM(config_parse_activation_policy, activation_policy, ActivationPolicy, "Failed to parse activation policy");
 --- a/src/network/networkd-network.h
 +++ b/src/network/networkd-network.h
-@@ -46,6 +46,17 @@
-        _IPV6_LINK_LOCAL_ADDRESS_GEN_MODE_INVALID        = -1
- } IPv6LinkLocalAddressGenMode;
+@@ -53,6 +53,17 @@
+         _KEEP_CONFIGURATION_INVALID = -1,
+ } KeepConfiguration;
  
 +typedef enum ActivationPolicy {
 +        ACTIVATION_POLICY_UP,
@@ -308,27 +308,27 @@ Fixes: #17437
 +
  typedef struct Manager Manager;
  
- typedef struct NetworkDHCPServerEmitAddress {
-@@ -98,6 +109,7 @@
-         bool unmanaged;
+ struct Network {
+@@ -240,6 +251,7 @@
+ 
          bool required_for_online; /* Is this network required to be considered online? */
          LinkOperationalStateRange required_operstate_for_online;
 +        ActivationPolicy activation_policy;
  
-         /* misc settings */
-         bool configure_without_carrier;
-@@ -330,6 +342,7 @@
+         LLDPMode lldp_mode; /* LLDP reception */
+         LLDPEmit lldp_emit; /* LLDP transmission */
+@@ -325,6 +337,7 @@
+ CONFIG_PARSER_PROTOTYPE(config_parse_ntp);
  CONFIG_PARSER_PROTOTYPE(config_parse_required_for_online);
  CONFIG_PARSER_PROTOTYPE(config_parse_keep_configuration);
- CONFIG_PARSER_PROTOTYPE(config_parse_ipv6_link_local_address_gen_mode);
 +CONFIG_PARSER_PROTOTYPE(config_parse_activation_policy);
  
  const struct ConfigPerfItem* network_network_gperf_lookup(const char *key, GPERF_LEN_TYPE length);
  
-@@ -338,3 +351,6 @@
+@@ -333,3 +346,6 @@
  
- const char* ipv6_link_local_address_gen_mode_to_string(IPv6LinkLocalAddressGenMode s) _const_;
- IPv6LinkLocalAddressGenMode ipv6_link_local_address_gen_mode_from_string(const char *s) _pure_;
+ const char* keep_configuration_to_string(KeepConfiguration i) _const_;
+ KeepConfiguration keep_configuration_from_string(const char *s) _pure_;
 +
 +const char* activation_policy_to_string(ActivationPolicy i) _const_;
 +ActivationPolicy activation_policy_from_string(const char *s) _pure_;
