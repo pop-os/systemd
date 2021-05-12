@@ -121,3 +121,6 @@ lp1921696/0001-rfkill-improve-error-logging.patch
 lp1921696/0002-rfkill-use-short-writes-and-accept-long-reads.patch
 lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
 lp1929122-network-check-that-received-ifindex-is-valid.patch
+lp1664844/0001-network-add-ActivationPolicy-configuration-parameter.patch
+lp1664844/0002-test-add-ActivationPolicy-unit-tests.patch
+lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch
