@@ -1,4 +1,4 @@
-systemd (248.2-1ubuntu1) UNRELEASED; urgency=medium
+systemd (248.2-1ubuntu1) impish; urgency=medium
 
   * Merge to Ubuntu from Debian unstable
     - Dropped changes:
@@ -20,8 +20,14 @@ systemd (248.2-1ubuntu1) UNRELEASED; urgency=medium
     - debian/patches/test-Allow-running-only-a-subset-of-integration-tests-by-.patch
     - debian/patches/lp1895418.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b285544ed5e3233abc54493defe65bd7525729e5
+  * Deny-list TEST-10-ISSUE-2467 again on s390x because it is flaky
+    File: debian/patches/deny-list-upstream-test-10-s390x.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=a85a3471d2ef6a9dbd4e2dee90abc3d52fb5c78e
+  * Deny-list TEST-29-PORTABLE on ppc64el
+    File: debian/patches/deny-list-TEST-29-PORTABLE-on-ppc64el.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=42479a9ba8c4dc7a81266b6679ac1853307bfb67
 
- -- Balint Reczey <rbalint@ubuntu.com>  Tue, 11 May 2021 13:07:24 +0200
+ -- Balint Reczey <rbalint@ubuntu.com>  Thu, 13 May 2021 18:08:29 +0200
 
 systemd (248.2-1) experimental; urgency=medium
 
