@@ -1,3 +1,16 @@
+systemd (248.3-1) experimental; urgency=medium
+
+  [ Michael Biebl ]
+  * New upstream version 248.3
+  * Rebase patches
+
+  [ Dan Streetman ]
+  * d/t: replace 'root-unittests' shell script with simple call to upstream script.
+    The upstream test runner script is much better, as it only prints failing test
+    output, and gives a summary of the test results at the end.
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 19 May 2021 13:09:57 +0200
+
 systemd (248.2-1ubuntu1) impish; urgency=medium
 
   * Merge to Ubuntu from Debian unstable

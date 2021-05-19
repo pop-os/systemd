@@ -43,7 +43,7 @@ index eab4c7e..ad15c7a 100644
  Resolve.ReadEtcHosts,              config_parse_bool,                    0,                   offsetof(Manager, read_etc_hosts)
  Resolve.ResolveUnicastSingleLabel, config_parse_bool,                    0,                   offsetof(Manager, resolve_unicast_single_label)
 diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
-index 21154a7..2b3e09a 100644
+index ed5d41a..1fae6cc 100644
 --- a/src/resolve/resolved-manager.c
 +++ b/src/resolve/resolved-manager.c
 @@ -591,7 +591,7 @@ int manager_new(Manager **ret) {
@@ -56,7 +56,7 @@ index 21154a7..2b3e09a 100644
                  .read_resolv_conf = true,
                  .need_builtin_fallbacks = true,
 diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
-index 0669135..0dc2289 100644
+index ba448c4..c7a8303 100644
 --- a/src/resolve/resolved.conf.in
 +++ b/src/resolve/resolved.conf.in
 @@ -26,7 +26,7 @@

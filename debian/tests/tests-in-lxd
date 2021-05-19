@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# run root-unittests in lxd
+# run some autopkgtest tests in lxd
 
 set -eu
 
@@ -44,12 +44,12 @@ fi
 lxc stop systemd-lxc
 lxc publish systemd-lxc --alias $IMAGE
 
-for t in root-unittests boot-and-services; do
+for t in unit-tests boot-and-services; do
     autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
 done
 
 # also check tests in privileged containers
 lxc profile set default security.privileged "true"
-for t in root-unittests boot-and-services; do
+for t in unit-tests boot-and-services; do
     autopkgtest -U -B . --test-name=$t -- lxd $IMAGE || [ $? = 2 ] # see Debian's #960267
 done
