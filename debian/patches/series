@@ -65,3 +65,4 @@ LoadCredentials-do-not-assert-on-invalid-syntax.patch
 lp1664844/0001-network-add-ActivationPolicy-configuration-parameter.patch
 lp1664844/0002-test-add-ActivationPolicy-unit-tests.patch
 lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch
+lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
