@@ -1,5 +1,12 @@
-systemd (247.3-3ubuntu4) UNRELEASED; urgency=medium
+systemd (247.3-3ubuntu3.1) focal; urgency=medium
 
+  [ Andy Chi ]
+  * debian/patches/lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Local-Mic-Mute-.patch
+    - Apply upstream patch to correct key and device mapping.
+      (LP: #1926547)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f360a705d992205e3da511910c859e81390e93c6
+
+  [ Łukasz 'sil2100' Zemczak ]
   * d/p/lp1664844/0001-network-add-ActivationPolicy-configuration-parameter.patch,
     d/p/lp1664844/0002-test-add-ActivationPolicy-unit-tests.patch,
     d/p/lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch:
@@ -7,7 +14,7 @@ systemd (247.3-3ubuntu4) UNRELEASED; urgency=medium
       (LP: #1664844)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ae75627f573f5946169819e4fdfe89290badaf21
 
- -- Łukasz 'sil2100' Zemczak <lukasz.zemczak@ubuntu.com>  Wed, 12 May 2021 11:56:50 +0200
+ -- Dan Streetman <ddstreet@canonical.com>  Fri, 21 May 2021 12:16:43 -0400
 
 systemd (247.3-3ubuntu3) hirsute; urgency=medium
 
