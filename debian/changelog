@@ -5,6 +5,7 @@ systemd (247.3-3ubuntu4) UNRELEASED; urgency=medium
     d/p/lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch:
     - add support for configuring the activation policy for an interface
       (LP: #1664844)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ae75627f573f5946169819e4fdfe89290badaf21
 
  -- Łukasz 'sil2100' Zemczak <lukasz.zemczak@ubuntu.com>  Wed, 12 May 2021 11:56:50 +0200
 
