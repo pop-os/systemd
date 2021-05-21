@@ -1,5 +1,12 @@
 systemd (245.4-4ubuntu3.7) UNRELEASED; urgency=medium
 
+  [ Andy Chi ]
+  * debian/patches/lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Local-Mic-Mute-.patch
+    - Apply upstream patch to correct key and device mapping.
+      (LP: #1926547)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=62c3ce6d6b2cab762b24aa610d6d135a67bdd76a
+
+  [ Dan Streetman ]
   * d/p/lp1921696/0001-rfkill-improve-error-logging.patch,
     d/p/lp1921696/0002-rfkill-use-short-writes-and-accept-long-reads.patch:
     Handle rfkill api change in kernel 5.10 (LP: #1921696)
