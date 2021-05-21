@@ -119,3 +119,4 @@ lp1915887-Downgrade-a-couple-of-warnings-to-debug.patch
 lp1887744-basic-unit-file-when-loading-linked-unit-files-use-l.patch
 lp1921696/0001-rfkill-improve-error-logging.patch
 lp1921696/0002-rfkill-use-short-writes-and-accept-long-reads.patch
+lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
