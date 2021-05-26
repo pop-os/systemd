@@ -35,7 +35,6 @@ debian/UBUNTU-units-block-CAP_SYS_MODULE-units-in-containers-too.patch
 debian/UBUNTU-test-sleep-skip-test_fiemap-upon-inapproriate-ioctl-.patch
 debian/UBUNTU-Support-system-image-read-only-etc.patch
 debian/UBUNTU-units-disable-journald-watchdog.patch
-debian/UBUNTU-resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch
 debian/UBUNTU-Revert-namespace-be-more-careful-when-handling-namespacin.patch
 debian/UBUNTU-Revert-cgroup-Continue-unit-reset-if-cgroup-is-busy.patch
 debian/UBUNTU-resolved-default-no-negative-caching.patch
