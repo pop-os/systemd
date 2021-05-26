@@ -20,6 +20,11 @@ systemd (245.4-4ubuntu3.7) UNRELEASED; urgency=medium
   * d/p/lp1902891-core-mount-mount-command-may-fail-after-adding-the-c.patch:
     Handle failed mount command (LP: #1902891)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b425189a483d7455db870b0ec5b2443c0eea7d76
+  * d/p/resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch,
+    d/p/lp1880258-log-nxdomain-as-debug.patch,
+    d/p/lp1785383-resolved-address-DVE-2018-0001.patch:
+    - Use upstream patch for DVE-2018-0001 handling (LP: #1785383)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ec45ebfee362ad3e429642f7519e8b88f16dc221
 
   [ Łukasz 'sil2100' Zemczak ]
   * d/p/lp1664844/0001-network-add-ActivationPolicy-configuration-parameter.patch,
