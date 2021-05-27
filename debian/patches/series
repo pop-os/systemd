@@ -66,3 +66,4 @@ lp1664844/0002-test-add-ActivationPolicy-unit-tests.patch
 lp1664844/0003-save-link-activation-policy-to-state-file-and-displa.patch
 lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Micmute-Hotkey-.patch
 lp1785383-resolved-address-DVE-2018-0001.patch
+lp1929849-rfkill-add-some-casts-to-silence-Werror-sign-compare.patch
