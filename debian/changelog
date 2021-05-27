@@ -1,4 +1,4 @@
-systemd (247.3-3ubuntu3.1) UNRELEASED; urgency=medium
+systemd (247.3-3ubuntu3.1) hirsute; urgency=medium
 
   [ Andy Chi ]
   * debian/patches/lp1926547-hwdb-60-keyboard-Update-Dell-Privacy-Local-Mic-Mute-.patch
@@ -20,7 +20,7 @@ systemd (247.3-3ubuntu3.1) UNRELEASED; urgency=medium
     - Use upstream patch for DVE-2018-0001 handling (LP: #1785383)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b42e31c1e06dfd0319438a156c316cb10c8cebb3
 
- -- Dan Streetman <ddstreet@canonical.com>  Fri, 21 May 2021 12:16:43 -0400
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 27 May 2021 11:09:57 -0400
 
 systemd (247.3-3ubuntu3) hirsute; urgency=medium
 
