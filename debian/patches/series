@@ -126,3 +126,4 @@ lp1929560-network-move-set-MAC-and-set-nomaster-operations-out.patch
 lp1902891-core-mount-mount-command-may-fail-after-adding-the-c.patch
 lp1785383-resolved-address-DVE-2018-0001.patch
 lp1933402-udev-Fix-SIGSEGV-in-AlternativeNamesPolicy-handling.patch
+lp1930910-hwdb-Add-ProBook-to-use-micmute-hotkey.patch
