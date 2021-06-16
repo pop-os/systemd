@@ -150,6 +150,7 @@ Depends: @,
   zstd,
   squashfs-tools,
   vim-tiny,
+  dosfstools,
 Restrictions: needs-root, allow-stderr, isolation-machine
 
 Tests: boot-smoke
