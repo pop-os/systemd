@@ -13,6 +13,7 @@ ARGS=(
     "--optimization=3 -Db_lto=true"
     "--optimization=3 -Db_lto=false"
     "--optimization=3 -Ddns-over-tls=openssl"
+    "--optimization=3 -Dfexecve=true -Dstandalone-binaries=true -Dstatic-libsystemd=true -Dstatic-libudev=true"
     "-Db_ndebug=true"
 )
 PACKAGES=(
@@ -45,9 +46,9 @@ PACKAGES=(
     mount
     net-tools
     perl
-    python-lxml
     python3-evdev
     python3-lxml
+    python3-jinja2
     python3-pip
     python3-pyparsing
     python3-setuptools

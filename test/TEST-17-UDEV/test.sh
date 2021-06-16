@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 set -e
+
 TEST_DESCRIPTION="UDEV"
-IMAGE_NAME="udev"
+IMAGE_NAME="default"
 TEST_NO_NSPAWN=1
 
-. $TEST_BASE_DIR/test-functions
-QEMU_TIMEOUT=500
+# shellcheck source=test/test-functions
+. "${TEST_BASE_DIR:?}/test-functions"
 
-test_append_files() {
-    (
-        instmods dummy
-        generate_module_dependencies
-    )
-}
+QEMU_TIMEOUT=800
 
-do_test "$@" 17
+do_test "$@"

@@ -7,22 +7,104 @@
 
 #include "alloc-util.h"
 #include "bpf-program.h"
+#include "escape.h"
 #include "fd-util.h"
 #include "memory-util.h"
 #include "missing_syscall.h"
 #include "path-util.h"
+#include "serialize.h"
+#include "string-table.h"
+
+static const char *const bpf_cgroup_attach_type_table[__MAX_BPF_ATTACH_TYPE] = {
+        [BPF_CGROUP_INET_INGRESS] =     "ingress",
+        [BPF_CGROUP_INET_EGRESS] =      "egress",
+        [BPF_CGROUP_INET_SOCK_CREATE] = "sock_create",
+        [BPF_CGROUP_SOCK_OPS] =         "sock_ops",
+        [BPF_CGROUP_DEVICE] =           "device",
+        [BPF_CGROUP_INET4_BIND] =       "bind4",
+        [BPF_CGROUP_INET6_BIND] =       "bind6",
+        [BPF_CGROUP_INET4_CONNECT] =    "connect4",
+        [BPF_CGROUP_INET6_CONNECT] =    "connect6",
+        [BPF_CGROUP_INET4_POST_BIND] =  "post_bind4",
+        [BPF_CGROUP_INET6_POST_BIND] =  "post_bind6",
+        [BPF_CGROUP_UDP4_SENDMSG] =     "sendmsg4",
+        [BPF_CGROUP_UDP6_SENDMSG] =     "sendmsg6",
+        [BPF_CGROUP_SYSCTL] =           "sysctl",
+        [BPF_CGROUP_UDP4_RECVMSG] =     "recvmsg4",
+        [BPF_CGROUP_UDP6_RECVMSG] =     "recvmsg6",
+        [BPF_CGROUP_GETSOCKOPT] =       "getsockopt",
+        [BPF_CGROUP_SETSOCKOPT] =       "setsockopt",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(bpf_cgroup_attach_type, int);
+
+DEFINE_HASH_OPS_WITH_KEY_DESTRUCTOR(bpf_program_hash_ops, void, trivial_hash_func, trivial_compare_func, bpf_program_unref);
+
+ /* struct bpf_prog_info info must be initialized since its value is both input and output
+  * for BPF_OBJ_GET_INFO_BY_FD syscall. */
+static int bpf_program_get_info_by_fd(int prog_fd, struct bpf_prog_info *info, uint32_t info_len) {
+        union bpf_attr attr;
+
+        /* Explicitly memset to zero since some compilers may produce non-zero-initialized padding when
+         * structured initialization is used.
+         * Refer to https://github.com/systemd/systemd/issues/18164
+         */
+        zero(attr);
+        attr.info.bpf_fd = prog_fd;
+        attr.info.info_len = info_len;
+        attr.info.info = PTR_TO_UINT64(info);
+
+        if (bpf(BPF_OBJ_GET_INFO_BY_FD, &attr, sizeof(attr)) < 0)
+                return -errno;
+
+        return 0;
+}
 
 int bpf_program_new(uint32_t prog_type, BPFProgram **ret) {
         _cleanup_(bpf_program_unrefp) BPFProgram *p = NULL;
 
-        p = new0(BPFProgram, 1);
+        p = new(BPFProgram, 1);
         if (!p)
                 return -ENOMEM;
 
-        p->n_ref = 1;
-        p->prog_type = prog_type;
-        p->kernel_fd = -1;
+        *p = (BPFProgram) {
+                .n_ref = 1,
+                .prog_type = prog_type,
+                .kernel_fd = -1,
+        };
 
+        *ret = TAKE_PTR(p);
+
+        return 0;
+}
+
+int bpf_program_new_from_bpffs_path(const char *path, BPFProgram **ret) {
+        _cleanup_(bpf_program_unrefp) BPFProgram *p = NULL;
+        struct bpf_prog_info info = {};
+        int r;
+
+        assert(path);
+        assert(ret);
+
+        p = new(BPFProgram, 1);
+        if (!p)
+                return -ENOMEM;
+
+        *p = (BPFProgram) {
+                .prog_type = BPF_PROG_TYPE_UNSPEC,
+                .n_ref = 1,
+                .kernel_fd = -1,
+        };
+
+        r = bpf_program_load_from_bpf_fs(p, path);
+        if (r < 0)
+                return r;
+
+        r = bpf_program_get_info_by_fd(p->kernel_fd, &info, sizeof(info));
+        if (r < 0)
+                return r;
+
+        p->prog_type = info.type;
         *ret = TAKE_PTR(p);
 
         return 0;
@@ -57,7 +139,7 @@ int bpf_program_add_instructions(BPFProgram *p, const struct bpf_insn *instructi
         if (p->kernel_fd >= 0) /* don't allow modification after we uploaded things to the kernel */
                 return -EBUSY;
 
-        if (!GREEDY_REALLOC(p->instructions, p->allocated, p->n_instructions + count))
+        if (!GREEDY_REALLOC(p->instructions, p->n_instructions + count))
                 return -ENOMEM;
 
         memcpy(p->instructions + p->n_instructions, instructions, sizeof(struct bpf_insn) * count);
@@ -251,6 +333,170 @@ int bpf_map_lookup_element(int fd, const void *key, void *value) {
 
         if (bpf(BPF_MAP_LOOKUP_ELEM, &attr, sizeof(attr)) < 0)
                 return -errno;
+
+        return 0;
+}
+
+int bpf_program_pin(int prog_fd, const char *bpffs_path) {
+        union bpf_attr attr;
+
+        zero(attr);
+        attr.pathname = PTR_TO_UINT64((void *) bpffs_path);
+        attr.bpf_fd = prog_fd;
+
+        if (bpf(BPF_OBJ_PIN, &attr, sizeof(attr)) < 0)
+                return -errno;
+
+        return 0;
+}
+
+int bpf_program_get_id_by_fd(int prog_fd, uint32_t *ret_id) {
+        struct bpf_prog_info info = {};
+        int r;
+
+        assert(ret_id);
+
+        r = bpf_program_get_info_by_fd(prog_fd, &info, sizeof(info));
+        if (r < 0)
+                return r;
+
+        *ret_id = info.id;
+
+        return 0;
+};
+
+int bpf_program_serialize_attachment(
+                FILE *f,
+                FDSet *fds,
+                const char *key,
+                BPFProgram *p) {
+
+        _cleanup_free_ char *escaped = NULL;
+        int copy, r;
+
+        if (!p || !p->attached_path)
+                return 0;
+
+        assert(p->kernel_fd >= 0);
+
+        escaped = cescape(p->attached_path);
+        if (!escaped)
+                return -ENOMEM;
+
+        copy = fdset_put_dup(fds, p->kernel_fd);
+        if (copy < 0)
+                return log_error_errno(copy, "Failed to add BPF kernel fd to serialize: %m");
+
+        r = serialize_item_format(
+                        f,
+                        key,
+                        "%i %s %s",
+                        copy,
+                        bpf_cgroup_attach_type_to_string(p->attached_type),
+                        escaped);
+        if (r < 0)
+                return r;
+
+        /* After serialization, let's forget the fact that this program is attached. The attachment — if you
+         * so will — is now 'owned' by the serialization, and not us anymore. Why does that matter? Because
+         * of BPF's less-than-ideal lifecycle handling: to detach a program from a cgroup we have to
+         * explicitly do so, it's not done implicitly on close(). Now, since we are serializing here we don't
+         * want the program to be detached while freeing things, so that the attachment can be retained after
+         * deserializing again. bpf_program_free() implicitly detaches things, if attached_path is non-NULL,
+         * hence we set it to NULL here. */
+
+        p->attached_path = mfree(p->attached_path);
+        return 0;
+}
+
+int bpf_program_serialize_attachment_set(FILE *f, FDSet *fds, const char *key, Set *set) {
+        BPFProgram *p;
+        int r;
+
+        SET_FOREACH(p, set) {
+                r = bpf_program_serialize_attachment(f, fds, key, p);
+                if (r < 0)
+                        return r;
+        }
+
+        return 0;
+}
+
+int bpf_program_deserialize_attachment(const char *v, FDSet *fds, BPFProgram **bpfp) {
+        _cleanup_free_ char *sfd = NULL, *sat = NULL, *unescaped = NULL;
+        _cleanup_(bpf_program_unrefp) BPFProgram *p = NULL;
+        _cleanup_close_ int fd = -1;
+        int ifd, at, r;
+
+        assert(v);
+        assert(bpfp);
+
+        /* Extract first word: the fd number */
+        r = extract_first_word(&v, &sfd, NULL, 0);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return -EINVAL;
+
+        r = safe_atoi(sfd, &ifd);
+        if (r < 0)
+                return r;
+        if (ifd < 0)
+                return -EBADF;
+
+        /* Extract second word: the attach type */
+        r = extract_first_word(&v, &sat, NULL, 0);
+        if (r < 0)
+                return r;
+        if (r == 0)
+                return -EINVAL;
+
+        at = bpf_cgroup_attach_type_from_string(sat);
+        if (at < 0)
+                return at;
+
+        /* The rest is the path */
+        r = cunescape(v, 0, &unescaped);
+        if (r < 0)
+                return r;
+
+        fd = fdset_remove(fds, ifd);
+        if (fd < 0)
+                return fd;
+
+        p = new(BPFProgram, 1);
+        if (!p)
+                return -ENOMEM;
+
+        *p = (BPFProgram) {
+                .n_ref = 1,
+                .kernel_fd = TAKE_FD(fd),
+                .prog_type = BPF_PROG_TYPE_UNSPEC,
+                .attached_path = TAKE_PTR(unescaped),
+                .attached_type = at,
+        };
+
+        if (*bpfp)
+                bpf_program_unref(*bpfp);
+
+        *bpfp = TAKE_PTR(p);
+        return 0;
+}
+
+int bpf_program_deserialize_attachment_set(const char *v, FDSet *fds, Set **bpfsetp) {
+        BPFProgram *p = NULL;
+        int r;
+
+        assert(v);
+        assert(bpfsetp);
+
+        r = bpf_program_deserialize_attachment(v, fds, &p);
+        if (r < 0)
+                return r;
+
+        r = set_ensure_consume(bpfsetp, &bpf_program_hash_ops, p);
+        if (r < 0)
+                return r;
 
         return 0;
 }

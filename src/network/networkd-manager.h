@@ -32,6 +32,7 @@ struct Manager {
         bool dirty;
         bool restarting;
         bool manage_foreign_routes;
+        bool manage_foreign_rules;
 
         Set *dirty_links;
 
@@ -39,8 +40,12 @@ struct Manager {
         LinkOperationalState operational_state;
         LinkCarrierState carrier_state;
         LinkAddressState address_state;
+        LinkAddressState ipv4_address_state;
+        LinkAddressState ipv6_address_state;
+        LinkOnlineState online_state;
 
         Hashmap *links;
+        Hashmap *links_by_name;
         Hashmap *netdevs;
         OrderedHashmap *networks;
         Hashmap *dhcp6_prefixes;
@@ -49,15 +54,17 @@ struct Manager {
 
         usec_t network_dirs_ts_usec;
 
-        DUID duid;
-        sd_id128_t product_uuid;
+        DUID dhcp_duid;
+        DUID dhcp6_duid;
+        DUID duid_product_uuid;
         bool has_product_uuid;
+        bool product_uuid_requested;
         Set *links_requesting_uuid;
-        Set *duids_requesting_uuid;
 
         char* dynamic_hostname;
         char* dynamic_timezone;
 
+        unsigned routing_policy_rule_remove_messages;
         Set *rules;
         Set *rules_foreign;
 
@@ -65,10 +72,12 @@ struct Manager {
         Hashmap *nexthops_by_id;
 
         /* Manager stores nexthops without RTA_OIF attribute. */
+        unsigned nexthop_remove_messages;
         Set *nexthops;
         Set *nexthops_foreign;
 
         /* Manager stores routes without RTA_OIF attribute. */
+        unsigned route_remove_messages;
         Set *routes;
         Set *routes_foreign;
 
@@ -76,7 +85,7 @@ struct Manager {
         Hashmap *route_table_numbers_by_name;
         Hashmap *route_table_names_by_number;
 
-        /* For link speed meter*/
+        /* For link speed meter */
         bool use_speed_meter;
         sd_event_source *speed_meter_event_source;
         usec_t speed_meter_interval_usec;
@@ -87,6 +96,8 @@ struct Manager {
         bool bridge_mdb_on_master_not_supported;
 
         FirewallContext *fw_ctx;
+
+        OrderedSet *request_queue;
 };
 
 int manager_new(Manager **ret);
@@ -99,8 +110,6 @@ int manager_load_config(Manager *m);
 bool manager_should_reload(Manager *m);
 
 int manager_enumerate(Manager *m);
-
-Link* manager_find_uplink(Manager *m, Link *exclude);
 
 int manager_set_hostname(Manager *m, const char *hostname);
 int manager_set_timezone(Manager *m, const char *timezone);

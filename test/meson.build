@@ -57,17 +57,15 @@ if install_tests
 endif
 
 test_network_generator_conversion_sh = find_program('test-network-generator-conversion.sh')
-
-############################################################
-
 test_systemd_tmpfiles_py = find_program('test-systemd-tmpfiles.py')
+hwdb_test_sh = find_program('hwdb-test.sh')
 
 ############################################################
 
 test_sysusers_sh = configure_file(
         input : 'test-sysusers.sh.in',
         output : 'test-sysusers.sh',
-        configuration : substs)
+        configuration : conf)
 if install_tests and conf.get('ENABLE_SYSUSERS') == 1
         install_data(test_sysusers_sh,
                      install_dir : testsdir)
@@ -124,17 +122,6 @@ if perl.found()
         endif
 else
         message('Skipping udev-test because perl is not available')
-endif
-
-############################################################
-
-if conf.get('ENABLE_HWDB') == 1
-        hwdb_test_sh = find_program('hwdb-test.sh')
-        if want_tests != 'false'
-                test('hwdb-test',
-                     hwdb_test_sh,
-                     timeout : 90)
-        endif
 endif
 
 ############################################################

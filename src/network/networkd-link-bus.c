@@ -10,6 +10,7 @@
 #include "bus-message-util.h"
 #include "bus-polkit.h"
 #include "dns-domain.h"
+#include "networkd-json.h"
 #include "networkd-link-bus.h"
 #include "networkd-link.h"
 #include "networkd-manager.h"
@@ -23,6 +24,7 @@
 BUS_DEFINE_PROPERTY_GET_ENUM(property_get_operational_state, link_operstate, LinkOperationalState);
 BUS_DEFINE_PROPERTY_GET_ENUM(property_get_carrier_state, link_carrier_state, LinkCarrierState);
 BUS_DEFINE_PROPERTY_GET_ENUM(property_get_address_state, link_address_state, LinkAddressState);
+BUS_DEFINE_PROPERTY_GET_ENUM(property_get_online_state, link_online_state, LinkOnlineState);
 static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_administrative_state, link_state, LinkState);
 
 static int property_get_bit_rates(
@@ -178,7 +180,7 @@ int bus_link_method_set_dns_servers_ex(sd_bus_message *message, void *userdata, 
 }
 
 int bus_link_method_set_domains(sd_bus_message *message, void *userdata, sd_bus_error *error) {
-        _cleanup_(ordered_set_freep) OrderedSet *search_domains = NULL, *route_domains = NULL;
+        _cleanup_ordered_set_free_ OrderedSet *search_domains = NULL, *route_domains = NULL;
         Link *l = userdata;
         int r;
 
@@ -211,22 +213,22 @@ int bus_link_method_set_domains(sd_bus_message *message, void *userdata, sd_bus_
                 if (r == 0)
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid search domain %s", name);
                 if (!route_only && dns_name_is_root(name))
-                        return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Root domain is not suitable as search domain");
+                        return sd_bus_error_set(error, SD_BUS_ERROR_INVALID_ARGS, "Root domain is not suitable as search domain");
 
                 r = dns_name_normalize(name, 0, &str);
                 if (r < 0)
                         return sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Invalid search domain %s", name);
 
                 domains = route_only ? &route_domains : &search_domains;
-                r = ordered_set_ensure_allocated(domains, &string_hash_ops);
+                r = ordered_set_ensure_allocated(domains, &string_hash_ops_free);
                 if (r < 0)
                         return r;
 
-                r = ordered_set_put(*domains, str);
+                r = ordered_set_consume(*domains, TAKE_PTR(str));
+                if (r == -EEXIST)
+                        continue;
                 if (r < 0)
                         return r;
-
-                TAKE_PTR(str);
         }
 
         r = sd_bus_message_exit_container(message);
@@ -242,8 +244,8 @@ int bus_link_method_set_domains(sd_bus_message *message, void *userdata, sd_bus_
         if (r == 0)
                 return 1; /* Polkit will call us back */
 
-        ordered_set_free_free(l->search_domains);
-        ordered_set_free_free(l->route_domains);
+        ordered_set_free(l->search_domains);
+        ordered_set_free(l->route_domains);
         l->search_domains = TAKE_PTR(search_domains);
         l->route_domains = TAKE_PTR(route_domains);
 
@@ -665,7 +667,7 @@ int bus_link_method_reconfigure(sd_bus_message *message, void *userdata, sd_bus_
         if (r == 0)
                 return 1; /* Polkit will call us back */
 
-        r = link_reconfigure(l, true);
+        r = link_reconfigure(l, /* force = */ true);
         if (r < 0)
                 return r;
         if (r > 0) {
@@ -678,12 +680,44 @@ int bus_link_method_reconfigure(sd_bus_message *message, void *userdata, sd_bus_
         return sd_bus_reply_method_return(message, NULL);
 }
 
+int bus_link_method_describe(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+        _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+        _cleanup_free_ char *text = NULL;
+        Link *link = userdata;
+        int r;
+
+        assert(message);
+        assert(link);
+
+        r = link_build_json(link, &v);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Failed to build JSON data: %m");
+
+        r = json_variant_format(v, 0, &text);
+        if (r < 0)
+                return log_link_error_errno(link, r, "Failed to format JSON data: %m");
+
+        r = sd_bus_message_new_method_return(message, &reply);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(reply, "s", text);
+        if (r < 0)
+                return r;
+
+        return sd_bus_send(NULL, reply, NULL);
+}
+
 const sd_bus_vtable link_vtable[] = {
         SD_BUS_VTABLE_START(0),
 
         SD_BUS_PROPERTY("OperationalState", "s", property_get_operational_state, offsetof(Link, operstate), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("CarrierState", "s", property_get_carrier_state, offsetof(Link, carrier_state), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("AddressState", "s", property_get_address_state, offsetof(Link, address_state), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("IPv4AddressState", "s", property_get_address_state, offsetof(Link, ipv4_address_state), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("IPv6AddressState", "s", property_get_address_state, offsetof(Link, ipv6_address_state), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+        SD_BUS_PROPERTY("OnlineState", "s", property_get_online_state, offsetof(Link, online_state), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("AdministrativeState", "s", property_get_administrative_state, offsetof(Link, state), SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
         SD_BUS_PROPERTY("BitRates", "(tt)", property_get_bit_rates, 0, 0),
 
@@ -761,6 +795,11 @@ const sd_bus_vtable link_vtable[] = {
                                 SD_BUS_NO_ARGS,
                                 SD_BUS_NO_RESULT,
                                 bus_link_method_reconfigure,
+                                SD_BUS_VTABLE_UNPRIVILEGED),
+        SD_BUS_METHOD_WITH_ARGS("Describe",
+                                SD_BUS_NO_ARGS,
+                                SD_BUS_RESULT("s", json),
+                                bus_link_method_describe,
                                 SD_BUS_VTABLE_UNPRIVILEGED),
 
         SD_BUS_VTABLE_END
@@ -854,7 +893,7 @@ int link_send_changed_strv(Link *link, char **properties) {
         assert(link->manager);
         assert(properties);
 
-        if (!link->manager->bus)
+        if (sd_bus_is_ready(link->manager->bus) <= 0)
                 return 0;
 
         p = link_bus_path(link);

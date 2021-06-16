@@ -11,6 +11,10 @@ libcore_sources = '''
         bpf-devices.h
         bpf-firewall.c
         bpf-firewall.h
+        bpf-foreign.c
+        bpf-foreign.h
+        bpf-socket-bind.c
+        bpf-socket-bind.h
         cgroup.c
         cgroup.h
         core-varlink.c
@@ -81,6 +85,8 @@ libcore_sources = '''
         load-fragment.h
         locale-setup.c
         locale-setup.h
+        manager-dump.c
+        manager-dump.h
         manager.c
         manager.h
         mount.c
@@ -113,6 +119,8 @@ libcore_sources = '''
         timer.h
         transaction.c
         transaction.h
+        unit-dependency-atom.c
+        unit-dependency-atom.h
         unit-printf.c
         unit-printf.h
         unit-serialize.c
@@ -121,11 +129,16 @@ libcore_sources = '''
         unit.h
 '''.split()
 
+subdir('bpf/socket_bind')
+if conf.get('BPF_FRAMEWORK') == 1
+        libcore_sources += [socket_bind_skel_h]
+endif
+
 load_fragment_gperf_gperf = custom_target(
         'load-fragment-gperf.gperf',
-        input : 'load-fragment-gperf.gperf.m4',
+        input : 'load-fragment-gperf.gperf.in',
         output: 'load-fragment-gperf.gperf',
-        command : [meson_apply_m4, config_h, '@INPUT@'],
+        command : [meson_render_jinja2, config_h, '@INPUT@'],
         capture : true)
 
 load_fragment_gperf_c = custom_target(
@@ -150,6 +163,7 @@ libcore = static_library(
         include_directories : includes,
         dependencies : [versiondep,
                         threads,
+                        libdl,
                         librt,
                         libseccomp,
                         libpam,
@@ -164,34 +178,29 @@ core_includes = [includes, include_directories('.')]
 
 systemd_sources = files('main.c')
 
-in_files = [['system.conf',      pkgsysconfdir],
-            ['user.conf',        pkgsysconfdir],
-            ['systemd.pc',       pkgconfigdatadir]]
+in_files = [['system.conf',                     pkgsysconfdir],
+            ['user.conf',                       pkgsysconfdir],
+            ['systemd.pc',                      pkgconfigdatadir],
+            ['org.freedesktop.systemd1.policy', polkitpolicydir]]
 
 foreach item : in_files
         file = item[0]
         dir = item[1]
-        if install_sysconfdir_samples or dir != pkgsysconfdir
-                configure_file(
-                        input : file + '.in',
-                        output : file,
-                        configuration : substs,
-                        install_dir : dir == 'no' ? '' : dir)
-        endif
 
+        custom_target(
+                file,
+                input : file + '.in',
+                output: file,
+                command : [meson_render_jinja2, config_h, '@INPUT@'],
+                capture : true,
+                install : dir != 'no',
+                install_dir : dir)
 endforeach
 
 install_data('org.freedesktop.systemd1.conf',
              install_dir : dbuspolicydir)
 install_data('org.freedesktop.systemd1.service',
              install_dir : dbussystemservicedir)
-
-policy = configure_file(
-        input : 'org.freedesktop.systemd1.policy.in',
-        output : 'org.freedesktop.systemd1.policy',
-        configuration : substs)
-install_data(policy,
-             install_dir : polkitpolicydir)
 
 meson.add_install_script('sh', '-c', mkdir_p.format(systemshutdowndir))
 meson.add_install_script('sh', '-c', mkdir_p.format(systemsleepdir))

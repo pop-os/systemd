@@ -53,11 +53,14 @@ typedef struct Link {
         char *kind;
         unsigned short iftype;
         char *state_file;
-        hw_addr_data hw_addr;
-        hw_addr_data bcast_addr;
+        struct hw_addr_data hw_addr;
+        struct hw_addr_data bcast_addr;
         struct ether_addr permanent_mac;
         struct in6_addr ipv6ll_address;
         uint32_t mtu;
+        uint32_t min_mtu;
+        uint32_t max_mtu;
+        uint32_t original_mtu;
         sd_device *sd_device;
         char *driver;
 
@@ -75,18 +78,29 @@ typedef struct Link {
         LinkOperationalState operstate;
         LinkCarrierState carrier_state;
         LinkAddressState address_state;
+        LinkAddressState ipv4_address_state;
+        LinkAddressState ipv6_address_state;
+        LinkOnlineState online_state;
 
-        unsigned address_messages;
+        unsigned static_address_messages;
+        unsigned static_address_label_messages;
+        unsigned static_bridge_fdb_messages;
+        unsigned static_bridge_mdb_messages;
+        unsigned static_ipv6_proxy_ndp_messages;
+        unsigned static_neighbor_messages;
+        unsigned static_nexthop_messages;
+        unsigned static_route_messages;
+        unsigned static_routing_policy_rule_messages;
         unsigned address_remove_messages;
-        unsigned address_label_messages;
-        unsigned neighbor_messages;
-        unsigned route_messages;
-        unsigned nexthop_messages;
-        unsigned routing_policy_rule_messages;
+        unsigned neighbor_remove_messages;
+        unsigned nexthop_remove_messages;
+        unsigned route_remove_messages;
         unsigned tc_messages;
         unsigned sr_iov_messages;
-        unsigned enslaving;
-        unsigned bridge_mdb_messages;
+        unsigned set_link_messages;
+        unsigned set_flags_messages;
+        unsigned create_stacked_netdev_messages;
+        unsigned create_stacked_netdev_after_configured_messages;
 
         Set *addresses;
         Set *addresses_foreign;
@@ -104,9 +118,7 @@ typedef struct Link {
         Address *dhcp_address, *dhcp_address_old;
         Set *dhcp_routes, *dhcp_routes_old;
         char *lease_file;
-        uint32_t original_mtu;
         unsigned dhcp4_messages;
-        unsigned dhcp4_remove_messages;
         sd_ipv4acd *dhcp_acd;
         bool dhcp4_route_failed:1;
         bool dhcp4_route_retrying:1;
@@ -116,20 +128,21 @@ typedef struct Link {
         sd_ipv4ll *ipv4ll;
         bool ipv4ll_address_configured:1;
 
-        bool request_static_addresses:1;
-        bool addresses_configured:1;
-        bool addresses_ready:1;
-        bool neighbors_configured:1;
-        bool static_routes_configured:1;
+        bool static_addresses_configured:1;
+        bool static_address_labels_configured:1;
+        bool static_bridge_fdb_configured:1;
+        bool static_bridge_mdb_configured:1;
+        bool static_ipv6_proxy_ndp_configured:1;
+        bool static_neighbors_configured:1;
         bool static_nexthops_configured:1;
-        bool routing_policy_rules_configured:1;
+        bool static_routes_configured:1;
+        bool static_routing_policy_rules_configured:1;
         bool tc_configured:1;
         bool sr_iov_configured:1;
-        bool setting_mtu:1;
-        bool setting_genmode:1;
-        bool ipv6_mtu_set:1;
-        bool bridge_mdb_configured:1;
         bool activated:1;
+        bool master_set:1;
+        bool stacked_netdevs_created:1;
+        bool stacked_netdevs_after_configured_created:1;
 
         sd_dhcp_server *dhcp_server;
 
@@ -149,6 +162,7 @@ typedef struct Link {
         sd_dhcp6_lease *dhcp6_lease;
         Set *dhcp6_addresses, *dhcp6_addresses_old;
         Set *dhcp6_routes, *dhcp6_routes_old;
+        Set *dhcp6_pd_prefixes;
         Set *dhcp6_pd_addresses, *dhcp6_pd_addresses_old;
         Set *dhcp6_pd_routes, *dhcp6_pd_routes_old;
         unsigned dhcp6_address_messages;
@@ -195,6 +209,8 @@ typedef struct Link {
 
 typedef int (*link_netlink_message_handler_t)(sd_netlink*, sd_netlink_message*, Link*);
 
+bool link_is_ready_to_configure(Link *link, bool allow_unmanaged);
+
 void link_ntp_settings_clear(Link *link);
 void link_dns_settings_clear(Link *link);
 Link *link_unref(Link *link);
@@ -203,12 +219,14 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Link*, link_unref);
 DEFINE_TRIVIAL_DESTRUCTOR(link_netlink_destroy_callback, Link, link_unref);
 
 int link_get(Manager *m, int ifindex, Link **ret);
+int link_get_by_name(Manager *m, const char *ifname, Link **ret);
+int link_get_master(Link *link, Link **ret);
 
-int link_up(Link *link);
-int link_down(Link *link, link_netlink_message_handler_t callback);
+int link_getlink_handler_internal(sd_netlink *rtnl, sd_netlink_message *m, Link *link, const char *error_msg);
+int link_call_getlink(Link *link, link_netlink_message_handler_t callback);
+int link_handle_bound_to_list(Link *link);
 
 void link_enter_failed(Link *link);
-
 void link_set_state(Link *link, LinkState state);
 void link_check_ready(Link *link);
 
@@ -221,8 +239,6 @@ bool link_ipv6_enabled(Link *link);
 bool link_ipv6ll_enabled(Link *link);
 int link_ipv6ll_gained(Link *link, const struct in6_addr *address);
 
-int link_set_mtu(Link *link, uint32_t mtu);
-
 bool link_ipv4ll_enabled(Link *link);
 
 int link_stop_engines(Link *link, bool may_keep_dhcp);
@@ -230,15 +246,7 @@ int link_stop_engines(Link *link, bool may_keep_dhcp);
 const char* link_state_to_string(LinkState s) _const_;
 LinkState link_state_from_string(const char *s) _pure_;
 
-int link_configure(Link *link);
 int link_reconfigure(Link *link, bool force);
 
 int manager_udev_process_link(sd_device_monitor *monitor, sd_device *device, void *userdata);
 int manager_rtnl_process_link(sd_netlink *rtnl, sd_netlink_message *message, Manager *m);
-
-int log_link_message_full_errno(Link *link, sd_netlink_message *m, int level, int err, const char *msg);
-#define log_link_message_error_errno(link, m, err, msg)   log_link_message_full_errno(link, m, LOG_ERR, err, msg)
-#define log_link_message_warning_errno(link, m, err, msg) log_link_message_full_errno(link, m, LOG_WARNING, err, msg)
-#define log_link_message_notice_errno(link, m, err, msg)  log_link_message_full_errno(link, m, LOG_NOTICE, err, msg)
-#define log_link_message_info_errno(link, m, err, msg)    log_link_message_full_errno(link, m, LOG_INFO, err, msg)
-#define log_link_message_debug_errno(link, m, err, msg)   log_link_message_full_errno(link, m, LOG_DEBUG, err, msg)

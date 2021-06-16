@@ -132,18 +132,15 @@ static int specifier_cgroup_root(char specifier, const void *data, const void *u
 }
 
 static int specifier_cgroup_slice(char specifier, const void *data, const void *userdata, char **ret) {
-        const Unit *u = userdata;
+        const Unit *u = userdata, *slice;
         char *n;
 
         assert(u);
 
         bad_specifier(u, specifier);
 
-        if (UNIT_ISSET(u->slice)) {
-                const Unit *slice;
-
-                slice = UNIT_DEREF(u->slice);
-
+        slice = UNIT_GET_SLICE(u);
+        if (slice) {
                 if (slice->cgroup_path)
                         n = strdup(slice->cgroup_path);
                 else
@@ -201,10 +198,10 @@ int unit_name_printf(const Unit *u, const char* format, char **ret) {
         assert(format);
         assert(ret);
 
-        return specifier_printf(format, table, u, ret);
+        return specifier_printf(format, UNIT_NAME_MAX, table, u, ret);
 }
 
-int unit_full_printf(const Unit *u, const char *format, char **ret) {
+int unit_full_printf_full(const Unit *u, const char *format, size_t max_length, char **ret) {
         /* This is similar to unit_name_printf() but also supports unescaping. Also, adds a couple of additional codes
          * (which are likely not suitable for unescaped inclusion in unit names):
          *
@@ -265,5 +262,5 @@ int unit_full_printf(const Unit *u, const char *format, char **ret) {
                 {}
         };
 
-        return specifier_printf(format, table, u, ret);
+        return specifier_printf(format, max_length, table, u, ret);
 }

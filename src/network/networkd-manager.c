@@ -34,6 +34,7 @@
 #include "networkd-neighbor.h"
 #include "networkd-network-bus.h"
 #include "networkd-nexthop.h"
+#include "networkd-queue.h"
 #include "networkd-routing-policy-rule.h"
 #include "networkd-speed-meter.h"
 #include "networkd-state-file.h"
@@ -59,8 +60,10 @@ static int manager_reset_all(Manager *m) {
 
         HASHMAP_FOREACH(link, m->links) {
                 r = link_carrier_reset(link);
-                if (r < 0)
+                if (r < 0) {
                         log_link_warning_errno(link, r, "Could not reset carrier: %m");
+                        link_enter_failed(link);
+                }
         }
 
         return 0;
@@ -100,8 +103,8 @@ static int on_connected(sd_bus_message *message, void *userdata, sd_bus_error *r
                 (void) manager_set_hostname(m, m->dynamic_hostname);
         if (m->dynamic_timezone)
                 (void) manager_set_timezone(m, m->dynamic_timezone);
-        if (m->links_requesting_uuid)
-                (void) manager_request_product_uuid(m, NULL);
+        if (!set_isempty(m->links_requesting_uuid))
+                (void) manager_request_product_uuid(m);
 
         return 0;
 }
@@ -379,8 +382,13 @@ int manager_new(Manager **ret) {
 
         *m = (Manager) {
                 .speed_meter_interval_usec = SPEED_METER_DEFAULT_TIME_INTERVAL,
+                .online_state = _LINK_ONLINE_STATE_INVALID,
                 .manage_foreign_routes = true,
+                .manage_foreign_rules = true,
                 .ethtool_fd = -1,
+                .dhcp_duid.type = DUID_TYPE_EN,
+                .dhcp6_duid.type = DUID_TYPE_EN,
+                .duid_product_uuid.type = DUID_TYPE_UUID,
         };
 
         m->state_file = strdup("/run/systemd/netif/state");
@@ -399,6 +407,10 @@ int manager_new(Manager **ret) {
         (void) sd_event_add_signal(m->event, NULL, SIGUSR2, signal_restart_callback, m);
 
         r = sd_event_add_post(m->event, NULL, manager_dirty_handler, m);
+        if (r < 0)
+                return r;
+
+        r = sd_event_add_post(m->event, NULL, manager_process_requests, m);
         if (r < 0)
                 return r;
 
@@ -426,8 +438,6 @@ int manager_new(Manager **ret) {
         if (r < 0)
                 return r;
 
-        m->duid.type = DUID_TYPE_EN;
-
         *ret = TAKE_PTR(m);
 
         return 0;
@@ -444,14 +454,16 @@ Manager* manager_free(Manager *m) {
         HASHMAP_FOREACH(link, m->links)
                 (void) link_stop_engines(link, true);
 
+        m->request_queue = ordered_set_free(m->request_queue);
+
         m->dhcp6_prefixes = hashmap_free_with_destructor(m->dhcp6_prefixes, dhcp6_pd_free);
         m->dhcp6_pd_prefixes = set_free_with_destructor(m->dhcp6_pd_prefixes, dhcp6_pd_free);
 
         m->dirty_links = set_free_with_destructor(m->dirty_links, link_unref);
         m->links_requesting_uuid = set_free_with_destructor(m->links_requesting_uuid, link_unref);
+        m->links_by_name = hashmap_free(m->links_by_name);
         m->links = hashmap_free_with_destructor(m->links, link_unref);
 
-        m->duids_requesting_uuid = set_free(m->duids_requesting_uuid);
         m->networks = ordered_hashmap_free_with_destructor(m->networks, network_unref);
 
         m->netdevs = hashmap_free_with_destructor(m->netdevs, netdev_unref);
@@ -655,6 +667,9 @@ static int manager_enumerate_rules(Manager *m) {
         assert(m);
         assert(m->rtnl);
 
+        if (!m->manage_foreign_rules)
+                return 0;
+
         r = sd_rtnl_message_new_routing_policy_rule(m->rtnl, &req, RTM_GETRULE, 0);
         if (r < 0)
                 return r;
@@ -706,43 +721,6 @@ int manager_enumerate(Manager *m) {
         return 0;
 }
 
-Link* manager_find_uplink(Manager *m, Link *exclude) {
-        _cleanup_free_ struct local_address *gateways = NULL;
-        int n;
-
-        assert(m);
-
-        /* Looks for a suitable "uplink", via black magic: an
-         * interface that is up and where the default route with the
-         * highest priority points to. */
-
-        n = local_gateways(m->rtnl, 0, AF_UNSPEC, &gateways);
-        if (n < 0) {
-                log_warning_errno(n, "Failed to determine list of default gateways: %m");
-                return NULL;
-        }
-
-        for (int i = 0; i < n; i++) {
-                Link *link;
-
-                link = hashmap_get(m->links, INT_TO_PTR(gateways[i].ifindex));
-                if (!link) {
-                        log_debug("Weird, found a gateway for a link we don't know. Ignoring.");
-                        continue;
-                }
-
-                if (link == exclude)
-                        continue;
-
-                if (link->operstate < LINK_OPERSTATE_ROUTABLE)
-                        continue;
-
-                return link;
-        }
-
-        return NULL;
-}
-
 static int set_hostname_handler(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
         const sd_bus_error *e;
         int r;
@@ -767,8 +745,8 @@ int manager_set_hostname(Manager *m, const char *hostname) {
         if (r < 0)
                 return r;
 
-        if (!m->bus || sd_bus_is_ready(m->bus) <= 0) {
-                log_debug("Not connected to system bus, setting hostname later.");
+        if (sd_bus_is_ready(m->bus) <= 0) {
+                log_debug("Not connected to system bus, setting system hostname later.");
                 return 0;
         }
 
@@ -784,7 +762,6 @@ int manager_set_hostname(Manager *m, const char *hostname) {
                         "sb",
                         hostname,
                         false);
-
         if (r < 0)
                 return log_error_errno(r, "Could not set transient hostname: %m");
 
@@ -817,8 +794,8 @@ int manager_set_timezone(Manager *m, const char *tz) {
         if (r < 0)
                 return r;
 
-        if (!m->bus || sd_bus_is_ready(m->bus) <= 0) {
-                log_debug("Not connected to system bus, setting timezone later.");
+        if (sd_bus_is_ready(m->bus) <= 0) {
+                log_debug("Not connected to system bus, setting system timezone later.");
                 return 0;
         }
 

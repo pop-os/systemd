@@ -35,9 +35,9 @@ basic_sources = files('''
         conf-files.h
         copy.c
         copy.h
+        creds-util.c
+        creds-util.h
         def.h
-        device-nodes.c
-        device-nodes.h
         dirent-util.c
         dirent-util.h
         dlfcn-util.c
@@ -356,10 +356,13 @@ arch_list = [
         'mipso32',
         'powerpc',
         'powerpc64',
+        'riscv32',
+        'riscv64',
         's390',
         's390x',
         'sparc',
-        'x86_64']
+        'x86_64'
+]
 
 run_target(
         'update-syscall-tables',

@@ -668,7 +668,8 @@ static int service_setup_bus_name(Service *s) {
 
         assert(s);
 
-        if (s->type != SERVICE_DBUS)
+        /* If s->bus_name is not set, then the unit will be refused by service_verify() later. */
+        if (s->type != SERVICE_DBUS || !s->bus_name)
                 return 0;
 
         r = unit_add_dependency_by_name(UNIT(s), UNIT_REQUIRES, SPECIAL_DBUS_SOCKET, true, UNIT_DEPENDENCY_FILE);
@@ -1245,12 +1246,11 @@ static int service_collect_fds(
 
                 rn_socket_fds = 1;
         } else {
-                void *v;
                 Unit *u;
 
                 /* Pass all our configured sockets for singleton services */
 
-                HASHMAP_FOREACH_KEY(v, u, UNIT(s)->dependencies[UNIT_TRIGGERED_BY]) {
+                UNIT_FOREACH_DEPENDENCY(u, UNIT(s), UNIT_ATOM_TRIGGERED_BY) {
                         _cleanup_free_ int *cfds = NULL;
                         Socket *sock;
                         int cn_fds;
@@ -1364,9 +1364,9 @@ static int service_allocate_exec_fd_event_source(
 static int service_allocate_exec_fd(
                 Service *s,
                 sd_event_source **ret_event_source,
-                int* ret_exec_fd) {
+                int *ret_exec_fd) {
 
-        _cleanup_close_pair_ int p[2] = { -1, -1 };
+        _cleanup_close_pair_ int p[] = { -1, -1 };
         int r;
 
         assert(s);
@@ -1380,7 +1380,7 @@ static int service_allocate_exec_fd(
         if (r < 0)
                 return r;
 
-        p[0] = -1;
+        TAKE_FD(p[0]);
         *ret_exec_fd = TAKE_FD(p[1]);
 
         return 0;
@@ -1410,7 +1410,7 @@ static int service_spawn(
                 ExecCommand *c,
                 usec_t timeout,
                 ExecFlags flags,
-                pid_t *_pid) {
+                pid_t *ret_pid) {
 
         _cleanup_(exec_params_clear) ExecParameters exec_params = {
                 .flags     = flags,
@@ -1427,7 +1427,7 @@ static int service_spawn(
 
         assert(s);
         assert(c);
-        assert(_pid);
+        assert(ret_pid);
 
         r = unit_prepare_exec(UNIT(s)); /* This realizes the cgroup, among other things */
         if (r < 0)
@@ -1582,7 +1582,7 @@ static int service_spawn(
         if (r < 0)
                 return r;
 
-        *_pid = pid;
+        *ret_pid = pid;
 
         return 0;
 }
@@ -1621,18 +1621,25 @@ static int control_pid_good(Service *s) {
         return s->control_pid > 0;
 }
 
-static int cgroup_good(Service *s) {
-        int r;
-
+static int cgroup_empty(Service *s) {
         assert(s);
 
-        /* Returns 0 if the cgroup is empty or doesn't exist, > 0 if it is exists and is populated, < 0 if we can't
-         * figure it out */
+        /* Returns 0 if there is no cgroup, > 0 if is empty or doesn't exist, < 0 if we can't figure it out */
 
         if (!UNIT(s)->cgroup_path)
                 return 0;
 
-        r = cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, UNIT(s)->cgroup_path);
+        return cg_is_empty_recursive(SYSTEMD_CGROUP_CONTROLLER, UNIT(s)->cgroup_path);
+}
+
+
+static int cgroup_good(Service *s) {
+        int r;
+
+        /* Returns 0 if the cgroup is empty or doesn't exist, > 0 if it is exists and is populated, < 0 if we can't
+         * figure it out */
+
+        r = cgroup_empty(s);
         if (r < 0)
                 return r;
 
@@ -2265,7 +2272,7 @@ static void service_enter_restart(Service *s) {
                 goto fail;
 
         /* Count the jobs we enqueue for restarting. This counter is maintained as long as the unit isn't fully
-         * stopped, i.e. as long as it remains up or remains in auto-start states. The use can reset the counter
+         * stopped, i.e. as long as it remains up or remains in auto-start states. The user can reset the counter
          * explicitly however via the usual "systemctl reset-failure" logic. */
         s->n_restarts ++;
         s->flush_n_restarts = false;
@@ -2559,10 +2566,10 @@ static unsigned service_exec_command_index(Unit *u, ServiceExecCommand id, ExecC
 
 static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command) {
         _cleanup_free_ char *args = NULL, *p = NULL;
-        size_t allocated = 0, length = 0;
         Service *s = SERVICE(u);
         const char *type, *key;
         ServiceExecCommand id;
+        size_t length = 0;
         unsigned idx;
         char **arg;
 
@@ -2591,7 +2598,7 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
                         return log_oom();
 
                 n = strlen(e);
-                if (!GREEDY_REALLOC(args, allocated, length + 2 + n + 2))
+                if (!GREEDY_REALLOC(args, length + 2 + n + 2))
                         return log_oom();
 
                 if (length > 0)
@@ -2603,7 +2610,7 @@ static int service_serialize_exec_command(Unit *u, FILE *f, ExecCommand *command
                 args[length++] = '"';
         }
 
-        if (!GREEDY_REALLOC(args, allocated, length + 1))
+        if (!GREEDY_REALLOC(args, length + 1))
                 return log_oom();
 
         args[length++] = 0;
@@ -2930,7 +2937,7 @@ static int service_deserialize_item(Unit *u, const char *key, const char *value,
 
                 r = extract_first_word(&value, &fdn, NULL, EXTRACT_CUNESCAPE | EXTRACT_UNQUOTE);
                 if (r <= 0) {
-                        log_unit_debug_errno(u, r, "Failed to parse fd-store-fd value \"%s\": %m", value);
+                        log_unit_debug(u, "Failed to parse fd-store-fd value: %s", value);
                         return 0;
                 }
 
@@ -3142,7 +3149,7 @@ static int service_demand_pid_file(Service *s) {
                 return -ENOMEM;
         }
 
-        path_simplify(ps->path, false);
+        path_simplify(ps->path);
 
         /* PATH_CHANGED would not be enough. There are daemons (sendmail) that
          * keep their PID file open all the time. */
@@ -3395,7 +3402,14 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
         else
                 assert_not_reached("Unknown code");
 
-        if (s->main_pid == pid) {
+        /* Services with ExitType=cgroup ignore the main PID for purposes of exit status */
+        if (s->exit_type == SERVICE_EXIT_CGROUP && s->main_pid == pid) {
+                service_unwatch_main_pid(s);
+                s->main_pid_known = false;
+        }
+
+        if ((s->exit_type == SERVICE_EXIT_MAIN && s->main_pid == pid) ||
+            (s->exit_type == SERVICE_EXIT_CGROUP && cgroup_empty(s) && !control_pid_good(s))) {
                 /* Forking services may occasionally move to a new PID.
                  * As long as they update the PID file before exiting the old
                  * PID, they're fine. */
@@ -3428,7 +3442,7 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
 
                 unit_log_process_exit(
                                 u,
-                                "Main process",
+                                s->exit_type == SERVICE_EXIT_CGROUP ? "Last process" : "Main process",
                                 service_exec_command_to_string(SERVICE_EXEC_START),
                                 f == SERVICE_SUCCESS,
                                 code, status);
@@ -3441,16 +3455,14 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                     s->type == SERVICE_ONESHOT &&
                     f == SERVICE_SUCCESS) {
 
-                        /* There is another command to *
-                         * execute, so let's do that. */
+                        /* There is another command to execute, so let's do that. */
 
                         log_unit_debug(u, "Running next main command for state %s.", service_state_to_string(s->state));
                         service_run_next_main(s);
 
                 } else {
 
-                        /* The service exited, so the service is officially
-                         * gone. */
+                        /* The service exited, so the service is officially gone. */
                         s->main_command = NULL;
 
                         switch (s->state) {
@@ -3463,12 +3475,11 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
                                 if (control_pid_good(s) <= 0)
                                         service_enter_stop(s, f);
 
-                                /* Otherwise need to wait untill the operation is done. */
+                                /* Otherwise need to wait until the operation is done. */
                                 break;
 
                         case SERVICE_STOP:
-                                /* Need to wait until the operation is
-                                 * done */
+                                /* Need to wait until the operation is done. */
                                 break;
 
                         case SERVICE_START:
@@ -4453,6 +4464,13 @@ static const char* const service_type_table[_SERVICE_TYPE_MAX] = {
 };
 
 DEFINE_STRING_TABLE_LOOKUP(service_type, ServiceType);
+
+static const char* const service_exit_type_table[_SERVICE_EXIT_TYPE_MAX] = {
+        [SERVICE_EXIT_MAIN] = "main",
+        [SERVICE_EXIT_CGROUP] = "cgroup",
+};
+
+DEFINE_STRING_TABLE_LOOKUP(service_exit_type, ServiceExitType);
 
 static const char* const service_exec_command_table[_SERVICE_EXEC_COMMAND_MAX] = {
         [SERVICE_EXEC_CONDITION] = "ExecCondition",
