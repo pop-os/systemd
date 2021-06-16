@@ -12,7 +12,7 @@ Closes: #869719
  1 file changed, 1 deletion(-)
 
 diff --git a/units/systemd-udevd.service.in b/units/systemd-udevd.service.in
-index 225eac2..f541ff6 100644
+index 8f9c66b..702082a 100644
 --- a/units/systemd-udevd.service.in
 +++ b/units/systemd-udevd.service.in
 @@ -35,7 +35,6 @@ MemoryDenyWriteExecute=yes
@@ -22,4 +22,4 @@ index 225eac2..f541ff6 100644
 -SystemCallArchitectures=native
  LockPersonality=yes
  IPAddressDeny=any
- @SERVICE_WATCHDOG@
+ {{SERVICE_WATCHDOG}}

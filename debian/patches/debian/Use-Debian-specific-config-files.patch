@@ -16,10 +16,10 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 164 insertions(+), 113 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 78d0390..9f2117d 100644
+index 26a6762..c283a30 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
-@@ -1454,19 +1454,43 @@ int get_timezone(char **ret) {
+@@ -1435,19 +1435,43 @@ int get_timezone(char **ret) {
          const char *e;
          char *z;
          int r;
@@ -27,7 +27,7 @@ index 78d0390..9f2117d 100644
  
          r = readlink_malloc("/etc/localtime", &t);
 -        if (r == -ENOENT) {
--                /* If the symlink does not exist, assume "UTC", like glibc does*/
+-                /* If the symlink does not exist, assume "UTC", like glibc does */
 -                z = strdup("UTC");
 +        if (r < 0) {
 +                if (r == -ENOENT)
@@ -42,7 +42,7 @@ index 78d0390..9f2117d 100644
 +
 +                        if (use_utc_fallback) {
 +                                /* If the /etc/localtime symlink does not exist and we failed
-+                                 * to read /etc/timezone, assume "UTC", like glibc does. */
++                                 * to read /etc/timezone, assume "UTC", like glibc does */
 +                                z = strdup("UTC");
 +                                if (!z)
 +                                        return -ENOMEM;
@@ -402,10 +402,10 @@ index d2f0566..6d064e2 100644
          return r;
  }
 diff --git a/src/timedate/timedated.c b/src/timedate/timedated.c
-index 567244d..3c4bd82 100644
+index 66b4542..2083c9d 100644
 --- a/src/timedate/timedated.c
 +++ b/src/timedate/timedated.c
-@@ -283,6 +283,8 @@ static int context_read_data(Context *c) {
+@@ -293,6 +293,8 @@ static int context_read_data(Context *c) {
  static int context_write_data_timezone(Context *c) {
          _cleanup_free_ char *p = NULL;
          const char *source;
@@ -414,7 +414,7 @@ index 567244d..3c4bd82 100644
  
          assert(c);
  
-@@ -296,9 +298,12 @@ static int context_write_data_timezone(Context *c) {
+@@ -306,9 +308,12 @@ static int context_write_data_timezone(Context *c) {
                  if (access("/usr/share/zoneinfo/UTC", F_OK) < 0) {
  
                          if (unlink("/etc/localtime") < 0 && errno != ENOENT)
@@ -429,7 +429,7 @@ index 567244d..3c4bd82 100644
                  }
  
                  source = "../usr/share/zoneinfo/UTC";
-@@ -310,7 +315,17 @@ static int context_write_data_timezone(Context *c) {
+@@ -320,7 +325,17 @@ static int context_write_data_timezone(Context *c) {
                  source = p;
          }
  

@@ -11,10 +11,10 @@ See: #979716
  1 file changed, 60 insertions(+), 60 deletions(-)
 
 diff --git a/test/networkd-test.py b/test/networkd-test.py
-index 726cc2e..b7a3587 100755
+index 799df08..a41ed22 100755
 --- a/test/networkd-test.py
 +++ b/test/networkd-test.py
-@@ -689,66 +689,66 @@ DNSSECNegativeTrustAnchors=company lab
+@@ -699,66 +699,66 @@ DNSSECNegativeTrustAnchors=company lab
          self.assertRegex(general_log, 'query.*megasearch.net')
          self.assertNotIn('megasearch.net', vpn_log)
  

@@ -16,10 +16,10 @@ Bug-Debian: https://bugs.debian.org/773528
  3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/man/journald.conf.xml b/man/journald.conf.xml
-index 757a92c..1e9eeb9 100644
+index ed7e428..0abed9c 100644
 --- a/man/journald.conf.xml
 +++ b/man/journald.conf.xml
-@@ -421,7 +421,7 @@
+@@ -426,7 +426,7 @@
          <command>systemd-journald</command> collects generated audit records, it just controls whether it
          tells the kernel to generate them. This means if another tool turns on auditing even if
          <command>systemd-journald</command> left it off, it will still collect the generated
@@ -29,7 +29,7 @@ index 757a92c..1e9eeb9 100644
  
        <varlistentry>
 diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
-index 8a08b28..6819204 100644
+index e8ab89d..c001681 100644
 --- a/src/journal/journald-server.c
 +++ b/src/journal/journald-server.c
 @@ -2190,7 +2190,7 @@ int server_init(Server *s, const char *namespace) {
