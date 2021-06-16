@@ -10,8 +10,8 @@ We welcome all contributions to systemd. If you notice a bug or a missing
 feature, please feel invited to fix it, and submit your work as a GitHub Pull
 Request (PR) at https://github.com/systemd/systemd/pull/new.
 
-Please make sure to follow our [Coding Style](CODING_STYLE.md) when submitting patches.
-Also have a look at our [Contribution Guidelines](CONTRIBUTING.md).
+Please make sure to follow our [Coding Style](CODING_STYLE.md) when submitting
+patches. Also have a look at our [Contribution Guidelines](CONTRIBUTING.md).
 
 When adding new functionality, tests should be added. For shared functionality
 (in `src/basic/` and `src/shared/`) unit tests should be sufficient. The general
@@ -22,8 +22,8 @@ test executable. For features at a higher level, tests in `src/test/` are very
 strongly recommended. If that is not possible, integration tests in `test/` are
 encouraged.
 
-Please also have a look at our list of [code quality tools](CODE_QUALITY.md) we have setup for systemd,
-to ensure our codebase stays in good shape.
+Please also have a look at our list of [code quality tools](CODE_QUALITY.md) we
+have setup for systemd, to ensure our codebase stays in good shape.
 
 Please always test your work before submitting a PR. For many of the components
 of systemd testing is straight-forward as you can simply compile systemd and
@@ -36,12 +36,12 @@ building clean OS images from an upstream distribution in combination with a
 fresh build of the project in the local working directory. To make use of this,
 please acquire `mkosi` from https://github.com/systemd/mkosi first, unless your
 distribution has packaged it already and you can get it from there. After the
-tool is installed, symlink the settings file for your distribution of choice from
-.mkosi/ to mkosi.default in the project root directory (note that the package
-manager for this distro needs to be installed on your host system). After doing
-that, it is sufficient to type `mkosi` in the systemd project directory to
-generate a disk image `image.raw` you can boot either in `systemd-nspawn` or in
-an UEFI-capable VM:
+tool is installed, symlink the settings file for your distribution of choice
+from .mkosi/ to mkosi.default in the project root directory (note that the
+package manager for this distro needs to be installed on your host system).
+After doing that, it is sufficient to type `mkosi` in the systemd project
+directory to generate a disk image `image.raw` you can boot either in
+`systemd-nspawn` or in an UEFI-capable VM:
 
 ```
 # mkosi boot
@@ -106,13 +106,34 @@ And after that, head over to your repo on GitHub and click "Compare & pull reque
 
 Happy hacking!
 
+## Templating engines in .in files
+
+Some source files are generated during build. We use two templating engines:
+* meson's `configure_file()` directive uses syntax with `@VARIABLE@`.
+
+  See the
+  [Meson docs for `configure_file()`](https://mesonbuild.com/Reference-manual.html#configure_file)
+  for details.
+
+{% raw %}
+* most files are rendered using jinja2, with `{{VARIABLE}}` and `{% if … %}`,
+  `{% elif … %}`, `{% else … %}`, `{% endif … %}` blocks. `{# … #}` is a
+  jinja2 comment, i.e. that block will not be visible in the rendered
+  output. `{% raw %} … `{% endraw %}`{{ '{' }}{{ '% endraw %' }}}` creates a block
+  where jinja2 syntax is not interpreted.
+
+  See the
+  [Jinja Template Designer Documentation](https://jinja2docs.readthedocs.io/en/stable/templates.html#synopsis)
+  for details.
+
+Please note that files for both template engines use the `.in` extension.
 
 ## Developer and release modes
 
 In the default meson configuration (`-Dmode=developer`), certain checks are
 enabled that are suitable when hacking on systemd (such as internal
-documentation consistency checks). Those are not useful when compiling for code
-for distribution and can be disabled by setting `-Dmode=release`.
+documentation consistency checks). Those are not useful when compiling for
+distribution and can be disabled by setting `-Dmode=release`.
 
 ## Fuzzers
 

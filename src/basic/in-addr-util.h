@@ -20,6 +20,12 @@ struct in_addr_data {
         union in_addr_union address;
 };
 
+struct in_addr_prefix {
+        int family;
+        uint8_t prefixlen;
+        union in_addr_union address;
+};
+
 bool in4_addr_is_null(const struct in_addr *a);
 static inline bool in4_addr_is_set(const struct in_addr *a) {
         return !in4_addr_is_null(a);
@@ -52,6 +58,7 @@ int in_addr_is_localhost(int family, const union in_addr_union *u);
 
 bool in4_addr_is_local_multicast(const struct in_addr *a);
 bool in4_addr_is_non_local(const struct in_addr *a);
+bool in6_addr_is_ipv4_mapped_address(const struct in6_addr *a);
 
 bool in4_addr_equal(const struct in_addr *a, const struct in_addr *b);
 bool in6_addr_equal(const struct in6_addr *a, const struct in6_addr *b);
@@ -67,7 +74,13 @@ int in_addr_prefix_range(
                 union in_addr_union *ret_start,
                 union in_addr_union *ret_end);
 int in_addr_to_string(int family, const union in_addr_union *u, char **ret);
+static inline int in6_addr_to_string(const struct in6_addr *u, char **ret) {
+        return in_addr_to_string(AF_INET6, (const union in_addr_union*) u, ret);
+}
 int in_addr_prefix_to_string(int family, const union in_addr_union *u, unsigned prefixlen, char **ret);
+static inline int in6_addr_prefix_to_string(const struct in6_addr *u, unsigned prefixlen, char **ret) {
+        return in_addr_prefix_to_string(AF_INET6, (const union in_addr_union*) u, prefixlen, ret);
+}
 int in_addr_port_ifindex_name_to_string(int family, const union in_addr_union *u, uint16_t port, int ifindex, const char *server_name, char **ret);
 static inline int in_addr_ifindex_to_string(int family, const union in_addr_union *u, int ifindex, char **ret) {
         return in_addr_port_ifindex_name_to_string(family, u, 0, ifindex, NULL, ret);
@@ -111,4 +124,13 @@ void in6_addr_hash_func(const struct in6_addr *addr, struct siphash *state);
 int in6_addr_compare_func(const struct in6_addr *a, const struct in6_addr *b);
 
 extern const struct hash_ops in_addr_data_hash_ops;
+extern const struct hash_ops in_addr_prefix_hash_ops;
+extern const struct hash_ops in_addr_prefix_hash_ops_free;
 extern const struct hash_ops in6_addr_hash_ops;
+
+#define IPV4_ADDRESS_FMT_STR     "%u.%u.%u.%u"
+#define IPV4_ADDRESS_FMT_VAL(address)              \
+        be32toh((address).s_addr) >> 24,           \
+        (be32toh((address).s_addr) >> 16) & 0xFFu, \
+        (be32toh((address).s_addr) >> 8) & 0xFFu,  \
+        be32toh((address).s_addr) & 0xFFu

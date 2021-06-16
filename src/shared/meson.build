@@ -23,6 +23,8 @@ shared_sources = files('''
         boot-timestamps.h
         bootspec.c
         bootspec.h
+        bpf-dlopen.c
+        bpf-dlopen.h
         bpf-program.c
         bpf-program.h
         bridge-util.c
@@ -78,6 +80,8 @@ shared_sources = files('''
         daemon-util.h
         dev-setup.c
         dev-setup.h
+        device-nodes.c
+        device-nodes.h
         devnode-acl.h
         discover-image.c
         discover-image.h
@@ -262,6 +266,8 @@ shared_sources = files('''
         user-record.h
         userdb.c
         userdb.h
+        userdb-dropin.c
+        userdb-dropin.h
         utmp-wtmp.h
         varlink.c
         varlink.h
@@ -317,6 +323,13 @@ endif
 
 if conf.get('HAVE_LIBIPTC') == 1
         shared_sources += files('firewall-util-iptables.c')
+endif
+
+if conf.get('HAVE_LIBBPF') == 1
+        shared_sources += files('''
+                bpf-link.c
+                bpf-link.h
+        '''.split())
 endif
 
 if conf.get('HAVE_KMOD') == 1
@@ -380,6 +393,7 @@ libshared_deps = [threads,
                   libblkid,
                   libcap,
                   libcrypt,
+                  libdl,
                   libgcrypt,
                   libiptc,
                   libkmod,

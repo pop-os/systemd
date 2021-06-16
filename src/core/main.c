@@ -54,6 +54,7 @@
 #include "loopback-setup.h"
 #include "machine-id-setup.h"
 #include "manager.h"
+#include "manager-dump.h"
 #include "mkdir.h"
 #include "mount-setup.h"
 #include "os-util.h"
@@ -1198,8 +1199,8 @@ static void bump_file_max_and_nr_open(void) {
 #endif
 
 #if BUMP_PROC_SYS_FS_FILE_MAX
-        /* The maximum the kernel allows for this since 5.2 is LONG_MAX, use that. (Previously thing where
-         * different but the operation would fail silently.) */
+        /* The maximum the kernel allows for this since 5.2 is LONG_MAX, use that. (Previously things were
+         * different, but the operation would fail silently.) */
         r = sysctl_writef("fs/file-max", "%li\n", LONG_MAX);
         if (r < 0)
                 log_full_errno(IN_SET(r, -EROFS, -EPERM, -EACCES) ? LOG_DEBUG : LOG_WARNING, r, "Failed to bump fs.file-max, ignoring: %m");
@@ -1367,7 +1368,7 @@ static int status_welcome(void) {
 
 static int write_container_id(void) {
         const char *c;
-        int r;
+        int r = 0;  /* avoid false maybe-uninitialized warning */
 
         c = getenv("container");
         if (isempty(c))
@@ -1999,7 +2000,7 @@ static void log_execution_mode(bool *ret_first_boot) {
         if (arg_system) {
                 int v;
 
-                log_info("systemd " GIT_VERSION " running in %ssystem mode. (%s)",
+                log_info("systemd " GIT_VERSION " running in %ssystem mode (%s)",
                          arg_action == ACTION_TEST ? "test " : "",
                          systemd_features);
 
@@ -2500,16 +2501,6 @@ static int initialize_security(
         return 0;
 }
 
-static void test_summary(Manager *m) {
-        assert(m);
-
-        printf("-> By units:\n");
-        manager_dump_units(m, stdout, "\t");
-
-        printf("-> By jobs:\n");
-        manager_dump_jobs(m, stdout, "\t");
-}
-
 static int collect_fds(FDSet **ret_fds, const char **ret_error_message) {
         int r;
 
@@ -2549,18 +2540,16 @@ static void setup_console_terminal(bool skip_setup) {
 
 static bool early_skip_setup_check(int argc, char *argv[]) {
         bool found_deserialize = false;
-        int i;
 
         /* Determine if this is a reexecution or normal bootup. We do the full command line parsing much later, so
          * let's just have a quick peek here. Note that if we have switched root, do all the special setup things
          * anyway, even if in that case we also do deserialization. */
 
-        for (i = 1; i < argc; i++) {
+        for (int i = 1; i < argc; i++)
                 if (streq(argv[i], "--switched-root"))
                         return false; /* If we switched root, don't skip the setup. */
                 else if (streq(argv[i], "--deserialize"))
                         found_deserialize = true;
-        }
 
         return found_deserialize; /* When we are deserializing, then we are reexecuting, hence avoid the extensive setup */
 }
@@ -2884,7 +2873,7 @@ int main(int argc, char *argv[]) {
                  format_timespan(timespan, sizeof(timespan), after_startup - before_startup, 100 * USEC_PER_MSEC));
 
         if (arg_action == ACTION_TEST) {
-                test_summary(m);
+                manager_test_summary(m);
                 retval = EXIT_SUCCESS;
                 goto finish;
         }

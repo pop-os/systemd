@@ -199,7 +199,7 @@ static int automount_set_where(Automount *a) {
         if (r < 0)
                 return r;
 
-        path_simplify(a->where, false);
+        path_simplify(a->where);
         return 1;
 }
 
@@ -651,7 +651,7 @@ fail:
 
 static void *expire_thread(void *p) {
         struct autofs_dev_ioctl param;
-        _cleanup_(expire_data_freep) struct expire_data *data = (struct expire_data*)p;
+        _cleanup_(expire_data_freep) struct expire_data *data = p;
         int r;
 
         assert(data->dev_autofs_fd >= 0);
@@ -1087,6 +1087,7 @@ const UnitVTable automount_vtable = {
         .can_transient = true,
         .can_fail = true,
         .can_trigger = true,
+        .exclude_from_switch_root_serialization = true,
 
         .init = automount_init,
         .load = automount_load,

@@ -6,6 +6,7 @@
 #include "memory-util.h"
 #include "netlink-internal.h"
 #include "netlink-util.h"
+#include "parse-util.h"
 #include "strv.h"
 
 int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
@@ -266,12 +267,17 @@ int rtnl_set_link_alternative_names_by_ifname(sd_netlink **rtnl, const char *ifn
         return 0;
 }
 
-int rtnl_resolve_link_alternative_name(sd_netlink **rtnl, const char *name) {
+int rtnl_resolve_link_alternative_name(sd_netlink **rtnl, const char *name, char **ret) {
         _cleanup_(sd_netlink_unrefp) sd_netlink *our_rtnl = NULL;
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *message = NULL, *reply = NULL;
-        int r, ret;
+        int r, ifindex;
 
         assert(name);
+
+        /* This returns ifindex and the main interface name. */
+
+        if (!ifname_valid_full(name, IFNAME_VALID_ALTERNATIVE))
+                return -EINVAL;
 
         if (!rtnl)
                 rtnl = &our_rtnl;
@@ -295,16 +301,69 @@ int rtnl_resolve_link_alternative_name(sd_netlink **rtnl, const char *name) {
         if (r < 0)
                 return r;
 
-        r = sd_rtnl_message_link_get_ifindex(reply, &ret);
+        r = sd_rtnl_message_link_get_ifindex(reply, &ifindex);
         if (r < 0)
                 return r;
-        assert(ret > 0);
-        return ret;
+        assert(ifindex > 0);
+
+        if (ret) {
+                r = sd_netlink_message_read_string_strdup(message, IFLA_IFNAME, ret);
+                if (r < 0)
+                        return r;
+        }
+
+        return ifindex;
 }
 
-int rtnl_get_link_iftype(sd_netlink **rtnl, int ifindex, unsigned short *ret) {
-        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *message = NULL, *reply = NULL;
+int rtnl_resolve_ifname(sd_netlink **rtnl, const char *name) {
         int r;
+
+        /* Like if_nametoindex, but resolves "alternative names" too. */
+
+        assert(name);
+
+        r = if_nametoindex(name);
+        if (r > 0)
+                return r;
+
+        return rtnl_resolve_link_alternative_name(rtnl, name, NULL);
+}
+
+int rtnl_resolve_interface(sd_netlink **rtnl, const char *name) {
+        int r;
+
+        /* Like rtnl_resolve_ifname, but resolves interface numbers too. */
+
+        assert(name);
+
+        r = parse_ifindex(name);
+        if (r > 0)
+                return r;
+        assert(r < 0);
+
+        return rtnl_resolve_ifname(rtnl, name);
+}
+
+int rtnl_resolve_interface_or_warn(sd_netlink **rtnl, const char *name) {
+        int r;
+
+        r = rtnl_resolve_interface(rtnl, name);
+        if (r < 0)
+                return log_error_errno(r, "Failed to resolve interface \"%s\": %m", name);
+        return r;
+}
+
+int rtnl_get_link_info(sd_netlink **rtnl, int ifindex, unsigned short *ret_iftype, unsigned *ret_flags) {
+        _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *message = NULL, *reply = NULL;
+        unsigned short iftype;
+        unsigned flags;
+        int r;
+
+        assert(rtnl);
+        assert(ifindex > 0);
+
+        if (!ret_iftype && !ret_flags)
+                return 0;
 
         if (!*rtnl) {
                 r = sd_netlink_open(rtnl);
@@ -322,7 +381,23 @@ int rtnl_get_link_iftype(sd_netlink **rtnl, int ifindex, unsigned short *ret) {
         if (r < 0)
                 return r;
 
-        return sd_rtnl_message_link_get_type(reply, ret);
+        if (ret_iftype) {
+                r = sd_rtnl_message_link_get_type(reply, &iftype);
+                if (r < 0)
+                        return r;
+        }
+
+        if (ret_flags) {
+                r = sd_rtnl_message_link_get_flags(reply, &flags);
+                if (r < 0)
+                        return r;
+        }
+
+        if (ret_iftype)
+                *ret_iftype = iftype;
+        if (ret_flags)
+                *ret_flags = flags;
+        return 0;
 }
 
 int rtnl_message_new_synthetic_error(sd_netlink *rtnl, int error, uint32_t serial, sd_netlink_message **ret) {
@@ -409,6 +484,44 @@ int rtattr_append_attribute(struct rtattr **rta, unsigned short type, const void
         return 0;
 }
 
+MultipathRoute *multipath_route_free(MultipathRoute *m) {
+        if (!m)
+                return NULL;
+
+        free(m->ifname);
+
+        return mfree(m);
+}
+
+int multipath_route_dup(const MultipathRoute *m, MultipathRoute **ret) {
+        _cleanup_(multipath_route_freep) MultipathRoute *n = NULL;
+        _cleanup_free_ char *ifname = NULL;
+
+        assert(m);
+        assert(ret);
+
+        if (m->ifname) {
+                ifname = strdup(m->ifname);
+                if (!ifname)
+                        return -ENOMEM;
+        }
+
+        n = new(MultipathRoute, 1);
+        if (!n)
+                return -ENOMEM;
+
+        *n = (MultipathRoute) {
+                .gateway = m->gateway,
+                .weight = m->weight,
+                .ifindex = m->ifindex,
+                .ifname = TAKE_PTR(ifname),
+        };
+
+        *ret = TAKE_PTR(n);
+
+        return 0;
+}
+
 int rtattr_read_nexthop(const struct rtnexthop *rtnh, size_t size, int family, OrderedSet **ret) {
         _cleanup_ordered_set_free_free_ OrderedSet *set = NULL;
         int r;
@@ -420,7 +533,7 @@ int rtattr_read_nexthop(const struct rtnexthop *rtnh, size_t size, int family, O
                 return -EBADMSG;
 
         for (; size >= sizeof(struct rtnexthop); ) {
-                _cleanup_free_ MultipathRoute *m = NULL;
+                _cleanup_(multipath_route_freep) MultipathRoute *m = NULL;
 
                 if (NLMSG_ALIGN(rtnh->rtnh_len) > size)
                         return -EBADMSG;
@@ -434,7 +547,7 @@ int rtattr_read_nexthop(const struct rtnexthop *rtnh, size_t size, int family, O
 
                 *m = (MultipathRoute) {
                         .ifindex = rtnh->rtnh_ifindex,
-                        .weight = rtnh->rtnh_hops == 0 ? 0 : rtnh->rtnh_hops + 1,
+                        .weight = rtnh->rtnh_hops,
                 };
 
                 if (rtnh->rtnh_len > sizeof(struct rtnexthop)) {

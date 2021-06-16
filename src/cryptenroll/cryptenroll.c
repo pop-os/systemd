@@ -36,6 +36,7 @@ static int *arg_wipe_slots = NULL;
 static size_t arg_n_wipe_slots = 0;
 static WipeScope arg_wipe_slots_scope = WIPE_EXPLICIT;
 static unsigned arg_wipe_slots_mask = 0; /* Bitmask of (1U << EnrollType), for wiping all slots of specific types */
+static Fido2EnrollFlags arg_fido2_lock_with = FIDO2ENROLL_PIN | FIDO2ENROLL_UP;
 
 assert_cc(sizeof(arg_wipe_slots_mask) * 8 >= _ENROLL_TYPE_MAX);
 
@@ -88,9 +89,15 @@ static int help(void) {
                "                       Specify PKCS#11 security token URI\n"
                "     --fido2-device=PATH\n"
                "                       Enroll a FIDO2-HMAC security token\n"
+               "     --fido2-with-client-pin=BOOL\n"
+               "                       Whether to require entering a PIN to unlock the volume\n"
+               "     --fido2-with-user-presence=BOOL\n"
+               "                       Whether to require user presence to unlock the volume\n"
+               "     --fido2-with-user-verification=BOOL\n"
+               "                       Whether to require user verification to unlock the volume\n"
                "     --tpm2-device=PATH\n"
                "                       Enroll a TPM2 device\n"
-               "     --tpm2-pcrs=PCR1,PCR2,PCR3,…\n"
+               "     --tpm2-pcrs=PCR1+PCR2+PCR3,…\n"
                "                       Specify TPM2 PCRs to seal against\n"
                "     --wipe-slot=SLOT1,SLOT2,…\n"
                "                       Wipe specified slots\n"
@@ -114,18 +121,24 @@ static int parse_argv(int argc, char *argv[]) {
                 ARG_TPM2_DEVICE,
                 ARG_TPM2_PCRS,
                 ARG_WIPE_SLOT,
+                ARG_FIDO2_WITH_PIN,
+                ARG_FIDO2_WITH_UP,
+                ARG_FIDO2_WITH_UV,
         };
 
         static const struct option options[] = {
-                { "help",             no_argument,       NULL, 'h'                  },
-                { "version",          no_argument,       NULL, ARG_VERSION          },
-                { "password",         no_argument,       NULL, ARG_PASSWORD         },
-                { "recovery-key",     no_argument,       NULL, ARG_RECOVERY_KEY     },
-                { "pkcs11-token-uri", required_argument, NULL, ARG_PKCS11_TOKEN_URI },
-                { "fido2-device",     required_argument, NULL, ARG_FIDO2_DEVICE     },
-                { "tpm2-device",      required_argument, NULL, ARG_TPM2_DEVICE      },
-                { "tpm2-pcrs",        required_argument, NULL, ARG_TPM2_PCRS        },
-                { "wipe-slot",        required_argument, NULL, ARG_WIPE_SLOT        },
+                { "help",                         no_argument,       NULL, 'h'                  },
+                { "version",                      no_argument,       NULL, ARG_VERSION          },
+                { "password",                     no_argument,       NULL, ARG_PASSWORD         },
+                { "recovery-key",                 no_argument,       NULL, ARG_RECOVERY_KEY     },
+                { "pkcs11-token-uri",             required_argument, NULL, ARG_PKCS11_TOKEN_URI },
+                { "fido2-device",                 required_argument, NULL, ARG_FIDO2_DEVICE     },
+                { "fido2-with-client-pin",        required_argument, NULL, ARG_FIDO2_WITH_PIN   },
+                { "fido2-with-user-presence",     required_argument, NULL, ARG_FIDO2_WITH_UP    },
+                { "fido2-with-user-verification", required_argument, NULL, ARG_FIDO2_WITH_UV    },
+                { "tpm2-device",                  required_argument, NULL, ARG_TPM2_DEVICE      },
+                { "tpm2-pcrs",                    required_argument, NULL, ARG_TPM2_PCRS        },
+                { "wipe-slot",                    required_argument, NULL, ARG_WIPE_SLOT        },
                 {}
         };
 
@@ -143,6 +156,39 @@ static int parse_argv(int argc, char *argv[]) {
 
                 case ARG_VERSION:
                         return version();
+
+                case ARG_FIDO2_WITH_PIN: {
+                        bool lock_with_pin;
+
+                        r = parse_boolean_argument("--fido2-with-client-pin=", optarg, &lock_with_pin);
+                        if (r < 0)
+                                return r;
+
+                        SET_FLAG(arg_fido2_lock_with, FIDO2ENROLL_PIN, lock_with_pin);
+                        break;
+                }
+
+                case ARG_FIDO2_WITH_UP: {
+                        bool lock_with_up;
+
+                        r = parse_boolean_argument("--fido2-with-user-presence=", optarg, &lock_with_up);
+                        if (r < 0)
+                                return r;
+
+                        SET_FLAG(arg_fido2_lock_with, FIDO2ENROLL_UP, lock_with_up);
+                        break;
+                }
+
+                case ARG_FIDO2_WITH_UV: {
+                        bool lock_with_uv;
+
+                        r = parse_boolean_argument("--fido2-with-user-verification=", optarg, &lock_with_uv);
+                        if (r < 0)
+                                return r;
+
+                        SET_FLAG(arg_fido2_lock_with, FIDO2ENROLL_UV, lock_with_uv);
+                        break;
+                }
 
                 case ARG_PASSWORD:
                         if (arg_enroll_type >= 0)
@@ -417,7 +463,7 @@ static int prepare_luks(
                                                        "Too many attempts, giving up:");
 
                         r = ask_password_auto(
-                                        question, "drive-harddisk", id, "cryptenroll", USEC_INFINITY,
+                                        question, "drive-harddisk", id, "cryptenroll", "cryptenroll.passphrase", USEC_INFINITY,
                                         ask_password_flags,
                                         &passwords);
                         if (r < 0)
@@ -464,6 +510,8 @@ static int run(int argc, char *argv[]) {
         if (r <= 0)
                 return r;
 
+        cryptsetup_enable_logging(NULL);
+
         if (arg_enroll_type < 0)
                 r = prepare_luks(&cd, NULL, NULL); /* No need to unlock device if we don't need the volume key because we don't need to enroll anything */
         else
@@ -486,7 +534,7 @@ static int run(int argc, char *argv[]) {
                 break;
 
         case ENROLL_FIDO2:
-                slot = enroll_fido2(cd, vk, vks, arg_fido2_device);
+                slot = enroll_fido2(cd, vk, vks, arg_fido2_device, arg_fido2_lock_with);
                 break;
 
         case ENROLL_TPM2:

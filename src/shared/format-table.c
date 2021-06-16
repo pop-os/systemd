@@ -136,7 +136,6 @@ struct Table {
         size_t cell_height_max; /* Maximum number of lines per cell. (If there are more, ellipsis is shown. If SIZE_MAX then no limit is set, the default. == 0 is not allowed.) */
 
         TableData **data;
-        size_t n_allocated;
 
         size_t *display_map;  /* List of columns to show (by their index). It's fine if columns are listed multiple times or not at all */
         size_t n_display_map;
@@ -453,7 +452,7 @@ int table_add_cell_full(
                         return -ENOMEM;
         }
 
-        if (!GREEDY_REALLOC(t->data, t->n_allocated, MAX(t->n_cells + 1, t->n_columns)))
+        if (!GREEDY_REALLOC(t->data, MAX(t->n_cells + 1, t->n_columns)))
                 return -ENOMEM;
 
         if (ret_cell)
@@ -510,7 +509,7 @@ int table_dup_cell(Table *t, TableCell *cell) {
         if (i >= t->n_cells)
                 return -ENXIO;
 
-        if (!GREEDY_REALLOC(t->data, t->n_allocated, MAX(t->n_cells + 1, t->n_columns)))
+        if (!GREEDY_REALLOC(t->data, MAX(t->n_cells + 1, t->n_columns)))
                 return -ENOMEM;
 
         t->data[t->n_cells++] = table_data_ref(t->data[i]);
@@ -783,19 +782,17 @@ int table_update(Table *t, TableCell *cell, TableDataType type, const void *data
 }
 
 int table_add_many_internal(Table *t, TableDataType first_type, ...) {
-        TableDataType type;
-        va_list ap;
         TableCell *last_cell = NULL;
+        va_list ap;
         int r;
 
         assert(t);
         assert(first_type >= 0);
         assert(first_type < _TABLE_DATA_TYPE_MAX);
 
-        type = first_type;
-
         va_start(ap, first_type);
-        for (;;) {
+
+        for (TableDataType type = first_type;; type = va_arg(ap, TableDataType)) {
                 const void *data;
                 union {
                         uint64_t size;
@@ -968,43 +965,43 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         size_t w = va_arg(ap, size_t);
 
                         r = table_set_minimum_width(t, last_cell, w);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_MAXIMUM_WIDTH: {
                         size_t w = va_arg(ap, size_t);
                         r = table_set_maximum_width(t, last_cell, w);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_WEIGHT: {
                         unsigned w = va_arg(ap, unsigned);
                         r = table_set_weight(t, last_cell, w);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_ALIGN_PERCENT: {
                         unsigned p = va_arg(ap, unsigned);
                         r = table_set_align_percent(t, last_cell, p);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_ELLIPSIZE_PERCENT: {
                         unsigned p = va_arg(ap, unsigned);
                         r = table_set_ellipsize_percent(t, last_cell, p);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_COLOR: {
                         const char *c = va_arg(ap, const char*);
                         r = table_set_color(t, last_cell, c);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_RGAP_COLOR: {
                         const char *c = va_arg(ap, const char*);
                         r = table_set_rgap_color(t, last_cell, c);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_BOTH_COLORS: {
@@ -1017,19 +1014,19 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         }
 
                         r = table_set_rgap_color(t, last_cell, c);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_URL: {
                         const char *u = va_arg(ap, const char*);
                         r = table_set_url(t, last_cell, u);
-                        break;
+                        goto check;
                 }
 
                 case TABLE_SET_UPPERCASE: {
                         int u = va_arg(ap, int);
                         r = table_set_uppercase(t, last_cell, u);
-                        break;
+                        goto check;
                 }
 
                 case _TABLE_DATA_TYPE_MAX:
@@ -1041,15 +1038,12 @@ int table_add_many_internal(Table *t, TableDataType first_type, ...) {
                         assert_not_reached("Uh? Unexpected data type.");
                 }
 
-                if (type < _TABLE_DATA_TYPE_MAX)
-                        r = table_add_cell(t, &last_cell, type, data);
-
+                r = table_add_cell(t, &last_cell, type, data);
+        check:
                 if (r < 0) {
                         va_end(ap);
                         return r;
                 }
-
-                type = va_arg(ap, TableDataType);
         }
 }
 
@@ -1099,19 +1093,18 @@ static int table_set_display_all(Table *t) {
 }
 
 int table_set_display_internal(Table *t, size_t first_column, ...) {
-        size_t allocated, column;
+        size_t column;
         va_list ap;
 
         assert(t);
 
-        allocated = t->n_display_map;
         column = first_column;
 
         va_start(ap, first_column);
         for (;;) {
                 assert(column < t->n_columns);
 
-                if (!GREEDY_REALLOC(t->display_map, allocated, MAX(t->n_columns, t->n_display_map+1))) {
+                if (!GREEDY_REALLOC(t->display_map, MAX(t->n_columns, t->n_display_map+1))) {
                         va_end(ap);
                         return -ENOMEM;
                 }
@@ -1129,19 +1122,18 @@ int table_set_display_internal(Table *t, size_t first_column, ...) {
 }
 
 int table_set_sort_internal(Table *t, size_t first_column, ...) {
-        size_t allocated, column;
+        size_t column;
         va_list ap;
 
         assert(t);
 
-        allocated = t->n_sort_map;
         column = first_column;
 
         va_start(ap, first_column);
         for (;;) {
                 assert(column < t->n_columns);
 
-                if (!GREEDY_REALLOC(t->sort_map, allocated, MAX(t->n_columns, t->n_sort_map+1))) {
+                if (!GREEDY_REALLOC(t->sort_map, MAX(t->n_columns, t->n_sort_map+1))) {
                         va_end(ap);
                         return -ENOMEM;
                 }
@@ -2144,7 +2136,7 @@ int table_print(Table *t, FILE *f) {
                                                 /* Never give more than requested. If we hit a column like this, there's more
                                                  * space to allocate to other columns which means we need to restart the
                                                  * iteration. However, if we hit a column like this, let's assign it the space
-                                                 * it wanted for good early.*/
+                                                 * it wanted for good early. */
 
                                                 w = requested_width[j];
                                                 restart = true;
