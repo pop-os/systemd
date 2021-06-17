@@ -99,6 +99,7 @@ Restrictions: needs-root, allow-stderr, isolation-container, skippable
 Tests: unit-tests
 Depends: systemd-tests,
   libpam-systemd,
+  udev,
   tree,
   perl,
   python3,
