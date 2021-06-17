@@ -1,0 +1,37 @@
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 16 Jun 2021 21:50:23 +0100
+Subject: test: do not run 'meson configure' if NO_BUILD is set
+
+There is no build tree and packages are used, so it cannot work. Unlikely
+that static linking has been set for those builds anyway.
+
+Fixes https://github.com/systemd/systemd/issues/19955
+
+(cherry picked from commit 63878c52beec442f1b3314ca223e54c897de499b)
+---
+ test/test-functions | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index f9f9d6a..a82e9f7 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1006,11 +1006,13 @@ create_empty_image() {
+     fi
+ 
+     local size=500
+-    if meson configure "${BUILD_DIR:?}" | grep 'static-lib\|standalone-binaries' | awk '{ print $2 }' | grep -q 'true'; then
+-        size=$((size+=200))
+-    fi
+-    if meson configure "${BUILD_DIR:?}" | grep 'link-.*-shared' | awk '{ print $2 }' | grep -q 'false'; then
+-        size=$((size+=200))
++    if [ -z "$NO_BUILD" ]; then
++        if meson configure "${BUILD_DIR:?}" | grep 'static-lib\|standalone-binaries' | awk '{ print $2 }' | grep -q 'true'; then
++            size=$((size+=200))
++        fi
++        if meson configure "${BUILD_DIR:?}" | grep 'link-.*-shared' | awk '{ print $2 }' | grep -q 'false'; then
++            size=$((size+=200))
++        fi
+     fi
+     if [[ "$STRIP_BINARIES" = "no" ]]; then
+         size=$((4 * size))
