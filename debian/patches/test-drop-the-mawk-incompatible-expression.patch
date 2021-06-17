@@ -1,0 +1,28 @@
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 17 Jun 2021 14:38:21 +0200
+Subject: test: drop the mawk-incompatible expression
+
+The three-argument match() is a GNU AWK extension, thus breaking the
+compatibility with mawk (used on Ubuntu/Debian, for example). Let's
+replace it with a (hopefully) more portable sed expression to drop the
+inadvertently introduced gawk dependency.
+
+Fixes: #19957
+(cherry picked from commit 521c8c717b4c1a8b6c0f0314cb5258343236bed7)
+---
+ test/test-functions | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index a82e9f7..b154ace 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -2036,7 +2036,7 @@ inst_rule_programs() {
+     local rule="${1:?}"
+     local prog bin
+ 
+-    awk 'match($0, /PROGRAM==?"([^ "]+)/, m) { print m[1]; }' "$rule" | while read -r prog; do
++    sed -rn 's/^.*?PROGRAM==?"([^ "]+).*$/\1/p' "$rule" | while read -r prog; do
+         if [ -x "/lib/udev/$prog" ]; then
+             bin="/lib/udev/$prog"
+         else
