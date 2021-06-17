@@ -1,8 +1,22 @@
-systemd (249~rc1-1) UNRELEASED; urgency=medium
+systemd (249~rc1-1) experimental; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 249~rc1
+  * Rebase patches
+  * Replace m4 Build-Depends with python3-jinja2
+  * Update symbols file for libsystemd0
+  * test: do not run 'meson configure' if NO_BUILD is set
+  * test: drop the mawk-incompatible expression
+  * Add gawk <!nocheck> to Build-Depends.
+    It is used in tools/check-directives.sh which is run during "meson test".
+  * autopkgtest: add udev dependency to unit-tests.
+    Without a properly set up hwdb the test-sd-hwdb test is skipped.
 
- -- Michael Biebl <biebl@debian.org>  Wed, 16 Jun 2021 13:33:09 +0200
+  [ Luca Boccassi ]
+  * autopkgtest: add dependency on dosfstools for upstream test.
+    Needed to create EFI partition (vfat)
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 17 Jun 2021 18:09:43 +0200
 
 systemd (248.3-1) experimental; urgency=medium
 
