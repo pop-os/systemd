@@ -395,3 +395,31 @@ Description: libudev shared library
  This library provides access to udev device information.
  .
  This is a minimal version, only for use in the installation system.
+
+Package: systemd-standalone-sysusers
+Section: admin
+Architecture: linux-any
+Priority: optional
+Breaks: systemd
+Replaces: systemd
+Provides: systemd-sysusers (= ${binary:Version})
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Description: Standalone sysusers binary for use in non-systemd systems
+ Standalone sysusers binary with minimal dependencies.
+ This package conflicts with the main systemd package and is meant for use in
+ non-systemd systems.
+
+Package: systemd-standalone-tmpfiles
+Section: admin
+Architecture: linux-any
+Priority: optional
+Breaks: systemd
+Replaces: systemd
+Provides: systemd-tmpfiles (= ${binary:Version})
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+Description: Standalone tmpfiles binary for use in non-systemd systems
+ Standalone tmpfiles binary with minimal dependencies.
+ This package conflicts with the main systemd package and is meant for use in
+ non-systemd systems.

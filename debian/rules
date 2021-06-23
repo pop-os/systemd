@@ -104,6 +104,7 @@ CONFFLAGS_deb = \
 	-Dnss-resolve=true \
 	-Dnss-systemd=true \
 	-Dresolve=true \
+	-Dstandalone-binaries=true \
 	-Dlink-systemctl-shared=false
 
 ifeq (, $(filter stage1, $(DEB_BUILD_PROFILES)))
@@ -254,6 +255,12 @@ endif
 
 	dh_install --remaining-packages --sourcedir=debian/install/deb
 
+	# install standalone binaries
+	for pkg in sysusers tmpfiles; do \
+		mkdir -p debian/systemd-standalone-$$pkg/bin; \
+		mv debian/systemd/bin/systemd-$$pkg.standalone debian/systemd-standalone-$$pkg/bin/systemd-$$pkg; \
+	done
+
 	# we don't want /tmp to be a tmpfs by default
 	mv debian/systemd/lib/systemd/system/tmp.mount debian/systemd/usr/share/systemd/
 	printf '\n[Install]\nWantedBy=local-fs.target\n' >> debian/systemd/usr/share/systemd/tmp.mount
@@ -272,7 +279,7 @@ endif
 
 	# remove duplicate files shipped by systemd-*/udev
 	echo "Removing duplicate files in systemd package:"
-	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd); do \
+	set -e; for pkg in $(shell dh_listpackages -Nudev-udeb -Nlibudev1-udeb -Nsystemd -Nsystemd-standalone-sysusers -Nsystemd-standalone-tmpfiles); do \
 		echo "... from $$pkg..."; \
 		(cd debian/$$pkg; find -type f -o -type l) | (cd debian/systemd; xargs rm -f --verbose); \
 		(cd debian/$$pkg; find -mindepth 1 -type d | sort -r) | (cd debian/systemd; xargs rmdir --ignore-fail-on-non-empty --verbose || true); \
