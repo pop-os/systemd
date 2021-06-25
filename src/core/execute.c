@@ -46,6 +46,7 @@
 #include "cgroup-setup.h"
 #include "chown-recursive.h"
 #include "cpu-set-util.h"
+#include "data-fd-util.h"
 #include "def.h"
 #include "env-file.h"
 #include "env-util.h"
@@ -3189,6 +3190,8 @@ static int apply_mount_namespace(
                         .protect_proc = context->protect_proc,
                         .proc_subset = context->proc_subset,
                         .private_ipc = context->private_ipc || context->ipc_namespace_path,
+                        /* If NNP is on, we can turn on MS_NOSUID, since it won't have any effect anymore. */
+                        .mount_nosuid = context->no_new_privileges && !mac_selinux_use(),
                 };
         } else if (!context->dynamic_user && root_dir)
                 /*

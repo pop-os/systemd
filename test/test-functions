@@ -864,6 +864,7 @@ install_modules() {
 
     instmods loop
     instmods vfat
+    instmods nls_ascii =nls
     instmods dummy
 
     if [[ "$LOOKS_LIKE_SUSE" ]]; then
@@ -1006,11 +1007,13 @@ create_empty_image() {
     fi
 
     local size=500
-    if meson configure "${BUILD_DIR:?}" | grep 'static-lib\|standalone-binaries' | awk '{ print $2 }' | grep -q 'true'; then
-        size=$((size+=200))
-    fi
-    if meson configure "${BUILD_DIR:?}" | grep 'link-.*-shared' | awk '{ print $2 }' | grep -q 'false'; then
-        size=$((size+=200))
+    if [ -z "$NO_BUILD" ]; then
+        if meson configure "${BUILD_DIR:?}" | grep 'static-lib\|standalone-binaries' | awk '{ print $2 }' | grep -q 'true'; then
+            size=$((size+=200))
+        fi
+        if meson configure "${BUILD_DIR:?}" | grep 'link-.*-shared' | awk '{ print $2 }' | grep -q 'false'; then
+            size=$((size+=200))
+        fi
     fi
     if [[ "$STRIP_BINARIES" = "no" ]]; then
         size=$((4 * size))
@@ -1223,6 +1226,66 @@ check_result_qemu() {
         fi
     fi
 
+    return $ret
+}
+
+check_result_nspawn_unittests() {
+    local workspace="${1:?}"
+    local ret=1
+
+    [[ -e "$workspace/testok" ]] && ret=0
+
+    if [[ -s "$workspace/failed" ]]; then
+        ret=$((ret + 1))
+        echo "=== Failed test log ==="
+        cat "$workspace/failed"
+    else
+        if [[ -s "$workspace/skipped" ]]; then
+            echo "=== Skipped test log =="
+            cat "$workspace/skipped"
+            # We might have only skipped tests - that should not fail the job
+            ret=0
+        fi
+        if [[ -s "$workspace/testok" ]]; then
+            echo "=== Passed tests ==="
+            cat "$workspace/testok"
+        fi
+    fi
+
+    save_journal "$workspace/var/log/journal"
+    _umount_dir "${initdir:?}"
+
+    [[ -n "${TIMED_OUT:=}" ]] && ret=1
+    return $ret
+}
+
+check_result_qemu_unittests() {
+    local ret=1
+
+    mount_initdir
+    [[ -e "${initdir:?}/testok" ]] && ret=0
+
+    if [[ -s "$initdir/failed" ]]; then
+        ret=$((ret + 1))
+        echo "=== Failed test log ==="
+        cat "$initdir/failed"
+    else
+        if [[ -s "$initdir/skipped" ]]; then
+            echo "=== Skipped test log =="
+            cat "$initdir/skipped"
+            # We might have only skipped tests - that should not fail the job
+            ret=0
+        fi
+        if [[ -s "$initdir/testok" ]]; then
+            echo "=== Passed tests ==="
+            cat "$initdir/testok"
+        fi
+    fi
+
+    save_journal "$initdir/var/log/journal"
+    _umount_dir "$initdir"
+
+    [[ -n "${TIMED_OUT:=}" ]] && ret=1
     return $ret
 }
 
@@ -2034,7 +2097,7 @@ inst_rule_programs() {
     local rule="${1:?}"
     local prog bin
 
-    awk 'match($0, /PROGRAM==?"([^ "]+)/, m) { print m[1]; }' "$rule" | while read -r prog; do
+    sed -rn 's/^.*?PROGRAM==?"([^ "]+).*$/\1/p' "$rule" | while read -r prog; do
         if [ -x "/lib/udev/$prog" ]; then
             bin="/lib/udev/$prog"
         else
@@ -2353,13 +2416,6 @@ test_create_image() {
     (
         LOG_LEVEL=5
         setup_basic_environment
-
-        # We want to test all services in TEST-01-BASIC, but mask them in
-        # all other tests
-        if [[ "$TESTID" != "01" ]]; then
-            dinfo "Masking supporting services"
-            mask_supporting_services
-        fi
     )
 }
 
@@ -2410,6 +2466,13 @@ test_setup() {
         fi
 
         mount_initdir
+        # We want to test all services in TEST-01-BASIC, but mask them in
+        # all other tests
+        if [[ "${TESTID:?}" != "01" ]]; then
+            dinfo "Masking supporting services"
+            mask_supporting_services
+        fi
+
         if [ "$hook_defined" -eq 0 ]; then
             test_append_files "${initdir:?}"
         fi

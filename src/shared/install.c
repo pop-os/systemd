@@ -568,8 +568,6 @@ static int remove_marked_symlinks_fd(
 
         FOREACH_DIRENT(de, d, return -errno) {
 
-                dirent_ensure_type(d, de);
-
                 if (de->d_type == DT_DIR) {
                         _cleanup_free_ char *p = NULL;
                         int nfd, q;
@@ -738,8 +736,6 @@ static int find_symlinks_in_directory(
                 bool found_path = false, found_dest, b = false;
                 int q;
 
-                dirent_ensure_type(dir, de);
-
                 if (de->d_type != DT_LNK)
                         continue;
 
@@ -835,8 +831,6 @@ static int find_symlinks(
                 const char *suffix;
                 _cleanup_free_ const char *path = NULL;
                 _cleanup_closedir_ DIR *d = NULL;
-
-                dirent_ensure_type(config_dir, de);
 
                 if (de->d_type != DT_DIR)
                         continue;
@@ -969,6 +963,7 @@ static void install_info_free(UnitFileInstallInfo *i) {
 
         free(i->name);
         free(i->path);
+        free(i->root);
         strv_free(i->aliases);
         strv_free(i->wanted_by);
         strv_free(i->required_by);
@@ -1029,6 +1024,7 @@ static int install_info_add(
                 InstallContext *c,
                 const char *name,
                 const char *path,
+                const char *root,
                 bool auxiliary,
                 UnitFileInstallInfo **ret) {
 
@@ -1070,6 +1066,14 @@ static int install_info_add(
         if (!i->name) {
                 r = -ENOMEM;
                 goto fail;
+        }
+
+        if (root) {
+                i->root = strdup(root);
+                if (!i->root) {
+                        r = -ENOMEM;
+                        goto fail;
+                }
         }
 
         if (path) {
@@ -1153,11 +1157,11 @@ static int config_parse_also(
                 if (r == 0)
                         break;
 
-                r = install_name_printf(info, word, &printed);
+                r = install_name_printf(info, word, info->root, &printed);
                 if (r < 0)
                         return r;
 
-                r = install_info_add(c, printed, NULL, true, NULL);
+                r = install_info_add(c, printed, NULL, info->root, /* auxiliary= */ true, NULL);
                 if (r < 0)
                         return r;
 
@@ -1200,7 +1204,7 @@ static int config_parse_default_instance(
                 return log_syntax(unit, LOG_WARNING, filename, line, 0,
                                   "DefaultInstance= only makes sense for template units, ignoring.");
 
-        r = install_name_printf(i, rvalue, &printed);
+        r = install_name_printf(i, rvalue, i->root, &printed);
         if (r < 0)
                 return r;
 
@@ -1643,7 +1647,7 @@ static int install_info_traverse(
                                 bn = buffer;
                         }
 
-                        r = install_info_add(c, bn, NULL, false, &i);
+                        r = install_info_add(c, bn, NULL, paths->root_dir, /* auxiliary= */ false, &i);
                         if (r < 0)
                                 return r;
 
@@ -1682,9 +1686,9 @@ static int install_info_add_auto(
 
                 pp = prefix_roota(paths->root_dir, name_or_path);
 
-                return install_info_add(c, NULL, pp, false, ret);
+                return install_info_add(c, NULL, pp, paths->root_dir, /* auxiliary= */ false, ret);
         } else
-                return install_info_add(c, name_or_path, NULL, false, ret);
+                return install_info_add(c, name_or_path, NULL, paths->root_dir, /* auxiliary= */ false, ret);
 }
 
 static int install_info_discover(
@@ -1826,7 +1830,7 @@ static int install_info_symlink_alias(
         STRV_FOREACH(s, i->aliases) {
                 _cleanup_free_ char *alias_path = NULL, *dst = NULL, *dst_updated = NULL;
 
-                q = install_path_printf(i, *s, &dst);
+                q = install_path_printf(i, *s, i->root, &dst);
                 if (q < 0)
                         return q;
 
@@ -1911,7 +1915,7 @@ static int install_info_symlink_wants(
         STRV_FOREACH(s, list) {
                 _cleanup_free_ char *path = NULL, *dst = NULL;
 
-                q = install_name_printf(i, *s, &dst);
+                q = install_name_printf(i, *s, i->root, &dst);
                 if (q < 0)
                         return q;
 
@@ -2693,7 +2697,7 @@ int unit_file_disable(
                 if (!unit_name_is_valid(*i, UNIT_NAME_ANY))
                         return -EINVAL;
 
-                r = install_info_add(&c, *i, NULL, false, NULL);
+                r = install_info_add(&c, *i, NULL, paths.root_dir, /* auxiliary= */ false, NULL);
                 if (r < 0)
                         return r;
         }
@@ -3379,8 +3383,6 @@ int unit_file_preset_all(
                         if (!unit_name_is_valid(de->d_name, UNIT_NAME_ANY))
                                 continue;
 
-                        dirent_ensure_type(d, de);
-
                         if (!IN_SET(de->d_type, DT_LNK, DT_REG))
                                 continue;
 
@@ -3456,8 +3458,6 @@ int unit_file_get_list(
 
                         if (hashmap_get(h, de->d_name))
                                 continue;
-
-                        dirent_ensure_type(d, de);
 
                         if (!IN_SET(de->d_type, DT_LNK, DT_REG))
                                 continue;

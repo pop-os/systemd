@@ -4562,45 +4562,43 @@ int unit_kill_context(
 }
 
 int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask) {
-        _cleanup_free_ char *p = NULL;
-        UnitDependencyInfo di;
         int r;
 
         assert(u);
         assert(path);
 
-        /* Registers a unit for requiring a certain path and all its prefixes. We keep a hashtable of these paths in
-         * the unit (from the path to the UnitDependencyInfo structure indicating how to the dependency came to
-         * be). However, we build a prefix table for all possible prefixes so that new appearing mount units can easily
-         * determine which units to make themselves a dependency of. */
+        /* Registers a unit for requiring a certain path and all its prefixes. We keep a hashtable of these
+         * paths in the unit (from the path to the UnitDependencyInfo structure indicating how to the
+         * dependency came to be). However, we build a prefix table for all possible prefixes so that new
+         * appearing mount units can easily determine which units to make themselves a dependency of. */
 
         if (!path_is_absolute(path))
                 return -EINVAL;
 
-        r = hashmap_ensure_allocated(&u->requires_mounts_for, &path_hash_ops);
-        if (r < 0)
-                return r;
+        if (hashmap_contains(u->requires_mounts_for, path)) /* Exit quickly if the path is already covered. */
+                return 0;
 
-        p = strdup(path);
+        _cleanup_free_ char *p = strdup(path);
         if (!p)
                 return -ENOMEM;
 
+        /* Use the canonical form of the path as the stored key. We call path_is_normalized()
+         * only after simplification, since path_is_normalized() rejects paths with '.'.
+         * path_is_normalized() also verifies that the path fits in PATH_MAX. */
         path = path_simplify(p);
 
         if (!path_is_normalized(path))
                 return -EPERM;
 
-        if (hashmap_contains(u->requires_mounts_for, path))
-                return 0;
-
-        di = (UnitDependencyInfo) {
+        UnitDependencyInfo di = {
                 .origin_mask = mask
         };
 
-        r = hashmap_put(u->requires_mounts_for, path, di.data);
+        r = hashmap_ensure_put(&u->requires_mounts_for, &path_hash_ops, p, di.data);
         if (r < 0)
                 return r;
-        p = NULL;
+        assert(r > 0);
+        TAKE_PTR(p); /* path remains a valid pointer to the string stored in the hashmap */
 
         char prefix[strlen(path) + 1];
         PATH_FOREACH_PREFIX_MORE(prefix, path) {
@@ -5520,7 +5518,11 @@ int unit_pid_attachable(Unit *u, pid_t pid, sd_bus_error *error) {
 void unit_log_success(Unit *u) {
         assert(u);
 
-        log_unit_struct(u, LOG_INFO,
+        /* Let's show message "Deactivated successfully" in debug mode (when manager is user) rather than in info mode.
+         * This message has low information value for regular users and it might be a bit overwhelming on a system with
+         * a lot of devices. */
+        log_unit_struct(u,
+                        MANAGER_IS_USER(u->manager) ? LOG_DEBUG : LOG_INFO,
                         "MESSAGE_ID=" SD_MESSAGE_UNIT_SUCCESS_STR,
                         LOG_UNIT_INVOCATION_ID(u),
                         LOG_UNIT_MESSAGE(u, "Deactivated successfully."));
