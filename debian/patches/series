@@ -1,5 +1,3 @@
-test-do-not-run-meson-configure-if-NO_BUILD-is-set.patch
-test-drop-the-mawk-incompatible-expression.patch
 debian/Use-Debian-specific-config-files.patch
 debian/Bring-tmpfiles.d-tmp.conf-in-line-with-Debian-defaul.patch
 debian/Make-run-lock-tmpfs-an-API-fs.patch

@@ -16,7 +16,7 @@ Closes: #981407
  3 files changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index b18f3b3..b4f7e55 100644
+index b0f2469..2cfaff4 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -371,6 +371,7 @@ static int patch_var_run(
@@ -51,10 +51,10 @@ index bf23c48..7aa406c 100644
                                      "Please update package to include a native systemd unit file, in order to make it more safe and robust.", fpath);
  
 diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
-index 8e8be84..20781f8 100644
+index 9ffe784..5338861 100644
 --- a/src/tmpfiles/tmpfiles.c
 +++ b/src/tmpfiles/tmpfiles.c
-@@ -2805,6 +2805,7 @@ static int specifier_expansion_from_arg(Item *i) {
+@@ -2821,6 +2821,7 @@ static int specifier_expansion_from_arg(Item *i) {
  static int patch_var_run(const char *fname, unsigned line, char **path) {
          const char *k;
          char *n;
@@ -62,7 +62,7 @@ index 8e8be84..20781f8 100644
  
          assert(path);
          assert(*path);
-@@ -2830,7 +2831,8 @@ static int patch_var_run(const char *fname, unsigned line, char **path) {
+@@ -2846,7 +2847,8 @@ static int patch_var_run(const char *fname, unsigned line, char **path) {
          /* Also log about this briefly. We do so at LOG_NOTICE level, as we fixed up the situation automatically, hence
           * there's no immediate need for action by the user. However, in the interest of making things less confusing
           * to the user, let's still inform the user that these snippets should really be updated. */
