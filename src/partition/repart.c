@@ -169,6 +169,7 @@ struct Partition {
         EncryptMode encrypt;
 
         uint64_t gpt_flags;
+        int no_auto;
         int read_only;
         int growfs;
 
@@ -243,6 +244,7 @@ static Partition *partition_new(void) {
                 .offset = UINT64_MAX,
                 .copy_blocks_fd = -1,
                 .copy_blocks_size = UINT64_MAX,
+                .no_auto = -1,
                 .read_only = -1,
                 .growfs = -1,
         };
@@ -971,7 +973,7 @@ static int config_parse_label(
         /* Nota bene: the empty label is a totally valid one. Let's hence not follow our usual rule of
          * assigning the empty string to reset to default here, but really accept it as label to set. */
 
-        r = specifier_printf(rvalue, GPT_LABEL_MAX, system_and_tmp_specifier_table, NULL, &resolved);
+        r = specifier_printf(rvalue, GPT_LABEL_MAX, system_and_tmp_specifier_table, arg_root, NULL, &resolved);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to expand specifiers in Label=, ignoring: %s", rvalue);
@@ -1136,7 +1138,7 @@ static int config_parse_copy_files(
         if (!isempty(p))
                 return log_syntax(unit, LOG_ERR, filename, line, SYNTHETIC_ERRNO(EINVAL), "Too many arguments: %s", rvalue);
 
-        r = specifier_printf(source, PATH_MAX-1, system_and_tmp_specifier_table, NULL, &resolved_source);
+        r = specifier_printf(source, PATH_MAX-1, system_and_tmp_specifier_table, arg_root, NULL, &resolved_source);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to expand specifiers in CopyFiles= source, ignoring: %s", rvalue);
@@ -1147,7 +1149,7 @@ static int config_parse_copy_files(
         if (r < 0)
                 return 0;
 
-        r = specifier_printf(target, PATH_MAX-1, system_and_tmp_specifier_table, NULL, &resolved_target);
+        r = specifier_printf(target, PATH_MAX-1, system_and_tmp_specifier_table, arg_root, NULL, &resolved_target);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to expand specifiers in CopyFiles= target, ignoring: %s", resolved_target);
@@ -1196,7 +1198,7 @@ static int config_parse_copy_blocks(
                 return 0;
         }
 
-        r = specifier_printf(rvalue, PATH_MAX-1, system_and_tmp_specifier_table, NULL, &d);
+        r = specifier_printf(rvalue, PATH_MAX-1, system_and_tmp_specifier_table, arg_root, NULL, &d);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
                            "Failed to expand specifiers in CopyBlocks= source path, ignoring: %s", rvalue);
@@ -1244,7 +1246,7 @@ static int config_parse_make_dirs(
                 if (r == 0)
                         return 0;
 
-                r = specifier_printf(word, PATH_MAX-1, system_and_tmp_specifier_table, NULL, &d);
+                r = specifier_printf(word, PATH_MAX-1, system_and_tmp_specifier_table, arg_root, NULL, &d);
                 if (r < 0) {
                         log_syntax(unit, LOG_WARNING, filename, line, r,
                                    "Failed to expand specifiers in MakeDirectories= parameter, ignoring: %s", word);
@@ -1312,6 +1314,7 @@ static int partition_read_definition(Partition *p, const char *path) {
                 { "Partition", "Encrypt",         config_parse_encrypt,     0, &p->encrypt          },
                 { "Partition", "Flags",           config_parse_gpt_flags,   0, &p->gpt_flags        },
                 { "Partition", "ReadOnly",        config_parse_tristate,    0, &p->read_only        },
+                { "Partition", "NoAuto",          config_parse_tristate,    0, &p->no_auto          },
                 { "Partition", "GrowFileSystem",  config_parse_tristate,    0, &p->growfs           },
                 {}
         };
@@ -3269,6 +3272,17 @@ static uint64_t partition_merge_flags(Partition *p) {
 
         f = p->gpt_flags;
 
+        if (p->no_auto >= 0) {
+                if (gpt_partition_type_knows_no_auto(p->type_uuid))
+                        SET_FLAG(f, GPT_FLAG_NO_AUTO, p->no_auto);
+                else {
+                        char buffer[ID128_UUID_STRING_MAX];
+                        log_warning("Configured NoAuto=%s for partition type '%s' that doesn't support it, ignoring.",
+                                    yes_no(p->no_auto),
+                                    gpt_partition_type_uuid_to_string_harder(p->type_uuid, buffer));
+                }
+        }
+
         if (p->read_only >= 0) {
                 if (gpt_partition_type_knows_read_only(p->type_uuid))
                         SET_FLAG(f, GPT_FLAG_READ_ONLY, p->read_only);
@@ -3409,7 +3423,7 @@ static int context_mangle_partitions(Context *context) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set partition label: %m");
 
-                        /* Merge the read only + growfs setting with the literal flags, and set them for the partition */
+                        /* Merge the no auto + read only + growfs setting with the literal flags, and set them for the partition */
                         r = set_gpt_flags(q, partition_merge_flags(p));
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set GPT partition flags: %m");
