@@ -1,3 +1,12 @@
+systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
+
+   * d/p/lp1933402-udev-Fix-SIGSEGV-in-AlternativeNamesPolicy-handling.patch:
+     - Fix uninitialized variable that can lead to corrupt network altnames
+       and/or segmentation faults. (LP: #1933402)
+       https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8276cde551b31840b4fc10a2905cda20f7148522
+
+ -- dann frazier <dann.frazier@canonical.com>  Mon, 28 Jun 2021 16:33:33 -0600
+
 systemd (245.4-4ubuntu3.7) focal; urgency=medium
 
   [ Andy Chi ]
