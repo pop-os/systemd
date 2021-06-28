@@ -1,5 +1,11 @@
 systemd (248.3-1ubuntu2) UNRELEASED; urgency=medium
 
+  [ Kai-Heng Feng ]
+  * d/p/hwdb-Add-ProBook-to-use-micmute-hotkey.patch:
+    - Add ProBook to use micmute hotkey (LP: #1930910)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=30b96fac92d911cb725f7220a9539085a24fe5f7
+
+  [ Dan Streetman ]
   * d/p/debian/UBUNTU-resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch:
     Remove no-longer-needed patch for DVE-2018-0001 (LP: #1785383)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=943b2dd5884e67c67d6336c24352b02e17809df0
