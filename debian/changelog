@@ -11,6 +11,14 @@ systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
     - Add ProBook to use micmute hotkey (LP: #1930910)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=ab932a977b74aef1351532ab70effb761508b9be
 
+  [ Dan Streetman ]
+  * d/p/lp1931578/0001-network-default-RequiredForOnline-false-if-Activacti.patch,
+    d/p/lp1931578/0002-networkctl-add-field-Required-For-Online.patch,
+    d/p/lp1931578/0003-test-add-test-to-verify-RequiredForOnline-setting-wi.patch:
+    Adjust default for RequiredForOnline when using ActivationPolicy
+    (LP: #1931578)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=aa2b5015d91037e476ee67d684d7e2d30e616199
+
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 28 Jun 2021 10:19:47 -0400
 
 systemd (245.4-4ubuntu3.7) focal; urgency=medium
