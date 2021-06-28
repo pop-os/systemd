@@ -45,3 +45,6 @@ debian/UBUNTU-src-test-test-execute.c-Skip-parts-of-test-execute-in-con.patch
 lp1861941-dont-generate-disk-byuuid-for-bcache-uuid.patch
 debian/UBUNTU-deny-list-TEST-10-ISSUE-2467.patch
 deny-list-TEST-29-PORTABLE-on-ppc64el.patch
+lp1931578/0001-network-default-RequiredForOnline-false-if-Activacti.patch
+lp1931578/0002-networkctl-add-field-Required-For-Online.patch
+lp1931578/0003-test-add-test-to-verify-RequiredForOnline-setting-wi.patch
