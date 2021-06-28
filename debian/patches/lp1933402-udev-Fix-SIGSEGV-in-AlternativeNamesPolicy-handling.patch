@@ -13,19 +13,53 @@ Origin: upstream, https://github.com/systemd/systemd/commit/61fd7d6720c562c88ab7
 Bug-Ubuntu: https://bugs.launchpad.net/bugs/1933402
 Last-Updated: 2021-06-28
 
-diff --git a/src/udev/net/link-config.c b/src/udev/net/link-config.c
-index 71946c9ecc..48039511fa 100644
---- a/src/udev/net/link-config.c
-+++ b/src/udev/net/link-config.c
-@@ -498,7 +498,7 @@ int link_config_apply(link_config_ctx *ctx, link_config *config,
+Index: systemd/src/udev/net/link-config.c
+===================================================================
+--- systemd.orig/src/udev/net/link-config.c
++++ systemd/src/udev/net/link-config.c
+@@ -10,7 +10,6 @@
+ #include "conf-files.h"
+ #include "conf-parser.h"
+ #include "def.h"
+-#include "device-private.h"
+ #include "device-util.h"
+ #include "ethtool-util.h"
+ #include "fd-util.h"
+@@ -352,7 +351,6 @@ int link_config_apply(link_config_ctx *c
+         struct ether_addr *mac = NULL;
+         const char *new_name = NULL;
+         const char *old_name;
+-        DeviceAction a = _DEVICE_ACTION_INVALID;
+         unsigned speed, name_type = NET_NAME_UNKNOWN;
+         NamePolicy policy;
+         int r, ifindex;
+@@ -366,16 +364,6 @@ int link_config_apply(link_config_ctx *c
+         if (r < 0)
+                 return r;
  
-         if (config->alternative_names_policy)
-                 for (NamePolicy *p = config->alternative_names_policy; *p != _NAMEPOLICY_INVALID; p++) {
--                        const char *n;
-+                        const char *n = NULL;
+-        r = device_get_action(device, &a);
+-        if (r < 0)
+-                log_device_warning_errno(device, r, "Failed to get ACTION= property: %m");
+-        else if (!IN_SET(a, DEVICE_ACTION_ADD, DEVICE_ACTION_BIND, DEVICE_ACTION_MOVE)) {
+-                log_device_debug(device, "Skipping to apply .link settings on '%s' uevent.", device_action_to_string(a));
+-
+-                *name = old_name;
+-                return 0;
+-        }
+-
+         r = ethtool_set_glinksettings(&ctx->ethtool_fd, old_name,
+                                       config->autonegotiation, config->advertise,
+                                       config->speed, config->duplex, config->port);
+@@ -433,12 +421,6 @@ int link_config_apply(link_config_ctx *c
+                 goto no_rename;
+         }
  
-                         switch (*p) {
-                         case NAMEPOLICY_DATABASE:
--- 
-2.32.0
-
+-        if (a == DEVICE_ACTION_MOVE) {
+-                log_device_debug(device, "Skipping to apply Name= and NamePolicy= on '%s' uevent.", device_action_to_string(a));
+-                new_name = old_name;
+-                goto no_rename;
+-        }
+-
+         if (ctx->enable_name_policy && config->name_policy)
+                 for (NamePolicy *p = config->name_policy; *p != _NAMEPOLICY_INVALID; p++) {
+                         policy = *p;
