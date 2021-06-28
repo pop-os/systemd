@@ -3,6 +3,12 @@ systemd (248.3-1ubuntu2) UNRELEASED; urgency=medium
   * d/p/debian/UBUNTU-resolved-Mitigate-DVE-2018-0001-by-retrying-NXDOMAIN-with.patch:
     Remove no-longer-needed patch for DVE-2018-0001 (LP: #1785383)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=943b2dd5884e67c67d6336c24352b02e17809df0
+  * d/p/lp1931578/0001-network-default-RequiredForOnline-false-if-Activacti.patch,
+    d/p/lp1931578/0002-networkctl-add-field-Required-For-Online.patch,
+    d/p/lp1931578/0003-test-add-test-to-verify-RequiredForOnline-setting-wi.patch:
+    Adjust default for RequiredForOnline when using ActivationPolicy
+    (LP: #1931578)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d0b8629ec14396f1a5d5f7c132c9b687065136b0
 
  -- Dan Streetman <ddstreet@canonical.com>  Wed, 26 May 2021 10:17:01 -0400
 
