@@ -18,6 +18,9 @@ systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
     Adjust default for RequiredForOnline when using ActivationPolicy
     (LP: #1931578)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=aa2b5015d91037e476ee67d684d7e2d30e616199
+  * d/extra/dhclient-enter-resolved-hook:
+    Check is-enabled systemd-resolved in dhclient hook (LP: #1853164)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=52ec2eb2a991cd406d1a94e8301e1b31d2bdb53c
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 28 Jun 2021 10:19:47 -0400
 
