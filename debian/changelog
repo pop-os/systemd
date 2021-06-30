@@ -33,6 +33,10 @@ systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
     d/p/lp1928200/0005-man-document-binfmt-s-new-unregister-switch.patch:
     Unregister all binfmts before shutdown (LP: #1928200)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bc605ba3f0c9d585ef834b35e9bbfc547a6f9eb5
+  * d/p/lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch:
+    Add man page symlink and deprecation notice for systemd-resolve
+    (LP: #1894622)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=823d20d2c3f78fbb0e68c4fee8cbcdb84e94dcde
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 28 Jun 2021 10:19:47 -0400
 
