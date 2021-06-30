@@ -26,6 +26,13 @@ systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
   * d/extra/dhclient-enter-resolved-hook:
     Check is-enabled systemd-resolved in dhclient hook (LP: #1853164)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=52ec2eb2a991cd406d1a94e8301e1b31d2bdb53c
+  * d/p/lp1928200/0001-shared-add-common-helper-for-unregistering-all-binfm.patch,
+    d/p/lp1928200/0002-shutdown-unregister-all-binfmt_misc-entries-before-e.patch,
+    d/p/lp1928200/0003-binfmt-modernize-code-a-bit.patch,
+    d/p/lp1928200/0004-binfmt-also-unregister-binfmt-entries-from-unit.patch,
+    d/p/lp1928200/0005-man-document-binfmt-s-new-unregister-switch.patch:
+    Unregister all binfmts before shutdown (LP: #1928200)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=bc605ba3f0c9d585ef834b35e9bbfc547a6f9eb5
 
  -- Dan Streetman <ddstreet@canonical.com>  Mon, 28 Jun 2021 10:19:47 -0400
 
