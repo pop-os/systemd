@@ -23,6 +23,7 @@ systemd (248.3-1ubuntu2) UNRELEASED; urgency=medium
   * d/p/lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch:
     Add man page symlink and deprecation notice for systemd-resolve
     (LP: #1894622)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=f719185253f989d6708c894150c0878cabee6589
 
  -- Dan Streetman <ddstreet@canonical.com>  Wed, 26 May 2021 10:17:01 -0400
 
