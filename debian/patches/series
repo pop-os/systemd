@@ -136,3 +136,4 @@ lp1928200/0002-shutdown-unregister-all-binfmt_misc-entries-before-e.patch
 lp1928200/0003-binfmt-modernize-code-a-bit.patch
 lp1928200/0004-binfmt-also-unregister-binfmt-entries-from-unit.patch
 lp1928200/0005-man-document-binfmt-s-new-unregister-switch.patch
+lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
