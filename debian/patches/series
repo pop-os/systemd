@@ -131,3 +131,8 @@ lp1931578/0001-network-default-RequiredForOnline-false-if-Activacti.patch
 lp1931578/0002-networkctl-add-field-Required-For-Online.patch
 lp1931578/0003-test-add-test-to-verify-RequiredForOnline-setting-wi.patch
 lp1932352-hwdb-Add-mic-mute-key-mapping-for-HP-Elite-Dragonfly.patch
+lp1928200/0001-shared-add-common-helper-for-unregistering-all-binfm.patch
+lp1928200/0002-shutdown-unregister-all-binfmt_misc-entries-before-e.patch
+lp1928200/0003-binfmt-modernize-code-a-bit.patch
+lp1928200/0004-binfmt-also-unregister-binfmt-entries-from-unit.patch
+lp1928200/0005-man-document-binfmt-s-new-unregister-switch.patch
