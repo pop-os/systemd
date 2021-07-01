@@ -38,8 +38,6 @@ ifneq (, $(filter noudeb, $(DEB_BUILD_OPTIONS)))
 export DEB_BUILD_PROFILES += noudeb
 endif
 
-# default-hierarchy=hybrid is kept to not break snapd, see LP: #1850667
-# TODO drop this delta in Ubuntu 21.10
 CONFFLAGS = \
 	-Db_lto=true \
 	-Db_pie=true \
@@ -67,7 +65,6 @@ CONFFLAGS = \
 	-Ddbuspolicydir=/usr/share/dbus-1/system.d/ \
 	-Dsupport-url=$(SUPPORT_URL) \
 	-Ddefault-kill-user-processes=false \
-	-Ddefault-hierarchy=hybrid \
 	-Ddefault-dnssec=no \
 	-Ddefault-llmnr=no \
 	-Ddefault-mdns=no \
