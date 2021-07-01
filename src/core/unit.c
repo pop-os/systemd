@@ -1331,7 +1331,7 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
         return 0;
 }
 
-const char *unit_description(Unit *u) {
+const char* unit_description(Unit *u) {
         assert(u);
 
         if (u->description)
@@ -1340,13 +1340,38 @@ const char *unit_description(Unit *u) {
         return strna(u->id);
 }
 
-const char *unit_status_string(Unit *u) {
+const char* unit_status_string(Unit *u, char **ret_combined_buffer) {
         assert(u);
+        assert(u->id);
 
-        if (u->manager->status_unit_format == STATUS_UNIT_FORMAT_NAME && u->id)
+        /* Return u->id, u->description, or "{u->id} - {u->description}".
+         * Versions with u->description are only used if it is set.
+         * The last option is used if configured and the caller provided the 'ret_combined_buffer'
+         * pointer.
+         *
+         * Note that *ret_combined_buffer may be set to NULL. */
+
+        if (!u->description ||
+            u->manager->status_unit_format == STATUS_UNIT_FORMAT_NAME ||
+            (u->manager->status_unit_format == STATUS_UNIT_FORMAT_COMBINED && !ret_combined_buffer) ||
+            streq(u->description, u->id)) {
+
+                if (ret_combined_buffer)
+                        *ret_combined_buffer = NULL;
                 return u->id;
+        }
 
-        return unit_description(u);
+        if (ret_combined_buffer) {
+                if (u->manager->status_unit_format == STATUS_UNIT_FORMAT_COMBINED) {
+                        *ret_combined_buffer = strjoin(u->id, " - ", u->description);
+                        if (*ret_combined_buffer)
+                                return *ret_combined_buffer;
+                        log_oom(); /* Fall back to ->description */
+                } else
+                        *ret_combined_buffer = NULL;
+        }
+
+        return u->description;
 }
 
 /* Common implementation for multiple backends */
@@ -1730,15 +1755,16 @@ static bool unit_test_assert(Unit *u) {
         return u->assert_result;
 }
 
-void unit_status_printf(Unit *u, StatusType status_type, const char *status, const char *unit_status_msg_format) {
-        const char *d;
-
-        d = unit_status_string(u);
-        if (log_get_show_color())
-                d = strjoina(ANSI_HIGHLIGHT, d, ANSI_NORMAL);
+void unit_status_printf(Unit *u, StatusType status_type, const char *status, const char *format, const char *ident) {
+        if (log_get_show_color()) {
+                if (u->manager->status_unit_format == STATUS_UNIT_FORMAT_COMBINED && strchr(ident, ' '))
+                        ident = strjoina(ANSI_HIGHLIGHT, u->id, ANSI_NORMAL, " - ", u->description);
+                else
+                        ident = strjoina(ANSI_HIGHLIGHT, ident, ANSI_NORMAL);
+        }
 
         DISABLE_WARNING_FORMAT_NONLITERAL;
-        manager_status_printf(u->manager, status_type, status, unit_status_msg_format, d);
+        manager_status_printf(u->manager, status_type, status, format, ident);
         REENABLE_WARNING;
 }
 
@@ -2928,7 +2954,7 @@ void unit_dequeue_rewatch_pids(Unit *u) {
         if (r < 0)
                 log_warning_errno(r, "Failed to disable event source for tidying watched PIDs, ignoring: %m");
 
-        u->rewatch_pids_event_source = sd_event_source_unref(u->rewatch_pids_event_source);
+        u->rewatch_pids_event_source = sd_event_source_disable_unref(u->rewatch_pids_event_source);
 }
 
 bool unit_job_is_applicable(Unit *u, JobType j) {
@@ -5576,12 +5602,13 @@ void unit_log_process_exit(
 
         log_unit_struct(u, level,
                         "MESSAGE_ID=" SD_MESSAGE_UNIT_PROCESS_EXIT_STR,
-                        LOG_UNIT_MESSAGE(u, "%s exited, code=%s, status=%i/%s",
+                        LOG_UNIT_MESSAGE(u, "%s exited, code=%s, status=%i/%s%s",
                                          kind,
                                          sigchld_code_to_string(code), status,
                                          strna(code == CLD_EXITED
                                                ? exit_status_to_string(status, EXIT_STATUS_FULL)
-                                               : signal_to_string(status))),
+                                               : signal_to_string(status)),
+                                         success ? " (success)" : ""),
                         "EXIT_CODE=%s", sigchld_code_to_string(code),
                         "EXIT_STATUS=%i", status,
                         "COMMAND=%s", strna(command),
