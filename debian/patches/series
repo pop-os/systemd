@@ -137,3 +137,6 @@ lp1928200/0003-binfmt-modernize-code-a-bit.patch
 lp1928200/0004-binfmt-also-unregister-binfmt-entries-from-unit.patch
 lp1928200/0005-man-document-binfmt-s-new-unregister-switch.patch
 lp1894622-Add-systemd-resolve-backwards-compatibility-section-.patch
+lp1858210/0001-time-simplify-get_timezones.patch
+lp1858210/0002-time-split-get_timezone-into-main-function-and-zone1.patch
+lp1858210/0003-time-get-timezones-from-tzdata.zi.patch
