@@ -34,12 +34,10 @@ CHANGES WITH 249 in spe:
           previously unprovisioned images (i.e. images with a mostly empty
           /etc/).
 
-        * Services gained a new ExitType= setting which can configure how to
-          determine when a service exited: the default is "main" which defines
-          the runtime by the service's main process lifetime (this matches the
-          only behaviour implemented in v248 and before), but with "cgroup" the
-          runtime is defined by the existence of any process in the service's
-          cgroup.
+        * PID 1 may now show both the unit name and the unit description
+          strings in its status output during boot. This may be configured with
+          StatusUnitFormat=combined in system.conf or
+          systemd.status-unit-format=combined on the kernel command line.
 
         * The systemd-machine-id-setup tool now supports a --image= switch for
           provisioning a machine ID file into an OS disk image, similar to how
@@ -71,9 +69,10 @@ CHANGES WITH 249 in spe:
           and then stream their own root partition onto the target medium.
 
         * systemd-repart's partition configuration files gained support for a
-          Flags= and a ReadOnly= setting, allowing control of the GPT partition
-          flags for the created partitions: this is useful for marking newly
-          created partitions as read-only from the start.
+          Flags=, a ReadOnly= and a NoAuto= setting, allowing control of these
+          GPT partition flags for the created partitions: this is useful for
+          marking newly created partitions as read-only, or as not being
+          subject for automatic mounting from creation on.
 
         * The /etc/os-release file has been extended with two new (optional)
           variables IMAGE_VERSION= and IMAGE_ID=, carrying identity and version
@@ -282,9 +281,9 @@ CHANGES WITH 249 in spe:
         * A new ConditionOSRelease= setting has been added to unit files to
           check os-release(5) fields. The "=", "!=", "<", "<=", ">=", ">"
           operators may be used to check if some field has some specific value
-          or do a aphanumerical comparison. Equality comparisons are useful for
-          fields like ID, but relative comparisons for fields like VERSION_ID
-          or IMAGE_VERSION.
+          or do an alphanumerical comparison. Equality comparisons are useful
+          for fields like ID, but relative comparisons for fields like
+          VERSION_ID or IMAGE_VERSION.
 
         * hostnamed gained a new Describe() D-Bus method that returns a JSON
           serialization of the host data it exposes. This is exposed via
@@ -449,6 +448,11 @@ CHANGES WITH 249 in spe:
           (default, as before), turn echo off entirely, or echo the typed
           characters literally.
 
+        * The systemd-ask-password tool also gained a new -n switch for
+          suppressing output of a trailing newline character when writing the
+          acquired password to standard output, similar to /bin/echo's -n
+          switch.
+
         * New documentation has been added that describes the organization of
           the systemd source code tree:
 
@@ -505,37 +509,46 @@ CHANGES WITH 249 in spe:
           and friends), all file systems will be mounted with MS_NOSUID by
           default, unless the system is running with SELinux enabled.
 
-        Contributions from: Aakash Singh, adrian5, Alexander Sverdlin,
-        alexlzhu, Allen Webb, Alvin Šipraga, Alyssa Ross, Anders Wenhaug,
-        Andrea Pappacoda, Anita Zhang, asavah, Balint Reczey, Bertrand Jacquin,
-        borna-blazevic, caoxia2008cxx, Carlo Teubner, Christian Göttsche,
-        Christian Hesse, Daniel Schaefer, Dan Streetman,
-        David Santamaría Rogado, David Tardon, Deepak Rawat,
-        Dimitri John Ledkov, ei-ke, Emilio Herrera, Emil Renner Berthing,
-        Eric Cook, Flos Lonicerae, Franck Bui, Francois Gervais,
-        Frantisek Sumsal, Gibeom Gwon, gitm0, Hans de Goede, Harsh Barsaiyan,
-        Henri Chain, Hristo Venev, Igor Zhbanov, imayoda, Jakub Warczarek,
-        James Buren, Jan Janssen, Jan Macku, Jan Synacek, Jason Francis,
-        Jayanth Ananthapadmanaban, Jeremy Szu, Jérôme Carretero,
+        * When enumerating time zones the timedatectl tool will now consult the
+          'tzdata.zi' file shipped by the IANA time zone database package, in
+          addition to 'zone1970.tab', as before. This makes sure time zone
+          aliases are now correctly supported. Some distributions so far did
+          not install this additional file, most do however. If you
+          distribution does not install it yet, it might make sense to change
+          that.
+
+        Contributions from: Aakash Singh, adrian5, Albert Brox,
+        Alexander Sverdlin, Alexander Tsoy, alexlzhu, Allen Webb,
+        Alvin Šipraga, Alyssa Ross, Anders Wenhaug, Andrea Pappacoda,
+        Anita Zhang, asavah, Balint Reczey, Bertrand Jacquin, borna-blazevic,
+        caoxia2008cxx, Carlo Teubner, Christian Göttsche, Christian Hesse,
+        Daniel Schaefer, Dan Streetman, David Santamaría Rogado, David Tardon,
+        Deepak Rawat, dgcampea, Dimitri John Ledkov, ei-ke, Emilio Herrera,
+        Emil Renner Berthing, Eric Cook, Flos Lonicerae, Franck Bui,
+        Francois Gervais, Frantisek Sumsal, Gibeom Gwon, gitm0, Hans de Goede,
+        Harsh Barsaiyan, Henri Chain, Hristo Venev, Igor Zhbanov, imayoda,
+        Jakub Warczarek, James Buren, Jan Janssen, Jan Macku, Jan Synacek,
+        Jason Francis, Jayanth Ananthapadmanaban, Jeremy Szu, Jérôme Carretero,
         Jesse Stricker, jiangchuangang, Joerg Behrmann, Jóhann B. Guðmundsson,
         Jörg Deckert, Jörg Thalheim, Juergen Hoetzel, Julia Kartseva,
-        Kai-Heng Feng, Khem Raj, KoyamaSohei, Lennart Poettering,
+        Kai-Heng Feng, Khem Raj, KoyamaSohei, laineantti, Lennart Poettering,
         LetzteInstanz, Luca Adrian L, Luca Boccassi, Lucas Magasweran,
         Mantas Mikulėnas, Marco Antonio Mauro, Mark Wielaard, Masahiro Matsuya,
         Matt Johnston, Michael Catanzaro, Michal Koutný, Michal Sekletár,
         Mike Crowe, Mike Kazantsev, Milan, Miroslav Suchý, Morten Linderud,
         nerdopolis, nl6720, Noah Meyerhans, Oleg Popov, Olle Lundberg,
-        Ondrej Kozina, Perry.Yuan, Peter Hutterer, Peter Kjellerstedt,
-        Peter Morrow, Phaedrus Leeds, plattrap, Roman Beranek, Roshan Shariff,
-        Ryan Hendrickson, Samuel BF, scootergrisen, Sebastian Blunt,
-        Seong-ho Cho, Sergey Bugaev, Sevan Janiyan, Sibo Dong, simmon,
-        Simon Watts, Srinidhi Kaushik, Štěpán Němec, Steve Bonds,
-        Susant Sahani, sverdlin, syyhao1994, Takashi Sakamoto, Topi Miettinen,
-        tramsay, Uwe Kleine-König, Viktor Mihajlovski, Vincent Dechenaux,
-        Vito Caputo, William A. Kennington III, Yangyang Shen, Yegor Alexeyev,
-        Yi Gao, Yu Watanabe, Zbigniew Jędrzejewski-Szmek, zsien, наб
+        Ondrej Kozina, Paweł Marciniak, Perry.Yuan, Peter Hutterer,
+        Peter Kjellerstedt, Peter Morrow, Phaedrus Leeds, plattrap,
+        Raul Tambre, Roman Beranek, Roshan Shariff, Ryan Hendrickson,
+        Samuel BF, scootergrisen, Sebastian Blunt, Seong-ho Cho, Sergey Bugaev,
+        Sevan Janiyan, Sibo Dong, simmon, Simon Watts, Srinidhi Kaushik,
+        Štěpán Němec, Steve Bonds, Susant Sahani, sverdlin, syyhao1994,
+        Takashi Sakamoto, Topi Miettinen, tramsay, Uwe Kleine-König,
+        Viktor Mihajlovski, Vincent Dechenaux, Vito Caputo,
+        William A. Kennington III, Yangyang Shen, Yegor Alexeyev, Yi Gao,
+        Yu Watanabe, Zbigniew Jędrzejewski-Szmek, zsien, наб
 
-        — Warsaw, 2021-06-25
+        — Berlin, 2021-07-01
 
 CHANGES WITH 248:
 
@@ -1332,7 +1345,7 @@ CHANGES WITH 247:
           all system calls known at the time systemd was built.
 
         * Behaviour of system call filter allow lists has changed slightly:
-          system calls that are contained in @known will result in a EPERM by
+          system calls that are contained in @known will result in EPERM by
           default, while those not contained in it result in ENOSYS. This
           should improve compatibility because known system calls will thus be
           communicated as prohibited, while unknown (and thus newer ones) will
@@ -5803,7 +5816,7 @@ CHANGES WITH 233:
         * sd-id128 gained a new API for generating unique IDs for the host in a
           way that does not leak the machine ID. Specifically,
           sd_id128_get_machine_app_specific() derives an ID based on the
-          machine ID a in well-defined, non-reversible, stable way. This is
+          machine ID in a well-defined, non-reversible, stable way. This is
           useful whenever an identifier for the host is needed but where the
           identifier shall not be useful to identify the system beyond the
           scope of the application itself. (Internally this uses HMAC-SHA256 as
@@ -8053,7 +8066,7 @@ CHANGES WITH 220:
 
         * udev will no longer create device symlinks for all block devices by
           default. A deny list for excluding special block devices from this
-          logic has been turned into a allow list that requires picking block
+          logic has been turned into an allow list that requires picking block
           devices explicitly that require device symlinks.
 
         * A new (currently still internal) API sd-device.h has been
