@@ -19,7 +19,7 @@ Bug-Debian: https://bugs.debian.org/815020
  2 files changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/src/core/main.c b/src/core/main.c
-index 906c148..19edcf4 100644
+index da6c50a..d45e180 100644
 --- a/src/core/main.c
 +++ b/src/core/main.c
 @@ -2689,8 +2689,6 @@ int main(int argc, char *argv[]) {

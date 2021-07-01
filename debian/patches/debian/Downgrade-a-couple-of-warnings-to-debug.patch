@@ -16,7 +16,7 @@ Closes: #981407
  3 files changed, 7 insertions(+), 3 deletions(-)
 
 diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
-index b0f2469..2cfaff4 100644
+index 8fb3c37..8cbe62d 100644
 --- a/src/core/load-fragment.c
 +++ b/src/core/load-fragment.c
 @@ -371,6 +371,7 @@ static int patch_var_run(
