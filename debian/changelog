@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.8) focal; urgency=medium
 
   [ dann frazier ]
   * d/p/lp1933402-udev-Fix-SIGSEGV-in-AlternativeNamesPolicy-handling.patch:
@@ -50,7 +50,7 @@ systemd (245.4-4ubuntu3.8) UNRELEASED; urgency=medium
     Don't rewrite resolv.conf is content unchanged (LP: #1891215)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=563e24f303462dfefd85b77051e742eb712a520c
 
- -- Dan Streetman <ddstreet@canonical.com>  Mon, 28 Jun 2021 10:19:47 -0400
+ -- Dan Streetman <ddstreet@canonical.com>  Tue, 06 Jul 2021 14:33:09 -0400
 
 systemd (245.4-4ubuntu3.7) focal; urgency=medium
 
