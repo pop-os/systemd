@@ -1,3 +1,9 @@
+systemd (249-1) UNRELEASED; urgency=medium
+
+  * New upstream version 249
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 07 Jul 2021 19:51:14 +0200
+
 systemd (249~rc3-1) experimental; urgency=medium
 
   * New upstream version 249~rc3
