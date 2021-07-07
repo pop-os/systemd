@@ -29,7 +29,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  LIBSYSTEMD_246@LIBSYSTEMD_246 246
  LIBSYSTEMD_247@LIBSYSTEMD_247 247
  LIBSYSTEMD_248@LIBSYSTEMD_248 248
- LIBSYSTEMD_249@LIBSYSTEMD_249 249~rc1
+ LIBSYSTEMD_249@LIBSYSTEMD_249 249
  sd_booted@LIBSYSTEMD_209 0
  sd_bus_add_fallback@LIBSYSTEMD_221 221
  sd_bus_add_fallback_vtable@LIBSYSTEMD_221 221
@@ -371,16 +371,16 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_get_syspath@LIBSYSTEMD_240 240
  sd_device_get_tag_first@LIBSYSTEMD_240 240
  sd_device_get_tag_next@LIBSYSTEMD_240 240
- sd_device_get_trigger_uuid@LIBSYSTEMD_249 249~rc1
- sd_device_get_usec_initialized@LIBSYSTEMD_249 249~rc1
+ sd_device_get_trigger_uuid@LIBSYSTEMD_249 249
+ sd_device_get_usec_initialized@LIBSYSTEMD_249 249
  sd_device_get_usec_since_initialized@LIBSYSTEMD_240 240
  sd_device_has_current_tag@LIBSYSTEMD_247 247
  sd_device_has_tag@LIBSYSTEMD_240 240
  sd_device_monitor_attach_event@LIBSYSTEMD_240 240
  sd_device_monitor_detach_event@LIBSYSTEMD_240 240
- sd_device_monitor_filter_add_match_parent@LIBSYSTEMD_249 249~rc1
+ sd_device_monitor_filter_add_match_parent@LIBSYSTEMD_249 249
  sd_device_monitor_filter_add_match_subsystem_devtype@LIBSYSTEMD_240 240
- sd_device_monitor_filter_add_match_sysattr@LIBSYSTEMD_249 249~rc1
+ sd_device_monitor_filter_add_match_sysattr@LIBSYSTEMD_249 249
  sd_device_monitor_filter_add_match_tag@LIBSYSTEMD_240 240
  sd_device_monitor_filter_remove@LIBSYSTEMD_240 240
  sd_device_monitor_filter_update@LIBSYSTEMD_240 240
@@ -394,8 +394,8 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_monitor_unref@LIBSYSTEMD_240 240
  sd_device_new_from_device_id@LIBSYSTEMD_240 240
  sd_device_new_from_devnum@LIBSYSTEMD_240 240
- sd_device_new_from_ifindex@LIBSYSTEMD_249 249~rc1
- sd_device_new_from_ifname@LIBSYSTEMD_249 249~rc1
+ sd_device_new_from_ifindex@LIBSYSTEMD_249 249
+ sd_device_new_from_ifname@LIBSYSTEMD_249 249
  sd_device_new_from_stat_rdev@LIBSYSTEMD_248 248
  sd_device_new_from_subsystem_sysname@LIBSYSTEMD_240 240
  sd_device_new_from_syspath@LIBSYSTEMD_240 240
@@ -403,7 +403,7 @@ libsystemd.so.0 libsystemd0 #MINVER#
  sd_device_set_sysattr_value@LIBSYSTEMD_240 240
  sd_device_set_sysattr_valuef@LIBSYSTEMD_247 247
  sd_device_trigger@LIBSYSTEMD_248 248
- sd_device_trigger_with_uuid@LIBSYSTEMD_249 249~rc1
+ sd_device_trigger_with_uuid@LIBSYSTEMD_249 249
  sd_device_unref@LIBSYSTEMD_240 240
  sd_event_add_child@LIBSYSTEMD_221 221
  sd_event_add_child_pidfd@LIBSYSTEMD_245 245
