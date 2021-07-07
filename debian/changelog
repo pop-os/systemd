@@ -1,8 +1,13 @@
-systemd (249-1) UNRELEASED; urgency=medium
+systemd (249-1) experimental; urgency=medium
 
   * New upstream version 249
+  * Rebase patches
+  * Update symbol versions for the v249 release
+  * Fix removal of systemd-hwdb-update.service.
+    As we don't support factory-reset, we don't need this service.
+    In Debian, the hwdb binary database is updated via a dpkg file trigger.
 
- -- Michael Biebl <biebl@debian.org>  Wed, 07 Jul 2021 19:51:14 +0200
+ -- Michael Biebl <biebl@debian.org>  Wed, 07 Jul 2021 22:33:31 +0200
 
 systemd (249~rc3-1) experimental; urgency=medium
 
