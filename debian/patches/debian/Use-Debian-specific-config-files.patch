@@ -16,7 +16,7 @@ Read/write /etc/timezone if /etc/localtime does not exist.
  4 files changed, 164 insertions(+), 113 deletions(-)
 
 diff --git a/src/basic/time-util.c b/src/basic/time-util.c
-index 796caac..9be27be 100644
+index 5d162e8..4b0a3bf 100644
 --- a/src/basic/time-util.c
 +++ b/src/basic/time-util.c
 @@ -1498,19 +1498,43 @@ int get_timezone(char **ret) {

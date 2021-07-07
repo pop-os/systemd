@@ -59,7 +59,7 @@ http://lists.freedesktop.org/archives/systemd-devel/2015-April/030175.html
  create mode 100644 units/systemd-fsckd.socket
 
 diff --git a/man/rules/meson.build b/man/rules/meson.build
-index a62d568..a164d29 100644
+index 0f65191..b50e5a0 100644
 --- a/man/rules/meson.build
 +++ b/man/rules/meson.build
 @@ -853,6 +853,7 @@ manpages = [
@@ -239,7 +239,7 @@ index 0000000..b7ad58d
 +
 +</refentry>
 diff --git a/meson.build b/meson.build
-index 32e5413..e5d7cc8 100644
+index 738879e..592cc5d 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -2887,6 +2887,15 @@ executable(
