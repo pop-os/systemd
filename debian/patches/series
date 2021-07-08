@@ -153,3 +153,4 @@ lp1937117/0001-revert-lp1929560-network-move-set-MAC-and-set-nomaster-operations
 lp1937117/0002-avoid-changing-interface-master-if-interface-already-up.patch
 lp1937238-util-return-the-correct-correct-wd-from-inotify-help.patch
 dell-clamshell-accel-location-base.patch
+lp1935051-shared-unit-file-make-sure-the-old-hashmaps-and-sets.patch
