@@ -5,6 +5,12 @@ systemd (248.3-1ubuntu3) UNRELEASED; urgency=medium
     - Apply upstream patch to fix Hipersocket DHCP mode (LP: #1914740)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9e20d2f9d70b25782bdd1c7dbec0d179604b88cc
 
+  [ Dan Streetman ]
+  * d/p/lp1934981-correct-suspend-then-sleep-string.patch:
+    Fix sleep verb used by logind during suspend-then-hibernate
+    (LP: #1934981)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b09083d520fecd57ebe28319ad7638442db2e2bd
+
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 16:53:38 -0400
 
 systemd (248.3-1ubuntu2) impish; urgency=medium
