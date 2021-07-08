@@ -27,6 +27,9 @@ systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
     Reset start limit counter for systemd-resolved in dhclient hook
     (LP: #1939255)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9d3a91a0b70a4b2bcc166f366cd0a880fd494812
+  * d/p/lp1935051-shared-unit-file-make-sure-the-old-hashmaps-and-sets.patch:
+    Fix memory leak in path cache (LP: #1935051)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=12d6bdeb35f309158fe8d4242c6dd9be4d067604
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
 
