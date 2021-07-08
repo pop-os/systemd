@@ -1,0 +1,55 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 1 Jun 2021 19:43:55 +0200
+Subject: unit-name: generate a clear error code when converting an overly long
+ fs path to a unit name
+Origin: https://github.com/systemd/systemd/commit/9d5acfab20c5f1177d877d0bec18063c0a6c5929
+
+[Salvatore Bonaccorso: Backport to 247.3 for context changes in
+src/test/test-unit-name.c]
+---
+ src/basic/unit-name.c     | 6 ++++++
+ src/test/test-unit-name.c | 4 ++--
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+--- a/src/basic/unit-name.c
++++ b/src/basic/unit-name.c
+@@ -528,6 +528,9 @@ int unit_name_from_path(const char *path
+         if (!s)
+                 return -ENOMEM;
+ 
++        if (strlen(s) >= UNIT_NAME_MAX) /* Return a slightly more descriptive error for this specific condition */
++                return -ENAMETOOLONG;
++
+         /* Refuse this if this got too long or for some other reason didn't result in a valid name */
+         if (!unit_name_is_valid(s, UNIT_NAME_PLAIN))
+                 return -EINVAL;
+@@ -559,6 +562,9 @@ int unit_name_from_path_instance(const c
+         if (!s)
+                 return -ENOMEM;
+ 
++        if (strlen(s) >= UNIT_NAME_MAX) /* Return a slightly more descriptive error for this specific condition */
++                return -ENAMETOOLONG;
++
+         /* Refuse this if this got too long or for some other reason didn't result in a valid name */
+         if (!unit_name_is_valid(s, UNIT_NAME_INSTANCE))
+                 return -EINVAL;
+--- a/src/test/test-unit-name.c
++++ b/src/test/test-unit-name.c
+@@ -130,7 +130,7 @@ static void test_unit_name_from_path(voi
+         test_unit_name_from_path_one("///", ".mount", "-.mount", 0);
+         test_unit_name_from_path_one("/foo/../bar", ".mount", NULL, -EINVAL);
+         test_unit_name_from_path_one("/foo/./bar", ".mount", NULL, -EINVAL);
+-        test_unit_name_from_path_one("/waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ".mount", NULL, -EINVAL);
++        test_unit_name_from_path_one("/waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ".mount", NULL, -ENAMETOOLONG);
+ }
+ 
+ static void test_unit_name_from_path_instance_one(const char *pattern, const char *path, const char *suffix, const char *expected, int ret) {
+@@ -160,7 +160,7 @@ static void test_unit_name_from_path_ins
+         test_unit_name_from_path_instance_one("waldo", "..", ".mount", NULL, -EINVAL);
+         test_unit_name_from_path_instance_one("waldo", "/foo", ".waldi", NULL, -EINVAL);
+         test_unit_name_from_path_instance_one("wa--ldo", "/--", ".mount", "wa--ldo@\\x2d\\x2d.mount", 0);
+-        test_unit_name_from_path_instance_one("waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "/waldo", ".mount", NULL, -EINVAL);
++        test_unit_name_from_path_instance_one("waldoaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "/waldo", ".mount", NULL, -ENAMETOOLONG);
+ }
+ 
+ static void test_unit_name_to_path_one(const char *unit, const char *path, int ret) {
