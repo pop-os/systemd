@@ -1,0 +1,19 @@
+From: Dan Streetman <ddstreet@canonical.com>
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/systemd/+bug/1934981
+
+This fixes what looks like a typo in a cut-and-paste from upstream
+commit c58493c00af.
+
+This is fixed upstream by the much larger changes in commit c8cd8ca3986.
+
+--- systemd-248.3.orig/src/login/logind-dbus.c
++++ systemd-248.3/src/login/logind-dbus.c
+@@ -2022,7 +2022,7 @@ static int method_suspend_then_hibernate
+                         "org.freedesktop.login1.hibernate",
+                         "org.freedesktop.login1.hibernate-multiple-sessions",
+                         "org.freedesktop.login1.hibernate-ignore-inhibit",
+-                        "hybrid-sleep",
++                        "suspend-then-hibernate",
+                         sd_bus_message_is_method_call(message, NULL, "SuspendThenHibernateWithFlags"),
+                         error);
+ }

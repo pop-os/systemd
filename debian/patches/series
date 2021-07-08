@@ -54,3 +54,4 @@ lp1858210/0001-time-simplify-get_timezones.patch
 lp1858210/0002-time-split-get_timezone-into-main-function-and-zone1.patch
 lp1858210/0003-time-get-timezones-from-tzdata.zi.patch
 lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch
+lp1934981-correct-suspend-then-sleep-string.patch
