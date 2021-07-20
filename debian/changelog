@@ -1,4 +1,4 @@
-systemd (248.3-1ubuntu3) UNRELEASED; urgency=medium
+systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
 
   [ Simon Chopin ]
   * d/p/lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch:
@@ -12,6 +12,19 @@ systemd (248.3-1ubuntu3) UNRELEASED; urgency=medium
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b09083d520fecd57ebe28319ad7638442db2e2bd
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 16:53:38 -0400
+
+systemd (248.3-1ubuntu3) impish; urgency=medium
+
+  * SECURITY UPDATE: DoS via DHCP FORCERENEW
+    - debian/patches/CVE-2020-13529.patch: tentatively ignore FORCERENEW
+      command in src/libsystemd-network/sd-dhcp-client.c.
+    - CVE-2020-13529
+  * SECURITY UPDATE: denial of service via stack exhaustion
+    - debian/patches/CVE-2021-33910.patch: do not use strdupa() on a path
+      in src/basic/unit-name.c.
+    - CVE-2021-33910
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Tue, 20 Jul 2021 11:35:20 -0400
 
 systemd (248.3-1ubuntu2) impish; urgency=medium
 
