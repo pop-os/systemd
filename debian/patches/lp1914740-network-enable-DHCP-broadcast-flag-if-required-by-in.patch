@@ -35,9 +35,6 @@ Supercedes #18829
  6 files changed, 44 insertions(+), 5 deletions(-)
  create mode 100644 rules.d/81-net-dhcp.rules
 
-diff --git a/rules.d/81-net-dhcp.rules b/rules.d/81-net-dhcp.rules
-new file mode 100644
-index 0000000000..2ef25ba060
 --- /dev/null
 +++ b/rules.d/81-net-dhcp.rules
 @@ -0,0 +1,14 @@
@@ -55,8 +52,6 @@ index 0000000000..2ef25ba060
 +ENV{ID_NET_DRIVER}=="qeth_l3", ENV{ID_NET_DHCP_BROADCAST}="1"
 +
 +LABEL="net_dhcp_end"
-diff --git a/rules.d/meson.build b/rules.d/meson.build
-index 13d1d330cf..9dfc42fb94 100644
 --- a/rules.d/meson.build
 +++ b/rules.d/meson.build
 @@ -23,6 +23,7 @@ rules = files('''
@@ -65,16 +60,14 @@ index 13d1d330cf..9dfc42fb94 100644
          80-net-setup-link.rules
 +        81-net-dhcp.rules
  '''.split())
-
+ 
  install_data(rules,
-diff --git a/src/network/networkd-dhcp4.c b/src/network/networkd-dhcp4.c
-index 13e3e32f40..2a90d324f6 100644
 --- a/src/network/networkd-dhcp4.c
 +++ b/src/network/networkd-dhcp4.c
-@@ -1318,6 +1318,30 @@ int dhcp4_set_client_identifier(Link *link) {
+@@ -1320,6 +1320,30 @@ int dhcp4_set_client_identifier(Link *li
          return 0;
  }
-
+ 
 +static bool link_needs_dhcp_broadcast(Link *link) {
 +        const char *val;
 +        int r;
@@ -102,21 +95,19 @@ index 13e3e32f40..2a90d324f6 100644
  int dhcp4_configure(Link *link) {
          sd_dhcp_option *send_option;
          void *request_options;
-@@ -1354,8 +1378,7 @@ int dhcp4_configure(Link *link) {
+@@ -1356,8 +1380,7 @@ int dhcp4_configure(Link *link) {
          if (r < 0)
                  return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set callback: %m");
-
+ 
 -        r = sd_dhcp_client_set_request_broadcast(link->dhcp_client,
 -                                                 link->network->dhcp_broadcast);
 +        r = sd_dhcp_client_set_request_broadcast(link->dhcp_client, link_needs_dhcp_broadcast(link));
          if (r < 0)
                  return log_link_error_errno(link, r, "DHCP4 CLIENT: Failed to set request flag for broadcast: %m");
-
-diff --git a/src/network/networkd-network-gperf.gperf b/src/network/networkd-network-gperf.gperf
-index fb726c8634..15230612f0 100644
+ 
 --- a/src/network/networkd-network-gperf.gperf
 +++ b/src/network/networkd-network-gperf.gperf
-@@ -166,7 +166,7 @@ DHCPv4.RequestOptions,                       config_parse_dhcp_request_options,
+@@ -168,7 +168,7 @@ DHCPv4.RequestOptions,
  DHCPv4.Anonymize,                            config_parse_bool,                                        0,                             offsetof(Network, dhcp_anonymize)
  DHCPv4.SendHostname,                         config_parse_bool,                                        0,                             offsetof(Network, dhcp_send_hostname)
  DHCPv4.Hostname,                             config_parse_hostname,                                    0,                             offsetof(Network, dhcp_hostname)
@@ -125,7 +116,7 @@ index fb726c8634..15230612f0 100644
  DHCPv4.VendorClassIdentifier,                config_parse_string,                                      0,                             offsetof(Network, dhcp_vendor_class_identifier)
  DHCPv4.MaxAttempts,                          config_parse_dhcp_max_attempts,                           0,                             0
  DHCPv4.UserClass,                            config_parse_dhcp_user_class,                             0,                             offsetof(Network, dhcp_user_class)
-@@ -316,7 +316,7 @@ DHCP.UseRoutes,                              config_parse_bool,
+@@ -318,7 +318,7 @@ DHCP.UseRoutes,
  DHCP.Anonymize,                              config_parse_bool,                                        0,                             offsetof(Network, dhcp_anonymize)
  DHCP.SendHostname,                           config_parse_bool,                                        0,                             offsetof(Network, dhcp_send_hostname)
  DHCP.Hostname,                               config_parse_hostname,                                    0,                             offsetof(Network, dhcp_hostname)
@@ -134,23 +125,19 @@ index fb726c8634..15230612f0 100644
  DHCP.CriticalConnection,                     config_parse_tristate,                                    0,                             offsetof(Network, dhcp_critical)
  DHCP.VendorClassIdentifier,                  config_parse_string,                                      0,                             offsetof(Network, dhcp_vendor_class_identifier)
  DHCP.UserClass,                              config_parse_dhcp_user_class,                             0,                             offsetof(Network, dhcp_user_class)
-diff --git a/src/network/networkd-network.c b/src/network/networkd-network.c
-index 2e716b291e..4408c2ab24 100644
 --- a/src/network/networkd-network.c
 +++ b/src/network/networkd-network.c
-@@ -397,6 +397,7 @@ int network_load_one(Manager *manager, OrderedHashmap **networks, const char *fi
+@@ -441,6 +441,7 @@ int network_load_one(Manager *manager, O
                  .dhcp_use_mtu = false,
                  /* NOTE: from man: UseTimezone=... Defaults to "no".*/
                  .dhcp_use_timezone = false,
 +                .dhcp_broadcast = -1,
                  .rapid_commit = true,
-
+ 
                  .dhcp6_use_ntp = true,
-diff --git a/src/network/networkd-network.h b/src/network/networkd-network.h
-index 266e40cef5..064dbe63c3 100644
 --- a/src/network/networkd-network.h
 +++ b/src/network/networkd-network.h
-@@ -103,7 +103,7 @@ struct Network {
+@@ -114,7 +114,7 @@ struct Network {
          int ip_service_type;
          bool dhcp_anonymize;
          bool dhcp_send_hostname;
@@ -159,6 +146,3 @@ index 266e40cef5..064dbe63c3 100644
          bool dhcp_use_dns;
          bool dhcp_routes_to_dns;
          bool dhcp_use_ntp;
---
-2.30.2
-
