@@ -1,3 +1,12 @@
+systemd (245.4-4ubuntu3.9) UNRELEASED; urgency=medium
+
+  [ Simon Chopin ]
+  * d/p/lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch:
+    - Apply upstream patch to fix Hipersocket DHCP mode (LP: #1914740)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=326ae43b7966d9e7c5f7124027185a79a07fa276
+
+ -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
+
 systemd (245.4-4ubuntu3.8) focal; urgency=medium
 
   [ dann frazier ]
