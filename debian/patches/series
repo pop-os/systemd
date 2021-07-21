@@ -156,3 +156,4 @@ lp1937117/0002-avoid-changing-interface-master-if-interface-already-up.patch
 systemd-boot-id-compat.patch
 cryptswap-mount-fix.patch
 system76-usb.patch
+launchpad-build-fix.patch
