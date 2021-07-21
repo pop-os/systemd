@@ -146,3 +146,4 @@ lp1891215/0003-fs-util-rename-conservative_rename-conservative_rena.patch
 lp1891215/0004-fs-util-make-sure-conservative_renameat-properly-det.patch
 lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch
 lp1934981-correct-suspend-then-sleep-string.patch
+lp1934221-resolved-disable-event-sources-before-unreffing-them.patch
