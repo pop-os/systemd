@@ -116,7 +116,11 @@ Depends: systemd-tests,
 Restrictions: needs-root, isolation-container, breaks-testbed
 
 Tests: upstream
-Depends: @,
+Depends: systemd-tests,
+  systemd-journal-remote,
+  systemd-container,
+  systemd-coredump,
+  systemd-timesyncd,
   attr,
   tree,
   perl,
