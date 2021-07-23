@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.9) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.11) UNRELEASED; urgency=medium
 
   [ Lukas Märdian ]
   * Add d/p/lp1934221-resolved-disable-event-sources-before-unreffing-them.patch
@@ -17,6 +17,19 @@ systemd (245.4-4ubuntu3.9) UNRELEASED; urgency=medium
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=997f3a7da3d5db22e3c63626c3f7dc3dff0830b0
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
+
+systemd (245.4-4ubuntu3.10) focal-security; urgency=medium
+
+  * SECURITY UPDATE: DoS via DHCP FORCERENEW
+    - debian/patches/CVE-2020-13529.patch: tentatively ignore FORCERENEW
+      command in src/libsystemd-network/sd-dhcp-client.c.
+    - CVE-2020-13529
+  * SECURITY UPDATE: denial of service via stack exhaustion
+    - debian/patches/CVE-2021-33910.patch: do not use strdupa() on a path
+      in src/basic/unit-name.c.
+    - CVE-2021-33910
+
+ -- Marc Deslauriers <marc.deslauriers@ubuntu.com>  Tue, 20 Jul 2021 07:39:51 -0400
 
 systemd (245.4-4ubuntu3.8) focal; urgency=medium
 
