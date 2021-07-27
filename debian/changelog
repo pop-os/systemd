@@ -15,6 +15,9 @@ systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
     Fix sleep verb used by logind during suspend-then-hibernate
     (LP: #1934981)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=997f3a7da3d5db22e3c63626c3f7dc3dff0830b0
+  * d/p/lp1937238-util-return-the-correct-correct-wd-from-inotify-help.patch:
+    Fix watch for time sync (LP: #1937238)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dbabff8a03eb232c19174eff1335cd7cb7d7860c
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
 
