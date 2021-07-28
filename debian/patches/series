@@ -57,3 +57,4 @@ lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch
 lp1934981-correct-suspend-then-sleep-string.patch
 CVE-2020-13529.patch
 CVE-2021-33910.patch
+dell-clamshell-accel-location-base-with-sku.patch

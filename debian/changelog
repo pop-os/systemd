@@ -1,5 +1,9 @@
 systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
 
+  [ Yao Wei ]
+  * Use SKU to identify Dell clamshell models for accelerometer properties
+    (LP: #1938259)
+
   [ Simon Chopin ]
   * d/p/lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch:
     - Apply upstream patch to fix Hipersocket DHCP mode (LP: #1914740)
