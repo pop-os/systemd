@@ -1,5 +1,9 @@
 systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
 
+  [ Yao Wei ]
+  * d/p/dell-clamshell-accel-location-base.patch:
+    Add ACCEL_LOCATION=base property for Dell clamshell models (LP: #1938259)
+
   [ Lukas Märdian ]
   * Add d/p/lp1934221-resolved-disable-event-sources-before-unreffing-them.patch
     - Fix segfault in systemd-resolve (LP: #1934221)

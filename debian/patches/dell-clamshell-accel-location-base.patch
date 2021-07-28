@@ -1,0 +1,26 @@
+From: Yao Wei <yao.wei@canonical.com>
+Date: Wed, 28 Jul 2021 10:45:44 +0800
+Subject: Add ACCEL_LOCATION=base property for Dell clamshell models
+
+Origin: upstream, https://github.com/systemd/systemd/pull/20314
+---
+ hwdb.d/60-sensor.hwdb | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/hwdb.d/60-sensor.hwdb b/hwdb.d/60-sensor.hwdb
+index abedbac..e19a3e9 100644
+--- a/hwdb.d/60-sensor.hwdb
++++ b/hwdb.d/60-sensor.hwdb
+@@ -249,6 +249,12 @@ sensor:modalias:acpi:*KIOX000A*:dmi:*svn*CytrixTechnology:*pn*Complex11t*
+ sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:pnVostro5581:*
+  ACCEL_LOCATION=base
+ 
++sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0A3E:*
++ ACCEL_LOCATION=base
++
++sensor:modalias:platform:HID-SENSOR-200073:dmi:*svnDell*:sku0B0B:*
++ ACCEL_LOCATION=base
++
+ # Dell Venue 10 Pro 5055
+ sensor:modalias:acpi:INVN6500*:dmi:*svnDell*:pnVenue10Pro5055*
+  ACCEL_MOUNT_MATRIX=0, -1, 0; 1, 0, 0; 0, 0, 1

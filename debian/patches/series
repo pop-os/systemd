@@ -152,3 +152,4 @@ CVE-2021-33910.patch
 lp1937117/0001-revert-lp1929560-network-move-set-MAC-and-set-nomaster-operations-out.patch
 lp1937117/0002-avoid-changing-interface-master-if-interface-already-up.patch
 lp1937238-util-return-the-correct-correct-wd-from-inotify-help.patch
+dell-clamshell-accel-location-base.patch
