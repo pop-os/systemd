@@ -3,6 +3,7 @@ systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
   [ Yao Wei ]
   * Use SKU to identify Dell clamshell models for accelerometer properties
     (LP: #1938259)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=d02cab1a9aad017b68ca1117bf3f0bbcb1b9315c
 
   [ Simon Chopin ]
   * d/p/lp1914740-network-enable-DHCP-broadcast-flag-if-required-by-in.patch:
