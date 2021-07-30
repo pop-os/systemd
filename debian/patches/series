@@ -27,7 +27,6 @@ debian/Revert-pager-stop-disabling-urlification-under-a-pager.patch
 debian/Ubuntu-UseDomains-by-default.patch
 debian/Ubuntu-core-in-execute-soft-fail-setting-Nice-priority-when.patch
 debian/Ubuntu-units-set-ConditionVirtualization-private-users-on-j.patch
-debian/UBUNTU-drop-kernel.-settings-from-sysctl-defaults-shipped.patch
 debian/UBUNTU-Add-AssumedApparmorLabel-unconfined-to-timedate1-dbus.patch
 debian/UBUNTU-test-test-functions-launch-qemu-with-vga-none.patch
 debian/UBUNTU-wait-online-exit-if-no-links-are-managed.patch
