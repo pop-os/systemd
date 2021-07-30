@@ -81,8 +81,6 @@ Depends: ${shlibs:Depends},
 Conflicts: consolekit,
            libpam-ck-connector,
 Breaks: systemd-shim (<< 10-4~),
-        python-dbusmock (<< 0.18),
-        python3-dbusmock (<< 0.18),
         resolvconf (<< 1.83~),
         udev (<< 247~),
 Description: system and service manager
