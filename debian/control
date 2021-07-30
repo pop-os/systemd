@@ -156,8 +156,6 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          systemd,
          adduser
-Breaks: systemd (<< 239-6)
-Replaces: systemd (<< 239-6)
 Description: tools for sending and receiving remote journal logs
  This package provides tools for sending and receiving remote journal logs:
   * systemd-journal-remote
@@ -344,8 +342,6 @@ Depends: ${shlibs:Depends},
          util-linux (>= 2.27.1),
          s390-tools (>> 1.6.2) [s390],
 Conflicts: hal
-Breaks: systemd (<< 233-4),
-Replaces: systemd (<< 233-4)
 Description: /dev/ and hotplug management daemon
  udev is a daemon which dynamically creates and removes device nodes from
  /dev/, handles hotplug events and loads drivers at boot time.
