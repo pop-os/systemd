@@ -11,11 +11,9 @@ debian/Revert-core-one-step-back-again-for-nspawn-we-actual.patch
 debian/Revert-core-set-RLIMIT_CORE-to-unlimited-by-default.patch
 debian/Let-graphical-session-pre.target-be-manually-started.patch
 debian/Add-env-variable-for-machine-ID-path.patch
-debian/Drop-seccomp-system-call-filter-for-udev.patch
 debian/deny-list-upstream-test-25.patch
 debian/deny-list-upstream-test-02-ppc64el.patch
 debian/udev-drop-SystemCallArchitectures-native-from-systemd-ude.patch
-debian/Keep-journal-files-compatible-with-older-versions.patch
 debian/Move-sysusers.d-sysctl.d-binfmt.d-modules-load.d-back-to-.patch
 debian/systemctl-do-not-shutdown-immediately-on-scheduled-shutdo.patch
 debian/test-disable-DnsmasqClientTest.test_resolved_etc_hosts-in.patch
