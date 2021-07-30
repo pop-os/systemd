@@ -16,6 +16,9 @@ systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
     Fix sleep verb used by logind during suspend-then-hibernate
     (LP: #1934981)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=b09083d520fecd57ebe28319ad7638442db2e2bd
+  * d/p/debian/UBUNTU-drop-kernel.-settings-from-sysctl-defaults-shipped.patch:
+    Revert patch, no reason to diverge from upstream on these sysctl settings
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8959a2640c631f026988f1fef6b1a825af6c97dd
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 16:53:38 -0400
 
