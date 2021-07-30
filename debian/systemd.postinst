@@ -115,25 +115,6 @@ if [ -n "$2" ]; then
     _systemctl try-restart systemd-journald.service || true
 fi
 
-if dpkg --compare-versions "$2" lt-nl "235-3~"; then
-    # systemd-bus-proxyd got dropped before stretch, and never created any file
-    deluser --system systemd-bus-proxy || true
-fi
-
-if dpkg --compare-versions "$2" lt-nl "236-1~"; then
-    # Clean up old /var/lib/systemd/clock on upgrade.
-    # The clock file used by systemd-timesyncd is now stored in
-    # StateDirectory=systemd/timesync.
-    rm -f /var/lib/systemd/clock
-fi
-
-if dpkg --compare-versions "$2" lt-nl "239-12~"; then
-    # clean up bogus "nobody" group from #912525; ensure that it's a system group
-    if getent group nobody >/dev/null; then
-        delgroup --system nobody || true
-    fi
-fi
-
 if dpkg --compare-versions "$2" lt-nl "245.4-4~"; then
     # systemd-pstore.service is now enabled via sysinit.target
     rm -f /etc/systemd/system/systemd-remount-fs.service.wants/systemd-pstore.service
