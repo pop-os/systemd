@@ -80,8 +80,8 @@ Depends: ${shlibs:Depends},
          adduser,
 Conflicts: consolekit,
            libpam-ck-connector,
-Breaks: systemd-shim (<< 10-4~),
-        resolvconf (<< 1.83~),
+           systemd-shim,
+Breaks: resolvconf (<< 1.83~),
         udev (<< 247~),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
