@@ -1,3 +1,31 @@
+systemd (249.2-2) experimental; urgency=medium
+
+  * Remove obsolete upgrade code from maintainer scripts
+  * Clean up old versions from maintscript files
+  * Drop obsolete systemd Breaks/Replaces
+  * Drop obsolete python-dbusmock Breaks
+  * Turn versioned systemd-shim Breaks into unversioned Conflicts.
+    There never was a fixed systemd-shim version before it was removed from
+    the archive.
+  * Drop patches which are no longer needed after bullseye
+  * Stop setting up device symlinks for CD-RW/DVD drives.
+    Those udev rules were a Debian specific workaround that were mainly
+    added for compat with older software which wasn't able to automatically
+    discover those types of devices. Those rules didn't provide
+    stable/predictable names though, so remove them. (Closes: #991639)
+  * autopkgtest: add systemd-timesyncd dependency to timedated test.
+    We need systemd-timesyncd in the timedated test, not just an arbitrary
+    provider of time-daemon.
+  * autopkgtest: clean up dependencies of boot-smoke test.
+    A lot of the dependencies are not needed but were originally added to
+    avoid a testbed reset and make it possible to reuse the testbed of the
+    upstream test. This turned out to be a maintenance problem and the
+    dependencies were not updated accordingly. Instead of trying to keep the
+    two tests in sync, trim down the boot-smoke dependencies to its bare
+    minimum.
+
+ -- Michael Biebl <biebl@debian.org>  Sat, 31 Jul 2021 21:49:05 +0200
+
 systemd (249.2-1) experimental; urgency=medium
 
   * New upstream version 249.2
