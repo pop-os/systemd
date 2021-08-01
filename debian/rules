@@ -246,6 +246,8 @@ override_dh_install:
 	debian/extra/make-sysusers-basic > debian/install/deb/usr/lib/sysusers.d/basic.conf
 	# remove resolvconf compat symlink
 	rm -f debian/install/*/sbin/resolvconf
+	# remove obsolete compat symlink
+	rm -f debian/install/*/usr/bin/systemd-resolve
 ifeq (, $(filter noudeb, $(DEB_BUILD_PROFILES)))
 	dh_install -pudev-udeb -plibudev1-udeb --sourcedir=debian/install/udeb
 endif
