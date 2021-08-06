@@ -4,6 +4,8 @@
 
 set -eu
 
+# cgroupv2 testing workaround: https://github.com/snapcore/snapd/pull/10589
+export SNAPD_HIDE_CGROUPV2_WARNING=1
 lxd init --auto
 
 IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
