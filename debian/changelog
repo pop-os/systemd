@@ -1,3 +1,16 @@
+systemd (249.3-2) experimental; urgency=medium
+
+  * Provide standalone binaries for sysusers and tmpfiles (Closes: #946456)
+  * Fix test dependencies of upstream test.
+    After splitting out the standalone binaries for sysusers and tmpfiles
+    into separate packages (which conflict with the main systemd package),
+    we can no longer use the '@' notation in the upstream test.
+    This reverts commit 5eeeb1b562a1a9802df105091bda4741c263336d and also
+    adds systemd-tests and systemd-timesyncd to the upstream test
+    dependencies.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 08 Aug 2021 22:51:18 +0200
+
 systemd (249.3-1) experimental; urgency=medium
 
   * New upstream version 249.3
