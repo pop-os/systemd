@@ -23,6 +23,10 @@ systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
   * d/p/lp1937238-util-return-the-correct-correct-wd-from-inotify-help.patch:
     Fix watch for time sync (LP: #1937238)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=dbabff8a03eb232c19174eff1335cd7cb7d7860c
+  * d/extra/dhclient-enter-resolved-hook:
+    Reset start limit counter for systemd-resolved in dhclient hook
+    (LP: #1939255)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=9d3a91a0b70a4b2bcc166f366cd0a880fd494812
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
 
