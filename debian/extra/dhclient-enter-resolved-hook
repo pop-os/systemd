@@ -57,6 +57,10 @@ EOF
               newstate="$(mktemp)"
               md5sum $statedir/isc-dhcp-v4-$interface.conf $statedir/isc-dhcp-v6-$interface.conf > $newstate 2> /dev/null
               if ! cmp --quiet $oldstate $newstate; then
+                  # We need to reset-failed to reset the start limit counter,
+                  # in case we're processing more than StartLimitBurst interfaces
+                  # LP: #1939255
+                  systemctl reset-failed systemd-resolved.service
                   systemctl try-reload-or-restart systemd-resolved.service
               fi
 
