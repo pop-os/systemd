@@ -83,6 +83,8 @@ Conflicts: consolekit,
            systemd-shim,
 Breaks: resolvconf (<< 1.83~),
         udev (<< 247~),
+Provides: systemd-sysusers (= ${binary:Version}),
+          systemd-tmpfiles (= ${binary:Version}),
 Description: system and service manager
  systemd is a system and service manager for Linux. It provides aggressive
  parallelization capabilities, uses socket and D-Bus activation for starting
@@ -400,8 +402,8 @@ Package: systemd-standalone-sysusers
 Section: admin
 Architecture: linux-any
 Priority: optional
-Breaks: systemd
-Replaces: systemd
+Conflicts: systemd-sysusers
+Replaces: systemd-sysusers
 Provides: systemd-sysusers (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -414,8 +416,8 @@ Package: systemd-standalone-tmpfiles
 Section: admin
 Architecture: linux-any
 Priority: optional
-Breaks: systemd
-Replaces: systemd
+Conflicts: systemd-tmpfiles
+Replaces: systemd-tmpfiles
 Provides: systemd-tmpfiles (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
