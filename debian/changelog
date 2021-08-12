@@ -1,3 +1,11 @@
+systemd (249.3-3) experimental; urgency=medium
+
+  * Use C/R/P for systemd-sysusers and systemd-tmpfiles.
+    It's an interface/facility that can only be provided by a single package
+    at a time.
+
+ -- Michael Biebl <biebl@debian.org>  Thu, 12 Aug 2021 22:45:02 +0200
+
 systemd (249.3-2) experimental; urgency=medium
 
   * Provide standalone binaries for sysusers and tmpfiles (Closes: #946456)
