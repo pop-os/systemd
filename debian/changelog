@@ -21,7 +21,7 @@ systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8959a2640c631f026988f1fef6b1a825af6c97dd
 
   [ Lukas Märdian ]
-  * Use upstream's default -Ddefault-hierarchy=unified.
+  * Use upstream's default -Ddefault-hierarchy=unified. (LP: #1850667)
     File: debian/rules
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=93ba352792db14b3d21d12909b3b6f8a1165c5de
   * tests: hide snapd cgroupv2 warning.
