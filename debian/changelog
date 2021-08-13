@@ -20,7 +20,17 @@ systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
     Revert patch, no reason to diverge from upstream on these sysctl settings
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=8959a2640c631f026988f1fef6b1a825af6c97dd
 
- -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 16:53:38 -0400
+  [ Lukas Märdian ]
+  * Use upstream's default -Ddefault-hierarchy=unified.
+    File: debian/rules
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=93ba352792db14b3d21d12909b3b6f8a1165c5de
+  * tests: hide snapd cgroupv2 warning.
+    Pending release of PR https://github.com/snapcore/snapd/pull/10589
+    but it won't hurt to have it in there anyways.
+    File: debian/tests/tests-in-lxd
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c06736c1fb90d976fe5cd520b97c0272ef8fcc64
+
+ -- Lukas Märdian <slyon@ubuntu.com>  Fri, 13 Aug 2021 14:44:26 +0200
 
 systemd (248.3-1ubuntu3) impish; urgency=medium
 
