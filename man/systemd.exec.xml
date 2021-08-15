@@ -305,8 +305,11 @@
         Filesystem</ulink>. It is generally recommended to run most system services with this option set to
         <literal>invisible</literal>. This option is implemented via file system namespacing, and thus cannot
         be used with services that shall be able to install mount points in the host file system
-        hierarchy. It also cannot be used for services that need to access metainformation about other users'
-        processes. This option implies <varname>MountAPIVFS=</varname>.</para>
+        hierarchy. Note that the root user is unaffected by this option, so to be effective it has to be used
+        together with <varname>User=</varname> or <varname>DynamicUser=yes</varname>, and also without the
+        <literal>CAP_SYS_PTRACE</literal> capability, which also allows a process to bypass this feature. It
+        cannot be used for services that need to access metainformation about other users' processes. This
+        option implies <varname>MountAPIVFS=</varname>.</para>
 
         <para>If the kernel doesn't support per-mount point <option>hidepid=</option> mount options this
         setting remains without effect, and the unit's processes will be able to access and see other process
@@ -2373,7 +2376,9 @@ SystemCallErrorNumber=EPERM</programlisting>
         <citerefentry><refentrytitle>systemd.socket</refentrytitle><manvolnum>5</manvolnum></citerefentry> for more
         details about named file descriptors and their ordering.</para>
 
-        <para>This setting defaults to <option>null</option>.</para></listitem>
+        <para>This setting defaults to <option>null</option>, unless
+        <varname>StandardInputText=</varname>/<varname>StandardInputData=</varname> are set, in which case it
+        defaults to <option>data</option>.</para></listitem>
       </varlistentry>
 
       <varlistentry>
@@ -2472,9 +2477,11 @@ SystemCallErrorNumber=EPERM</programlisting>
         <term><varname>StandardInputText=</varname></term>
         <term><varname>StandardInputData=</varname></term>
 
-        <listitem><para>Configures arbitrary textual or binary data to pass via file descriptor 0 (STDIN) to the
-        executed processes. These settings have no effect unless <varname>StandardInput=</varname> is set to
-        <option>data</option>. Use this option to embed process input data directly in the unit file.</para>
+        <listitem><para>Configures arbitrary textual or binary data to pass via file descriptor 0 (STDIN) to
+        the executed processes. These settings have no effect unless <varname>StandardInput=</varname> is set
+        to <option>data</option> (which is the default if <varname>StandardInput=</varname> is not set
+        otherwise, but <varname>StandardInputText=</varname>/<varname>StandardInputData=</varname> is). Use
+        this option to embed process input data directly in the unit file.</para>
 
         <para><varname>StandardInputText=</varname> accepts arbitrary textual data. C-style escapes for special
         characters as well as the usual <literal>%</literal>-specifiers are resolved. Each time this setting is used

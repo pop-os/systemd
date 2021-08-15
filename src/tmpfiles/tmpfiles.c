@@ -837,7 +837,7 @@ static int fd_set_perms(Item *i, int fd, const char *path, const struct stat *st
         int r;
 
         assert(i);
-        assert(fd);
+        assert(fd >= 0);
         assert(path);
 
         if (!i->mode_set && !i->uid_set && !i->gid_set)
@@ -1021,7 +1021,7 @@ static int fd_set_xattrs(Item *i, int fd, const char *path, const struct stat *s
         char **name, **value;
 
         assert(i);
-        assert(fd);
+        assert(fd >= 0);
         assert(path);
 
         xsprintf(procfs_path, "/proc/self/fd/%i", fd);
@@ -1124,7 +1124,7 @@ static int fd_set_acls(Item *item, int fd, const char *path, const struct stat *
         struct stat stbuf;
 
         assert(item);
-        assert(fd);
+        assert(fd >= 0);
         assert(path);
 
         if (!st) {
@@ -1278,7 +1278,7 @@ static int fd_set_attribute(Item *item, int fd, const char *path, const struct s
         int r;
 
         assert(item);
-        assert(fd);
+        assert(fd >= 0);
         assert(path);
 
         if (!item->attribute_set || item->attribute_mask == 0)
@@ -2334,6 +2334,8 @@ static int clean_item(Item *i) {
 
 static int process_item(Item *i, OperationMask operation) {
         OperationMask todo;
+        _cleanup_free_ char *_path = NULL;
+        const char *path;
         int r, q, p;
 
         assert(i);
@@ -2344,9 +2346,21 @@ static int process_item(Item *i, OperationMask operation) {
 
         i->done |= operation;
 
-        r = chase_symlinks(i->path, arg_root, CHASE_NO_AUTOFS|CHASE_WARN, NULL, NULL);
+        path = i->path;
+        if (string_is_glob(path)) {
+                /* We can't easily check whether a glob matches any autofs path, so let's do the check only
+                 * for the non-glob part. */
+
+                r = glob_non_glob_prefix(path, &_path);
+                if (r < 0 && r != -ENOENT)
+                        return log_debug_errno(r, "Failed to deglob path: %m");
+                if (r >= 0)
+                        path = _path;
+        }
+
+        r = chase_symlinks(path, arg_root, CHASE_NO_AUTOFS|CHASE_NONEXISTENT|CHASE_WARN, NULL, NULL);
         if (r == -EREMOTE) {
-                log_notice_errno(r, "Skipping %s", i->path);
+                log_notice_errno(r, "Skipping %s", i->path); /* We log the configured path, to not confuse the user. */
                 return 0;
         }
         if (r < 0)
@@ -3173,7 +3187,7 @@ static int read_config_file(char **config_dirs, const char *fn, bool ignore_enoe
         _cleanup_fclose_ FILE *_f = NULL;
         unsigned v = 0;
         FILE *f;
-        Item *i;
+        ItemArray *ia;
         int r = 0;
 
         assert(fn);
@@ -3226,31 +3240,36 @@ static int read_config_file(char **config_dirs, const char *fn, bool ignore_enoe
         }
 
         /* we have to determine age parameter for each entry of type X */
-        ORDERED_HASHMAP_FOREACH(i, globs) {
-                Item *j, *candidate_item = NULL;
+        ORDERED_HASHMAP_FOREACH(ia, globs)
+                for (size_t ni = 0; ni < ia->n_items; ni++) {
+                        ItemArray *ja;
+                        Item *i = ia->items + ni, *candidate_item = NULL;
 
-                if (i->type != IGNORE_DIRECTORY_PATH)
-                        continue;
-
-                ORDERED_HASHMAP_FOREACH(j, items) {
-                        if (!IN_SET(j->type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY, CREATE_SUBVOLUME, CREATE_SUBVOLUME_INHERIT_QUOTA, CREATE_SUBVOLUME_NEW_QUOTA))
+                        if (i->type != IGNORE_DIRECTORY_PATH)
                                 continue;
 
-                        if (path_equal(j->path, i->path)) {
-                                candidate_item = j;
-                                break;
+                        ORDERED_HASHMAP_FOREACH(ja, items)
+                                for (size_t nj = 0; nj < ja->n_items; nj++) {
+                                        Item *j = ja->items + nj;
+
+                                        if (!IN_SET(j->type, CREATE_DIRECTORY, TRUNCATE_DIRECTORY, CREATE_SUBVOLUME, CREATE_SUBVOLUME_INHERIT_QUOTA, CREATE_SUBVOLUME_NEW_QUOTA))
+                                                continue;
+
+                                        if (path_equal(j->path, i->path)) {
+                                                candidate_item = j;
+                                                break;
+                                        }
+
+                                        if ((!candidate_item && path_startswith(i->path, j->path)) ||
+                                            (candidate_item && path_startswith(j->path, candidate_item->path) && (fnmatch(i->path, j->path, FNM_PATHNAME | FNM_PERIOD) == 0)))
+                                                candidate_item = j;
+                                }
+
+                        if (candidate_item && candidate_item->age_set) {
+                                i->age = candidate_item->age;
+                                i->age_set = true;
                         }
-
-                        if ((!candidate_item && path_startswith(i->path, j->path)) ||
-                            (candidate_item && path_startswith(j->path, candidate_item->path) && (fnmatch(i->path, j->path, FNM_PATHNAME | FNM_PERIOD) == 0)))
-                                candidate_item = j;
                 }
-
-                if (candidate_item && candidate_item->age_set) {
-                        i->age = candidate_item->age;
-                        i->age_set = true;
-                }
-        }
 
         if (ferror(f)) {
                 log_error_errno(errno, "Failed to read from file %s: %m", fn);

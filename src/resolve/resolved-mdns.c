@@ -15,10 +15,10 @@
 void manager_mdns_stop(Manager *m) {
         assert(m);
 
-        m->mdns_ipv4_event_source = sd_event_source_unref(m->mdns_ipv4_event_source);
+        m->mdns_ipv4_event_source = sd_event_source_disable_unref(m->mdns_ipv4_event_source);
         m->mdns_ipv4_fd = safe_close(m->mdns_ipv4_fd);
 
-        m->mdns_ipv6_event_source = sd_event_source_unref(m->mdns_ipv6_event_source);
+        m->mdns_ipv6_event_source = sd_event_source_disable_unref(m->mdns_ipv6_event_source);
         m->mdns_ipv6_fd = safe_close(m->mdns_ipv6_fd);
 }
 
@@ -289,9 +289,11 @@ static int on_mdns_packet(sd_event_source *s, int fd, uint32_t revents, void *us
                         const char *name = dns_resource_key_name(rr->key);
                         DnsTransaction *t;
 
-                        /* If the received reply packet contains ANY record that is not .local or .in-addr.arpa,
-                         * we assume someone's playing tricks on us and discard the packet completely. */
+                        /* If the received reply packet contains ANY record that is not .local
+                         * or .in-addr.arpa or .ip6.arpa, we assume someone's playing tricks on
+                         * us and discard the packet completely. */
                         if (!(dns_name_endswith(name, "in-addr.arpa") > 0 ||
+                              dns_name_endswith(name, "ip6.arpa") > 0 ||
                               dns_name_endswith(name, "local") > 0))
                                 return 0;
 

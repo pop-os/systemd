@@ -322,7 +322,7 @@ static void print_status_info(
         printf("\n");
 
         if (i->following)
-                printf("   Follow: unit currently follows state of %s\n", i->following);
+                printf("    Follows: unit currently follows state of %s\n", i->following);
 
         if (STRPTR_IN_SET(i->load_state, "error", "not-found", "bad-setting")) {
                 on = ansi_highlight_red();
@@ -1424,7 +1424,8 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (n < 0)
                                 return log_oom();
 
-                        bus_print_property_value(name, expected_value, value, h);
+                        if (all || !isempty(h))
+                                bus_print_property_value(name, expected_value, value, h);
 
                         return 1;
 
@@ -1625,7 +1626,8 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
                         if (!affinity)
                                 return log_oom();
 
-                        bus_print_property_value(name, expected_value, value, affinity);
+                        if (all || !isempty(affinity))
+                                bus_print_property_value(name, expected_value, value, affinity);
 
                         return 1;
                 } else if (streq(name, "MountImages")) {
@@ -1856,7 +1858,7 @@ static int show_one(
                 return log_error_errno(r, "Failed to get properties: %s", bus_error_message(&error, r));
 
         if (unit && streq_ptr(info.load_state, "not-found") && streq_ptr(info.active_state, "inactive")) {
-                log_full(show_mode == SYSTEMCTL_SHOW_STATUS ? LOG_ERR : LOG_DEBUG,
+                log_full(show_mode == SYSTEMCTL_SHOW_PROPERTIES ? LOG_DEBUG : LOG_ERR,
                          "Unit %s could not be found.", unit);
 
                 if (show_mode == SYSTEMCTL_SHOW_STATUS)

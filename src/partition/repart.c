@@ -942,6 +942,9 @@ static int config_parse_label(
         assert(rvalue);
         assert(label);
 
+        /* Nota bene: the empty label is a totally valid one. Let's hence not follow our usual rule of
+         * assigning the empty string to reset to default here, but really accept it as label to set. */
+
         r = specifier_printf(rvalue, specifier_table, NULL, &resolved);
         if (r < 0) {
                 log_syntax(unit, LOG_WARNING, filename, line, r,
@@ -1851,7 +1854,7 @@ static int context_dump_partitions(Context *context, const char *node) {
                 r = table_add_many(
                                 t,
                                 TABLE_STRING, gpt_partition_type_uuid_to_string_harder(p->type_uuid, uuid_buffer),
-                                TABLE_STRING, label ?: "-", TABLE_SET_COLOR, label ? NULL : ansi_grey(),
+                                TABLE_STRING, empty_to_null(label) ?: "-", TABLE_SET_COLOR, empty_to_null(label) ? NULL : ansi_grey(),
                                 TABLE_UUID, sd_id128_is_null(p->new_uuid) ? p->current_uuid : p->new_uuid,
                                 TABLE_STRING, p->definition_path ? basename(p->definition_path) : "-", TABLE_SET_COLOR, p->definition_path ? NULL : ansi_grey(),
                                 TABLE_STRING, partname ?: "-", TABLE_SET_COLOR, partname ? NULL : ansi_highlight(),
@@ -2251,6 +2254,11 @@ static int context_discard_partition(Context *context, Partition *p) {
                 log_info("Storage does not support discard, not discarding data in future partition %" PRIu64 ".", p->partno);
                 return 0;
         }
+        if (r == -EBUSY) {
+                /* Let's handle this gracefully: https://bugzilla.kernel.org/show_bug.cgi?id=211167 */
+                log_info("Block device is busy, not discarding partition %" PRIu64 " because it probably is mounted.", p->partno);
+                return 0;
+        }
         if (r == 0) {
                 log_info("Partition %" PRIu64 " too short for discard, skipping.", p->partno);
                 return 0;
@@ -2419,7 +2427,7 @@ static int partition_encrypt(
                          volume_key,
                          volume_key_size,
                          &(struct crypt_params_luks2) {
-                                 .label = p->new_label,
+                                 .label = strempty(p->new_label),
                                  .sector_size = 512U,
                          });
         if (r < 0)
@@ -2635,7 +2643,7 @@ static int do_copy_files(Partition *p, const char *fs) {
 
                         pfd = chase_symlinks_and_open(dn, fs, CHASE_PREFIX_ROOT|CHASE_WARN, O_RDONLY|O_DIRECTORY|O_CLOEXEC, NULL);
                         if (pfd < 0)
-                                return log_error_errno(tfd, "Failed to open parent directory of target: %m");
+                                return log_error_errno(pfd, "Failed to open parent directory of target: %m");
 
                         tfd = openat(pfd, basename(*target), O_CREAT|O_EXCL|O_WRONLY|O_CLOEXEC, 0700);
                         if (tfd < 0)
@@ -2763,7 +2771,7 @@ static int context_mkfs(Context *context) {
                 if (r < 0)
                         return r;
 
-                r = make_filesystem(fsdev, p->format, p->new_label, fs_uuid, arg_discard);
+                r = make_filesystem(fsdev, p->format, strempty(p->new_label), fs_uuid, arg_discard);
                 if (r < 0) {
                         encrypted_dev_fd = safe_close(encrypted_dev_fd);
                         (void) deactivate_luks(cd, encrypted);
@@ -2952,7 +2960,7 @@ static int context_acquire_partition_uuids_and_labels(Context *context) {
 
                         if (p->current_label) {
                                 free(p->new_label);
-                                p->new_label = strdup(p->current_label);
+                                p->new_label = strdup(strempty(p->current_label));
                                 if (!p->new_label)
                                         return log_oom();
                         }
@@ -3035,9 +3043,7 @@ static int context_mangle_partitions(Context *context) {
                         }
 
                         if (!streq_ptr(p->new_label, p->current_label)) {
-                                assert(!isempty(p->new_label));
-
-                                r = fdisk_partition_set_name(p->current_partition, p->new_label);
+                                r = fdisk_partition_set_name(p->current_partition, strempty(p->new_label));
                                 if (r < 0)
                                         return log_error_errno(r, "Failed to set partition label: %m");
 
@@ -3061,7 +3067,7 @@ static int context_mangle_partitions(Context *context) {
                         assert(p->offset % 512 == 0);
                         assert(p->new_size % 512 == 0);
                         assert(!sd_id128_is_null(p->new_uuid));
-                        assert(!isempty(p->new_label));
+                        assert(p->new_label);
 
                         t = fdisk_new_parttype();
                         if (!t)
@@ -3099,7 +3105,7 @@ static int context_mangle_partitions(Context *context) {
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set partition UUID: %m");
 
-                        r = fdisk_partition_set_name(q, p->new_label);
+                        r = fdisk_partition_set_name(q, strempty(p->new_label));
                         if (r < 0)
                                 return log_error_errno(r, "Failed to set partition label: %m");
 
@@ -3711,7 +3717,7 @@ static int parse_efi_variable_factory_reset(void) {
 
         arg_factory_reset = r;
         if (r)
-                log_notice("Honouring factory reset requested via EFI variable FactoryReset: %m");
+                log_notice("Factory reset requested via EFI variable FactoryReset.");
 
         return 0;
 }
@@ -3860,6 +3866,40 @@ static int find_root(char **ret, int *ret_fd) {
         return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "Failed to discover root block device.");
 }
 
+static int resize_pt(int fd) {
+        char procfs_path[STRLEN("/proc/self/fd/") + DECIMAL_STR_MAX(int)];
+        _cleanup_(fdisk_unref_contextp) struct fdisk_context *c = NULL;
+        int r;
+
+        /* After resizing the backing file we need to resize the partition table itself too, so that it takes
+         * possession of the enlarged backing file. For this it suffices to open the device with libfdisk and
+         * immediately write it again, with no changes. */
+
+        c = fdisk_new_context();
+        if (!c)
+                return log_oom();
+
+        xsprintf(procfs_path, "/proc/self/fd/%i", fd);
+        r = fdisk_assign_device(c, procfs_path, 0);
+        if (r < 0)
+                return log_error_errno(r, "Failed to open device '%s': %m", procfs_path);
+
+        r = fdisk_has_label(c);
+        if (r < 0)
+                return log_error_errno(r, "Failed to determine whether disk '%s' has a disk label: %m", procfs_path);
+        if (r == 0) {
+                log_debug("Not resizing partition table, as there currently is none.");
+                return 0;
+        }
+
+        r = fdisk_write_disklabel(c);
+        if (r < 0)
+                return log_error_errno(r, "Failed to write resized partition table: %m");
+
+        log_info("Resized partition table.");
+        return 1;
+}
+
 static int resize_backing_fd(const char *node, int *fd) {
         char buf1[FORMAT_BYTES_MAX], buf2[FORMAT_BYTES_MAX];
         _cleanup_close_ int writable_fd = -1;
@@ -3912,6 +3952,10 @@ static int resize_backing_fd(const char *node, int *fd) {
                         /* Fallback to truncation, if fallocate() is not supported. */
                         log_debug("Backing file system does not support fallocate(), falling back to ftruncate().");
                 } else {
+                        r = resize_pt(writable_fd);
+                        if (r < 0)
+                                return r;
+
                         if (st.st_size == 0) /* Likely regular file just created by us */
                                 log_info("Allocated %s for '%s'.", buf2, node);
                         else
@@ -3924,6 +3968,10 @@ static int resize_backing_fd(const char *node, int *fd) {
         if (ftruncate(writable_fd, arg_size) < 0)
                 return log_error_errno(errno, "Failed to grow '%s' from %s to %s by truncation: %m",
                                        node, buf1, buf2);
+
+        r = resize_pt(writable_fd);
+        if (r < 0)
+                return r;
 
         if (st.st_size == 0) /* Likely regular file just created by us */
                 log_info("Sized '%s' to %s.", node, buf2);

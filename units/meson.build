@@ -203,7 +203,8 @@ in_units = [
         ['systemd-networkd.service',             'ENABLE_NETWORKD'],
         ['systemd-networkd-wait-online.service', 'ENABLE_NETWORKD'],
         ['systemd-nspawn@.service',              ''],
-        ['systemd-oomd.service',                 'ENABLE_OOMD'],
+        ['systemd-oomd.service',                 'ENABLE_OOMD',
+         'dbus-org.freedesktop.oom1.service'],
         ['systemd-portabled.service',            'ENABLE_PORTABLED',
          'dbus-org.freedesktop.portable1.service'],
         ['systemd-userdbd.service',              'ENABLE_USERDB'],
@@ -338,8 +339,7 @@ if conf.get('HAVE_SYSV_COMPAT') == 1
         foreach i : [1, 2, 3, 4, 5]
                 meson.add_install_script(
                         'sh', '-c',
-                        mkdir_p
-                        .format(join_paths(systemunitdir, 'runlevel@0@.target.wants'.format(i))))
+                        mkdir_p.format(join_paths(systemunitdir, 'runlevel@0@.target.wants'.format(i))))
         endforeach
 endif
 

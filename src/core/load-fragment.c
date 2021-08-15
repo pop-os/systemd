@@ -791,7 +791,7 @@ int config_parse_exec(
                         return ignore ? 0 : -ENOEXEC;
                 }
 
-                if (!path_is_absolute(path) && !filename_is_valid(path)) {
+                if (!(path_is_absolute(path) ? path_is_valid(path) : filename_is_valid(path))) {
                         log_syntax(unit, ignore ? LOG_WARNING : LOG_ERR, filename, line, 0,
                                    "Neither a valid executable name nor an absolute path%s: %s",
                                    ignore ? ", ignoring" : "", path);
@@ -1680,6 +1680,8 @@ int config_parse_exec_cpu_affinity(const char *unit,
                                    void *userdata) {
 
         ExecContext *c = data;
+        const Unit *u = userdata;
+        _cleanup_free_ char *k = NULL;
         int r;
 
         assert(filename);
@@ -1694,7 +1696,15 @@ int config_parse_exec_cpu_affinity(const char *unit,
                 return 0;
         }
 
-        r = parse_cpu_set_extend(rvalue, &c->cpu_set, true, unit, filename, line, lvalue);
+        r = unit_full_printf(u, rvalue, &k);
+        if (r < 0) {
+                log_syntax(unit, LOG_WARNING, filename, line, r,
+                           "Failed to resolve unit specifiers in '%s', ignoring: %m",
+                           rvalue);
+                return 0;
+        }
+
+        r = parse_cpu_set_extend(k, &c->cpu_set, true, unit, filename, line, lvalue);
         if (r >= 0)
                 c->cpu_affinity_from_numa = false;
 
@@ -4569,7 +4579,7 @@ int config_parse_load_credential(
         r = extract_first_word(&p, &word, ":", EXTRACT_DONT_COALESCE_SEPARATORS);
         if (r == -ENOMEM)
                 return log_oom();
-        if (r <= 0) {
+        if (r <= 0 || isempty(p)) {
                 log_syntax(unit, LOG_WARNING, filename, line, r, "Invalid syntax, ignoring: %s", rvalue);
                 return 0;
         }
@@ -4999,20 +5009,20 @@ int config_parse_mount_images(
                 if (r == 0)
                         continue;
 
-                r = unit_full_printf(u, first, &sresolved);
-                if (r < 0) {
-                        log_syntax(unit, LOG_WARNING, filename, line, r,
-                                   "Failed to resolve unit specifiers in \"%s\", ignoring: %m", first);
-                        continue;
-                }
-
-                s = sresolved;
+                s = first;
                 if (s[0] == '-') {
                         permissive = true;
                         s++;
                 }
 
-                r = path_simplify_and_warn(s, PATH_CHECK_ABSOLUTE, unit, filename, line, lvalue);
+                r = unit_full_printf(u, s, &sresolved);
+                if (r < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Failed to resolve unit specifiers in \"%s\", ignoring: %m", s);
+                        continue;
+                }
+
+                r = path_simplify_and_warn(sresolved, PATH_CHECK_ABSOLUTE, unit, filename, line, lvalue);
                 if (r < 0)
                         continue;
 
@@ -5089,7 +5099,7 @@ int config_parse_mount_images(
 
                 r = mount_image_add(&c->mount_images, &c->n_mount_images,
                                     &(MountImage) {
-                                            .source = s,
+                                            .source = sresolved,
                                             .destination = dresolved,
                                             .mount_options = options,
                                             .ignore_enoent = permissive,

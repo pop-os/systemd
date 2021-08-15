@@ -1310,20 +1310,28 @@ static int mount_partition(
         }
 
         if (directory) {
-                if (!FLAGS_SET(flags, DISSECT_IMAGE_READ_ONLY)) {
-                        /* Automatically create missing mount points, if necessary. */
-                        r = mkdir_p_root(where, directory, uid_shift, (gid_t) uid_shift, 0755);
-                        if (r < 0)
-                                return r;
-                }
+                /* Automatically create missing mount points inside the image, if necessary. */
+                r = mkdir_p_root(where, directory, uid_shift, (gid_t) uid_shift, 0755);
+                if (r < 0 && r != -EROFS)
+                        return r;
 
                 r = chase_symlinks(directory, where, CHASE_PREFIX_ROOT, &chased, NULL);
                 if (r < 0)
                         return r;
 
                 p = chased;
-        } else
+        } else {
+                /* Create top-level mount if missing – but only if this is asked for. This won't modify the
+                 * image (as the branch above does) but the host hierarchy, and the created directory might
+                 * survive our mount in the host hierarchy hence. */
+                if (FLAGS_SET(flags, DISSECT_IMAGE_MKDIR)) {
+                        r = mkdir_p(where, 0755);
+                        if (r < 0)
+                                return r;
+                }
+
                 p = where;
+        }
 
         /* If requested, turn on discard support. */
         if (fstype_can_discard(fstype) &&
@@ -1348,11 +1356,26 @@ static int mount_partition(
                 if (!strextend_with_separator(&options, ",", m->mount_options, NULL))
                         return -ENOMEM;
 
-        if (FLAGS_SET(flags, DISSECT_IMAGE_MKDIR)) {
-                r = mkdir_p(p, 0755);
-                if (r < 0)
-                        return r;
-        }
+        /* So, when you request MS_RDONLY from ext4, then this means nothing. It happily still writes to the
+         * backing storage. What's worse, the BLKRO[GS]ET flag and (in case of loopback devices)
+         * LO_FLAGS_READ_ONLY don't mean anything, they affect userspace accesses only, and write accesses
+         * from the upper file system still get propagated through to the underlying file system,
+         * unrestricted. To actually get ext4/xfs/btrfs to stop writing to the device we need to specify
+         * "norecovery" as mount option, in addition to MS_RDONLY. Yes, this sucks, since it means we need to
+         * carry a per file system table here.
+         *
+         * Note that this means that we might not be able to mount corrupted file systems as read-only
+         * anymore (since in some cases the kernel implementations will refuse mounting when corrupted,
+         * read-only and "norecovery" is specified). But I think for the case of automatically determined
+         * mount options for loopback devices this is the right choice, since otherwise using the same
+         * loopback file twice even in read-only mode, is going to fail badly sooner or later. The usecase of
+         * making reuse of the immutable images "just work" is more relevant to us than having read-only
+         * access that actually modifies stuff work on such image files. Or to say this differently: if
+         * people want their file systems to be fixed up they should just open them in writable mode, where
+         * all these problems don't exist. */
+        if (!rw && STRPTR_IN_SET(fstype, "ext3", "ext4", "xfs", "btrfs"))
+                if (!strextend_with_separator(&options, ",", "norecovery", NULL))
+                        return -ENOMEM;
 
         r = mount_nofollow_verbose(LOG_DEBUG, node, p, fstype, MS_NODEV|(rw ? 0 : MS_RDONLY), options);
         if (r < 0)
@@ -1385,10 +1408,6 @@ int dissected_image_mount(DissectedImage *m, const char *where, uid_t uid_shift,
                 if (r < 0)
                         return r;
         }
-
-        /* Mask DISSECT_IMAGE_MKDIR for all subdirs: the idea is that only the top-level mount point is
-         * created if needed, but the image itself not modified. */
-        flags &= ~DISSECT_IMAGE_MKDIR;
 
         if ((flags & DISSECT_IMAGE_MOUNT_NON_ROOT_ONLY) == 0) {
                 /* For us mounting root always means mounting /usr as well */
@@ -1532,6 +1551,7 @@ DecryptedImage* decrypted_image_unref(DecryptedImage* d) {
                 free(p->name);
         }
 
+        free(d->decrypted);
         free(d);
 #endif
         return NULL;
@@ -2214,8 +2234,8 @@ int dissected_image_acquire_metadata(DissectedImage *m) {
                 [META_HOSTNAME]     = "/etc/hostname\0",
                 [META_MACHINE_ID]   = "/etc/machine-id\0",
                 [META_MACHINE_INFO] = "/etc/machine-info\0",
-                [META_OS_RELEASE]   = "/etc/os-release\0"
-                                      "/usr/lib/os-release\0",
+                [META_OS_RELEASE]   = ("/etc/os-release\0"
+                                       "/usr/lib/os-release\0"),
         };
 
         _cleanup_strv_free_ char **machine_info = NULL, **os_release = NULL;
