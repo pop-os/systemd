@@ -1,8 +1,17 @@
-systemd (247.9-1) UNRELEASED; urgency=medium
+systemd (247.9-1) unstable; urgency=medium
 
+  [ Michael Biebl ]
   * New upstream version 247.9
+  * Rebase patches
+  * Fix removal of systemd-hwdb-update.service.
+    As we don't support factory-reset, we don't need this service.
+    In Debian, the hwdb binary database is updated via a dpkg file trigger.
 
- -- Michael Biebl <biebl@debian.org>  Sun, 15 Aug 2021 15:34:25 +0200
+  [ Balint Reczey ]
+  * debian/rules: Don't ship README files in (/usr)/lib/*.d.
+    README files are typically shipped in /usr/share/doc.
+
+ -- Michael Biebl <biebl@debian.org>  Sun, 15 Aug 2021 21:10:56 +0200
 
 systemd (247.3-6) unstable; urgency=high
 
