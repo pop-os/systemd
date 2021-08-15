@@ -4,6 +4,7 @@
 # they are very long but quite repetitive and the parser is not very fast.
 # So we don't "test" them.
 hwdb_files_notest = files('''
+        README
         20-pci-vendor-model.hwdb
         20-pci-classes.hwdb
         20-usb-vendor-model.hwdb
@@ -47,8 +48,7 @@ if conf.get('ENABLE_HWDB') == 1
                                          mkdir_p.format(join_paths(sysconfdir, 'udev/hwdb.d')))
 
                 meson.add_install_script('sh', '-c',
-                                         'test -n "$DESTDIR" || @0@/systemd-hwdb update'
-                                         .format(rootbindir))
+                                         'test -n "$DESTDIR" || @0@/systemd-hwdb update'.format(rootbindir))
         endif
 
         if want_tests != 'false'

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 
-#include <sys/poll.h>
+#include <poll.h>
 
 #include "alloc-util.h"
 #include "errno-util.h"
@@ -222,11 +222,11 @@ DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(varlink_state, VarlinkState);
         log_debug("%s: " fmt, varlink_server_description(s), ##__VA_ARGS__)
 
 static inline const char *varlink_description(Varlink *v) {
-        return strna(v ? v->description : NULL);
+        return (v ? v->description : NULL) ?: "varlink";
 }
 
 static inline const char *varlink_server_description(VarlinkServer *s) {
-        return strna(s ? s->description : NULL);
+        return (s ? s->description : NULL) ?: "varlink";
 }
 
 static void varlink_set_state(Varlink *v, VarlinkState state) {
@@ -234,10 +234,10 @@ static void varlink_set_state(Varlink *v, VarlinkState state) {
         assert(state >= 0 && state < _VARLINK_STATE_MAX);
 
         if (v->state < 0)
-                varlink_log(v, "varlink: setting state %s",
+                varlink_log(v, "Setting state %s",
                             varlink_state_to_string(state));
         else
-                varlink_log(v, "varlink: changing state %s → %s",
+                varlink_log(v, "Changing state %s → %s",
                             varlink_state_to_string(v->state),
                             varlink_state_to_string(state));
 
@@ -1213,13 +1213,11 @@ Varlink* varlink_close_unref(Varlink *v) {
 }
 
 Varlink* varlink_flush_close_unref(Varlink *v) {
-
         if (!v)
                 return NULL;
 
         (void) varlink_flush(v);
-        (void) varlink_close(v);
-        return varlink_unref(v);
+        return varlink_close_unref(v);
 }
 
 static int varlink_enqueue_json(Varlink *v, JsonVariant *m) {

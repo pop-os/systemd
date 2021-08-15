@@ -10,7 +10,6 @@
 #include "resolved-etc-hosts.h"
 #include "string-util.h"
 
-#define CNAME_MAX 8
 #define QUERIES_MAX 2048
 #define AUXILIARY_QUERIES_MAX 64
 
@@ -43,6 +42,8 @@ static void dns_query_candidate_stop(DnsQueryCandidate *c) {
 
         assert(c);
 
+        /* Detach all the DnsTransactions attached to this query */
+
         while ((t = set_steal_first(c->transactions))) {
                 set_remove(t->notify_query_candidates, c);
                 set_remove(t->notify_query_candidates_done, c);
@@ -50,20 +51,33 @@ static void dns_query_candidate_stop(DnsQueryCandidate *c) {
         }
 }
 
+static DnsQueryCandidate* dns_query_candidate_unlink(DnsQueryCandidate *c) {
+        assert(c);
+
+        /* Detach this DnsQueryCandidate from the Query and Scope objects */
+
+        if (c->query) {
+                LIST_REMOVE(candidates_by_query, c->query->candidates, c);
+                c->query = NULL;
+        }
+
+        if (c->scope) {
+                LIST_REMOVE(candidates_by_scope, c->scope->query_candidates, c);
+                c->scope = NULL;
+        }
+
+        return c;
+}
+
 static DnsQueryCandidate* dns_query_candidate_free(DnsQueryCandidate *c) {
         if (!c)
                 return NULL;
 
         dns_query_candidate_stop(c);
+        dns_query_candidate_unlink(c);
 
         set_free(c->transactions);
         dns_search_domain_unref(c->search_domain);
-
-        if (c->query)
-                LIST_REMOVE(candidates_by_query, c->query->candidates, c);
-
-        if (c->scope)
-                LIST_REMOVE(candidates_by_scope, c->scope->query_candidates, c);
 
         return mfree(c);
 }
@@ -103,6 +117,7 @@ static int dns_query_candidate_add_transaction(DnsQueryCandidate *c, DnsResource
 
         assert(c);
         assert(key);
+        assert(c->query); /* We shan't add transactions to a candidate that has been detached already */
 
         t = dns_scope_find_transaction(c->scope, key, true);
         if (!t) {
@@ -211,6 +226,7 @@ static int dns_query_candidate_setup_transactions(DnsQueryCandidate *c) {
         int n = 0, r;
 
         assert(c);
+        assert(c->query); /* We shan't add transactions to a candidate that has been detached already */
 
         dns_query_candidate_stop(c);
 
@@ -252,6 +268,9 @@ void dns_query_candidate_notify(DnsQueryCandidate *c) {
         int r;
 
         assert(c);
+
+        if (!c->query) /* This candidate has been abandoned, do nothing. */
+                return;
 
         state = dns_query_candidate_state(c);
 
@@ -297,17 +316,19 @@ static void dns_query_stop(DnsQuery *q) {
 
         assert(q);
 
-        q->timeout_event_source = sd_event_source_unref(q->timeout_event_source);
+        q->timeout_event_source = sd_event_source_disable_unref(q->timeout_event_source);
 
         LIST_FOREACH(candidates_by_query, c, q->candidates)
                 dns_query_candidate_stop(c);
 }
 
-static void dns_query_unref_candidates(DnsQuery *q) {
+static void dns_query_unlink_candidates(DnsQuery *q) {
         assert(q);
 
         while (q->candidates)
-                dns_query_candidate_unref(q->candidates);
+                /* Here we drop *our* references to each of the candidates. If we had the only reference, the
+                 * DnsQueryCandidate object will be freed. */
+                dns_query_candidate_unref(dns_query_candidate_unlink(q->candidates));
 }
 
 static void dns_query_reset_answer(DnsQuery *q) {
@@ -336,7 +357,7 @@ DnsQuery *dns_query_free(DnsQuery *q) {
                 LIST_REMOVE(auxiliary_queries, q->auxiliary_for->auxiliary_queries, q);
         }
 
-        dns_query_unref_candidates(q);
+        dns_query_unlink_candidates(q);
 
         dns_question_unref(q->question_idna);
         dns_question_unref(q->question_utf8);
@@ -890,18 +911,18 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
         assert(q);
 
         q->n_cname_redirects++;
-        if (q->n_cname_redirects > CNAME_MAX)
+        if (q->n_cname_redirects > CNAME_REDIRECT_MAX)
                 return -ELOOP;
 
         r = dns_question_cname_redirect(q->question_idna, cname, &nq_idna);
         if (r < 0)
                 return r;
-        else if (r > 0)
+        if (r > 0)
                 log_debug("Following CNAME/DNAME %s → %s.", dns_question_first_name(q->question_idna), dns_question_first_name(nq_idna));
 
         k = dns_question_is_equal(q->question_idna, q->question_utf8);
         if (k < 0)
-                return r;
+                return k;
         if (k > 0) {
                 /* Same question? Shortcut new question generation */
                 nq_utf8 = dns_question_ref(nq_idna);
@@ -910,7 +931,7 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
                 k = dns_question_cname_redirect(q->question_utf8, cname, &nq_utf8);
                 if (k < 0)
                         return k;
-                else if (k > 0)
+                if (k > 0)
                         log_debug("Following UTF8 CNAME/DNAME %s → %s.", dns_question_first_name(q->question_utf8), dns_question_first_name(nq_utf8));
         }
 
@@ -932,7 +953,7 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
         dns_question_unref(q->question_utf8);
         q->question_utf8 = TAKE_PTR(nq_utf8);
 
-        dns_query_unref_candidates(q);
+        dns_query_unlink_candidates(q);
         dns_query_reset_answer(q);
 
         q->state = DNS_TRANSACTION_NULL;

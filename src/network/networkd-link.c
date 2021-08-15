@@ -4,6 +4,7 @@
 #include <linux/if.h>
 #include <linux/if_arp.h>
 #include <linux/if_link.h>
+#include <linux/netdevice.h>
 #include <unistd.h>
 
 #include "alloc-util.h"
@@ -28,7 +29,6 @@
 #include "networkd-dhcp6.h"
 #include "networkd-fdb.h"
 #include "networkd-ipv4ll.h"
-#include "networkd-ipv6-proxy-ndp.h"
 #include "networkd-link-bus.h"
 #include "networkd-link.h"
 #include "networkd-lldp-tx.h"
@@ -152,6 +152,12 @@ static void link_update_master_operstate(Link *link, NetDev *netdev) {
                 return;
 
         if (netdev->ifindex <= 0)
+                return;
+
+        /* If an interface is self-mentioned in Bridge= or friends, then it introduces an infinite loop.
+         * FIXME: there still exits a possibility of an infinite loop when two or more interfaces
+         * mention each other in Bridge= or so. We need to detect such a loop. */
+        if (link->ifindex == netdev->ifindex)
                 return;
 
         if (link_get(link->manager, netdev->ifindex, &master) < 0)
@@ -1346,8 +1352,9 @@ static int link_configure_addrgen_mode(Link *link) {
                 r = sysctl_read_ip_property(AF_INET6, link->ifname, "stable_secret", NULL);
                 if (r < 0) {
                         /* The file may not exist. And even if it exists, when stable_secret is unset,
-                         * reading the file fails with EIO. */
-                        log_link_debug_errno(link, r, "Failed to read sysctl property stable_secret: %m");
+                         * reading the file fails with ENOMEM when read_full_virtual_file(), which uses
+                         * read() as the backend, and EIO when read_one_line_file() which uses fgetc(). */
+                        log_link_debug_errno(link, r, "Failed to read sysctl property stable_secret, ignoring: %m");
 
                         ipv6ll_mode = IN6_ADDR_GEN_MODE_EUI64;
                 } else
@@ -1394,7 +1401,7 @@ static int link_up_handler(sd_netlink *rtnl, sd_netlink_message *m, Link *link) 
         return 1;
 }
 
-static int link_up(Link *link) {
+int link_up(Link *link) {
         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *req = NULL;
         int r;
 
@@ -1492,7 +1499,7 @@ static int link_set_group(Link *link) {
         assert(link->manager);
         assert(link->manager->rtnl);
 
-        if (link->network->group <= 0)
+        if (!link->network->group_set)
                 return 0;
 
         log_link_debug(link, "Setting group");
@@ -2001,37 +2008,51 @@ static int link_enter_join_netdev(Link *link) {
 }
 
 static int link_drop_foreign_config(Link *link) {
-        int r;
+        int k, r;
+
+        assert(link);
+        assert(link->manager);
 
         r = link_drop_foreign_addresses(link);
-        if (r < 0)
-                return r;
 
-        r = link_drop_foreign_neighbors(link);
-        if (r < 0)
-                return r;
+        k = link_drop_foreign_neighbors(link);
+        if (k < 0 && r >= 0)
+                r = k;
 
-        return link_drop_foreign_routes(link);
+        k = link_drop_foreign_routes(link);
+        if (k < 0 && r >= 0)
+                r = k;
+
+        k = manager_drop_foreign_routing_policy_rules(link->manager);
+        if (k < 0 && r >= 0)
+                r = k;
+
+        return r;
 }
 
 static int link_drop_config(Link *link) {
-        int r;
+        int k, r;
+
+        assert(link);
+        assert(link->manager);
 
         r = link_drop_addresses(link);
-        if (r < 0)
-                return r;
 
-        r = link_drop_neighbors(link);
-        if (r < 0)
-                return r;
+        k = link_drop_neighbors(link);
+        if (k < 0 && r >= 0)
+                r = k;
 
-        r = link_drop_routes(link);
-        if (r < 0)
-                return r;
+        k = link_drop_routes(link);
+        if (k < 0 && r >= 0)
+                r = k;
+
+        k = manager_drop_routing_policy_rules(link->manager, link);
+        if (k < 0 && r >= 0)
+                r = k;
 
         ndisc_flush(link);
 
-        return 0;
+        return r;
 }
 
 int link_configure(Link *link) {
@@ -2053,10 +2074,6 @@ int link_configure(Link *link) {
                 return link_configure_can(link);
 
         r = link_set_sysctl(link);
-        if (r < 0)
-                return r;
-
-        r = link_set_ipv6_proxy_ndp_addresses(link);
         if (r < 0)
                 return r;
 
@@ -2508,7 +2525,7 @@ int link_add(Manager *m, sd_netlink_message *message, Link **ret) {
                 sprintf(ifindex_str, "n%d", link->ifindex);
                 r = sd_device_new_from_device_id(&device, ifindex_str);
                 if (r < 0) {
-                        log_link_warning_errno(link, r, "Could not find device, waiting for device initialization: %m");
+                        log_link_debug_errno(link, r, "Could not find device, waiting for device initialization: %m");
                         return 0;
                 }
 

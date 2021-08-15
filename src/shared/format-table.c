@@ -1370,7 +1370,7 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 _cleanup_free_ char *p;
                 char *ret;
 
-                p = new(char, FORMAT_TIMESTAMP_MAX);
+                p = new(char, d->type == TABLE_TIMESTAMP_RELATIVE ? FORMAT_TIMESTAMP_RELATIVE_MAX : FORMAT_TIMESTAMP_MAX);
                 if (!p)
                         return NULL;
 
@@ -1379,7 +1379,7 @@ static const char *table_data_format(Table *t, TableData *d, bool avoid_uppercas
                 else if (d->type == TABLE_TIMESTAMP_UTC)
                         ret = format_timestamp_style(p, FORMAT_TIMESTAMP_MAX, d->timestamp, TIMESTAMP_UTC);
                 else
-                        ret = format_timestamp_relative(p, FORMAT_TIMESTAMP_MAX, d->timestamp);
+                        ret = format_timestamp_relative(p, FORMAT_TIMESTAMP_RELATIVE_MAX, d->timestamp);
                 if (!ret)
                         return "n/a";
 
@@ -1993,8 +1993,7 @@ int table_print(Table *t, FILE *f) {
                                 if (width[j] < minimum_width[j])
                                         width[j] = minimum_width[j];
 
-                                assert(width[j] >= requested_width[j]);
-                                delta = width[j] - requested_width[j];
+                                delta = LESS_BY(width[j], requested_width[j]);
 
                                 /* Subtract what we just added from the rest */
                                 if (extra > delta)
