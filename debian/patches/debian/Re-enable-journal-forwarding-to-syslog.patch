@@ -42,10 +42,10 @@ index 10ebc3e..ce15766 100644
  
                  .max_file_usec = DEFAULT_MAX_FILE_USEC,
 diff --git a/src/journal/journald.conf b/src/journal/journald.conf
-index 2e1aacd..d6cd5b1 100644
+index 5a60a9d..64f4d4b 100644
 --- a/src/journal/journald.conf
 +++ b/src/journal/journald.conf
-@@ -29,7 +29,7 @@
+@@ -32,7 +32,7 @@
  #RuntimeMaxFiles=100
  #MaxRetentionSec=
  #MaxFileSec=1month

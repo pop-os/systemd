@@ -1,9 +1,8 @@
-From cbcea9f517bfe79b019fcec5c364952ea33d24f2 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+From: =?utf-8?q?Zbigniew_J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
 Date: Wed, 23 Jun 2021 11:52:56 +0200
 Subject: basic/unit-name: adjust comments
 MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
+Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 8bit
 
 We already checked for "too long" right above…
@@ -12,7 +11,7 @@ We already checked for "too long" right above…
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/basic/unit-name.c b/src/basic/unit-name.c
-index a22763443fdd..1deead74588b 100644
+index 9b6cacd..e286831 100644
 --- a/src/basic/unit-name.c
 +++ b/src/basic/unit-name.c
 @@ -528,7 +528,7 @@ int unit_name_from_path(const char *path, const char *suffix, char **ret) {
@@ -33,6 +32,3 @@ index a22763443fdd..1deead74588b 100644
          if (!unit_name_is_valid(s, UNIT_NAME_INSTANCE))
                  return -EINVAL;
  
--- 
-2.32.0
-

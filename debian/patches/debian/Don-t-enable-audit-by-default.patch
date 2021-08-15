@@ -42,10 +42,10 @@ index ce15766..bd7fa8f 100644
                  .watchdog_usec = USEC_INFINITY,
  
 diff --git a/src/journal/journald.conf b/src/journal/journald.conf
-index d6cd5b1..5e4b0e2 100644
+index 64f4d4b..a690681 100644
 --- a/src/journal/journald.conf
 +++ b/src/journal/journald.conf
-@@ -41,4 +41,4 @@
+@@ -44,4 +44,4 @@
  #MaxLevelWall=emerg
  #LineMax=48K
  #ReadKMsg=yes

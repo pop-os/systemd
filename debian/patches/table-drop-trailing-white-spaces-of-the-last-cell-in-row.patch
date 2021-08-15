@@ -11,10 +11,10 @@ Fixes #18415.
  2 files changed, 26 insertions(+), 20 deletions(-)
 
 diff --git a/src/shared/format-table.c b/src/shared/format-table.c
-index a13a198..2dc95e9 100644
+index 702edc7..129dc2a 100644
 --- a/src/shared/format-table.c
 +++ b/src/shared/format-table.c
-@@ -2155,6 +2155,12 @@ int table_print(Table *t, FILE *f) {
+@@ -2154,6 +2154,12 @@ int table_print(Table *t, FILE *f) {
                                                  if (!aligned)
                                                          return -ENOMEM;
  

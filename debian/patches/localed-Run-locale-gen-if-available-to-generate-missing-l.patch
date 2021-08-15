@@ -22,10 +22,10 @@ will also be inert at runtime if the locale-gen binary is missing.
  6 files changed, 286 insertions(+), 4 deletions(-)
 
 diff --git a/meson.build b/meson.build
-index 580964c..cf93f38 100644
+index f0e28cc..efb76ba 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -833,6 +833,14 @@ if default_locale == ''
+@@ -838,6 +838,14 @@ if default_locale == ''
  endif
  conf.set_quoted('SYSTEMD_DEFAULT_LOCALE', default_locale)
  
