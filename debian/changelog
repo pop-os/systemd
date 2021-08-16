@@ -29,8 +29,11 @@ systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
     but it won't hurt to have it in there anyways.
     File: debian/tests/tests-in-lxd
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=c06736c1fb90d976fe5cd520b97c0272ef8fcc64
+  * Add d/p/Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
+    File: debian/patches/Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=57ab55efaee92466bd5dbf046badc623188d254b
 
- -- Lukas Märdian <slyon@ubuntu.com>  Fri, 13 Aug 2021 14:44:26 +0200
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 16 Aug 2021 12:45:24 +0200
 
 systemd (248.3-1ubuntu3) impish; urgency=medium
 
