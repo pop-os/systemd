@@ -1,0 +1,110 @@
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 12 Aug 2021 16:04:40 +0200
+Subject: Merge pull request #20199 from ddstreet/unit_cgroup_catchup
+
+cgroup: do 'catchup' for unit cgroup inotify watch files
+---
+ src/core/cgroup.c  | 18 ++++++++++++++++++
+ src/core/cgroup.h  |  2 ++
+ src/core/manager.c |  4 ++++
+ src/core/unit.c    |  9 +++++++--
+ 4 files changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index 9cbdd29..3e938b5 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -2896,6 +2896,9 @@ static int unit_check_cgroup_events(Unit *u) {
+ 
+         assert(u);
+ 
++        if (!u->cgroup_path)
++                return 0;
++
+         r = cg_get_keyed_attribute_graceful(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, "cgroup.events",
+                                             STRV_MAKE("populated", "frozen"), values);
+         if (r < 0)
+@@ -3649,6 +3652,21 @@ void unit_invalidate_cgroup_bpf(Unit *u) {
+         }
+ }
+ 
++void unit_cgroup_catchup(Unit *u) {
++        assert(u);
++
++        if (!UNIT_HAS_CGROUP_CONTEXT(u))
++                return;
++
++        /* We dropped the inotify watch during reexec/reload, so we need to
++         * check these as they may have changed.
++         * Note that (currently) the kernel doesn't actually update cgroup
++         * file modification times, so we can't just serialize and then check
++         * the mtime for file(s) we are interested in. */
++        (void) unit_check_cgroup_events(u);
++        unit_add_to_cgroup_oom_queue(u);
++}
++
+ bool unit_cgroup_delegate(Unit *u) {
+         CGroupContext *c;
+ 
+diff --git a/src/core/cgroup.h b/src/core/cgroup.h
+index fa79ba1..7ef4d5a 100644
+--- a/src/core/cgroup.h
++++ b/src/core/cgroup.h
+@@ -288,6 +288,8 @@ void manager_invalidate_startup_units(Manager *m);
+ const char* cgroup_device_policy_to_string(CGroupDevicePolicy i) _const_;
+ CGroupDevicePolicy cgroup_device_policy_from_string(const char *s) _pure_;
+ 
++void unit_cgroup_catchup(Unit *u);
++
+ bool unit_cgroup_delegate(Unit *u);
+ 
+ int compare_job_priority(const void *a, const void *b);
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 688e688..e2dd7ba 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1326,6 +1326,10 @@ static void manager_clear_jobs_and_units(Manager *m) {
+         assert(!m->cleanup_queue);
+         assert(!m->gc_unit_queue);
+         assert(!m->gc_job_queue);
++        assert(!m->cgroup_realize_queue);
++        assert(!m->cgroup_empty_queue);
++        assert(!m->cgroup_oom_queue);
++        assert(!m->target_deps_queue);
+         assert(!m->stop_when_unneeded_queue);
+ 
+         assert(hashmap_isempty(m->jobs));
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 4745329..ee53457 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -687,6 +687,9 @@ Unit* unit_free(Unit *u) {
+         if (u->in_dbus_queue)
+                 LIST_REMOVE(dbus_queue, u->manager->dbus_unit_queue, u);
+ 
++        if (u->in_cleanup_queue)
++                LIST_REMOVE(cleanup_queue, u->manager->cleanup_queue, u);
++
+         if (u->in_gc_queue)
+                 LIST_REMOVE(gc_queue, u->manager->gc_unit_queue, u);
+ 
+@@ -696,8 +699,8 @@ Unit* unit_free(Unit *u) {
+         if (u->in_cgroup_empty_queue)
+                 LIST_REMOVE(cgroup_empty_queue, u->manager->cgroup_empty_queue, u);
+ 
+-        if (u->in_cleanup_queue)
+-                LIST_REMOVE(cleanup_queue, u->manager->cleanup_queue, u);
++        if (u->in_cgroup_oom_queue)
++                LIST_REMOVE(cgroup_oom_queue, u->manager->cgroup_oom_queue, u);
+ 
+         if (u->in_target_deps_queue)
+                 LIST_REMOVE(target_deps_queue, u->manager->target_deps_queue, u);
+@@ -3377,6 +3380,8 @@ void unit_catchup(Unit *u) {
+ 
+         if (UNIT_VTABLE(u)->catchup)
+                 UNIT_VTABLE(u)->catchup(u);
++
++        unit_cgroup_catchup(u);
+ }
+ 
+ static bool fragment_mtime_newer(const char *path, usec_t mtime, bool path_masked) {
