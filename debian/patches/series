@@ -58,3 +58,6 @@ CVE-2020-13529.patch
 CVE-2021-33910.patch
 dell-clamshell-accel-location-base-with-sku.patch
 Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
+udev-fix-slot-based-network-names-on-s390.patch
+udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
+udev-allow-onboard-index-up-to-65535.patch

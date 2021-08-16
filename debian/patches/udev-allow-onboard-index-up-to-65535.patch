@@ -1,0 +1,101 @@
+From: Viktor Mihajlovski <mihajlov@linux.ibm.com>
+Date: Tue, 27 Apr 2021 15:25:16 +0200
+Subject: udev: allow onboard index up to 65535
+
+The maximum allowed value of the sysfs device index entry was limited to
+16383 (2^14-1) to avoid the generation of unreasonable onboard interface
+names.
+For s390 the index can assume a value of up to 65535 (2^16-1) which is
+now allowed depending on the new naming flag NAMING_16BIT_INDEX.
+Larger index values are considered unreasonable and remain to be
+ignored.
+---
+ man/systemd.net-naming-scheme.xml |  7 ++++++-
+ src/shared/netif-naming-scheme.h  |  3 ++-
+ src/udev/udev-builtin-net_id.c    | 20 +++++++++++++-------
+ 3 files changed, 21 insertions(+), 9 deletions(-)
+
+diff --git a/man/systemd.net-naming-scheme.xml b/man/systemd.net-naming-scheme.xml
+index fe044d2..bc1ff78 100644
+--- a/man/systemd.net-naming-scheme.xml
++++ b/man/systemd.net-naming-scheme.xml
+@@ -376,7 +376,12 @@
+           of the <filename>function_id</filename> device attribute. This attribute is now used to build the
+           <varname>ID_NET_NAME_SLOT</varname>. Before that, all slot names were parsed as decimal
+           numbers, which could either result in an incorrect value of the <varname>ID_NET_NAME_SLOT</varname>
+-          property or none at all.</para></listitem>
++          property or none at all.</para>
++
++          <para>Some firmware and hypervisor implementations report unreasonable high numbers for the onboard
++          index. To prevent the generation of bogus onbard interface names, index numbers greater than 16381
++          (2^14-1) were ignored. For s390 PCI devices index values up to 65535 (2^16-1) are valid. To account
++          for that, the limit is increased to now 65535.</para></listitem>
+         </varlistentry>
+ 
+       </variablelist>
+diff --git a/src/shared/netif-naming-scheme.h b/src/shared/netif-naming-scheme.h
+index f719744..c0f94d0 100644
+--- a/src/shared/netif-naming-scheme.h
++++ b/src/shared/netif-naming-scheme.h
+@@ -33,6 +33,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_NSPAWN_LONG_HASH    = 1 << 8, /* Shorten nspawn interfaces by including 24bit hash, instead of simple truncation  */
+         NAMING_BRIDGE_NO_SLOT      = 1 << 9, /* Don't use PCI hotplug slot information if the corresponding device is a PCI bridge */
+         NAMING_SLOT_FUNCTION_ID    = 1 << 10, /* Use function_id if present to identify PCI hotplug slots */
++        NAMING_16BIT_INDEX         = 1 << 11, /* Allow full 16-bit for the onboard index */
+ 
+         /* And now the masks that combine the features above */
+         NAMING_V238 = 0,
+@@ -42,7 +43,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_V243 = NAMING_V241 | NAMING_NETDEVSIM | NAMING_LABEL_NOPREFIX,
+         NAMING_V245 = NAMING_V243 | NAMING_NSPAWN_LONG_HASH,
+         NAMING_V247 = NAMING_V245 | NAMING_BRIDGE_NO_SLOT,
+-        NAMING_V249 = NAMING_V247 | NAMING_SLOT_FUNCTION_ID,
++        NAMING_V249 = NAMING_V247 | NAMING_SLOT_FUNCTION_ID | NAMING_16BIT_INDEX,
+ 
+         _NAMING_SCHEME_FLAGS_INVALID = -EINVAL,
+ } NamingSchemeFlags;
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index 53653c4..8079fd2 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -36,7 +36,8 @@
+ #include "strxcpyx.h"
+ #include "udev-builtin.h"
+ 
+-#define ONBOARD_INDEX_MAX (16*1024-1)
++#define ONBOARD_14BIT_INDEX_MAX ((1U << 14) - 1)
++#define ONBOARD_16BIT_INDEX_MAX ((1U << 16) - 1)
+ 
+ enum netname_type{
+         NET_UNDEF,
+@@ -161,6 +162,16 @@ static int get_virtfn_info(sd_device *dev, struct netnames *names, struct virtfn
+         return 0;
+ }
+ 
++static bool is_valid_onboard_index(unsigned long idx) {
++        /* Some BIOSes report rubbish indexes that are excessively high (2^24-1 is an index VMware likes to
++         * report for example). Let's define a cut-off where we don't consider the index reliable anymore. We
++         * pick some arbitrary cut-off, which is somewhere beyond the realistic number of physical network
++         * interface a system might have. Ideally the kernel would already filter this crap for us, but it
++         * doesn't currently. The initial cut-off value (2^14-1) was too conservative for s390 PCI which
++         * allows for index values up 2^16-1 which is now enabled with the NAMING_16BIT_INDEX naming flag. */
++        return idx <= (naming_scheme_has(NAMING_16BIT_INDEX) ? ONBOARD_16BIT_INDEX_MAX : ONBOARD_14BIT_INDEX_MAX);
++}
++
+ /* retrieve on-board index number and label from firmware */
+ static int dev_pci_onboard(sd_device *dev, struct netnames *names) {
+         unsigned long idx, dev_port = 0;
+@@ -183,12 +194,7 @@ static int dev_pci_onboard(sd_device *dev, struct netnames *names) {
+         if (idx == 0 && !naming_scheme_has(NAMING_ZERO_ACPI_INDEX))
+                 return -EINVAL;
+ 
+-        /* Some BIOSes report rubbish indexes that are excessively high (2^24-1 is an index VMware likes to
+-         * report for example). Let's define a cut-off where we don't consider the index reliable anymore. We
+-         * pick some arbitrary cut-off, which is somewhere beyond the realistic number of physical network
+-         * interface a system might have. Ideally the kernel would already filter this crap for us, but it
+-         * doesn't currently. */
+-        if (idx > ONBOARD_INDEX_MAX)
++        if (!is_valid_onboard_index(idx))
+                 return -ENOENT;
+ 
+         /* kernel provided port index for multiple ports on a single PCI function */

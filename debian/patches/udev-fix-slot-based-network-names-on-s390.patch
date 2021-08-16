@@ -1,0 +1,132 @@
+From: Viktor Mihajlovski <mihajlov@linux.ibm.com>
+Date: Thu, 18 Mar 2021 11:03:34 +0100
+Subject: udev: fix slot based network names on s390
+
+The s390 PCI driver assigns the hotplug slot name from the
+function_id attribute of the PCI device using a 8 char hexadecimal
+format to match the underlying firmware/hypervisor notation.
+
+Further, there's always a one-to-one mapping between a PCI
+function and a hotplug slot, as individual functions can
+hot plugged even for multi-function devices.
+
+As the generic matching code will always try to parse the slot
+name in /sys/bus/pci/slots as a positive decimal number, either
+a wrong value might be produced for ID_NET_NAME_SLOT if
+the slot name consists of decimal numbers only, or none at all
+if a character in the range from 'a' to 'f' is encountered.
+
+Additionally, the generic code assumes that two interfaces
+share a hotplug slot, if they differ only in the function part
+of the PCI address. E.g., for an interface with the PCI address
+dddd:bb:aa.f, it will match the device to the first slot with
+an address dddd:bb:aa. As more than one slot may have this address
+for the s390 PCI driver, the wrong slot may be selected.
+
+To resolve this we're adding a new naming schema version with the
+flag NAMING_SLOT_FUNCTION_ID, which enables the correct matching
+of hotplug slots if the device has an attribute named function_id.
+The ID_NET_NAME_SLOT property will only be produced if there's
+a file /sys/bus/pci/slots/<slotname> where <slotname> matches
+the value of /sys/bus/pci/devices/.../function_id in 8 char
+hex notation.
+
+Fixes #19016
+See also #19078
+---
+ man/systemd.net-naming-scheme.xml | 10 ++++++++++
+ src/shared/netif-naming-scheme.c  |  1 +
+ src/shared/netif-naming-scheme.h  |  2 ++
+ src/udev/udev-builtin-net_id.c    | 26 ++++++++++++++++++++++++++
+ 4 files changed, 39 insertions(+)
+
+diff --git a/man/systemd.net-naming-scheme.xml b/man/systemd.net-naming-scheme.xml
+index 646dd3e..fe044d2 100644
+--- a/man/systemd.net-naming-scheme.xml
++++ b/man/systemd.net-naming-scheme.xml
+@@ -369,6 +369,16 @@
+           property.</para></listitem>
+         </varlistentry>
+ 
++        <varlistentry>
++          <term><constant>v249</constant></term>
++
++          <listitem><para>PCI hotplug slot names for the s390 PCI driver are a hexadecimal representation
++          of the <filename>function_id</filename> device attribute. This attribute is now used to build the
++          <varname>ID_NET_NAME_SLOT</varname>. Before that, all slot names were parsed as decimal
++          numbers, which could either result in an incorrect value of the <varname>ID_NET_NAME_SLOT</varname>
++          property or none at all.</para></listitem>
++        </varlistentry>
++
+       </variablelist>
+ 
+     <para>Note that <constant>latest</constant> may be used to denote the latest scheme known (to this
+diff --git a/src/shared/netif-naming-scheme.c b/src/shared/netif-naming-scheme.c
+index df520ab..82c6625 100644
+--- a/src/shared/netif-naming-scheme.c
++++ b/src/shared/netif-naming-scheme.c
+@@ -13,6 +13,7 @@ static const NamingScheme naming_schemes[] = {
+         { "v243", NAMING_V243 },
+         { "v245", NAMING_V245 },
+         { "v247", NAMING_V247 },
++        { "v249", NAMING_V249 },
+         /* … add more schemes here, as the logic to name devices is updated … */
+ };
+ 
+diff --git a/src/shared/netif-naming-scheme.h b/src/shared/netif-naming-scheme.h
+index 28cd4e4..f719744 100644
+--- a/src/shared/netif-naming-scheme.h
++++ b/src/shared/netif-naming-scheme.h
+@@ -32,6 +32,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_LABEL_NOPREFIX      = 1 << 7, /* Don't prepend ID_NET_LABEL_ONBOARD with interface type prefix */
+         NAMING_NSPAWN_LONG_HASH    = 1 << 8, /* Shorten nspawn interfaces by including 24bit hash, instead of simple truncation  */
+         NAMING_BRIDGE_NO_SLOT      = 1 << 9, /* Don't use PCI hotplug slot information if the corresponding device is a PCI bridge */
++        NAMING_SLOT_FUNCTION_ID    = 1 << 10, /* Use function_id if present to identify PCI hotplug slots */
+ 
+         /* And now the masks that combine the features above */
+         NAMING_V238 = 0,
+@@ -41,6 +42,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_V243 = NAMING_V241 | NAMING_NETDEVSIM | NAMING_LABEL_NOPREFIX,
+         NAMING_V245 = NAMING_V243 | NAMING_NSPAWN_LONG_HASH,
+         NAMING_V247 = NAMING_V245 | NAMING_BRIDGE_NO_SLOT,
++        NAMING_V249 = NAMING_V247 | NAMING_SLOT_FUNCTION_ID,
+ 
+         _NAMING_SCHEME_FLAGS_INVALID = -EINVAL,
+ } NamingSchemeFlags;
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index 872833e..66c52e6 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -345,6 +345,32 @@ static int dev_pci_slot(sd_device *dev, struct netnames *names) {
+                 if (sd_device_get_sysname(hotplug_slot_dev, &sysname) < 0)
+                         continue;
+ 
++                /*  The <sysname>/function_id attribute is unique to the s390 PCI driver.
++                    If present, we know that the slot's directory name for this device is
++                    /sys/bus/pci/XXXXXXXX/ where XXXXXXXX is the fixed length 8 hexadecimal
++                    character string representation of function_id.
++                    Therefore we can short cut here and just check for the existence of
++                    the slot directory. As this directory has to exist, we're emitting a
++                    debug message for the unlikely case it's not found.
++                    Note that the domain part of doesn't belong to the slot name here
++                    because there's a 1-to-1 relationship between PCI function and its hotplug
++                    slot.
++                 */
++                if (naming_scheme_has(NAMING_SLOT_FUNCTION_ID) &&
++                    sd_device_get_sysattr_value(hotplug_slot_dev, "function_id", &attr) >= 0) {
++                        int function_id;
++                        _cleanup_free_ char *str;
++
++                        if (safe_atoi(attr, &function_id) >= 0 &&
++                            asprintf(&str, "%s/%08x/", slots, function_id) >= 0 &&
++                            access(str, R_OK) == 0) {
++                                hotplug_slot = function_id;
++                                domain = 0;
++                        } else
++                                log_debug("No matching slot for function_id (%s).", attr);
++                        break;
++                }
++
+                 FOREACH_DIRENT_ALL(dent, dir, break) {
+                         int i;
+                         char str[PATH_MAX];
