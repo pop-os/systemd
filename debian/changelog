@@ -32,8 +32,14 @@ systemd (248.3-1ubuntu4) UNRELEASED; urgency=medium
   * Add d/p/Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
     File: debian/patches/Merge-pull-request-20199-from-ddstreet-unit_cgroup_catchu.patch
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=57ab55efaee92466bd5dbf046badc623188d254b
+  * Add RoCE: Predictable Interface Names (LP: #1929184)
+    Files:
+    - debian/patches/udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
+    - debian/patches/udev-allow-onboard-index-up-to-65535.patch
+    - debian/patches/udev-fix-slot-based-network-names-on-s390.patch
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=44d2c4bef78a2cbaeaad9acd512dad89d272489c
 
- -- Lukas Märdian <slyon@ubuntu.com>  Mon, 16 Aug 2021 12:45:24 +0200
+ -- Lukas Märdian <slyon@ubuntu.com>  Mon, 16 Aug 2021 15:43:48 +0200
 
 systemd (248.3-1ubuntu3) impish; urgency=medium
 
