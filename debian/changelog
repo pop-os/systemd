@@ -1,3 +1,11 @@
+systemd (249.3-4) experimental; urgency=medium
+
+  * Add Conflicts/Replaces: systemd to systemd-standalone-{sysusers,tmpfiles}
+    This allows upgrades from older systemd versions which do not have
+    Provides: systemd-{sysusers,tmpfiles}. (Closes: #992376)
+
+ -- Michael Biebl <biebl@debian.org>  Wed, 25 Aug 2021 09:35:03 +0200
+
 systemd (249.3-3) experimental; urgency=medium
 
   * Use C/R/P for systemd-sysusers and systemd-tmpfiles.
