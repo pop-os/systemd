@@ -402,8 +402,10 @@ Package: systemd-standalone-sysusers
 Section: admin
 Architecture: linux-any
 Priority: optional
-Conflicts: systemd-sysusers
-Replaces: systemd-sysusers
+Conflicts: systemd-sysusers,
+           systemd
+Replaces: systemd-sysusers,
+          systemd
 Provides: systemd-sysusers (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
@@ -416,8 +418,10 @@ Package: systemd-standalone-tmpfiles
 Section: admin
 Architecture: linux-any
 Priority: optional
-Conflicts: systemd-tmpfiles
-Replaces: systemd-tmpfiles
+Conflicts: systemd-tmpfiles,
+           systemd
+Replaces: systemd-tmpfiles,
+          systemd
 Provides: systemd-tmpfiles (= ${binary:Version})
 Depends: ${shlibs:Depends},
          ${misc:Depends},
