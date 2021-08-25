@@ -30,6 +30,10 @@ systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
   * d/p/lp1935051-shared-unit-file-make-sure-the-old-hashmaps-and-sets.patch:
     Fix memory leak in path cache (LP: #1935051)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=12d6bdeb35f309158fe8d4242c6dd9be4d067604
+  * d/p/lp1934147/0001-cgroup-do-catchup-for-unit-cgroup-inotify-watch-file.patch,
+    d/p/lp1934147/0002-core-Make-sure-cgroup_oom_queue-is-flushed-on-manage.patch:
+    Catchup cgroup inotify watch after reexec/reload (LP: #1934147)
+    https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=63eabc88b8e0005eb40b15b543538ce35377bdbd
 
  -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
 
