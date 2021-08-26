@@ -1,4 +1,4 @@
-systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
+systemd (245.4-4ubuntu3.12) focal; urgency=medium
 
   [ Yao Wei ]
   * d/p/dell-clamshell-accel-location-base.patch:
@@ -35,7 +35,7 @@ systemd (245.4-4ubuntu3.12) UNRELEASED; urgency=medium
     Catchup cgroup inotify watch after reexec/reload (LP: #1934147)
     https://git.launchpad.net/~ubuntu-core-dev/ubuntu/+source/systemd/commit/?id=63eabc88b8e0005eb40b15b543538ce35377bdbd
 
- -- Dan Streetman <ddstreet@canonical.com>  Tue, 20 Jul 2021 17:06:12 -0400
+ -- Dan Streetman <ddstreet@canonical.com>  Thu, 26 Aug 2021 10:18:02 -0400
 
 systemd (245.4-4ubuntu3.11) focal-security; urgency=medium
 
