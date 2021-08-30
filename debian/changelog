@@ -1,8 +1,9 @@
-systemd (249.4-1) UNRELEASED; urgency=medium
+systemd (249.4-1) experimental; urgency=medium
 
   * New upstream version 249.4
+  * Rebase patches
 
- -- Michael Biebl <biebl@debian.org>  Mon, 30 Aug 2021 10:30:47 +0200
+ -- Michael Biebl <biebl@debian.org>  Mon, 30 Aug 2021 11:20:16 +0200
 
 systemd (249.3-4) experimental; urgency=medium
 
