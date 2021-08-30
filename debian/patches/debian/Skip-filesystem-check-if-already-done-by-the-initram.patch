@@ -15,7 +15,7 @@ Closes: #810748
  2 files changed, 9 insertions(+), 3 deletions(-)
 
 diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
-index a4e3ea5..0518387 100644
+index b6582c9..e1a1200 100644
 --- a/src/fstab-generator/fstab-generator.c
 +++ b/src/fstab-generator/fstab-generator.c
 @@ -357,6 +357,7 @@ static int add_mount(
@@ -26,7 +26,7 @@ index a4e3ea5..0518387 100644
  
          assert(what);
          assert(where);
-@@ -439,9 +440,13 @@ static int add_mount(
+@@ -440,9 +441,13 @@ static int add_mount(
                  fprintf(f, "Before=%s\n", post);
  
          if (passno != 0) {
