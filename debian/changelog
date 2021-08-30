@@ -1,3 +1,9 @@
+systemd (249.4-1) UNRELEASED; urgency=medium
+
+  * New upstream version 249.4
+
+ -- Michael Biebl <biebl@debian.org>  Mon, 30 Aug 2021 10:30:47 +0200
+
 systemd (249.3-4) experimental; urgency=medium
 
   * Add Conflicts/Replaces: systemd to systemd-standalone-{sysusers,tmpfiles}
