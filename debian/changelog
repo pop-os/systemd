@@ -1,3 +1,11 @@
+systemd (248.3-1ubuntu7) impish; urgency=medium
+
+  * d/tests/tests-in-lxd: suppress the cgroups v2 warning on stderr from
+    lxd/lxc even more comprehensively until the snapd change required to
+    do it nicely gets into a release.
+
+ -- Michael Hudson-Doyle <michael.hudson@ubuntu.com>  Wed, 01 Sep 2021 19:21:58 +1200
+
 systemd (248.3-1ubuntu6) impish; urgency=medium
 
   * Replace my patch in previous upload with upstream's functionally similar

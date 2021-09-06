@@ -6,6 +6,20 @@ set -eu
 
 # cgroupv2 testing workaround: https://github.com/snapcore/snapd/pull/10589
 export SNAPD_HIDE_CGROUPV2_WARNING=1
+# But until that change ends up in a snapd release, take a more blunt approach
+# to suppressing stderr from lxc/lxd to avoid upsetting autopkgtest-virt-lxd.
+d=$(mktemp -d)
+cat <<\EOF > "$d/lxc"
+#!/bin/sh
+/snap/bin/lxc "$@" 2>/dev/null
+EOF
+cat <<\EOF > "$d/lxd"
+#!/bin/sh
+/snap/bin/lxd "$@" 2>/dev/null
+EOF
+chmod a+rx "$d" "$d/lxc" "$d/lxd"
+export PATH="$d:$PATH"
+
 lxd init --auto
 
 IMAGE=autopkgtest/ubuntu/$(lsb_release -cs)/$(dpkg --print-architecture)
