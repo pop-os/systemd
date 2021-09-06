@@ -1,0 +1,27 @@
+Description: pass a larger buffer in icmp6_receive
+ To have enough room for glibc 2.34's timestamp translation games.
+Author: Michael Hudson-Doyle <michael.hudson@ubuntu.com>
+Origin: vendor
+Bug: https://github.com/systemd/systemd/issues/20564
+Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1940635
+Last-Update: 2021-08-29
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/src/libsystemd-network/icmp6-util.c
++++ b/src/libsystemd-network/icmp6-util.c
+@@ -147,9 +147,14 @@
+ 
+ int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *ret_dst,
+                   triple_timestamp *ret_timestamp) {
+-
++#ifdef __arm__
++        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int)) + /* ttl */
++                         CMSG_SPACE(sizeof(int64_t)*2) + /* 64 bit timestamp */
++                         CMSG_SPACE(sizeof(struct timeval))) control;
++#else
+         CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int)) + /* ttl */
+                          CMSG_SPACE(sizeof(struct timeval))) control;
++#endif
+         struct iovec iov = {};
+         union sockaddr_union sa = {};
+         struct msghdr msg = {

@@ -1,3 +1,11 @@
+systemd (248.3-1ubuntu5) impish; urgency=medium
+
+  * d/patches/lp1940635.patch: Pass a larger control message buffer to recvmsg
+    in icmp6_receive to have enough room for glibc 2.34's timestamp
+    translation games. (LP: #1940635)
+
+ -- Michael Hudson-Doyle <michael.hudson@ubuntu.com>  Sun, 29 Aug 2021 23:11:50 +1200
+
 systemd (248.3-1ubuntu4) impish; urgency=medium
 
   [ Yao Wei ]
