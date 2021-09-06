@@ -1,3 +1,13 @@
+systemd (248.3-1ubuntu6) impish; urgency=medium
+
+  * Replace my patch in previous upload with upstream's functionally similar
+    but much more elegant fix.
+  * d/patches/lp1942113.patch: Do not run a test that fails in a container
+    (this has only started running because 248.3-1ubuntu4 changed to default
+    to a unified cgroups hierarchy). (LP: #1942113)
+
+ -- Michael Hudson-Doyle <michael.hudson@ubuntu.com>  Tue, 31 Aug 2021 22:59:13 +1200
+
 systemd (248.3-1ubuntu5) impish; urgency=medium
 
   * d/patches/lp1940635.patch: Pass a larger control message buffer to recvmsg

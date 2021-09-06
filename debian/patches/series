@@ -62,3 +62,4 @@ udev-fix-slot-based-network-names-on-s390.patch
 udev-add-missing-initialization-to-fix-freeing-invalid-ad.patch
 udev-allow-onboard-index-up-to-65535.patch
 lp1940635.patch
+lp1942113.patch

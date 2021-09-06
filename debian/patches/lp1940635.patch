@@ -1,27 +1,87 @@
-Description: pass a larger buffer in icmp6_receive
- To have enough room for glibc 2.34's timestamp translation games.
-Author: Michael Hudson-Doyle <michael.hudson@ubuntu.com>
-Origin: vendor
-Bug: https://github.com/systemd/systemd/issues/20564
-Bug-Ubuntu: https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1940635
-Last-Update: 2021-08-29
+From 9365e296fe281da45797af89a97627e872fc019d Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 29 Aug 2021 20:50:49 +0900
+Subject: [PATCH 1/2] socket-util: introduce CMSG_SPACE_TIMEVAL/TIMESPEC macro
+ to support additional 64bit timeval or timespec
+
+Fixes #20482 and #20564.
 ---
-This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+ src/basic/socket-util.h             | 22 ++++++++++++++++++++++
+ src/journal/journald-server.c       |  2 +-
+ src/libsystemd-network/icmp6-util.c |  2 +-
+ src/timesync/timesyncd-manager.c    |  2 +-
+ 4 files changed, 25 insertions(+), 3 deletions(-)
+
+--- a/src/basic/socket-util.h
++++ b/src/basic/socket-util.h
+@@ -275,6 +275,28 @@
+ int socket_bind_to_ifname(int fd, const char *ifname);
+ int socket_bind_to_ifindex(int fd, int ifindex);
+ 
++/* Define a 64bit version of timeval/timespec in any case, even on 32bit userspace. */
++struct timeval_large {
++        uint64_t tvl_sec, tvl_usec;
++};
++struct timespec_large {
++        uint64_t tvl_sec, tvl_nsec;
++};
++
++/* glibc duplicates timespec/timeval on certain 32bit archs, once in 32bit and once in 64bit.
++ * See __convert_scm_timestamps() in glibc souce code. Hence, we need additional buffer space for them
++ * to prevent from recvmsg_safe() returning -EXFULL. */
++#define CMSG_SPACE_TIMEVAL                                              \
++        ((sizeof(struct timeval) == sizeof(struct timeval_large)) ?     \
++         CMSG_SPACE(sizeof(struct timeval)) :                           \
++         CMSG_SPACE(sizeof(struct timeval)) +                           \
++         CMSG_SPACE(sizeof(struct timeval_large)))
++#define CMSG_SPACE_TIMESPEC                                             \
++        ((sizeof(struct timespec) == sizeof(struct timespec_large)) ?   \
++         CMSG_SPACE(sizeof(struct timespec)) :                          \
++         CMSG_SPACE(sizeof(struct timespec)) +                          \
++         CMSG_SPACE(sizeof(struct timespec_large)))
++
+ ssize_t recvmsg_safe(int sockfd, struct msghdr *msg, int flags);
+ 
+ int socket_get_family(int fd, int *ret);
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -1270,7 +1270,7 @@
+          * identical to NAME_MAX. For now we use that, but this should be updated one day when the final
+          * limit is known. */
+         CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct ucred)) +
+-                         CMSG_SPACE(sizeof(struct timeval)) +
++                         CMSG_SPACE_TIMEVAL +
+                          CMSG_SPACE(sizeof(int)) + /* fd */
+                          CMSG_SPACE(NAME_MAX) /* selinux label */) control;
+ 
 --- a/src/libsystemd-network/icmp6-util.c
 +++ b/src/libsystemd-network/icmp6-util.c
-@@ -147,9 +147,14 @@
- 
- int icmp6_receive(int fd, void *buffer, size_t size, struct in6_addr *ret_dst,
+@@ -149,7 +149,7 @@
                    triple_timestamp *ret_timestamp) {
--
-+#ifdef __arm__
-+        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int)) + /* ttl */
-+                         CMSG_SPACE(sizeof(int64_t)*2) + /* 64 bit timestamp */
-+                         CMSG_SPACE(sizeof(struct timeval))) control;
-+#else
+ 
          CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(int)) + /* ttl */
-                          CMSG_SPACE(sizeof(struct timeval))) control;
-+#endif
+-                         CMSG_SPACE(sizeof(struct timeval))) control;
++                         CMSG_SPACE_TIMEVAL) control;
          struct iovec iov = {};
          union sockaddr_union sa = {};
          struct msghdr msg = {
+--- a/src/timesync/timesyncd-manager.c
++++ b/src/timesync/timesyncd-manager.c
+@@ -412,7 +412,7 @@
+                 .iov_base = &ntpmsg,
+                 .iov_len = sizeof(ntpmsg),
+         };
+-        CMSG_BUFFER_TYPE(CMSG_SPACE(sizeof(struct timeval))) control;
++        CMSG_BUFFER_TYPE(CMSG_SPACE_TIMEVAL) control;
+         union sockaddr_union server_addr;
+         struct msghdr msghdr = {
+                 .msg_iov = &iov,
+@@ -467,6 +467,8 @@
+ 
+                 switch (cmsg->cmsg_type) {
+                 case SCM_TIMESTAMPNS:
++                        assert(cmsg->cmsg_len == CMSG_LEN(sizeof(struct timespec)));
++
+                         recv_time = (struct timespec *) CMSG_DATA(cmsg);
+                         break;
+                 }
